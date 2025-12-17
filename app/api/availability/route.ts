@@ -2,6 +2,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
+type BookingForBusy = {
+  scheduledFor: Date
+  durationMinutesSnapshot: number | null
+}
+
 export const dynamic = 'force-dynamic'
 
 function pickString(v: unknown): string | null {
@@ -138,22 +143,24 @@ async function computeNextSlots(args: {
   const bufferMinutes = 10
   const stepMinutes = 30
 
-  const bookings = await prisma.booking.findMany({
-    where: {
-      professionalId,
-      scheduledFor: { gte: nowUtc, lte: horizonUtc },
-      NOT: { status: 'CANCELLED' as any },
-    },
-    select: { scheduledFor: true, durationMinutesSnapshot: true },
-    take: 2000,
-  })
+  const bookings = (await prisma.booking.findMany({
+  where: {
+    professionalId,
+    scheduledFor: { gte: nowUtc, lte: horizonUtc },
+    NOT: { status: 'CANCELLED' as any },
+  },
+  select: { scheduledFor: true, durationMinutesSnapshot: true },
+  take: 2000,
+})) as BookingForBusy[]
+
 
   const busy: BusyInterval[] = bookings.map((b) => {
-    const start = new Date(b.scheduledFor)
-    const dur = Number(b.durationMinutesSnapshot) || durationMinutes
-    const end = addMinutes(start, dur)
-    return { start, end }
-  })
+  const start = new Date(b.scheduledFor)
+  const dur = Number(b.durationMinutesSnapshot) || durationMinutes
+  const end = addMinutes(start, dur)
+  return { start, end }
+})
+
 
   const fallback = { enabled: true, start: '09:00', end: '18:00' }
   const wh = workingHours && typeof workingHours === 'object' ? workingHours : null
