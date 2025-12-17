@@ -1,0 +1,61 @@
+import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { verifyPassword, createToken } from '@/lib/auth'
+
+type LoginBody = {
+  email: string
+  password: string
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json()) as LoginBody
+    const { email, password } = body
+
+    if (!email || !password) {
+      return NextResponse.json({ error: 'Missing email or password' }, { status: 400 })
+    }
+
+    const db: any = prisma
+
+    const user = await db.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    }
+
+    const isValid = await verifyPassword(password, user.password)
+
+    if (!isValid) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    }
+
+    const token = createToken({ userId: user.id, role: user.role })
+
+    const response = NextResponse.json(
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+        },
+      },
+      { status: 200 },
+    )
+
+    response.cookies.set('tovis_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+    })
+
+    return response
+  } catch (error) {
+    console.error('Login error', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}

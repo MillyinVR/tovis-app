@@ -1,0 +1,641 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// =======================
+// ENUMS
+// =======================
+
+enum ReminderType {
+  GENERAL
+  AFTERCARE
+  REBOOK
+  PRODUCT_FOLLOWUP
+  LICENSE
+}
+
+enum AllergySeverity {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum Role {
+  CLIENT
+  PRO
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  COMPLETED
+  CANCELLED
+}
+
+enum BookingSource {
+  REQUESTED // client sought out THIS pro (profile/looks/referral/NFC)
+  DISCOVERY // client searched a service and picked whoever (closest/soonest)
+  AFTERCARE // rebooked from aftercare summary link/button
+}
+
+enum ProfessionType {
+  COSMETOLOGIST
+  BARBER
+  ESTHETICIAN
+  MANICURIST
+  MASSAGE_THERAPIST
+  MAKEUP_ARTIST
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum VerificationDocumentType {
+  LICENSE
+  ID_CARD
+  MAKEUP_PRIMARY
+  MAKEUP_SECONDARY
+}
+
+enum ReminderChannel {
+  SMS
+  EMAIL
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum MediaVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum WaitlistStatus {
+  ACTIVE
+  NOTIFIED
+  BOOKED
+  CANCELLED
+}
+
+enum ClientNoteVisibility {
+  PROFESSIONALS_ONLY
+  ADMIN_ONLY
+}
+
+// =======================
+// CORE MODELS
+// =======================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  favoritePros ProfessionalFavorite[]
+
+  clientProfile       ClientProfile?
+  professionalProfile ProfessionalProfile?
+
+  // media interactions
+  mediaLikes    MediaLike[]
+  mediaComments MediaComment[]
+
+  // opposite relation for MediaAsset.uploadedByUser
+  uploadedMedia MediaAsset[] @relation("UploadedMedia")
+}
+
+model ClientProfile {
+  id        String  @id @default(cuid())
+  userId    String  @unique
+  firstName String
+  lastName  String
+  phone     String?
+  avatarUrl String?
+
+  alertBanner String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  bookings  Booking[]
+  notes     ClientProfessionalNote[]
+  allergies ClientAllergy[]
+  reviews   Review[]
+  reminders Reminder[]
+
+  waitlistEntries WaitlistEntry[]
+}
+
+model ProfessionalProfile {
+  id           String                 @id @default(cuid())
+  userId       String                 @unique
+  businessName String?
+  bio          String?
+  avatarUrl    String?
+  favorites    ProfessionalFavorite[] @relation("ProFavorites")
+  autoAcceptBookings Boolean  @default(false)
+  timeZone String? // IANA tz like "America/New_York"
+
+  
+  location String @default("")
+
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+
+  latitude       Float?
+  longitude      Float?
+  mobileRadiusKm Int?
+
+  professionType     ProfessionType?
+  licenseNumber      String?
+  licenseState       String?
+  licenseExpiry      DateTime?
+  licenseVerified    Boolean            @default(false)
+  verificationStatus VerificationStatus @default(PENDING)
+
+  isMobile  Boolean @default(false)
+  isInSalon Boolean @default(false)
+  isSuite   Boolean @default(false)
+
+  user             User                          @relation(fields: [userId], references: [id])
+  offerings        ProfessionalServiceOffering[]
+  bookings         Booking[]
+  verificationDocs VerificationDocument[]
+
+  clientNotes       ClientProfessionalNote[]
+  recordedAllergies ClientAllergy[]
+  reviews           Review[]
+  reminders         Reminder[]
+
+  /// Weekly schedule JSON:
+  /// { "mon": { "enabled": true, "start": "09:00", "end": "17:00" }, ... }
+  workingHours Json?
+
+  // ✅ Last-minute
+  lastMinuteSettings LastMinuteSettings? @relation("ProLastMinuteSettings")
+
+  mediaAssets     MediaAsset[]
+  waitlistEntries WaitlistEntry[]
+
+  // ✅ Store tracking (you added this)
+  productSales ProductSale[]
+}
+
+model ServiceCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  parentId    String?
+
+  parent   ServiceCategory?  @relation("CategoryChildren", fields: [parentId], references: [id])
+  children ServiceCategory[] @relation("CategoryChildren")
+
+  isActive Boolean @default(true)
+
+  services Service[]
+}
+
+model ProfessionalFavorite {
+  id             String   @id @default(cuid())
+  professionalId String
+  userId         String
+  createdAt      DateTime @default(now())
+
+  professional ProfessionalProfile @relation("ProFavorites", fields: [professionalId], references: [id])
+  user         User                @relation(fields: [userId], references: [id])
+
+  @@unique([professionalId, userId])
+  @@index([professionalId, createdAt])
+}
+
+model Service {
+  id                     String  @id @default(cuid())
+  name                   String  @unique
+  categoryId             String
+  description            String?
+  defaultDurationMinutes Int
+  minPrice               Decimal @db.Decimal(10, 2)
+  defaultImageUrl        String?
+  allowMobile            Boolean @default(false)
+  isActive               Boolean @default(true)
+
+  category         ServiceCategory               @relation(fields: [categoryId], references: [id])
+  offerings        ProfessionalServiceOffering[]
+  bookings         Booking[]
+  lastMinuteRules  LastMinuteServiceRule[]       @relation("ServiceLastMinuteRules")
+  permissions      ServicePermission[]
+  mediaServiceTags MediaServiceTag[]
+  waitlistEntries  WaitlistEntry[]
+}
+
+model ServicePermission {
+  id             String         @id @default(cuid())
+  serviceId      String
+  professionType ProfessionType
+  stateCode      String?
+
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@index([professionType, stateCode])
+}
+
+model ProfessionalServiceOffering {
+  id              String  @id @default(cuid())
+  professionalId  String
+  serviceId       String
+  title           String?
+  description     String?
+  price           Decimal @db.Decimal(10, 2)
+  durationMinutes Int
+  customImageUrl  String?
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  service      Service             @relation(fields: [serviceId], references: [id])
+  bookings     Booking[]
+
+  @@unique([professionalId, serviceId])
+}
+
+model LastMinuteSettings {
+  id              String   @id @default(cuid())
+  professionalId  String   @unique
+
+  enabled          Boolean  @default(false)
+  discountsEnabled Boolean  @default(false) // ✅ NEW
+
+  windowSameDayPct Int     @default(20)
+  window24hPct     Int     @default(10)
+
+  minPrice        Decimal? @db.Decimal(10,2)
+
+  disableMon Boolean @default(false)
+  disableTue Boolean @default(false)
+  disableWed Boolean @default(false)
+  disableThu Boolean @default(false)
+  disableFri Boolean @default(false)
+  disableSat Boolean @default(false)
+  disableSun Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation("ProLastMinuteSettings", fields: [professionalId], references: [id])
+  serviceRules  LastMinuteServiceRule[]
+  blocks        LastMinuteBlock[]
+}
+
+
+model LastMinuteServiceRule {
+  id         String  @id @default(cuid())
+  settingsId String
+  serviceId  String
+  enabled    Boolean @default(true)
+
+  minPrice Decimal? @db.Decimal(10, 2)
+
+  settings LastMinuteSettings @relation(fields: [settingsId], references: [id])
+  service  Service            @relation("ServiceLastMinuteRules", fields: [serviceId], references: [id])
+
+  @@unique([settingsId, serviceId])
+}
+
+model LastMinuteBlock {
+  id         String @id @default(cuid())
+  settingsId String
+
+  // block specific times from being offered last-minute
+  startAt DateTime
+  endAt   DateTime
+  reason  String?
+
+  settings LastMinuteSettings @relation(fields: [settingsId], references: [id])
+
+  @@index([settingsId, startAt])
+}
+
+model Booking {
+  id             String        @id @default(cuid())
+  clientId       String
+  professionalId String
+  serviceId      String
+  offeringId     String?
+  scheduledFor   DateTime
+  status         BookingStatus @default(PENDING)
+
+  priceSnapshot           Decimal @db.Decimal(10, 2)
+  durationMinutesSnapshot Int
+
+  depositAmount  Decimal? @db.Decimal(10, 2)
+  tipAmount      Decimal? @db.Decimal(10, 2)
+  taxAmount      Decimal? @db.Decimal(10, 2)
+  discountAmount Decimal? @db.Decimal(10, 2)
+  totalAmount    Decimal? @db.Decimal(10, 2)
+
+  consultationNotes       String?
+  consultationPrice       Decimal?  @db.Decimal(10, 2)
+  consultationConfirmedAt DateTime?
+
+  // ✅ Source tracking
+  source            BookingSource @default(DISCOVERY)
+  rebookOfBookingId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client           ClientProfile                @relation(fields: [clientId], references: [id])
+  professional     ProfessionalProfile          @relation(fields: [professionalId], references: [id])
+  service          Service                      @relation(fields: [serviceId], references: [id])
+  offering         ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
+  aftercareSummary AftercareSummary?
+
+  // Optional: link bookings together for rebooks
+  rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
+  rebooks  Booking[] @relation("RebookChain")
+
+  reviews   Review[]
+  reminders Reminder[]
+
+  reminderMinutesBefore Int?             @default(1440)
+  reminderSentAt        DateTime?
+  reminderChannel       ReminderChannel?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  mediaAssets  MediaAsset[]
+  productSales ProductSale[]
+
+  @@index([professionalId, scheduledFor])
+  @@index([professionalId, clientId])
+  @@index([professionalId, source])
+}
+
+model BookingHold {
+  id            String   @id @default(cuid())
+  offeringId    String
+  professionalId String
+  scheduledFor  DateTime
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([offeringId, scheduledFor])
+  @@index([professionalId, scheduledFor])
+}
+
+
+model AftercareSummary {
+  id          String    @id @default(cuid())
+  bookingId   String    @unique
+  notes       String?
+  rebookedFor DateTime?
+
+  // ✅ prep for store purchases later
+  publicToken String @unique @default(cuid()) // for clean share links / checkout attribution
+
+  booking         Booking                 @relation(fields: [bookingId], references: [id])
+  recommendations ProductRecommendation[]
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  name           String
+  brand          String?
+  description    String?
+  retailPrice    Decimal? @db.Decimal(10, 2)
+  wholesalePrice Decimal? @db.Decimal(10, 2)
+  isActive       Boolean  @default(true)
+
+  recommendations ProductRecommendation[]
+  productSales    ProductSale[]
+}
+
+model ProductRecommendation {
+  id                 String  @id @default(cuid())
+  aftercareSummaryId String
+  productId          String
+  note               String?
+
+  aftercareSummary AftercareSummary @relation(fields: [aftercareSummaryId], references: [id])
+  product          Product          @relation(fields: [productId], references: [id])
+}
+
+model ProductSale {
+  id             String   @id @default(cuid())
+  professionalId String
+  bookingId      String?
+  productId      String
+  quantity       Int      @default(1)
+  unitPrice      Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  booking      Booking?            @relation(fields: [bookingId], references: [id])
+  product      Product             @relation(fields: [productId], references: [id])
+
+  @@index([professionalId, createdAt])
+  @@index([productId, createdAt])
+}
+
+model VerificationDocument {
+  id             String                   @id @default(cuid())
+  professionalId String
+  type           VerificationDocumentType
+  label          String?
+  imageUrl       String?
+  url            String?
+  createdAt      DateTime                 @default(now())
+  reviewedAt     DateTime?
+  status         VerificationStatus       @default(PENDING)
+  adminNote      String?
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+}
+
+model ClientProfessionalNote {
+  id             String               @id @default(cuid())
+  clientId       String
+  professionalId String
+  title          String?
+  body           String
+  visibility     ClientNoteVisibility @default(PROFESSIONALS_ONLY)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id])
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+
+  @@index([clientId])
+  @@index([professionalId, createdAt])
+}
+
+model Review {
+  id             String   @id @default(cuid())
+  clientId       String
+  professionalId String
+  bookingId      String?
+  rating         Int
+  headline       String?
+  body           String?
+  createdAt      DateTime @default(now())
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id])
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  booking      Booking?            @relation(fields: [bookingId], references: [id])
+
+  mediaAssets MediaAsset[]
+
+  @@index([professionalId, createdAt])
+  @@index([clientId, createdAt])
+}
+
+model ClientAllergy {
+  id                       String          @id @default(cuid())
+  clientId                 String
+  label                    String
+  description              String?
+  severity                 AllergySeverity @default(MODERATE)
+  recordedByProfessionalId String?
+  createdAt                DateTime        @default(now())
+
+  client     ClientProfile        @relation(fields: [clientId], references: [id])
+  recordedBy ProfessionalProfile? @relation(fields: [recordedByProfessionalId], references: [id])
+
+  @@index([clientId])
+}
+
+model Reminder {
+  id             String       @id @default(cuid())
+  professionalId String
+  clientId       String?
+  bookingId      String?
+  type           ReminderType @default(GENERAL)
+  title          String
+  body           String?
+  dueAt          DateTime
+  createdAt      DateTime     @default(now())
+  completedAt    DateTime?
+
+  dedupeKey String? @unique
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  client       ClientProfile?      @relation(fields: [clientId], references: [id])
+  booking      Booking?            @relation(fields: [bookingId], references: [id])
+
+  @@index([professionalId, dueAt])
+  @@index([clientId, dueAt])
+}
+
+// =======================
+// MEDIA MODELS
+// =======================
+
+model MediaAsset {
+  id               String    @id @default(cuid())
+  professionalId   String
+  bookingId        String?
+  reviewId         String?
+  uploadedByUserId String?
+  uploadedByRole   Role?
+  url              String
+  thumbUrl         String?
+  mediaType        MediaType
+  caption          String?
+  createdAt        DateTime  @default(now())
+
+  visibility            MediaVisibility @default(PUBLIC)
+  isFeaturedInPortfolio Boolean         @default(false)
+  isEligibleForLooks    Boolean         @default(false)
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  booking      Booking?            @relation(fields: [bookingId], references: [id])
+  review       Review?             @relation(fields: [reviewId], references: [id])
+
+  uploadedByUser User? @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
+
+  services MediaServiceTag[]
+  likes    MediaLike[]
+  comments MediaComment[]
+
+  waitlistEntries WaitlistEntry[]
+}
+
+model MediaServiceTag {
+  id        String @id @default(cuid())
+  mediaId   String
+  serviceId String
+
+  media   MediaAsset @relation(fields: [mediaId], references: [id])
+  service Service    @relation(fields: [serviceId], references: [id])
+
+  @@unique([mediaId, serviceId])
+}
+
+model MediaLike {
+  id        String   @id @default(cuid())
+  mediaId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  media MediaAsset @relation(fields: [mediaId], references: [id])
+  user  User       @relation(fields: [userId], references: [id])
+
+  @@unique([mediaId, userId])
+}
+
+model MediaComment {
+  id        String   @id @default(cuid())
+  mediaId   String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+
+  media MediaAsset @relation(fields: [mediaId], references: [id])
+  user  User       @relation(fields: [userId], references: [id])
+}
+
+// =======================
+// WAITLIST
+// =======================
+
+model WaitlistEntry {
+  id             String  @id @default(cuid())
+  clientId       String
+  professionalId String
+  serviceId      String
+  mediaId        String?
+
+  preferredStart      DateTime
+  preferredEnd        DateTime
+  preferredTimeBucket String?
+
+  status    WaitlistStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id])
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  service      Service             @relation(fields: [serviceId], references: [id])
+  media        MediaAsset?         @relation(fields: [mediaId], references: [id])
+}

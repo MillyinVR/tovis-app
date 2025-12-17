@@ -1,0 +1,537 @@
+1. High-level product vision
+
+TOVIS is a platform that lets clients browse beauty services like they browse TikTok or shopping apps and book directly with licensed professionals.
+
+Clients scroll through visual feeds: hair, nails, makeup, barbers, mobile massage, etc.
+
+They can save looks, see portfolios, check availability, and book without calling a receptionist or DM’ing strangers.
+
+Pros get:
+
+client retention tools,
+
+aftercare summaries,
+
+rebooking nudges,
+
+and compliance / safety features (especially for mobile services).
+
+Long-term goal: increase the % of beauty school grads who actually stay in the industry by making independent work, suites, and flexible schedules sustainable.
+
+2. User roles
+
+There are three main roles:
+
+Client
+
+Scrolls / browses inspo & services
+
+Finds professionals by:
+
+location
+
+service type
+
+vibe/portfolio
+
+Books appointments
+
+Receives and views aftercare summaries
+
+Rebooks, pays, rates, and purchases recommended products
+
+Professional (Individual)
+
+Can be:
+
+Mobile
+
+In-salon
+
+Suite-based
+
+Or any combo of those
+
+Has a Pro Dashboard:
+
+Today’s bookings
+
+Upcoming schedule
+
+Aftercare summaries they’ve submitted
+
+Who rebooked / who didn’t
+
+Who purchased product
+
+Who still owes payment
+
+Cannot create raw “Services” themselves.
+They choose from admin-defined services (e.g., “Full Highlight,” “Classic Fill,” “Gentleman’s Razor Shave”) and create offerings with their pricing, duration, and availability.
+
+Admin (Platform + Salon Owners for white-label)
+
+Platform admin:
+
+Verifies licenses
+
+Manages global catalog of services
+
+Manages complaints, issues, refunds
+
+Tracks system health & metrics
+
+Salon owner (later, white-label mode):
+
+Gets a salon-branded version of the client app
+
+Controls which stylists/services show for that salon’s clients
+
+Sees salon-level metrics & bookings
+
+3. Core MVP features (what a new chat needs to know)
+3.1 Authentication & accounts
+
+Email + password auth.
+
+Roles: CLIENT, PRO, ADMIN.
+
+On registration:
+
+If role = CLIENT → create ClientProfile (name, phone, etc.).
+
+If role = PRO → create ProfessionalProfile (business name, location, license info, etc.).
+
+JWT session (cookie) or Supabase auth, depending on final stack. But role-based auth is required.
+
+3.2 Client experience (MVP)
+
+Browse / Discover
+
+Client sees a feed of service offerings:
+
+Card = photos, price, duration, location tag, pro rating.
+
+Filter by:
+
+Location
+
+Category (hair, nails, makeup, barber, massage, etc.)
+
+Mobile / in-salon / suite
+
+Can tap into a pro profile:
+
+Portfolio photos
+
+Services they offer
+
+Reviews
+
+Availability snippet
+
+Booking flow (MVP simple version)
+
+User picks:
+
+One offering (e.g. “Full set Gel X with Soak Off” from Pro X)
+
+Time (exact time for in-salon/suite; time window for mobile)
+
+For mobile:
+
+If client chooses 10:00, booking shows:
+
+Client view: “Pro may arrive between 9:45–10:15”
+
+Pro view: just “10:00”
+
+Booking is created with status = PENDING or ACCEPTED depending on rules.
+
+Client dashboard
+
+Shows upcoming bookings:
+
+Service name
+
+Pro name
+
+Date/time
+
+Status badge: PENDING / ACCEPTED / COMPLETED / CANCELLED
+
+Ability to:
+
+View details
+
+Cancel (within policy, later)
+
+After service is complete:
+
+View aftercare summary
+
+See recommended products & links / purchase
+
+Option to rebook.
+
+3.3 Professional experience (MVP)
+
+Pro dashboard
+
+Today’s appointments (list)
+
+Upcoming bookings
+
+Quick stats:
+
+Rebooking rate
+
+No-show/cancellation count (later)
+
+Access to:
+
+Aftercare summaries
+
+Product recommendations & tracking
+
+Payment status (paid / pending / waiting external)
+
+Start / stop button & aftercare flow
+
+On a booking:
+
+Before starting:
+
+Pro hits Start.
+
+App instructs them:
+
+Take before photos.
+
+Review client’s AI pre-consult (if they did one).
+
+Confirm:
+
+Services agreed
+
+Prices
+
+This “consultation contract” is sent to client app in real time.
+Client taps confirm. This protects the pro (“I didn’t know it would cost that much” argument goes away).
+
+While in progress:
+
+Start button flips to Stop / Finished.
+
+On finish:
+
+Take after photos.
+
+Fill out aftercare summary:
+
+What was done
+
+Recommended products (from catalog, not free text for MVP)
+
+When to rebook
+
+Notes (allergies, sensitivities, what worked well)
+
+Option for pro to rebook on the spot and attach next date to summary.
+
+All of that is saved and visible:
+
+In Pro’s “aftercare summaries” tab
+
+In Client’s “past services / aftercare” tab
+
+Location modes
+
+Each pro profile has:
+
+isMobile (true/false)
+
+isInSalon
+
+isSuite
+
+Booking logic:
+
+Desktop / in-salon / suite: fixed times.
+
+Mobile: display arrival window like DoorDash plus optional live tracking later.
+
+3.4 Home-service safety & restrictions (MVP rules)
+
+For mobile services only:
+
+Safety verification
+
+Extra checks for mobile pros before they can take home bookings:
+
+ID / license verification
+
+Possibly background check or manual approval flag on the pro.
+
+Travel kit tracking
+
+Each mobile pro has a “travel kit” checklist of what they usually carry.
+
+Travel kit is mainly for internal / later features (safety & quality), not needed in code for MVP but should exist in data model as TravelKitItem or similar.
+
+Mobile-only categories
+
+Some categories allowed at home:
+
+Example: blowouts, basic haircuts, massage, makeup, simple nail sets, spray tans.
+
+Certain services not allowed as home services for safety/hygiene (e.g. some chemical services, certain invasive treatments).
+That’s controlled by flags on Service like allowMobile: boolean.
+
+3.5 White-label salon mode (post-MVP but important to mention)
+
+Goal: make salons feel protected, not poached.
+
+TOVIS has a base app + white-label salon apps.
+
+Base app:
+
+Everyone visible:
+
+Independent pros
+
+Mobile pros
+
+Salon stylists
+
+Clients can:
+
+Find any provider in their area
+
+Book with any salon or individual
+
+White-label salon app:
+
+Branded for a specific salon.
+
+If a client signs up through that salon’s app:
+
+Their view is scoped to:
+
+That salon’s stylists
+
+That salon’s announcements, offers, etc.
+
+They do not see the wider pro marketplace inside that branded experience.
+
+Data rules:
+
+Those clients still technically live in the same underlying database, but:
+
+Salon gets access to their own slice (salon-scoped view).
+
+Platform still maintains global pipes for safety, payments, and compliance.
+
+Stylists in the salon:
+
+Still show up in base app search as normal providers.
+
+But salon-app clients experience is salon-only.
+
+3.6 Group bookings & events (not MVP, but design now)
+
+Two concepts:
+
+Event tab
+
+Shows curated big events:
+
+Example: “Coachella Weekend 1,” “Music Festival X,” “Fashion Week LA”.
+
+Event page:
+
+“Start a group booking for [Event Name]” button.
+
+Shows pros in that event area tagged “Book me for [Event]”.
+
+Group booking flow
+
+One person creates a group (e.g. Stacy makes “Coachella Glam Crew”).
+
+She invites friends (people with accounts).
+
+Inside group:
+
+Group chat style thread.
+
+Members add inspo photos.
+
+Others can react / vote.
+
+Once they decide, they add chosen look(s) to the group “consultation” that pros will see.
+
+Creator:
+
+Chooses services needed for each person and order of service.
+
+Example: Nancy, Stacy, Michelle, Sarah in order.
+
+Sets notification preferences for each participant.
+
+During event day:
+
+Pro sees the order.
+
+Hits Start for Nancy; group sees “Stylist is working on Nancy”.
+
+When Nancy finishes, Stacy gets “You’re up in 5 minutes”.
+
+If someone’s late, they can ask group to swap spots; accepted swap updates order.
+
+Payment:
+
+Each participant can pay for their own services.
+
+One person can pay for others (e.g. bride pays for bridesmaids) by selecting them in checkout.
+
+This doesn’t need to be built first, but new chat should know the shape so we don’t paint ourselves into a corner with the schema.
+
+4. Data model (conceptual, not code)
+
+A new chat should know you already have / want something like:
+
+User
+
+id, email, passwordHash, role
+
+1-to-1 with ClientProfile OR ProfessionalProfile (or neither for ADMIN)
+
+ClientProfile
+
+userId
+
+firstName, lastName, phone
+
+Relations:
+
+bookings
+
+savedServices
+
+savedProfessionals
+
+ProfessionalProfile
+
+userId
+
+businessName
+
+bio
+
+location
+
+licenseNumber
+
+licenseVerified
+
+isMobile, isInSalon, isSuite
+
+Relations:
+
+servicesOffered (via offerings)
+
+bookings
+
+Service (global catalog, admin-managed)
+
+id, name
+
+category
+
+baseDuration
+
+basePrice
+
+Flags like allowMobile
+
+ProfessionalServiceOffering (pro’s specific config for a Service)
+
+id
+
+professionalId
+
+serviceId
+
+price
+
+durationMinutes
+
+Maybe simple isActive flag
+
+Booking
+
+id
+
+clientId
+
+professionalId
+
+serviceId
+
+offeringId
+
+scheduledFor
+
+status (PENDING, ACCEPTED, COMPLETED, CANCELLED)
+
+priceSnapshot
+
+durationMinutesSnapshot
+
+AftercareSummary
+
+id
+
+bookingId
+
+notes
+
+productsRecommended (link to Product table or just snapshot)
+
+rebookedFor (optional next appointment date)
+
+Product (for wholesale & retail)
+
+id
+
+name
+
+brand
+
+salonWholesalePrice
+
+clientRetailPrice
+
+License restrictions (e.g. only certain licenses can buy).
+
+More entities later (Events, Groups, Salon, TravelKitItem, SafetyCheck, etc.), but this is enough for a new assistant to design a sane schema.
+
+5. Tech stack we had settled on
+
+For the new chat, you can say:
+
+Frontend / Backend: Next.js App Router (latest), TypeScript
+
+Database: Postgres via Supabase
+
+ORM: Prisma
+
+Auth: custom email/password with bcrypt + JWT in httpOnly cookies or Supabase auth if we want simpler
+
+UI: Tailwind CSS
+
+Goal: design for millions of users, so:
+
+Migrations via Prisma
+
+No random hacks that break at scale
