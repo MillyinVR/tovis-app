@@ -30,6 +30,13 @@ function normalizeSource(v: unknown): BookingSourceNormalized {
   return 'REQUESTED'
 }
 
+type ExistingBookingForConflict = {
+  id: string
+  scheduledFor: Date
+  durationMinutesSnapshot: number | null
+  status: unknown
+}
+
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -37,19 +44,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Only clients can create bookings.' }, { status: 401 })
     }
 
-    const body = await request.json().catch(() => ({} as any))
+    const body = (await request.json().catch(() => ({}))) as any
 
     const offeringId = pickString(body?.offeringId)
     const scheduledForRaw = body?.scheduledFor
     const holdId = pickString(body?.holdId)
     const source = normalizeSource(body?.source)
-    const mediaId = pickString(body?.mediaId) // optional, only use if schema supports it
+    const mediaId = pickString(body?.mediaId) // optional (only if schema supports it)
 
     if (!offeringId || !scheduledForRaw) {
       return NextResponse.json({ error: 'Missing offering or date/time.' }, { status: 400 })
     }
 
-    // Option A requires holds. (If you want to allow non-hold bookings later, we can relax this.)
+    // Option A requires holds.
     if (!holdId) {
       return NextResponse.json({ error: 'Hold expired. Please pick a slot again.' }, { status: 409 })
     }
@@ -109,7 +116,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
     }
 
-    // Must match professional (extra safety)
+    // Must match professional
     if (hold.professionalId !== offering.professionalId) {
       return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
     }
@@ -121,7 +128,7 @@ export async function POST(request: Request) {
     const windowStart = addMinutes(requestedStart, -duration * 2)
     const windowEnd = addMinutes(requestedStart, duration * 2)
 
-    const existing = await prisma.booking.findMany({
+    const existing = (await prisma.booking.findMany({
       where: {
         professionalId: offering.professionalId,
         scheduledFor: { gte: windowStart, lte: windowEnd },
@@ -135,9 +142,9 @@ export async function POST(request: Request) {
       },
       orderBy: { scheduledFor: 'asc' },
       take: 50,
-    })
+    })) as ExistingBookingForConflict[]
 
-    const hasConflict = existing.some((b) => {
+    const hasConflict = existing.some((b: ExistingBookingForConflict) => {
       const bDur = Number(b.durationMinutesSnapshot || 0)
       if (!Number.isFinite(bDur) || bDur <= 0) return false
       const bStart = new Date(b.scheduledFor)
@@ -163,11 +170,9 @@ export async function POST(request: Request) {
           professionalId: offering.professionalId,
           serviceId: offering.serviceId,
           offeringId: offering.id,
-
           scheduledFor: requestedStart,
           status: initialStatus,
           source,
-
           priceSnapshot: offering.price,
           durationMinutesSnapshot: offering.durationMinutes,
 
@@ -185,14 +190,12 @@ export async function POST(request: Request) {
         },
       })
 
-      // Delete hold so it can't be reused
       await tx.bookingHold.delete({ where: { id: hold.id } })
-
       return created
     })
 
     return NextResponse.json({ ok: true, booking }, { status: 201 })
-  } catch (e: any) {
+  } catch (e) {
     console.error('POST /api/bookings error:', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
