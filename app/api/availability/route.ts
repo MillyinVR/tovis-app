@@ -2,12 +2,35 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
+export const dynamic = 'force-dynamic'
+
+/** ===== Types (minimal, just enough to stop TS whining) ===== */
+
 type BookingForBusy = {
   scheduledFor: Date
   durationMinutesSnapshot: number | null
 }
 
-export const dynamic = 'force-dynamic'
+type BusyInterval = { start: Date; end: Date }
+
+type ProfessionalForAvailability = {
+  id: string
+  businessName: string | null
+  avatarUrl: string | null
+  location: string | null
+  city: string | null
+  timeZone: string | null
+  workingHours: any | null
+}
+
+type OfferingForOtherPros = {
+  id: string
+  price: any
+  durationMinutes: number | null
+  professional: ProfessionalForAvailability | null
+}
+
+/** ===== Helpers ===== */
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -99,8 +122,6 @@ function addDaysToYMD(year: number, month: number, day: number, daysToAdd: numbe
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
 
-type BusyInterval = { start: Date; end: Date }
-
 function parseHHMM(s: string) {
   const m = /^(\d{2}):(\d{2})$/.exec(s)
   if (!m) return null
@@ -110,8 +131,6 @@ function parseHHMM(s: string) {
   if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
   return { hh, mm }
 }
-
-const weekdayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
 function getDayKeyFromUtc(dateUtc: Date, timeZone: string) {
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
@@ -144,23 +163,21 @@ async function computeNextSlots(args: {
   const stepMinutes = 30
 
   const bookings = (await prisma.booking.findMany({
-  where: {
-    professionalId,
-    scheduledFor: { gte: nowUtc, lte: horizonUtc },
-    NOT: { status: 'CANCELLED' as any },
-  },
-  select: { scheduledFor: true, durationMinutesSnapshot: true },
-  take: 2000,
-})) as BookingForBusy[]
+    where: {
+      professionalId,
+      scheduledFor: { gte: nowUtc, lte: horizonUtc },
+      NOT: { status: 'CANCELLED' as any },
+    },
+    select: { scheduledFor: true, durationMinutesSnapshot: true },
+    take: 2000,
+  })) as BookingForBusy[]
 
-
-  const busy: BusyInterval[] = bookings.map((b) => {
-  const start = new Date(b.scheduledFor)
-  const dur = Number(b.durationMinutesSnapshot) || durationMinutes
-  const end = addMinutes(start, dur)
-  return { start, end }
-})
-
+  const busy: BusyInterval[] = bookings.map((b: BookingForBusy) => {
+    const start = new Date(b.scheduledFor)
+    const dur = Number(b.durationMinutesSnapshot) || durationMinutes
+    const end = addMinutes(start, dur)
+    return { start, end }
+  })
 
   const fallback = { enabled: true, start: '09:00', end: '18:00' }
   const wh = workingHours && typeof workingHours === 'object' ? workingHours : null
@@ -213,7 +230,7 @@ async function computeNextSlots(args: {
 
       const slotEndUtc = addMinutes(slotStartUtc, durationMinutes)
 
-      const conflict = busy.some((b) => overlaps(slotStartUtc, slotEndUtc, b.start, b.end))
+      const conflict = busy.some((bi: BusyInterval) => overlaps(slotStartUtc, slotEndUtc, bi.start, bi.end))
       if (conflict) continue
 
       out.push(slotStartUtc.toISOString())
@@ -238,7 +255,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Missing professionalId' }, { status: 400 })
     }
 
-    const creator = await prisma.professionalProfile.findUnique({
+    const creator = (await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
       select: {
         id: true,
@@ -249,13 +266,13 @@ export async function GET(req: Request) {
         timeZone: true,
         workingHours: true,
       } as any,
-    })
+    })) as ProfessionalForAvailability | null
 
     if (!creator) {
       return NextResponse.json({ error: 'Professional not found' }, { status: 404 })
     }
 
-    const creatorTimeZone = (creator as any).timeZone || 'America/Los_Angeles'
+    const creatorTimeZone = creator.timeZone || 'America/Los_Angeles'
 
     const creatorOffering = serviceId
       ? await prisma.professionalServiceOffering.findFirst({
@@ -271,12 +288,12 @@ export async function GET(req: Request) {
       durationMinutes: creatorDuration,
       limit,
       timeZone: creatorTimeZone,
-      workingHours: (creator as any).workingHours ?? null,
+      workingHours: creator.workingHours ?? null,
     })
 
     let otherPros: Array<any> = []
     if (serviceId) {
-      const offerings = await prisma.professionalServiceOffering.findMany({
+      const offerings = (await prisma.professionalServiceOffering.findMany({
         where: {
           serviceId,
           isActive: true,
@@ -299,21 +316,21 @@ export async function GET(req: Request) {
             },
           },
         },
-      })
+      })) as OfferingForOtherPros[]
 
       otherPros = (
         await Promise.all(
-          offerings.map(async (o) => {
+          offerings.map(async (o: OfferingForOtherPros) => {
             const p = o.professional
             if (!p?.id) return null
 
-            const pTz = (p as any).timeZone || 'America/Los_Angeles'
+            const pTz = p.timeZone || 'America/Los_Angeles'
             const slots = await computeNextSlots({
               professionalId: String(p.id),
               durationMinutes: o.durationMinutes ?? 60,
               limit: Math.min(4, limit),
               timeZone: pTz,
-              workingHours: (p as any).workingHours ?? null,
+              workingHours: p.workingHours ?? null,
             })
 
             return {
@@ -336,14 +353,14 @@ export async function GET(req: Request) {
       mediaId: mediaId ?? null,
       serviceId: serviceId ?? null,
 
-      // top-level timezone for the "creator pro" (main one)
+      // timezone for the primary pro (creator)
       timeZone: creatorTimeZone,
 
       primaryPro: {
         id: creator.id,
         businessName: creator.businessName ?? null,
-        avatarUrl: (creator as any).avatarUrl ?? null,
-        location: (creator as any).location ?? (creator as any).city ?? null,
+        avatarUrl: creator.avatarUrl ?? null,
+        location: creator.location ?? creator.city ?? null,
         offeringId: creatorOffering?.id ?? null,
         price: creatorOffering?.price ?? null,
         durationMinutes: creatorOffering?.durationMinutes ?? null,
