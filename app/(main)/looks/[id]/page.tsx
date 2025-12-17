@@ -45,7 +45,10 @@ export default async function LookDetailPage({
 
   return (
     <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <Link href="/looks" style={{ fontSize: 12, textDecoration: 'none', color: '#111', display: 'inline-block', marginBottom: 10 }}>
+      <Link
+        href="/looks"
+        style={{ fontSize: 12, textDecoration: 'none', color: '#111', display: 'inline-block', marginBottom: 10 }}
+      >
         ← Back to Looks
       </Link>
 
@@ -70,11 +73,22 @@ export default async function LookDetailPage({
 
           {media.services.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {media.services.map((t) => (
-                <span key={t.id} style={{ background: '#111', color: '#fff', fontSize: 11, padding: '4px 8px', borderRadius: 999 }}>
-                  {t.service?.name || 'Service'}
-                </span>
-              ))}
+              {media.services.map(
+                (t: { id: string; service?: { name?: string | null } | null }) => (
+                  <span
+                    key={t.id}
+                    style={{
+                      background: '#111',
+                      color: '#fff',
+                      fontSize: 11,
+                      padding: '4px 8px',
+                      borderRadius: 999,
+                    }}
+                  >
+                    {t.service?.name || 'Service'}
+                  </span>
+                ),
+              )}
             </div>
           )}
 
@@ -92,7 +106,14 @@ export default async function LookDetailPage({
             <div style={{ marginTop: 6 }}>
               <Link
                 href={`/professionals/${pro.id}`}
-                style={{ fontSize: 12, textDecoration: 'none', border: '1px solid #111', padding: '8px 12px', borderRadius: 999, display: 'inline-block' }}
+                style={{
+                  fontSize: 12,
+                  textDecoration: 'none',
+                  border: '1px solid #111',
+                  padding: '8px 12px',
+                  borderRadius: 999,
+                  display: 'inline-block',
+                }}
               >
                 View profile
               </Link>
