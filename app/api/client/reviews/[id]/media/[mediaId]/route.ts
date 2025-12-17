@@ -1,14 +1,17 @@
 // app/api/client/reviews/[id]/media/[mediaId]/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
 export const dynamic = 'force-dynamic'
 
-export async function DELETE(_req: Request, { params }: { params: { id: string; mediaId: string } }) {
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string; mediaId: string }> },
+) {
   try {
-    const reviewId = params.id
-    const mediaId = params.mediaId
+    const { id, mediaId } = await context.params
+    const reviewId = id
 
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {

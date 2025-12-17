@@ -1,5 +1,4 @@
-// app/api/client/bookings/[bookingId]/review/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
@@ -18,6 +17,12 @@ type IncomingMediaItem = {
   url: string
   thumbUrl?: string | null
   mediaType: MediaType
+}
+
+type Ctx = {
+  params: Promise<{
+    bookingId: string
+  }>
 }
 
 function isMediaType(x: unknown): x is MediaType {
@@ -44,15 +49,14 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
 }
 
 function parseRating(x: unknown): number | null {
-  const n =
-    typeof x === 'number' ? x : typeof x === 'string' ? parseInt(x, 10) : NaN
+  const n = typeof x === 'number' ? x : typeof x === 'string' ? parseInt(x, 10) : NaN
   if (!Number.isFinite(n) || n < 1 || n > 5) return null
   return n
 }
 
-export async function POST(req: Request, { params }: { params: { bookingId: string } }) {
+export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const bookingId = params.bookingId
+    const { bookingId } = await ctx.params
 
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {

@@ -1,5 +1,5 @@
 // app/api/client/reviews/[id]/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
@@ -35,9 +35,13 @@ function normalizeText(
   return { value: trimmed }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
   try {
-    const reviewId = params.id
+    const { id } = await context.params
+    const reviewId = id
     if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
 
     const user = await getCurrentUser().catch(() => null)
@@ -51,7 +55,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     })
 
     if (!existing) return NextResponse.json({ error: 'Review not found.' }, { status: 404 })
-    if (existing.clientId !== user.clientProfile.id) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    if (existing.clientId !== user.clientProfile.id) {
+      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    }
 
     const body = (await req.json().catch(() => ({}))) as UpdateReviewBody
 
@@ -61,16 +67,23 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     const headlineNorm = normalizeText(body.headline, HEADLINE_MAX)
-    if ('invalid' in headlineNorm) return NextResponse.json({ error: `Headline: ${headlineNorm.invalid}` }, { status: 400 })
+    if ('invalid' in headlineNorm) {
+      return NextResponse.json({ error: `Headline: ${headlineNorm.invalid}` }, { status: 400 })
+    }
 
     const reviewBodyNorm = normalizeText(body.body, BODY_MAX)
-    if ('invalid' in reviewBodyNorm) return NextResponse.json({ error: `Body: ${reviewBodyNorm.invalid}` }, { status: 400 })
+    if ('invalid' in reviewBodyNorm) {
+      return NextResponse.json({ error: `Body: ${reviewBodyNorm.invalid}` }, { status: 400 })
+    }
 
     const hasAnyChange =
       ratingParsed !== undefined || !('unset' in headlineNorm) || !('unset' in reviewBodyNorm)
 
     if (!hasAnyChange) {
-      const current = await prisma.review.findUnique({ where: { id: reviewId }, include: { mediaAssets: true } })
+      const current = await prisma.review.findUnique({
+        where: { id: reviewId },
+        include: { mediaAssets: true },
+      })
       return NextResponse.json({ review: current }, { status: 200 })
     }
 
@@ -91,9 +104,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
   try {
-    const reviewId = params.id
+    const { id } = await context.params
+    const reviewId = id
     if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
 
     const user = await getCurrentUser().catch(() => null)
@@ -107,7 +124,9 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     })
 
     if (!review) return NextResponse.json({ error: 'Review not found.' }, { status: 404 })
-    if (review.clientId !== user.clientProfile.id) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    if (review.clientId !== user.clientProfile.id) {
+      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.mediaAsset.updateMany({

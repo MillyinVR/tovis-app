@@ -1,5 +1,5 @@
 // app/api/client/reviews/[id]/media/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
@@ -40,9 +40,13 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   return items
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
   try {
-    const reviewId = params.id
+    const { id } = await context.params
+    const reviewId = id
 
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
@@ -51,7 +55,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const body = (await req.json().catch(() => ({}))) as AddReviewMediaBody
     const mediaItems = parseMedia(body.media)
-    if (!mediaItems.length) return NextResponse.json({ error: 'No media provided.' }, { status: 400 })
+    if (!mediaItems.length) {
+      return NextResponse.json({ error: 'No media provided.' }, { status: 400 })
+    }
 
     const review = await prisma.review.findUnique({
       where: { id: reviewId },
@@ -59,7 +65,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     })
 
     if (!review) return NextResponse.json({ error: 'Review not found.' }, { status: 404 })
-    if (review.clientId !== user.clientProfile.id) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    if (review.clientId !== user.clientProfile.id) {
+      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    }
 
     if (!review.bookingId) {
       return NextResponse.json(
@@ -74,7 +82,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const created = await prisma.mediaAsset.createMany({
       data: mediaItems.map((m) => ({
         professionalId: review.professionalId,
-        bookingId: review.bookingId,
+        bookingId: review.bookingId!,
         reviewId: review.id,
         url: m.url,
         thumbUrl: m.thumbUrl ?? null,
@@ -93,7 +101,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       include: { mediaAssets: true },
     })
 
-    return NextResponse.json({ ok: true, createdCount: created.count, review: updated }, { status: 201 })
+    return NextResponse.json(
+      { ok: true, createdCount: created.count, review: updated },
+      { status: 201 },
+    )
   } catch (e) {
     console.error('POST /api/client/reviews/[id]/media error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

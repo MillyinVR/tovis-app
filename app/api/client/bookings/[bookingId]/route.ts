@@ -1,9 +1,15 @@
 // app/api/client/bookings/[bookingId]/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
 export const dynamic = 'force-dynamic'
+
+type Ctx = {
+  params: Promise<{
+    bookingId: string
+  }>
+}
 
 function isValidDate(d: Date) {
   return d instanceof Date && !Number.isNaN(d.getTime())
@@ -20,14 +26,14 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart
 }
 
-export async function PATCH(req: Request, { params }: { params: { bookingId: string } }) {
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
       return NextResponse.json({ error: 'Only clients can update bookings.' }, { status: 401 })
     }
 
-    const bookingId = params.bookingId
+    const { bookingId } = await ctx.params
     if (!bookingId) return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 })
 
     const body = await req.json().catch(() => ({} as any))
