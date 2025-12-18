@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,31 +9,18 @@ type Ctx = {
   params: Promise<{ bookingId: string }>
 }
 
-type BookingStatusLike = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
-
-type PatchAction = 'cancel' | 'reschedule'
 type PatchBody =
   | { action: 'cancel' }
   | { action: 'reschedule'; scheduledFor: string }
 
-type BookingForPatch = Prisma.BookingGetPayload<{
-  select: {
-    id: true
-    clientId: true
-    professionalId: true
-    scheduledFor: true
-    durationMinutesSnapshot: true
-    status: true
-  }
-}>
-
-type ExistingBookingForConflict = Prisma.BookingGetPayload<{
-  select: {
-    id: true
-    scheduledFor: true
-    durationMinutesSnapshot: true
-  }
-}>
+type BookingRow = {
+  id: string
+  clientId: string
+  professionalId: string
+  scheduledFor: Date
+  durationMinutesSnapshot: number
+  status: string
+}
 
 function isValidDate(d: Date) {
   return d instanceof Date && !Number.isNaN(d.getTime())
@@ -49,28 +35,12 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart
 }
 
-function parseBody(raw: unknown): PatchBody | null {
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-
-  const action =
-    typeof r.action === 'string' ? (r.action.trim().toLowerCase() as PatchAction) : null
-
-  if (action === 'cancel') return { action: 'cancel' }
-
-  if (action === 'reschedule') {
-    const scheduledFor = typeof r.scheduledFor === 'string' ? r.scheduledFor : null
-    if (!scheduledFor) return null
-    return { action: 'reschedule', scheduledFor }
-  }
-
+function normalizeAction(v: unknown): PatchBody['action'] | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim().toLowerCase()
+  if (s === 'cancel') return 'cancel'
+  if (s === 'reschedule') return 'reschedule'
   return null
-}
-
-function asStatus(v: unknown): BookingStatusLike {
-  const s = typeof v === 'string' ? v.toUpperCase() : ''
-  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') return s
-  return 'PENDING'
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
@@ -81,12 +51,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     const { bookingId } = await ctx.params
-    if (!bookingId) {
-      return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 })
-    }
+    if (!bookingId) return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 })
 
-    const body = parseBody(await req.json().catch(() => null))
-    if (!body) {
+    const bodyRaw = (await req.json().catch(() => ({}))) as Partial<PatchBody> & Record<string, unknown>
+    const action = normalizeAction(bodyRaw.action)
+    if (!action) {
       return NextResponse.json(
         { error: 'Invalid action. Use { action: "cancel" } or { action: "reschedule", scheduledFor }' },
         { status: 400 },
@@ -103,26 +72,22 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         durationMinutesSnapshot: true,
         status: true,
       },
-    })) as BookingForPatch | null
+    })) as BookingRow | null
 
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.clientId !== user.clientProfile.id) {
-      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
-    }
+    if (booking.clientId !== user.clientProfile.id) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
 
-    const status = asStatus((booking as any).status)
     const now = new Date()
     const start = new Date(booking.scheduledFor)
-
-    const dur = Number(booking.durationMinutesSnapshot ?? 60)
-    if (!Number.isFinite(dur) || dur <= 0) {
-      return NextResponse.json({ error: 'Booking duration is invalid.' }, { status: 400 })
-    }
+    const dur = Number(booking.durationMinutesSnapshot || 60)
+    const statusUpper = String(booking.status || '').toUpperCase()
 
     // ---- CANCEL ----
-    if (body.action === 'cancel') {
-      if (status === 'CANCELLED') return NextResponse.json({ ok: true, booking }, { status: 200 })
-      if (status === 'COMPLETED') {
+    if (action === 'cancel') {
+      if (statusUpper === 'CANCELLED') {
+        return NextResponse.json({ ok: true, booking }, { status: 200 })
+      }
+      if (statusUpper === 'COMPLETED') {
         return NextResponse.json({ error: 'Completed bookings cannot be cancelled.' }, { status: 400 })
       }
       if (start.getTime() < now.getTime()) {
@@ -139,24 +104,24 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     // ---- RESCHEDULE ----
-    if (status === 'CANCELLED' || status === 'COMPLETED') {
+    if (statusUpper === 'CANCELLED' || statusUpper === 'COMPLETED') {
       return NextResponse.json({ error: 'That booking can’t be rescheduled.' }, { status: 400 })
     }
 
-    const nextStart = new Date(body.scheduledFor)
-    if (!isValidDate(nextStart)) {
-      return NextResponse.json({ error: 'Invalid scheduledFor.' }, { status: 400 })
+    const scheduledForRaw = (bodyRaw as { scheduledFor?: unknown }).scheduledFor
+    if (typeof scheduledForRaw !== 'string' || !scheduledForRaw.trim()) {
+      return NextResponse.json({ error: 'Missing scheduledFor.' }, { status: 400 })
     }
-    if (nextStart.getTime() < now.getTime()) {
-      return NextResponse.json({ error: 'Pick a future time.' }, { status: 400 })
-    }
+
+    const nextStart = new Date(scheduledForRaw)
+    if (!isValidDate(nextStart)) return NextResponse.json({ error: 'Invalid scheduledFor.' }, { status: 400 })
+    if (nextStart.getTime() < now.getTime()) return NextResponse.json({ error: 'Pick a future time.' }, { status: 400 })
 
     const nextEnd = addMinutes(nextStart, dur)
-
     const windowStart = addMinutes(nextStart, -dur * 2)
     const windowEnd = addMinutes(nextStart, dur * 2)
 
-    const existing = (await prisma.booking.findMany({
+    const existing = await prisma.booking.findMany({
       where: {
         professionalId: booking.professionalId,
         scheduledFor: { gte: windowStart, lte: windowEnd },
@@ -165,22 +130,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
       orderBy: { scheduledFor: 'asc' },
       take: 100,
-    })) as ExistingBookingForConflict[]
+    })
 
-    const hasConflict = existing.some((b) => {
+    const hasConflict = existing.some((b: { id: string; scheduledFor: Date; durationMinutesSnapshot: number }) => {
       if (b.id === booking.id) return false
-
       const bStart = new Date(b.scheduledFor)
-      const bDur = Number(b.durationMinutesSnapshot ?? 0)
+      const bDur = Number(b.durationMinutesSnapshot || 0)
       if (!Number.isFinite(bDur) || bDur <= 0) return false
-
       const bEnd = addMinutes(bStart, bDur)
       return overlaps(bStart, bEnd, nextStart, nextEnd)
     })
 
-    if (hasConflict) {
-      return NextResponse.json({ error: 'That time is no longer available.' }, { status: 409 })
-    }
+    if (hasConflict) return NextResponse.json({ error: 'That time is no longer available.' }, { status: 409 })
 
     const updated = await prisma.booking.update({
       where: { id: booking.id },
