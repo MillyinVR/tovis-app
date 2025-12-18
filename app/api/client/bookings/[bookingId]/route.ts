@@ -3,18 +3,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import type { Prisma } from '@prisma/client'
-import { BookingStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = {
-  params: Promise<{
-    bookingId: string
-  }>
+  params: Promise<{ bookingId: string }>
 }
 
-type PatchAction = 'cancel' | 'reschedule'
+type BookingStatusLike = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 
+type PatchAction = 'cancel' | 'reschedule'
 type PatchBody =
   | { action: 'cancel' }
   | { action: 'reschedule'; scheduledFor: string }
@@ -69,6 +67,12 @@ function parseBody(raw: unknown): PatchBody | null {
   return null
 }
 
+function asStatus(v: unknown): BookingStatusLike {
+  const s = typeof v === 'string' ? v.toUpperCase() : ''
+  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') return s
+  return 'PENDING'
+}
+
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -106,6 +110,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
     }
 
+    const status = asStatus((booking as any).status)
     const now = new Date()
     const start = new Date(booking.scheduledFor)
 
@@ -116,10 +121,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
     // ---- CANCEL ----
     if (body.action === 'cancel') {
-      if (booking.status === BookingStatus.CANCELLED) {
-        return NextResponse.json({ ok: true, booking }, { status: 200 })
-      }
-      if (booking.status === BookingStatus.COMPLETED) {
+      if (status === 'CANCELLED') return NextResponse.json({ ok: true, booking }, { status: 200 })
+      if (status === 'COMPLETED') {
         return NextResponse.json({ error: 'Completed bookings cannot be cancelled.' }, { status: 400 })
       }
       if (start.getTime() < now.getTime()) {
@@ -128,7 +131,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
       const updated = await prisma.booking.update({
         where: { id: booking.id },
-        data: { status: BookingStatus.CANCELLED },
+        data: { status: 'CANCELLED' as any },
         select: { id: true, status: true, scheduledFor: true },
       })
 
@@ -136,7 +139,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     // ---- RESCHEDULE ----
-    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.COMPLETED) {
+    if (status === 'CANCELLED' || status === 'COMPLETED') {
       return NextResponse.json({ error: 'That booking can’t be rescheduled.' }, { status: 400 })
     }
 
@@ -150,7 +153,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
     const nextEnd = addMinutes(nextStart, dur)
 
-    // Small window so we don’t scan the universe
     const windowStart = addMinutes(nextStart, -dur * 2)
     const windowEnd = addMinutes(nextStart, dur * 2)
 
@@ -158,7 +160,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       where: {
         professionalId: booking.professionalId,
         scheduledFor: { gte: windowStart, lte: windowEnd },
-        NOT: { status: BookingStatus.CANCELLED },
+        NOT: { status: 'CANCELLED' as any },
       },
       select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
       orderBy: { scheduledFor: 'asc' },
