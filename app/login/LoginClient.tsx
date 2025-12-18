@@ -11,13 +11,12 @@ function safeJson(res: Response) {
  * Only allow internal redirects.
  * Prevents open-redirect abuse like /login?from=https://evil.com
  */
-function sanitizeFrom(from: string | null): string {
-  const fallback = '/'
-  if (!from) return fallback
+function sanitizeFrom(from: string | null): string | null {
+  if (!from) return null
   const trimmed = from.trim()
-  if (!trimmed) return fallback
-  if (!trimmed.startsWith('/')) return fallback
-  if (trimmed.startsWith('//')) return fallback
+  if (!trimmed) return null
+  if (!trimmed.startsWith('/')) return null
+  if (trimmed.startsWith('//')) return null
   return trimmed
 }
 
@@ -54,18 +53,20 @@ export default function LoginClient() {
         return
       }
 
+      // Make server components reflect the new auth state immediately
       router.refresh()
 
-      // Redirect back to where they came from
+      // If we were redirected here from a protected route, go back there
       if (from) {
-        router.push(from)
+        router.replace(from)
         return
       }
 
+      // Otherwise redirect by role (your "dashboard" behavior)
       const role = data?.user?.role
-      if (role === 'CLIENT') router.push('/client')
-      else if (role === 'PRO') router.push('/pro')
-      else router.push('/')
+      if (role === 'CLIENT') router.replace('/client')
+      else if (role === 'PRO') router.replace('/pro')
+      else router.replace('/')
     } catch (err) {
       console.error(err)
       setError('Network error.')
