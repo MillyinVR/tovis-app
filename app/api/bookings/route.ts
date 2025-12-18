@@ -162,37 +162,39 @@ export async function POST(request: Request) {
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? ('ACCEPTED' as any) : ('PENDING' as any)
 
-    // Create booking + delete hold atomically
-    const booking = await prisma.$transaction(async (tx) => {
-      const created = await tx.booking.create({
-        data: {
-          clientId: user.clientProfile!.id,
-          professionalId: offering.professionalId,
-          serviceId: offering.serviceId,
-          offeringId: offering.id,
-          scheduledFor: requestedStart,
-          status: initialStatus,
-          source,
-          priceSnapshot: offering.price,
-          durationMinutesSnapshot: offering.durationMinutes,
+    // Create booking + delete hold atomically (no `tx` parameter)
+const [booking] = await prisma.$transaction([
+  prisma.booking.create({
+    data: {
+      clientId: user.clientProfile!.id,
+      professionalId: offering.professionalId,
+      serviceId: offering.serviceId,
+      offeringId: offering.id,
 
-          // Only include if your Booking model actually has this column:
-          // mediaId: mediaId,
-        },
-        select: {
-          id: true,
-          status: true,
-          scheduledFor: true,
-          professionalId: true,
-          serviceId: true,
-          offeringId: true,
-          source: true,
-        },
-      })
+      scheduledFor: requestedStart,
+      status: initialStatus,
+      source,
 
-      await tx.bookingHold.delete({ where: { id: hold.id } })
-      return created
-    })
+      priceSnapshot: offering.price,
+      durationMinutesSnapshot: offering.durationMinutes,
+
+      // mediaId: mediaId, // only if column exists
+    },
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+      professionalId: true,
+      serviceId: true,
+      offeringId: true,
+      source: true,
+    },
+  }),
+
+  prisma.bookingHold.delete({ where: { id: hold.id } }),
+])
+
+
 
     return NextResponse.json({ ok: true, booking }, { status: 201 })
   } catch (e) {
