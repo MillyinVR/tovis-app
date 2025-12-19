@@ -41,42 +41,31 @@ export async function POST(req: NextRequest) {
     const note = pickString(body?.note)
     const discountPctRaw = pickNumber(body?.discountPct)
 
-    if (!offeringId) {
-      return NextResponse.json({ error: 'offeringId is required (for now).' }, { status: 400 })
-    }
-    if (!startAt) {
-      return NextResponse.json({ error: 'startAt is required (ISO string).' }, { status: 400 })
-    }
+    if (!offeringId) return NextResponse.json({ error: 'offeringId is required.' }, { status: 400 })
+    if (!startAt) return NextResponse.json({ error: 'startAt is required (ISO string).' }, { status: 400 })
     if (endAt && endAt.getTime() <= startAt.getTime()) {
       return NextResponse.json({ error: 'endAt must be after startAt.' }, { status: 400 })
     }
 
-    // Basic “last-minute” sanity: only allow next 48h (tweak later)
+    // Allow only next 48h (tweak later)
     const now = Date.now()
     const startMs = startAt.getTime()
-    if (startMs < now - 60_000) {
-      return NextResponse.json({ error: 'startAt is in the past.' }, { status: 400 })
-    }
+    if (startMs < now - 60_000) return NextResponse.json({ error: 'startAt is in the past.' }, { status: 400 })
     if (startMs > now + 48 * 60 * 60_000) {
       return NextResponse.json({ error: 'startAt must be within 48 hours for last-minute.' }, { status: 400 })
     }
 
-    const discountPct =
-      discountPctRaw == null ? null : clampInt(discountPctRaw, 0, 80)
+    const discountPct = discountPctRaw == null ? null : clampInt(discountPctRaw, 0, 80)
 
-    // Must be a real offering owned by this pro
     const offering = await prisma.professionalServiceOffering.findFirst({
       where: { id: offeringId, professionalId: proId, isActive: true },
-      select: { id: true, professionalId: true, serviceId: true },
+      select: { id: true, serviceId: true },
     })
-    if (!offering) {
-      return NextResponse.json({ error: 'Offering not found.' }, { status: 404 })
-    }
+    if (!offering) return NextResponse.json({ error: 'Offering not found.' }, { status: 404 })
 
-    // Pro must have last-minute enabled
     const settings = await prisma.lastMinuteSettings.findUnique({
       where: { professionalId: proId },
-      select: { enabled: true, discountsEnabled: true, minPrice: true, blocks: { select: { startAt: true, endAt: true } } },
+      select: { enabled: true, discountsEnabled: true, blocks: { select: { startAt: true, endAt: true } } },
     })
     if (!settings?.enabled) {
       return NextResponse.json({ error: 'Last-minute openings are disabled for this professional.' }, { status: 409 })
@@ -85,13 +74,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Discounts are disabled for this professional.' }, { status: 409 })
     }
 
-    // Block overlap check (if any blocks exist)
     const blocks = settings.blocks || []
-    const proposedEnd = endAt ?? new Date(startAt.getTime() + 60 * 60_000) // if no endAt, assume 60m for overlap check
-    const overlaps = blocks.some((b) => startAt < b.endAt && proposedEnd > b.startAt)
-    if (overlaps) {
-      return NextResponse.json({ error: 'This time is blocked from last-minute openings.' }, { status: 409 })
-    }
+    const proposedEnd = endAt ?? new Date(startAt.getTime() + 60 * 60_000)
+    const blocked = blocks.some((b) => startAt < b.endAt && proposedEnd > b.startAt)
+    if (blocked) return NextResponse.json({ error: 'This time is blocked from last-minute openings.' }, { status: 409 })
 
     const opening = await prisma.lastMinuteOpening.create({
       data: {
