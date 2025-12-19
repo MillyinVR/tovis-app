@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 import UpcomingBookings from './components/UpcomingBookings'
 import PendingBookings from './components/PendingBookings'
@@ -64,13 +65,23 @@ function nextStatusBadge(b: BookingLike) {
   return <Badge label={s || 'Unknown'} bg="#f3f4f6" color="#111827" />
 }
 
+function normalizeTabKey(raw: string): TabKey | null {
+  const t = raw.toLowerCase().trim()
+  if (t === 'upcoming' || t === 'pending' || t === 'waitlist' || t === 'prebooked' || t === 'past') return t
+  return null
+}
+
 export default function ClientBookingsDashboard() {
   const searchParams = useSearchParams()
+  const tabParam = searchParams?.get('tab') || ''
 
   const [buckets, setBuckets] = useState<Buckets>(EMPTY_BUCKETS)
   const [tab, setTab] = useState<TabKey>('upcoming')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+
+  // ✅ "Optional but smart": apply deep link ONCE, then stop overriding user clicks.
+  const [didInitTab, setDidInitTab] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -94,14 +105,14 @@ export default function ClientBookingsDashboard() {
     reload()
   }, [reload])
 
-  // ✅ Deep link: /client?tab=waitlist
   useEffect(() => {
-    const t = (searchParams?.get('tab') || '').toLowerCase().trim()
-    if (!t) return
-    if (t === 'upcoming' || t === 'pending' || t === 'waitlist' || t === 'prebooked' || t === 'past') {
-      setTab(t as TabKey)
-    }
-  }, [searchParams])
+    if (didInitTab) return
+
+    const parsed = normalizeTabKey(tabParam)
+    if (parsed) setTab(parsed)
+
+    setDidInitTab(true)
+  }, [tabParam, didInitTab])
 
   const counts = useMemo(() => {
     return {
