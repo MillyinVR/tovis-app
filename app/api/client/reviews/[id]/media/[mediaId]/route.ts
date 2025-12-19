@@ -6,17 +6,18 @@ import { getCurrentUser } from '@/lib/currentUser'
 export const dynamic = 'force-dynamic'
 
 type RouteContext = {
-  params: { id: string; mediaId: string }
+  params: Promise<{ id: string; mediaId: string }>
 }
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-export async function DELETE(_req: NextRequest, context: RouteContext) {
+export async function DELETE(_req: NextRequest, { params }: RouteContext) {
   try {
-    const reviewId = pickString(context.params?.id)
-    const mediaId = pickString(context.params?.mediaId)
+    const raw = await params
+    const reviewId = pickString(raw?.id)
+    const mediaId = pickString(raw?.mediaId)
 
     if (!reviewId || !mediaId) {
       return NextResponse.json({ error: 'Missing id or mediaId.' }, { status: 400 })
@@ -37,7 +38,6 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
     }
 
-    // Fetch media directly, then validate constraints.
     const media = await prisma.mediaAsset.findUnique({
       where: { id: mediaId },
       select: {
