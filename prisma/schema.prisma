@@ -90,6 +90,26 @@ enum WaitlistStatus {
   CANCELLED
 }
 
+enum ClientIntentType {
+  VIEW_PRO
+  VIEW_SERVICE
+  VIEW_OFFERING
+  VIEW_MEDIA
+}
+
+enum OpeningTier {
+  TIER1_WAITLIST_LAPSED
+  TIER2_FAVORITE_VIEWER
+  TIER3_PUBLIC
+}
+
+enum OpeningStatus {
+  ACTIVE
+  BOOKED
+  EXPIRED
+  CANCELLED
+}
+
 enum ClientNoteVisibility {
   PROFESSIONALS_ONLY
   ADMIN_ONLY
@@ -121,12 +141,15 @@ model User {
 }
 
 model ClientProfile {
-  id        String  @id @default(cuid())
-  userId    String  @unique
-  firstName String
-  lastName  String
-  phone     String?
-  avatarUrl String?
+  id                   String                      @id @default(cuid())
+  userId               String                      @unique
+  firstName            String
+  lastName             String
+  phone                String?
+  avatarUrl            String?
+  intentEvents         ClientIntentEvent[]
+  openingNotifications OpeningNotification[]
+  notificationSettings ClientNotificationSettings?
 
   alertBanner String?
 
@@ -142,16 +165,16 @@ model ClientProfile {
 }
 
 model ProfessionalProfile {
-  id           String                 @id @default(cuid())
-  userId       String                 @unique
-  businessName String?
-  bio          String?
-  avatarUrl    String?
-  favorites    ProfessionalFavorite[] @relation("ProFavorites")
-  autoAcceptBookings Boolean  @default(false)
-  timeZone String? // IANA tz like "America/New_York"
+  id                 String                 @id @default(cuid())
+  userId             String                 @unique
+  businessName       String?
+  bio                String?
+  avatarUrl          String?
+  favorites          ProfessionalFavorite[] @relation("ProFavorites")
+  autoAcceptBookings Boolean                @default(false)
+  timeZone           String? // IANA tz like "America/New_York"
+  intentEvents       ClientIntentEvent[]
 
-  
   location String @default("")
 
   addressLine1 String?
@@ -168,8 +191,9 @@ model ProfessionalProfile {
   licenseNumber      String?
   licenseState       String?
   licenseExpiry      DateTime?
-  licenseVerified    Boolean            @default(false)
-  verificationStatus VerificationStatus @default(PENDING)
+  licenseVerified    Boolean             @default(false)
+  verificationStatus VerificationStatus  @default(PENDING)
+  lastMinuteOpenings LastMinuteOpening[] @relation("ProOpenings")
 
   isMobile  Boolean @default(false)
   isInSalon Boolean @default(false)
@@ -228,15 +252,17 @@ model ProfessionalFavorite {
 }
 
 model Service {
-  id                     String  @id @default(cuid())
-  name                   String  @unique
+  id                     String              @id @default(cuid())
+  name                   String              @unique
   categoryId             String
   description            String?
   defaultDurationMinutes Int
-  minPrice               Decimal @db.Decimal(10, 2)
+  minPrice               Decimal             @db.Decimal(10, 2)
   defaultImageUrl        String?
-  allowMobile            Boolean @default(false)
-  isActive               Boolean @default(true)
+  allowMobile            Boolean             @default(false)
+  isActive               Boolean             @default(true)
+  intentEvents           ClientIntentEvent[]
+  lastMinuteOpenings     LastMinuteOpening[] @relation("ServiceOpenings")
 
   category         ServiceCategory               @relation(fields: [categoryId], references: [id])
   offerings        ProfessionalServiceOffering[]
@@ -269,8 +295,11 @@ model ProfessionalServiceOffering {
   customImageUrl  String?
   isActive        Boolean @default(true)
 
+  intentEvents       ClientIntentEvent[]
+  lastMinuteOpenings LastMinuteOpening[] @relation("OfferingOpenings")
+
   createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  updatedAt DateTime @updatedAt
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
   service      Service             @relation(fields: [serviceId], references: [id])
@@ -280,16 +309,16 @@ model ProfessionalServiceOffering {
 }
 
 model LastMinuteSettings {
-  id              String   @id @default(cuid())
-  professionalId  String   @unique
+  id             String @id @default(cuid())
+  professionalId String @unique
 
-  enabled          Boolean  @default(false)
-  discountsEnabled Boolean  @default(false) // ✅ NEW
+  enabled          Boolean @default(false)
+  discountsEnabled Boolean @default(false) // ✅ NEW
 
-  windowSameDayPct Int     @default(20)
-  window24hPct     Int     @default(10)
+  windowSameDayPct Int @default(20)
+  window24hPct     Int @default(10)
 
-  minPrice        Decimal? @db.Decimal(10,2)
+  minPrice Decimal? @db.Decimal(10, 2)
 
   disableMon Boolean @default(false)
   disableTue Boolean @default(false)
@@ -302,11 +331,10 @@ model LastMinuteSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  professional ProfessionalProfile @relation("ProLastMinuteSettings", fields: [professionalId], references: [id])
-  serviceRules  LastMinuteServiceRule[]
-  blocks        LastMinuteBlock[]
+  professional ProfessionalProfile     @relation("ProLastMinuteSettings", fields: [professionalId], references: [id])
+  serviceRules LastMinuteServiceRule[]
+  blocks       LastMinuteBlock[]
 }
-
 
 model LastMinuteServiceRule {
   id         String  @id @default(cuid())
@@ -334,6 +362,101 @@ model LastMinuteBlock {
   settings LastMinuteSettings @relation(fields: [settingsId], references: [id])
 
   @@index([settingsId, startAt])
+}
+
+model LastMinuteOpening {
+  id             String  @id @default(cuid())
+  professionalId String
+  serviceId      String?
+  offeringId     String?
+
+  startAt DateTime
+  endAt   DateTime?
+
+  status OpeningStatus @default(ACTIVE)
+
+  discountPct Int?
+  note        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile          @relation("ProOpenings", fields: [professionalId], references: [id])
+  service      Service?                     @relation("ServiceOpenings", fields: [serviceId], references: [id])
+  offering     ProfessionalServiceOffering? @relation("OfferingOpenings", fields: [offeringId], references: [id])
+
+  notifications OpeningNotification[]
+
+  @@index([professionalId, startAt])
+  @@index([serviceId, startAt])
+  @@index([status, startAt])
+}
+
+model OpeningNotification {
+  id        String @id @default(cuid())
+  openingId String
+  clientId  String
+
+  tier        OpeningTier
+  sentAt      DateTime    @default(now())
+  deliveredAt DateTime?
+  openedAt    DateTime?
+  clickedAt   DateTime?
+  bookedAt    DateTime?
+
+  // prevents spam + duplicates if you re-run jobs
+  dedupeKey String? @unique
+
+  opening LastMinuteOpening @relation(fields: [openingId], references: [id])
+  client  ClientProfile     @relation(fields: [clientId], references: [id])
+
+  @@unique([openingId, clientId, tier])
+  @@index([clientId, sentAt])
+  @@index([openingId, sentAt])
+}
+
+model ClientIntentEvent {
+  id       String           @id @default(cuid())
+  clientId String
+  type     ClientIntentType
+
+  professionalId String?
+  serviceId      String?
+  offeringId     String?
+  mediaId        String?
+
+  source    BookingSource? // DISCOVERY/REQUESTED/AFTERCARE if relevant
+  createdAt DateTime       @default(now())
+
+  // optional: helps dedupe / rate-limit spam tracking
+  sessionId String?
+
+  client       ClientProfile                @relation(fields: [clientId], references: [id])
+  professional ProfessionalProfile?         @relation(fields: [professionalId], references: [id])
+  service      Service?                     @relation(fields: [serviceId], references: [id])
+  offering     ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
+  media        MediaAsset?                  @relation(fields: [mediaId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([professionalId, createdAt])
+  @@index([serviceId, createdAt])
+  @@index([offeringId, createdAt])
+  @@index([mediaId, createdAt])
+}
+
+model ClientNotificationSettings {
+  id       String @id @default(cuid())
+  clientId String @unique
+
+  lastMinuteEnabled Boolean @default(true)
+
+  // optional granularity
+  maxLastMinutePerDay Int @default(2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client ClientProfile @relation(fields: [clientId], references: [id])
 }
 
 model Booking {
@@ -394,17 +517,16 @@ model Booking {
 }
 
 model BookingHold {
-  id            String   @id @default(cuid())
-  offeringId    String
+  id             String   @id @default(cuid())
+  offeringId     String
   professionalId String
-  scheduledFor  DateTime
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
+  scheduledFor   DateTime
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
 
   @@index([offeringId, scheduledFor])
   @@index([professionalId, scheduledFor])
 }
-
 
 model AftercareSummary {
   id          String    @id @default(cuid())
@@ -553,7 +675,7 @@ model Reminder {
 // =======================
 
 model MediaAsset {
-  id               String    @id @default(cuid())
+  id               String              @id @default(cuid())
   professionalId   String
   bookingId        String?
   reviewId         String?
@@ -563,7 +685,8 @@ model MediaAsset {
   thumbUrl         String?
   mediaType        MediaType
   caption          String?
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime            @default(now())
+  intentEvents     ClientIntentEvent[]
 
   visibility            MediaVisibility @default(PUBLIC)
   isFeaturedInPortfolio Boolean         @default(false)
@@ -626,7 +749,7 @@ model WaitlistEntry {
   professionalId String
   serviceId      String
   mediaId        String?
-  notes String?
+  notes          String?
 
   preferredStart      DateTime
   preferredEnd        DateTime
