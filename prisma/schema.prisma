@@ -626,6 +626,7 @@ model WaitlistEntry {
   professionalId String
   serviceId      String
   mediaId        String?
+  notes String?
 
   preferredStart      DateTime
   preferredEnd        DateTime

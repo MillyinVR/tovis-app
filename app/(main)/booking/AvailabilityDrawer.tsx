@@ -390,13 +390,14 @@ export default function AvailabilityDrawer({
   if (!open || !context) return null
 
   const continueHref =
-    selected?.offeringId && holdUntil
-      ? `/offerings/${selected.offeringId}?scheduledFor=${encodeURIComponent(selected.slotISO)}` +
-        `&mediaId=${encodeURIComponent(context.mediaId)}` +
-        `&holdUntil=${encodeURIComponent(String(holdUntil))}` +
-        `&proTimeZone=${encodeURIComponent(selected.proTimeZone)}` +
-        `&holdId=${encodeURIComponent(selected.holdId)}`
-      : null
+  selected?.offeringId && holdUntil
+    ? `/offerings/${selected.offeringId}?scheduledFor=${encodeURIComponent(selected.slotISO)}` +
+      `&mediaId=${encodeURIComponent(context.mediaId)}` +
+      `&holdUntil=${encodeURIComponent(String(holdUntil))}` +
+      `&proTimeZone=${encodeURIComponent(selected.proTimeZone)}` +
+      `&holdId=${encodeURIComponent(selected.holdId)}` +
+      `&source=${encodeURIComponent('DISCOVERY')}`
+    : null
 
   const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
 

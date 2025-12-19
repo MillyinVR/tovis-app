@@ -3,8 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE' | string
+
 type BookingPanelProps = {
   offeringId: string
+  professionalId: string
+  serviceId: string
+  mediaId?: string | null
+
   price: number
   durationMinutes: number
   isLoggedInAsClient: boolean
@@ -15,6 +21,7 @@ type BookingPanelProps = {
   locationLabel?: string | null
 
   professionalTimeZone?: string | null
+  source: BookingSource
 }
 
 function currentPathWithQuery() {
@@ -38,7 +45,7 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
 }
 
 async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+  return (await res.json().catch(() => ({}))) as any
 }
 
 function errorFromResponse(res: Response, data: any) {
@@ -53,9 +60,11 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-/**
- * TZ helpers
- */
+function upper(v: unknown) {
+  return typeof v === 'string' ? v.toUpperCase() : ''
+}
+
+/** TZ helpers */
 function getZonedParts(dateUtc: Date, timeZone: string) {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -70,7 +79,6 @@ function getZonedParts(dateUtc: Date, timeZone: string) {
   const parts = dtf.formatToParts(dateUtc)
   const map: Record<string, string> = {}
   for (const p of parts) map[p.type] = p.value
-
   return {
     year: Number(map.year),
     month: Number(map.month),
@@ -92,25 +100,15 @@ function zonedTimeToUtc(args: { year: number; month: number; day: number; hour: 
   let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
   const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
   guess = new Date(guess.getTime() - offset1 * 60_000)
-
   const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
-  if (offset2 !== offset1) {
-    guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
-  }
-
+  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
   return guess
 }
 
 function parseDatetimeLocal(value: string) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
   if (!m) return null
-  return {
-    year: Number(m[1]),
-    month: Number(m[2]),
-    day: Number(m[3]),
-    hour: Number(m[4]),
-    minute: Number(m[5]),
-  }
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }
 }
 
 function toDatetimeLocalFromISOInTimeZone(iso: string | null | undefined, timeZone: string) {
@@ -147,6 +145,9 @@ function formatPrettyInTimeZone(valueDatetimeLocal: string, timeZone: string) {
 
 export default function BookingPanel({
   offeringId,
+  professionalId,
+  serviceId,
+  mediaId = null,
   price,
   durationMinutes,
   isLoggedInAsClient,
@@ -155,11 +156,11 @@ export default function BookingPanel({
   professionalName = null,
   locationLabel = null,
   professionalTimeZone = null,
+  source,
 }: BookingPanelProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Standardize: proTimeZone query param from AvailabilityDrawer
   const proTz = professionalTimeZone || searchParams?.get('proTimeZone') || 'America/Los_Angeles'
 
   const viewerTz = useMemo(() => {
@@ -172,8 +173,14 @@ export default function BookingPanel({
 
   const holdId = (searchParams?.get('holdId') || '').trim() || null
   const holdUntilParam = searchParams?.get('holdUntil') || ''
+  const scheduledForFromUrl = (searchParams?.get('scheduledFor') || '').trim() || null
 
-  const [dateTime, setDateTime] = useState('') // datetime-local, interpreted in proTz
+  const hasHold = Boolean(holdId)
+
+  // The held slot is the truth. If there's a hold, scheduledFor MUST come from the URL.
+  const scheduledForISO = hasHold ? scheduledForFromUrl : defaultScheduledForISO
+
+  const [dateTime, setDateTime] = useState('') // datetime-local in proTz
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -184,7 +191,10 @@ export default function BookingPanel({
 
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const holdTimerRef = useRef<number | null>(null)
-  const touchedRef = useRef(false)
+
+  // waitlist state
+  const [waitlistBusy, setWaitlistBusy] = useState(false)
+  const [waitlistSuccess, setWaitlistSuccess] = useState<string | null>(null)
 
   const displayPrice = useMemo(() => {
     const n = Number(price)
@@ -192,13 +202,12 @@ export default function BookingPanel({
     return n.toFixed(0)
   }, [price])
 
-  // seed the datetime-local from scheduledFor (UTC iso) in pro tz
+  // Seed datetime-local from scheduledForISO in pro tz.
   useEffect(() => {
-    if (dateTime) return
-    const next = toDatetimeLocalFromISOInTimeZone(defaultScheduledForISO, proTz)
-    if (!next) return
-    setDateTime(next)
-  }, [defaultScheduledForISO, dateTime, proTz])
+    const next = toDatetimeLocalFromISOInTimeZone(scheduledForISO, proTz)
+    setDateTime(next || '')
+    setConfirmChecked(false)
+  }, [scheduledForISO, proTz])
 
   useEffect(() => {
     const ms = Number(holdUntilParam)
@@ -226,16 +235,6 @@ export default function BookingPanel({
       holdTimerRef.current = null
     }
   }, [holdUntil])
-
-  useEffect(() => {
-    function onBeforeUnload(e: BeforeUnloadEvent) {
-      if (!touchedRef.current || success) return
-      e.preventDefault()
-      e.returnValue = ''
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [success])
 
   const prettyTimePro = useMemo(() => formatPrettyInTimeZone(dateTime, proTz), [dateTime, proTz])
 
@@ -281,22 +280,73 @@ export default function BookingPanel({
     return holdUntil - Date.now() <= 2 * 60_000
   }, [holdUntil])
 
-  const canSubmit = Boolean(dateTime && confirmChecked && !loading && holdId && holdUntil)
+  const normalizedSource = useMemo(() => upper(source), [source])
 
-  const bookingShareUrl = useMemo(() => {
-    if (!createdBookingId) return null
-    if (typeof window === 'undefined') return null
-    return `${window.location.origin}/booking/${createdBookingId}`
-  }, [createdBookingId])
+  const missingHeldScheduledFor = Boolean(hasHold && !scheduledForFromUrl)
+
+  const canSubmit = Boolean(
+    !missingHeldScheduledFor &&
+      confirmChecked &&
+      !loading &&
+      (!hasHold || (holdId && holdUntil)) &&
+      normalizedSource &&
+      ['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) &&
+      scheduledForISO,
+  )
 
   async function copyShareLink() {
     try {
-      if (!bookingShareUrl) return
-      await navigator.clipboard.writeText(bookingShareUrl)
+      if (!createdBookingId) return
+      if (typeof window === 'undefined') return
+      const url = `${window.location.origin}/client/bookings/${createdBookingId}`
+      await navigator.clipboard.writeText(url)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1200)
     } catch {
       setCopied(false)
+    }
+  }
+
+  async function joinWaitlist() {
+    setError(null)
+    setWaitlistSuccess(null)
+
+    if (!isLoggedInAsClient) {
+      redirectToLogin(router, 'waitlist')
+      return
+    }
+
+    // Use scheduledForFromUrl if present, else whatever is in the input, else "now + 2 hours"
+    const desiredISO =
+      scheduledForFromUrl ||
+      toISOFromDatetimeLocalInTimeZone(dateTime, proTz) ||
+      new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+
+    setWaitlistBusy(true)
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          professionalId,
+          serviceId,
+          mediaId: mediaId || null,
+          desiredFor: desiredISO,
+          flexibilityMinutes: 60,
+          preferredTimeBucket: null,
+        }),
+      })
+
+      const data: any = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || `Failed to join waitlist (${res.status}).`)
+
+      setWaitlistSuccess('Added to waitlist.')
+      router.push('/client?tab=waitlist')
+      router.refresh()
+    } catch (e: any) {
+      setError(e?.message || 'Failed to join waitlist.')
+    } finally {
+      setWaitlistBusy(false)
     }
   }
 
@@ -306,15 +356,27 @@ export default function BookingPanel({
 
     setError(null)
     setSuccess(null)
+    setWaitlistSuccess(null)
 
     if (!isLoggedInAsClient) {
       redirectToLogin(router, 'book')
       return
     }
 
-    if (!holdId || !holdUntil) {
-      setError('Your hold expired. Please go back and pick a slot again.')
+    if (!normalizedSource || !['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource)) {
+      setError('Missing booking source. Please go back and try again.')
       return
+    }
+
+    if (hasHold) {
+      if (!holdId || !holdUntil) {
+        setError('Your hold expired. Please go back and pick a slot again.')
+        return
+      }
+      if (!scheduledForFromUrl) {
+        setError('Missing scheduled time for this hold. Please go back and pick a slot again.')
+        return
+      }
     }
 
     if (!confirmChecked) {
@@ -322,8 +384,9 @@ export default function BookingPanel({
       return
     }
 
-    const scheduledForISO = toISOFromDatetimeLocalInTimeZone(dateTime, proTz)
-    if (!scheduledForISO) {
+    const finalScheduledForISO = hasHold ? scheduledForFromUrl! : toISOFromDatetimeLocalInTimeZone(dateTime, proTz)
+
+    if (!finalScheduledForISO) {
       setError('Please choose a valid date and time.')
       return
     }
@@ -335,10 +398,9 @@ export default function BookingPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offeringId,
-          scheduledFor: scheduledForISO,
-          holdId,
-          // source: 'DISCOVERY', // optional
-          // mediaId: searchParams?.get('mediaId') || null, // only if Booking model has mediaId
+          scheduledFor: finalScheduledForISO,
+          holdId: hasHold ? holdId : null,
+          source: normalizedSource,
         }),
       })
 
@@ -358,8 +420,10 @@ export default function BookingPanel({
       setCreatedBookingId(bookingId)
 
       setSuccess('Booked. You’re officially on the calendar.')
-      touchedRef.current = false
       router.refresh()
+      setTimeout(() => {
+        router.push('/client')
+      }, 900)
     } catch (err) {
       console.error(err)
       setError('Network error while creating booking.')
@@ -370,36 +434,20 @@ export default function BookingPanel({
 
   const calendarHref = createdBookingId ? `/api/calendar?bookingId=${encodeURIComponent(createdBookingId)}` : null
 
+  const showWaitlistCTA = !success && (!hasHold || !holdUntil)
+
   return (
-    <section
-      style={{
-        border: '1px solid #eee',
-        borderRadius: 12,
-        padding: 16,
-        alignSelf: 'flex-start',
-        background: '#fff',
-      }}
-    >
+    <section style={{ border: '1px solid #eee', borderRadius: 12, padding: 16, alignSelf: 'flex-start', background: '#fff' }}>
       <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{success ? 'You’re booked' : 'Confirm your booking'}</h2>
 
-      <div
-        style={{
-          border: '1px solid #eee',
-          borderRadius: 12,
-          padding: 12,
-          background: success ? '#f0fdf4' : '#fafafa',
-          marginBottom: 12,
-        }}
-      >
+      <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: success ? '#f0fdf4' : '#fafafa', marginBottom: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
           <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>{success ? 'Confirmed' : 'Review'}</div>
 
           {holdLabel && !success ? (
-            <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>
-              Slot held for {holdLabel}
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>Slot held for {holdLabel}</div>
           ) : !success ? (
-            <div style={{ fontSize: 12, color: '#6b7280' }}>Pick a time and confirm</div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>Confirm and book</div>
           ) : (
             <div style={{ fontSize: 12, color: '#166534', fontWeight: 900 }}>Done</div>
           )}
@@ -410,73 +458,31 @@ export default function BookingPanel({
 
           <div style={{ fontSize: 13, color: '#111' }}>
             <span style={{ fontWeight: 800 }}>{professionalName || 'Professional'}</span>
-            {reviewLine ? <span> · {reviewLine}</span> : <span style={{ color: '#6b7280' }}> · Pick a time below</span>}
+            {reviewLine ? <span> · {reviewLine}</span> : <span style={{ color: '#6b7280' }}> · Missing time</span>}
           </div>
 
           {viewerTimeLine ? <div style={{ fontSize: 12, color: '#6b7280' }}>{viewerTimeLine}</div> : null}
 
           <div style={{ fontSize: 12, color: success ? '#166534' : '#6b7280' }}>
-            {success
-              ? 'Nice. Future You can’t pretend this never happened.'
-              : holdLabel
-                ? 'Finish booking before the hold expires.'
-                : `Times are shown in the appointment timezone: ${proTz}.`}
+            {success ? 'Nice. Future You can’t pretend this never happened.' : holdLabel ? 'Finish booking before the hold expires.' : `Times are shown in the appointment timezone: ${proTz}.`}
           </div>
         </div>
       </div>
 
       {success && createdBookingId ? (
         <div style={{ display: 'grid', gap: 10 }}>
-          <a
-            href="/client/bookings"
-            style={{
-              textDecoration: 'none',
-              background: '#111',
-              color: '#fff',
-              padding: '10px 12px',
-              borderRadius: 12,
-              fontWeight: 900,
-              fontSize: 13,
-              textAlign: 'center',
-            }}
-          >
+          <a href="/client" style={{ textDecoration: 'none', background: '#111', color: '#fff', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
             View my bookings
           </a>
 
           {calendarHref ? (
-            <a
-              href={calendarHref}
-              style={{
-                textDecoration: 'none',
-                border: '1px solid #ddd',
-                background: '#fff',
-                color: '#111',
-                padding: '10px 12px',
-                borderRadius: 12,
-                fontWeight: 900,
-                fontSize: 13,
-                textAlign: 'center',
-              }}
-            >
+            <a href={calendarHref} style={{ textDecoration: 'none', border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
               Add to calendar
             </a>
           ) : null}
 
-          <button
-            type="button"
-            onClick={copyShareLink}
-            style={{
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#111',
-              padding: '10px 12px',
-              borderRadius: 12,
-              fontWeight: 900,
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            {copied ? 'Link copied' : 'Share'}
+          <button type="button" onClick={copyShareLink} style={{ border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}>
+            {copied ? 'Link copied' : 'Copy booking link'}
           </button>
 
           <div style={{ fontSize: 12, color: '#6b7280' }}>You’ll thank yourself later.</div>
@@ -489,48 +495,30 @@ export default function BookingPanel({
               type="datetime-local"
               value={dateTime}
               onChange={(e) => {
-                touchedRef.current = true
+                if (hasHold) return
                 setDateTime(e.target.value)
                 setConfirmChecked(false)
               }}
-              style={{
-                width: '100%',
-                marginTop: 4,
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid #ddd',
-              }}
-              disabled={loading}
+              style={{ width: '100%', marginTop: 4, padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', opacity: hasHold ? 0.7 : 1 }}
+              disabled={loading || hasHold}
+              title={hasHold ? 'This time is locked because a slot is being held.' : undefined}
             />
           </label>
 
-          {!holdId || !holdUntil ? (
-            <div style={{ fontSize: 12, color: '#b91c1c' }}>
-              No valid hold found. Go back and pick a slot again.
-            </div>
+          {missingHeldScheduledFor ? <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div> : null}
+
+          {hasHold && (!holdId || !holdUntil) ? <div style={{ fontSize: 12, color: '#b91c1c' }}>No valid hold found. Go back and pick a slot again.</div> : null}
+
+          {!normalizedSource || !['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) ? (
+            <div style={{ fontSize: 12, color: '#b91c1c' }}>Missing booking source. (Parent page needs to pass it.)</div>
           ) : null}
 
-          <label
-            style={{
-              display: 'flex',
-              gap: 10,
-              alignItems: 'flex-start',
-              fontSize: 13,
-              color: '#111',
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid #eee',
-              background: '#fff',
-            }}
-          >
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#111', padding: 12, borderRadius: 12, border: '1px solid #eee', background: '#fff' }}>
             <input
               type="checkbox"
               checked={confirmChecked}
-              onChange={(e) => {
-                touchedRef.current = true
-                setConfirmChecked(e.target.checked)
-              }}
-              disabled={!dateTime || loading || !holdId || !holdUntil}
+              onChange={(e) => setConfirmChecked(e.target.checked)}
+              disabled={!dateTime || loading || (hasHold && (!holdId || !holdUntil))}
               style={{ marginTop: 2 }}
             />
             <div>
@@ -539,7 +527,8 @@ export default function BookingPanel({
             </div>
           </label>
 
-          {error && <p style={{ color: '#b91c1c', fontSize: 13, margin: 0 }}>{error}</p>}
+          {error ? <p style={{ color: '#b91c1c', fontSize: 13, margin: 0 }}>{error}</p> : null}
+          {waitlistSuccess ? <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p> : null}
 
           <button
             type="submit"
@@ -559,15 +548,30 @@ export default function BookingPanel({
             {loading ? 'Booking…' : holdLabel ? `Confirm now · $${displayPrice}` : `Confirm booking · $${displayPrice}`}
           </button>
 
-          {!isLoggedInAsClient && (
-            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-              You’ll need to log in as a client to complete your booking.
-            </p>
-          )}
+          {showWaitlistCTA ? (
+            <button
+              type="button"
+              onClick={joinWaitlist}
+              disabled={waitlistBusy || loading}
+              style={{
+                padding: '10px 12px',
+                borderRadius: 10,
+                border: '1px solid #ddd',
+                background: '#fff',
+                color: '#111',
+                fontSize: 13,
+                fontWeight: 900,
+                cursor: waitlistBusy ? 'default' : 'pointer',
+                opacity: waitlistBusy ? 0.7 : 1,
+              }}
+            >
+              {waitlistBusy ? 'Joining waitlist…' : 'No time works? Join waitlist'}
+            </button>
+          ) : null}
 
-          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-            {holdLabel ? 'If the hold expires, the time might disappear.' : 'Pick a time, confirm it, and you’re done.'}
-          </p>
+          {!isLoggedInAsClient ? <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>You’ll need to log in as a client to complete your booking.</p> : null}
+
+          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>{holdLabel ? 'If the hold expires, the time might disappear.' : 'Confirm it, and you’re done.'}</p>
         </form>
       )}
     </section>

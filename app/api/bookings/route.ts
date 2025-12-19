@@ -5,7 +5,23 @@ import { getCurrentUser } from '@/lib/currentUser'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown) {
+type BookingSourceNormalized = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
+
+type CreateBookingBody = {
+  offeringId?: unknown
+  scheduledFor?: unknown
+  holdId?: unknown // optional (Option A)
+  source?: unknown
+  mediaId?: unknown // optional (only if your schema has it)
+}
+
+type ExistingBookingForConflict = {
+  id: string
+  scheduledFor: Date
+  durationMinutesSnapshot: number | null
+}
+
+function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
@@ -22,19 +38,11 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart
 }
 
-type BookingSourceNormalized = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 function normalizeSource(v: unknown): BookingSourceNormalized {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
   if (s === 'AFTERCARE') return 'AFTERCARE'
   if (s === 'DISCOVERY') return 'DISCOVERY'
   return 'REQUESTED'
-}
-
-type ExistingBookingForConflict = {
-  id: string
-  scheduledFor: Date
-  durationMinutesSnapshot: number | null
-  status: unknown
 }
 
 export async function POST(request: Request) {
@@ -44,29 +52,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Only clients can create bookings.' }, { status: 401 })
     }
 
-    const body = (await request.json().catch(() => ({}))) as any
+    const body = (await request.json().catch(() => ({}))) as CreateBookingBody
 
-    const offeringId = pickString(body?.offeringId)
-    const scheduledForRaw = body?.scheduledFor
-    const holdId = pickString(body?.holdId)
-    const source = normalizeSource(body?.source)
-    const mediaId = pickString(body?.mediaId) // optional (only if schema supports it)
+    const offeringId = pickString(body.offeringId)
+    const scheduledForRaw = body.scheduledFor
+    const holdId = pickString(body.holdId) // Option A if present
+    const useHolds = Boolean(holdId)
+    const source = normalizeSource(body.source)
+    const mediaId = pickString(body.mediaId) // only if your Booking model has it
 
     if (!offeringId || !scheduledForRaw) {
       return NextResponse.json({ error: 'Missing offering or date/time.' }, { status: 400 })
     }
 
-    // Option A requires holds.
-    if (!holdId) {
-      return NextResponse.json({ error: 'Hold expired. Please pick a slot again.' }, { status: 409 })
-    }
-
-    const scheduledFor = new Date(scheduledForRaw)
+    const scheduledFor = new Date(String(scheduledForRaw))
     if (!isValidDate(scheduledFor)) {
       return NextResponse.json({ error: 'Invalid date/time.' }, { status: 400 })
     }
 
-    // buffer: don’t allow bookings for the immediate past / immediate now
+    // buffer: don’t allow bookings in the immediate past / immediate now
     const BUFFER_MINUTES = 5
     if (scheduledFor.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
       return NextResponse.json({ error: 'Please select a future time.' }, { status: 400 })
@@ -97,28 +101,31 @@ export async function POST(request: Request) {
 
     const now = new Date()
 
-    // Validate hold
-    const hold = await prisma.bookingHold.findUnique({
-      where: { id: holdId },
-      select: { id: true, offeringId: true, professionalId: true, scheduledFor: true, expiresAt: true },
-    })
+    // Option A: validate hold if provided
+    let holdToDeleteId: string | null = null
+    if (useHolds) {
+      const hold = await prisma.bookingHold.findUnique({
+        where: { id: holdId! },
+        select: { id: true, offeringId: true, professionalId: true, scheduledFor: true, expiresAt: true },
+      })
 
-    if (!hold || hold.offeringId !== offeringId) {
-      return NextResponse.json({ error: 'Hold not found. Please pick a slot again.' }, { status: 409 })
-    }
+      if (!hold || hold.offeringId !== offeringId) {
+        return NextResponse.json({ error: 'Hold not found. Please pick a slot again.' }, { status: 409 })
+      }
 
-    if (hold.expiresAt.getTime() <= now.getTime()) {
-      return NextResponse.json({ error: 'Hold expired. Please pick a slot again.' }, { status: 409 })
-    }
+      if (hold.expiresAt.getTime() <= now.getTime()) {
+        return NextResponse.json({ error: 'Hold expired. Please pick a slot again.' }, { status: 409 })
+      }
 
-    // Must match time
-    if (new Date(hold.scheduledFor).getTime() !== scheduledFor.getTime()) {
-      return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
-    }
+      if (new Date(hold.scheduledFor).getTime() !== scheduledFor.getTime()) {
+        return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
+      }
 
-    // Must match professional
-    if (hold.professionalId !== offering.professionalId) {
-      return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
+      if (hold.professionalId !== offering.professionalId) {
+        return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
+      }
+
+      holdToDeleteId = hold.id
     }
 
     const requestedStart = scheduledFor
@@ -138,13 +145,12 @@ export async function POST(request: Request) {
         id: true,
         scheduledFor: true,
         durationMinutesSnapshot: true,
-        status: true,
       },
       orderBy: { scheduledFor: 'asc' },
       take: 50,
     })) as ExistingBookingForConflict[]
 
-    const hasConflict = existing.some((b: ExistingBookingForConflict) => {
+    const hasConflict = existing.some((b) => {
       const bDur = Number(b.durationMinutesSnapshot || 0)
       if (!Number.isFinite(bDur) || bDur <= 0) return false
       const bStart = new Date(b.scheduledFor)
@@ -162,39 +168,40 @@ export async function POST(request: Request) {
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? ('ACCEPTED' as any) : ('PENDING' as any)
 
-    // Create booking + delete hold atomically (no `tx` parameter)
-const [booking] = await prisma.$transaction([
-  prisma.booking.create({
-    data: {
-      clientId: user.clientProfile!.id,
-      professionalId: offering.professionalId,
-      serviceId: offering.serviceId,
-      offeringId: offering.id,
+    // Build transaction ops (Option B = booking only, Option A = booking + delete hold)
+    const createBookingOp = prisma.booking.create({
+      data: {
+        clientId: user.clientProfile.id,
+        professionalId: offering.professionalId,
+        serviceId: offering.serviceId,
+        offeringId: offering.id,
 
-      scheduledFor: requestedStart,
-      status: initialStatus,
-      source,
+        scheduledFor: requestedStart,
+        status: initialStatus,
+        source,
 
-      priceSnapshot: offering.price,
-      durationMinutesSnapshot: offering.durationMinutes,
+        priceSnapshot: offering.price,
+        durationMinutesSnapshot: offering.durationMinutes,
 
-      // mediaId: mediaId, // only if column exists
-    },
-    select: {
-      id: true,
-      status: true,
-      scheduledFor: true,
-      professionalId: true,
-      serviceId: true,
-      offeringId: true,
-      source: true,
-    },
-  }),
+        // Only add this if your Booking model actually has the column:
+        // mediaId,
+      },
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+        professionalId: true,
+        serviceId: true,
+        offeringId: true,
+        source: true,
+      },
+    })
 
-  prisma.bookingHold.delete({ where: { id: hold.id } }),
-])
+    const ops = holdToDeleteId
+      ? [createBookingOp, prisma.bookingHold.delete({ where: { id: holdToDeleteId } })]
+      : [createBookingOp]
 
-
+    const [booking] = await prisma.$transaction(ops)
 
     return NextResponse.json({ ok: true, booking }, { status: 201 })
   } catch (e) {

@@ -15,6 +15,17 @@ function upper(v: unknown) {
   return typeof v === 'string' ? v.toUpperCase() : ''
 }
 
+type BookingRow = {
+  id: string
+  status: string | null
+  source: string | null
+  scheduledFor: Date
+  durationMinutesSnapshot: number | null
+  priceSnapshot: any
+  service: { id: string; name: string } | null
+  professional: { id: string; businessName: string | null; location: string | null; city: string | null; state: string | null } | null
+}
+
 export async function GET() {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -26,7 +37,7 @@ export async function GET() {
     const now = new Date()
     const next30 = addDays(now, 30)
 
-    const bookings = await prisma.booking.findMany({
+    const bookings = (await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
       take: 300,
@@ -38,16 +49,15 @@ export async function GET() {
         durationMinutesSnapshot: true,
         priceSnapshot: true,
         service: { select: { id: true, name: true } },
-        professional: {
-          select: { id: true, businessName: true, location: true, city: true, state: true },
-        },
+        professional: { select: { id: true, businessName: true, location: true, city: true, state: true } },
       },
-    })
+    })) as BookingRow[]
 
+    // ✅ Waitlist (no "any" + no silent failure)
     let waitlist: any[] = []
     try {
-      waitlist = await (prisma as any).waitlistEntry.findMany({
-        where: { clientId },
+      waitlist = await prisma.waitlistEntry.findMany({
+        where: { clientId, status: 'ACTIVE' },
         orderBy: { createdAt: 'desc' },
         take: 200,
         select: {
@@ -56,21 +66,32 @@ export async function GET() {
           serviceId: true,
           professionalId: true,
           notes: true,
-          availability: true,
+
+          // ✅ Pick ONE model shape:
+
+          // If your schema uses preferred window fields:
+          preferredStart: true,
+          preferredEnd: true,
+          preferredTimeBucket: true,
+          status: true,
+          mediaId: true,
+
+          // If you *actually* added `availability` to Prisma, use this instead and remove the preferred* fields:
+          // availability: true,
+
           service: { select: { id: true, name: true } },
-          professional: {
-            select: { id: true, businessName: true, location: true, city: true, state: true },
-          },
+          professional: { select: { id: true, businessName: true, location: true, city: true, state: true } },
         },
       })
-    } catch {
+    } catch (e) {
+      console.error('GET /api/client/bookings waitlist error:', e)
       waitlist = []
     }
 
-    const upcoming: any[] = []
-    const pending: any[] = []
-    const prebooked: any[] = []
-    const past: any[] = []
+    const upcoming: BookingRow[] = []
+    const pending: BookingRow[] = []
+    const prebooked: BookingRow[] = []
+    const past: BookingRow[] = []
 
     for (const b of bookings) {
       const when = new Date(b.scheduledFor)
@@ -80,7 +101,6 @@ export async function GET() {
       const status = upper(b.status)
       const source = upper(b.source)
 
-      // Past always wins
       if (!isFuture || status === 'COMPLETED' || status === 'CANCELLED') {
         past.push(b)
         continue
@@ -91,19 +111,16 @@ export async function GET() {
         continue
       }
 
-      // Prebooked (aftercare) bucket
       if (source === 'AFTERCARE' && isFuture) {
         prebooked.push(b)
         continue
       }
 
-      // Normal upcoming (accepted + within 30)
       if (status === 'ACCEPTED' && within30) {
         upcoming.push(b)
         continue
       }
 
-      // Everything else future-ish goes to past for now (keeps UI simple)
       past.push(b)
     }
 

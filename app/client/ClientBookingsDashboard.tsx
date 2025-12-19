@@ -1,7 +1,7 @@
-// app/client/ClientBookingsDashboard.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 import UpcomingBookings from './components/UpcomingBookings'
 import PendingBookings from './components/PendingBookings'
@@ -42,10 +42,6 @@ function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
 }
 
-/**
- * Normalizes the API response to the shape the dashboard expects.
- * Also supports legacy API key `confirmed` by mapping it to `prebooked`.
- */
 function normalizeBuckets(input: unknown): Buckets {
   const b = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
 
@@ -54,11 +50,8 @@ function normalizeBuckets(input: unknown): Buckets {
   const waitlist = asArray<WaitlistLike>(b.waitlist)
   const past = asArray<BookingLike>(b.past)
 
-  // If your API still returns `confirmed`, treat it as prebooked for now.
   const prebooked =
-    asArray<BookingLike>(b.prebooked).length > 0
-      ? asArray<BookingLike>(b.prebooked)
-      : asArray<BookingLike>(b.confirmed)
+    asArray<BookingLike>(b.prebooked).length > 0 ? asArray<BookingLike>(b.prebooked) : asArray<BookingLike>(b.confirmed)
 
   return { upcoming, pending, waitlist, prebooked, past }
 }
@@ -73,38 +66,43 @@ function nextStatusBadge(b: BookingLike) {
 }
 
 export default function ClientBookingsDashboard() {
+  const searchParams = useSearchParams()
+
   const [buckets, setBuckets] = useState<Buckets>(EMPTY_BUCKETS)
   const [tab, setTab] = useState<TabKey>('upcoming')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
+  const reload = useCallback(async () => {
+    try {
+      setLoading(true)
+      setErr(null)
 
-    async function load() {
-      try {
-        setLoading(true)
-        setErr(null)
+      const res = await fetch('/api/client/bookings', { cache: 'no-store' })
+      const data: any = await res.json().catch(() => ({}))
 
-        const res = await fetch('/api/client/bookings', { cache: 'no-store' })
-        const data: any = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Failed to load bookings.')
 
-        if (!res.ok) throw new Error(data?.error || 'Failed to load bookings.')
-
-        const next = normalizeBuckets(data?.buckets)
-        if (!cancelled) setBuckets(next)
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || 'Failed to load bookings.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    load()
-    return () => {
-      cancelled = true
+      setBuckets(normalizeBuckets(data?.buckets))
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to load bookings.')
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
+
+  // ✅ Deep link: /client?tab=waitlist
+  useEffect(() => {
+    const t = (searchParams?.get('tab') || '').toLowerCase().trim()
+    if (!t) return
+    if (t === 'upcoming' || t === 'pending' || t === 'waitlist' || t === 'prebooked' || t === 'past') {
+      setTab(t as TabKey)
+    }
+  }, [searchParams])
 
   const counts = useMemo(() => {
     return {
@@ -127,6 +125,23 @@ export default function ClientBookingsDashboard() {
       <div style={{ border: '1px solid #fee2e2', background: '#fff1f2', padding: 14, borderRadius: 12 }}>
         <div style={{ fontWeight: 900, marginBottom: 6 }}>Couldn’t load your bookings</div>
         <div style={{ color: '#7f1d1d', fontSize: 13 }}>{err}</div>
+
+        <button
+          type="button"
+          onClick={reload}
+          style={{
+            marginTop: 10,
+            border: '1px solid #ddd',
+            borderRadius: 999,
+            padding: '8px 12px',
+            fontSize: 12,
+            fontWeight: 900,
+            background: '#fff',
+            cursor: 'pointer',
+          }}
+        >
+          Retry
+        </button>
       </div>
     )
   }
@@ -146,24 +161,16 @@ export default function ClientBookingsDashboard() {
           <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
             <div style={{ fontSize: 18, fontWeight: 900 }}>
               {nextAppt.service?.name || 'Appointment'}
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#6b7280' }}>
-                {' '}
-                · {prettyWhen(nextAppt.scheduledFor)}
-              </span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#6b7280' }}> · {prettyWhen(nextAppt.scheduledFor)}</span>
             </div>
 
             <div style={{ color: '#111', fontSize: 13 }}>
               <span style={{ fontWeight: 900 }}>{nextAppt.professional?.businessName || 'Professional'}</span>
-              {locationLabel(nextAppt.professional) ? (
-                <span style={{ color: '#6b7280' }}> · {locationLabel(nextAppt.professional)}</span>
-              ) : null}
+              {locationLabel(nextAppt.professional) ? <span style={{ color: '#6b7280' }}> · {locationLabel(nextAppt.professional)}</span> : null}
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
-              {sourceUpper(nextAppt.source) === 'AFTERCARE' ? (
-                <Badge label="Prebooked" bg="#eef2ff" color="#1e3a8a" />
-              ) : null}
-
+              {sourceUpper(nextAppt.source) === 'AFTERCARE' ? <Badge label="Prebooked" bg="#eef2ff" color="#1e3a8a" /> : null}
               {nextStatusBadge(nextAppt)}
 
               <a
@@ -218,7 +225,7 @@ export default function ClientBookingsDashboard() {
       <div style={{ border: '1px solid #eee', borderRadius: 16, background: '#fff', padding: 14 }}>
         {tab === 'upcoming' ? <UpcomingBookings items={buckets.upcoming} /> : null}
         {tab === 'pending' ? <PendingBookings items={buckets.pending} /> : null}
-        {tab === 'waitlist' ? <WaitlistBookings items={buckets.waitlist} /> : null}
+        {tab === 'waitlist' ? <WaitlistBookings items={buckets.waitlist} onChanged={reload} /> : null}
         {tab === 'prebooked' ? <PrebookedBookings items={buckets.prebooked} /> : null}
         {tab === 'past' ? <PastBookings items={buckets.past} /> : null}
 
