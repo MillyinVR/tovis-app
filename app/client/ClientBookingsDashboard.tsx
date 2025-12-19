@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
 
 import UpcomingBookings from './components/UpcomingBookings'
 import PendingBookings from './components/PendingBookings'
