@@ -1,3 +1,4 @@
+// app/api/openings/[openingId]/notify/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -14,17 +15,18 @@ function startOfLocalDay(d = new Date()) {
   return x
 }
 
-export async function POST(req: NextRequest, context: { params: Promise<{ openingId: string }> }) {
+export async function POST(_req: NextRequest, { params }: { params: { openingId: string } }) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { openingId } = await context.params
+    const openingId = params?.openingId
     if (!openingId) return NextResponse.json({ error: 'Missing openingId' }, { status: 400 })
 
     const proId = user.professionalProfile.id
+    const now = new Date()
 
     // Load opening + basic guardrails
     const opening = await prisma.lastMinuteOpening.findUnique({
@@ -45,7 +47,18 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
       return NextResponse.json({ error: 'Opening is not ACTIVE.' }, { status: 409 })
     }
 
-    // Optional: ensure last-minute is enabled (keeps pros from accidentally notifying)
+    // Time guardrails: don’t notify dead slots
+    if (opening.startAt.getTime() <= now.getTime()) {
+      return NextResponse.json({ error: 'Opening start time has already passed.' }, { status: 409 })
+    }
+
+    // Optional: keep aligned with “48h last-minute” concept
+    const MAX_HOURS = 48
+    if (opening.startAt.getTime() > now.getTime() + MAX_HOURS * 60 * 60_000) {
+      return NextResponse.json({ error: `Opening must be within ${MAX_HOURS} hours to notify.` }, { status: 409 })
+    }
+
+    // Ensure last-minute is enabled for pro
     const settings = await prisma.lastMinuteSettings.findUnique({
       where: { professionalId: proId },
       select: { enabled: true },
@@ -54,7 +67,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
       return NextResponse.json({ error: 'Last-minute openings are disabled for this professional.' }, { status: 409 })
     }
 
-    const now = new Date()
     const eightWeeksAgo = daysAgo(56)
 
     // -----------------------------
@@ -70,10 +82,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
       distinct: ['clientId'],
       take: 500,
     })
-
     const waitlistClientIds = waitlist.map((w) => w.clientId)
 
-    // Who already has a future booking with this pro?
     const upcoming = await prisma.booking.findMany({
       where: {
         professionalId: proId,
@@ -86,7 +96,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
     })
     const hasUpcoming = new Set(upcoming.map((b) => b.clientId))
 
-    // Get “most recent booking” per client (distinct + orderBy works on Postgres)
     const lastBookings = await prisma.booking.findMany({
       where: {
         professionalId: proId,
@@ -105,19 +114,18 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
     const tier1ClientIds = waitlistClientIds.filter((clientId) => {
       if (hasUpcoming.has(clientId)) return false
       const last = lastByClient.get(clientId)
-      if (!last) return false // if they never booked you, they’re not “lapsed”
+      if (!last) return false // never booked => not “lapsed”
       return last.getTime() <= eightWeeksAgo.getTime()
     })
 
     // -----------------------------
-    // Tier 2: favorited pro + never booked this pro (and not already tier1)
+    // Tier 2: favorited pro + never booked this pro (and not tier1)
     // -----------------------------
     const favorites = await prisma.professionalFavorite.findMany({
       where: { professionalId: proId },
       select: { userId: true },
       take: 5000,
     })
-
     const favoriterUserIds = favorites.map((f) => f.userId)
 
     const favoriteClients = await prisma.clientProfile.findMany({
@@ -125,10 +133,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
       select: { id: true },
       take: 5000,
     })
-
     const favoriteClientIds = favoriteClients.map((c) => c.id)
 
-    // Who has EVER booked this pro?
     const everBooked = await prisma.booking.findMany({
       where: { professionalId: proId, NOT: { status: 'CANCELLED' } },
       select: { clientId: true },
@@ -149,10 +155,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
     ]
 
     if (candidates.length === 0) {
-      return NextResponse.json(
-        { ok: true, openingId, created: 0, reason: 'No eligible recipients' },
-        { status: 200 },
-      )
+      return NextResponse.json({ ok: true, openingId, created: 0, reason: 'No eligible recipients' }, { status: 200 })
     }
 
     const candidateIds = Array.from(new Set(candidates.map((c) => c.clientId)))
@@ -165,7 +168,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
       notifSettings.map((s) => [s.clientId, { enabled: s.lastMinuteEnabled, max: s.maxLastMinutePerDay }]),
     )
 
-    // Count sent today per client
     const todayStart = startOfLocalDay(new Date())
     const counts = await prisma.openingNotification.groupBy({
       by: ['clientId'],
@@ -186,7 +188,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
         openingId,
         clientId: c.clientId,
         tier: c.tier,
-        // dedupeKey is optional, but you already have it and it helps reruns
+        // sentAt defaults to now() in schema. Set explicitly if you want.
+        // sentAt: new Date(),
         dedupeKey: `${openingId}:${c.clientId}:${c.tier}`,
       }))
 
@@ -199,7 +202,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ openin
 
     const created = await prisma.openingNotification.createMany({
       data: toCreate,
-      skipDuplicates: true, // respects @@unique(openingId, clientId, tier) and/or dedupeKey unique
+      skipDuplicates: true,
     })
 
     return NextResponse.json(

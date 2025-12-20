@@ -58,6 +58,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Only clients can create bookings.' }, { status: 401 })
     }
 
+    const clientId = user.clientProfile.id
+
     const body = (await request.json().catch(() => ({}))) as CreateBookingBody
 
     const offeringId = pickString(body.offeringId)
@@ -138,7 +140,7 @@ export async function POST(request: Request) {
       holdToDeleteId = hold.id
     }
 
-    // If claiming an opening, validate it matches time + pro + (offering/service if present)
+    // If claiming an opening, do a fast pre-check (real enforcement happens in the transaction)
     if (openingId) {
       const opening = await prisma.lastMinuteOpening.findUnique({
         where: { id: openingId },
@@ -161,7 +163,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
       }
 
-      // If opening is tied to a specific offering/service, enforce it
       if (opening.offeringId && opening.offeringId !== offering.id) {
         return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
       }
@@ -205,15 +206,38 @@ export async function POST(request: Request) {
     })
 
     if (hasConflict) {
-      return NextResponse.json({ error: 'That time is no longer available. Please select a different slot.' }, { status: 409 })
+      return NextResponse.json(
+        { error: 'That time is no longer available. Please select a different slot.' },
+        { status: 409 },
+      )
     }
 
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
-    // Transaction: claim opening (if any) + create booking + delete hold (if any)
+    // Transaction: claim opening (if any) + create booking + delete hold (if any) + mark notification booked
     const booking = await prisma.$transaction(async (tx) => {
       if (openingId) {
+        // Enforce opening is still ACTIVE and matches the booking we’re about to create.
+        // This is what prevents “two clients booked the same opening.”
+        const activeOpening = await tx.lastMinuteOpening.findFirst({
+          where: { id: openingId, status: 'ACTIVE' },
+          select: {
+            id: true,
+            startAt: true,
+            professionalId: true,
+            offeringId: true,
+            serviceId: true,
+          },
+        })
+
+        if (!activeOpening) throw new Error('OPENING_NOT_AVAILABLE')
+
+        if (activeOpening.professionalId !== offering.professionalId) throw new Error('OPENING_NOT_AVAILABLE')
+        if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) throw new Error('OPENING_NOT_AVAILABLE')
+        if (activeOpening.serviceId && activeOpening.serviceId !== offering.serviceId) throw new Error('OPENING_NOT_AVAILABLE')
+        if (new Date(activeOpening.startAt).getTime() !== requestedStart.getTime()) throw new Error('OPENING_NOT_AVAILABLE')
+
         const updated = await tx.lastMinuteOpening.updateMany({
           where: { id: openingId, status: 'ACTIVE' },
           data: { status: 'BOOKED' },
@@ -223,7 +247,7 @@ export async function POST(request: Request) {
 
       const created = await tx.booking.create({
         data: {
-          clientId: user.clientProfile!.id,
+          clientId,
           professionalId: offering.professionalId,
           serviceId: offering.serviceId,
           offeringId: offering.id,
@@ -237,6 +261,9 @@ export async function POST(request: Request) {
 
           // Only include if your Booking model has it
           // mediaId: mediaId ?? null,
+
+          // If you later add booking.openingId in schema, this is where it goes:
+          // openingId: openingId ?? null,
         },
         select: {
           id: true,
@@ -248,6 +275,20 @@ export async function POST(request: Request) {
           source: true,
         },
       })
+
+      // Mark the client’s notification as “booked” (if they came from a notification or the opening exists in their feed).
+      if (openingId) {
+        await tx.openingNotification.updateMany({
+          where: {
+            clientId,
+            openingId,
+            bookedAt: null,
+          },
+          data: {
+            bookedAt: new Date(),
+          },
+        })
+      }
 
       if (holdToDeleteId) {
         await tx.bookingHold.delete({ where: { id: holdToDeleteId } })
