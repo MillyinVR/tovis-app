@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+
 
 type Pro = { businessName: string | null; city: string | null; location: string | null; timeZone: string | null }
 type Svc = { name: string } | null
