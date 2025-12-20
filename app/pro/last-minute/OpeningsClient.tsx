@@ -23,7 +23,6 @@ type OpeningRow = {
   note: string | null
   offeringId: string | null
   serviceId: string | null
-  createdAt?: string
   service?: { name: string } | null
   offering?: { title: string | null } | null
   _count?: { notifications?: number }
@@ -96,10 +95,13 @@ export default function OpeningsClient({ offerings }: Props) {
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch('/api/pro/openings?hours=48', { cache: 'no-store' })
+      const res = await fetch('/api/pro/openings?hours=48&take=100', { cache: 'no-store' })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Failed to load openings.')
-      setItems(Array.isArray(data?.openings) ? data.openings : [])
+      const list = Array.isArray(data?.openings) ? (data.openings as OpeningRow[]) : []
+      // Keep it stable + sorted
+      list.sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt))
+      setItems(list)
     } catch (e: any) {
       setErr(e?.message || 'Failed to load openings.')
       setItems([])
@@ -153,12 +155,10 @@ export default function OpeningsClient({ offerings }: Props) {
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Failed to create opening.')
 
-      // optimistic insert (also reload to keep it honest)
-      if (data?.opening?.id) {
-        setItems((prev) => [data.opening, ...prev])
-      }
+      // Reset lightweight inputs
       setNote('')
       setDiscountPct('')
+      // Reload so the list includes service/offering joins + counts
       await loadOpenings()
       router.refresh()
     } catch (e: any) {
@@ -173,13 +173,9 @@ export default function OpeningsClient({ offerings }: Props) {
     setBusy(true)
     setErr(null)
     try {
-      const res = await fetch(`/api/openings/${encodeURIComponent(openingId)}/notify`, {
-        method: 'POST',
-      })
+      const res = await fetch(`/api/openings/${encodeURIComponent(openingId)}/notify`, { method: 'POST' })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Notify failed.')
-
-      // Optional: reload so notification counts update
       await loadOpenings()
       router.refresh()
     } catch (e: any) {
@@ -196,12 +192,12 @@ export default function OpeningsClient({ offerings }: Props) {
     try {
       const res = await fetch(`/api/pro/openings?id=${encodeURIComponent(openingId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Cancel failed.')
-
+      if (!res.ok) throw new Error(data?.error || 'Remove failed.')
+      // optimistic remove is fine here
       setItems((prev) => prev.filter((x) => x.id !== openingId))
       router.refresh()
     } catch (e: any) {
-      setErr(e?.message || 'Cancel failed.')
+      setErr(e?.message || 'Remove failed.')
     } finally {
       setBusy(false)
     }
@@ -213,7 +209,7 @@ export default function OpeningsClient({ offerings }: Props) {
       <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, background: '#fff' }}>
         <div style={{ fontWeight: 900, marginBottom: 6 }}>Create a last-minute opening</div>
         <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-          Add a slot in the next 48 hours. If you notify, we’ll queue eligible clients. Humans love being “selected.”
+          Add a slot in the next 48 hours. If you notify, we queue eligible clients. Humans love being “selected.”
         </div>
 
         <div style={{ display: 'grid', gap: 10 }}>
@@ -247,9 +243,7 @@ export default function OpeningsClient({ offerings }: Props) {
             </label>
 
             <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>
-                End {useEndAt ? '' : '(optional)'}
-              </span>
+              <span style={{ fontSize: 12, color: '#6b7280' }}>End {useEndAt ? '' : '(optional)'}</span>
               <input
                 type="datetime-local"
                 value={endAt}
@@ -341,7 +335,7 @@ export default function OpeningsClient({ offerings }: Props) {
         </div>
 
         <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, marginBottom: 10 }}>
-          Next 48 hours (default). Active openings show in the client last-minute module.
+          Next 48 hours. Use “Notify clients” to queue eligible recipients.
         </div>
 
         {loading ? (
@@ -352,10 +346,15 @@ export default function OpeningsClient({ offerings }: Props) {
           <div style={{ display: 'grid', gap: 10 }}>
             {items.map((o) => {
               const when = prettyWhen(o.startAt)
-              const svc = o.service?.name || 'Service'
+              const svc =
+                o.service?.name ||
+                (o.offeringId ? offeringLabelById.get(o.offeringId)?.split(' · ')[0] : null) ||
+                o.offering?.title ||
+                'Service'
+
               const disc = o.discountPct != null ? `${o.discountPct}% off` : null
               const status = String(o.status || 'UNKNOWN')
-              const notifCount = o._count?.notifications
+              const notifCount = o._count?.notifications ?? 0
 
               return (
                 <div
@@ -376,7 +375,7 @@ export default function OpeningsClient({ offerings }: Props) {
                     </div>
                     <div style={{ fontSize: 12, color: '#6b7280' }}>
                       {status}
-                      {typeof notifCount === 'number' ? ` · ${notifCount} notified` : ''}
+                      {notifCount ? ` · ${notifCount} notified` : ''}
                     </div>
                   </div>
 

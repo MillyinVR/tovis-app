@@ -59,6 +59,11 @@ export default async function ProLastMinutePage() {
       <OpeningsClient offerings={payload.offerings as any} />
     </div>
 
+    <div style={{ marginTop: 14 }}>
+    <OpeningsClient offerings={payload.offerings as any} />
+  </div>
+
+
     </main>
   )
 }
