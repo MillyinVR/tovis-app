@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import LastMinuteSettingsClient from './settingsClient'
 import { moneyToString } from '@/lib/money'
+import OpeningsClient from './OpeningsClient'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +55,10 @@ export default async function ProLastMinutePage() {
       <div style={{ marginTop: 14 }}>
         <LastMinuteSettingsClient initial={payload as any} />
       </div>
+      <div style={{ marginTop: 14 }}>
+      <OpeningsClient offerings={payload.offerings as any} />
+    </div>
+
     </main>
   )
 }

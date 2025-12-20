@@ -23,7 +23,8 @@ type Initial = {
     serviceRules: { serviceId: string; enabled: boolean; minPrice: string | null }[]
     blocks: Block[]
   }
-  offerings: { serviceId: string; name: string; basePrice: string }[]
+  // ✅ include offering id so we can create openings later using offeringId
+  offerings: { id: string; serviceId: string; name: string; basePrice: string }[]
 }
 
 function isMoney(v: string) {
@@ -36,9 +37,7 @@ async function safeJson(res: Response) {
 
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes(),
-  )}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function fmtRange(startIso: string, endIso: string) {
@@ -135,6 +134,15 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     for (const r of initial.settings.serviceRules) m.set(r.serviceId, { enabled: r.enabled, minPrice: r.minPrice })
     return m
   }, [initial.settings.serviceRules])
+
+  // ✅ De-dupe offerings into one row per serviceId (rules are per service)
+  const services = useMemo(() => {
+    const m = new Map<string, { serviceId: string; name: string; basePrice: string }>()
+    for (const o of initial.offerings) {
+      if (!m.has(o.serviceId)) m.set(o.serviceId, { serviceId: o.serviceId, name: o.name, basePrice: o.basePrice })
+    }
+    return Array.from(m.values())
+  }, [initial.offerings])
 
   async function saveSettings(patch: any) {
     setBusy(true)
@@ -242,7 +250,6 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
               onClick={() => {
                 const next = !enabled
                 setEnabled(next)
-                // If turning OFF last-minute entirely, discounts are irrelevant (but we keep the value)
                 saveSettings({ enabled: next })
               }}
             />
@@ -373,11 +380,11 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
       <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, background: '#fff' }}>
         <div style={{ fontWeight: 900, marginBottom: 8 }}>Eligible services</div>
         <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
-          Toggle which services can be booked last-minute. (Per-service min price can come later.)
+          Toggle which services can be booked last-minute. (Rules are per service, not per offering.)
         </div>
 
         <div style={{ display: 'grid', gap: 10 }}>
-          {initial.offerings.map((s) => {
+          {services.map((s) => {
             const rule = ruleByService.get(s.serviceId)
             const ruleEnabled = rule ? rule.enabled : true
 
