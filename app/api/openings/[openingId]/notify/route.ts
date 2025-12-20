@@ -15,20 +15,18 @@ function startOfLocalDay(d = new Date()) {
   return x
 }
 
-export async function POST(_req: NextRequest, { params }: { params: { openingId: string } }) {
+export async function POST(_req: NextRequest, context: { params: Promise<{ openingId: string }> }) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const openingId = params?.openingId
+    const { openingId } = await context.params
     if (!openingId) return NextResponse.json({ error: 'Missing openingId' }, { status: 400 })
 
     const proId = user.professionalProfile.id
-    const now = new Date()
 
-    // Load opening + basic guardrails
     const opening = await prisma.lastMinuteOpening.findUnique({
       where: { id: openingId },
       select: {
@@ -47,26 +45,15 @@ export async function POST(_req: NextRequest, { params }: { params: { openingId:
       return NextResponse.json({ error: 'Opening is not ACTIVE.' }, { status: 409 })
     }
 
-    // Time guardrails: don’t notify dead slots
-    if (opening.startAt.getTime() <= now.getTime()) {
-      return NextResponse.json({ error: 'Opening start time has already passed.' }, { status: 409 })
-    }
-
-    // Optional: keep aligned with “48h last-minute” concept
-    const MAX_HOURS = 48
-    if (opening.startAt.getTime() > now.getTime() + MAX_HOURS * 60 * 60_000) {
-      return NextResponse.json({ error: `Opening must be within ${MAX_HOURS} hours to notify.` }, { status: 409 })
-    }
-
-    // Ensure last-minute is enabled for pro
-    const settings = await prisma.lastMinuteSettings.findUnique({
+    const lm = await prisma.lastMinuteSettings.findUnique({
       where: { professionalId: proId },
       select: { enabled: true },
     })
-    if (!settings?.enabled) {
+    if (!lm?.enabled) {
       return NextResponse.json({ error: 'Last-minute openings are disabled for this professional.' }, { status: 409 })
     }
 
+    const now = new Date()
     const eightWeeksAgo = daysAgo(56)
 
     // -----------------------------
@@ -114,12 +101,12 @@ export async function POST(_req: NextRequest, { params }: { params: { openingId:
     const tier1ClientIds = waitlistClientIds.filter((clientId) => {
       if (hasUpcoming.has(clientId)) return false
       const last = lastByClient.get(clientId)
-      if (!last) return false // never booked => not “lapsed”
+      if (!last) return false
       return last.getTime() <= eightWeeksAgo.getTime()
     })
 
     // -----------------------------
-    // Tier 2: favorited pro + never booked this pro (and not tier1)
+    // Tier 2: favorited pro + never booked this pro
     // -----------------------------
     const favorites = await prisma.professionalFavorite.findMany({
       where: { professionalId: proId },
@@ -146,9 +133,6 @@ export async function POST(_req: NextRequest, { params }: { params: { openingId:
     const tier1Set = new Set(tier1ClientIds)
     const tier2ClientIds = favoriteClientIds.filter((cid) => !tier1Set.has(cid) && !everBookedSet.has(cid))
 
-    // -----------------------------
-    // Respect notification settings + max per day
-    // -----------------------------
     const candidates = [
       ...tier1ClientIds.map((id) => ({ clientId: id, tier: 'TIER1_WAITLIST_LAPSED' as const })),
       ...tier2ClientIds.map((id) => ({ clientId: id, tier: 'TIER2_FAVORITE_VIEWER' as const })),
@@ -188,8 +172,6 @@ export async function POST(_req: NextRequest, { params }: { params: { openingId:
         openingId,
         clientId: c.clientId,
         tier: c.tier,
-        // sentAt defaults to now() in schema. Set explicitly if you want.
-        // sentAt: new Date(),
         dedupeKey: `${openingId}:${c.clientId}:${c.tier}`,
       }))
 
