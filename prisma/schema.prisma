@@ -137,7 +137,8 @@ model User {
   mediaComments MediaComment[]
 
   // opposite relation for MediaAsset.uploadedByUser
-  uploadedMedia MediaAsset[] @relation("UploadedMedia")
+  uploadedMedia   MediaAsset[]     @relation("UploadedMedia")
+  adminActionLogs AdminActionLog[]
 }
 
 model ClientProfile {
@@ -220,7 +221,23 @@ model ProfessionalProfile {
   waitlistEntries WaitlistEntry[]
 
   // ✅ Store tracking (you added this)
-  productSales ProductSale[]
+  productSales    ProductSale[]
+  adminActionLogs AdminActionLog[]
+}
+
+model AdminActionLog {
+  id             String   @id @default(cuid())
+  adminUserId    String
+  professionalId String
+  action         String
+  note           String?
+  createdAt      DateTime @default(now())
+
+  adminUser    User                @relation(fields: [adminUserId], references: [id])
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+
+  @@index([professionalId, createdAt])
+  @@index([adminUserId, createdAt])
 }
 
 model ServiceCategory {
