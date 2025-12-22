@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { AdminPermissionRole } from '@prisma/client'
+import { hasAdminPermission } from '@/lib/adminPermissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,9 +26,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     const { id } = await context.params
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
+    const svc = await prisma.service.findUnique({
+      where: { id },
+      select: { id: true, categoryId: true },
+    })
+    if (!svc) return NextResponse.json({ error: 'Service not found' }, { status: 404 })
+
+    const ok = await hasAdminPermission({
+      adminUserId: user.id,
+      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+      scope: { serviceId: svc.id, categoryId: svc.categoryId },
+    })
+    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
     const form = await req.formData()
     const method = pickString(form.get('_method'))?.toUpperCase()
-
     if (method !== 'PATCH') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
 
     // Toggle only?
@@ -36,6 +50,19 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         where: { id },
         data: { isActive: isActiveRaw === 'true' },
       })
+
+      await prisma.adminActionLog
+        .create({
+          data: {
+            adminUserId: user.id,
+            serviceId: id,
+            categoryId: svc.categoryId,
+            action: 'SERVICE_TOGGLED',
+            note: `isActive=${isActiveRaw}`,
+          },
+        })
+        .catch(() => null)
+
       return NextResponse.redirect(new URL('/admin/services', req.url))
     }
 
@@ -43,13 +70,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     const name = pickString(form.get('name'))
     const categoryId = pickString(form.get('categoryId'))
     const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes'))
-    const minPrice = pickString(form.get('minPrice')) // Decimal: pass as string
+    const minPrice = pickString(form.get('minPrice'))
     const description = pickString(form.get('description'))
     const allowMobile = pickString(form.get('allowMobile')) === 'true'
 
     if (!name || !categoryId || !defaultDurationMinutes || !minPrice) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
     }
+
+    // If category changes, enforce new category scope too
+    const okNewCategory = await hasAdminPermission({
+      adminUserId: user.id,
+      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+      scope: { categoryId },
+    })
+    if (!okNewCategory) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     await prisma.service.update({
       where: { id },
@@ -62,6 +97,18 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         allowMobile,
       },
     })
+
+    await prisma.adminActionLog
+      .create({
+        data: {
+          adminUserId: user.id,
+          serviceId: id,
+          categoryId,
+          action: 'SERVICE_UPDATED',
+          note: name,
+        },
+      })
+      .catch(() => null)
 
     return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(id)}`, req.url))
   } catch (e) {

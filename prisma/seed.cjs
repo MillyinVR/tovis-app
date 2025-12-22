@@ -7,7 +7,6 @@ const bcrypt = require('bcrypt')
 
 const prisma = new PrismaClient()
 
-
 function money(v) {
   // force 2 decimals, stored as Decimal(10,2)
   // allow passing "180", 180, "180.5", etc.
@@ -43,7 +42,6 @@ async function upsertService({ name, categoryId, description, defaultDurationMin
 }
 
 async function ensurePermission(serviceId, professionType, stateCode = null) {
-  // Prevent duplicates even if you run seed multiple times
   const existing = await prisma.servicePermission.findFirst({
     where: { serviceId, professionType, stateCode },
     select: { id: true },
@@ -56,7 +54,6 @@ async function ensurePermission(serviceId, professionType, stateCode = null) {
 }
 
 async function upsertMediaAsset({ professionalId, url, mediaType, caption }) {
-  // If you don't have a unique constraint on url, this will just "find first" then create.
   const existing = await prisma.mediaAsset.findFirst({
     where: { professionalId, url },
     select: { id: true },
@@ -83,15 +80,63 @@ async function upsertMediaAsset({ professionalId, url, mediaType, caption }) {
       caption,
       visibility: 'PUBLIC',
       isEligibleForLooks: true,
-      // If your schema requires these, add them:
-      // uploadedByRole: 'PRO',
-      // isFeaturedInPortfolio: false,
     },
   })
 }
 
+async function upsertAdmin({ email, password }) {
+  const adminHash = await bcrypt.hash(password, 10)
+
+  const adminUser = await prisma.user.upsert({
+    where: { email },
+    update: {
+      role: 'ADMIN',
+      // If you prefer not to reset password on re-seed, delete next line:
+      password: adminHash,
+    },
+    create: {
+      email,
+      password: adminHash,
+      role: 'ADMIN',
+    },
+    select: { id: true, email: true, role: true },
+  })
+
+  // Grant SUPER_ADMIN (unscoped). Your schema has @@unique on:
+  // [adminUserId, role, professionalId, serviceId, categoryId]
+  // Upsert isn't possible unless Prisma generated a compound unique selector name,
+  // so we do findFirst + create.
+  const existingPerm = await prisma.adminPermission.findFirst({
+    where: {
+      adminUserId: adminUser.id,
+      role: 'SUPER_ADMIN',
+      professionalId: null,
+      serviceId: null,
+      categoryId: null,
+    },
+    select: { id: true },
+  })
+
+  if (!existingPerm) {
+    await prisma.adminPermission.create({
+      data: {
+        adminUserId: adminUser.id,
+        role: 'SUPER_ADMIN',
+        professionalId: null,
+        serviceId: null,
+        categoryId: null,
+      },
+    })
+  }
+
+  console.log('ADMIN login:', { email, password })
+  console.log('ADMIN user id:', adminUser.id)
+
+  return adminUser
+}
+
 async function main() {
-console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
+  console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
 
   // -----------------------------
   // 0) Create test users so you can login
@@ -100,6 +145,10 @@ console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
   const proPassword = 'Password123!'
   const clientEmail = 'client@test.com'
   const clientPassword = 'Password123!'
+
+  // Admin credentials (override in .env if you want)
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@test.com'
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Password123!'
 
   const proHash = await bcrypt.hash(proPassword, 10)
   const clientHash = await bcrypt.hash(clientPassword, 10)
@@ -140,7 +189,11 @@ console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
       },
     },
   })
-  
+
+  // -----------------------------
+  // 0b) Create ADMIN + SUPER_ADMIN permission
+  // -----------------------------
+  await upsertAdmin({ email: adminEmail, password: adminPassword })
 
   // -----------------------------
   // 1) Root categories
@@ -233,7 +286,7 @@ console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
   })
 
   // -----------------------------
-  // 3) Services (Decimal minPrice)
+  // 3) Services
   // -----------------------------
   const balayage = await upsertService({
     name: 'Balayage',
@@ -299,27 +352,23 @@ console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
   })
 
   // -----------------------------
-  // 4) Service permissions (so allowed-services filter works)
-  //    Adjust these rules later to match real licensing laws.
+  // 4) Service permissions
   // -----------------------------
-  // Cosmetologist (CA) can do hair, nails, makeup in our simplified world
   await ensurePermission(balayage.id, 'COSMETOLOGIST', 'CA')
   await ensurePermission(rootTouchUp.id, 'COSMETOLOGIST', 'CA')
   await ensurePermission(haircutStyle.id, 'COSMETOLOGIST', 'CA')
   await ensurePermission(extensionInstall.id, 'COSMETOLOGIST', 'CA')
   await ensurePermission(gelX.id, 'COSMETOLOGIST', 'CA')
   await ensurePermission(softGlam.id, 'COSMETOLOGIST', 'CA')
-
-  // Massage therapist permission for massage
   await ensurePermission(swedish60.id, 'MASSAGE_THERAPIST', 'CA')
 
-  console.log('✅ Seed complete.')
+  console.log('✅ Seed core data complete.')
   console.log('PRO login:', { email: proEmail, password: proPassword })
   console.log('CLIENT login:', { email: clientEmail, password: clientPassword })
   console.log('PRO profile id:', proUser.professionalProfile?.id)
 
   // -----------------------------
-  // 5) Seed Looks feed media (PUBLIC + eligible)
+  // 5) Seed Looks feed media
   // -----------------------------
   const proId = proUser.professionalProfile?.id
   if (!proId) throw new Error('Missing pro profile id for seeding media')
@@ -346,25 +395,21 @@ console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
   })
 
   // Attach service tags to looks (JOIN TABLE)
-  // ✅ IMPORTANT: your join model name might differ.
-  // This assumes a model like MediaAssetServiceTag with fields: mediaAssetId, serviceId
-  async function tagLook(mediaAssetId, serviceId) {
-    const existing = await prisma.mediaAssetServiceTag.findFirst({
-      where: { mediaAssetId, serviceId },
+  // Your schema model is MediaServiceTag (NOT mediaAssetServiceTag)
+  async function tagLook(mediaId, serviceId) {
+    const existing = await prisma.mediaServiceTag.findFirst({
+      where: { mediaId, serviceId },
       select: { id: true },
     })
     if (existing) return existing
-    return prisma.mediaAssetServiceTag.create({
-      data: { mediaAssetId, serviceId },
+    return prisma.mediaServiceTag.create({
+      data: { mediaId, serviceId },
     })
-}
-
+  }
 
   await tagLook(look1.id, balayage.id)
   await tagLook(look1.id, rootTouchUp.id)
-
   await tagLook(look2.id, gelX.id)
-
   await tagLook(look3.id, softGlam.id)
 
   console.log('✅ Seeded looks feed media:', [look1.id, look2.id, look3.id])

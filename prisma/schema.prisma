@@ -115,17 +115,51 @@ enum ClientNoteVisibility {
   ADMIN_ONLY
 }
 
+enum AdminPermissionRole {
+  SUPER_ADMIN
+  SUPPORT
+  REVIEWER
+}
+
 // =======================
 // CORE MODELS
 // =======================
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  role      Role
+model AdminPermission {
+  id String @id @default(cuid())
+
+  adminUserId String
+  role        AdminPermissionRole @default(SUPPORT)
+
+  // Option A scopes (all optional)
+  professionalId String?
+  serviceId      String?
+  categoryId     String?
+
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  adminUser    User                 @relation(fields: [adminUserId], references: [id])
+  professional ProfessionalProfile? @relation(fields: [professionalId], references: [id])
+  service      Service?             @relation(fields: [serviceId], references: [id])
+  category     ServiceCategory?     @relation(fields: [categoryId], references: [id])
+
+  // Prevent obvious duplicates
+  @@unique([adminUserId, role, professionalId, serviceId, categoryId])
+  @@index([adminUserId, createdAt])
+  @@index([professionalId])
+  @@index([serviceId])
+  @@index([categoryId])
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  password         String
+  role             Role
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  adminActionLogs  AdminActionLog[]  @relation("AdminUserLogs")
+  adminPermissions AdminPermission[]
 
   favoritePros ProfessionalFavorite[]
 
@@ -137,8 +171,7 @@ model User {
   mediaComments MediaComment[]
 
   // opposite relation for MediaAsset.uploadedByUser
-  uploadedMedia   MediaAsset[]     @relation("UploadedMedia")
-  adminActionLogs AdminActionLog[]
+  uploadedMedia MediaAsset[] @relation("UploadedMedia")
 }
 
 model ClientProfile {
@@ -175,6 +208,7 @@ model ProfessionalProfile {
   autoAcceptBookings Boolean                @default(false)
   timeZone           String? // IANA tz like "America/New_York"
   intentEvents       ClientIntentEvent[]
+  adminPermissions   AdminPermission[]
 
   location String @default("")
 
@@ -222,37 +256,49 @@ model ProfessionalProfile {
 
   // ✅ Store tracking (you added this)
   productSales    ProductSale[]
-  adminActionLogs AdminActionLog[]
+  adminActionLogs AdminActionLog[] @relation("ProfessionalLogs")
 }
 
 model AdminActionLog {
-  id             String   @id @default(cuid())
-  adminUserId    String
-  professionalId String
-  action         String
-  note           String?
-  createdAt      DateTime @default(now())
+  id          String @id @default(cuid())
+  adminUserId String
 
-  adminUser    User                @relation(fields: [adminUserId], references: [id])
-  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  // Option A: optional targets
+  professionalId String?
+  serviceId      String?
+  categoryId     String?
 
-  @@index([professionalId, createdAt])
+  action    String
+  note      String?
+  createdAt DateTime @default(now())
+
+  // Relations (named to avoid Prisma ambiguity)
+  adminUser    User                 @relation("AdminUserLogs", fields: [adminUserId], references: [id])
+  professional ProfessionalProfile? @relation("ProfessionalLogs", fields: [professionalId], references: [id])
+  service      Service?             @relation("ServiceLogs", fields: [serviceId], references: [id])
+  category     ServiceCategory?     @relation("CategoryLogs", fields: [categoryId], references: [id])
+
   @@index([adminUserId, createdAt])
+  @@index([professionalId, createdAt])
+  @@index([serviceId, createdAt])
+  @@index([categoryId, createdAt])
 }
 
 model ServiceCategory {
-  id          String  @id @default(cuid())
-  name        String
-  slug        String  @unique
-  description String?
-  parentId    String?
+  id               String            @id @default(cuid())
+  name             String
+  slug             String            @unique
+  description      String?
+  parentId         String?
+  adminPermissions AdminPermission[]
 
   parent   ServiceCategory?  @relation("CategoryChildren", fields: [parentId], references: [id])
   children ServiceCategory[] @relation("CategoryChildren")
 
   isActive Boolean @default(true)
 
-  services Service[]
+  services        Service[]
+  adminActionLogs AdminActionLog[] @relation("CategoryLogs")
 }
 
 model ProfessionalFavorite {
@@ -280,6 +326,7 @@ model Service {
   isActive               Boolean             @default(true)
   intentEvents           ClientIntentEvent[]
   lastMinuteOpenings     LastMinuteOpening[] @relation("ServiceOpenings")
+  adminPermissions       AdminPermission[]
 
   category         ServiceCategory               @relation(fields: [categoryId], references: [id])
   offerings        ProfessionalServiceOffering[]
@@ -288,6 +335,7 @@ model Service {
   permissions      ServicePermission[]
   mediaServiceTags MediaServiceTag[]
   waitlistEntries  WaitlistEntry[]
+  adminActionLogs  AdminActionLog[]              @relation("ServiceLogs")
 }
 
 model ServicePermission {

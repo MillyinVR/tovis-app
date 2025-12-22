@@ -1,7 +1,7 @@
 // app/admin/layout.tsx
-import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { getCurrentUser } from '@/lib/currentUser'
+import AdminGuard from './_components/AdminGuard'
+import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,49 +26,59 @@ function NavLink({ href, label }: { href: string; label: string }) {
 }
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const user = await getCurrentUser().catch(() => null)
-
-  // Hard gate: only ADMINs belong here.
-  if (!user) redirect('/login?from=/admin')
-  if (user.role !== 'ADMIN') redirect('/')
+  const info = await getAdminUiPerms()
+  const email = info?.email
+  const perms = info?.perms
 
   return (
-    <div style={{ fontFamily: 'system-ui' }}>
-      <header
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
-          background: '#fff',
-          borderBottom: '1px solid #eee',
-        }}
-      >
-        <div
+    <AdminGuard>
+      <div style={{ fontFamily: 'system-ui' }}>
+        <header
           style={{
-            maxWidth: 1100,
-            margin: '0 auto',
-            padding: '14px 16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+            background: '#fff',
+            borderBottom: '1px solid #eee',
           }}
         >
-          <div style={{ display: 'grid' }}>
-            <div style={{ fontWeight: 1000, fontSize: 15 }}>Admin</div>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>{user.email}</div>
+          <div
+            style={{
+              maxWidth: 1100,
+              margin: '0 auto',
+              padding: '14px 16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'grid' }}>
+              <div style={{ fontWeight: 1000, fontSize: 15 }}>Admin</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>{email ?? ''}</div>
+            </div>
+
+            <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <NavLink href="/admin" label="Dashboard" />
+
+              {perms?.canReviewPros ? <NavLink href="/admin/professionals" label="Professionals" /> : null}
+
+              {perms?.canManageCatalog ? (
+                <>
+                  <NavLink href="/admin/services" label="Services" />
+                  <NavLink href="/admin/categories" label="Categories" />
+                </>
+              ) : null}
+
+              {perms?.canManagePermissions ? <NavLink href="/admin/permissions" label="Permissions" /> : null}
+
+              {perms?.canViewLogs ? <NavLink href="/admin/logs" label="Logs" /> : null}
+            </nav>
           </div>
+        </header>
 
-          <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <NavLink href="/admin" label="Dashboard" />
-            <NavLink href="/admin/professionals" label="Professionals" />
-            <NavLink href="/admin/services" label="Services" />
-            <NavLink href="/admin/categories" label="Categories" />
-          </nav>
-        </div>
-      </header>
-
-      <main style={{ maxWidth: 1100, margin: '0 auto', padding: '18px 16px' }}>{children}</main>
-    </div>
+        <main style={{ maxWidth: 1100, margin: '0 auto', padding: '18px 16px' }}>{children}</main>
+      </div>
+    </AdminGuard>
   )
 }
