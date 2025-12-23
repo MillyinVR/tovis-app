@@ -5,11 +5,16 @@ import type { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-/** ===== Types (minimal, just enough to stop TS whining) ===== */
+/** ===== Minimal Types ===== */
 
 type BookingForBusy = {
   scheduledFor: Date
   durationMinutesSnapshot: number | null
+}
+
+type HoldForBusy = {
+  scheduledFor: Date
+  expiresAt: Date
 }
 
 type BusyInterval = { start: Date; end: Date }
@@ -34,14 +39,7 @@ type OfferingForPrimary = {
   mobileDurationMinutes: number | null
 }
 
-type OfferingForOtherPros = {
-  id: string
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonPriceStartingAt: any | null
-  salonDurationMinutes: number | null
-  mobilePriceStartingAt: any | null
-  mobileDurationMinutes: number | null
+type OfferingForOtherPros = OfferingForPrimary & {
   professional: ProfessionalForAvailability | null
 }
 
@@ -85,30 +83,29 @@ function pickEffectiveLocationType(args: {
   return null
 }
 
-function pickDurationMinutesForAvailability(offering: {
+function pickConservativeDuration(offering: {
   salonDurationMinutes: number | null
   mobileDurationMinutes: number | null
 }): number {
-  // Conservative: use max so we don't advertise slots that can't fit a longer variant.
   const d1 = Number(offering.salonDurationMinutes ?? 0)
   const d2 = Number(offering.mobileDurationMinutes ?? 0)
   const best = Math.max(d1, d2)
   return Number.isFinite(best) && best > 0 ? best : 60
 }
 
-function pickPriceAndDurationForMode(args: {
-  offering: OfferingForPrimary | OfferingForOtherPros
-  locationType: ServiceLocationType
-}) {
-  const { offering, locationType } = args
-
+function pickModeFields(
+  offering: OfferingForPrimary | OfferingForOtherPros,
+  locationType: ServiceLocationType,
+) {
   const priceStartingAt =
     locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
-
   const durationMinutes =
     locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
 
-  return { priceStartingAt: priceStartingAt ?? null, durationMinutes: durationMinutes ?? null }
+  return {
+    priceStartingAt: priceStartingAt ?? null,
+    durationMinutes: durationMinutes ?? null,
+  }
 }
 
 /**
@@ -208,6 +205,10 @@ function getDayKeyFromUtc(dateUtc: Date, timeZone: string) {
 /**
  * Compute upcoming slots in professional timezone working hours,
  * but return them as UTC ISO strings (what you store).
+ *
+ * Includes busy intervals from:
+ * - bookings (non-cancelled)
+ * - active holds (optional but recommended)
  */
 async function computeNextSlots(args: {
   professionalId: string
@@ -223,28 +224,49 @@ async function computeNextSlots(args: {
   const bufferMinutes = 10
   const stepMinutes = 30
 
-  const bookings = (await prisma.booking.findMany({
-    where: {
-      professionalId,
-      scheduledFor: { gte: nowUtc, lte: horizonUtc },
-      NOT: { status: 'CANCELLED' as any },
-    },
-    select: { scheduledFor: true, durationMinutesSnapshot: true },
-    take: 2000,
-  })) as BookingForBusy[]
+  const [bookings, holds] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        professionalId,
+        scheduledFor: { gte: nowUtc, lte: horizonUtc },
+        NOT: { status: 'CANCELLED' as any },
+      },
+      select: { scheduledFor: true, durationMinutesSnapshot: true },
+      take: 2000,
+    }) as any as Promise<BookingForBusy[]>,
 
-  const busy: BusyInterval[] = bookings.map((b: BookingForBusy) => {
+    // ✅ Optional but recommended: block active holds so availability matches reality.
+    prisma.bookingHold.findMany({
+      where: {
+        professionalId,
+        scheduledFor: { gte: nowUtc, lte: horizonUtc },
+        expiresAt: { gt: nowUtc },
+      },
+      select: { scheduledFor: true, expiresAt: true },
+      take: 2000,
+    }) as any as Promise<HoldForBusy[]>,
+  ])
+
+  const busyBookings: BusyInterval[] = bookings.map((b) => {
     const start = new Date(b.scheduledFor)
     const dur = Number(b.durationMinutesSnapshot) || durationMinutes
     const end = addMinutes(start, dur)
     return { start, end }
   })
 
+  // Holds are “exact slot start held”, so we treat them as blocking for the service duration.
+  const busyHolds: BusyInterval[] = holds.map((h) => {
+    const start = new Date(h.scheduledFor)
+    const end = addMinutes(start, durationMinutes)
+    return { start, end }
+  })
+
+  const busy: BusyInterval[] = [...busyBookings, ...busyHolds]
+
   const fallback = { enabled: true, start: '09:00', end: '18:00' }
   const wh = workingHours && typeof workingHours === 'object' ? workingHours : null
 
   const proNowParts = getZonedParts(nowUtc, timeZone)
-
   const out: string[] = []
 
   for (let dayOffset = 0; dayOffset <= 10 && out.length < limit; dayOffset++) {
@@ -261,7 +283,6 @@ async function computeNextSlots(args: {
 
     const dayKey = getDayKeyFromUtc(noonUtc, timeZone)
     const rule = wh && wh[dayKey] ? wh[dayKey] : fallback
-
     if (rule?.enabled === false) continue
 
     const startParsed = parseHHMM(String(rule?.start ?? fallback.start)) ?? parseHHMM(fallback.start)!
@@ -291,7 +312,7 @@ async function computeNextSlots(args: {
 
       const slotEndUtc = addMinutes(slotStartUtc, durationMinutes)
 
-      const conflict = busy.some((bi: BusyInterval) => overlaps(slotStartUtc, slotEndUtc, bi.start, bi.end))
+      const conflict = busy.some((bi) => overlaps(slotStartUtc, slotEndUtc, bi.start, bi.end))
       if (conflict) continue
 
       out.push(slotStartUtc.toISOString())
@@ -352,7 +373,6 @@ export async function GET(req: Request) {
         })) as OfferingForPrimary | null)
       : null
 
-    // If we have an offering, pick an effective mode (SALON vs MOBILE)
     const effectiveCreatorLocationType = creatorOffering
       ? pickEffectiveLocationType({
           requested: requestedLocationType,
@@ -361,33 +381,29 @@ export async function GET(req: Request) {
         })
       : null
 
-    // Determine duration for computing availability
-    let creatorDuration = 60
+    // duration used to compute primary slots
+    let creatorDurationMinutes = 60
     if (creatorOffering) {
       if (effectiveCreatorLocationType) {
-        const pd = pickPriceAndDurationForMode({
-          offering: creatorOffering,
-          locationType: effectiveCreatorLocationType,
-        })
-        creatorDuration = Number(pd.durationMinutes ?? 0) || 60
+        const { durationMinutes } = pickModeFields(creatorOffering, effectiveCreatorLocationType)
+        const d = Number(durationMinutes ?? 0)
+        creatorDurationMinutes = Number.isFinite(d) && d > 0 ? d : pickConservativeDuration(creatorOffering)
       } else {
-        creatorDuration = pickDurationMinutesForAvailability(creatorOffering)
+        creatorDurationMinutes = pickConservativeDuration(creatorOffering)
       }
     }
 
     const creatorSlots = await computeNextSlots({
       professionalId,
-      durationMinutes: creatorDuration,
+      durationMinutes: creatorDurationMinutes,
       limit,
       timeZone: creatorTimeZone,
       workingHours: creator.workingHours ?? null,
     })
 
-    // Build primary pro payload fields
-    const primaryPriceAndDuration =
-      creatorOffering && effectiveCreatorLocationType
-        ? pickPriceAndDurationForMode({ offering: creatorOffering, locationType: effectiveCreatorLocationType })
-        : { priceStartingAt: null, durationMinutes: null }
+    const primaryMode = creatorOffering && effectiveCreatorLocationType
+      ? pickModeFields(creatorOffering, effectiveCreatorLocationType)
+      : { priceStartingAt: null, durationMinutes: null }
 
     let otherPros: Array<any> = []
     if (serviceId) {
@@ -422,31 +438,22 @@ export async function GET(req: Request) {
 
       otherPros = (
         await Promise.all(
-          offerings.map(async (o: OfferingForOtherPros) => {
+          offerings.map(async (o) => {
             const p = o.professional
             if (!p?.id) return null
-
-            const pTz = p.timeZone || 'America/Los_Angeles'
 
             const effectiveLocationType = pickEffectiveLocationType({
               requested: requestedLocationType,
               offersInSalon: Boolean(o.offersInSalon),
               offersMobile: Boolean(o.offersMobile),
             })
-
-            // If they don’t support requested and don’t support anything, skip.
             if (!effectiveLocationType) return null
 
-            const { priceStartingAt, durationMinutes } = pickPriceAndDurationForMode({
-              offering: o,
-              locationType: effectiveLocationType,
-            })
+            const { priceStartingAt, durationMinutes } = pickModeFields(o, effectiveLocationType)
+            const d = Number(durationMinutes ?? 0)
+            const durationForSlots = Number.isFinite(d) && d > 0 ? d : pickConservativeDuration(o)
 
-            // If they haven't configured duration for that mode, be conservative
-            const dur = Number(durationMinutes ?? 0)
-            const durationForSlots =
-              Number.isFinite(dur) && dur > 0 ? dur : pickDurationMinutesForAvailability(o)
-
+            const pTz = p.timeZone || 'America/Los_Angeles'
             const slots = await computeNextSlots({
               professionalId: String(p.id),
               durationMinutes: durationForSlots,
@@ -463,9 +470,8 @@ export async function GET(req: Request) {
 
               offeringId: o.id,
 
-              // Updated fields
               locationType: effectiveLocationType,
-              priceStartingAt,
+              priceStartingAt: priceStartingAt ?? null,
               durationMinutes: durationForSlots,
 
               slots,
@@ -477,13 +483,14 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json({
+      ok: true,
       mediaId: mediaId ?? null,
       serviceId: serviceId ?? null,
 
       // timezone for the primary pro (creator)
       timeZone: creatorTimeZone,
 
-      // reflects what mode we used to compute primary availability (if known)
+      // reflects what mode we used for primary slots (if known)
       locationType: effectiveCreatorLocationType ?? null,
 
       primaryPro: {
@@ -494,10 +501,9 @@ export async function GET(req: Request) {
 
         offeringId: creatorOffering?.id ?? null,
 
-        // Updated fields
         locationType: effectiveCreatorLocationType ?? null,
-        priceStartingAt: primaryPriceAndDuration.priceStartingAt ?? null,
-        durationMinutes: creatorDuration,
+        priceStartingAt: primaryMode.priceStartingAt ?? null,
+        durationMinutes: creatorDurationMinutes,
 
         slots: creatorSlots,
         isCreator: true,

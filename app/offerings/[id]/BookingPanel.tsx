@@ -5,15 +5,28 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import type { FormEvent } from 'react'
 
 type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE'
+type ServiceLocationType = 'SALON' | 'MOBILE'
 
 type BookingPanelProps = {
   offeringId: string
   professionalId: string
   serviceId: string
+
+  // attribution (discovery)
   mediaId?: string | null
 
-  price: number
-  durationMinutes: number
+  // ✅ NEW: offering capabilities + per-mode price/duration
+  offersInSalon: boolean
+  offersMobile: boolean
+
+  salonPriceStartingAt?: number | null
+  salonDurationMinutes?: number | null
+  mobilePriceStartingAt?: number | null
+  mobileDurationMinutes?: number | null
+
+  // optional default mode (page can suggest it)
+  defaultLocationType?: ServiceLocationType | null
+
   isLoggedInAsClient: boolean
   defaultScheduledForISO?: string | null
 
@@ -133,6 +146,8 @@ function toISOFromDatetimeLocalInTimeZone(value: string, timeZone: string): stri
   if (!p) return null
   const utc = zonedTimeToUtc({ ...p, timeZone })
   if (Number.isNaN(utc.getTime())) return null
+  // normalize to minute precision
+  utc.setSeconds(0, 0)
   return utc.toISOString()
 }
 
@@ -151,21 +166,72 @@ function formatPrettyInTimeZone(valueDatetimeLocal: string, timeZone: string) {
   }).format(utc)
 }
 
-export default function BookingPanel({
-  offeringId,
-  professionalId,
-  serviceId,
-  mediaId = null,
-  price,
-  durationMinutes,
-  isLoggedInAsClient,
-  defaultScheduledForISO = null,
-  serviceName = null,
-  professionalName = null,
-  locationLabel = null,
-  professionalTimeZone = null,
-  source,
-}: BookingPanelProps) {
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
+}
+
+function pickEffectiveLocationType(args: {
+  requested: ServiceLocationType | null
+  offersInSalon: boolean
+  offersMobile: boolean
+}): ServiceLocationType | null {
+  const { requested, offersInSalon, offersMobile } = args
+  if (requested === 'SALON' && offersInSalon) return 'SALON'
+  if (requested === 'MOBILE' && offersMobile) return 'MOBILE'
+  if (offersInSalon) return 'SALON'
+  if (offersMobile) return 'MOBILE'
+  return null
+}
+
+function pickModeFields(args: {
+  locationType: ServiceLocationType
+  salonPriceStartingAt?: number | null
+  salonDurationMinutes?: number | null
+  mobilePriceStartingAt?: number | null
+  mobileDurationMinutes?: number | null
+}) {
+  const { locationType } = args
+  const price =
+    locationType === 'MOBILE' ? args.mobilePriceStartingAt ?? null : args.salonPriceStartingAt ?? null
+  const duration =
+    locationType === 'MOBILE' ? args.mobileDurationMinutes ?? null : args.salonDurationMinutes ?? null
+
+  const durationMinutes = Number(duration ?? 0)
+  const safeDuration = Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : 60
+
+  const priceNum = Number(price ?? NaN)
+  const safePrice = Number.isFinite(priceNum) && priceNum >= 0 ? priceNum : 0
+
+  return { price: safePrice, durationMinutes: safeDuration }
+}
+
+export default function BookingPanel(props: BookingPanelProps) {
+  const {
+    offeringId,
+    professionalId,
+    serviceId,
+    mediaId = null,
+
+    offersInSalon,
+    offersMobile,
+    salonPriceStartingAt = null,
+    salonDurationMinutes = null,
+    mobilePriceStartingAt = null,
+    mobileDurationMinutes = null,
+    defaultLocationType = null,
+
+    isLoggedInAsClient,
+    defaultScheduledForISO = null,
+    serviceName = null,
+    professionalName = null,
+    locationLabel = null,
+    professionalTimeZone = null,
+    source,
+  } = props
+
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -179,11 +245,35 @@ export default function BookingPanel({
     }
   }, [])
 
+  // hold + scheduledFor truth
   const holdId = (searchParams?.get('holdId') || '').trim() || null
   const holdUntilParam = searchParams?.get('holdUntil') || ''
   const scheduledForFromUrl = (searchParams?.get('scheduledFor') || '').trim() || null
-
   const hasHold = Boolean(holdId)
+
+  // ✅ opening attribution (from opening flow)
+  const openingId = (searchParams?.get('openingId') || '').trim() || null
+
+  // ✅ locationType can be suggested by URL or props
+  const requestedLocationFromUrl = normalizeLocationType(searchParams?.get('locationType'))
+  const initialEffectiveLocationType = useMemo(() => {
+    const requested = defaultLocationType ?? requestedLocationFromUrl
+    return pickEffectiveLocationType({ requested, offersInSalon, offersMobile })
+  }, [defaultLocationType, requestedLocationFromUrl, offersInSalon, offersMobile])
+
+  const [locationType, setLocationType] = useState<ServiceLocationType | null>(initialEffectiveLocationType)
+
+  // Keep locationType stable if props change
+  useEffect(() => {
+    setLocationType((prev) => {
+      const next = pickEffectiveLocationType({
+        requested: prev ?? initialEffectiveLocationType,
+        offersInSalon,
+        offersMobile,
+      })
+      return next
+    })
+  }, [offersInSalon, offersMobile, initialEffectiveLocationType])
 
   // The held slot is the truth. If there's a hold, scheduledFor MUST come from the URL.
   const scheduledForISO = hasHold ? scheduledForFromUrl : defaultScheduledForISO
@@ -204,14 +294,32 @@ export default function BookingPanel({
   const [waitlistBusy, setWaitlistBusy] = useState(false)
   const [waitlistSuccess, setWaitlistSuccess] = useState<string | null>(null)
 
+  // ✅ chosen mode determines display price + duration (and payload)
+  const mode = locationType
+  const modeFields = useMemo(() => {
+    if (!mode) return { price: 0, durationMinutes: 60 }
+    return pickModeFields({
+      locationType: mode,
+      salonPriceStartingAt,
+      salonDurationMinutes,
+      mobilePriceStartingAt,
+      mobileDurationMinutes,
+    })
+  }, [mode, salonPriceStartingAt, salonDurationMinutes, mobilePriceStartingAt, mobileDurationMinutes])
+
   const displayPrice = useMemo(() => {
-    const n = Number(price)
+    const n = Number(modeFields.price)
     if (!Number.isFinite(n)) return '0'
+    // you previously did integer display; keep it consistent
     return n.toFixed(0)
-  }, [price])
+  }, [modeFields.price])
+
+  const displayDuration = useMemo(() => {
+    const d = Number(modeFields.durationMinutes)
+    return Number.isFinite(d) && d > 0 ? d : 60
+  }, [modeFields.durationMinutes])
 
   // Seed datetime-local from scheduledForISO in pro tz.
-  // Important: do not stomp user input if there's no scheduledForISO.
   useEffect(() => {
     const next = toDatetimeLocalFromISOInTimeZone(scheduledForISO, proTz)
     if (next) setDateTime(next)
@@ -268,13 +376,12 @@ export default function BookingPanel({
 
   const reviewLine = useMemo(() => {
     if (!prettyTimePro) return null
-    const dur = Number(durationMinutes)
-    const durLabel = Number.isFinite(dur) && dur > 0 ? `${dur} min` : null
-    const priceLabel = `$${displayPrice}`
+    const durLabel = `${displayDuration} min`
+    const priceLabel = `Starting at $${displayPrice}`
     const where = locationLabel ? ` · ${locationLabel}` : ''
-    const durPart = durLabel ? ` · ${durLabel}` : ''
-    return `${prettyTimePro}${durPart} · ${priceLabel}${where} · ${proTz}`
-  }, [prettyTimePro, durationMinutes, displayPrice, locationLabel, proTz])
+    const modeLabel = mode ? ` · ${mode === 'SALON' ? 'In-salon' : 'Mobile'}` : ''
+    return `${prettyTimePro}${modeLabel} · ${durLabel} · ${priceLabel}${where} · ${proTz}`
+  }, [prettyTimePro, displayDuration, displayPrice, locationLabel, proTz, mode])
 
   const holdLabel = useMemo(() => {
     if (!holdUntil) return null
@@ -290,18 +397,23 @@ export default function BookingPanel({
     return holdUntil - Date.now() <= 2 * 60_000
   }, [holdUntil])
 
-  // Source is now strongly typed; keep an uppercase string for API payload consistency
   const normalizedSource = useMemo(() => source.toUpperCase(), [source])
 
   const missingHeldScheduledFor = Boolean(hasHold && !scheduledForFromUrl)
+  const missingLocationType = Boolean(!locationType)
+
+  const finalScheduledForISO = useMemo(() => {
+    return hasHold ? scheduledForFromUrl : toISOFromDatetimeLocalInTimeZone(dateTime, proTz)
+  }, [hasHold, scheduledForFromUrl, dateTime, proTz])
 
   const canSubmit = Boolean(
     !missingHeldScheduledFor &&
+      !missingLocationType &&
       confirmChecked &&
       !loading &&
       (!hasHold || (holdId && holdUntil)) &&
       ['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) &&
-      (hasHold ? scheduledForFromUrl : toISOFromDatetimeLocalInTimeZone(dateTime, proTz)),
+      finalScheduledForISO,
   )
 
   async function copyShareLink() {
@@ -328,7 +440,7 @@ export default function BookingPanel({
 
     const desiredISO =
       scheduledForFromUrl ||
-      toISOFromDatetimeLocalInTimeZone(dateTime, proTz) ||
+      finalScheduledForISO ||
       new Date(Date.now() + 2 * 60 * 60_000).toISOString()
 
     setWaitlistBusy(true)
@@ -377,6 +489,11 @@ export default function BookingPanel({
       return
     }
 
+    if (!locationType) {
+      setError('Missing booking location type. Please pick in-salon or mobile.')
+      return
+    }
+
     if (hasHold) {
       if (!holdId || !holdUntil) {
         setError('Your hold expired. Please go back and pick a slot again.')
@@ -393,8 +510,6 @@ export default function BookingPanel({
       return
     }
 
-    const finalScheduledForISO = hasHold ? scheduledForFromUrl! : toISOFromDatetimeLocalInTimeZone(dateTime, proTz)
-
     if (!finalScheduledForISO) {
       setError('Please choose a valid date and time.')
       return
@@ -409,8 +524,14 @@ export default function BookingPanel({
           offeringId,
           scheduledFor: finalScheduledForISO,
           holdId: hasHold ? holdId : null,
+
+          // ✅ always explicit
           source: normalizedSource,
-          locationType: 'SALON', // or 'MOBILE' from the page/query
+          locationType,
+
+          // ✅ attribution
+          mediaId: mediaId || null,
+          openingId: openingId || null,
         }),
       })
 
@@ -445,6 +566,8 @@ export default function BookingPanel({
   const calendarHref = createdBookingId ? `/api/calendar?bookingId=${encodeURIComponent(createdBookingId)}` : null
   const showWaitlistCTA = !success && (!hasHold || !holdUntil)
 
+  const showModeToggle = Boolean(offersInSalon && offersMobile)
+
   return (
     <section style={{ border: '1px solid #eee', borderRadius: 12, padding: 16, alignSelf: 'flex-start', background: '#fff' }}>
       <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{success ? 'You’re booked' : 'Confirm your booking'}</h2>
@@ -473,7 +596,11 @@ export default function BookingPanel({
           {viewerTimeLine ? <div style={{ fontSize: 12, color: '#6b7280' }}>{viewerTimeLine}</div> : null}
 
           <div style={{ fontSize: 12, color: success ? '#166534' : '#6b7280' }}>
-            {success ? 'Nice. Future You can’t pretend this never happened.' : holdLabel ? 'Finish booking before the hold expires.' : `Times are shown in the appointment timezone: ${proTz}.`}
+            {success
+              ? 'Nice. Future You can’t pretend this never happened.'
+              : holdLabel
+                ? 'Finish booking before the hold expires.'
+                : `Times are shown in the appointment timezone: ${proTz}.`}
           </div>
         </div>
       </div>
@@ -498,6 +625,67 @@ export default function BookingPanel({
         </div>
       ) : (
         <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
+          {showModeToggle ? (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#111' }}>Appointment type</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={loading || hasHold}
+                  onClick={() => {
+                    setLocationType('SALON')
+                    setConfirmChecked(false)
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: locationType === 'SALON' ? '2px solid #111' : '1px solid #ddd',
+                    background: '#fff',
+                    fontWeight: 900,
+                    cursor: loading || hasHold ? 'default' : 'pointer',
+                    opacity: loading || hasHold ? 0.7 : 1,
+                  }}
+                >
+                  In-salon
+                </button>
+                <button
+                  type="button"
+                  disabled={loading || hasHold}
+                  onClick={() => {
+                    setLocationType('MOBILE')
+                    setConfirmChecked(false)
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: locationType === 'MOBILE' ? '2px solid #111' : '1px solid #ddd',
+                    background: '#fff',
+                    fontWeight: 900,
+                    cursor: loading || hasHold ? 'default' : 'pointer',
+                    opacity: loading || hasHold ? 0.7 : 1,
+                  }}
+                >
+                  Mobile
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                Pricing is always <span style={{ fontWeight: 900 }}>starting at</span>.
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#6b7280' }}>
+              {locationType === 'MOBILE' ? 'Mobile appointment' : 'In-salon appointment'}
+            </div>
+          )}
+
+          {!locationType ? (
+            <div style={{ fontSize: 12, color: '#b91c1c' }}>
+              This offering has no valid appointment type enabled. (No salon or mobile.)
+            </div>
+          ) : null}
+
           <label style={{ fontSize: 14, color: '#111' }}>
             Date &amp; time (appointment timezone: <span style={{ fontWeight: 900 }}>{proTz}</span>)
             <input
@@ -523,7 +711,7 @@ export default function BookingPanel({
               type="checkbox"
               checked={confirmChecked}
               onChange={(e) => setConfirmChecked(e.target.checked)}
-              disabled={!dateTime || loading || (hasHold && (!holdId || !holdUntil))}
+              disabled={!dateTime || loading || !locationType || (hasHold && (!holdId || !holdUntil))}
               style={{ marginTop: 2 }}
             />
             <div>
@@ -550,7 +738,7 @@ export default function BookingPanel({
               opacity: !canSubmit ? 0.7 : 1,
             }}
           >
-            {loading ? 'Booking…' : holdLabel ? `Confirm now · $${displayPrice}` : `Confirm booking · $${displayPrice}`}
+            {loading ? 'Booking…' : holdLabel ? `Confirm now · Starting at $${displayPrice}` : `Confirm booking · Starting at $${displayPrice}`}
           </button>
 
           {showWaitlistCTA ? (

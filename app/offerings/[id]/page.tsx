@@ -12,7 +12,7 @@ type SearchParamsShape = {
   proTimeZone?: string
   source?: string
   locationType?: string // "SALON" | "MOBILE"
-  // Optional: these are used by BookingPanel via useSearchParams anyway
+  openingId?: string // optional: BookingPanel reads from URL too, but keep for sanity
   holdId?: string
   holdUntil?: string
 }
@@ -21,6 +21,9 @@ type PageProps = {
   params: { id: string } | Promise<{ id: string }>
   searchParams?: SearchParamsShape | Promise<SearchParamsShape>
 }
+
+type ServiceLocationType = 'SALON' | 'MOBILE'
+type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE'
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -41,15 +44,14 @@ function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-function normalizeLocationType(v: unknown): 'SALON' | 'MOBILE' | null {
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = upper(v)
   if (s === 'SALON') return 'SALON'
   if (s === 'MOBILE') return 'MOBILE'
   return null
 }
 
-// ✅ Option A: validate + normalize booking source on the server page
-function normalizeSource(v: unknown): 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE' | null {
+function normalizeSource(v: unknown): BookingSource | null {
   const s = upper(v)
   if (s === 'DISCOVERY') return 'DISCOVERY'
   if (s === 'REQUESTED') return 'REQUESTED'
@@ -64,12 +66,30 @@ function toNumberOrNull(v: unknown): number | null {
     const n = Number(v)
     return Number.isFinite(n) ? n : null
   }
+  // Prisma Decimal often has toNumber()
+  if (typeof (v as any)?.toNumber === 'function') {
+    const n = (v as any).toNumber()
+    return Number.isFinite(n) ? n : null
+  }
   try {
     const n = Number(String(v))
     return Number.isFinite(n) ? n : null
   } catch {
     return null
   }
+}
+
+function pickEffectiveLocationType(args: {
+  requested: ServiceLocationType | null
+  offersInSalon: boolean
+  offersMobile: boolean
+}): ServiceLocationType | null {
+  const { requested, offersInSalon, offersMobile } = args
+  if (requested === 'SALON' && offersInSalon) return 'SALON'
+  if (requested === 'MOBILE' && offersMobile) return 'MOBILE'
+  if (offersInSalon) return 'SALON'
+  if (offersMobile) return 'MOBILE'
+  return null
 }
 
 export default async function OfferingPage(props: PageProps) {
@@ -81,18 +101,52 @@ export default async function OfferingPage(props: PageProps) {
 
   const scheduledFor = pickString(sp?.scheduledFor)
   const mediaId = pickString(sp?.mediaId)
+
+  // NOTE: openingId/holdId/holdUntil are intentionally NOT handled here.
+  // BookingPanel reads them from useSearchParams and sends openingId automatically.
+  // (Keep them in SearchParamsShape for clarity and future server-side UI logic.)
+
   const proTimeZoneFromUrl = sanitizeTimeZone(pickString(sp?.proTimeZone))
   const requestedLocationType = normalizeLocationType(sp?.locationType)
 
-  // ✅ normalized + validated
   const sourceFromUrl = normalizeSource(sp?.source)
-  const sourceForPanel = sourceFromUrl ?? 'REQUESTED'
+  const sourceForPanel: BookingSource = sourceFromUrl ?? 'REQUESTED'
 
   const offering = await prisma.professionalServiceOffering.findUnique({
     where: { id },
-    include: {
-      service: { include: { category: true } },
-      professional: { include: { user: true } },
+    select: {
+      id: true,
+      isActive: true,
+
+      title: true,
+      description: true,
+      customImageUrl: true,
+
+      offersInSalon: true,
+      offersMobile: true,
+      salonPriceStartingAt: true,
+      salonDurationMinutes: true,
+      mobilePriceStartingAt: true,
+      mobileDurationMinutes: true,
+
+      service: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          category: { select: { name: true } },
+        },
+      },
+      professional: {
+        select: {
+          id: true,
+          businessName: true,
+          city: true,
+          location: true,
+          timeZone: true,
+          user: { select: { email: true } },
+        },
+      },
     },
   })
 
@@ -102,49 +156,43 @@ export default async function OfferingPage(props: PageProps) {
   const isLoggedInAsClient = Boolean(user && user.role === 'CLIENT')
 
   const svc = offering.service
-  const cat = svc?.category
+  const cat = offering.service?.category
   const prof = offering.professional
 
-  const proTimeZoneFromDb = sanitizeTimeZone((prof as any)?.timeZone ?? null)
+  const proTimeZoneFromDb = sanitizeTimeZone(prof?.timeZone ?? null)
   const effectiveProTimeZone = proTimeZoneFromUrl ?? proTimeZoneFromDb ?? null
 
-  // ---- choose SALON vs MOBILE and pick correct price/duration ----
-  const offersSalon = Boolean((offering as any).offersInSalon)
-  const offersMobile = Boolean((offering as any).offersMobile)
+  // ✅ offering capabilities + per-mode fields (new world)
+  const offersInSalon = Boolean(offering.offersInSalon)
+  const offersMobile = Boolean(offering.offersMobile)
 
-  const salonPrice = toNumberOrNull((offering as any).salonPriceStartingAt)
-  const salonDuration = typeof (offering as any).salonDurationMinutes === 'number' ? (offering as any).salonDurationMinutes : null
+  const salonPriceStartingAt = toNumberOrNull(offering.salonPriceStartingAt)
+  const salonDurationMinutes =
+    typeof offering.salonDurationMinutes === 'number' ? offering.salonDurationMinutes : null
 
-  const mobilePrice = toNumberOrNull((offering as any).mobilePriceStartingAt)
-  const mobileDuration = typeof (offering as any).mobileDurationMinutes === 'number' ? (offering as any).mobileDurationMinutes : null
+  const mobilePriceStartingAt = toNumberOrNull(offering.mobilePriceStartingAt)
+  const mobileDurationMinutes =
+    typeof offering.mobileDurationMinutes === 'number' ? offering.mobileDurationMinutes : null
 
-  let effectiveLocationType: 'SALON' | 'MOBILE' | null = null
-  if (requestedLocationType === 'SALON' && offersSalon) effectiveLocationType = 'SALON'
-  else if (requestedLocationType === 'MOBILE' && offersMobile) effectiveLocationType = 'MOBILE'
-  else if (offersSalon) effectiveLocationType = 'SALON'
-  else if (offersMobile) effectiveLocationType = 'MOBILE'
-  else effectiveLocationType = null
+  // ✅ default mode (for initial selection on BookingPanel)
+  const defaultLocationType = pickEffectiveLocationType({
+    requested: requestedLocationType,
+    offersInSalon,
+    offersMobile,
+  })
 
-  const fallbackDuration = typeof svc?.defaultDurationMinutes === 'number' ? svc.defaultDurationMinutes : 60
-  const fallbackPrice = toNumberOrNull((svc as any)?.minPrice) ?? 0
+  const titleForUI = offering.title || svc?.name || 'Service'
+  const descriptionForUI = offering.description ?? svc?.description ?? ''
 
-  let priceForPanel = fallbackPrice
-  let durationForPanel = fallbackDuration
+  const defaultModeConfigured =
+    defaultLocationType === 'SALON'
+      ? salonPriceStartingAt !== null && salonDurationMinutes !== null
+      : defaultLocationType === 'MOBILE'
+        ? mobilePriceStartingAt !== null && mobileDurationMinutes !== null
+        : false
 
-  if (effectiveLocationType === 'SALON') {
-    if (salonPrice !== null) priceForPanel = salonPrice
-    if (salonDuration !== null) durationForPanel = salonDuration
-  } else if (effectiveLocationType === 'MOBILE') {
-    if (mobilePrice !== null) priceForPanel = mobilePrice
-    if (mobileDuration !== null) durationForPanel = mobileDuration
-  }
-
-  const hasRealPricing =
-    (effectiveLocationType === 'SALON' && salonPrice !== null && salonDuration !== null) ||
-    (effectiveLocationType === 'MOBILE' && mobilePrice !== null && mobileDuration !== null)
-
-  const titleForUI = (offering as any).title || svc?.name || 'Service'
-  const descriptionForUI = (offering as any).description ?? svc?.description ?? ''
+  const proName = prof.businessName || prof.user?.email || 'Professional'
+  const locationLabel = (prof.city || prof.location) ?? null
 
   return (
     <main style={{ maxWidth: 900, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
@@ -167,7 +215,7 @@ export default async function OfferingPage(props: PageProps) {
               color: '#777',
             }}
           >
-            {(offering as any).customImageUrl ? 'Pro image here' : 'Default service image here'}
+            {offering.customImageUrl ? 'Pro image here' : 'Default service image here'}
           </div>
 
           {cat?.name ? <div style={{ fontSize: 13, color: '#777', marginBottom: 4 }}>{cat.name}</div> : null}
@@ -177,8 +225,8 @@ export default async function OfferingPage(props: PageProps) {
           <div style={{ fontSize: 14, color: '#555', marginBottom: 12 }}>{descriptionForUI}</div>
 
           <div style={{ fontSize: 14, color: '#555' }}>
-            <strong>{prof.businessName || prof.user?.email || 'Professional'}</strong>
-            {prof.city || prof.location ? <span> · {prof.city || prof.location}</span> : null}
+            <strong>{proName}</strong>
+            {locationLabel ? <span> · {locationLabel}</span> : null}
           </div>
 
           {effectiveProTimeZone ? (
@@ -187,14 +235,14 @@ export default async function OfferingPage(props: PageProps) {
             </div>
           ) : null}
 
-          <div style={{ marginTop: 12, fontSize: 12, color: hasRealPricing ? '#6b7280' : '#b91c1c' }}>
-            {effectiveLocationType ? (
+          <div style={{ marginTop: 12, fontSize: 12, color: defaultModeConfigured ? '#6b7280' : '#b91c1c' }}>
+            {defaultLocationType ? (
               <>
-                Booking mode: <strong>{effectiveLocationType}</strong>
-                {!hasRealPricing ? ' (pricing not fully set for this mode yet)' : null}
+                Default booking mode: <strong>{defaultLocationType}</strong>
+                {!defaultModeConfigured ? ' (pricing/duration not fully set for this mode yet)' : null}
               </>
             ) : (
-              <>This offering doesn’t have salon/mobile settings configured yet.</>
+              <>This offering doesn’t have salon/mobile enabled yet.</>
             )}
           </div>
         </div>
@@ -204,13 +252,21 @@ export default async function OfferingPage(props: PageProps) {
           professionalId={prof.id}
           serviceId={svc.id}
           mediaId={mediaId}
-          price={priceForPanel}
-          durationMinutes={durationForPanel}
+
+          offersInSalon={offersInSalon}
+          offersMobile={offersMobile}
+          salonPriceStartingAt={salonPriceStartingAt}
+          salonDurationMinutes={salonDurationMinutes}
+          mobilePriceStartingAt={mobilePriceStartingAt}
+          mobileDurationMinutes={mobileDurationMinutes}
+
+          defaultLocationType={defaultLocationType}
+
           isLoggedInAsClient={isLoggedInAsClient}
           defaultScheduledForISO={scheduledFor}
           serviceName={titleForUI}
-          professionalName={prof.businessName || prof.user?.email || null}
-          locationLabel={(prof.city || prof.location) ?? null}
+          professionalName={proName}
+          locationLabel={locationLabel}
           professionalTimeZone={effectiveProTimeZone}
           source={sourceForPanel}
         />

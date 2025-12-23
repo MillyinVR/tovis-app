@@ -30,12 +30,15 @@ function pickEffectiveLocationType(args: {
   return null
 }
 
-function pickModeFields(offering: {
-  salonPriceStartingAt: any | null
-  salonDurationMinutes: number | null
-  mobilePriceStartingAt: any | null
-  mobileDurationMinutes: number | null
-}, locationType: ServiceLocationType) {
+function pickModeFields(
+  offering: {
+    salonPriceStartingAt: any | null
+    salonDurationMinutes: number | null
+    mobilePriceStartingAt: any | null
+    mobileDurationMinutes: number | null
+  },
+  locationType: ServiceLocationType,
+) {
   const priceStartingAt =
     locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
   const durationMinutes =
@@ -65,15 +68,13 @@ export async function GET(req: Request) {
     }
 
     const clientId = user.clientProfile.id
-
     const { searchParams } = new URL(req.url)
 
-    // optional filter knobs (keep them if your UI uses them)
     const serviceId = pickString(searchParams.get('serviceId'))
     const professionalId = pickString(searchParams.get('professionalId'))
     const requestedLocationType = normalizeLocationType(searchParams.get('locationType'))
 
-    const openings = await prisma.openingNotification.findMany({
+    const notifications = await prisma.openingNotification.findMany({
       where: {
         clientId,
         bookedAt: null,
@@ -100,7 +101,6 @@ export async function GET(req: Request) {
             endAt: true,
             discountPct: true,
             note: true,
-
             professional: {
               select: {
                 id: true,
@@ -111,15 +111,11 @@ export async function GET(req: Request) {
                 timeZone: true,
               },
             },
-
             service: { select: { id: true, name: true } },
-
-            // ✅ FIX: new offering fields (no price / durationMinutes)
             offering: {
               select: {
                 id: true,
                 title: true,
-
                 offersInSalon: true,
                 offersMobile: true,
                 salonPriceStartingAt: true,
@@ -133,18 +129,18 @@ export async function GET(req: Request) {
       },
     })
 
-    const normalized = openings
+    const normalized = notifications
       .map((n) => {
         const o = n.opening
         if (!o) return null
 
         const off = o.offering
+        const pro = o.professional
 
-        // Decide which mode to display.
-        // Priority:
-        // 1) query param if valid
-        // 2) if offering exists: pick offered default
-        // 3) fallback: null
+        // Pick a mode to display for this opening card.
+        // Note: Opening itself doesn’t store locationType (yet), so we pick:
+        // - requestedLocationType if it’s supported
+        // - else default to SALON if available, else MOBILE
         let effectiveLocationType: ServiceLocationType | null = null
         if (off) {
           effectiveLocationType = pickEffectiveLocationType({
@@ -156,7 +152,6 @@ export async function GET(req: Request) {
           effectiveLocationType = requestedLocationType
         }
 
-        // Compute price/duration to show for the opening card
         let priceStartingAt: any | null = null
         let durationMinutes: number | null = null
 
@@ -166,7 +161,6 @@ export async function GET(req: Request) {
           durationMinutes = picked.durationMinutes
           if (durationMinutes == null) durationMinutes = pickConservativeDuration(off)
         } else if (off) {
-          // no mode decided, still provide a duration for UI layouts
           durationMinutes = pickConservativeDuration(off)
         }
 
@@ -186,17 +180,15 @@ export async function GET(req: Request) {
             discountPct: o.discountPct ?? null,
             note: o.note ?? null,
 
-            service: o.service
-              ? { id: o.service.id, name: o.service.name }
-              : null,
+            service: o.service ? { id: o.service.id, name: o.service.name } : null,
 
-            professional: o.professional
+            professional: pro
               ? {
-                  id: o.professional.id,
-                  businessName: o.professional.businessName ?? null,
-                  avatarUrl: o.professional.avatarUrl ?? null,
-                  location: o.professional.location ?? o.professional.city ?? null,
-                  timeZone: o.professional.timeZone ?? null,
+                  id: pro.id,
+                  businessName: pro.businessName ?? null,
+                  avatarUrl: pro.avatarUrl ?? null,
+                  location: pro.location ?? pro.city ?? null,
+                  timeZone: pro.timeZone ?? null,
                 }
               : null,
 
@@ -207,7 +199,7 @@ export async function GET(req: Request) {
                   offersInSalon: Boolean(off.offersInSalon),
                   offersMobile: Boolean(off.offersMobile),
 
-                  // ✅ new, UI-friendly fields
+                  // UI-friendly fields
                   locationType: effectiveLocationType ?? null,
                   priceStartingAt,
                   durationMinutes,
