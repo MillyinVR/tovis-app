@@ -2,14 +2,17 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { UI_SIZES } from '../ui/layoutConstants'
 
-type DrawerContext = {
-  mediaId: string
-  professionalId: string
-  serviceId?: string | null
-} | null
+type DrawerContext =
+  | {
+      mediaId: string
+      professionalId: string
+      serviceId?: string | null
+    }
+  | null
 
 type ProCard = {
   id: string
@@ -37,6 +40,25 @@ const FOOTER_HEIGHT = UI_SIZES.footerHeight
 
 async function safeJson(res: Response) {
   return res.json().catch(() => ({})) as Promise<any>
+}
+
+function currentPathWithQuery() {
+  if (typeof window === 'undefined') return '/looks'
+  return window.location.pathname + window.location.search + window.location.hash
+}
+
+function sanitizeFrom(from: string) {
+  const trimmed = from.trim()
+  if (!trimmed) return '/looks'
+  if (!trimmed.startsWith('/')) return '/looks'
+  if (trimmed.startsWith('//')) return '/looks'
+  return trimmed
+}
+
+function redirectToLogin(router: ReturnType<typeof useRouter>, reason: string) {
+  const from = sanitizeFrom(currentPathWithQuery())
+  const qs = new URLSearchParams({ from, reason })
+  router.push(`/login?${qs.toString()}`)
 }
 
 /**
@@ -129,9 +151,7 @@ function zonedTimeToUtc(args: { year: number; month: number; day: number; hour: 
   guess = new Date(guess.getTime() - offset1 * 60_000)
 
   const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
-  if (offset2 !== offset1) {
-    guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
-  }
+  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
 
   return guess
 }
@@ -170,6 +190,8 @@ export default function AvailabilityDrawer({
   onClose: () => void
   context: DrawerContext
 }) {
+  const router = useRouter()
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<AvailabilityResponse | null>(null)
@@ -185,18 +207,35 @@ export default function AvailabilityDrawer({
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [holding, setHolding] = useState(false)
 
-  // ✅ Waitlist UI
+  // Waitlist UI
   const [waitlistOpen, setWaitlistOpen] = useState(false)
   const [desired, setDesired] = useState('') // datetime-local
   const [flexMinutes, setFlexMinutes] = useState(60)
   const [waitlistNotes, setWaitlistNotes] = useState('')
   const [waitlistPosting, setWaitlistPosting] = useState(false)
   const [waitlistMsg, setWaitlistMsg] = useState<string | null>(null)
+  const [waitlistOk, setWaitlistOk] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const holdTimerRef = useRef<number | null>(null)
 
   const viewerTz = useMemo(() => getViewerTimeZone(), [])
+
+  function hardResetUi() {
+    setSelected(null)
+    setHoldUntil(null)
+    setHolding(false)
+
+    setWaitlistOpen(false)
+    setDesired('')
+    setFlexMinutes(60)
+    setWaitlistNotes('')
+    setWaitlistMsg(null)
+    setWaitlistOk(false)
+    setWaitlistPosting(false)
+
+    setError(null)
+  }
 
   // Cleanup on unmount
   useEffect(() => {
@@ -208,27 +247,17 @@ export default function AvailabilityDrawer({
     }
   }, [])
 
-  // Fetch availability when opened
+  // Fetch availability when opened/context changes
   useEffect(() => {
     if (!open || !context) return
 
-    setSelected(null)
-    setHoldUntil(null)
-    setHolding(false)
-
-    setWaitlistOpen(false)
-    setDesired('')
-    setFlexMinutes(60)
-    setWaitlistNotes('')
-    setWaitlistMsg(null)
-    setWaitlistPosting(false)
+    hardResetUi()
 
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
     setLoading(true)
-    setError(null)
     setData(null)
 
     const qs = new URLSearchParams({
@@ -244,6 +273,14 @@ export default function AvailabilityDrawer({
     })
       .then(async (res) => {
         const body = await safeJson(res)
+
+        if (res.status === 401) {
+          // Guests can VIEW the drawer in your product, but if your API requires auth, handle it cleanly.
+          // If you decide availability should be public later, drop this.
+          redirectToLogin(router, 'availability')
+          throw new Error('Please log in to view availability.')
+        }
+
         if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
         setData(body as AvailabilityResponse)
       })
@@ -255,7 +292,8 @@ export default function AvailabilityDrawer({
         if (abortRef.current === controller) abortRef.current = null
         setLoading(false)
       })
-  }, [open, context])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, context?.professionalId, context?.mediaId, context?.serviceId])
 
   const primary = data?.primaryPro ?? null
   const others = data?.otherPros ?? []
@@ -264,6 +302,8 @@ export default function AvailabilityDrawer({
   const appointmentTz = useMemo(() => {
     return primary?.timeZone || data?.timeZone || viewerTz || 'America/Los_Angeles'
   }, [primary?.timeZone, data?.timeZone, viewerTz])
+
+  const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
 
   // Hold countdown label
   const holdLabel = useMemo(() => {
@@ -306,8 +346,8 @@ export default function AvailabilityDrawer({
     setError(null)
     setWaitlistOpen(false)
     setWaitlistMsg(null)
+    setWaitlistOk(false)
 
-    // clear existing countdown while we create the hold
     setSelected(null)
     setHoldUntil(null)
 
@@ -323,14 +363,18 @@ export default function AvailabilityDrawer({
       })
 
       const body = await safeJson(res)
+
+      if (res.status === 401) {
+        redirectToLogin(router, 'hold')
+        return
+      }
+
       if (!res.ok) throw new Error(body?.error || `Hold failed (${res.status})`)
 
       const holdId = typeof body?.holdId === 'string' ? body.holdId : null
       const holdUntilMs = typeof body?.holdUntil === 'number' ? body.holdUntil : null
 
-      if (!holdId || !holdUntilMs) {
-        throw new Error('Hold response missing holdId/holdUntil.')
-      }
+      if (!holdId || !holdUntilMs) throw new Error('Hold response missing holdId/holdUntil.')
 
       setSelected({ proId, offeringId, slotISO, proTimeZone: tz, holdId })
       setHoldUntil(holdUntilMs)
@@ -348,8 +392,8 @@ export default function AvailabilityDrawer({
 
   async function submitWaitlist() {
     if (!context || !data?.waitlistSupported) return
-
     if (!effectiveServiceId) {
+      setWaitlistOk(false)
       setWaitlistMsg('This look is missing a service link, so waitlist can’t be created yet.')
       return
     }
@@ -357,9 +401,9 @@ export default function AvailabilityDrawer({
 
     setWaitlistPosting(true)
     setWaitlistMsg(null)
+    setWaitlistOk(false)
 
     try {
-      // interpret desired as appointment timezone (primary pro)
       const desiredISO = desired ? toISOFromDatetimeLocalInTimeZone(desired, appointmentTz) : null
 
       const res = await fetch('/api/waitlist', {
@@ -376,11 +420,19 @@ export default function AvailabilityDrawer({
       })
 
       const body = await safeJson(res)
+
+      if (res.status === 401) {
+        redirectToLogin(router, 'waitlist')
+        return
+      }
+
       if (!res.ok) throw new Error(body?.error || `Waitlist failed (${res.status})`)
 
+      setWaitlistOk(true)
       setWaitlistMsg('You’re on the waitlist. We’ll notify you if something opens up.')
       setWaitlistOpen(false)
     } catch (e: any) {
+      setWaitlistOk(false)
       setWaitlistMsg(e?.message || 'Failed to join waitlist.')
     } finally {
       setWaitlistPosting(false)
@@ -390,22 +442,24 @@ export default function AvailabilityDrawer({
   if (!open || !context) return null
 
   const continueHref =
-  selected?.offeringId && holdUntil
-    ? `/offerings/${selected.offeringId}?scheduledFor=${encodeURIComponent(selected.slotISO)}` +
-      `&mediaId=${encodeURIComponent(context.mediaId)}` +
-      `&holdUntil=${encodeURIComponent(String(holdUntil))}` +
-      `&proTimeZone=${encodeURIComponent(selected.proTimeZone)}` +
-      `&holdId=${encodeURIComponent(selected.holdId)}` +
-      `&source=${encodeURIComponent('DISCOVERY')}`
-    : null
-
-  const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
+    selected?.offeringId && holdUntil
+      ? `/offerings/${encodeURIComponent(selected.offeringId)}` +
+        `?scheduledFor=${encodeURIComponent(selected.slotISO)}` +
+        `&mediaId=${encodeURIComponent(context.mediaId)}` +
+        `&holdUntil=${encodeURIComponent(String(holdUntil))}` +
+        `&proTimeZone=${encodeURIComponent(selected.proTimeZone)}` +
+        `&holdId=${encodeURIComponent(selected.holdId)}` +
+        `&source=${encodeURIComponent('DISCOVERY')}`
+      : null
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        onClick={() => {
+          hardResetUi()
+          onClose()
+        }}
         style={{
           position: 'absolute',
           inset: 0,
@@ -434,7 +488,13 @@ export default function AvailabilityDrawer({
       >
         <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontWeight: 900 }}>View availability</div>
-          <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <button
+            onClick={() => {
+              hardResetUi()
+              onClose()
+            }}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}
+          >
             ✕
           </button>
         </div>
@@ -562,7 +622,8 @@ export default function AvailabilityDrawer({
 
                 {showLocalHint && selected?.slotISO ? (
                   <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
-                    Your local time for this slot: <strong style={{ color: '#111' }}>{fmtInViewerTz(selected.slotISO)}</strong>
+                    Your local time for this slot:{' '}
+                    <strong style={{ color: '#111' }}>{fmtInViewerTz(selected.slotISO)}</strong>
                   </div>
                 ) : null}
 
@@ -606,7 +667,7 @@ export default function AvailabilityDrawer({
                   </div>
 
                   {waitlistMsg ? (
-                    <div style={{ marginTop: 10, fontSize: 13, color: waitlistMsg.includes('waitlist') ? '#166534' : '#b91c1c' }}>
+                    <div style={{ marginTop: 10, fontSize: 13, color: waitlistOk ? '#166534' : '#b91c1c', fontWeight: waitlistOk ? 800 : 600 }}>
                       {waitlistMsg}
                     </div>
                   ) : null}
@@ -618,6 +679,7 @@ export default function AvailabilityDrawer({
                         onClick={() => {
                           setWaitlistOpen(true)
                           setWaitlistMsg(null)
+                          setWaitlistOk(false)
                           setSelected(null)
                           setHoldUntil(null)
                         }}
@@ -635,7 +697,9 @@ export default function AvailabilityDrawer({
                         Join waitlist
                       </button>
 
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>You’ll only get pinged if it matches your window.</div>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>
+                        You’ll only get pinged if it matches your window.
+                      </div>
                     </div>
                   ) : (
                     <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>

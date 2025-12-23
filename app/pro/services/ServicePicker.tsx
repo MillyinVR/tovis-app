@@ -23,12 +23,20 @@ type CategoryDTO = {
 
 type OfferingDTO = {
   id: string
+  serviceId: string
   title: string | null
-  price: string // dollars string
-  durationMinutes: number
+  description?: string | null
   customImageUrl: string | null
+  defaultImageUrl?: string | null
   serviceName: string
   categoryName: string | null
+
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonPriceStartingAt: string | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: string | null
+  mobileDurationMinutes: number | null
 }
 
 type Props = {
@@ -51,7 +59,6 @@ function normalizeMoney2(v: string) {
   return `${a}.${b}`
 }
 
-// Safe compare: turn "12.34" into integer cents in the UI only
 function moneyToCentsInt(v: string) {
   const n = normalizeMoney2(v)
   if (!n) return null
@@ -66,13 +73,22 @@ export default function ServicePicker({ categories }: Props) {
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState('')
   const [selectedServiceId, setSelectedServiceId] = useState('')
 
-  // UI-only for now (API route doesn’t support these yet)
+  // overrides
   const [title, setTitle] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
+  const [customImageUrl, setCustomImageUrl] = useState('')
+  const [description, setDescription] = useState('')
 
-  // These DO submit
-  const [price, setPrice] = useState<string>('') // dollars string
-  const [duration, setDuration] = useState<string>('') // minutes
+  // location toggles
+  const [offersInSalon, setOffersInSalon] = useState(true)
+  const [offersMobile, setOffersMobile] = useState(false)
+
+  // SALON fields
+  const [salonPrice, setSalonPrice] = useState<string>('') // dollars string
+  const [salonDuration, setSalonDuration] = useState<string>('') // minutes
+
+  // MOBILE fields
+  const [mobilePrice, setMobilePrice] = useState<string>('') // dollars string
+  const [mobileDuration, setMobileDuration] = useState<string>('') // minutes
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -92,10 +108,7 @@ export default function ServicePicker({ categories }: Props) {
   const servicesForSelection: ServiceDTO[] = useMemo(() => {
     if (selectedSubcategory) return selectedSubcategory.services
     if (selectedCategory) {
-      return [
-        ...selectedCategory.services,
-        ...selectedCategory.children.flatMap((child) => child.services),
-      ]
+      return [...selectedCategory.services, ...selectedCategory.children.flatMap((child) => child.services)]
     }
     return []
   }, [selectedCategory, selectedSubcategory])
@@ -105,16 +118,43 @@ export default function ServicePicker({ categories }: Props) {
     [servicesForSelection, selectedServiceId],
   )
 
+  function resetAll() {
+    setTitle('')
+    setDescription('')
+    setCustomImageUrl('')
+
+    setOffersInSalon(true)
+    setOffersMobile(false)
+
+    setSalonPrice('')
+    setSalonDuration('')
+    setMobilePrice('')
+    setMobileDuration('')
+
+    setSuccess(null)
+    setError(null)
+  }
+
   function resetFormForService(service: ServiceDTO | null) {
     if (!service) {
-      setTitle('')
-      setPrice('')
-      setDuration('')
+      resetAll()
       return
     }
+
     setTitle(service.name)
-    setPrice(normalizeMoney2(service.minPrice) ?? service.minPrice)
-    setDuration(String(service.defaultDurationMinutes))
+    setDescription('')
+    setCustomImageUrl('')
+
+    setOffersInSalon(true)
+    setOffersMobile(false)
+
+    const p = normalizeMoney2(service.minPrice) ?? service.minPrice
+    const d = String(service.defaultDurationMinutes)
+
+    setSalonPrice(p)
+    setSalonDuration(d)
+    setMobilePrice(p)
+    setMobileDuration(d)
   }
 
   function handleCategoryChange(id: string) {
@@ -122,24 +162,26 @@ export default function ServicePicker({ categories }: Props) {
     setSelectedSubcategoryId('')
     setSelectedServiceId('')
     resetFormForService(null)
-    setSuccess(null)
-    setError(null)
   }
 
   function handleSubcategoryChange(id: string) {
     setSelectedSubcategoryId(id)
     setSelectedServiceId('')
     resetFormForService(null)
-    setSuccess(null)
-    setError(null)
   }
 
   function handleServiceChange(id: string) {
     setSelectedServiceId(id)
     const svc = servicesForSelection.find((s) => s.id === id) || null
     resetFormForService(svc)
-    setSuccess(null)
-    setError(null)
+  }
+
+  function validatePriceMin(priceNorm: string, minPrice: string, label: 'Salon' | 'Mobile') {
+    const enteredCents = moneyToCentsInt(priceNorm)
+    const minCents = moneyToCentsInt(minPrice)
+    if (enteredCents === null || minCents === null) return `Invalid ${label} price configuration.`
+    if (enteredCents < minCents) return `${label} price must be at least $${normalizeMoney2(minPrice) ?? minPrice}.`
+    return null
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -154,28 +196,55 @@ export default function ServicePicker({ categories }: Props) {
       return
     }
 
-    const priceNorm = normalizeMoney2(price)
-    if (!priceNorm) {
-      setError('Price must be a valid amount like 50 or 49.99')
+    if (!offersInSalon && !offersMobile) {
+      setError('Enable at least Salon or Mobile.')
       return
     }
 
-    const durationInt = parseInt(duration, 10)
-    if (Number.isNaN(durationInt) || durationInt <= 0) {
-      setError('Duration must be a positive number of minutes.')
-      return
+    // SALON validate if enabled
+    let salonPriceNorm: string | null = null
+    let salonDurationInt: number | null = null
+    if (offersInSalon) {
+      salonPriceNorm = normalizeMoney2(salonPrice)
+      if (!salonPriceNorm) {
+        setError('Salon price must be a valid amount like 50 or 49.99')
+        return
+      }
+
+      salonDurationInt = parseInt(salonDuration, 10)
+      if (Number.isNaN(salonDurationInt) || salonDurationInt <= 0) {
+        setError('Salon duration must be a positive number of minutes.')
+        return
+      }
+
+      const minErr = validatePriceMin(salonPriceNorm, selectedService.minPrice, 'Salon')
+      if (minErr) {
+        setError(minErr)
+        return
+      }
     }
 
-    // min price check (client-side only)
-    const enteredCents = moneyToCentsInt(priceNorm)
-    const minCents = moneyToCentsInt(selectedService.minPrice)
-    if (enteredCents === null || minCents === null) {
-      setError('Invalid price configuration. Check the service min price.')
-      return
-    }
-    if (enteredCents < minCents) {
-      setError(`Price must be at least $${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}.`)
-      return
+    // MOBILE validate if enabled
+    let mobilePriceNorm: string | null = null
+    let mobileDurationInt: number | null = null
+    if (offersMobile) {
+      mobilePriceNorm = normalizeMoney2(mobilePrice)
+      if (!mobilePriceNorm) {
+        setError('Mobile price must be a valid amount like 50 or 49.99')
+        return
+      }
+
+      mobileDurationInt = parseInt(mobileDuration, 10)
+      if (Number.isNaN(mobileDurationInt) || mobileDurationInt <= 0) {
+        setError('Mobile duration must be a positive number of minutes.')
+        return
+      }
+
+      const minErr = validatePriceMin(mobilePriceNorm, selectedService.minPrice, 'Mobile')
+      if (minErr) {
+        setError(minErr)
+        return
+      }
     }
 
     setLoading(true)
@@ -185,8 +254,19 @@ export default function ServicePicker({ categories }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serviceId: selectedService.id,
-          price: priceNorm, // ✅ dollars string for API boundary
-          durationMinutes: durationInt,
+
+          title: title.trim() || null,
+          description: description.trim() || null,
+          customImageUrl: customImageUrl.trim() || null,
+
+          offersInSalon,
+          offersMobile,
+
+          salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
+          salonDurationMinutes: offersInSalon ? salonDurationInt : null,
+
+          mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
+          mobileDurationMinutes: offersMobile ? mobileDurationInt : null,
         }),
       })
 
@@ -321,15 +401,9 @@ export default function ServicePicker({ categories }: Props) {
           gap: 12,
         }}
       >
-        <div
-          style={{
-            display: 'grid',
-            gap: 12,
-            gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)',
-          }}
-        >
-          <div>
-            <label htmlFor="title" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <label htmlFor="title" style={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
               How it shows on your menu
             </label>
             <input
@@ -351,43 +425,16 @@ export default function ServicePicker({ categories }: Props) {
             />
           </div>
 
-          <div>
-            <label htmlFor="price" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-              Base price (you)
+          <div style={{ display: 'grid', gap: 6 }}>
+            <label htmlFor="desc" style={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
+              Description (optional)
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: 13 }}>$</span>
-              <input
-                id="price"
-                type="text"
-                inputMode="decimal"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                disabled={!selectedService || loading}
-                style={{
-                  flex: 1,
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  padding: 8,
-                  fontSize: 13,
-                  fontFamily: 'inherit',
-                  background: !selectedService ? '#f7f7f7' : '#fff',
-                }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="duration" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-              Duration (minutes)
-            </label>
-            <input
-              id="duration"
-              type="number"
-              min={1}
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
+            <textarea
+              id="desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
               disabled={!selectedService || loading}
+              rows={3}
               style={{
                 width: '100%',
                 borderRadius: 8,
@@ -395,34 +442,180 @@ export default function ServicePicker({ categories }: Props) {
                 padding: 8,
                 fontSize: 13,
                 fontFamily: 'inherit',
+                resize: 'vertical',
                 background: !selectedService ? '#f7f7f7' : '#fff',
               }}
             />
           </div>
+
+          <div>
+            <label htmlFor="imageUrl" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+              Custom image URL (optional)
+            </label>
+            <input
+              id="imageUrl"
+              type="text"
+              value={customImageUrl}
+              onChange={(e) => setCustomImageUrl(e.target.value)}
+              placeholder="Paste a hosted image URL for now"
+              disabled={loading}
+              style={{
+                width: '100%',
+                borderRadius: 8,
+                border: '1px solid #ddd',
+                padding: 8,
+                fontSize: 13,
+                fontFamily: 'inherit',
+              }}
+            />
+            <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
+              Later this becomes “upload a photo” from gallery / camera.
+            </div>
+          </div>
         </div>
 
-        <div>
-          <label htmlFor="imageUrl" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-            Custom image URL (optional)
+        {/* LOCATION TOGGLES */}
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={offersInSalon}
+              onChange={(e) => setOffersInSalon(e.target.checked)}
+              disabled={!selectedService || loading}
+            />
+            Offer in Salon
           </label>
-          <input
-            id="imageUrl"
-            type="text"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            placeholder="Paste a hosted image URL for now"
-            disabled={loading}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-            }}
-          />
-          <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
-            Later this becomes “upload a photo” from gallery / camera.
+
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={offersMobile}
+              onChange={(e) => setOffersMobile(e.target.checked)}
+              disabled={!selectedService || loading}
+            />
+            Offer Mobile
+          </label>
+
+          {selectedService ? (
+            <div style={{ fontSize: 12, color: '#6b7280' }}>
+              Service min price: <b>${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}</b>
+            </div>
+          ) : null}
+        </div>
+
+        {/* SALON */}
+        <div
+          style={{
+            border: '1px solid #eee',
+            borderRadius: 12,
+            padding: 12,
+            background: offersInSalon ? '#fff' : '#fafafa',
+            opacity: offersInSalon ? 1 : 0.6,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Salon pricing</div>
+
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Starting at</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 13 }}>$</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={salonPrice}
+                  onChange={(e) => setSalonPrice(e.target.value)}
+                  disabled={!selectedService || loading || !offersInSalon}
+                  style={{
+                    flex: 1,
+                    borderRadius: 8,
+                    border: '1px solid #ddd',
+                    padding: 8,
+                    fontSize: 13,
+                    fontFamily: 'inherit',
+                    background: !offersInSalon ? '#f3f4f6' : '#fff',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Duration (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                value={salonDuration}
+                onChange={(e) => setSalonDuration(e.target.value)}
+                disabled={!selectedService || loading || !offersInSalon}
+                style={{
+                  width: '100%',
+                  borderRadius: 8,
+                  border: '1px solid #ddd',
+                  padding: 8,
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  background: !offersInSalon ? '#f3f4f6' : '#fff',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* MOBILE */}
+        <div
+          style={{
+            border: '1px solid #eee',
+            borderRadius: 12,
+            padding: 12,
+            background: offersMobile ? '#fff' : '#fafafa',
+            opacity: offersMobile ? 1 : 0.6,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Mobile pricing</div>
+
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Starting at</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 13 }}>$</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={mobilePrice}
+                  onChange={(e) => setMobilePrice(e.target.value)}
+                  disabled={!selectedService || loading || !offersMobile}
+                  style={{
+                    flex: 1,
+                    borderRadius: 8,
+                    border: '1px solid #ddd',
+                    padding: 8,
+                    fontSize: 13,
+                    fontFamily: 'inherit',
+                    background: !offersMobile ? '#f3f4f6' : '#fff',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Duration (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                value={mobileDuration}
+                onChange={(e) => setMobileDuration(e.target.value)}
+                disabled={!selectedService || loading || !offersMobile}
+                style={{
+                  width: '100%',
+                  borderRadius: 8,
+                  border: '1px solid #ddd',
+                  padding: 8,
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  background: !offersMobile ? '#f3f4f6' : '#fff',
+                }}
+              />
+            </div>
           </div>
         </div>
 
@@ -435,9 +628,6 @@ export default function ServicePicker({ categories }: Props) {
             onClick={() => {
               setSelectedServiceId('')
               resetFormForService(null)
-              setImageUrl('')
-              setError(null)
-              setSuccess(null)
             }}
             disabled={loading}
             style={{

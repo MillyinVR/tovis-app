@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import type { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,8 @@ type CreateBookingBody = {
   scheduledFor?: unknown
   holdId?: unknown
   source?: unknown
-
-  // Optional if your Booking model has it
+  locationType?: unknown
   mediaId?: unknown
-
-  // Optional: booking is claiming a last-minute opening
   openingId?: unknown
 }
 
@@ -51,6 +49,12 @@ function normalizeSource(v: unknown): BookingSourceNormalized {
   return 'REQUESTED'
 }
 
+function normalizeLocationType(v: unknown): ServiceLocationType {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'MOBILE') return 'MOBILE'
+  return 'SALON'
+}
+
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -59,18 +63,15 @@ export async function POST(request: Request) {
     }
 
     const clientId = user.clientProfile.id
-
     const body = (await request.json().catch(() => ({}))) as CreateBookingBody
 
     const offeringId = pickString(body.offeringId)
     const scheduledForRaw = body.scheduledFor
     const holdId = pickString(body.holdId)
     const source = normalizeSource(body.source)
+    const locationType = normalizeLocationType(body.locationType)
 
-    // optional only if your schema supports it
-    const mediaId = pickString(body.mediaId)
-
-    // opening claim
+    const mediaId = pickString(body.mediaId) // optional (only used if your Booking model has it)
     const openingId = pickString(body.openingId)
 
     if (!offeringId || !scheduledForRaw) {
@@ -82,13 +83,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid date/time.' }, { status: 400 })
     }
 
-    // Buffer: don’t allow immediate-now bookings
     const BUFFER_MINUTES = 5
     if (scheduledFor.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
       return NextResponse.json({ error: 'Please select a future time.' }, { status: 400 })
     }
 
-    // Load offering
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
       select: {
@@ -96,8 +95,14 @@ export async function POST(request: Request) {
         isActive: true,
         professionalId: true,
         serviceId: true,
-        price: true,
-        durationMinutes: true,
+
+        offersInSalon: true,
+        offersMobile: true,
+        salonPriceStartingAt: true,
+        salonDurationMinutes: true,
+        mobilePriceStartingAt: true,
+        mobileDurationMinutes: true,
+
         professional: { select: { autoAcceptBookings: true } },
       },
     })
@@ -106,19 +111,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid or inactive offering.' }, { status: 400 })
     }
 
-    const duration = Number(offering.durationMinutes || 0)
+    if (locationType === 'SALON' && !offering.offersInSalon) {
+      return NextResponse.json({ error: 'This service is not offered in-salon.' }, { status: 400 })
+    }
+    if (locationType === 'MOBILE' && !offering.offersMobile) {
+      return NextResponse.json({ error: 'This service is not offered as mobile.' }, { status: 400 })
+    }
+
+    const priceSnapshot =
+      locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+    const durationSnapshot =
+      locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+
+    if (priceSnapshot == null) {
+      return NextResponse.json(
+        { error: `Pricing is not set for ${locationType === 'MOBILE' ? 'mobile' : 'salon'} bookings.` },
+        { status: 400 },
+      )
+    }
+
+    const duration = Number(durationSnapshot ?? 0)
     if (!Number.isFinite(duration) || duration <= 0) {
-      return NextResponse.json({ error: 'Offering duration is invalid.' }, { status: 400 })
+      return NextResponse.json({ error: 'Offering duration is invalid for this booking type.' }, { status: 400 })
     }
 
     const now = new Date()
 
-    // Option A: validate hold if provided
+    // Validate hold if provided.
+    // With the "enterprise" approach, old holds may have clientId = null.
+    // Rules:
+    // - If hold.clientId is set, it MUST match this clientId.
+    // - If hold.clientId is null (legacy row), we allow it if everything else matches,
+    //   but we still delete it after booking.
     let holdToDeleteId: string | null = null
     if (holdId) {
       const hold = await prisma.bookingHold.findUnique({
         where: { id: holdId },
-        select: { id: true, offeringId: true, professionalId: true, scheduledFor: true, expiresAt: true },
+        select: {
+          id: true,
+          offeringId: true,
+          professionalId: true,
+          clientId: true, // ✅ may be null
+          scheduledFor: true,
+          expiresAt: true,
+        },
       })
 
       if (!hold || hold.offeringId !== offeringId) {
@@ -137,10 +173,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
       }
 
+      // Ownership enforcement when available
+      if (hold.clientId && hold.clientId !== clientId) {
+        return NextResponse.json({ error: 'Hold not found. Please pick a slot again.' }, { status: 409 })
+      }
+
       holdToDeleteId = hold.id
     }
 
-    // If claiming an opening, do a fast pre-check (real enforcement happens in the transaction)
+    // opening pre-check (real enforcement in transaction)
     if (openingId) {
       const opening = await prisma.lastMinuteOpening.findUnique({
         where: { id: openingId },
@@ -159,40 +200,26 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'That opening is no longer available.' }, { status: 409 })
       }
 
-      if (opening.professionalId !== offering.professionalId) {
-        return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
-      }
-
-      if (opening.offeringId && opening.offeringId !== offering.id) {
-        return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
-      }
-      if (opening.serviceId && opening.serviceId !== offering.serviceId) {
-        return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
-      }
-
-      if (new Date(opening.startAt).getTime() !== scheduledFor.getTime()) {
-        return NextResponse.json({ error: 'Opening time mismatch.' }, { status: 409 })
-      }
+      if (opening.professionalId !== offering.professionalId) return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
+      if (opening.offeringId && opening.offeringId !== offering.id) return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
+      if (opening.serviceId && opening.serviceId !== offering.serviceId) return NextResponse.json({ error: 'Opening mismatch.' }, { status: 409 })
+      if (new Date(opening.startAt).getTime() !== scheduledFor.getTime()) return NextResponse.json({ error: 'Opening time mismatch.' }, { status: 409 })
     }
 
     const requestedStart = scheduledFor
     const requestedEnd = addMinutes(requestedStart, duration)
 
-    // Conflict scan window (tight, cheap)
     const windowStart = addMinutes(requestedStart, -duration * 2)
     const windowEnd = addMinutes(requestedStart, duration * 2)
 
+    // Cheap pre-scan for UX
     const existing = (await prisma.booking.findMany({
       where: {
         professionalId: offering.professionalId,
         scheduledFor: { gte: windowStart, lte: windowEnd },
         NOT: { status: 'CANCELLED' },
       },
-      select: {
-        id: true,
-        scheduledFor: true,
-        durationMinutesSnapshot: true,
-      },
+      select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
       orderBy: { scheduledFor: 'asc' },
       take: 50,
     })) as ExistingBookingForConflict[]
@@ -215,24 +242,35 @@ export async function POST(request: Request) {
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
-    // Transaction: claim opening (if any) + create booking + delete hold (if any) + mark notification booked
     const booking = await prisma.$transaction(async (tx) => {
+      // Re-check conflicts inside transaction (prevents double-book)
+      const existing2 = (await tx.booking.findMany({
+        where: {
+          professionalId: offering.professionalId,
+          scheduledFor: { gte: windowStart, lte: windowEnd },
+          NOT: { status: 'CANCELLED' },
+        },
+        select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
+        take: 50,
+      })) as ExistingBookingForConflict[]
+
+      const hasConflict2 = existing2.some((b) => {
+        const bDur = Number(b.durationMinutesSnapshot || 0)
+        if (!Number.isFinite(bDur) || bDur <= 0) return false
+        const bStart = new Date(b.scheduledFor)
+        const bEnd = addMinutes(bStart, bDur)
+        return overlaps(bStart, bEnd, requestedStart, requestedEnd)
+      })
+
+      if (hasConflict2) throw new Error('TIME_NOT_AVAILABLE')
+
       if (openingId) {
-        // Enforce opening is still ACTIVE and matches the booking we’re about to create.
-        // This is what prevents “two clients booked the same opening.”
         const activeOpening = await tx.lastMinuteOpening.findFirst({
           where: { id: openingId, status: 'ACTIVE' },
-          select: {
-            id: true,
-            startAt: true,
-            professionalId: true,
-            offeringId: true,
-            serviceId: true,
-          },
+          select: { id: true, startAt: true, professionalId: true, offeringId: true, serviceId: true },
         })
 
         if (!activeOpening) throw new Error('OPENING_NOT_AVAILABLE')
-
         if (activeOpening.professionalId !== offering.professionalId) throw new Error('OPENING_NOT_AVAILABLE')
         if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) throw new Error('OPENING_NOT_AVAILABLE')
         if (activeOpening.serviceId && activeOpening.serviceId !== offering.serviceId) throw new Error('OPENING_NOT_AVAILABLE')
@@ -256,14 +294,13 @@ export async function POST(request: Request) {
           status: initialStatus,
           source,
 
-          priceSnapshot: offering.price,
-          durationMinutesSnapshot: offering.durationMinutes,
+          locationType,
 
-          // Only include if your Booking model has it
+          priceSnapshot,
+          durationMinutesSnapshot: duration,
+
+          // ✅ Optional: only uncomment if Booking has mediaId field
           // mediaId: mediaId ?? null,
-
-          // If you later add booking.openingId in schema, this is where it goes:
-          // openingId: openingId ?? null,
         },
         select: {
           id: true,
@@ -273,20 +310,14 @@ export async function POST(request: Request) {
           serviceId: true,
           offeringId: true,
           source: true,
+          locationType: true,
         },
       })
 
-      // Mark the client’s notification as “booked” (if they came from a notification or the opening exists in their feed).
       if (openingId) {
         await tx.openingNotification.updateMany({
-          where: {
-            clientId,
-            openingId,
-            bookedAt: null,
-          },
-          data: {
-            bookedAt: new Date(),
-          },
+          where: { clientId, openingId, bookedAt: null },
+          data: { bookedAt: new Date() },
         })
       }
 
@@ -301,6 +332,9 @@ export async function POST(request: Request) {
   } catch (e: any) {
     if (e?.message === 'OPENING_NOT_AVAILABLE') {
       return NextResponse.json({ error: 'That opening was just taken. Please pick another slot.' }, { status: 409 })
+    }
+    if (e?.message === 'TIME_NOT_AVAILABLE') {
+      return NextResponse.json({ error: 'That time is no longer available. Please select a different slot.' }, { status: 409 })
     }
 
     console.error('POST /api/bookings error:', e)

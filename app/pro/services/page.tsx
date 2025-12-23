@@ -30,10 +30,8 @@ export default async function ProServicesPage() {
 
   const offerings = await prisma.professionalServiceOffering.findMany({
     where: { professionalId: profId, isActive: true },
-    include: {
-      service: { include: { category: true } },
-    },
-    orderBy: { service: { name: 'asc' } },
+    include: { service: { include: { category: true } } },
+    orderBy: { createdAt: 'asc' },
   })
 
   const categoryPayload = categories.map((cat) => ({
@@ -62,10 +60,18 @@ export default async function ProServicesPage() {
     serviceId: o.serviceId,
     title: o.title,
     description: o.description,
-    price: moneyToString(o.price) ?? '0.00',
-    durationMinutes: o.durationMinutes,
     customImageUrl: o.customImageUrl ?? null,
-    defaultImageUrl: (o.service as any).defaultImageUrl ?? null, // avoids TS blowups if schema differs
+
+    offersInSalon: Boolean(o.offersInSalon),
+    offersMobile: Boolean(o.offersMobile),
+
+    salonPriceStartingAt: o.salonPriceStartingAt ? moneyToString(o.salonPriceStartingAt) : null,
+    salonDurationMinutes: o.salonDurationMinutes ?? null,
+
+    mobilePriceStartingAt: o.mobilePriceStartingAt ? moneyToString(o.mobilePriceStartingAt) : null,
+    mobileDurationMinutes: o.mobileDurationMinutes ?? null,
+
+    defaultImageUrl: (o.service as any).defaultImageUrl ?? null,
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,
   }))
@@ -76,8 +82,7 @@ export default async function ProServicesPage() {
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 4 }}>My services</h1>
           <p style={{ fontSize: 13, color: '#555' }}>
-            Choose from the TOVIS service library, then customize time, price, and photo for your own menu.
-            Only your version changes, not anyone else&apos;s.
+            Choose from the TOVIS service library, then set pricing for Salon and/or Mobile.
           </p>
         </div>
 
@@ -95,9 +100,7 @@ export default async function ProServicesPage() {
         <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Your current offerings</h2>
 
         {offeringsPayload.length === 0 ? (
-          <p style={{ fontSize: 13, color: '#777' }}>
-            You haven&apos;t added any services yet. Use the flow above to add your first one.
-          </p>
+          <p style={{ fontSize: 13, color: '#777' }}>You haven&apos;t added any services yet.</p>
         ) : (
           <OfferingManager initialOfferings={offeringsPayload} />
         )}

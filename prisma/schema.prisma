@@ -121,6 +121,11 @@ enum AdminPermissionRole {
   REVIEWER
 }
 
+enum ServiceLocationType {
+  SALON
+  MOBILE
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -160,6 +165,7 @@ model User {
   updatedAt        DateTime          @updatedAt
   adminActionLogs  AdminActionLog[]  @relation("AdminUserLogs")
   adminPermissions AdminPermission[]
+  sentMessages     Message[]         @relation("UserSentMessages")
 
   favoritePros ProfessionalFavorite[]
 
@@ -184,16 +190,18 @@ model ClientProfile {
   intentEvents         ClientIntentEvent[]
   openingNotifications OpeningNotification[]
   notificationSettings ClientNotificationSettings?
+  messageThreads       MessageThread[]             @relation("ClientThreads")
 
   alertBanner String?
 
   user User @relation(fields: [userId], references: [id])
 
-  bookings  Booking[]
-  notes     ClientProfessionalNote[]
-  allergies ClientAllergy[]
-  reviews   Review[]
-  reminders Reminder[]
+  bookings     Booking[]
+  bookingHolds BookingHold[] // ✅ ADD THIS (opposite relation)
+  notes        ClientProfessionalNote[]
+  allergies    ClientAllergy[]
+  reviews      Review[]
+  reminders    Reminder[]
 
   waitlistEntries WaitlistEntry[]
 }
@@ -209,6 +217,7 @@ model ProfessionalProfile {
   timeZone           String? // IANA tz like "America/New_York"
   intentEvents       ClientIntentEvent[]
   adminPermissions   AdminPermission[]
+  messageThreads     MessageThread[]        @relation("ProThreads")
 
   location String @default("")
 
@@ -336,6 +345,8 @@ model Service {
   mediaServiceTags MediaServiceTag[]
   waitlistEntries  WaitlistEntry[]
   adminActionLogs  AdminActionLog[]              @relation("ServiceLogs")
+  messageThreads   MessageThread[]               @relation("ServiceThreads")
+  quotes           Quote[]                       @relation("ServiceQuotes")
 }
 
 model ServicePermission {
@@ -350,25 +361,42 @@ model ServicePermission {
 }
 
 model ProfessionalServiceOffering {
-  id              String  @id @default(cuid())
-  professionalId  String
-  serviceId       String
-  title           String?
-  description     String?
-  price           Decimal @db.Decimal(10, 2)
-  durationMinutes Int
-  customImageUrl  String?
-  isActive        Boolean @default(true)
+  id             String @id @default(cuid())
+  professionalId String
+  serviceId      String
 
-  intentEvents       ClientIntentEvent[]
-  lastMinuteOpenings LastMinuteOpening[] @relation("OfferingOpenings")
+  title       String?
+  description String?
 
+  // Keep these for backwards compatibility OR migrate cleanly (your choice):
+  // price           Decimal @db.Decimal(10, 2)
+  // durationMinutes Int
+
+  // ✅ New: separate “starting at” + duration per location type
+  salonPriceStartingAt  Decimal?        @db.Decimal(10, 2)
+  salonDurationMinutes  Int?
+  mobilePriceStartingAt Decimal?        @db.Decimal(10, 2)
+  mobileDurationMinutes Int?
+  messageThreads        MessageThread[] @relation("OfferingThreads")
+  quotes                Quote[]         @relation("OfferingQuotes")
+
+  // ✅ Pro-only image override shown on their profile/services tab
+  customImageUrl String?
+
+  // ✅ Pro can offer salon and/or mobile per service
+  offersInSalon Boolean @default(true)
+  offersMobile  Boolean @default(false)
+
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
   service      Service             @relation(fields: [serviceId], references: [id])
   bookings     Booking[]
+
+  intentEvents       ClientIntentEvent[]
+  lastMinuteOpenings LastMinuteOpening[] @relation("OfferingOpenings")
 
   @@unique([professionalId, serviceId])
 }
@@ -525,13 +553,14 @@ model ClientNotificationSettings {
 }
 
 model Booking {
-  id             String        @id @default(cuid())
+  id             String              @id @default(cuid())
   clientId       String
   professionalId String
   serviceId      String
   offeringId     String?
   scheduledFor   DateTime
-  status         BookingStatus @default(PENDING)
+  status         BookingStatus       @default(PENDING)
+  locationType   ServiceLocationType @default(SALON)
 
   priceSnapshot           Decimal @db.Decimal(10, 2)
   durationMinutesSnapshot Int
@@ -589,9 +618,14 @@ model BookingHold {
   expiresAt      DateTime
   createdAt      DateTime @default(now())
 
+  clientId String? // <-- nullable for now
+  client   ClientProfile? @relation(fields: [clientId], references: [id])
+
   @@index([offeringId, scheduledFor])
   @@index([professionalId, scheduledFor])
+  @@index([clientId, expiresAt])
 }
+
 
 model AftercareSummary {
   id          String    @id @default(cuid())
@@ -827,4 +861,66 @@ model WaitlistEntry {
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
   service      Service             @relation(fields: [serviceId], references: [id])
   media        MediaAsset?         @relation(fields: [mediaId], references: [id])
+}
+
+model MessageThread {
+  id             String   @id @default(cuid())
+  clientId       String
+  professionalId String
+  serviceId      String?
+  offeringId     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client       ClientProfile                @relation("ClientThreads", fields: [clientId], references: [id])
+  professional ProfessionalProfile          @relation("ProThreads", fields: [professionalId], references: [id])
+  service      Service?                     @relation("ServiceThreads", fields: [serviceId], references: [id])
+  offering     ProfessionalServiceOffering? @relation("OfferingThreads", fields: [offeringId], references: [id])
+
+  messages Message[]
+  quotes   Quote[]
+
+  @@unique([clientId, professionalId, serviceId])
+  @@index([professionalId, updatedAt])
+  @@index([clientId, updatedAt])
+}
+
+model Message {
+  id           String   @id @default(cuid())
+  threadId     String
+  senderUserId String
+  body         String?
+  createdAt    DateTime @default(now())
+
+  thread MessageThread @relation(fields: [threadId], references: [id])
+  sender User          @relation("UserSentMessages", fields: [senderUserId], references: [id])
+
+  attachments MessageAttachment[]
+}
+
+model MessageAttachment {
+  id        String    @id @default(cuid())
+  messageId String
+  url       String
+  mediaType MediaType @default(IMAGE)
+  createdAt DateTime  @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+}
+
+model Quote {
+  id              String              @id @default(cuid())
+  threadId        String
+  serviceId       String
+  offeringId      String?
+  locationType    ServiceLocationType
+  priceStartingAt Decimal?            @db.Decimal(10, 2)
+  durationMinutes Int?
+  notes           String?
+  status          String              @default("SENT")
+  createdAt       DateTime            @default(now())
+
+  thread   MessageThread                @relation(fields: [threadId], references: [id])
+  service  Service                      @relation("ServiceQuotes", fields: [serviceId], references: [id])
+  offering ProfessionalServiceOffering? @relation("OfferingQuotes", fields: [offeringId], references: [id])
 }

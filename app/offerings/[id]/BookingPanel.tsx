@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import type { FormEvent } from 'react'
 
-type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE' | string
+type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE'
 
 type BookingPanelProps = {
   offeringId: string
@@ -44,8 +45,12 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
+async function safeJson(res: Response): Promise<any> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
 }
 
 function errorFromResponse(res: Response, data: any) {
@@ -58,10 +63,6 @@ function errorFromResponse(res: Response, data: any) {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
-}
-
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.toUpperCase() : ''
 }
 
 /** TZ helpers */
@@ -95,7 +96,14 @@ function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
   return Math.round((asIfUtc - dateUtc.getTime()) / 60_000)
 }
 
-function zonedTimeToUtc(args: { year: number; month: number; day: number; hour: number; minute: number; timeZone: string }) {
+function zonedTimeToUtc(args: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  timeZone: string
+}) {
   const { year, month, day, hour, minute, timeZone } = args
   let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
   const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
@@ -203,10 +211,12 @@ export default function BookingPanel({
   }, [price])
 
   // Seed datetime-local from scheduledForISO in pro tz.
+  // Important: do not stomp user input if there's no scheduledForISO.
   useEffect(() => {
     const next = toDatetimeLocalFromISOInTimeZone(scheduledForISO, proTz)
-    setDateTime(next || '')
+    if (next) setDateTime(next)
     setConfirmChecked(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduledForISO, proTz])
 
   useEffect(() => {
@@ -280,7 +290,8 @@ export default function BookingPanel({
     return holdUntil - Date.now() <= 2 * 60_000
   }, [holdUntil])
 
-  const normalizedSource = useMemo(() => upper(source), [source])
+  // Source is now strongly typed; keep an uppercase string for API payload consistency
+  const normalizedSource = useMemo(() => source.toUpperCase(), [source])
 
   const missingHeldScheduledFor = Boolean(hasHold && !scheduledForFromUrl)
 
@@ -289,9 +300,8 @@ export default function BookingPanel({
       confirmChecked &&
       !loading &&
       (!hasHold || (holdId && holdUntil)) &&
-      normalizedSource &&
       ['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) &&
-      scheduledForISO,
+      (hasHold ? scheduledForFromUrl : toISOFromDatetimeLocalInTimeZone(dateTime, proTz)),
   )
 
   async function copyShareLink() {
@@ -316,7 +326,6 @@ export default function BookingPanel({
       return
     }
 
-    // Use scheduledForFromUrl if present, else whatever is in the input, else "now + 2 hours"
     const desiredISO =
       scheduledForFromUrl ||
       toISOFromDatetimeLocalInTimeZone(dateTime, proTz) ||
@@ -337,7 +346,7 @@ export default function BookingPanel({
         }),
       })
 
-      const data: any = await res.json().catch(() => ({}))
+      const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || `Failed to join waitlist (${res.status}).`)
 
       setWaitlistSuccess('Added to waitlist.')
@@ -350,7 +359,7 @@ export default function BookingPanel({
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (loading) return
 
@@ -363,7 +372,7 @@ export default function BookingPanel({
       return
     }
 
-    if (!normalizedSource || !['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource)) {
+    if (!['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource)) {
       setError('Missing booking source. Please go back and try again.')
       return
     }
@@ -401,6 +410,7 @@ export default function BookingPanel({
           scheduledFor: finalScheduledForISO,
           holdId: hasHold ? holdId : null,
           source: normalizedSource,
+          locationType: 'SALON', // or 'MOBILE' from the page/query
         }),
       })
 
@@ -433,7 +443,6 @@ export default function BookingPanel({
   }
 
   const calendarHref = createdBookingId ? `/api/calendar?bookingId=${encodeURIComponent(createdBookingId)}` : null
-
   const showWaitlistCTA = !success && (!hasHold || !holdUntil)
 
   return (
@@ -508,10 +517,6 @@ export default function BookingPanel({
           {missingHeldScheduledFor ? <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div> : null}
 
           {hasHold && (!holdId || !holdUntil) ? <div style={{ fontSize: 12, color: '#b91c1c' }}>No valid hold found. Go back and pick a slot again.</div> : null}
-
-          {!normalizedSource || !['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) ? (
-            <div style={{ fontSize: 12, color: '#b91c1c' }}>Missing booking source. (Parent page needs to pass it.)</div>
-          ) : null}
 
           <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#111', padding: 12, borderRadius: 12, border: '1px solid #eee', background: '#fff' }}>
             <input

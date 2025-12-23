@@ -1,6 +1,7 @@
 // app/api/availability/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import type { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,10 +24,24 @@ type ProfessionalForAvailability = {
   workingHours: any | null
 }
 
+type OfferingForPrimary = {
+  id: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonPriceStartingAt: any | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: any | null
+  mobileDurationMinutes: number | null
+}
+
 type OfferingForOtherPros = {
   id: string
-  price: any
-  durationMinutes: number | null
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonPriceStartingAt: any | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: any | null
+  mobileDurationMinutes: number | null
   professional: ProfessionalForAvailability | null
 }
 
@@ -48,6 +63,52 @@ function addMinutes(d: Date, minutes: number) {
 /** existingStart < requestedEnd AND requestedStart < existingEnd */
 function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && bStart < aEnd
+}
+
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
+}
+
+function pickEffectiveLocationType(args: {
+  requested: ServiceLocationType | null
+  offersInSalon: boolean
+  offersMobile: boolean
+}): ServiceLocationType | null {
+  const { requested, offersInSalon, offersMobile } = args
+  if (requested === 'SALON' && offersInSalon) return 'SALON'
+  if (requested === 'MOBILE' && offersMobile) return 'MOBILE'
+  if (offersInSalon) return 'SALON'
+  if (offersMobile) return 'MOBILE'
+  return null
+}
+
+function pickDurationMinutesForAvailability(offering: {
+  salonDurationMinutes: number | null
+  mobileDurationMinutes: number | null
+}): number {
+  // Conservative: use max so we don't advertise slots that can't fit a longer variant.
+  const d1 = Number(offering.salonDurationMinutes ?? 0)
+  const d2 = Number(offering.mobileDurationMinutes ?? 0)
+  const best = Math.max(d1, d2)
+  return Number.isFinite(best) && best > 0 ? best : 60
+}
+
+function pickPriceAndDurationForMode(args: {
+  offering: OfferingForPrimary | OfferingForOtherPros
+  locationType: ServiceLocationType
+}) {
+  const { offering, locationType } = args
+
+  const priceStartingAt =
+    locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+
+  const durationMinutes =
+    locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+
+  return { priceStartingAt: priceStartingAt ?? null, durationMinutes: durationMinutes ?? null }
 }
 
 /**
@@ -189,7 +250,6 @@ async function computeNextSlots(args: {
   for (let dayOffset = 0; dayOffset <= 10 && out.length < limit; dayOffset++) {
     const ymd = addDaysToYMD(proNowParts.year, proNowParts.month, proNowParts.day, dayOffset)
 
-    // pick weekday rule using noon in pro tz
     const noonUtc = zonedTimeToUtc({
       year: ymd.year,
       month: ymd.month,
@@ -198,6 +258,7 @@ async function computeNextSlots(args: {
       minute: 0,
       timeZone,
     })
+
     const dayKey = getDayKeyFromUtc(noonUtc, timeZone)
     const rule = wh && wh[dayKey] ? wh[dayKey] : fallback
 
@@ -248,6 +309,8 @@ export async function GET(req: Request) {
     const serviceId = pickString(searchParams.get('serviceId'))
     const mediaId = pickString(searchParams.get('mediaId'))
 
+    const requestedLocationType = normalizeLocationType(searchParams.get('locationType'))
+
     const limit = Math.min(toInt(searchParams.get('limit'), 6) || 6, 12)
     const otherProsLimit = Math.min(toInt(searchParams.get('otherProsLimit'), 6) || 6, 12)
 
@@ -275,13 +338,42 @@ export async function GET(req: Request) {
     const creatorTimeZone = creator.timeZone || 'America/Los_Angeles'
 
     const creatorOffering = serviceId
-      ? await prisma.professionalServiceOffering.findFirst({
+      ? ((await prisma.professionalServiceOffering.findFirst({
           where: { professionalId, serviceId, isActive: true },
-          select: { id: true, price: true, durationMinutes: true },
+          select: {
+            id: true,
+            offersInSalon: true,
+            offersMobile: true,
+            salonPriceStartingAt: true,
+            salonDurationMinutes: true,
+            mobilePriceStartingAt: true,
+            mobileDurationMinutes: true,
+          },
+        })) as OfferingForPrimary | null)
+      : null
+
+    // If we have an offering, pick an effective mode (SALON vs MOBILE)
+    const effectiveCreatorLocationType = creatorOffering
+      ? pickEffectiveLocationType({
+          requested: requestedLocationType,
+          offersInSalon: Boolean(creatorOffering.offersInSalon),
+          offersMobile: Boolean(creatorOffering.offersMobile),
         })
       : null
 
-    const creatorDuration = creatorOffering?.durationMinutes ?? 60
+    // Determine duration for computing availability
+    let creatorDuration = 60
+    if (creatorOffering) {
+      if (effectiveCreatorLocationType) {
+        const pd = pickPriceAndDurationForMode({
+          offering: creatorOffering,
+          locationType: effectiveCreatorLocationType,
+        })
+        creatorDuration = Number(pd.durationMinutes ?? 0) || 60
+      } else {
+        creatorDuration = pickDurationMinutesForAvailability(creatorOffering)
+      }
+    }
 
     const creatorSlots = await computeNextSlots({
       professionalId,
@@ -290,6 +382,12 @@ export async function GET(req: Request) {
       timeZone: creatorTimeZone,
       workingHours: creator.workingHours ?? null,
     })
+
+    // Build primary pro payload fields
+    const primaryPriceAndDuration =
+      creatorOffering && effectiveCreatorLocationType
+        ? pickPriceAndDurationForMode({ offering: creatorOffering, locationType: effectiveCreatorLocationType })
+        : { priceStartingAt: null, durationMinutes: null }
 
     let otherPros: Array<any> = []
     if (serviceId) {
@@ -302,8 +400,12 @@ export async function GET(req: Request) {
         take: otherProsLimit,
         select: {
           id: true,
-          price: true,
-          durationMinutes: true,
+          offersInSalon: true,
+          offersMobile: true,
+          salonPriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobilePriceStartingAt: true,
+          mobileDurationMinutes: true,
           professional: {
             select: {
               id: true,
@@ -325,9 +427,29 @@ export async function GET(req: Request) {
             if (!p?.id) return null
 
             const pTz = p.timeZone || 'America/Los_Angeles'
+
+            const effectiveLocationType = pickEffectiveLocationType({
+              requested: requestedLocationType,
+              offersInSalon: Boolean(o.offersInSalon),
+              offersMobile: Boolean(o.offersMobile),
+            })
+
+            // If they don’t support requested and don’t support anything, skip.
+            if (!effectiveLocationType) return null
+
+            const { priceStartingAt, durationMinutes } = pickPriceAndDurationForMode({
+              offering: o,
+              locationType: effectiveLocationType,
+            })
+
+            // If they haven't configured duration for that mode, be conservative
+            const dur = Number(durationMinutes ?? 0)
+            const durationForSlots =
+              Number.isFinite(dur) && dur > 0 ? dur : pickDurationMinutesForAvailability(o)
+
             const slots = await computeNextSlots({
               professionalId: String(p.id),
-              durationMinutes: o.durationMinutes ?? 60,
+              durationMinutes: durationForSlots,
               limit: Math.min(4, limit),
               timeZone: pTz,
               workingHours: p.workingHours ?? null,
@@ -338,9 +460,14 @@ export async function GET(req: Request) {
               businessName: p.businessName ?? null,
               avatarUrl: p.avatarUrl ?? null,
               location: p.location ?? p.city ?? null,
+
               offeringId: o.id,
-              price: o.price,
-              durationMinutes: o.durationMinutes,
+
+              // Updated fields
+              locationType: effectiveLocationType,
+              priceStartingAt,
+              durationMinutes: durationForSlots,
+
               slots,
               timeZone: pTz,
             }
@@ -356,18 +483,27 @@ export async function GET(req: Request) {
       // timezone for the primary pro (creator)
       timeZone: creatorTimeZone,
 
+      // reflects what mode we used to compute primary availability (if known)
+      locationType: effectiveCreatorLocationType ?? null,
+
       primaryPro: {
         id: creator.id,
         businessName: creator.businessName ?? null,
         avatarUrl: creator.avatarUrl ?? null,
         location: creator.location ?? creator.city ?? null,
+
         offeringId: creatorOffering?.id ?? null,
-        price: creatorOffering?.price ?? null,
-        durationMinutes: creatorOffering?.durationMinutes ?? null,
+
+        // Updated fields
+        locationType: effectiveCreatorLocationType ?? null,
+        priceStartingAt: primaryPriceAndDuration.priceStartingAt ?? null,
+        durationMinutes: creatorDuration,
+
         slots: creatorSlots,
         isCreator: true,
         timeZone: creatorTimeZone,
       },
+
       otherPros,
       waitlistSupported: true,
     })

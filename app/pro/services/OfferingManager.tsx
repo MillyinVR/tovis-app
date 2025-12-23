@@ -1,4 +1,3 @@
-// app/pro/services/OfferingManager.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -9,12 +8,21 @@ type Offering = {
   serviceId: string
   title: string | null
   description: string | null
-  price: string
-  durationMinutes: number
+
   customImageUrl: string | null
   defaultImageUrl?: string | null
+
   serviceName: string
   categoryName: string | null
+
+  offersInSalon: boolean
+  offersMobile: boolean
+
+  salonPriceStartingAt: string | null
+  salonDurationMinutes: number | null
+
+  mobilePriceStartingAt: string | null
+  mobileDurationMinutes: number | null
 }
 
 type Props = {
@@ -135,17 +143,47 @@ function OfferingCard({
   error: string | null
   success: string | null
   onToggle: () => void
-  onSave: (patch: { title?: string | null; description?: string | null; price?: string; durationMinutes?: number; customImageUrl?: string | null }) => void
+  onSave: (patch: {
+    title?: string | null
+    description?: string | null
+    customImageUrl?: string | null
+
+    offersInSalon?: boolean
+    offersMobile?: boolean
+
+    salonPriceStartingAt?: string | null
+    salonDurationMinutes?: number | null
+
+    mobilePriceStartingAt?: string | null
+    mobileDurationMinutes?: number | null
+  }) => void
   onRemove: () => void
 }) {
-  // Local editable state
   const [title, setTitle] = useState(o.title ?? o.serviceName)
   const [description, setDescription] = useState(o.description ?? '')
-  const [price, setPrice] = useState(o.price)
-  const [duration, setDuration] = useState(String(o.durationMinutes))
   const [customImageUrl, setCustomImageUrl] = useState(o.customImageUrl ?? '')
 
+  const [offersInSalon, setOffersInSalon] = useState(Boolean(o.offersInSalon))
+  const [offersMobile, setOffersMobile] = useState(Boolean(o.offersMobile))
+
+  const [salonPrice, setSalonPrice] = useState(o.salonPriceStartingAt ?? '')
+  const [salonDuration, setSalonDuration] = useState(o.salonDurationMinutes ? String(o.salonDurationMinutes) : '')
+
+  const [mobilePrice, setMobilePrice] = useState(o.mobilePriceStartingAt ?? '')
+  const [mobileDuration, setMobileDuration] = useState(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
+
   const imgSrc = pickImage(o)
+
+  function summaryLine() {
+    const parts: string[] = []
+    if (o.offersInSalon && o.salonPriceStartingAt && o.salonDurationMinutes) {
+      parts.push(`Salon: $${o.salonPriceStartingAt} • ${o.salonDurationMinutes}m`)
+    }
+    if (o.offersMobile && o.mobilePriceStartingAt && o.mobileDurationMinutes) {
+      parts.push(`Mobile: $${o.mobilePriceStartingAt} • ${o.mobileDurationMinutes}m`)
+    }
+    return parts.length ? parts.join('  |  ') : 'No pricing set'
+  }
 
   return (
     <div
@@ -192,13 +230,9 @@ function OfferingCard({
 
             {o.categoryName ? <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>{o.categoryName}</div> : null}
 
-            <div style={{ fontSize: 12, color: '#555', marginTop: 6 }}>
-              {o.durationMinutes} min • ${o.price}
-            </div>
+            <div style={{ fontSize: 12, color: '#555', marginTop: 6 }}>{summaryLine()}</div>
 
-            {o.customImageUrl ? (
-              <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>Custom image override</div>
-            ) : null}
+            {o.customImageUrl ? <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>Custom image override</div> : null}
           </div>
         </div>
 
@@ -243,18 +277,43 @@ function OfferingCard({
           onSubmit={(e) => {
             e.preventDefault()
 
-            const priceNorm = normalizeMoney2(price)
-            if (!priceNorm) return alert('Price must be like 50 or 49.99')
+            if (!offersInSalon && !offersMobile) return alert('Enable at least Salon or Mobile.')
 
-            const d = Math.trunc(Number(duration))
-            if (!Number.isFinite(d) || d <= 0) return alert('Duration must be a positive number.')
+            // salon validation if enabled
+            let salonPriceNorm: string | null = null
+            let salonDurInt: number | null = null
+            if (offersInSalon) {
+              salonPriceNorm = normalizeMoney2(salonPrice)
+              if (!salonPriceNorm) return alert('Salon price must be like 50 or 49.99')
+
+              salonDurInt = Math.trunc(Number(salonDuration))
+              if (!Number.isFinite(salonDurInt) || salonDurInt <= 0) return alert('Salon duration must be a positive number.')
+            }
+
+            // mobile validation if enabled
+            let mobilePriceNorm: string | null = null
+            let mobileDurInt: number | null = null
+            if (offersMobile) {
+              mobilePriceNorm = normalizeMoney2(mobilePrice)
+              if (!mobilePriceNorm) return alert('Mobile price must be like 50 or 49.99')
+
+              mobileDurInt = Math.trunc(Number(mobileDuration))
+              if (!Number.isFinite(mobileDurInt) || mobileDurInt <= 0) return alert('Mobile duration must be a positive number.')
+            }
 
             onSave({
               title: title.trim() || null,
               description: description.trim() || null,
-              price: priceNorm,
-              durationMinutes: d,
               customImageUrl: customImageUrl.trim() || null,
+
+              offersInSalon,
+              offersMobile,
+
+              salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
+              salonDurationMinutes: offersInSalon ? salonDurInt : null,
+
+              mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
+              mobileDurationMinutes: offersMobile ? mobileDurInt : null,
             })
           }}
           style={{
@@ -264,7 +323,7 @@ function OfferingCard({
             gap: 10,
           }}
         >
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '2fr 1fr 1fr' }}>
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '2fr 1fr' }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <span style={{ fontSize: 12, color: '#555' }}>Title</span>
               <input
@@ -276,24 +335,12 @@ function OfferingCard({
             </label>
 
             <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#555' }}>Price</span>
+              <span style={{ fontSize: 12, color: '#555' }}>Custom image URL</span>
               <input
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
+                value={customImageUrl}
+                onChange={(e) => setCustomImageUrl(e.target.value)}
                 disabled={busy}
-                inputMode="decimal"
-                style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
-              />
-            </label>
-
-            <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#555' }}>Minutes</span>
-              <input
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-                disabled={busy}
-                type="number"
-                min={1}
+                placeholder="https://..."
                 style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
               />
             </label>
@@ -310,19 +357,78 @@ function OfferingCard({
             />
           </label>
 
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 12, color: '#555' }}>Custom image URL (optional)</span>
-            <input
-              value={customImageUrl}
-              onChange={(e) => setCustomImageUrl(e.target.value)}
-              disabled={busy}
-              placeholder="https://..."
-              style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
-            />
-            <span style={{ fontSize: 11, color: '#777' }}>
-              This overrides the default service image (if one exists).
-            </span>
-          </label>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input type="checkbox" checked={offersInSalon} onChange={(e) => setOffersInSalon(e.target.checked)} disabled={busy} />
+              Offer in Salon
+            </label>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input type="checkbox" checked={offersMobile} onChange={(e) => setOffersMobile(e.target.checked)} disabled={busy} />
+              Offer Mobile
+            </label>
+          </div>
+
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr' }}>
+            {/* SALON */}
+            <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 10, opacity: offersInSalon ? 1 : 0.6 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Salon</div>
+
+              <div style={{ display: 'grid', gap: 8 }}>
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#555' }}>Starting at</span>
+                  <input
+                    value={salonPrice}
+                    onChange={(e) => setSalonPrice(e.target.value)}
+                    disabled={busy || !offersInSalon}
+                    inputMode="decimal"
+                    style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
+                  />
+                </label>
+
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#555' }}>Minutes</span>
+                  <input
+                    value={salonDuration}
+                    onChange={(e) => setSalonDuration(e.target.value)}
+                    disabled={busy || !offersInSalon}
+                    type="number"
+                    min={1}
+                    style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* MOBILE */}
+            <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 10, opacity: offersMobile ? 1 : 0.6 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Mobile</div>
+
+              <div style={{ display: 'grid', gap: 8 }}>
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#555' }}>Starting at</span>
+                  <input
+                    value={mobilePrice}
+                    onChange={(e) => setMobilePrice(e.target.value)}
+                    disabled={busy || !offersMobile}
+                    inputMode="decimal"
+                    style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
+                  />
+                </label>
+
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#555' }}>Minutes</span>
+                  <input
+                    value={mobileDuration}
+                    onChange={(e) => setMobileDuration(e.target.value)}
+                    disabled={busy || !offersMobile}
+                    type="number"
+                    min={1}
+                    style={{ borderRadius: 8, border: '1px solid #ddd', padding: 8, fontSize: 13 }}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
 
           {error ? <div style={{ fontSize: 12, color: '#b91c1c' }}>{error}</div> : null}
           {success ? <div style={{ fontSize: 12, color: '#16a34a' }}>{success}</div> : null}

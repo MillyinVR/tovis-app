@@ -6,12 +6,13 @@ import LastMinuteSettingsClient from './settingsClient'
 import { moneyToString } from '@/lib/money'
 import OpeningsClient from './OpeningsClient'
 
-
 export const dynamic = 'force-dynamic'
 
 export default async function ProLastMinutePage() {
   const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) redirect('/login?from=/pro/last-minute')
+  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
+    redirect('/login?from=/pro/last-minute')
+  }
 
   const proId = user.professionalProfile.id
 
@@ -37,12 +38,29 @@ export default async function ProLastMinutePage() {
         minPrice: r.minPrice ? moneyToString(r.minPrice) : null,
       })),
     },
-    offerings: offerings.map((o) => ({
-      id: o.id,
-      serviceId: o.serviceId,
-      name: o.title || o.service.name,
-      basePrice: moneyToString(o.price) ?? '0.00',
-    })),
+    offerings: offerings.map((o) => {
+      // Option B: pick a reasonable “base” price for display/rules
+      const base =
+        o.salonPriceStartingAt ??
+        o.mobilePriceStartingAt ??
+        o.service.minPrice ??
+        null
+
+      return {
+        id: o.id,
+        serviceId: o.serviceId,
+        name: o.title || o.service.name,
+        basePrice: base ? moneyToString(base) : '0.00',
+
+        // Optional extras if your OpeningsClient wants them later
+        offersInSalon: o.offersInSalon,
+        offersMobile: o.offersMobile,
+        salonPriceStartingAt: o.salonPriceStartingAt ? moneyToString(o.salonPriceStartingAt) : null,
+        mobilePriceStartingAt: o.mobilePriceStartingAt ? moneyToString(o.mobilePriceStartingAt) : null,
+        salonDurationMinutes: o.salonDurationMinutes ?? null,
+        mobileDurationMinutes: o.mobileDurationMinutes ?? null,
+      }
+    }),
   }
 
   return (
@@ -55,15 +73,10 @@ export default async function ProLastMinutePage() {
       <div style={{ marginTop: 14 }}>
         <LastMinuteSettingsClient initial={payload as any} />
       </div>
+
       <div style={{ marginTop: 14 }}>
-      <OpeningsClient offerings={payload.offerings as any} />
-    </div>
-
-    <div style={{ marginTop: 14 }}>
-    <OpeningsClient offerings={payload.offerings as any} />
-  </div>
-
-
+        <OpeningsClient offerings={payload.offerings as any} />
+      </div>
     </main>
   )
 }
