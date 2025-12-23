@@ -2,15 +2,17 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import type { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type CreateHoldBody = {
   offeringId?: unknown
   scheduledFor?: unknown
+  locationType?: unknown
 }
 
-function pickString(v: unknown) {
+function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
@@ -27,42 +29,179 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart
 }
 
-/**
- * Normalize to minute precision.
- * UI uses minute resolution; avoids "10:00:00.123" vs "10:00:00.000".
- */
+/** Normalize to minute precision. */
 function normalizeToMinute(d: Date) {
   const x = new Date(d)
   x.setSeconds(0, 0)
   return x
 }
 
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
+}
+
+function pickDurationMinutes(args: {
+  locationType: ServiceLocationType
+  salonDurationMinutes: number | null
+  mobileDurationMinutes: number | null
+}) {
+  const raw = args.locationType === 'MOBILE' ? args.mobileDurationMinutes : args.salonDurationMinutes
+  const n = Number(raw ?? 0)
+  return Number.isFinite(n) && n > 0 ? n : 60
+}
+
+/** -------------------------
+ * Working-hours enforcement
+ * ------------------------- */
+type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
+type WorkingHours = Record<string, WorkingHoursDay>
+
+function isValidIanaTimeZone(tz: string | null | undefined) {
+  if (!tz || typeof tz !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
+    return true
+  } catch {
+    return false
+  }
+}
+
+function getZonedParts(dateUtc: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const parts = dtf.formatToParts(dateUtc)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  }
+}
+
+function getWeekdayKeyInTimeZone(
+  dateUtc: Date,
+  timeZone: string,
+): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+    .format(dateUtc)
+    .toLowerCase()
+  if (weekday.startsWith('mon')) return 'mon'
+  if (weekday.startsWith('tue')) return 'tue'
+  if (weekday.startsWith('wed')) return 'wed'
+  if (weekday.startsWith('thu')) return 'thu'
+  if (weekday.startsWith('fri')) return 'fri'
+  if (weekday.startsWith('sat')) return 'sat'
+  return 'sun'
+}
+
+function parseHHMM(v?: string) {
+  if (!v || typeof v !== 'string') return null
+  const m = /^(\d{2}):(\d{2})$/.exec(v.trim())
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  if (hh < 0 || hh > 23) return null
+  if (mm < 0 || mm > 59) return null
+  return { hh, mm }
+}
+
+function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) {
+  const z = getZonedParts(dateUtc, timeZone)
+  return z.hour * 60 + z.minute
+}
+
+function ensureWithinWorkingHours(args: {
+  scheduledStartUtc: Date
+  scheduledEndUtc: Date
+  workingHours: unknown
+  timeZone: string
+}): { ok: true } | { ok: false; error: string } {
+  const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
+
+  if (!workingHours || typeof workingHours !== 'object') {
+    return { ok: false, error: 'This professional has not set working hours yet.' }
+  }
+
+  const wh = workingHours as WorkingHours
+  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, timeZone)
+  const rule = wh?.[dayKey]
+
+  if (!rule || rule.enabled === false) {
+    return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  }
+
+  const startHHMM = parseHHMM(rule.start)
+  const endHHMM = parseHHMM(rule.end)
+  if (!startHHMM || !endHHMM) {
+    return { ok: false, error: 'This professional’s working hours are misconfigured.' }
+  }
+
+  const windowStartMin = startHHMM.hh * 60 + startHHMM.mm
+  const windowEndMin = endHHMM.hh * 60 + endHHMM.mm
+  if (windowEndMin <= windowStartMin) {
+    return { ok: false, error: 'This professional’s working hours are misconfigured.' }
+  }
+
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
+
+  const endDayKey = getWeekdayKeyInTimeZone(scheduledEndUtc, timeZone)
+  if (endDayKey !== dayKey) {
+    return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  }
+
+  if (startMin < windowStartMin || endMin > windowEndMin) {
+    return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  }
+
+  return { ok: true }
+}
+
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Only clients can hold slots.' }, { status: 401 })
+      return NextResponse.json({ ok: false, error: 'Only clients can hold slots.' }, { status: 401 })
     }
     const clientId = user.clientProfile.id
 
     const body = (await req.json().catch(() => ({}))) as CreateHoldBody
-    const offeringId = pickString(body?.offeringId)
-    const scheduledForRaw = body?.scheduledFor
+    const offeringId = pickString(body.offeringId)
+    const locationType = normalizeLocationType(body.locationType)
 
-    if (!offeringId || !scheduledForRaw) {
-      return NextResponse.json({ error: 'Missing offeringId or scheduledFor.' }, { status: 400 })
+    if (!offeringId || !body.scheduledFor || !locationType) {
+      return NextResponse.json(
+        { ok: false, error: 'Missing offeringId, scheduledFor, or locationType.' },
+        { status: 400 },
+      )
     }
 
-    const scheduledForParsed = new Date(String(scheduledForRaw))
+    const scheduledForParsed = new Date(String(body.scheduledFor))
     if (!isValidDate(scheduledForParsed)) {
-      return NextResponse.json({ error: 'Invalid scheduledFor.' }, { status: 400 })
+      return NextResponse.json({ ok: false, error: 'Invalid scheduledFor.' }, { status: 400 })
     }
 
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
     const BUFFER_MINUTES = 5
     if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
-      return NextResponse.json({ error: 'Please select a future time.' }, { status: 400 })
+      return NextResponse.json({ ok: false, error: 'Please select a future time.' }, { status: 400 })
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -72,10 +211,16 @@ export async function POST(req: Request) {
           id: true,
           isActive: true,
           professionalId: true,
-
-          // Option B durations (holds need duration to test overlap)
+          offersInSalon: true,
+          offersMobile: true,
           salonDurationMinutes: true,
           mobileDurationMinutes: true,
+          professional: {
+            select: {
+              timeZone: true,
+              workingHours: true,
+            },
+          },
         },
       })
 
@@ -83,19 +228,38 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 400, error: 'Invalid or inactive offering.' }
       }
 
-      // Conservative overlap window: use the MAX configured duration
-      const d1 = Number(offering.salonDurationMinutes ?? 0)
-      const d2 = Number(offering.mobileDurationMinutes ?? 0)
-      const duration = Math.max(d1, d2)
-
-      if (!Number.isFinite(duration) || duration <= 0) {
-        return { ok: false as const, status: 400, error: 'Offering duration is invalid.' }
+      if (locationType === 'SALON' && !offering.offersInSalon) {
+        return { ok: false as const, status: 400, error: 'This service is not offered in-salon.' }
+      }
+      if (locationType === 'MOBILE' && !offering.offersMobile) {
+        return { ok: false as const, status: 400, error: 'This service is not offered as mobile.' }
       }
 
+      const duration = pickDurationMinutes({
+        locationType,
+        salonDurationMinutes: offering.salonDurationMinutes,
+        mobileDurationMinutes: offering.mobileDurationMinutes,
+      })
+
       const requestedEnd = addMinutes(requestedStart, duration)
+
+      const proTz = isValidIanaTimeZone(offering.professional?.timeZone)
+        ? offering.professional!.timeZone!
+        : 'America/Los_Angeles'
+
+      const whCheck = ensureWithinWorkingHours({
+        scheduledStartUtc: requestedStart,
+        scheduledEndUtc: requestedEnd,
+        workingHours: offering.professional?.workingHours,
+        timeZone: proTz,
+      })
+      if (!whCheck.ok) {
+        return { ok: false as const, status: 400, error: whCheck.error }
+      }
+
       const now = new Date()
 
-      // Tidy: delete expired holds for this exact pro+time
+      // Cleanup: delete expired holds for this exact pro+slot
       await tx.bookingHold.deleteMany({
         where: {
           professionalId: offering.professionalId,
@@ -104,28 +268,26 @@ export async function POST(req: Request) {
         },
       })
 
-      // Optional UX nicety:
-      // If THIS client already holds this slot (new holds store clientId), return it.
+      // If THIS client already holds this exact slot, return it
       const existingClientHold = await tx.bookingHold.findFirst({
         where: {
           professionalId: offering.professionalId,
           scheduledFor: requestedStart,
           expiresAt: { gt: now },
-          clientId: clientId, // nullable field in DB, but we are matching our id
+          clientId,
         },
-        select: { id: true, expiresAt: true },
+        select: { id: true, expiresAt: true, scheduledFor: true },
       })
 
       if (existingClientHold) {
         return {
           ok: true as const,
           status: 200,
-          holdId: existingClientHold.id,
-          holdUntil: existingClientHold.expiresAt.getTime(),
+          hold: existingClientHold,
         }
       }
 
-      // Booking conflict check (widened window so overlaps aren’t missed)
+      // Booking conflict check
       const windowStart = addMinutes(requestedStart, -duration * 2)
       const windowEnd = addMinutes(requestedStart, duration * 2)
 
@@ -151,23 +313,18 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 409, error: 'That time was just taken.' }
       }
 
-      // Active hold conflict check (after cleanup)
-      // IMPORTANT: block if ANYONE has a hold for this pro+time.
+      // Hold conflict check: block if ANYONE holds this exact slot
       const activeHold = await tx.bookingHold.findFirst({
         where: {
           professionalId: offering.professionalId,
           scheduledFor: requestedStart,
           expiresAt: { gt: now },
         },
-        select: { id: true, clientId: true },
+        select: { id: true },
       })
 
       if (activeHold) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'Someone is already holding that time. Try another slot.',
-        }
+        return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
       }
 
       const expiresAt = addMinutes(now, 10)
@@ -176,31 +333,23 @@ export async function POST(req: Request) {
         data: {
           offeringId: offering.id,
           professionalId: offering.professionalId,
-          clientId, // ✅ NEW (nullable in schema, but we always write it now)
+          clientId,
           scheduledFor: requestedStart,
           expiresAt,
         },
-        select: { id: true, expiresAt: true },
+        select: { id: true, expiresAt: true, scheduledFor: true },
       })
 
-      return {
-        ok: true as const,
-        status: 201,
-        holdId: hold.id,
-        holdUntil: hold.expiresAt.getTime(),
-      }
+      return { ok: true as const, status: 201, hold }
     })
 
     if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status })
+      return NextResponse.json({ ok: false, error: result.error }, { status: result.status })
     }
 
-    return NextResponse.json(
-      { ok: true, holdId: result.holdId, holdUntil: result.holdUntil },
-      { status: result.status },
-    )
+    return NextResponse.json({ ok: true, hold: result.hold }, { status: result.status })
   } catch (e) {
     console.error('POST /api/holds error', e)
-    return NextResponse.json({ error: 'Failed to create hold.' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'Failed to create hold.' }, { status: 500 })
   }
 }

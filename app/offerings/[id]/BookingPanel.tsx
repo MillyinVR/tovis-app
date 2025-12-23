@@ -1,3 +1,4 @@
+// app/offerings/[id]/BookingPanel.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -12,10 +13,8 @@ type BookingPanelProps = {
   professionalId: string
   serviceId: string
 
-  // attribution (discovery)
   mediaId?: string | null
 
-  // ✅ NEW: offering capabilities + per-mode price/duration
   offersInSalon: boolean
   offersMobile: boolean
 
@@ -24,7 +23,6 @@ type BookingPanelProps = {
   mobilePriceStartingAt?: number | null
   mobileDurationMinutes?: number | null
 
-  // optional default mode (page can suggest it)
   defaultLocationType?: ServiceLocationType | null
 
   isLoggedInAsClient: boolean
@@ -78,94 +76,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-/** TZ helpers */
-function getZonedParts(dateUtc: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
-}
-
-function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
-  const z = getZonedParts(dateUtc, timeZone)
-  const asIfUtc = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, z.second)
-  return Math.round((asIfUtc - dateUtc.getTime()) / 60_000)
-}
-
-function zonedTimeToUtc(args: {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  timeZone: string
-}) {
-  const { year, month, day, hour, minute, timeZone } = args
-  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
-  const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
-  guess = new Date(guess.getTime() - offset1 * 60_000)
-  const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
-  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
-  return guess
-}
-
-function parseDatetimeLocal(value: string) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
-  if (!m) return null
-  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }
-}
-
-function toDatetimeLocalFromISOInTimeZone(iso: string | null | undefined, timeZone: string) {
-  if (!iso || typeof iso !== 'string') return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const z = getZonedParts(d, timeZone)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${z.year}-${pad(z.month)}-${pad(z.day)}T${pad(z.hour)}:${pad(z.minute)}`
-}
-
-function toISOFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
-  const p = parseDatetimeLocal(value)
-  if (!p) return null
-  const utc = zonedTimeToUtc({ ...p, timeZone })
-  if (Number.isNaN(utc.getTime())) return null
-  // normalize to minute precision
-  utc.setSeconds(0, 0)
-  return utc.toISOString()
-}
-
-function formatPrettyInTimeZone(valueDatetimeLocal: string, timeZone: string) {
-  const p = parseDatetimeLocal(valueDatetimeLocal)
-  if (!p) return null
-  const utc = zonedTimeToUtc({ ...p, timeZone })
-  if (Number.isNaN(utc.getTime())) return null
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(utc)
-}
-
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
   if (s === 'SALON') return 'SALON'
@@ -194,10 +104,8 @@ function pickModeFields(args: {
   mobileDurationMinutes?: number | null
 }) {
   const { locationType } = args
-  const price =
-    locationType === 'MOBILE' ? args.mobilePriceStartingAt ?? null : args.salonPriceStartingAt ?? null
-  const duration =
-    locationType === 'MOBILE' ? args.mobileDurationMinutes ?? null : args.salonDurationMinutes ?? null
+  const price = locationType === 'MOBILE' ? args.mobilePriceStartingAt ?? null : args.salonPriceStartingAt ?? null
+  const duration = locationType === 'MOBILE' ? args.mobileDurationMinutes ?? null : args.salonDurationMinutes ?? null
 
   const durationMinutes = Number(duration ?? 0)
   const safeDuration = Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : 60
@@ -206,6 +114,166 @@ function pickModeFields(args: {
   const safePrice = Number.isFinite(priceNum) && priceNum >= 0 ? priceNum : 0
 
   return { price: safePrice, durationMinutes: safeDuration }
+}
+
+function formatSlotLabel(isoUtc: string, timeZone: string) {
+  const d = new Date(isoUtc)
+  if (Number.isNaN(d.getTime())) return isoUtc
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(d)
+}
+
+function isoToYMDInTz(isoUtc: string, timeZone: string): string | null {
+  const d = new Date(isoUtc)
+  if (Number.isNaN(d.getTime())) return null
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  const y = map.year
+  const m = map.month
+  const day = map.day
+  if (!y || !m || !day) return null
+  return `${y}-${m}-${day}`
+}
+
+function ymdFromDateInTz(dateUtc: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(dateUtc)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  return `${map.year}-${map.month}-${map.day}`
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60_000)
+}
+
+function startOfMonthUtcFromYMD(ymd: string) {
+  const [y, m] = ymd.split('-').map((x) => Number(x))
+  return new Date(Date.UTC(y, (m || 1) - 1, 1, 12, 0, 0, 0))
+}
+
+function addMonthsUtc(d: Date, months: number) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1, 12, 0, 0, 0))
+}
+
+function buildMonthGrid(args: { monthStartUtc: Date; proTz: string }) {
+  const { monthStartUtc, proTz } = args
+  const monthKey = ymdFromDateInTz(monthStartUtc, proTz).slice(0, 7)
+
+  const monthStartYMD = ymdFromDateInTz(monthStartUtc, proTz)
+  const monthStartLocalNoonUtc = new Date(
+    Date.UTC(
+      Number(monthStartYMD.slice(0, 4)),
+      Number(monthStartYMD.slice(5, 7)) - 1,
+      Number(monthStartYMD.slice(8, 10)),
+      12,
+      0,
+      0,
+      0,
+    ),
+  )
+
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: proTz, weekday: 'short' })
+    .format(monthStartLocalNoonUtc)
+    .toLowerCase()
+
+  const map: Record<string, number> = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 }
+  const idx =
+    weekday.startsWith('mon')
+      ? map.mon
+      : weekday.startsWith('tue')
+        ? map.tue
+        : weekday.startsWith('wed')
+          ? map.wed
+          : weekday.startsWith('thu')
+            ? map.thu
+            : weekday.startsWith('fri')
+              ? map.fri
+              : weekday.startsWith('sat')
+                ? map.sat
+                : map.sun
+
+  const gridStartUtc = addDays(monthStartUtc, -idx)
+
+  const days: { ymd: string; inMonth: boolean; dateUtc: Date }[] = []
+  for (let i = 0; i < 42; i++) {
+    const dUtc = addDays(gridStartUtc, i)
+    const ymd = ymdFromDateInTz(dUtc, proTz)
+    const inMonth = ymd.slice(0, 7) === monthKey
+    days.push({ ymd, inMonth, dateUtc: dUtc })
+  }
+
+  return days
+}
+
+function clearHoldParams(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>) {
+  if (typeof window === 'undefined') return
+  const qs = new URLSearchParams(searchParams?.toString() || '')
+  qs.delete('holdId')
+  qs.delete('holdUntil')
+  qs.delete('scheduledFor')
+  router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
+}
+
+function parseHoldResponse(data: any): { holdId: string; holdUntilMs: number; scheduledForISO: string } {
+  const hold = data?.hold
+  const holdId = typeof hold?.id === 'string' ? hold.id : ''
+  const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt : ''
+  const scheduledForIso = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor : ''
+
+  const holdUntilMs = expiresAtIso ? new Date(expiresAtIso).getTime() : NaN
+  if (!holdId || !scheduledForIso || !Number.isFinite(holdUntilMs)) {
+    throw new Error('Hold response was missing fields.')
+  }
+
+  return { holdId, holdUntilMs, scheduledForISO: scheduledForIso }
+}
+
+async function createHoldForSelectedSlot(args: {
+  offeringId: string
+  scheduledFor: string
+  locationType: ServiceLocationType
+  router: ReturnType<typeof useRouter>
+  searchParams: ReturnType<typeof useSearchParams>
+}) {
+  const { offeringId, scheduledFor, locationType, router, searchParams } = args
+
+  const res = await fetch('/api/holds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ offeringId, scheduledFor, locationType }),
+  })
+
+  const data = await safeJson(res)
+  if (!res.ok || !data?.ok) throw new Error(data?.error || 'Failed to hold slot.')
+
+  const parsed = parseHoldResponse(data)
+
+  const qs = new URLSearchParams(searchParams?.toString() || '')
+  qs.set('holdId', parsed.holdId)
+  qs.set('holdUntil', String(parsed.holdUntilMs))
+  qs.set('scheduledFor', parsed.scheduledForISO)
+  qs.set('locationType', locationType)
+
+  router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
+
+  return { holdId: parsed.holdId, holdUntilMs: parsed.holdUntilMs, scheduledFor: parsed.scheduledForISO }
 }
 
 export default function BookingPanel(props: BookingPanelProps) {
@@ -235,26 +303,14 @@ export default function BookingPanel(props: BookingPanelProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const proTz = professionalTimeZone || searchParams?.get('proTimeZone') || 'America/Los_Angeles'
-
-  const viewerTz = useMemo(() => {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || null
-    } catch {
-      return null
-    }
-  }, [])
-
-  // hold + scheduledFor truth
-  const holdId = (searchParams?.get('holdId') || '').trim() || null
+  // URL truth
+  const holdIdFromUrl = (searchParams?.get('holdId') || '').trim() || null
   const holdUntilParam = searchParams?.get('holdUntil') || ''
   const scheduledForFromUrl = (searchParams?.get('scheduledFor') || '').trim() || null
-  const hasHold = Boolean(holdId)
+  const hasHold = Boolean(holdIdFromUrl)
 
-  // ✅ opening attribution (from opening flow)
   const openingId = (searchParams?.get('openingId') || '').trim() || null
 
-  // ✅ locationType can be suggested by URL or props
   const requestedLocationFromUrl = normalizeLocationType(searchParams?.get('locationType'))
   const initialEffectiveLocationType = useMemo(() => {
     const requested = defaultLocationType ?? requestedLocationFromUrl
@@ -263,7 +319,6 @@ export default function BookingPanel(props: BookingPanelProps) {
 
   const [locationType, setLocationType] = useState<ServiceLocationType | null>(initialEffectiveLocationType)
 
-  // Keep locationType stable if props change
   useEffect(() => {
     setLocationType((prev) => {
       const next = pickEffectiveLocationType({
@@ -275,26 +330,89 @@ export default function BookingPanel(props: BookingPanelProps) {
     })
   }, [offersInSalon, offersMobile, initialEffectiveLocationType])
 
-  // The held slot is the truth. If there's a hold, scheduledFor MUST come from the URL.
-  const scheduledForISO = hasHold ? scheduledForFromUrl : defaultScheduledForISO
+  // -----------------------
+  // Hold countdown (FIXED)
+  // -----------------------
+  const [holdUntil, setHoldUntil] = useState<number | null>(null)
+  const [nowMs, setNowMs] = useState<number>(() => Date.now())
+  const holdTickRef = useRef<number | null>(null)
 
-  const [dateTime, setDateTime] = useState('') // datetime-local in proTz
-  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    const ms = Number(holdUntilParam)
+    if (Number.isFinite(ms) && ms > 0) {
+      setHoldUntil(ms)
+    } else {
+      setHoldUntil(null)
+    }
+  }, [holdUntilParam])
+
+  useEffect(() => {
+    if (!holdUntil) return
+    setNowMs(Date.now())
+
+    if (holdTickRef.current) window.clearInterval(holdTickRef.current)
+    holdTickRef.current = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, 500)
+
+    return () => {
+      if (holdTickRef.current) window.clearInterval(holdTickRef.current)
+      holdTickRef.current = null
+    }
+  }, [holdUntil])
+
+  // expire behavior: clear URL + show error
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  useEffect(() => {
+    if (!holdUntil) return
+    if (nowMs < holdUntil) return
 
+    setHoldUntil(null)
+    clearHoldParams(router, searchParams)
+    setError('Your hold expired. Please pick another time.')
+  }, [nowMs, holdUntil, router, searchParams])
+
+  const holdLabel = useMemo(() => {
+    if (!holdUntil) return null
+    const remaining = clamp(holdUntil - nowMs, 0, 60 * 60 * 1000)
+    const s = Math.floor(remaining / 1000)
+    const mm = String(Math.floor(s / 60)).padStart(2, '0')
+    const ss = String(s % 60).padStart(2, '0')
+    return `${mm}:${ss}`
+  }, [holdUntil, nowMs])
+
+  const holdUrgent = useMemo(() => {
+    if (!holdUntil) return false
+    return holdUntil - nowMs <= 2 * 60_000
+  }, [holdUntil, nowMs])
+
+  // submit/success/etc
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState<string | null>(null)
   const [confirmChecked, setConfirmChecked] = useState(false)
   const [createdBookingId, setCreatedBookingId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const [holdUntil, setHoldUntil] = useState<number | null>(null)
-  const holdTimerRef = useRef<number | null>(null)
-
-  // waitlist state
+  // waitlist
   const [waitlistBusy, setWaitlistBusy] = useState(false)
   const [waitlistSuccess, setWaitlistSuccess] = useState<string | null>(null)
 
-  // ✅ chosen mode determines display price + duration (and payload)
+  // availability
+  const [availabilityBusy, setAvailabilityBusy] = useState(false)
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null)
+  const [availableSlots, setAvailableSlots] = useState<string[]>([])
+  const [apiTimeZone, setApiTimeZone] = useState<string | null>(null)
+
+  const proTz = professionalTimeZone || apiTimeZone || searchParams?.get('proTimeZone') || 'America/Los_Angeles'
+
+  const viewerTz = useMemo(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+    } catch {
+      return null
+    }
+  }, [])
+
   const mode = locationType
   const modeFields = useMemo(() => {
     if (!mode) return { price: 0, durationMinutes: 60 }
@@ -310,7 +428,6 @@ export default function BookingPanel(props: BookingPanelProps) {
   const displayPrice = useMemo(() => {
     const n = Number(modeFields.price)
     if (!Number.isFinite(n)) return '0'
-    // you previously did integer display; keep it consistent
     return n.toFixed(0)
   }, [modeFields.price])
 
@@ -319,49 +436,150 @@ export default function BookingPanel(props: BookingPanelProps) {
     return Number.isFinite(d) && d > 0 ? d : 60
   }, [modeFields.durationMinutes])
 
-  // Seed datetime-local from scheduledForISO in pro tz.
-  useEffect(() => {
-    const next = toDatetimeLocalFromISOInTimeZone(scheduledForISO, proTz)
-    if (next) setDateTime(next)
-    setConfirmChecked(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduledForISO, proTz])
+  const normalizedSource = useMemo(() => String(source).toUpperCase(), [source])
 
-  useEffect(() => {
-    const ms = Number(holdUntilParam)
-    if (Number.isFinite(ms) && ms > Date.now()) {
-      setHoldUntil(ms)
-      return
+  // Date picker
+  const todayYMDInProTz = useMemo(() => ymdFromDateInTz(new Date(), proTz), [proTz])
+  const maxYMDInProTz = useMemo(() => ymdFromDateInTz(addDays(new Date(), 365), proTz), [proTz])
+
+  const lockedYmdFromHold = useMemo(() => {
+    const iso = scheduledForFromUrl || null
+    if (!iso) return null
+    return isoToYMDInTz(iso, proTz)
+  }, [scheduledForFromUrl, proTz])
+
+  const initialMonthStartUtc = useMemo(() => {
+    const ymd = lockedYmdFromHold || todayYMDInProTz
+    return startOfMonthUtcFromYMD(ymd)
+  }, [lockedYmdFromHold, todayYMDInProTz])
+
+  const [monthStartUtc, setMonthStartUtc] = useState<Date>(initialMonthStartUtc)
+
+  const [selectedYMD, setSelectedYMD] = useState<string | null>(() => {
+    if (lockedYmdFromHold) return lockedYmdFromHold
+    if (defaultScheduledForISO) {
+      const ymd = isoToYMDInTz(defaultScheduledForISO, proTz)
+      if (ymd) return ymd
     }
-    setHoldUntil(null)
-  }, [holdUntilParam])
+    return todayYMDInProTz
+  })
+
+  const [selectedSlotISO, setSelectedSlotISO] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!holdUntil) return
-    if (holdTimerRef.current) window.clearInterval(holdTimerRef.current)
+    if (!selectedYMD) return
+    setMonthStartUtc(startOfMonthUtcFromYMD(selectedYMD))
+  }, [selectedYMD])
 
-    holdTimerRef.current = window.setInterval(() => {
-      setHoldUntil((prev) => {
-        if (!prev) return prev
-        if (Date.now() >= prev) return null
-        return prev
-      })
-    }, 500)
+  const gridDays = useMemo(() => buildMonthGrid({ monthStartUtc, proTz }), [monthStartUtc, proTz])
 
+  function ymdWithinRange(ymd: string) {
+    return ymd >= todayYMDInProTz && ymd <= maxYMDInProTz
+  }
+
+  // Fetch day availability
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDay() {
+      setAvailabilityError(null)
+      setAvailabilityBusy(true)
+
+      try {
+        if (!locationType) {
+          setAvailableSlots([])
+          setSelectedSlotISO(null)
+          return
+        }
+
+        // holds lock the time (until expiry clears params)
+        if (hasHold && scheduledForFromUrl) {
+          setAvailableSlots([])
+          setSelectedSlotISO(scheduledForFromUrl)
+          setConfirmChecked(false)
+          return
+        }
+
+        if (!selectedYMD) {
+          setAvailableSlots([])
+          setSelectedSlotISO(null)
+          return
+        }
+
+        if (!ymdWithinRange(selectedYMD)) {
+          setAvailableSlots([])
+          setSelectedSlotISO(null)
+          setAvailabilityError('That date is outside the booking window.')
+          return
+        }
+
+        const qs = new URLSearchParams()
+        qs.set('professionalId', professionalId)
+        qs.set('serviceId', serviceId)
+        qs.set('locationType', locationType)
+        qs.set('date', selectedYMD)
+        qs.set('stepMinutes', '5')
+        qs.set('bufferMinutes', '10')
+
+        const res = await fetch(`/api/availability/day?${qs.toString()}`)
+        const data = await safeJson(res)
+
+        if (!res.ok) throw new Error(data?.error || `Failed to load day availability (${res.status}).`)
+        if (!data?.ok) throw new Error(data?.error || 'Failed to load day availability.')
+
+        const tz = typeof data?.timeZone === 'string' ? data.timeZone : null
+        const slots = Array.isArray(data?.slots) ? data.slots : []
+
+        if (cancelled) return
+
+        setApiTimeZone(tz)
+        setAvailableSlots(slots)
+
+        const preferred = scheduledForFromUrl || defaultScheduledForISO
+        if (preferred && slots.includes(preferred)) setSelectedSlotISO(preferred)
+        else setSelectedSlotISO(slots[0] ?? null)
+
+        setConfirmChecked(false)
+      } catch (e: any) {
+        if (cancelled) return
+        setAvailableSlots([])
+        setSelectedSlotISO(null)
+        setAvailabilityError(e?.message || 'Failed to load day availability.')
+      } finally {
+        if (!cancelled) setAvailabilityBusy(false)
+      }
+    }
+
+    loadDay()
     return () => {
-      if (holdTimerRef.current) window.clearInterval(holdTimerRef.current)
-      holdTimerRef.current = null
+      cancelled = true
     }
-  }, [holdUntil])
+  }, [
+    professionalId,
+    serviceId,
+    locationType,
+    selectedYMD,
+    hasHold,
+    scheduledForFromUrl,
+    defaultScheduledForISO,
+    todayYMDInProTz,
+    maxYMDInProTz,
+  ])
 
-  const prettyTimePro = useMemo(() => formatPrettyInTimeZone(dateTime, proTz), [dateTime, proTz])
+  const finalScheduledForISO = useMemo(
+    () => (hasHold ? scheduledForFromUrl : selectedSlotISO),
+    [hasHold, scheduledForFromUrl, selectedSlotISO],
+  )
+
+  const prettyTimePro = useMemo(() => {
+    if (!finalScheduledForISO) return null
+    return formatSlotLabel(finalScheduledForISO, proTz)
+  }, [finalScheduledForISO, proTz])
 
   const viewerTimeLine = useMemo(() => {
-    if (!dateTime || !viewerTz) return null
+    if (!finalScheduledForISO || !viewerTz) return null
     if (viewerTz === proTz) return null
-    const p = parseDatetimeLocal(dateTime)
-    if (!p) return null
-    const utc = zonedTimeToUtc({ ...p, timeZone: proTz })
+    const utc = new Date(finalScheduledForISO)
     if (Number.isNaN(utc.getTime())) return null
     const local = new Intl.DateTimeFormat(undefined, {
       timeZone: viewerTz,
@@ -372,7 +590,7 @@ export default function BookingPanel(props: BookingPanelProps) {
       minute: '2-digit',
     }).format(utc)
     return `Your local time: ${local}`
-  }, [dateTime, viewerTz, proTz])
+  }, [finalScheduledForISO, viewerTz, proTz])
 
   const reviewLine = useMemo(() => {
     if (!prettyTimePro) return null
@@ -383,35 +601,14 @@ export default function BookingPanel(props: BookingPanelProps) {
     return `${prettyTimePro}${modeLabel} · ${durLabel} · ${priceLabel}${where} · ${proTz}`
   }, [prettyTimePro, displayDuration, displayPrice, locationLabel, proTz, mode])
 
-  const holdLabel = useMemo(() => {
-    if (!holdUntil) return null
-    const remaining = clamp(holdUntil - Date.now(), 0, 60 * 60 * 1000)
-    const s = Math.floor(remaining / 1000)
-    const mm = String(Math.floor(s / 60)).padStart(2, '0')
-    const ss = String(s % 60).padStart(2, '0')
-    return `${mm}:${ss}`
-  }, [holdUntil])
-
-  const holdUrgent = useMemo(() => {
-    if (!holdUntil) return false
-    return holdUntil - Date.now() <= 2 * 60_000
-  }, [holdUntil])
-
-  const normalizedSource = useMemo(() => source.toUpperCase(), [source])
-
   const missingHeldScheduledFor = Boolean(hasHold && !scheduledForFromUrl)
   const missingLocationType = Boolean(!locationType)
-
-  const finalScheduledForISO = useMemo(() => {
-    return hasHold ? scheduledForFromUrl : toISOFromDatetimeLocalInTimeZone(dateTime, proTz)
-  }, [hasHold, scheduledForFromUrl, dateTime, proTz])
 
   const canSubmit = Boolean(
     !missingHeldScheduledFor &&
       !missingLocationType &&
       confirmChecked &&
       !loading &&
-      (!hasHold || (holdId && holdUntil)) &&
       ['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) &&
       finalScheduledForISO,
   )
@@ -439,9 +636,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
 
     const desiredISO =
-      scheduledForFromUrl ||
-      finalScheduledForISO ||
-      new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+      scheduledForFromUrl || finalScheduledForISO || new Date(Date.now() + 2 * 60 * 60_000).toISOString()
 
     setWaitlistBusy(true)
     try {
@@ -494,42 +689,45 @@ export default function BookingPanel(props: BookingPanelProps) {
       return
     }
 
-    if (hasHold) {
-      if (!holdId || !holdUntil) {
-        setError('Your hold expired. Please go back and pick a slot again.')
-        return
-      }
-      if (!scheduledForFromUrl) {
-        setError('Missing scheduled time for this hold. Please go back and pick a slot again.')
-        return
-      }
-    }
-
     if (!confirmChecked) {
       setError('Please confirm the time works for you.')
       return
     }
 
     if (!finalScheduledForISO) {
-      setError('Please choose a valid date and time.')
+      setError('Please pick an available time.')
       return
     }
 
     setLoading(true)
     try {
+      // Ensure we have a hold (Option B truth)
+      let effectiveHoldId = holdIdFromUrl
+      let effectiveScheduledFor = scheduledForFromUrl
+
+      if (!effectiveHoldId || !effectiveScheduledFor) {
+        const h = await createHoldForSelectedSlot({
+          offeringId,
+          scheduledFor: finalScheduledForISO,
+          locationType,
+          router,
+          searchParams,
+        })
+        effectiveHoldId = h.holdId
+        effectiveScheduledFor = h.scheduledFor
+        setHoldUntil(h.holdUntilMs)
+        setNowMs(Date.now())
+      }
+
       const res = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offeringId,
-          scheduledFor: finalScheduledForISO,
-          holdId: hasHold ? holdId : null,
-
-          // ✅ always explicit
+          scheduledFor: effectiveScheduledFor,
+          holdId: effectiveHoldId,
           source: normalizedSource,
           locationType,
-
-          // ✅ attribution
           mediaId: mediaId || null,
           openingId: openingId || null,
         }),
@@ -552,12 +750,9 @@ export default function BookingPanel(props: BookingPanelProps) {
 
       setSuccess('Booked. You’re officially on the calendar.')
       router.refresh()
-      setTimeout(() => {
-        router.push('/client')
-      }, 900)
-    } catch (err) {
-      console.error(err)
-      setError('Network error while creating booking.')
+      setTimeout(() => router.push('/client'), 900)
+    } catch (err: any) {
+      setError(err?.message || 'Network error while creating booking.')
     } finally {
       setLoading(false)
     }
@@ -565,19 +760,57 @@ export default function BookingPanel(props: BookingPanelProps) {
 
   const calendarHref = createdBookingId ? `/api/calendar?bookingId=${encodeURIComponent(createdBookingId)}` : null
   const showWaitlistCTA = !success && (!hasHold || !holdUntil)
-
   const showModeToggle = Boolean(offersInSalon && offersMobile)
 
-  return (
-    <section style={{ border: '1px solid #eee', borderRadius: 12, padding: 16, alignSelf: 'flex-start', background: '#fff' }}>
-      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{success ? 'You’re booked' : 'Confirm your booking'}</h2>
+  const monthLabel = useMemo(() => {
+    const d = new Date(monthStartUtc.getTime())
+    return new Intl.DateTimeFormat(undefined, { timeZone: proTz, month: 'long', year: 'numeric' }).format(d)
+  }, [monthStartUtc, proTz])
 
-      <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: success ? '#f0fdf4' : '#fafafa', marginBottom: 12 }}>
+  function canGoPrevMonth() {
+    const prev = addMonthsUtc(monthStartUtc, -1)
+    const prevKey = ymdFromDateInTz(prev, proTz).slice(0, 7)
+    const minKey = todayYMDInProTz.slice(0, 7)
+    return prevKey >= minKey
+  }
+
+  function canGoNextMonth() {
+    const next = addMonthsUtc(monthStartUtc, +1)
+    const nextKey = ymdFromDateInTz(next, proTz).slice(0, 7)
+    const maxKey = maxYMDInProTz.slice(0, 7)
+    return nextKey <= maxKey
+  }
+
+  return (
+    <section
+      style={{
+        border: '1px solid #eee',
+        borderRadius: 12,
+        padding: 16,
+        alignSelf: 'flex-start',
+        background: '#fff',
+      }}
+    >
+      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>
+        {success ? 'You’re booked' : 'Confirm your booking'}
+      </h2>
+
+      <div
+        style={{
+          border: '1px solid #eee',
+          borderRadius: 12,
+          padding: 12,
+          background: success ? '#f0fdf4' : '#fafafa',
+          marginBottom: 12,
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
           <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>{success ? 'Confirmed' : 'Review'}</div>
 
           {holdLabel && !success ? (
-            <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>Slot held for {holdLabel}</div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>
+              Slot held for {holdLabel}
+            </div>
           ) : !success ? (
             <div style={{ fontSize: 12, color: '#6b7280' }}>Confirm and book</div>
           ) : (
@@ -607,17 +840,55 @@ export default function BookingPanel(props: BookingPanelProps) {
 
       {success && createdBookingId ? (
         <div style={{ display: 'grid', gap: 10 }}>
-          <a href="/client" style={{ textDecoration: 'none', background: '#111', color: '#fff', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
+          <a
+            href="/client"
+            style={{
+              textDecoration: 'none',
+              background: '#111',
+              color: '#fff',
+              padding: '10px 12px',
+              borderRadius: 12,
+              fontWeight: 900,
+              fontSize: 13,
+              textAlign: 'center',
+            }}
+          >
             View my bookings
           </a>
 
           {calendarHref ? (
-            <a href={calendarHref} style={{ textDecoration: 'none', border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
+            <a
+              href={calendarHref}
+              style={{
+                textDecoration: 'none',
+                border: '1px solid #ddd',
+                background: '#fff',
+                color: '#111',
+                padding: '10px 12px',
+                borderRadius: 12,
+                fontWeight: 900,
+                fontSize: 13,
+                textAlign: 'center',
+              }}
+            >
               Add to calendar
             </a>
           ) : null}
 
-          <button type="button" onClick={copyShareLink} style={{ border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}>
+          <button
+            type="button"
+            onClick={copyShareLink}
+            style={{
+              border: '1px solid #ddd',
+              background: '#fff',
+              color: '#111',
+              padding: '10px 12px',
+              borderRadius: 12,
+              fontWeight: 900,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
             {copied ? 'Link copied' : 'Copy booking link'}
           </button>
 
@@ -633,8 +904,11 @@ export default function BookingPanel(props: BookingPanelProps) {
                   type="button"
                   disabled={loading || hasHold}
                   onClick={() => {
+                    if (hasHold) return
                     setLocationType('SALON')
                     setConfirmChecked(false)
+                    setError(null)
+                    clearHoldParams(router, searchParams)
                   }}
                   style={{
                     flex: 1,
@@ -653,8 +927,11 @@ export default function BookingPanel(props: BookingPanelProps) {
                   type="button"
                   disabled={loading || hasHold}
                   onClick={() => {
+                    if (hasHold) return
                     setLocationType('MOBILE')
                     setConfirmChecked(false)
+                    setError(null)
+                    clearHoldParams(router, searchParams)
                   }}
                   style={{
                     flex: 1,
@@ -686,32 +963,206 @@ export default function BookingPanel(props: BookingPanelProps) {
             </div>
           ) : null}
 
-          <label style={{ fontSize: 14, color: '#111' }}>
-            Date &amp; time (appointment timezone: <span style={{ fontWeight: 900 }}>{proTz}</span>)
-            <input
-              type="datetime-local"
-              value={dateTime}
-              onChange={(e) => {
-                if (hasHold) return
-                setDateTime(e.target.value)
-                setConfirmChecked(false)
+          {/* Calendar */}
+          <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: '#fff' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 10,
               }}
-              style={{ width: '100%', marginTop: 4, padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', opacity: hasHold ? 0.7 : 1 }}
-              disabled={loading || hasHold}
-              title={hasHold ? 'This time is locked because a slot is being held.' : undefined}
-            />
-          </label>
+            >
+              <button
+                type="button"
+                disabled={hasHold || !canGoPrevMonth()}
+                onClick={() => setMonthStartUtc((d) => addMonthsUtc(d, -1))}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid #ddd',
+                  background: '#fff',
+                  fontWeight: 900,
+                  cursor: hasHold ? 'default' : 'pointer',
+                  opacity: hasHold || !canGoPrevMonth() ? 0.5 : 1,
+                }}
+                title={hasHold ? 'Date is locked while a hold exists.' : undefined}
+              >
+                ‹
+              </button>
 
-          {missingHeldScheduledFor ? <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div> : null}
+              <div style={{ fontWeight: 900, color: '#111' }}>{monthLabel}</div>
 
-          {hasHold && (!holdId || !holdUntil) ? <div style={{ fontSize: 12, color: '#b91c1c' }}>No valid hold found. Go back and pick a slot again.</div> : null}
+              <button
+                type="button"
+                disabled={hasHold || !canGoNextMonth()}
+                onClick={() => setMonthStartUtc((d) => addMonthsUtc(d, +1))}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid #ddd',
+                  background: '#fff',
+                  fontWeight: 900,
+                  cursor: hasHold ? 'default' : 'pointer',
+                  opacity: hasHold || !canGoNextMonth() ? 0.5 : 1,
+                }}
+                title={hasHold ? 'Date is locked while a hold exists.' : undefined}
+              >
+                ›
+              </button>
+            </div>
 
-          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#111', padding: 12, borderRadius: 12, border: '1px solid #eee', background: '#fff' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 6,
+                marginBottom: 6,
+                fontSize: 11,
+                color: '#6b7280',
+              }}
+            >
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+                <div key={d} style={{ textAlign: 'center', fontWeight: 900 }}>
+                  {d}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+              {gridDays.map((d) => {
+                const isSelected = selectedYMD === d.ymd
+                const disabled = hasHold || !ymdWithinRange(d.ymd)
+                const dayNum = Number(d.ymd.slice(8, 10))
+                return (
+                  <button
+                    key={d.ymd}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      if (hasHold) return
+                      setSelectedYMD(d.ymd)
+                      setConfirmChecked(false)
+                      setError(null)
+                      clearHoldParams(router, searchParams)
+                    }}
+                    style={{
+                      padding: '10px 0',
+                      borderRadius: 10,
+                      border: isSelected ? '2px solid #111' : '1px solid #eee',
+                      background: d.inMonth ? '#fff' : '#fafafa',
+                      color: disabled ? '#9ca3af' : '#111',
+                      fontWeight: 900,
+                      cursor: disabled ? 'default' : 'pointer',
+                      opacity: disabled ? 0.5 : 1,
+                      textAlign: 'center',
+                    }}
+                    title={!ymdWithinRange(d.ymd) ? 'Outside booking window' : undefined}
+                  >
+                    {dayNum}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+              Booking window: {todayYMDInProTz} → {maxYMDInProTz} (pro timezone)
+            </div>
+          </div>
+
+          {/* Times */}
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div style={{ fontSize: 14, color: '#111' }}>
+              Select a time (timezone: <span style={{ fontWeight: 900 }}>{proTz}</span>)
+            </div>
+
+            {availabilityBusy ? (
+              <div style={{ fontSize: 12, color: '#6b7280' }}>Loading availability…</div>
+            ) : availabilityError ? (
+              <div style={{ fontSize: 12, color: '#b91c1c' }}>{availabilityError}</div>
+            ) : hasHold ? (
+              <div style={{ fontSize: 12, color: '#6b7280' }}>Time is locked while the slot is held.</div>
+            ) : availableSlots.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                No available times for this day. Pick another day or join the waitlist.
+              </div>
+            ) : (
+              <select
+                value={selectedSlotISO ?? ''}
+                onChange={async (e) => {
+                  if (hasHold) return
+                  const iso = e.target.value || null
+                  setSelectedSlotISO(iso)
+                  setConfirmChecked(false)
+                  setError(null)
+
+                  if (!iso || !locationType) return
+
+                  try {
+                    const h = await createHoldForSelectedSlot({
+                      offeringId,
+                      scheduledFor: iso,
+                      locationType,
+                      router,
+                      searchParams,
+                    })
+                    setHoldUntil(h.holdUntilMs)
+                    setNowMs(Date.now())
+                  } catch (err: any) {
+                    setError(err?.message || 'Failed to hold that time.')
+                  }
+                }}
+                disabled={loading || hasHold}
+                style={{
+                  width: '100%',
+                  marginTop: 4,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #ddd',
+                  opacity: hasHold ? 0.7 : 1,
+                }}
+                title={hasHold ? 'This time is locked because a slot is being held.' : undefined}
+              >
+                {availableSlots.map((iso) => (
+                  <option key={iso} value={iso}>
+                    {formatSlotLabel(iso, proTz)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {missingHeldScheduledFor ? (
+            <div style={{ fontSize: 12, color: '#b91c1c' }}>
+              Hold is present but scheduledFor is missing. Go back and pick a slot again.
+            </div>
+          ) : null}
+
+          {hasHold && (!holdIdFromUrl || !holdUntil) ? (
+            <div style={{ fontSize: 12, color: '#b91c1c' }}>
+              No valid hold found. Go back and pick a slot again.
+            </div>
+          ) : null}
+
+          <label
+            style={{
+              display: 'flex',
+              gap: 10,
+              alignItems: 'flex-start',
+              fontSize: 13,
+              color: '#111',
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid #eee',
+              background: '#fff',
+            }}
+          >
             <input
               type="checkbox"
               checked={confirmChecked}
               onChange={(e) => setConfirmChecked(e.target.checked)}
-              disabled={!dateTime || loading || !locationType || (hasHold && (!holdId || !holdUntil))}
+              disabled={!finalScheduledForISO || loading || !locationType || (hasHold && (!holdIdFromUrl || !holdUntil))}
               style={{ marginTop: 2 }}
             />
             <div>
@@ -721,7 +1172,9 @@ export default function BookingPanel(props: BookingPanelProps) {
           </label>
 
           {error ? <p style={{ color: '#b91c1c', fontSize: 13, margin: 0 }}>{error}</p> : null}
-          {waitlistSuccess ? <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p> : null}
+          {waitlistSuccess ? (
+            <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p>
+          ) : null}
 
           <button
             type="submit"
@@ -762,9 +1215,15 @@ export default function BookingPanel(props: BookingPanelProps) {
             </button>
           ) : null}
 
-          {!isLoggedInAsClient ? <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>You’ll need to log in as a client to complete your booking.</p> : null}
+          {!isLoggedInAsClient ? (
+            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+              You’ll need to log in as a client to complete your booking.
+            </p>
+          ) : null}
 
-          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>{holdLabel ? 'If the hold expires, the time might disappear.' : 'Confirm it, and you’re done.'}</p>
+          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+            {holdLabel ? 'If the hold expires, the time might disappear.' : 'Pick a date, pick a time, and you’re done.'}
+          </p>
         </form>
       )}
     </section>
