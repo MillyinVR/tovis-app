@@ -106,7 +106,9 @@ function getWeekdayKeyInTimeZone(
   dateUtc: Date,
   timeZone: string,
 ): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(dateUtc).toLowerCase()
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+    .format(dateUtc)
+    .toLowerCase()
   if (weekday.startsWith('mon')) return 'mon'
   if (weekday.startsWith('tue')) return 'tue'
   if (weekday.startsWith('wed')) return 'wed'
@@ -192,6 +194,7 @@ export async function POST(request: Request) {
 
     const offeringId = pickString(body.offeringId)
     const holdId = pickString(body.holdId)
+
     const source = normalizeSource(body.source)
     const locationType = normalizeLocationType(body.locationType)
 
@@ -254,11 +257,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'This service is not offered as mobile.' }, { status: 400 })
     }
 
-    const priceStartingAt =
-      locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
-
-    const durationSnapshot =
-      locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+    const priceStartingAt = locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+    const durationSnapshot = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
 
     if (priceStartingAt == null) {
       return NextResponse.json(
@@ -296,7 +296,7 @@ export async function POST(request: Request) {
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
     const booking = await prisma.$transaction(async (tx) => {
-      // 1) Validate hold
+      // 1) Validate hold (SERVER TRUTH)
       const hold = await tx.bookingHold.findUnique({
         where: { id: holdId },
         select: {
@@ -306,19 +306,27 @@ export async function POST(request: Request) {
           clientId: true,
           scheduledFor: true,
           expiresAt: true,
+          // IMPORTANT: add this to your BookingHold model + hold creation
+          locationType: true,
         },
       })
 
       if (!hold) throw new Error('HOLD_NOT_FOUND')
+
+      // Fail closed (do not reveal existence)
+      if (hold.clientId !== clientId) throw new Error('HOLD_NOT_FOUND')
+
+      if (hold.expiresAt.getTime() <= now.getTime()) throw new Error('HOLD_EXPIRED')
       if (hold.offeringId !== offeringId) throw new Error('HOLD_MISMATCH')
       if (hold.professionalId !== offering.professionalId) throw new Error('HOLD_MISMATCH')
-      if (hold.clientId && hold.clientId !== clientId) throw new Error('HOLD_NOT_FOUND')
-      if (hold.expiresAt.getTime() <= now.getTime()) throw new Error('HOLD_EXPIRED')
+
+      // Make sure the hold is for the same location mode (SALON vs MOBILE)
+      if (hold.locationType !== locationType) throw new Error('HOLD_MISMATCH')
 
       const holdStart = normalizeToMinute(new Date(hold.scheduledFor))
       if (holdStart.getTime() !== requestedStart.getTime()) throw new Error('HOLD_MISMATCH')
 
-      // 2) Conflict re-check
+      // 2) Conflict re-check (bookings)
       const existing2 = (await tx.booking.findMany({
         where: {
           professionalId: offering.professionalId,
@@ -411,10 +419,16 @@ export async function POST(request: Request) {
     const msg = String(e?.message || '')
 
     if (msg === 'OPENING_NOT_AVAILABLE') {
-      return NextResponse.json({ ok: false, error: 'That opening was just taken. Please pick another slot.' }, { status: 409 })
+      return NextResponse.json(
+        { ok: false, error: 'That opening was just taken. Please pick another slot.' },
+        { status: 409 },
+      )
     }
     if (msg === 'TIME_NOT_AVAILABLE') {
-      return NextResponse.json({ ok: false, error: 'That time is no longer available. Please select a different slot.' }, { status: 409 })
+      return NextResponse.json(
+        { ok: false, error: 'That time is no longer available. Please select a different slot.' },
+        { status: 409 },
+      )
     }
     if (msg === 'HOLD_NOT_FOUND') {
       return NextResponse.json({ ok: false, error: 'Hold not found. Please pick a slot again.' }, { status: 409 })

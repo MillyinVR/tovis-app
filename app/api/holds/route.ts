@@ -336,6 +336,7 @@ export async function POST(req: Request) {
           clientId,
           scheduledFor: requestedStart,
           expiresAt,
+          locationType, // ✅ Prisma now accepts this
         },
         select: { id: true, expiresAt: true, scheduledFor: true },
       })

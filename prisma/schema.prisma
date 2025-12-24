@@ -617,6 +617,8 @@ model BookingHold {
   scheduledFor   DateTime
   expiresAt      DateTime
   createdAt      DateTime @default(now())
+  locationType ServiceLocationType
+
 
   clientId String? // <-- nullable for now
   client   ClientProfile? @relation(fields: [clientId], references: [id])

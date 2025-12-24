@@ -222,27 +222,58 @@ function buildMonthGrid(args: { monthStartUtc: Date; proTz: string }) {
   return days
 }
 
+// Pure URL cleanup (no async, no hold deletion)
 function clearHoldParams(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>) {
   if (typeof window === 'undefined') return
   const qs = new URLSearchParams(searchParams?.toString() || '')
   qs.delete('holdId')
   qs.delete('holdUntil')
   qs.delete('scheduledFor')
+  // NOTE: do NOT delete locationType here. That’s a user choice.
   router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
 }
 
-function parseHoldResponse(data: any): { holdId: string; holdUntilMs: number; scheduledForISO: string } {
+// Optional: delete hold, then clear URL params (use when you intentionally want to free the slot)
+async function clearHoldAndParams(args: {
+  holdId: string | null
+  router: ReturnType<typeof useRouter>
+  searchParams: ReturnType<typeof useSearchParams>
+}) {
+  const { holdId, router, searchParams } = args
+  if (holdId) {
+    await deleteHoldById(holdId).catch(() => {})
+  }
+  clearHoldParams(router, searchParams)
+}
+
+function parseHoldResponse(data: any): {
+  holdId: string
+  holdUntilMs: number
+  scheduledForISO: string
+  locationType?: ServiceLocationType | null
+} {
   const hold = data?.hold
   const holdId = typeof hold?.id === 'string' ? hold.id : ''
   const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt : ''
   const scheduledForIso = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor : ''
+  const locationType = normalizeLocationType(hold?.locationType)
 
   const holdUntilMs = expiresAtIso ? new Date(expiresAtIso).getTime() : NaN
   if (!holdId || !scheduledForIso || !Number.isFinite(holdUntilMs)) {
     throw new Error('Hold response was missing fields.')
   }
 
-  return { holdId, holdUntilMs, scheduledForISO: scheduledForIso }
+  return { holdId, holdUntilMs, scheduledForISO: scheduledForIso, locationType }
+}
+
+async function deleteHoldById(holdId: string) {
+  const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' })
+  if (res.ok) return
+  const data = await safeJson(res)
+  const msg = data?.error || `Failed to delete hold (${res.status}).`
+  const err: any = new Error(msg)
+  err.status = res.status
+  throw err
 }
 
 async function createHoldForSelectedSlot(args: {
@@ -251,8 +282,18 @@ async function createHoldForSelectedSlot(args: {
   locationType: ServiceLocationType
   router: ReturnType<typeof useRouter>
   searchParams: ReturnType<typeof useSearchParams>
+  previousHoldId?: string | null
 }) {
-  const { offeringId, scheduledFor, locationType, router, searchParams } = args
+  const { offeringId, scheduledFor, locationType, router, searchParams, previousHoldId } = args
+
+  // ✅ Delete old hold before creating a new one
+  if (previousHoldId) {
+    try {
+      await deleteHoldById(previousHoldId)
+    } catch {
+      // don’t hard-fail; holds also expire server-side
+    }
+  }
 
   const res = await fetch('/api/holds', {
     method: 'POST',
@@ -265,15 +306,35 @@ async function createHoldForSelectedSlot(args: {
 
   const parsed = parseHoldResponse(data)
 
-  const qs = new URLSearchParams(searchParams?.toString() || '')
-  qs.set('holdId', parsed.holdId)
-  qs.set('holdUntil', String(parsed.holdUntilMs))
-  qs.set('scheduledFor', parsed.scheduledForISO)
-  qs.set('locationType', locationType)
-
-  router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
+  if (typeof window !== 'undefined') {
+    const qs = new URLSearchParams(searchParams?.toString() || '')
+    qs.set('holdId', parsed.holdId)
+    qs.set('holdUntil', String(parsed.holdUntilMs))
+    qs.set('scheduledFor', parsed.scheduledForISO)
+    qs.set('locationType', locationType)
+    router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
+  }
 
   return { holdId: parsed.holdId, holdUntilMs: parsed.holdUntilMs, scheduledFor: parsed.scheduledForISO }
+}
+
+async function fetchHoldById(holdId: string) {
+  const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'GET' })
+  const data = await safeJson(res)
+
+  if (!res.ok || !data?.ok) {
+    const msg = data?.error || `Failed to load hold (${res.status}).`
+    const err: any = new Error(msg)
+    err.status = res.status
+    throw err
+  }
+
+  const parsed = parseHoldResponse(data)
+  return {
+    scheduledForISO: parsed.scheduledForISO,
+    holdUntilMs: parsed.holdUntilMs,
+    locationType: parsed.locationType ?? null,
+  }
 }
 
 export default function BookingPanel(props: BookingPanelProps) {
@@ -303,10 +364,9 @@ export default function BookingPanel(props: BookingPanelProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // URL truth
   const holdIdFromUrl = (searchParams?.get('holdId') || '').trim() || null
-  const holdUntilParam = searchParams?.get('holdUntil') || ''
   const scheduledForFromUrl = (searchParams?.get('scheduledFor') || '').trim() || null
+  const holdUntilFromUrl = searchParams?.get('holdUntil') || ''
   const hasHold = Boolean(holdIdFromUrl)
 
   const openingId = (searchParams?.get('openingId') || '').trim() || null
@@ -331,29 +391,90 @@ export default function BookingPanel(props: BookingPanelProps) {
   }, [offersInSalon, offersMobile, initialEffectiveLocationType])
 
   // -----------------------
-  // Hold countdown (FIXED)
+  // Hold truth (server wins)
+  // -----------------------
+  const [scheduledForFromHold, setScheduledForFromHold] = useState<string | null>(null)
+
+  // -----------------------
+  // Hold countdown
   // -----------------------
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [nowMs, setNowMs] = useState<number>(() => Date.now())
   const holdTickRef = useRef<number | null>(null)
 
-  useEffect(() => {
-    const ms = Number(holdUntilParam)
-    if (Number.isFinite(ms) && ms > 0) {
-      setHoldUntil(ms)
-    } else {
-      setHoldUntil(null)
-    }
-  }, [holdUntilParam])
+  const [error, setError] = useState<string | null>(null)
 
+  // Fast initial paint: if URL has a future holdUntil, show it immediately.
+  useEffect(() => {
+    const ms = Number(holdUntilFromUrl)
+    if (Number.isFinite(ms) && ms > Date.now()) setHoldUntil(ms)
+    else if (!holdIdFromUrl) setHoldUntil(null)
+  }, [holdUntilFromUrl, holdIdFromUrl])
+
+  // Hydrate hold from server (prevents URL editing from lying)
+  useEffect(() => {
+    let cancelled = false
+
+    async function hydrateHold() {
+      if (!holdIdFromUrl) {
+        setScheduledForFromHold(null)
+        return
+      }
+
+      try {
+        const h = await fetchHoldById(holdIdFromUrl)
+        if (cancelled) return
+
+        setHoldUntil(h.holdUntilMs)
+        setNowMs(Date.now())
+        setScheduledForFromHold(h.scheduledForISO)
+
+        // ✅ server-truth locationType wins if present
+        if (h.locationType) {
+          setLocationType(h.locationType)
+        }
+
+        // Normalize URL to server truth (only if different)
+        if (typeof window !== 'undefined') {
+          const qs = new URLSearchParams(searchParams?.toString() || '')
+          const urlScheduled = (qs.get('scheduledFor') || '').trim() || null
+          const urlHoldUntil = Number(qs.get('holdUntil') || '')
+          const urlLoc = normalizeLocationType(qs.get('locationType'))
+
+          const needsFix =
+            urlScheduled !== h.scheduledForISO ||
+            !(Number.isFinite(urlHoldUntil) && urlHoldUntil === h.holdUntilMs) ||
+            (h.locationType && urlLoc !== h.locationType)
+
+          if (needsFix) {
+            qs.set('scheduledFor', h.scheduledForISO)
+            qs.set('holdUntil', String(h.holdUntilMs))
+            if (h.locationType) qs.set('locationType', h.locationType)
+            router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
+          }
+        }
+      } catch (e: any) {
+        if (cancelled) return
+        setHoldUntil(null)
+        setScheduledForFromHold(null)
+        clearHoldParams(router, searchParams)
+        setError(e?.message || 'Your hold is no longer valid. Please pick another time.')
+      }
+    }
+
+    hydrateHold()
+    return () => {
+      cancelled = true
+    }
+  }, [holdIdFromUrl, router, searchParams])
+
+  // Tick
   useEffect(() => {
     if (!holdUntil) return
     setNowMs(Date.now())
 
     if (holdTickRef.current) window.clearInterval(holdTickRef.current)
-    holdTickRef.current = window.setInterval(() => {
-      setNowMs(Date.now())
-    }, 500)
+    holdTickRef.current = window.setInterval(() => setNowMs(Date.now()), 500)
 
     return () => {
       if (holdTickRef.current) window.clearInterval(holdTickRef.current)
@@ -361,13 +482,13 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
   }, [holdUntil])
 
-  // expire behavior: clear URL + show error
-  const [error, setError] = useState<string | null>(null)
+  // Expire behavior
   useEffect(() => {
     if (!holdUntil) return
     if (nowMs < holdUntil) return
 
     setHoldUntil(null)
+    setScheduledForFromHold(null)
     clearHoldParams(router, searchParams)
     setError('Your hold expired. Please pick another time.')
   }, [nowMs, holdUntil, router, searchParams])
@@ -438,15 +559,20 @@ export default function BookingPanel(props: BookingPanelProps) {
 
   const normalizedSource = useMemo(() => String(source).toUpperCase(), [source])
 
-  // Date picker
+  // Date picker window
   const todayYMDInProTz = useMemo(() => ymdFromDateInTz(new Date(), proTz), [proTz])
   const maxYMDInProTz = useMemo(() => ymdFromDateInTz(addDays(new Date(), 365), proTz), [proTz])
 
+  // When a hold exists, lock to server-truth (fallback to URL only briefly)
+  const lockedIso = useMemo(() => {
+    if (!hasHold) return null
+    return scheduledForFromHold || scheduledForFromUrl || null
+  }, [hasHold, scheduledForFromHold, scheduledForFromUrl])
+
   const lockedYmdFromHold = useMemo(() => {
-    const iso = scheduledForFromUrl || null
-    if (!iso) return null
-    return isoToYMDInTz(iso, proTz)
-  }, [scheduledForFromUrl, proTz])
+    if (!lockedIso) return null
+    return isoToYMDInTz(lockedIso, proTz)
+  }, [lockedIso, proTz])
 
   const initialMonthStartUtc = useMemo(() => {
     const ymd = lockedYmdFromHold || todayYMDInProTz
@@ -492,10 +618,10 @@ export default function BookingPanel(props: BookingPanelProps) {
           return
         }
 
-        // holds lock the time (until expiry clears params)
-        if (hasHold && scheduledForFromUrl) {
+        // Holds lock the time
+        if (hasHold && lockedIso) {
           setAvailableSlots([])
-          setSelectedSlotISO(scheduledForFromUrl)
+          setSelectedSlotISO(lockedIso)
           setConfirmChecked(false)
           return
         }
@@ -535,7 +661,7 @@ export default function BookingPanel(props: BookingPanelProps) {
         setApiTimeZone(tz)
         setAvailableSlots(slots)
 
-        const preferred = scheduledForFromUrl || defaultScheduledForISO
+        const preferred = defaultScheduledForISO
         if (preferred && slots.includes(preferred)) setSelectedSlotISO(preferred)
         else setSelectedSlotISO(slots[0] ?? null)
 
@@ -560,15 +686,15 @@ export default function BookingPanel(props: BookingPanelProps) {
     locationType,
     selectedYMD,
     hasHold,
-    scheduledForFromUrl,
+    lockedIso,
     defaultScheduledForISO,
     todayYMDInProTz,
     maxYMDInProTz,
   ])
 
   const finalScheduledForISO = useMemo(
-    () => (hasHold ? scheduledForFromUrl : selectedSlotISO),
-    [hasHold, scheduledForFromUrl, selectedSlotISO],
+    () => (hasHold ? lockedIso : selectedSlotISO),
+    [hasHold, lockedIso, selectedSlotISO],
   )
 
   const prettyTimePro = useMemo(() => {
@@ -601,7 +727,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     return `${prettyTimePro}${modeLabel} · ${durLabel} · ${priceLabel}${where} · ${proTz}`
   }, [prettyTimePro, displayDuration, displayPrice, locationLabel, proTz, mode])
 
-  const missingHeldScheduledFor = Boolean(hasHold && !scheduledForFromUrl)
+  const missingHeldScheduledFor = Boolean(hasHold && !lockedIso)
   const missingLocationType = Boolean(!locationType)
 
   const canSubmit = Boolean(
@@ -635,8 +761,7 @@ export default function BookingPanel(props: BookingPanelProps) {
       return
     }
 
-    const desiredISO =
-      scheduledForFromUrl || finalScheduledForISO || new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+    const desiredISO = lockedIso || finalScheduledForISO || new Date(Date.now() + 2 * 60 * 60_000).toISOString()
 
     setWaitlistBusy(true)
     try {
@@ -701,22 +826,25 @@ export default function BookingPanel(props: BookingPanelProps) {
 
     setLoading(true)
     try {
-      // Ensure we have a hold (Option B truth)
+      // Ensure we have a hold (server-truth wins)
       let effectiveHoldId = holdIdFromUrl
-      let effectiveScheduledFor = scheduledForFromUrl
+      let effectiveScheduledFor = lockedIso
 
       if (!effectiveHoldId || !effectiveScheduledFor) {
         const h = await createHoldForSelectedSlot({
           offeringId,
-          scheduledFor: finalScheduledForISO,
+          scheduledFor: finalScheduledForISO, // ✅ FIX
           locationType,
           router,
           searchParams,
+          previousHoldId: holdIdFromUrl,
         })
+
         effectiveHoldId = h.holdId
         effectiveScheduledFor = h.scheduledFor
         setHoldUntil(h.holdUntilMs)
         setNowMs(Date.now())
+        setScheduledForFromHold(h.scheduledFor)
       }
 
       const res = await fetch('/api/bookings', {
@@ -791,9 +919,7 @@ export default function BookingPanel(props: BookingPanelProps) {
         background: '#fff',
       }}
     >
-      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>
-        {success ? 'You’re booked' : 'Confirm your booking'}
-      </h2>
+      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{success ? 'You’re booked' : 'Confirm your booking'}</h2>
 
       <div
         style={{
@@ -952,9 +1078,7 @@ export default function BookingPanel(props: BookingPanelProps) {
               </div>
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: '#6b7280' }}>
-              {locationType === 'MOBILE' ? 'Mobile appointment' : 'In-salon appointment'}
-            </div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>{locationType === 'MOBILE' ? 'Mobile appointment' : 'In-salon appointment'}</div>
           )}
 
           {!locationType ? (
@@ -1106,9 +1230,11 @@ export default function BookingPanel(props: BookingPanelProps) {
                       locationType,
                       router,
                       searchParams,
+                      previousHoldId: holdIdFromUrl, // ✅ IMPORTANT
                     })
                     setHoldUntil(h.holdUntilMs)
                     setNowMs(Date.now())
+                    setScheduledForFromHold(h.scheduledFor)
                   } catch (err: any) {
                     setError(err?.message || 'Failed to hold that time.')
                   }
