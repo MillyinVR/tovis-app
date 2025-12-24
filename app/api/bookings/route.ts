@@ -29,7 +29,7 @@ function pickString(v: unknown): string | null {
 }
 
 function isValidDate(d: Date) {
-  return d instanceof Date && !Number.isNaN(d.getTime())
+  return d instanceof Date && Number.isFinite(d.getTime())
 }
 
 function addMinutes(date: Date, minutes: number) {
@@ -48,18 +48,19 @@ function normalizeToMinute(d: Date) {
   return x
 }
 
-function normalizeSource(v: unknown): BookingSourceNormalized {
+function normalizeSourceStrict(v: unknown): BookingSourceNormalized | null {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
   if (s === 'AFTERCARE') return 'AFTERCARE'
   if (s === 'DISCOVERY') return 'DISCOVERY'
   if (s === 'REQUESTED') return 'REQUESTED'
-  return 'REQUESTED'
+  return null
 }
 
-function normalizeLocationType(v: unknown): ServiceLocationType {
+function normalizeLocationTypeStrict(v: unknown): ServiceLocationType | null {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return 'SALON'
   if (s === 'MOBILE') return 'MOBILE'
-  return 'SALON'
+  return null
 }
 
 /** -------------------------
@@ -195,10 +196,17 @@ export async function POST(request: Request) {
     const offeringId = pickString(body.offeringId)
     const holdId = pickString(body.holdId)
 
-    const source = normalizeSource(body.source)
-    const locationType = normalizeLocationType(body.locationType)
+    const source = normalizeSourceStrict(body.source)
+    if (!source) {
+      return NextResponse.json({ ok: false, error: 'Missing booking source.' }, { status: 400 })
+    }
 
-    const mediaId = pickString(body.mediaId) // not stored
+    const locationType = normalizeLocationTypeStrict(body.locationType)
+    if (!locationType) {
+      return NextResponse.json({ ok: false, error: 'Missing locationType.' }, { status: 400 })
+    }
+
+    const mediaId = pickString(body.mediaId) // not stored (yet)
     const openingId = pickString(body.openingId)
 
     if (!offeringId || !body.scheduledFor) {
@@ -206,6 +214,7 @@ export async function POST(request: Request) {
     }
 
     if (!holdId) {
+      // hold is required; we treat missing hold as a conflict (matches your UX)
       return NextResponse.json({ ok: false, error: 'Missing hold. Please pick a slot again.' }, { status: 409 })
     }
 
@@ -306,7 +315,6 @@ export async function POST(request: Request) {
           clientId: true,
           scheduledFor: true,
           expiresAt: true,
-          // IMPORTANT: add this to your BookingHold model + hold creation
           locationType: true,
         },
       })
@@ -319,8 +327,6 @@ export async function POST(request: Request) {
       if (hold.expiresAt.getTime() <= now.getTime()) throw new Error('HOLD_EXPIRED')
       if (hold.offeringId !== offeringId) throw new Error('HOLD_MISMATCH')
       if (hold.professionalId !== offering.professionalId) throw new Error('HOLD_MISMATCH')
-
-      // Make sure the hold is for the same location mode (SALON vs MOBILE)
       if (hold.locationType !== locationType) throw new Error('HOLD_MISMATCH')
 
       const holdStart = normalizeToMinute(new Date(hold.scheduledFor))

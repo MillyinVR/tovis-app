@@ -276,7 +276,7 @@ export async function POST(req: Request) {
           expiresAt: { gt: now },
           clientId,
         },
-        select: { id: true, expiresAt: true, scheduledFor: true },
+        select: { id: true, expiresAt: true, scheduledFor: true, locationType: true },
       })
 
       if (existingClientHold) {
@@ -338,7 +338,7 @@ export async function POST(req: Request) {
           expiresAt,
           locationType, // ✅ Prisma now accepts this
         },
-        select: { id: true, expiresAt: true, scheduledFor: true },
+        select: { id: true, expiresAt: true, scheduledFor: true, locationType: true },
       })
 
       return { ok: true as const, status: 201, hold }

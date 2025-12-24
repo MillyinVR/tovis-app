@@ -617,7 +617,7 @@ model BookingHold {
   scheduledFor   DateTime
   expiresAt      DateTime
   createdAt      DateTime @default(now())
-  locationType ServiceLocationType
+  locationType   ServiceLocationType
 
 
   clientId String? // <-- nullable for now
