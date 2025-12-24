@@ -1,6 +1,6 @@
 // app/booking/[id]/page.tsx
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
@@ -27,9 +27,44 @@ function fmtInTimeZone(dateUtc: Date, timeZone: string) {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   }).format(dateUtc)
+}
+
+function formatMoneyMaybe(v: unknown) {
+  if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(2)}`
+  if (typeof v === 'string' && v.trim()) return v.trim()
+  return null
+}
+
+function upper(v: unknown) {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function friendlyLocationType(v: unknown) {
+  const s = upper(v)
+  if (s === 'SALON') return 'In salon'
+  if (s === 'MOBILE') return 'Mobile'
+  return null
+}
+
+function friendlySource(v: unknown) {
+  const s = upper(v)
+  if (s === 'DISCOVERY') return 'Found in Looks'
+  if (s === 'REQUESTED') return 'Requested booking'
+  if (s === 'AFTERCARE') return 'Rebooked from aftercare'
+  return null
+}
+
+function friendlyStatus(v: unknown) {
+  const s = upper(v)
+  if (s === 'PENDING') return 'Pending approval'
+  if (s === 'ACCEPTED') return 'Confirmed'
+  if (s === 'CANCELLED') return 'Cancelled'
+  if (s === 'COMPLETED') return 'Completed'
+  return s || 'Unknown'
 }
 
 export default async function BookingReceiptPage(props: PageProps) {
@@ -37,51 +72,97 @@ export default async function BookingReceiptPage(props: PageProps) {
   const id = params?.id
   if (!id || typeof id !== 'string') notFound()
 
+  // ✅ If you’re not logged in, you don’t get to see anything.
   const user = await getCurrentUser().catch(() => null)
-  if (!user) notFound()
+  if (!user) redirect(`/login?from=${encodeURIComponent(`/booking/${id}`)}`)
 
+  // ✅ One query: booking + related bits we need for UI
   const booking = await prisma.booking.findUnique({
     where: { id },
+    select: {
+      id: true,
+      clientId: true,
+      professionalId: true,
+      offeringId: true,
+
+      scheduledFor: true,
+      status: true,
+      source: true,
+      locationType: true,
+
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+
+      service: {
+        select: {
+          id: true,
+          name: true,
+          category: { select: { name: true } },
+        },
+      },
+
+      professional: {
+        select: {
+          id: true,
+          businessName: true,
+          city: true,
+          location: true,
+          timeZone: true,
+          user: { select: { email: true } },
+        },
+      },
+    },
   })
+
   if (!booking) notFound()
 
-  const isClient = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
-  const isPro = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
-  if (!isClient && !isPro) notFound()
+  // ✅ Authorization: only the owning client OR owning pro can view.
+  const isClientViewer = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
+  const isProViewer = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
+  if (!isClientViewer && !isProViewer) notFound()
 
-  // Pull related info using ids
-  const [svc, prof] = await Promise.all([
-    prisma.service.findUnique({
-      where: { id: booking.serviceId },
-      include: { category: true },
-    }),
-    prisma.professionalProfile.findUnique({
-      where: { id: booking.professionalId },
-      include: { user: true },
-    }),
-  ])
+  const prof = booking.professional
+  const svc = booking.service
 
   const proName = prof?.businessName || prof?.user?.email || 'Professional'
   const serviceName = svc?.name || 'Service'
   const location = prof?.location || prof?.city || null
 
-  // ✅ timezone: prefer pro timezone, fallback to LA
-  const appointmentTz = sanitizeTimeZone((prof as any)?.timeZone) ?? 'America/Los_Angeles'
+  const appointmentTz = sanitizeTimeZone(prof?.timeZone ?? null) ?? 'America/Los_Angeles'
   const when = fmtInTimeZone(new Date(booking.scheduledFor), appointmentTz)
 
+  // Next actions
   const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
+  const aftercareHref = `/aftercare?bookingId=${encodeURIComponent(booking.id)}`
+
+  // Rebook path: prefer offering -> else pro profile -> else looks
   const rebookHref = booking.offeringId
     ? `/offerings/${booking.offeringId}`
     : prof?.id
       ? `/professionals/${prof.id}`
-      : '/explore'
-  const aftercareHref = `/aftercare?bookingId=${encodeURIComponent(booking.id)}`
+      : '/looks'
+
+  // Optional metadata for clarity
+  const duration = booking.durationMinutesSnapshot ?? null
+  const price = formatMoneyMaybe(booking.priceSnapshot)
+  const locationTypeLabel = friendlyLocationType(booking.locationType)
+  const sourceLabel = friendlySource(booking.source)
+  const statusLabel = friendlyStatus(booking.status)
 
   return (
     <main style={{ maxWidth: 860, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'baseline' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          alignItems: 'baseline',
+        }}
+      >
         <div>
-          <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Booking confirmed</div>
+          <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Booking receipt</div>
+
           <h1 style={{ fontSize: 28, margin: '6px 0 0', fontWeight: 900 }}>
             {serviceName} with {proName}
           </h1>
@@ -89,10 +170,41 @@ export default async function BookingReceiptPage(props: PageProps) {
           <div style={{ marginTop: 6, color: '#111', fontSize: 14 }}>
             <strong>{when}</strong>
             <span style={{ color: '#6b7280' }}> · {appointmentTz}</span>
-            {location ? <span> · {location}</span> : null}
+            {location ? <span style={{ color: '#6b7280' }}> · {location}</span> : null}
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <span>
+              <strong style={{ color: '#111' }}>Status:</strong> {statusLabel}
+            </span>
+
+            {locationTypeLabel ? (
+              <span>
+                <strong style={{ color: '#111' }}>Mode:</strong> {locationTypeLabel}
+              </span>
+            ) : null}
+
+            {duration ? (
+              <span>
+                <strong style={{ color: '#111' }}>Duration:</strong> {duration} min
+              </span>
+            ) : null}
+
+            {price ? (
+              <span>
+                <strong style={{ color: '#111' }}>Price:</strong> {price}
+              </span>
+            ) : null}
+
+            {sourceLabel ? (
+              <span>
+                <strong style={{ color: '#111' }}>Source:</strong> {sourceLabel}
+              </span>
+            ) : null}
           </div>
         </div>
 
+        {/* Looks = discovery home */}
         <Link href="/looks" style={{ textDecoration: 'none', color: '#111', fontWeight: 900 }}>
           ← Back to Looks
         </Link>
@@ -153,7 +265,7 @@ export default async function BookingReceiptPage(props: PageProps) {
           </Link>
 
           <Link
-            href="/client"
+            href={isProViewer ? '/professional/bookings' : '/client/bookings'}
             style={{
               textDecoration: 'none',
               border: '1px solid #eee',
@@ -174,6 +286,13 @@ export default async function BookingReceiptPage(props: PageProps) {
           </div>
         </div>
       </div>
+
+      {/* Optional little extra context (kept tiny) */}
+      {svc?.category?.name ? (
+        <div style={{ marginTop: 14, fontSize: 12, color: '#6b7280' }}>
+          Category: <strong style={{ color: '#111' }}>{svc.category.name}</strong>
+        </div>
+      ) : null}
     </main>
   )
 }

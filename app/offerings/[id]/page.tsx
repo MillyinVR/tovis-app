@@ -160,7 +160,7 @@ export default async function OfferingPage(props: PageProps) {
   const prof = offering.professional
 
   const proTimeZoneFromDb = sanitizeTimeZone(prof?.timeZone ?? null)
-  const effectiveProTimeZone = proTimeZoneFromUrl ?? proTimeZoneFromDb ?? null
+  const effectiveProTimeZone = proTimeZoneFromDb ?? null
 
   // ✅ offering capabilities + per-mode fields (new world)
   const offersInSalon = Boolean(offering.offersInSalon)
@@ -196,9 +196,10 @@ export default async function OfferingPage(props: PageProps) {
 
   return (
     <main style={{ maxWidth: 900, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <a href="/explore" style={{ fontSize: 13, color: '#555', textDecoration: 'none' }}>
-        ← Back to explore
-      </a>
+      <a href="/looks" style={{ fontSize: 13, color: '#555', textDecoration: 'none' }}>
+  ← Back to Looks
+</a>
+
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24, marginTop: 16 }}>
         <div>

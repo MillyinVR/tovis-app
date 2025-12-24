@@ -1,4 +1,3 @@
-// app/(main)/booking/AvailabilityDrawer.tsx
 'use client'
 
 import Link from 'next/link'
@@ -13,6 +12,8 @@ type DrawerContext =
       serviceId?: string | null
     }
   | null
+
+type ServiceLocationType = 'SALON' | 'MOBILE'
 
 type ProCard = {
   id: string
@@ -59,6 +60,36 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason: string) {
   const from = sanitizeFrom(currentPathWithQuery())
   const qs = new URLSearchParams({ from, reason })
   router.push(`/login?${qs.toString()}`)
+}
+
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
+}
+
+/**
+ * Option B hold shape:
+ * { ok: true, hold: { id, expiresAt, scheduledFor, locationType? } }
+ */
+function parseHoldResponse(data: any): { holdId: string; holdUntilMs: number; scheduledForISO?: string; locationType?: ServiceLocationType | null } {
+  const hold = data?.hold
+  const holdId = typeof hold?.id === 'string' ? hold.id : ''
+  const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt : ''
+  const scheduledForISO = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor : undefined
+  const loc = normalizeLocationType(hold?.locationType)
+
+  const holdUntilMs = expiresAtIso ? new Date(expiresAtIso).getTime() : NaN
+  if (!holdId || !Number.isFinite(holdUntilMs)) {
+    throw new Error('Hold response missing fields.')
+  }
+  return { holdId, holdUntilMs, scheduledForISO, locationType: loc }
+}
+
+async function deleteHoldById(holdId: string) {
+  if (!holdId) return
+  await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' }).catch(() => {})
 }
 
 /**
@@ -196,6 +227,8 @@ export default function AvailabilityDrawer({
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<AvailabilityResponse | null>(null)
 
+  const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
+
   const [selected, setSelected] = useState<{
     proId: string
     offeringId: string
@@ -221,7 +254,14 @@ export default function AvailabilityDrawer({
 
   const viewerTz = useMemo(() => getViewerTimeZone(), [])
 
-  function hardResetUi() {
+  function hardResetUi(args?: { deleteHold?: boolean }) {
+    const deleteHold = Boolean(args?.deleteHold)
+
+    const holdId = selected?.holdId
+    if (deleteHold && holdId) {
+      void deleteHoldById(holdId)
+    }
+
     setSelected(null)
     setHoldUntil(null)
     setHolding(false)
@@ -244,14 +284,20 @@ export default function AvailabilityDrawer({
       abortRef.current = null
       if (holdTimerRef.current) window.clearInterval(holdTimerRef.current)
       holdTimerRef.current = null
+
+      // Best-effort: if drawer unmounts with an active hold, free it
+      if (selected?.holdId) {
+        void deleteHoldById(selected.holdId)
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Fetch availability when opened/context changes
   useEffect(() => {
     if (!open || !context) return
 
-    hardResetUi()
+    hardResetUi({ deleteHold: true })
 
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -275,8 +321,6 @@ export default function AvailabilityDrawer({
         const body = await safeJson(res)
 
         if (res.status === 401) {
-          // Guests can VIEW the drawer in your product, but if your API requires auth, handle it cleanly.
-          // If you decide availability should be public later, drop this.
           redirectToLogin(router, 'availability')
           throw new Error('Please log in to view availability.')
         }
@@ -348,6 +392,11 @@ export default function AvailabilityDrawer({
     setWaitlistMsg(null)
     setWaitlistOk(false)
 
+    // If a previous hold exists, free it before creating a new one
+    if (selected?.holdId) {
+      void deleteHoldById(selected.holdId)
+    }
+
     setSelected(null)
     setHoldUntil(null)
 
@@ -359,6 +408,7 @@ export default function AvailabilityDrawer({
         body: JSON.stringify({
           offeringId,
           scheduledFor: slotISO, // already UTC ISO
+          locationType, // ✅ critical: matches BookingPanel + server expectations
         }),
       })
 
@@ -369,15 +419,15 @@ export default function AvailabilityDrawer({
         return
       }
 
-      if (!res.ok) throw new Error(body?.error || `Hold failed (${res.status})`)
+      if (!res.ok || !body?.ok) throw new Error(body?.error || `Hold failed (${res.status})`)
 
-      const holdId = typeof body?.holdId === 'string' ? body.holdId : null
-      const holdUntilMs = typeof body?.holdUntil === 'number' ? body.holdUntil : null
+      const parsed = parseHoldResponse(body)
 
-      if (!holdId || !holdUntilMs) throw new Error('Hold response missing holdId/holdUntil.')
+      setSelected({ proId, offeringId, slotISO, proTimeZone: tz, holdId: parsed.holdId })
+      setHoldUntil(parsed.holdUntilMs)
 
-      setSelected({ proId, offeringId, slotISO, proTimeZone: tz, holdId })
-      setHoldUntil(holdUntilMs)
+      // If server returns a canonical locationType, accept it
+      if (parsed.locationType) setLocationType(parsed.locationType)
     } catch (e: any) {
       setError(e?.message || 'Failed to hold slot. Try another time.')
     } finally {
@@ -449,6 +499,7 @@ export default function AvailabilityDrawer({
         `&holdUntil=${encodeURIComponent(String(holdUntil))}` +
         `&proTimeZone=${encodeURIComponent(selected.proTimeZone)}` +
         `&holdId=${encodeURIComponent(selected.holdId)}` +
+        `&locationType=${encodeURIComponent(locationType)}` + // ✅ critical
         `&source=${encodeURIComponent('DISCOVERY')}`
       : null
 
@@ -457,7 +508,7 @@ export default function AvailabilityDrawer({
       {/* Backdrop */}
       <div
         onClick={() => {
-          hardResetUi()
+          hardResetUi({ deleteHold: true })
           onClose()
         }}
         style={{
@@ -490,7 +541,7 @@ export default function AvailabilityDrawer({
           <div style={{ fontWeight: 900 }}>View availability</div>
           <button
             onClick={() => {
-              hardResetUi()
+              hardResetUi({ deleteHold: true })
               onClose()
             }}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}
@@ -569,6 +620,54 @@ export default function AvailabilityDrawer({
                 </div>
               </div>
 
+              {/* Mode toggle */}
+              <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>Appointment type</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (locationType === 'SALON') return
+                      hardResetUi({ deleteHold: true })
+                      setLocationType('SALON')
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: locationType === 'SALON' ? '2px solid #111' : '1px solid #ddd',
+                      background: '#fff',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    In-salon
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (locationType === 'MOBILE') return
+                      hardResetUi({ deleteHold: true })
+                      setLocationType('MOBILE')
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: locationType === 'MOBILE' ? '2px solid #111' : '1px solid #ddd',
+                      background: '#fff',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mobile
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+                  This choice affects holds and availability. Pick it once, then pick your time.
+                </div>
+              </div>
+
               {/* Slots */}
               <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, marginBottom: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
@@ -622,8 +721,7 @@ export default function AvailabilityDrawer({
 
                 {showLocalHint && selected?.slotISO ? (
                   <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
-                    Your local time for this slot:{' '}
-                    <strong style={{ color: '#111' }}>{fmtInViewerTz(selected.slotISO)}</strong>
+                    Your local time for this slot: <strong style={{ color: '#111' }}>{fmtInViewerTz(selected.slotISO)}</strong>
                   </div>
                 ) : null}
 
@@ -656,9 +754,7 @@ export default function AvailabilityDrawer({
                 <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
                     <div style={{ fontWeight: 900 }}>Waitlist</div>
-                    <div style={{ fontSize: 12, color: '#6b7280' }}>
-                      {noPrimarySlots ? 'No slots, get notified' : 'Can’t make this time? Get notified'}
-                    </div>
+                    <div style={{ fontSize: 12, color: '#6b7280' }}>{noPrimarySlots ? 'No slots, get notified' : 'Can’t make this time? Get notified'}</div>
                   </div>
 
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
@@ -697,9 +793,7 @@ export default function AvailabilityDrawer({
                         Join waitlist
                       </button>
 
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>
-                        You’ll only get pinged if it matches your window.
-                      </div>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>You’ll only get pinged if it matches your window.</div>
                     </div>
                   ) : (
                     <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>

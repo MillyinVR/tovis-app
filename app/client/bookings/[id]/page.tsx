@@ -12,14 +12,46 @@ function toDate(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-function formatWhen(d: Date) {
-  return d.toLocaleString(undefined, {
+function sanitizeTimeZone(tz: string | null | undefined) {
+  if (!tz) return null
+  if (!/^[A-Za-z_]+\/[A-Za-z0-9_\-+]+$/.test(tz)) return null
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
+    return tz
+  } catch {
+    return null
+  }
+}
+
+function formatWhenInTimeZone(d: Date, timeZone: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  })
+  }).format(d)
+}
+
+function upper(v: unknown) {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function friendlyLocationType(v: unknown) {
+  const s = upper(v)
+  if (s === 'SALON') return 'In salon'
+  if (s === 'MOBILE') return 'Mobile'
+  return null
+}
+
+function friendlySource(v: unknown) {
+  const s = upper(v)
+  if (s === 'DISCOVERY') return 'Looks'
+  if (s === 'REQUESTED') return 'Requested'
+  if (s === 'AFTERCARE') return 'Aftercare rebook'
+  return null
 }
 
 function statusPillTone(statusRaw: unknown) {
@@ -79,7 +111,6 @@ function locationLine(pro?: { location?: string | null; city?: string | null; st
 }
 
 function formatPriceMaybe(v: unknown): string | null {
-  // Handle numbers; if you later store cents as int, adjust here.
   if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(2)}`
   if (typeof v === 'string' && v.trim()) return v.trim()
   return null
@@ -97,13 +128,13 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
     where: { id: bookingId },
     include: {
       service: true,
-      professional: true,
+      professional: { include: { user: true } },
       aftercareSummary: true,
     },
   })
 
   if (!booking) notFound()
-  if (booking.clientId !== user.clientProfile.id) redirect('/client')
+  if (booking.clientId !== user.clientProfile.id) redirect('/client/bookings')
 
   const existingReview = await prisma.review.findFirst({
     where: { bookingId: booking.id, clientId: user.clientProfile.id },
@@ -125,7 +156,11 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
   })
 
   const scheduled = toDate(booking.scheduledFor)
-  const whenLabel = scheduled ? formatWhen(scheduled) : 'Unknown time'
+
+  // ✅ show in PRO timezone (consistent with booking flow)
+  const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
+  const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : 'Unknown time'
+
   const loc = locationLine(booking.professional)
   const pill = statusPillTone(booking.status)
   const msg = statusMessage(booking.status)
@@ -133,16 +168,17 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
   const duration = booking.durationMinutesSnapshot ?? null
   const priceLabel = formatPriceMaybe((booking as any).priceSnapshot)
 
+  const modeLabel = friendlyLocationType((booking as any).locationType)
+  const sourceLabel = friendlySource((booking as any).source)
+
   return (
     <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>
-        {booking.service?.name || 'Booking'}
-      </h1>
+      <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>{booking.service?.name || 'Booking'}</h1>
 
       {/* Top row: back + status pill */}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 }}>
         <a
-          href="/client"
+          href="/client/bookings"
           style={{
             textDecoration: 'none',
             border: '1px solid #e5e7eb',
@@ -175,21 +211,31 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
       </div>
 
       <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 10 }}>
-        With {booking.professional?.businessName || 'your professional'}
+        With {booking.professional?.businessName || booking.professional?.user?.email || 'your professional'}
       </div>
 
       {/* When + Where */}
       <div style={{ fontSize: 13, color: '#111', marginBottom: 10 }}>
         <span style={{ fontWeight: 800 }}>{whenLabel}</span>
+        <span style={{ color: '#6b7280' }}> · {appointmentTz}</span>
         {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
       </div>
 
       {/* Tiny details row */}
-      {(duration || priceLabel) ? (
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
+      {(duration || priceLabel || modeLabel || sourceLabel) ? (
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {duration ? <span style={{ fontWeight: 800, color: '#111' }}>{duration} min</span> : null}
-          {duration && priceLabel ? <span> · </span> : null}
           {priceLabel ? <span style={{ fontWeight: 800, color: '#111' }}>{priceLabel}</span> : null}
+          {modeLabel ? (
+            <span>
+              <span style={{ fontWeight: 800, color: '#111' }}>Mode:</span> {modeLabel}
+            </span>
+          ) : null}
+          {sourceLabel ? (
+            <span>
+              <span style={{ fontWeight: 800, color: '#111' }}>Source:</span> {sourceLabel}
+            </span>
+          ) : null}
         </div>
       ) : (
         <div style={{ marginBottom: 16 }} />

@@ -6,6 +6,9 @@ import type { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
+const BUFFER_MINUTES = 5
+const HOLD_MINUTES = 10
+
 type CreateHoldBody = {
   offeringId?: unknown
   scheduledFor?: unknown
@@ -176,9 +179,17 @@ function ensureWithinWorkingHours(args: {
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ ok: false, error: 'Only clients can hold slots.' }, { status: 401 })
+
+    // 401 = not logged in
+    if (!user) {
+      return NextResponse.json({ ok: false, error: 'Please log in.' }, { status: 401 })
     }
+
+    // 403 = logged in but not allowed
+    if (user.role !== 'CLIENT' || !user.clientProfile?.id) {
+      return NextResponse.json({ ok: false, error: 'Only clients can hold slots.' }, { status: 403 })
+    }
+
     const clientId = user.clientProfile.id
 
     const body = (await req.json().catch(() => ({}))) as CreateHoldBody
@@ -199,7 +210,7 @@ export async function POST(req: Request) {
 
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
-    const BUFFER_MINUTES = 5
+    // Prevent immediate / past holds
     if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
       return NextResponse.json({ ok: false, error: 'Please select a future time.' }, { status: 400 })
     }
@@ -259,22 +270,22 @@ export async function POST(req: Request) {
 
       const now = new Date()
 
-      // Cleanup: delete expired holds for this exact pro+slot
+      // Cleanup: delete expired holds for this professional (keeps table tidy)
       await tx.bookingHold.deleteMany({
         where: {
           professionalId: offering.professionalId,
-          scheduledFor: requestedStart,
           expiresAt: { lte: now },
         },
       })
 
-      // If THIS client already holds this exact slot, return it
+      // If THIS client already holds this exact slot (same locationType), return it
       const existingClientHold = await tx.bookingHold.findFirst({
         where: {
           professionalId: offering.professionalId,
           scheduledFor: requestedStart,
           expiresAt: { gt: now },
           clientId,
+          locationType,
         },
         select: { id: true, expiresAt: true, scheduledFor: true, locationType: true },
       })
@@ -287,7 +298,7 @@ export async function POST(req: Request) {
         }
       }
 
-      // Booking conflict check
+      // Booking conflict check (small window to avoid scanning everything)
       const windowStart = addMinutes(requestedStart, -duration * 2)
       const windowEnd = addMinutes(requestedStart, duration * 2)
 
@@ -313,12 +324,13 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 409, error: 'That time was just taken.' }
       }
 
-      // Hold conflict check: block if ANYONE holds this exact slot
+      // Hold conflict check: block if SOMEONE ELSE holds this exact slot
       const activeHold = await tx.bookingHold.findFirst({
         where: {
           professionalId: offering.professionalId,
           scheduledFor: requestedStart,
           expiresAt: { gt: now },
+          NOT: { clientId },
         },
         select: { id: true },
       })
@@ -327,7 +339,7 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
       }
 
-      const expiresAt = addMinutes(now, 10)
+      const expiresAt = addMinutes(now, HOLD_MINUTES)
 
       const hold = await tx.bookingHold.create({
         data: {
@@ -336,7 +348,7 @@ export async function POST(req: Request) {
           clientId,
           scheduledFor: requestedStart,
           expiresAt,
-          locationType, // ✅ Prisma now accepts this
+          locationType,
         },
         select: { id: true, expiresAt: true, scheduledFor: true, locationType: true },
       })
