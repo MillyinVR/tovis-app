@@ -329,8 +329,9 @@ export async function POST(request: Request) {
       if (hold.professionalId !== offering.professionalId) throw new Error('HOLD_MISMATCH')
       if (hold.locationType !== locationType) throw new Error('HOLD_MISMATCH')
 
-      const holdStart = normalizeToMinute(new Date(hold.scheduledFor))
-      if (holdStart.getTime() !== requestedStart.getTime()) throw new Error('HOLD_MISMATCH')
+      const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
+      const requestedEnd = addMinutes(requestedStart, durationMinutes)
+
 
       // 2) Conflict re-check (bookings)
       const existing2 = (await tx.booking.findMany({

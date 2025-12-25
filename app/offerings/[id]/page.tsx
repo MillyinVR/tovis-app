@@ -160,7 +160,9 @@ export default async function OfferingPage(props: PageProps) {
   const prof = offering.professional
 
   const proTimeZoneFromDb = sanitizeTimeZone(prof?.timeZone ?? null)
-  const effectiveProTimeZone = proTimeZoneFromDb ?? null
+
+  // ✅ FIX: honor URL timezone (from drawer) when present, otherwise DB, otherwise null
+  const effectiveProTimeZone = proTimeZoneFromUrl ?? proTimeZoneFromDb ?? null
 
   // ✅ offering capabilities + per-mode fields (new world)
   const offersInSalon = Boolean(offering.offersInSalon)
@@ -197,9 +199,8 @@ export default async function OfferingPage(props: PageProps) {
   return (
     <main style={{ maxWidth: 900, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <a href="/looks" style={{ fontSize: 13, color: '#555', textDecoration: 'none' }}>
-  ← Back to Looks
-</a>
-
+        ← Back to Looks
+      </a>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24, marginTop: 16 }}>
         <div>
@@ -253,16 +254,13 @@ export default async function OfferingPage(props: PageProps) {
           professionalId={prof.id}
           serviceId={svc.id}
           mediaId={mediaId}
-
           offersInSalon={offersInSalon}
           offersMobile={offersMobile}
           salonPriceStartingAt={salonPriceStartingAt}
           salonDurationMinutes={salonDurationMinutes}
           mobilePriceStartingAt={mobilePriceStartingAt}
           mobileDurationMinutes={mobileDurationMinutes}
-
           defaultLocationType={defaultLocationType}
-
           isLoggedInAsClient={isLoggedInAsClient}
           defaultScheduledForISO={scheduledFor}
           serviceName={titleForUI}

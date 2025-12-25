@@ -39,8 +39,12 @@ type AvailabilityResponse = {
 
 const FOOTER_HEIGHT = UI_SIZES.footerHeight
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+async function safeJson(res: Response): Promise<any> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
 }
 
 function currentPathWithQuery() {
@@ -73,15 +77,20 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
  * Option B hold shape:
  * { ok: true, hold: { id, expiresAt, scheduledFor, locationType? } }
  */
-function parseHoldResponse(data: any): { holdId: string; holdUntilMs: number; scheduledForISO?: string; locationType?: ServiceLocationType | null } {
+function parseHoldResponse(data: any): {
+  holdId: string
+  holdUntilMs: number
+  scheduledForISO: string
+  locationType?: ServiceLocationType | null
+} {
   const hold = data?.hold
   const holdId = typeof hold?.id === 'string' ? hold.id : ''
   const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt : ''
-  const scheduledForISO = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor : undefined
+  const scheduledForISO = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor : ''
   const loc = normalizeLocationType(hold?.locationType)
 
   const holdUntilMs = expiresAtIso ? new Date(expiresAtIso).getTime() : NaN
-  if (!holdId || !Number.isFinite(holdUntilMs)) {
+  if (!holdId || !scheduledForISO || !Number.isFinite(holdUntilMs)) {
     throw new Error('Hold response missing fields.')
   }
   return { holdId, holdUntilMs, scheduledForISO, locationType: loc }
@@ -141,7 +150,10 @@ function fmtInViewerTz(iso: string) {
 }
 
 /**
- * timezone helpers (same logic used in BookingPanel rewrite)
+ * datetime-local (YYYY-MM-DDTHH:mm) has no timezone.
+ * Interpret it as PROFESSIONAL timezone, convert to UTC ISO.
+ *
+ * This is the least-worst way to do it without pulling in date-fns-tz.
  */
 function getZonedParts(dateUtc: Date, timeZone: string) {
   const dtf = new Intl.DateTimeFormat('en-US', {
@@ -177,10 +189,12 @@ function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
 function zonedTimeToUtc(args: { year: number; month: number; day: number; hour: number; minute: number; timeZone: string }) {
   const { year, month, day, hour, minute, timeZone } = args
 
+  // initial guess pretending local = utc
   let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
   const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
   guess = new Date(guess.getTime() - offset1 * 60_000)
 
+  // correct for DST boundary if needed
   const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
   if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
 
@@ -199,10 +213,6 @@ function parseDatetimeLocal(value: string) {
   }
 }
 
-/**
- * datetime-local returns "YYYY-MM-DDTHH:mm" (no timezone).
- * Interpret it as PROFESSIONAL timezone and convert to UTC ISO.
- */
 function toISOFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
   if (!value) return null
   const p = parseDatetimeLocal(value)
@@ -240,6 +250,10 @@ export default function AvailabilityDrawer({
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [holding, setHolding] = useState(false)
 
+  // Countdown tick
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const tickRef = useRef<number | null>(null)
+
   // Waitlist UI
   const [waitlistOpen, setWaitlistOpen] = useState(false)
   const [desired, setDesired] = useState('') // datetime-local
@@ -250,22 +264,20 @@ export default function AvailabilityDrawer({
   const [waitlistOk, setWaitlistOk] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
-  const holdTimerRef = useRef<number | null>(null)
 
   const viewerTz = useMemo(() => getViewerTimeZone(), [])
 
-  function hardResetUi(args?: { deleteHold?: boolean }) {
-    const deleteHold = Boolean(args?.deleteHold)
+  const primary = data?.primaryPro ?? null
+  const others = data?.otherPros ?? []
 
-    const holdId = selected?.holdId
-    if (deleteHold && holdId) {
-      void deleteHoldById(holdId)
-    }
+  // appointment timezone: prefer primaryPro.timeZone, then top-level, then viewer, then fallback
+  const appointmentTz = useMemo(() => {
+    return primary?.timeZone || data?.timeZone || viewerTz || 'America/Los_Angeles'
+  }, [primary?.timeZone, data?.timeZone, viewerTz])
 
-    setSelected(null)
-    setHoldUntil(null)
-    setHolding(false)
+  const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
 
+  function resetWaitlistUi() {
     setWaitlistOpen(false)
     setDesired('')
     setFlexMinutes(60)
@@ -273,8 +285,25 @@ export default function AvailabilityDrawer({
     setWaitlistMsg(null)
     setWaitlistOk(false)
     setWaitlistPosting(false)
+  }
 
+  async function releaseHoldIfAny() {
+    if (selected?.holdId) {
+      await deleteHoldById(selected.holdId)
+    }
+  }
+
+  async function hardResetUi(args?: { deleteHold?: boolean }) {
+    const deleteHold = Boolean(args?.deleteHold)
+    if (deleteHold) {
+      await releaseHoldIfAny().catch(() => {})
+    }
+
+    setSelected(null)
+    setHoldUntil(null)
+    setHolding(false)
     setError(null)
+    resetWaitlistUi()
   }
 
   // Cleanup on unmount
@@ -282,8 +311,8 @@ export default function AvailabilityDrawer({
     return () => {
       abortRef.current?.abort()
       abortRef.current = null
-      if (holdTimerRef.current) window.clearInterval(holdTimerRef.current)
-      holdTimerRef.current = null
+      if (tickRef.current) window.clearInterval(tickRef.current)
+      tickRef.current = null
 
       // Best-effort: if drawer unmounts with an active hold, free it
       if (selected?.holdId) {
@@ -293,17 +322,43 @@ export default function AvailabilityDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Tick while a hold exists
+  useEffect(() => {
+    if (!holdUntil) return
+
+    setNowMs(Date.now())
+    if (tickRef.current) window.clearInterval(tickRef.current)
+    tickRef.current = window.setInterval(() => setNowMs(Date.now()), 500)
+
+    return () => {
+      if (tickRef.current) window.clearInterval(tickRef.current)
+      tickRef.current = null
+    }
+  }, [holdUntil])
+
+  // Expire behavior
+  useEffect(() => {
+    if (!holdUntil) return
+    if (nowMs < holdUntil) return
+
+    setHoldUntil(null)
+    setSelected(null)
+    setError('That hold expired. Pick another time.')
+  }, [nowMs, holdUntil])
+
   // Fetch availability when opened/context changes
   useEffect(() => {
     if (!open || !context) return
 
-    hardResetUi({ deleteHold: true })
+    // start fresh every open/context change
+    void hardResetUi({ deleteHold: true })
 
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
     setLoading(true)
+    setError(null)
     setData(null)
 
     const qs = new URLSearchParams({
@@ -325,61 +380,39 @@ export default function AvailabilityDrawer({
           throw new Error('Please log in to view availability.')
         }
 
-        if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
+        if (!res.ok) throw new Error(body?.error || `Request failed (${res.status}).`)
         setData(body as AvailabilityResponse)
       })
       .catch((e: any) => {
         if (e?.name === 'AbortError') return
-        setError(e?.message || 'Failed to load availability')
+        setError(e?.message || 'Failed to load availability.')
       })
       .finally(() => {
         if (abortRef.current === controller) abortRef.current = null
         setLoading(false)
       })
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, context?.professionalId, context?.mediaId, context?.serviceId])
 
-  const primary = data?.primaryPro ?? null
-  const others = data?.otherPros ?? []
+  // IMPORTANT: prefer serviceId returned by API (truth)
+  const effectiveServiceId = data?.serviceId ?? context?.serviceId ?? null
+  const canWaitlist = Boolean(data?.waitlistSupported && context?.professionalId && effectiveServiceId)
+  const noPrimarySlots = Boolean(primary && (!primary.slots || primary.slots.length === 0))
 
-  // appointment timezone: prefer primaryPro.timeZone, then top-level, then viewer, then fallback
-  const appointmentTz = useMemo(() => {
-    return primary?.timeZone || data?.timeZone || viewerTz || 'America/Los_Angeles'
-  }, [primary?.timeZone, data?.timeZone, viewerTz])
-
-  const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
-
-  // Hold countdown label
   const holdLabel = useMemo(() => {
     if (!holdUntil) return null
-    const remaining = Math.max(0, holdUntil - Date.now())
+    const remaining = Math.max(0, holdUntil - nowMs)
     const s = Math.floor(remaining / 1000)
     const mm = String(Math.floor(s / 60)).padStart(2, '0')
     const ss = String(s % 60).padStart(2, '0')
     return `${mm}:${ss}`
-  }, [holdUntil])
+  }, [holdUntil, nowMs])
 
-  // Run timer while holding
-  useEffect(() => {
-    if (!holdUntil) return
-    if (holdTimerRef.current) window.clearInterval(holdTimerRef.current)
-
-    holdTimerRef.current = window.setInterval(() => {
-      setHoldUntil((prev) => {
-        if (!prev) return prev
-        if (Date.now() >= prev) {
-          setSelected(null)
-          return null
-        }
-        return prev
-      })
-    }, 500)
-
-    return () => {
-      if (holdTimerRef.current) window.clearInterval(holdTimerRef.current)
-      holdTimerRef.current = null
-    }
-  }, [holdUntil])
+  const holdUrgent = useMemo(() => {
+    if (!holdUntil) return false
+    return holdUntil - nowMs <= 2 * 60_000
+  }, [holdUntil, nowMs])
 
   async function onPickSlot(proId: string, offeringId: string | null, slotISO: string, proTimeZone?: string | null) {
     if (!offeringId) return
@@ -388,13 +421,11 @@ export default function AvailabilityDrawer({
     const tz = proTimeZone || appointmentTz
 
     setError(null)
-    setWaitlistOpen(false)
-    setWaitlistMsg(null)
-    setWaitlistOk(false)
+    resetWaitlistUi()
 
-    // If a previous hold exists, free it before creating a new one
+    // Always release previous hold before creating a new one
     if (selected?.holdId) {
-      void deleteHoldById(selected.holdId)
+      await deleteHoldById(selected.holdId).catch(() => {})
     }
 
     setSelected(null)
@@ -407,8 +438,8 @@ export default function AvailabilityDrawer({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offeringId,
-          scheduledFor: slotISO, // already UTC ISO
-          locationType, // ✅ critical: matches BookingPanel + server expectations
+          scheduledFor: slotISO, // UTC ISO
+          locationType, // ✅ must match BookingPanel + server expectations
         }),
       })
 
@@ -419,26 +450,21 @@ export default function AvailabilityDrawer({
         return
       }
 
-      if (!res.ok || !body?.ok) throw new Error(body?.error || `Hold failed (${res.status})`)
+      if (!res.ok || !body?.ok) throw new Error(body?.error || `Hold failed (${res.status}).`)
 
       const parsed = parseHoldResponse(body)
 
-      setSelected({ proId, offeringId, slotISO, proTimeZone: tz, holdId: parsed.holdId })
+      setSelected({ proId, offeringId, slotISO: parsed.scheduledForISO, proTimeZone: tz, holdId: parsed.holdId })
       setHoldUntil(parsed.holdUntilMs)
 
-      // If server returns a canonical locationType, accept it
+      // If server returns canonical locationType, accept it
       if (parsed.locationType) setLocationType(parsed.locationType)
     } catch (e: any) {
-      setError(e?.message || 'Failed to hold slot. Try another time.')
+      setError(e?.message || 'Failed to hold that time. Try another slot.')
     } finally {
       setHolding(false)
     }
   }
-
-  // IMPORTANT: prefer serviceId returned by API (it’s the “truth”)
-  const effectiveServiceId = data?.serviceId ?? context?.serviceId ?? null
-  const canWaitlist = Boolean(data?.waitlistSupported && context?.professionalId && effectiveServiceId)
-  const noPrimarySlots = Boolean(primary && (!primary.slots || primary.slots.length === 0))
 
   async function submitWaitlist() {
     if (!context || !data?.waitlistSupported) return
@@ -476,7 +502,7 @@ export default function AvailabilityDrawer({
         return
       }
 
-      if (!res.ok) throw new Error(body?.error || `Waitlist failed (${res.status})`)
+      if (!res.ok) throw new Error(body?.error || `Waitlist failed (${res.status}).`)
 
       setWaitlistOk(true)
       setWaitlistMsg('You’re on the waitlist. We’ll notify you if something opens up.')
@@ -499,7 +525,7 @@ export default function AvailabilityDrawer({
         `&holdUntil=${encodeURIComponent(String(holdUntil))}` +
         `&proTimeZone=${encodeURIComponent(selected.proTimeZone)}` +
         `&holdId=${encodeURIComponent(selected.holdId)}` +
-        `&locationType=${encodeURIComponent(locationType)}` + // ✅ critical
+        `&locationType=${encodeURIComponent(locationType)}` +
         `&source=${encodeURIComponent('DISCOVERY')}`
       : null
 
@@ -508,14 +534,10 @@ export default function AvailabilityDrawer({
       {/* Backdrop */}
       <div
         onClick={() => {
-          hardResetUi({ deleteHold: true })
+          void hardResetUi({ deleteHold: true })
           onClose()
         }}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'rgba(0,0,0,0.45)',
-        }}
+        style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }}
       />
 
       {/* Sheet */}
@@ -541,7 +563,7 @@ export default function AvailabilityDrawer({
           <div style={{ fontWeight: 900 }}>View availability</div>
           <button
             onClick={() => {
-              hardResetUi({ deleteHold: true })
+              void hardResetUi({ deleteHold: true })
               onClose()
             }}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}
@@ -571,16 +593,7 @@ export default function AvailabilityDrawer({
                   marginBottom: 12,
                 }}
               >
-                <div
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 999,
-                    background: '#eee',
-                    overflow: 'hidden',
-                    flex: '0 0 auto',
-                  }}
-                >
+                <div style={{ width: 44, height: 44, borderRadius: 999, background: '#eee', overflow: 'hidden', flex: '0 0 auto' }}>
                   {primary.avatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={primary.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -628,7 +641,7 @@ export default function AvailabilityDrawer({
                     type="button"
                     onClick={() => {
                       if (locationType === 'SALON') return
-                      hardResetUi({ deleteHold: true })
+                      void hardResetUi({ deleteHold: true })
                       setLocationType('SALON')
                     }}
                     style={{
@@ -643,11 +656,12 @@ export default function AvailabilityDrawer({
                   >
                     In-salon
                   </button>
+
                   <button
                     type="button"
                     onClick={() => {
                       if (locationType === 'MOBILE') return
-                      hardResetUi({ deleteHold: true })
+                      void hardResetUi({ deleteHold: true })
                       setLocationType('MOBILE')
                     }}
                     style={{
@@ -663,8 +677,9 @@ export default function AvailabilityDrawer({
                     Mobile
                   </button>
                 </div>
+
                 <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-                  This choice affects holds and availability. Pick it once, then pick your time.
+                  This choice affects holds and availability. Pick it, then pick your time. Humans love steps.
                 </div>
               </div>
 
@@ -672,9 +687,10 @@ export default function AvailabilityDrawer({
               <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, marginBottom: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
                   <div style={{ fontWeight: 900 }}>Available times</div>
+
                   {holdLabel ? (
-                    <div style={{ fontSize: 12, color: '#111' }}>
-                      Slot on hold: <strong>{holdLabel}</strong>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>
+                      Slot held for {holdLabel}
                     </div>
                   ) : holding ? (
                     <div style={{ fontSize: 12, color: '#6b7280' }}>Holding…</div>
@@ -776,6 +792,7 @@ export default function AvailabilityDrawer({
                           setWaitlistOpen(true)
                           setWaitlistMsg(null)
                           setWaitlistOk(false)
+                          // If they want waitlist, they probably don’t want a hold ticking down.
                           setSelected(null)
                           setHoldUntil(null)
                         }}
@@ -929,27 +946,30 @@ export default function AvailabilityDrawer({
                             </div>
 
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                              {(p.slots || []).slice(0, 4).map((iso) => (
-                                <button
-                                  key={iso}
-                                  type="button"
-                                  onClick={() => onPickSlot(p.id, p.offeringId, iso, p.timeZone || appointmentTz)}
-                                  disabled={!p.offeringId || holding}
-                                  style={{
-                                    borderRadius: 999,
-                                    border: '1px solid #ddd',
-                                    padding: '8px 10px',
-                                    fontSize: 12,
-                                    cursor: !p.offeringId || holding ? 'not-allowed' : 'pointer',
-                                    background: selected?.proId === p.id && selected?.slotISO === iso ? '#111' : '#fff',
-                                    color: selected?.proId === p.id && selected?.slotISO === iso ? '#fff' : '#111',
-                                    opacity: !p.offeringId || holding ? 0.5 : 1,
-                                  }}
-                                  title={fmtFullInTimeZone(iso, pTz)}
-                                >
-                                  {fmtSlotInTimeZone(iso, pTz)}
-                                </button>
-                              ))}
+                              {(p.slots || []).slice(0, 4).map((iso) => {
+                                const isSelected = selected?.proId === p.id && selected?.slotISO === iso
+                                return (
+                                  <button
+                                    key={iso}
+                                    type="button"
+                                    onClick={() => onPickSlot(p.id, p.offeringId, iso, p.timeZone || appointmentTz)}
+                                    disabled={!p.offeringId || holding}
+                                    style={{
+                                      borderRadius: 999,
+                                      border: '1px solid #ddd',
+                                      padding: '8px 10px',
+                                      fontSize: 12,
+                                      cursor: !p.offeringId || holding ? 'not-allowed' : 'pointer',
+                                      background: isSelected ? '#111' : '#fff',
+                                      color: isSelected ? '#fff' : '#111',
+                                      opacity: !p.offeringId || holding ? 0.5 : 1,
+                                    }}
+                                    title={fmtFullInTimeZone(iso, pTz)}
+                                  >
+                                    {fmtSlotInTimeZone(iso, pTz)}
+                                  </button>
+                                )
+                              })}
                             </div>
                           </div>
                         )

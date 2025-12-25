@@ -8,6 +8,20 @@ import type { FormEvent } from 'react'
 type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE'
 type ServiceLocationType = 'SALON' | 'MOBILE'
 
+/**
+ * Canonical waitlist payload (align this with AvailabilityDrawer + /api/waitlist):
+ * - notes + preferredTimeBucket optional
+ */
+type WaitlistPayload = {
+  professionalId: string
+  serviceId: string
+  mediaId: string | null
+  desiredFor: string | null
+  flexibilityMinutes: number
+  notes?: string | null
+  preferredTimeBucket?: string | null
+}
+
 type BookingPanelProps = {
   offeringId: string
   professionalId: string
@@ -286,12 +300,12 @@ async function createHoldForSelectedSlot(args: {
 }) {
   const { offeringId, scheduledFor, locationType, router, searchParams, previousHoldId } = args
 
-  // ✅ Delete old hold before creating a new one
+  // Delete old hold before creating a new one
   if (previousHoldId) {
     try {
       await deleteHoldById(previousHoldId)
     } catch {
-      // don’t hard-fail; holds also expire server-side
+      // holds expire server-side too
     }
   }
 
@@ -335,6 +349,79 @@ async function fetchHoldById(holdId: string) {
     holdUntilMs: parsed.holdUntilMs,
     locationType: parsed.locationType ?? null,
   }
+}
+
+/**
+ * Optional UX polish: If user joins waitlist with no selection, default to tomorrow noon in pro tz,
+ * converted to UTC ISO.
+ *
+ * This uses Intl parts to build a "YYYY-MM-DDT12:00:00.000Z-ish" by finding tomorrow's YMD in pro tz,
+ * then anchoring at 12:00 "local" and converting by offset inference.
+ *
+ * It's not perfect around DST edges, but it's miles better than "2 hours from now at 2am."
+ */
+function getZonedParts(dateUtc: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const parts = dtf.formatToParts(dateUtc)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  }
+}
+
+function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
+  const z = getZonedParts(dateUtc, timeZone)
+  const asIfUtc = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, z.second)
+  return Math.round((asIfUtc - dateUtc.getTime()) / 60_000)
+}
+
+function zonedTimeToUtc(args: { year: number; month: number; day: number; hour: number; minute: number; timeZone: string }) {
+  const { year, month, day, hour, minute, timeZone } = args
+
+  // initial guess pretending local = utc
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
+  const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
+  guess = new Date(guess.getTime() - offset1 * 60_000)
+
+  // correct for DST boundary if needed
+  const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
+  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
+
+  return guess
+}
+
+function defaultWaitlistDesiredISO(proTz: string) {
+  const tomorrowNoonUtc = zonedTimeToUtc({
+    ...(() => {
+      // get tomorrow's YMD in pro tz
+      const tomorrow = addDays(new Date(), 1)
+      const ymd = ymdFromDateInTz(tomorrow, proTz) // in pro tz
+      return {
+        year: Number(ymd.slice(0, 4)),
+        month: Number(ymd.slice(5, 7)),
+        day: Number(ymd.slice(8, 10)),
+        hour: 12,
+        minute: 0,
+      }
+    })(),
+    timeZone: proTz,
+  })
+  return tomorrowNoonUtc.toISOString()
 }
 
 export default function BookingPanel(props: BookingPanelProps) {
@@ -454,7 +541,8 @@ export default function BookingPanel(props: BookingPanelProps) {
     return Number.isFinite(d) && d > 0 ? d : 60
   }, [modeFields.durationMinutes])
 
-  const normalizedSource = useMemo(() => String(source).toUpperCase(), [source])
+  // ✅ improvement: trim + uppercase so "discovery " doesn't brick the flow
+  const normalizedSource = useMemo(() => String(source).trim().toUpperCase(), [source])
 
   // Date picker window
   const todayYMDInProTz = useMemo(() => ymdFromDateInTz(new Date(), proTz), [proTz])
@@ -525,7 +613,7 @@ export default function BookingPanel(props: BookingPanelProps) {
         setNowMs(Date.now())
         setScheduledForFromHold(h.scheduledForISO)
 
-        // ✅ server-truth locationType wins if present
+        // server-truth locationType wins if present
         if (h.locationType) {
           setLocationType(h.locationType)
         }
@@ -553,7 +641,6 @@ export default function BookingPanel(props: BookingPanelProps) {
         if (cancelled) return
         setHoldUntil(null)
         setScheduledForFromHold(null)
-        // Best-effort delete + clear params
         void clearHoldAndParams({ holdId: holdIdFromUrl, router, searchParams })
         setError(e?.message || 'Your hold is no longer valid. Please pick another time.')
       }
@@ -590,7 +677,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     setError('Your hold expired. Please pick another time.')
   }, [nowMs, holdUntil, holdIdFromUrl, router, searchParams])
 
-  // Best-effort cleanup: if user leaves without booking, delete the hold so it doesn't block others
+  // Optional UX polish: "tap backdrop / navigate away" is hard to detect, but at least on unmount delete hold.
   useEffect(() => {
     return () => {
       if (createdBookingId) return
@@ -702,7 +789,10 @@ export default function BookingPanel(props: BookingPanelProps) {
     maxYMDInProTz,
   ])
 
-  const finalScheduledForISO = useMemo(() => (hasHold ? lockedIso : selectedSlotISO), [hasHold, lockedIso, selectedSlotISO])
+  const finalScheduledForISO = useMemo(
+    () => (hasHold ? lockedIso : selectedSlotISO),
+    [hasHold, lockedIso, selectedSlotISO],
+  )
 
   const prettyTimePro = useMemo(() => {
     if (!finalScheduledForISO) return null
@@ -759,6 +849,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
   }
 
+  // ✅ improvement: unified payload + better default desired time
   async function joinWaitlist() {
     setError(null)
     setWaitlistSuccess(null)
@@ -768,21 +859,28 @@ export default function BookingPanel(props: BookingPanelProps) {
       return
     }
 
-    const desiredISO = lockedIso || finalScheduledForISO || new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+    const desiredISO =
+      lockedIso ||
+      finalScheduledForISO ||
+      defaultScheduledForISO ||
+      defaultWaitlistDesiredISO(proTz)
+
+    const payload: WaitlistPayload = {
+      professionalId,
+      serviceId,
+      mediaId: mediaId || null,
+      desiredFor: desiredISO || null,
+      flexibilityMinutes: 60,
+      preferredTimeBucket: null,
+      notes: null,
+    }
 
     setWaitlistBusy(true)
     try {
       const res = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          professionalId,
-          serviceId,
-          mediaId: mediaId || null,
-          desiredFor: desiredISO,
-          flexibilityMinutes: 60,
-          preferredTimeBucket: null,
-        }),
+        body: JSON.stringify(payload),
       })
 
       const data = await safeJson(res)
@@ -926,7 +1024,9 @@ export default function BookingPanel(props: BookingPanelProps) {
         background: '#fff',
       }}
     >
-      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{success ? 'You’re booked' : 'Confirm your booking'}</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>
+        {success ? 'You’re booked' : 'Confirm your booking'}
+      </h2>
 
       <div
         style={{
@@ -1307,7 +1407,9 @@ export default function BookingPanel(props: BookingPanelProps) {
           </label>
 
           {error ? <p style={{ color: '#b91c1c', fontSize: 13, margin: 0 }}>{error}</p> : null}
-          {waitlistSuccess ? <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p> : null}
+          {waitlistSuccess ? (
+            <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p>
+          ) : null}
 
           <button
             type="submit"
@@ -1324,7 +1426,11 @@ export default function BookingPanel(props: BookingPanelProps) {
               opacity: !canSubmit ? 0.7 : 1,
             }}
           >
-            {loading ? 'Booking…' : holdLabel ? `Confirm now · Starting at $${displayPrice}` : `Confirm booking · Starting at $${displayPrice}`}
+            {loading
+              ? 'Booking…'
+              : holdLabel
+                ? `Confirm now · Starting at $${displayPrice}`
+                : `Confirm booking · Starting at $${displayPrice}`}
           </button>
 
           {showWaitlistCTA ? (
@@ -1349,7 +1455,9 @@ export default function BookingPanel(props: BookingPanelProps) {
           ) : null}
 
           {!isLoggedInAsClient ? (
-            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>You’ll need to log in as a client to complete your booking.</p>
+            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+              You’ll need to log in as a client to complete your booking.
+            </p>
           ) : null}
 
           <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
