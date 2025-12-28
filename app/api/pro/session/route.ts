@@ -12,7 +12,9 @@ function fullName(first?: string | null, last?: string | null) {
 type Mode = 'IDLE' | 'UPCOMING' | 'ACTIVE'
 type CenterAction = 'GO_SESSION' | 'NONE'
 
-// Matches your Prisma enum SessionStep
+type StepKey = 'consult' | 'session' | 'aftercare'
+
+// Matches your Prisma enum SessionStep (allow unknowns)
 type SessionStep =
   | 'NONE'
   | 'CONSULTATION'
@@ -24,12 +26,29 @@ type SessionStep =
   | 'DONE'
   | string
 
-function computeCenterLabel(mode: Mode, step: SessionStep | null) {
+function toUpper(v: unknown) {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function stepFromSessionStep(step: SessionStep | null): StepKey {
+  const s = toUpper(step || 'NONE')
+
+  // Canonical mapping: where should the pro land?
+  if (s === 'CONSULTATION' || s === 'CONSULTATION_PENDING_CLIENT') return 'consult'
+
+  if (s === 'BEFORE_PHOTOS' || s === 'SERVICE_IN_PROGRESS' || s === 'FINISH_REVIEW' || s === 'AFTER_PHOTOS') {
+    return 'session'
+  }
+
+  // DONE or NONE: default to consult (or aftercare if you prefer)
+  return 'consult'
+}
+
+function centerLabelFrom(mode: Mode, step: SessionStep | null) {
   if (mode === 'IDLE') return 'Start'
   if (mode === 'UPCOMING') return 'Start'
 
-  const s = String(step || 'NONE').toUpperCase()
-
+  const s = toUpper(step || 'NONE')
   if (s === 'CONSULTATION') return 'Consult'
   if (s === 'CONSULTATION_PENDING_CLIENT') return 'Waiting'
   if (s === 'BEFORE_PHOTOS') return 'Camera'
@@ -37,7 +56,6 @@ function computeCenterLabel(mode: Mode, step: SessionStep | null) {
   if (s === 'FINISH_REVIEW') return 'Finish'
   if (s === 'AFTER_PHOTOS') return 'Camera'
   if (s === 'DONE') return 'Start'
-
   return 'Session'
 }
 
@@ -52,26 +70,28 @@ export async function GET() {
     const proId = user.professionalProfile.id
     const now = new Date()
 
-    // 1) ACTIVE session wins
+    // 1) ACTIVE session wins: started but not finished
     const active = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
         startedAt: { not: null },
         finishedAt: null,
-        status: 'ACCEPTED',
-      },
+        status: { in: ['ACCEPTED', 'PENDING'] }, // tolerate your current flow
+      } as any,
       include: { client: true, service: true },
       orderBy: { startedAt: 'desc' },
     })
 
     if (active) {
       const step = (active.sessionStep as unknown as SessionStep) ?? null
+      const targetStep = stepFromSessionStep(step)
 
       return NextResponse.json({
         mode: 'ACTIVE' as Mode,
         sessionStep: step,
+        targetStep,
         centerAction: 'GO_SESSION' as CenterAction,
-        centerLabel: computeCenterLabel('ACTIVE', step),
+        centerLabel: centerLabelFrom('ACTIVE', step),
         booking: {
           id: active.id,
           status: active.status,
@@ -95,23 +115,25 @@ export async function GET() {
     const next = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
-        status: 'ACCEPTED',
+        status: { in: ['ACCEPTED', 'PENDING'] },
         startedAt: null,
         finishedAt: null,
         scheduledFor: { gte: windowStart, lte: windowEnd },
-      },
+      } as any,
       include: { client: true, service: true },
       orderBy: { scheduledFor: 'asc' },
     })
 
     if (next) {
       const step = (next.sessionStep as unknown as SessionStep) ?? null
+      const targetStep = stepFromSessionStep(step)
 
       return NextResponse.json({
         mode: 'UPCOMING' as Mode,
         sessionStep: step,
+        targetStep,
         centerAction: 'GO_SESSION' as CenterAction,
-        centerLabel: computeCenterLabel('UPCOMING', step),
+        centerLabel: centerLabelFrom('UPCOMING', step),
         booking: {
           id: next.id,
           status: next.status,
@@ -128,6 +150,7 @@ export async function GET() {
     return NextResponse.json({
       mode: 'IDLE' as Mode,
       sessionStep: null,
+      targetStep: null,
       centerAction: 'NONE' as CenterAction,
       centerLabel: 'Start',
       booking: null,

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 
 type UiSessionState = 'idle' | 'ready' | 'active'
+type StepKey = 'consult' | 'session' | 'aftercare'
 
 type SessionBooking = {
   id: string
@@ -18,6 +19,7 @@ type SessionBooking = {
 type SessionPayload = {
   mode?: string
   sessionStep?: string | null
+  targetStep?: StepKey | null
   centerLabel?: string
   centerAction?: 'GO_SESSION' | 'NONE'
   booking?: SessionBooking | null
@@ -66,6 +68,12 @@ function isCameraLabel(label: string) {
   return label.trim().toLowerCase() === 'camera'
 }
 
+function proBookingHref(bookingId: string, step?: StepKey | null) {
+  const base = `/pro/bookings/${encodeURIComponent(bookingId)}`
+  if (!step) return base
+  return `${base}?step=${encodeURIComponent(step)}`
+}
+
 export default function ProSessionFooter() {
   const router = useRouter()
   const pathname = usePathname()
@@ -76,6 +84,7 @@ export default function ProSessionFooter() {
   const [sessionState, setSessionState] = useState<UiSessionState>('idle')
   const [booking, setBooking] = useState<SessionBooking | null>(null)
   const [centerLabel, setCenterLabel] = useState('Start')
+  const [targetStep, setTargetStep] = useState<StepKey>('consult')
 
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(null)
@@ -116,6 +125,7 @@ export default function ProSessionFooter() {
         setSessionState('idle')
         setBooking(null)
         setCenterLabel('Start')
+        setTargetStep('consult')
         setError(errorFromResponse(res, data))
         return
       }
@@ -123,11 +133,11 @@ export default function ProSessionFooter() {
       setSessionState(normalizeUiState(data))
       setBooking(data.booking ?? null)
 
-      const lbl =
-        typeof data.centerLabel === 'string' && data.centerLabel.trim()
-          ? data.centerLabel.trim()
-          : 'Start'
+      const lbl = typeof data.centerLabel === 'string' && data.centerLabel.trim() ? data.centerLabel.trim() : 'Start'
       setCenterLabel(lbl)
+
+      const ts = data.targetStep
+      setTargetStep(ts === 'consult' || ts === 'session' || ts === 'aftercare' ? ts : 'consult')
     } catch (err: any) {
       if (err?.name === 'AbortError') return
       if (!opts?.silent) setError('Network error loading session.')
@@ -173,8 +183,6 @@ export default function ProSessionFooter() {
 
   const isActive = sessionState === 'active'
   const isReady = sessionState === 'ready'
-
-  // Clickable when active OR ready, as long as booking exists
   const centerDisabled = !booking || loading || !!actionLoading || (!isReady && !isActive)
 
   async function handleCenterClick() {
@@ -187,19 +195,19 @@ export default function ProSessionFooter() {
       if (sessionState === 'ready') {
         setActionLoading('start')
 
-        const res = await fetch(`/api/pro/bookings/${bookingId}/start`, { method: 'POST' })
+        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
         const data = await safeJson(res)
         if (!res.ok) throw new Error(errorFromResponse(res, data))
 
         await loadSession({ silent: true })
-        router.push(`/pro/bookings/${bookingId}/session`)
+        router.push(proBookingHref(bookingId, targetStep))
         return
       }
 
       if (sessionState === 'active') {
         setActionLoading('nav')
-        router.push(`/pro/bookings/${bookingId}/session`)
+        router.push(proBookingHref(bookingId, targetStep))
         return
       }
     } catch (err: any) {
@@ -215,13 +223,7 @@ export default function ProSessionFooter() {
     return pathname === href || pathname.startsWith(href + '/')
   }
 
-  const displayLabel =
-    actionLoading === 'start'
-      ? 'Starting…'
-      : actionLoading === 'nav'
-        ? 'Opening…'
-        : centerLabel
-
+  const displayLabel = actionLoading === 'start' ? 'Starting…' : actionLoading === 'nav' ? 'Opening…' : centerLabel
   const showCameraIcon = isCameraLabel(centerLabel)
 
   return (
