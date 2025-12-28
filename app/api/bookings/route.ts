@@ -16,6 +16,8 @@ type CreateBookingBody = {
   locationType?: unknown
   mediaId?: unknown
   openingId?: unknown
+  aftercareToken?: unknown
+  rebookOfBookingId?: unknown
 }
 
 type ExistingBookingForConflict = {
@@ -208,6 +210,8 @@ export async function POST(request: Request) {
 
     const mediaId = pickString(body.mediaId) // not stored (yet)
     const openingId = pickString(body.openingId)
+    const aftercareToken = pickString(body.aftercareToken)
+    const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
 
     if (!offeringId || !body.scheduledFor) {
       return NextResponse.json({ ok: false, error: 'Missing offering or date/time.' }, { status: 400 })
@@ -266,6 +270,58 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'This service is not offered as mobile.' }, { status: 400 })
     }
 
+    let rebookOfBookingIdForCreate: string | null = null
+
+    if (source === 'AFTERCARE') {
+      if (!aftercareToken) {
+        return NextResponse.json({ ok: false, error: 'Missing aftercare token.' }, { status: 400 })
+      }
+
+      const aftercare = await prisma.aftercareSummary.findUnique({
+        where: { publicToken: aftercareToken },
+        select: {
+          bookingId: true,
+          booking: {
+            select: {
+              id: true,
+              status: true,
+              clientId: true,
+              professionalId: true,
+              serviceId: true,
+              offeringId: true,
+            },
+          },
+        },
+      })
+
+      if (!aftercare?.booking) {
+        return NextResponse.json({ ok: false, error: 'Invalid aftercare token.' }, { status: 400 })
+      }
+
+      const originalBooking = aftercare.booking
+
+      if (originalBooking.status !== 'COMPLETED') {
+        return NextResponse.json({ ok: false, error: 'Only COMPLETED bookings can be rebooked.' }, { status: 409 })
+      }
+
+      if (originalBooking.clientId !== clientId) {
+        return NextResponse.json({ ok: false, error: 'Aftercare link does not match this client.' }, { status: 403 })
+      }
+
+      const matchesOffering =
+        (originalBooking.offeringId && originalBooking.offeringId === offering.id) ||
+        (originalBooking.professionalId === offering.professionalId && originalBooking.serviceId === offering.serviceId)
+
+      if (!matchesOffering) {
+        return NextResponse.json({ ok: false, error: 'Aftercare link does not match this offering.' }, { status: 403 })
+      }
+
+      rebookOfBookingIdForCreate =
+        requestedRebookOfBookingId && requestedRebookOfBookingId === originalBooking.id
+          ? requestedRebookOfBookingId
+          : originalBooking.id
+    }
+
     const priceStartingAt = locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
     const durationSnapshot = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
 
@@ -298,8 +354,6 @@ export async function POST(request: Request) {
     }
 
     const now = new Date()
-    const windowStart = addMinutes(requestedStart, -durationMinutes * 2)
-    const windowEnd = addMinutes(requestedStart, durationMinutes * 2)
 
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
@@ -331,6 +385,9 @@ export async function POST(request: Request) {
 
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
       const requestedEnd = addMinutes(requestedStart, durationMinutes)
+      // Use hold-truth time to avoid conflicts based on a tampered request payload.
+      const windowStart = addMinutes(requestedStart, -durationMinutes * 2)
+      const windowEnd = addMinutes(requestedStart, durationMinutes * 2)
 
 
       // 2) Conflict re-check (bookings)
@@ -390,6 +447,7 @@ export async function POST(request: Request) {
 
           source,
           locationType,
+          rebookOfBookingId: rebookOfBookingIdForCreate,
 
           priceSnapshot: priceStartingAt,
           durationMinutesSnapshot: durationMinutes,

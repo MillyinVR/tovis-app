@@ -110,7 +110,7 @@ export default async function OfferingPage(props: PageProps) {
   const requestedLocationType = normalizeLocationType(sp?.locationType)
 
   const sourceFromUrl = normalizeSource(sp?.source)
-  const sourceForPanel: BookingSource = sourceFromUrl ?? 'REQUESTED'
+  const sourceForPanel: BookingSource = sourceFromUrl ?? 'DISCOVERY'
 
   const offering = await prisma.professionalServiceOffering.findUnique({
     where: { id },

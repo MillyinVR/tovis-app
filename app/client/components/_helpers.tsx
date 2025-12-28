@@ -20,6 +20,10 @@ export type BookingLike = {
   scheduledFor?: string | Date | null
   durationMinutesSnapshot?: number | null
   priceSnapshot?: unknown
+
+  // ✅ Policy A/B: badge support for “NEW aftercare”
+  hasUnreadAftercare?: boolean
+
   service?: { id?: string; name?: string | null } | null
   professional?: {
     id?: string

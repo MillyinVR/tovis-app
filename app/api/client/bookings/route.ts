@@ -24,6 +24,7 @@ type BookingRow = {
   priceSnapshot: any
   service: { id: string; name: string } | null
   professional: { id: string; businessName: string | null; location: string | null; city: string | null; state: string | null } | null
+  hasUnreadAftercare?: boolean
 }
 
 export async function GET() {
@@ -37,6 +38,7 @@ export async function GET() {
     const now = new Date()
     const next30 = addDays(now, 30)
 
+    // Fetch bookings
     const bookings = (await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
@@ -53,7 +55,30 @@ export async function GET() {
       },
     })) as BookingRow[]
 
-    // ✅ Waitlist (no "any" + no silent failure)
+    /**
+     * ✅ Policy A: show unread-aftercare badges anywhere relevant.
+     * Unread = clientNotification(type=AFTERCARE, readAt=null)
+     */
+    const unread = await prisma.clientNotification.findMany({
+      where: {
+        clientId,
+        type: 'AFTERCARE',
+        readAt: null,
+        bookingId: { not: null },
+      } as any,
+      select: { bookingId: true },
+      take: 1000,
+    })
+
+    const unreadBookingIds = new Set(
+      unread.map((n: any) => (typeof n?.bookingId === 'string' ? n.bookingId : null)).filter(Boolean) as string[],
+    )
+
+    for (const b of bookings) {
+      b.hasUnreadAftercare = unreadBookingIds.has(b.id)
+    }
+
+    // ✅ Waitlist (kept as-is)
     let waitlist: any[] = []
     try {
       waitlist = await prisma.waitlistEntry.findMany({
@@ -67,17 +92,11 @@ export async function GET() {
           professionalId: true,
           notes: true,
 
-          // ✅ Pick ONE model shape:
-
-          // If your schema uses preferred window fields:
           preferredStart: true,
           preferredEnd: true,
           preferredTimeBucket: true,
           status: true,
           mediaId: true,
-
-          // If you *actually* added `availability` to Prisma, use this instead and remove the preferred* fields:
-          // availability: true,
 
           service: { select: { id: true, name: true } },
           professional: { select: { id: true, businessName: true, location: true, city: true, state: true } },

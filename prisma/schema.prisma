@@ -126,9 +126,69 @@ enum ServiceLocationType {
   MOBILE
 }
 
+enum AftercareRebookMode {
+  NONE
+  BOOKED_NEXT_APPOINTMENT // pro scheduled it (show “Next appointment”)
+  RECOMMENDED_WINDOW // client picks within window
+}
+
+enum ClientNotificationType {
+  AFTERCARE
+  LAST_MINUTE
+}
+
+enum SessionStep {
+  NONE
+
+  CONSULTATION
+  CONSULTATION_PENDING_CLIENT
+
+  BEFORE_PHOTOS
+  SERVICE_IN_PROGRESS
+
+  FINISH_REVIEW
+  AFTER_PHOTOS
+
+  DONE
+}
+
+enum MediaPhase {
+  BEFORE
+  AFTER
+  OTHER
+}
+
+enum ConsultationApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // =======================
 // CORE MODELS
 // =======================
+
+model ConsultationApproval {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  status     ConsultationApprovalStatus @default(PENDING)
+  approvedAt DateTime?
+  rejectedAt DateTime?
+
+  proposedServicesJson Json
+  proposedTotal        Decimal?
+  notes                String?
+
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  clientId String?
+  proId    String?
+
+  @@index([status])
+}
 
 model AdminPermission {
   id String @id @default(cuid())
@@ -196,12 +256,13 @@ model ClientProfile {
 
   user User @relation(fields: [userId], references: [id])
 
-  bookings     Booking[]
-  bookingHolds BookingHold[] // ✅ ADD THIS (opposite relation)
-  notes        ClientProfessionalNote[]
-  allergies    ClientAllergy[]
-  reviews      Review[]
-  reminders    Reminder[]
+  bookings      Booking[]
+  bookingHolds  BookingHold[] // ✅ ADD THIS (opposite relation)
+  notes         ClientProfessionalNote[]
+  allergies     ClientAllergy[]
+  reviews       Review[]
+  reminders     Reminder[]
+  notifications ClientNotification[]
 
   waitlistEntries WaitlistEntry[]
 }
@@ -549,6 +610,9 @@ model ClientNotificationSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  aftercareEnabled   Boolean @default(true)
+  maxAftercarePerDay Int     @default(5)
+
   client ClientProfile @relation(fields: [clientId], references: [id])
 }
 
@@ -571,9 +635,12 @@ model Booking {
   discountAmount Decimal? @db.Decimal(10, 2)
   totalAmount    Decimal? @db.Decimal(10, 2)
 
+  // Consultation approval object (1:1)
+  consultation            BookingConsultation?
   consultationNotes       String?
-  consultationPrice       Decimal?  @db.Decimal(10, 2)
+  consultationPrice       Decimal?              @db.Decimal(10, 2)
   consultationConfirmedAt DateTime?
+  consultationApproval    ConsultationApproval?
 
   // ✅ Source tracking
   source            BookingSource @default(DISCOVERY)
@@ -582,19 +649,20 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client           ClientProfile                @relation(fields: [clientId], references: [id])
-  professional     ProfessionalProfile          @relation(fields: [professionalId], references: [id])
-  service          Service                      @relation(fields: [serviceId], references: [id])
-  offering         ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
-  aftercareSummary AftercareSummary?
+  client              ClientProfile                @relation(fields: [clientId], references: [id])
+  professional        ProfessionalProfile          @relation(fields: [professionalId], references: [id])
+  service             Service                      @relation(fields: [serviceId], references: [id])
+  offering            ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
+  aftercareSummary    AftercareSummary?
+  clientNotifications ClientNotification[]
 
   // Optional: link bookings together for rebooks
   rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
   rebooks  Booking[] @relation("RebookChain")
 
-  reviews   Review[]
-  reminders Reminder[]
-
+  reviews               Review[]
+  reminders             Reminder[]
+  sessionStep           SessionStep      @default(NONE)
   reminderMinutesBefore Int?             @default(1440)
   reminderSentAt        DateTime?
   reminderChannel       ReminderChannel?
@@ -611,23 +679,21 @@ model Booking {
 }
 
 model BookingHold {
-  id             String   @id @default(cuid())
+  id             String              @id @default(cuid())
   offeringId     String
   professionalId String
   scheduledFor   DateTime
   expiresAt      DateTime
-  createdAt      DateTime @default(now())
+  createdAt      DateTime            @default(now())
   locationType   ServiceLocationType
 
-
-  clientId String? // <-- nullable for now
+  clientId String?
   client   ClientProfile? @relation(fields: [clientId], references: [id])
 
+  @@unique([professionalId, scheduledFor, locationType])
   @@index([offeringId, scheduledFor])
-  @@index([professionalId, scheduledFor])
   @@index([clientId, expiresAt])
 }
-
 
 model AftercareSummary {
   id          String    @id @default(cuid())
@@ -635,11 +701,18 @@ model AftercareSummary {
   notes       String?
   rebookedFor DateTime?
 
-  // ✅ prep for store purchases later
-  publicToken String @unique @default(cuid()) // for clean share links / checkout attribution
+  // ✅ NEW: timeframe-based recommendation (client self-rebooks)
+  rebookWindowStart DateTime?
+  rebookWindowEnd   DateTime?
 
-  booking         Booking                 @relation(fields: [bookingId], references: [id])
-  recommendations ProductRecommendation[]
+  // ✅ NEW: tells UI what to show (simple and explicit)
+  rebookMode AftercareRebookMode @default(NONE)
+
+  publicToken String @unique @default(cuid())
+
+  booking             Booking                 @relation(fields: [bookingId], references: [id])
+  recommendations     ProductRecommendation[]
+  clientNotifications ClientNotification[]
 }
 
 model Product {
@@ -793,11 +866,11 @@ model MediaAsset {
   isFeaturedInPortfolio Boolean         @default(false)
   isEligibleForLooks    Boolean         @default(false)
 
-  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
-  booking      Booking?            @relation(fields: [bookingId], references: [id])
-  review       Review?             @relation(fields: [reviewId], references: [id])
-
-  uploadedByUser User? @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  booking        Booking?            @relation(fields: [bookingId], references: [id])
+  review         Review?             @relation(fields: [reviewId], references: [id])
+  phase          MediaPhase          @default(OTHER)
+  uploadedByUser User?               @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
 
   services MediaServiceTag[]
   likes    MediaLike[]
@@ -925,4 +998,51 @@ model Quote {
   thread   MessageThread                @relation(fields: [threadId], references: [id])
   service  Service                      @relation("ServiceQuotes", fields: [serviceId], references: [id])
   offering ProfessionalServiceOffering? @relation("OfferingQuotes", fields: [offeringId], references: [id])
+}
+
+model BookingConsultation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  // What the pro proposed
+  proposedServicesJson Json?
+  proposedPrice        Decimal?
+  notes                String?
+
+  // Client decision
+  clientApprovedAt DateTime?
+  clientDeclinedAt DateTime?
+  clientMessage    String?
+}
+
+model ClientNotification {
+  id       String @id @default(cuid())
+  clientId String
+
+  // what happened
+  type  ClientNotificationType
+  title String
+  body  String?
+
+  // linking / deep link support
+  bookingId   String?
+  aftercareId String?
+
+  // for dedupe so you don’t spam them on edits
+  dedupeKey String? @unique
+
+  // read state
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  client    ClientProfile     @relation(fields: [clientId], references: [id])
+  booking   Booking?          @relation(fields: [bookingId], references: [id])
+  aftercare AftercareSummary? @relation(fields: [aftercareId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([clientId, readAt])
 }

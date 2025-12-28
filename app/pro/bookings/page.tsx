@@ -9,6 +9,8 @@ type BookingRow = {
   id: string
   status: string
   scheduledFor: Date | string
+  startedAt: Date | string | null
+  finishedAt: Date | string | null
   durationMinutesSnapshot: number
   priceSnapshot: any
   discountAmount: any | null
@@ -53,8 +55,7 @@ function formatStatus(status: string) {
 function PriceBlock(b: BookingRow) {
   const baseStr = moneyToString(b.priceSnapshot) ?? '0.00'
   const discountStr = b.discountAmount != null ? moneyToString(b.discountAmount) : null
-  const totalStr =
-    b.totalAmount != null ? moneyToString(b.totalAmount) : baseStr
+  const totalStr = b.totalAmount != null ? moneyToString(b.totalAmount) : baseStr
 
   const discountNum = discountStr ? Number(discountStr) : 0
 
@@ -136,7 +137,7 @@ function Section({ title, items }: { title: string; items: BookingRow[] }) {
                 </a>
               </div>
 
-              <div style={{ minWidth: 160, textAlign: 'right' }}>
+              <div style={{ minWidth: 180, textAlign: 'right' }}>
                 <div
                   style={{
                     fontSize: 11,
@@ -150,7 +151,12 @@ function Section({ title, items }: { title: string; items: BookingRow[] }) {
                   {formatStatus(b.status)}
                 </div>
 
-                <BookingActions bookingId={b.id} currentStatus={b.status} />
+                <BookingActions
+                  bookingId={b.id}
+                  currentStatus={b.status}
+                  startedAt={b.startedAt ? new Date(b.startedAt).toISOString() : null}
+                  finishedAt={b.finishedAt ? new Date(b.finishedAt).toISOString() : null}
+                />
               </div>
             </div>
           ))}
@@ -173,7 +179,6 @@ export default async function ProBookingsPage() {
     include: {
       client: { include: { user: true } },
       service: true,
-      offering: true,
     },
     orderBy: { scheduledFor: 'asc' },
   })) as BookingRow[]

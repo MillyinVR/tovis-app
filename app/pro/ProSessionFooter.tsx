@@ -1,3 +1,4 @@
+// app/pro/ProSessionFooter.tsx
 'use client'
 
 import Link from 'next/link'
@@ -11,6 +12,16 @@ type SessionBooking = {
   serviceName?: string
   clientName?: string
   scheduledFor?: string
+  sessionStep?: string | null
+}
+
+type SessionPayload = {
+  mode?: string
+  sessionStep?: string | null
+  centerLabel?: string
+  centerAction?: 'GO_SESSION' | 'NONE'
+  booking?: SessionBooking | null
+  error?: string
 }
 
 function currentPathWithQuery() {
@@ -44,35 +55,30 @@ function errorFromResponse(res: Response, data: any) {
   return `Request failed (${res.status}).`
 }
 
-function normalizeUiState(data: any): UiSessionState {
-  if (data?.mode) {
-    const m = String(data.mode).toUpperCase()
-    if (m === 'ACTIVE') return 'active'
-    if (m === 'UPCOMING') return 'ready'
-    return 'idle'
-  }
-  if (data?.state) {
-    const s = String(data.state).toLowerCase()
-    if (s === 'active') return 'active'
-    if (s === 'ready') return 'ready'
-    return 'idle'
-  }
+function normalizeUiState(data: SessionPayload): UiSessionState {
+  const m = String(data?.mode || '').toUpperCase()
+  if (m === 'ACTIVE') return 'active'
+  if (m === 'UPCOMING') return 'ready'
   return 'idle'
+}
+
+function isCameraLabel(label: string) {
+  return label.trim().toLowerCase() === 'camera'
 }
 
 export default function ProSessionFooter() {
   const router = useRouter()
   const pathname = usePathname()
 
-  // ✅ hide on auth pages
   if (!pathname) return null
   if (pathname.startsWith('/login') || pathname.startsWith('/signup')) return null
 
   const [sessionState, setSessionState] = useState<UiSessionState>('idle')
   const [booking, setBooking] = useState<SessionBooking | null>(null)
+  const [centerLabel, setCenterLabel] = useState('Start')
 
   const [loading, setLoading] = useState(false)
-  const [actionLoading, setActionLoading] = useState<'start' | 'finish' | null>(null)
+  const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const inFlightRef = useRef<AbortController | null>(null)
@@ -83,8 +89,10 @@ export default function ProSessionFooter() {
     const controller = new AbortController()
     inFlightRef.current = controller
 
-    if (!opts?.silent) setLoading(true)
-    if (!opts?.silent) setError(null)
+    if (!opts?.silent) {
+      setLoading(true)
+      setError(null)
+    }
 
     try {
       const res = await fetch('/api/pro/session', {
@@ -102,21 +110,27 @@ export default function ProSessionFooter() {
       }
 
       redirectedRef.current = false
-
-      const data = await safeJson(res)
+      const data = (await safeJson(res)) as SessionPayload
 
       if (!res.ok) {
         setSessionState('idle')
         setBooking(null)
+        setCenterLabel('Start')
         setError(errorFromResponse(res, data))
         return
       }
 
       setSessionState(normalizeUiState(data))
       setBooking(data.booking ?? null)
+
+      const lbl =
+        typeof data.centerLabel === 'string' && data.centerLabel.trim()
+          ? data.centerLabel.trim()
+          : 'Start'
+      setCenterLabel(lbl)
     } catch (err: any) {
       if (err?.name === 'AbortError') return
-      setError(opts?.silent ? null : 'Network error loading session.')
+      if (!opts?.silent) setError('Network error loading session.')
     } finally {
       if (inFlightRef.current === controller) inFlightRef.current = null
       if (!opts?.silent) setLoading(false)
@@ -125,7 +139,7 @@ export default function ProSessionFooter() {
 
   useEffect(() => {
     loadSession()
-    const id = setInterval(() => loadSession({ silent: true }), 60_000)
+    const id = setInterval(() => loadSession({ silent: true }), 15_000)
     return () => {
       clearInterval(id)
       inFlightRef.current?.abort()
@@ -134,8 +148,33 @@ export default function ProSessionFooter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    loadSession({ silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
+
+  useEffect(() => {
+    function onFocus() {
+      loadSession({ silent: true })
+    }
+    function onVisibility() {
+      if (document.visibilityState === 'visible') loadSession({ silent: true })
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const isActive = sessionState === 'active'
   const isReady = sessionState === 'ready'
+
+  // Clickable when active OR ready, as long as booking exists
   const centerDisabled = !booking || loading || !!actionLoading || (!isReady && !isActive)
 
   async function handleCenterClick() {
@@ -147,23 +186,20 @@ export default function ProSessionFooter() {
     try {
       if (sessionState === 'ready') {
         setActionLoading('start')
+
         const res = await fetch(`/api/pro/bookings/${bookingId}/start`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
         const data = await safeJson(res)
         if (!res.ok) throw new Error(errorFromResponse(res, data))
-        await loadSession()
-        router.refresh()
+
+        await loadSession({ silent: true })
+        router.push(`/pro/bookings/${bookingId}/session`)
         return
       }
 
       if (sessionState === 'active') {
-        setActionLoading('finish')
-        const res = await fetch(`/api/pro/bookings/${bookingId}/finish`, { method: 'POST' })
-        if (res.status === 401) return redirectToLogin(router, 'pro-finish')
-        const data = await safeJson(res)
-        if (!res.ok) throw new Error(errorFromResponse(res, data))
-        await loadSession()
-        router.push(`/pro/bookings/${bookingId}#aftercare`)
+        setActionLoading('nav')
+        router.push(`/pro/bookings/${bookingId}/session`)
         return
       }
     } catch (err: any) {
@@ -173,16 +209,20 @@ export default function ProSessionFooter() {
     }
   }
 
-  const centerLabel =
-    actionLoading === 'start' ? 'Starting…' :
-    actionLoading === 'finish' ? 'Finishing…' :
-    isActive ? 'Finish' : 'Start'
-
   function isActivePath(href: string) {
     if (!pathname) return false
     if (href === '/pro') return pathname === '/pro'
     return pathname === href || pathname.startsWith(href + '/')
   }
+
+  const displayLabel =
+    actionLoading === 'start'
+      ? 'Starting…'
+      : actionLoading === 'nav'
+        ? 'Opening…'
+        : centerLabel
+
+  const showCameraIcon = isCameraLabel(centerLabel)
 
   return (
     <div
@@ -209,6 +249,7 @@ export default function ProSessionFooter() {
         type="button"
         onClick={handleCenterClick}
         disabled={centerDisabled}
+        title={booking ? `${booking.serviceName ?? 'Service'} • ${booking.clientName ?? ''}` : 'No upcoming session'}
         style={{
           width: 60,
           height: 60,
@@ -219,7 +260,7 @@ export default function ProSessionFooter() {
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: 11,
-          fontWeight: 600,
+          fontWeight: 700,
           marginTop: -25,
           boxShadow: centerDisabled ? 'none' : '0 4px 10px rgba(0,0,0,0.3)',
           cursor: centerDisabled ? 'not-allowed' : 'pointer',
@@ -227,7 +268,7 @@ export default function ProSessionFooter() {
           opacity: actionLoading ? 0.85 : 1,
         }}
       >
-        {centerLabel}
+        {showCameraIcon ? '📷' : displayLabel}
       </button>
 
       <NavItem label="Messages" href="/pro/messages" icon="💬" active={isActivePath('/pro/messages')} />

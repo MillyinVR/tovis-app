@@ -457,6 +457,8 @@ export default function BookingPanel(props: BookingPanelProps) {
   const hasHold = Boolean(holdIdFromUrl)
 
   const openingId = (searchParams?.get('openingId') || '').trim() || null
+  const aftercareTokenFromUrl = (searchParams?.get('token') || '').trim() || null
+  const rebookOfBookingIdFromUrl = (searchParams?.get('rebookOfBookingId') || '').trim() || null
 
   const requestedLocationFromUrl = normalizeLocationType(searchParams?.get('locationType'))
   const initialEffectiveLocationType = useMemo(() => {
@@ -963,6 +965,8 @@ export default function BookingPanel(props: BookingPanelProps) {
           locationType,
           mediaId: mediaId || null,
           openingId: openingId || null,
+          aftercareToken: aftercareTokenFromUrl,
+          rebookOfBookingId: rebookOfBookingIdFromUrl,
         }),
       })
 

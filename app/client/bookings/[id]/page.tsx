@@ -8,6 +8,7 @@ import BookingActions from './BookingActions'
 export const dynamic = 'force-dynamic'
 
 function toDate(v: unknown): Date | null {
+  if (!v) return null
   const d = v instanceof Date ? v : new Date(String(v))
   return Number.isNaN(d.getTime()) ? null : d
 }
@@ -35,6 +36,16 @@ function formatWhenInTimeZone(d: Date, timeZone: string) {
   }).format(d)
 }
 
+function formatDateRangeInTimeZone(start: Date, end: Date, timeZone: string) {
+  const fmt = new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  return `${fmt.format(start)} – ${fmt.format(end)}`
+}
+
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
@@ -59,7 +70,7 @@ function statusPillTone(statusRaw: unknown) {
   if (s === 'CANCELLED') return { bg: '#fff1f2', color: '#9f1239' }
   if (s === 'COMPLETED') return { bg: '#ecfdf5', color: '#065f46' }
   if (s === 'PENDING') return { bg: '#fffbeb', color: '#854d0e' }
-  return { bg: '#ecfeff', color: '#155e75' } // ACCEPTED/other
+  return { bg: '#ecfeff', color: '#155e75' }
 }
 
 function statusMessage(statusRaw: unknown) {
@@ -116,6 +127,48 @@ function formatPriceMaybe(v: unknown): string | null {
   return null
 }
 
+type AftercareRebookInfo =
+  | { mode: 'BOOKED_NEXT_APPOINTMENT'; label: string }
+  | { mode: 'RECOMMENDED_WINDOW'; label: string }
+  | { mode: 'RECOMMENDED_DATE'; label: string }
+  | { mode: 'NONE'; label: null }
+
+function getAftercareRebookInfo(aftercare: any, timeZone: string): AftercareRebookInfo {
+  const modeRaw = String(aftercare?.rebookMode || 'NONE').toUpperCase()
+
+  if (modeRaw === 'BOOKED_NEXT_APPOINTMENT') {
+    const d = toDate(aftercare?.rebookedFor)
+    return d
+      ? { mode: 'BOOKED_NEXT_APPOINTMENT', label: `Next appointment booked: ${formatWhenInTimeZone(d, timeZone)}` }
+      : { mode: 'BOOKED_NEXT_APPOINTMENT', label: 'Next appointment booked.' }
+  }
+
+  if (modeRaw === 'RECOMMENDED_WINDOW') {
+    const s = toDate(aftercare?.rebookWindowStart)
+    const e = toDate(aftercare?.rebookWindowEnd)
+    if (s && e) {
+      return { mode: 'RECOMMENDED_WINDOW', label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}` }
+    }
+    return { mode: 'RECOMMENDED_WINDOW', label: 'Recommended rebook window.' }
+  }
+
+  if (modeRaw === 'NONE') {
+    return { mode: 'NONE', label: null }
+  }
+
+  const legacy = toDate(aftercare?.rebookedFor)
+  if (legacy) {
+    return { mode: 'RECOMMENDED_DATE', label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}` }
+  }
+
+  return { mode: 'NONE', label: null }
+}
+
+function pickToken(aftercare: any): string | null {
+  const t = aftercare?.publicToken
+  return typeof t === 'string' && t.trim() ? t.trim() : null
+}
+
 export default async function ClientBookingPage({ params }: { params: { id: string } }) {
   const bookingId = params.id
 
@@ -130,6 +183,7 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
       service: true,
       professional: { include: { user: true } },
       aftercareSummary: true,
+      consultationApproval: true,
     },
   })
 
@@ -157,11 +211,10 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
 
   const scheduled = toDate(booking.scheduledFor)
 
-  // ✅ show in PRO timezone (consistent with booking flow)
   const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
   const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : 'Unknown time'
 
-  const loc = locationLine(booking.professional)
+  const loc = locationLine(booking.professional as any)
   const pill = statusPillTone(booking.status)
   const msg = statusMessage(booking.status)
 
@@ -171,11 +224,53 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
   const modeLabel = friendlyLocationType((booking as any).locationType)
   const sourceLabel = friendlySource((booking as any).source)
 
+  const aftercare = booking.aftercareSummary
+  const rebookInfo = aftercare ? getAftercareRebookInfo(aftercare, appointmentTz) : { mode: 'NONE', label: null }
+  const aftercareToken = aftercare ? pickToken(aftercare) : null
+
+  const showRebookCTA = booking.status === 'COMPLETED' && Boolean(aftercareToken)
+
+  const showConsultationCTA =
+    booking.consultationApproval?.status === 'PENDING' &&
+    booking.sessionStep === 'CONSULTATION_PENDING_CLIENT' &&
+    booking.status !== 'CANCELLED' &&
+    booking.status !== 'COMPLETED'
+
+  // B-2: unread AFTERCARE notification check + mark read
+  let hasUnreadAftercareNotifForThisBooking = false
+
+  if (aftercare?.id) {
+    const unread = await prisma.clientNotification.findFirst({
+      where: {
+        clientId: user.clientProfile.id,
+        type: 'AFTERCARE',
+        bookingId: booking.id,
+        aftercareId: aftercare.id,
+        readAt: null,
+      } as any,
+      select: { id: true },
+    })
+
+    hasUnreadAftercareNotifForThisBooking = Boolean(unread)
+
+    if (unread) {
+      await prisma.clientNotification.updateMany({
+        where: {
+          clientId: user.clientProfile.id,
+          type: 'AFTERCARE',
+          bookingId: booking.id,
+          aftercareId: aftercare.id,
+          readAt: null,
+        } as any,
+        data: { readAt: new Date() } as any,
+      })
+    }
+  }
+
   return (
     <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>{booking.service?.name || 'Booking'}</h1>
 
-      {/* Top row: back + status pill */}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 }}>
         <a
           href="/client/bookings"
@@ -211,18 +306,16 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
       </div>
 
       <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 10 }}>
-        With {booking.professional?.businessName || booking.professional?.user?.email || 'your professional'}
+        With {(booking.professional as any)?.businessName || (booking.professional as any)?.user?.email || 'your professional'}
       </div>
 
-      {/* When + Where */}
       <div style={{ fontSize: 13, color: '#111', marginBottom: 10 }}>
         <span style={{ fontWeight: 800 }}>{whenLabel}</span>
         <span style={{ color: '#6b7280' }}> · {appointmentTz}</span>
         {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
       </div>
 
-      {/* Tiny details row */}
-      {(duration || priceLabel || modeLabel || sourceLabel) ? (
+      {duration || priceLabel || modeLabel || sourceLabel ? (
         <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {duration ? <span style={{ fontWeight: 800, color: '#111' }}>{duration} min</span> : null}
           {priceLabel ? <span style={{ fontWeight: 800, color: '#111' }}>{priceLabel}</span> : null}
@@ -241,7 +334,6 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
         <div style={{ marginBottom: 16 }} />
       )}
 
-      {/* Status message card */}
       <section
         style={{
           borderRadius: 12,
@@ -255,7 +347,39 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
         <div style={{ fontSize: 13, color: '#111' }}>{msg.body}</div>
       </section>
 
-      {/* Calendar link */}
+      {showConsultationCTA ? (
+        <section
+          style={{
+            borderRadius: 12,
+            border: '1px solid #fde68a',
+            background: '#fffbeb',
+            padding: 12,
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontWeight: 900, color: '#854d0e', marginBottom: 4 }}>Action needed: approve consultation</div>
+          <div style={{ fontSize: 13, color: '#111', marginBottom: 10 }}>
+            Your pro updated services and pricing. Approve it so they can begin your session and take your before photos.
+          </div>
+          <a
+            href={`/client/bookings/${encodeURIComponent(booking.id)}/consultation`}
+            style={{
+              display: 'inline-block',
+              textDecoration: 'none',
+              border: '1px solid #111',
+              borderRadius: 999,
+              padding: '10px 14px',
+              fontSize: 12,
+              fontWeight: 900,
+              color: '#fff',
+              background: '#111',
+            }}
+          >
+            Review &amp; approve
+          </a>
+        </section>
+      ) : null}
+
       <a
         href={`/api/calendar?bookingId=${encodeURIComponent(booking.id)}`}
         style={{
@@ -274,7 +398,6 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
         Add to calendar
       </a>
 
-      {/* Booking actions (ONLY ONCE) */}
       <BookingActions
         bookingId={booking.id}
         status={booking.status as any}
@@ -282,18 +405,102 @@ export default async function ClientBookingPage({ params }: { params: { id: stri
         durationMinutesSnapshot={duration}
       />
 
-      {/* AFTERCARE SUMMARY */}
-      <section style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 16 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Aftercare summary</div>
+      {/* AFTERCARE SUMMARY (Option B) */}
+      <section
+        id="aftercare"
+        style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 16 }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>Aftercare summary</div>
 
-        {booking.aftercareSummary?.notes ? (
-          <div style={{ fontSize: 13, color: '#374151' }}>{booking.aftercareSummary.notes}</div>
+          {hasUnreadAftercareNotifForThisBooking ? (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 900,
+                padding: '3px 8px',
+                borderRadius: 999,
+                border: '1px solid #fde68a',
+                background: '#fffbeb',
+                color: '#854d0e',
+                letterSpacing: 0.3,
+              }}
+            >
+              NEW
+            </span>
+          ) : null}
+        </div>
+
+        {aftercare?.notes ? (
+          <div style={{ fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap' }}>{aftercare.notes}</div>
         ) : (
-          <div style={{ fontSize: 12, color: '#9ca3af' }}>No aftercare notes provided.</div>
+          <div style={{ fontSize: 12, color: '#9ca3af' }}>
+            {booking.status === 'COMPLETED'
+              ? 'No aftercare notes provided.'
+              : 'Aftercare will appear here once the service is completed.'}
+          </div>
         )}
+
+        {aftercare && (rebookInfo.label || showRebookCTA) ? (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
+            <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 6 }}>Rebook</div>
+
+            {rebookInfo.label ? (
+              <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                {rebookInfo.label}
+                <span style={{ color: '#9ca3af' }}> · {appointmentTz}</span>
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10 }}>No rebook recommendation yet.</div>
+            )}
+
+            {showRebookCTA ? (
+              <a
+                href={`/client/rebook/${encodeURIComponent(aftercareToken as string)}`}
+                style={{
+                  display: 'inline-block',
+                  textDecoration: 'none',
+                  border: '1px solid #111',
+                  borderRadius: 999,
+                  padding: '10px 14px',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  color: '#fff',
+                  background: '#111',
+                }}
+              >
+                {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT' ? 'View rebook details' : 'Rebook now'}
+              </a>
+            ) : null}
+
+            {!aftercareToken && booking.status === 'COMPLETED' ? (
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>
+                Rebook link not available yet (missing aftercare token).
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: 12 }}>
+          <a
+            href="/client/aftercare"
+            style={{
+              display: 'inline-block',
+              textDecoration: 'none',
+              fontSize: 12,
+              fontWeight: 900,
+              color: '#111',
+              border: '1px solid #e5e7eb',
+              background: '#fff',
+              padding: '8px 12px',
+              borderRadius: 999,
+            }}
+          >
+            View all aftercare
+          </a>
+        </div>
       </section>
 
-      {/* REVIEW SECTION */}
       <ReviewSection
         bookingId={booking.id}
         existingReview={

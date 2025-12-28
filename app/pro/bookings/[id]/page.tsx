@@ -3,10 +3,12 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from './ConsultationForm'
-import AftercareForm from './AftercareForm'
+import AftercareForm from './aftercare/AftercareForm'
 import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
+
+type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
 
 function toDate(value: Date | string) {
   const d = typeof value === 'string' ? new Date(value) : value
@@ -45,9 +47,11 @@ function formatStatus(status: string) {
   }
 }
 
-export default async function BookingDetailPage(props: {
-  params: Promise<{ id: string }>
-}) {
+function isRebookMode(x: unknown): x is RebookMode {
+  return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
+}
+
+export default async function BookingDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params
 
   const user = await getCurrentUser().catch(() => null)
@@ -91,17 +95,15 @@ export default async function BookingDetailPage(props: {
   const startedAt = booking.startedAt ? toDate(booking.startedAt) : null
   const finishedAt = booking.finishedAt ? toDate(booking.finishedAt) : null
 
-  // Money values: Prisma Decimal -> string via moneyToString (your helper)
   const baseStr = moneyToString(booking.priceSnapshot) ?? '0.00'
-  const discountStr = booking.discountAmount != null ? (moneyToString(booking.discountAmount) ?? '0.00') : null
+  const discountStr =
+    booking.discountAmount != null ? moneyToString(booking.discountAmount) ?? '0.00' : null
+
   const totalStr =
-    booking.totalAmount != null
-      ? (moneyToString(booking.totalAmount) ?? baseStr)
-      : baseStr
+    booking.totalAmount != null ? moneyToString(booking.totalAmount) ?? baseStr : baseStr
 
   const hasDiscount = booking.discountAmount != null && Number(discountStr) > 0
 
-  // Make media serializable for client components
   const mediaForUI = (booking.mediaAssets || []).map((m) => ({
     id: m.id,
     url: m.url,
@@ -112,6 +114,26 @@ export default async function BookingDetailPage(props: {
     reviewId: m.reviewId ?? null,
     createdAt: m.createdAt.toISOString(),
   }))
+
+  const aftercare = booking.aftercareSummary
+
+  const existingRebookModeRaw = (aftercare as any)?.rebookMode
+  const existingRebookMode = isRebookMode(existingRebookModeRaw)
+    ? (existingRebookModeRaw as RebookMode)
+    : null
+
+  const existingRebookedFor =
+    aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
+
+  const existingRebookWindowStart =
+    (aftercare as any)?.rebookWindowStart instanceof Date
+      ? (aftercare as any).rebookWindowStart.toISOString()
+      : null
+
+  const existingRebookWindowEnd =
+    (aftercare as any)?.rebookWindowEnd instanceof Date
+      ? (aftercare as any).rebookWindowEnd.toISOString()
+      : null
 
   return (
     <main
@@ -171,9 +193,7 @@ export default async function BookingDetailPage(props: {
             {isToday ? 'Today' : 'Appointment'}
           </div>
 
-          <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>
-            {booking.service.name}
-          </h1>
+          <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>{booking.service.name}</h1>
 
           <div style={{ fontSize: 13, color: '#555', marginTop: 6 }}>
             {formatDateTime(scheduled)} • {Math.round(booking.durationMinutesSnapshot)} min
@@ -200,15 +220,11 @@ export default async function BookingDetailPage(props: {
             {formatStatus(booking.status)}
           </div>
 
-          {/* Price breakdown */}
           <div style={{ color: '#6b7280', display: 'grid', gap: 4, justifyItems: 'end' }}>
             {hasDiscount ? (
               <>
                 <div>
-                  Base:{' '}
-                  <span style={{ textDecoration: 'line-through' }}>
-                    ${baseStr}
-                  </span>
+                  Base: <span style={{ textDecoration: 'line-through' }}>${baseStr}</span>
                 </div>
                 <div>Last-minute discount: -${discountStr}</div>
                 <div style={{ color: '#111', fontWeight: 900 }}>Total: ${totalStr}</div>
@@ -239,6 +255,7 @@ export default async function BookingDetailPage(props: {
           marginBottom: 16,
           fontSize: 13,
           flexWrap: 'wrap',
+          alignItems: 'center',
         }}
       >
         <a
@@ -256,6 +273,23 @@ export default async function BookingDetailPage(props: {
         </a>
 
         <a
+          href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
+          style={{
+            display: 'inline-block',
+            textDecoration: 'none',
+            border: '1px solid #111',
+            borderRadius: 999,
+            padding: '10px 14px',
+            fontSize: 12,
+            fontWeight: 900,
+            color: '#fff',
+            background: '#111',
+          }}
+        >
+          Open aftercare
+        </a>
+
+        <a
           href="#aftercare"
           style={{
             padding: '6px 10px',
@@ -266,7 +300,7 @@ export default async function BookingDetailPage(props: {
             background: '#fafafa',
           }}
         >
-          Aftercare & rebook
+          Aftercare section
         </a>
       </nav>
 
@@ -293,12 +327,11 @@ export default async function BookingDetailPage(props: {
 
         <AftercareForm
           bookingId={booking.id}
-          existingNotes={booking.aftercareSummary?.notes ?? ''}
-          existingRebookedFor={
-            booking.aftercareSummary?.rebookedFor
-              ? booking.aftercareSummary.rebookedFor.toISOString()
-              : null
-          }
+          existingNotes={aftercare?.notes ?? ''}
+          existingRebookMode={existingRebookMode}
+          existingRebookedFor={existingRebookedFor}
+          existingRebookWindowStart={existingRebookWindowStart}
+          existingRebookWindowEnd={existingRebookWindowEnd}
           existingMedia={mediaForUI}
         />
       </section>

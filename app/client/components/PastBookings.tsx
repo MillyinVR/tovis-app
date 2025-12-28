@@ -27,12 +27,10 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
         const when = prettyWhen(b?.scheduledFor)
         const loc = locationLabel(b?.professional)
 
+        const hasUnreadAftercare = Boolean((b as any)?.hasUnreadAftercare)
+
         return (
-          <Link
-            key={b.id}
-            href={`/client/bookings/${encodeURIComponent(b.id)}`}
-            style={{ textDecoration: 'none', color: 'inherit' }}
-          >
+          <Link key={b.id} href={`/client/bookings/${encodeURIComponent(b.id)}`} style={{ textDecoration: 'none', color: 'inherit' }}>
             <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
                 <div style={{ fontWeight: 900 }}>{svc}</div>
@@ -44,7 +42,10 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
                 {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
               </div>
 
-              <div style={{ marginTop: 10 }}>{statusBadge(b?.status)}</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+                {statusBadge(b?.status)}
+                {hasUnreadAftercare ? <Badge label="New aftercare" bg="#fffbeb" color="#854d0e" /> : null}
+              </div>
             </div>
           </Link>
         )
