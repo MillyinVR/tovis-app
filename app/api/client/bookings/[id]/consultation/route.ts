@@ -1,4 +1,4 @@
-﻿// app/api/client/bookings/[bookingId]/consultation/route.ts
+﻿// app/api/client/bookings/[id]/consultation/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -10,7 +10,10 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = ConsultationDecisionCtx
+// ✅ Folder is [id], so params must be { id: string }
+type Ctx = ConsultationDecisionCtx & {
+  params: Promise<{ id: string }> | { id: string }
+}
 
 function pickString(v: unknown) {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -23,8 +26,8 @@ export async function GET(_req: Request, ctx: Ctx) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
     }
 
-    const { bookingId } = await Promise.resolve(ctx.params)
-    const id = pickString(bookingId)
+    const { id: rawId } = await Promise.resolve(ctx.params as any)
+    const id = pickString(rawId)
     if (!id) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
 
     const booking = await prisma.booking.findUnique({
@@ -65,7 +68,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 
     return NextResponse.json({ ok: true, booking, approval }, { status: 200 })
   } catch (e) {
-    console.error('GET /api/client/bookings/[bookingId]/consultation error', e)
+    console.error('GET /api/client/bookings/[id]/consultation error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -73,16 +76,18 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const body = (await req.json().catch(() => ({}))) as { action?: unknown }
-    const actionRaw = typeof body.action === 'string' ? body.action.toUpperCase() : ''
+    const actionRaw = typeof body.action === 'string' ? body.action.toUpperCase().trim() : ''
+
     if (actionRaw !== 'APPROVE' && actionRaw !== 'REJECT') {
       return NextResponse.json({ error: 'Invalid action.' }, { status: 400 })
     }
 
     const action: ConsultationDecisionAction = actionRaw === 'APPROVE' ? 'APPROVE' : 'REJECT'
-    return handleConsultationDecision(action, ctx)
+
+    // ✅ Let _decision.ts read ctx.params.id (not bookingId)
+    return handleConsultationDecision(action, ctx as ConsultationDecisionCtx)
   } catch (e) {
-    console.error('POST /api/client/bookings/[bookingId]/consultation error', e)
+    console.error('POST /api/client/bookings/[id]/consultation error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-

@@ -1,4 +1,4 @@
-// app/api/client/bookings/[bookingId]/route.ts
+// app/api/client/bookings/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -6,7 +6,8 @@ import { getCurrentUser } from '@/lib/currentUser'
 export const dynamic = 'force-dynamic'
 
 type Ctx = {
-  params: Promise<{ bookingId: string }>
+  // ✅ MUST match folder: app/api/client/bookings/[id]/...
+  params: Promise<{ id: string }>
 }
 
 type PatchBody =
@@ -20,6 +21,10 @@ type BookingRow = {
   scheduledFor: Date
   durationMinutesSnapshot: number
   status: string
+}
+
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
 function isValidDate(d: Date) {
@@ -50,8 +55,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: 'Only clients can update bookings.' }, { status: 401 })
     }
 
-    const { bookingId } = await ctx.params
-    if (!bookingId) return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 })
+    const { id } = await ctx.params
+    const bookingId = pickString(id)
+    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
 
     const bodyRaw = (await req.json().catch(() => ({}))) as Partial<PatchBody> & Record<string, unknown>
     const action = normalizeAction(bodyRaw.action)
@@ -151,7 +157,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
     return NextResponse.json({ ok: true, booking: updated }, { status: 200 })
   } catch (e) {
-    console.error('PATCH /api/client/bookings/[bookingId] error:', e)
+    console.error('PATCH /api/client/bookings/[id] error:', e)
     return NextResponse.json({ error: 'Failed to update booking.' }, { status: 500 })
   }
 }

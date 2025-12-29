@@ -5,6 +5,11 @@ import { getCurrentUser } from '@/lib/currentUser'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
 
+/**
+ * Next route handlers commonly pass:
+ * - { params: { id: string } }
+ * - { params: Promise<{ id: string }> }
+ */
 export type ConsultationDecisionCtx = {
   params: { id: string } | Promise<{ id: string }>
 }
@@ -36,19 +41,19 @@ function isFinalBooking(b: { status: string | null; finishedAt: Date | null }) {
   return s === 'CANCELLED' || s === 'COMPLETED' || Boolean(b.finishedAt)
 }
 
-export async function handleConsultationDecision(
-  action: ConsultationDecisionAction,
-  ctx: ConsultationDecisionCtx,
-) {
+export async function handleConsultationDecision(action: ConsultationDecisionAction, ctx: ConsultationDecisionCtx) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
     }
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    // ✅ Folder is [id], so ctx.params must provide id
+    const { id: rawId } = await Promise.resolve(ctx.params as any)
+    const bookingId = pickString(rawId)
+    if (!bookingId) {
+      return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    }
 
     const booking = (await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -71,8 +76,7 @@ export async function handleConsultationDecision(
       return NextResponse.json({ error: 'This booking is finalized.' }, { status: 409 })
     }
 
-    // If you truly never want changes after the pro hits Start, keep this.
-    // If you want to allow approval after start, remove this check (but that’s a bigger product decision).
+    // Product policy: if pro already started the session, freeze consult decision.
     if (booking.startedAt) {
       return NextResponse.json(
         { error: "Session already started. Consultation can't be changed." },
@@ -86,7 +90,8 @@ export async function handleConsultationDecision(
     })) as ApprovalRow | null
 
     if (!approval) return NextResponse.json({ error: 'No consultation proposal found.' }, { status: 404 })
-    if (approval.status !== 'PENDING') {
+
+    if (upper(approval.status) !== 'PENDING') {
       return NextResponse.json({ error: 'This consultation is already decided.' }, { status: 409 })
     }
 
@@ -129,6 +134,7 @@ export async function handleConsultationDecision(
       )
     }
 
+    // action === 'REJECT'
     const result = await prisma.$transaction(async (tx) => {
       const updatedApproval = await tx.consultationApproval.update({
         where: { id: approval.id },
@@ -155,7 +161,7 @@ export async function handleConsultationDecision(
       { status: 200 },
     )
   } catch (e) {
-    console.error('POST /api/client/bookings/[id]/consultation error', e)
+    console.error('handleConsultationDecision error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

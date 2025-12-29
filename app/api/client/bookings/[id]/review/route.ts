@@ -1,3 +1,4 @@
+// app/api/client/bookings/[id]/review/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -20,9 +21,8 @@ type IncomingMediaItem = {
 }
 
 type Ctx = {
-  params: Promise<{
-    bookingId: string
-  }>
+  // ✅ MUST match folder name: app/api/client/bookings/[id]/...
+  params: Promise<{ id: string }>
 }
 
 function isMediaType(x: unknown): x is MediaType {
@@ -31,6 +31,7 @@ function isMediaType(x: unknown): x is MediaType {
 
 function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   if (!Array.isArray(bodyMedia)) return []
+
   const items: IncomingMediaItem[] = []
 
   for (const raw of bodyMedia) {
@@ -49,14 +50,26 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
 }
 
 function parseRating(x: unknown): number | null {
-  const n = typeof x === 'number' ? x : typeof x === 'string' ? parseInt(x, 10) : NaN
+  const n =
+    typeof x === 'number'
+      ? x
+      : typeof x === 'string'
+        ? Number.parseInt(x, 10)
+        : Number.NaN
+
   if (!Number.isFinite(n) || n < 1 || n > 5) return null
   return n
 }
 
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const { bookingId } = await ctx.params
+    const { id } = await ctx.params
+    const bookingId = pickString(id)
+    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
 
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
@@ -64,8 +77,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     const body = (await req.json().catch(() => ({}))) as CreateReviewBody
+
     const rating = parseRating(body.rating)
-    if (!rating) return NextResponse.json({ error: 'Rating must be 1-5.' }, { status: 400 })
+    if (!rating) {
+      return NextResponse.json({ error: 'Rating must be an integer from 1–5.' }, { status: 400 })
+    }
 
     const headline = typeof body.headline === 'string' ? body.headline.trim() : null
     const reviewBody = typeof body.body === 'string' ? body.body.trim() : null
@@ -77,9 +93,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     })
 
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
+
     if (booking.clientId !== user.clientProfile.id) {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
     }
+
+    // If you ONLY want reviews after completion, uncomment this:
+    // if (!booking.finishedAt) {
+    //   return NextResponse.json({ error: 'You can review after the service is completed.' }, { status: 409 })
+    // }
 
     const existing = await prisma.review.findFirst({
       where: { bookingId: booking.id, clientId: user.clientProfile.id },
@@ -123,7 +145,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     return NextResponse.json({ ok: true, review: created }, { status: 201 })
   } catch (e) {
-    console.error('POST /api/client/bookings/[bookingId]/review error', e)
+    console.error('POST /api/client/bookings/[id]/review error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
