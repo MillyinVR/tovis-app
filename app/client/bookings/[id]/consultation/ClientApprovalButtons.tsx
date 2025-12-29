@@ -47,12 +47,14 @@ export default function ClientApprovalButtons({ bookingId }: { bookingId: string
     abortRef.current = controller
 
     try {
-      const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/consultation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-        signal: controller.signal,
-      })
+      const endpoint = action === 'APPROVE' ? 'approve' : 'reject'
+      const res = await fetch(
+        `/api/client/bookings/${encodeURIComponent(bookingId)}/consultation/${endpoint}`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+        },
+      )
 
       const data = await safeJson(res)
       if (!res.ok) {

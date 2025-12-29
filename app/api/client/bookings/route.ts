@@ -15,8 +15,12 @@ function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-type ConsultationApprovalRow = {
-  status: string | null
+function decimalToString(v: unknown): string | null {
+  if (v == null) return null
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  if (typeof v === 'object' && v && typeof (v as any).toString === 'function') return (v as any).toString()
+  return null
 }
 
 type BookingRow = {
@@ -26,7 +30,13 @@ type BookingRow = {
   sessionStep: string | null
   scheduledFor: Date
   durationMinutesSnapshot: number | null
-  priceSnapshot: any
+  priceSnapshot: unknown
+
+  // ✅ client-visible consult proposal (stored on Booking)
+  consultationNotes: string | null
+  consultationPrice: unknown
+  consultationConfirmedAt: Date | null
+
   service: { id: string; name: string } | null
   professional: {
     id: string
@@ -35,15 +45,56 @@ type BookingRow = {
     city: string | null
     state: string | null
   } | null
-  consultationApproval: ConsultationApprovalRow | null
-  hasUnreadAftercare?: boolean
-  hasPendingConsultationApproval?: boolean
+
+  consultationApproval: {
+    status: string
+    proposedServicesJson: unknown
+    proposedTotal: unknown
+    notes: string | null
+    approvedAt: Date | null
+    rejectedAt: Date | null
+  } | null
+}
+
+type BookingOut = {
+  id: string
+  status: string | null
+  source: string | null
+  sessionStep: string | null
+
+  scheduledFor: string
+  durationMinutesSnapshot: number | null
+  priceSnapshot: unknown
+
+  service: { id: string; name: string } | null
+  professional: {
+    id: string
+    businessName: string | null
+    location: string | null
+    city: string | null
+    state: string | null
+  } | null
+
+  hasUnreadAftercare: boolean
+
+  hasPendingConsultationApproval: boolean
+  consultation: null | {
+    // booking-side proposal
+    consultationNotes: string | null
+    consultationPrice: string | null
+    consultationConfirmedAt: string | null
+
+    // approval-side meta (source of truth for “pending/approved/rejected”)
+    approvalStatus: string | null
+    approvalNotes: string | null
+    proposedTotal: string | null
+    proposedServicesJson: unknown
+    approvedAt: string | null
+    rejectedAt: string | null
+  }
 }
 
 function needsConsultationApproval(b: BookingRow) {
-  // Final-product: if the pro sent consult for approval,
-  // booking.sessionStep should be CONSULTATION_PENDING_CLIENT
-  // and consultationApproval.status should be PENDING.
   const step = upper(b.sessionStep)
   const approval = upper(b.consultationApproval?.status)
   return step === 'CONSULTATION_PENDING_CLIENT' && approval === 'PENDING'
@@ -60,7 +111,6 @@ export async function GET() {
     const now = new Date()
     const next30 = addDays(now, 30)
 
-    // Fetch bookings (now includes sessionStep + consultationApproval)
     const bookings = (await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
@@ -73,19 +123,28 @@ export async function GET() {
         scheduledFor: true,
         durationMinutesSnapshot: true,
         priceSnapshot: true,
+
+        consultationNotes: true,
+        consultationPrice: true,
+        consultationConfirmedAt: true,
+
         service: { select: { id: true, name: true } },
         professional: { select: { id: true, businessName: true, location: true, city: true, state: true } },
 
-        // Assumes your Prisma schema has a relation called consultationApproval
-        // (1:1 or 1:many but represented as a single latest row).
-        consultationApproval: { select: { status: true } },
+        consultationApproval: {
+          select: {
+            status: true,
+            proposedServicesJson: true,
+            proposedTotal: true,
+            notes: true,
+            approvedAt: true,
+            rejectedAt: true,
+          },
+        },
       },
     })) as BookingRow[]
 
-    /**
-     * ✅ Policy A: unread-aftercare badges anywhere relevant.
-     * Unread = clientNotification(type=AFTERCARE, readAt=null)
-     */
+    // Policy A: unread aftercare badges anywhere relevant
     const unread = await prisma.clientNotification.findMany({
       where: {
         clientId,
@@ -99,16 +158,50 @@ export async function GET() {
 
     const unreadBookingIds = new Set(
       unread
-        .map((n: any) => (typeof n?.bookingId === 'string' ? n.bookingId : null))
-        .filter(Boolean) as string[],
+        .map((n: { bookingId: string | null }) => (typeof n.bookingId === 'string' ? n.bookingId : null))
+        .filter((x): x is string => Boolean(x)),
     )
 
-    for (const b of bookings) {
-      b.hasUnreadAftercare = unreadBookingIds.has(b.id)
-      b.hasPendingConsultationApproval = needsConsultationApproval(b)
-    }
+    const out: BookingOut[] = bookings.map((b) => {
+      const hasPending = needsConsultationApproval(b)
 
-    // ✅ Waitlist (kept as-is)
+      return {
+        id: b.id,
+        status: b.status,
+        source: b.source,
+        sessionStep: b.sessionStep,
+
+        scheduledFor: b.scheduledFor.toISOString(),
+        durationMinutesSnapshot: b.durationMinutesSnapshot,
+        priceSnapshot: b.priceSnapshot,
+
+        service: b.service,
+        professional: b.professional,
+
+        hasUnreadAftercare: unreadBookingIds.has(b.id),
+
+        hasPendingConsultationApproval: hasPending,
+        consultation:
+          // Only send this blob if it exists or is relevant.
+          // Keeps payload smaller + avoids “client sees random empty consultation UI”.
+          b.consultationApproval || b.consultationNotes || b.consultationPrice != null
+            ? {
+                consultationNotes: b.consultationNotes ?? null,
+                consultationPrice: decimalToString(b.consultationPrice),
+                consultationConfirmedAt: b.consultationConfirmedAt ? b.consultationConfirmedAt.toISOString() : null,
+
+                approvalStatus: b.consultationApproval?.status ?? null,
+                approvalNotes: b.consultationApproval?.notes ?? null,
+                proposedTotal: decimalToString(b.consultationApproval?.proposedTotal),
+                proposedServicesJson: b.consultationApproval?.proposedServicesJson ?? null,
+                approvedAt: b.consultationApproval?.approvedAt ? b.consultationApproval.approvedAt.toISOString() : null,
+                rejectedAt: b.consultationApproval?.rejectedAt ? b.consultationApproval.rejectedAt.toISOString() : null,
+              }
+            : null,
+      }
+    })
+
+    // Waitlist (unchanged)
     let waitlist: any[] = []
     try {
       waitlist = await prisma.waitlistEntry.findMany({
@@ -121,13 +214,11 @@ export async function GET() {
           serviceId: true,
           professionalId: true,
           notes: true,
-
           preferredStart: true,
           preferredEnd: true,
           preferredTimeBucket: true,
           status: true,
           mediaId: true,
-
           service: { select: { id: true, name: true } },
           professional: { select: { id: true, businessName: true, location: true, city: true, state: true } },
         },
@@ -137,12 +228,12 @@ export async function GET() {
       waitlist = []
     }
 
-    const upcoming: BookingRow[] = []
-    const pending: BookingRow[] = []
-    const prebooked: BookingRow[] = []
-    const past: BookingRow[] = []
+    const upcoming: BookingOut[] = []
+    const pending: BookingOut[] = []
+    const prebooked: BookingOut[] = []
+    const past: BookingOut[] = []
 
-    for (const b of bookings) {
+    for (const b of out) {
       const when = new Date(b.scheduledFor)
       const isFuture = when.getTime() >= now.getTime()
       const within30 = when.getTime() < next30.getTime()
@@ -150,38 +241,32 @@ export async function GET() {
       const status = upper(b.status)
       const source = upper(b.source)
 
-      // Past bucket
       if (!isFuture || status === 'COMPLETED' || status === 'CANCELLED') {
         past.push(b)
         continue
       }
 
-      // ✅ Client action required: consultation approval
-      // Put it in Pending so it can’t hide.
+      // ✅ If consult approval required, force into Pending so it can’t hide
       if (b.hasPendingConsultationApproval) {
         pending.push(b)
         continue
       }
 
-      // Regular “requested booking” pending
       if (status === 'PENDING') {
         pending.push(b)
         continue
       }
 
-      // Prebooked (source AFTERCARE)
       if (source === 'AFTERCARE' && isFuture) {
         prebooked.push(b)
         continue
       }
 
-      // Upcoming
       if (status === 'ACCEPTED' && within30) {
         upcoming.push(b)
         continue
       }
 
-      // Default fallback
       upcoming.push(b)
     }
 

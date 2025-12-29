@@ -1,3 +1,4 @@
+// app/client/ClientBookingsDashboard.tsx
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -50,8 +51,10 @@ function normalizeBuckets(input: unknown): Buckets {
   const waitlist = asArray<WaitlistLike>(b.waitlist)
   const past = asArray<BookingLike>(b.past)
 
-  const prebooked =
-    asArray<BookingLike>(b.prebooked).length > 0 ? asArray<BookingLike>(b.prebooked) : asArray<BookingLike>(b.confirmed)
+  // Backward compat: some older code used buckets.confirmed
+  const prebooked = asArray<BookingLike>(b.prebooked).length
+    ? asArray<BookingLike>(b.prebooked)
+    : asArray<BookingLike>(b.confirmed)
 
   return { upcoming, pending, waitlist, prebooked, past }
 }
@@ -80,7 +83,7 @@ export default function ClientBookingsDashboard() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
-  // ✅ "Optional but smart": apply deep link ONCE, then stop overriding user clicks.
+  // Apply deep link once, then stop overriding user clicks.
   const [didInitTab, setDidInitTab] = useState(false)
 
   const reload = useCallback(async () => {
@@ -107,10 +110,8 @@ export default function ClientBookingsDashboard() {
 
   useEffect(() => {
     if (didInitTab) return
-
     const parsed = normalizeTabKey(tabParam)
     if (parsed) setTab(parsed)
-
     setDidInitTab(true)
   }, [tabParam, didInitTab])
 
@@ -127,6 +128,9 @@ export default function ClientBookingsDashboard() {
   const nextAppt = useMemo<BookingLike | null>(() => {
     return buckets.upcoming.length ? buckets.upcoming[0] : null
   }, [buckets.upcoming])
+
+  // If any booking requires consult approval, we surface a "Action required" CTA in the Next card
+  const nextNeedsConsultApproval = Boolean(nextAppt?.hasPendingConsultationApproval)
 
   if (loading) return <div style={{ color: '#6b7280', fontSize: 13 }}>Loading your bookings…</div>
 
@@ -163,7 +167,7 @@ export default function ClientBookingsDashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
           <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 900 }}>Next appointment</div>
           <div style={{ fontSize: 12, color: '#6b7280' }}>
-            {counts.pending ? `${counts.pending} pending request${counts.pending === 1 ? '' : 's'}` : 'All caught up'}
+            {counts.pending ? `${counts.pending} pending item${counts.pending === 1 ? '' : 's'}` : 'All caught up'}
           </div>
         </div>
 
@@ -171,34 +175,65 @@ export default function ClientBookingsDashboard() {
           <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
             <div style={{ fontSize: 18, fontWeight: 900 }}>
               {nextAppt.service?.name || 'Appointment'}
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#6b7280' }}> · {prettyWhen(nextAppt.scheduledFor)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#6b7280' }}>
+                {' '}
+                · {prettyWhen(nextAppt.scheduledFor)}
+              </span>
             </div>
 
             <div style={{ color: '#111', fontSize: 13 }}>
               <span style={{ fontWeight: 900 }}>{nextAppt.professional?.businessName || 'Professional'}</span>
-              {locationLabel(nextAppt.professional) ? <span style={{ color: '#6b7280' }}> · {locationLabel(nextAppt.professional)}</span> : null}
+              {locationLabel(nextAppt.professional) ? (
+                <span style={{ color: '#6b7280' }}> · {locationLabel(nextAppt.professional)}</span>
+              ) : null}
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
-              {sourceUpper(nextAppt.source) === 'AFTERCARE' ? <Badge label="Prebooked" bg="#eef2ff" color="#1e3a8a" /> : null}
+              {sourceUpper(nextAppt.source) === 'AFTERCARE' ? (
+                <Badge label="Prebooked" bg="#eef2ff" color="#1e3a8a" />
+              ) : null}
+
+              {nextNeedsConsultApproval ? (
+                <Badge label="Action required" bg="#fffbeb" color="#854d0e" />
+              ) : null}
+
               {nextStatusBadge(nextAppt)}
 
-              <a
-                href={`/api/calendar?bookingId=${encodeURIComponent(nextAppt.id)}`}
-                style={{
-                  marginLeft: 'auto',
-                  textDecoration: 'none',
-                  border: '1px solid #ddd',
-                  borderRadius: 999,
-                  padding: '8px 12px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  color: '#111',
-                  background: '#fff',
-                }}
-              >
-                Add to calendar
-              </a>
+              {nextNeedsConsultApproval ? (
+                <a
+                  href={`/client/bookings/${encodeURIComponent(nextAppt.id)}?step=consult`}
+                  style={{
+                    marginLeft: 'auto',
+                    textDecoration: 'none',
+                    border: '1px solid #111',
+                    borderRadius: 999,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    fontWeight: 900,
+                    color: '#fff',
+                    background: '#111',
+                  }}
+                >
+                  Review &amp; approve
+                </a>
+              ) : (
+                <a
+                  href={`/api/calendar?bookingId=${encodeURIComponent(nextAppt.id)}`}
+                  style={{
+                    marginLeft: 'auto',
+                    textDecoration: 'none',
+                    border: '1px solid #ddd',
+                    borderRadius: 999,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    fontWeight: 900,
+                    color: '#111',
+                    background: '#fff',
+                  }}
+                >
+                  Add to calendar
+                </a>
+              )}
             </div>
           </div>
         ) : (
@@ -234,16 +269,29 @@ export default function ClientBookingsDashboard() {
       {/* Section container */}
       <div style={{ border: '1px solid #eee', borderRadius: 16, background: '#fff', padding: 14 }}>
         {tab === 'upcoming' ? <UpcomingBookings items={buckets.upcoming} /> : null}
-        {tab === 'pending' ? <PendingBookings items={buckets.pending} /> : null}
+
+        {/* ✅ important: pending needs reload after approve/reject */}
+        {tab === 'pending' ? <PendingBookings items={buckets.pending} onChanged={reload} /> : null}
+
         {tab === 'waitlist' ? <WaitlistBookings items={buckets.waitlist} onChanged={reload} /> : null}
         {tab === 'prebooked' ? <PrebookedBookings items={buckets.prebooked} /> : null}
         {tab === 'past' ? <PastBookings items={buckets.past} /> : null}
 
-        {tab === 'upcoming' && buckets.upcoming.length === 0 ? <div style={{ color: '#6b7280', fontSize: 13 }}>No upcoming bookings.</div> : null}
-        {tab === 'pending' && buckets.pending.length === 0 ? <div style={{ color: '#6b7280', fontSize: 13 }}>No pending requests.</div> : null}
-        {tab === 'waitlist' && buckets.waitlist.length === 0 ? <div style={{ color: '#6b7280', fontSize: 13 }}>No waitlist entries.</div> : null}
-        {tab === 'prebooked' && buckets.prebooked.length === 0 ? <div style={{ color: '#6b7280', fontSize: 13 }}>No prebooked appointments yet.</div> : null}
-        {tab === 'past' && buckets.past.length === 0 ? <div style={{ color: '#6b7280', fontSize: 13 }}>No history yet.</div> : null}
+        {tab === 'upcoming' && buckets.upcoming.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: 13 }}>No upcoming bookings.</div>
+        ) : null}
+        {tab === 'pending' && buckets.pending.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: 13 }}>No pending items.</div>
+        ) : null}
+        {tab === 'waitlist' && buckets.waitlist.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: 13 }}>No waitlist entries.</div>
+        ) : null}
+        {tab === 'prebooked' && buckets.prebooked.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: 13 }}>No prebooked appointments yet.</div>
+        ) : null}
+        {tab === 'past' && buckets.past.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: 13 }}>No history yet.</div>
+        ) : null}
       </div>
     </section>
   )

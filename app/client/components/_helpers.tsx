@@ -13,23 +13,46 @@ export type BookingSource =
   | 'AFTERCARE'
   | (string & {})
 
+// Keep this for compatibility if older code references it
 export type ConsultationApprovalLike = {
   status?: string | null
 } | null
+
+// ✅ Canonical consult payload coming from API
+export type ConsultationLike =
+  | {
+      consultationNotes?: string | null
+      consultationPrice?: string | null
+      consultationConfirmedAt?: string | null
+
+      approvalStatus?: string | null
+      approvalNotes?: string | null
+      proposedTotal?: string | null
+      proposedServicesJson?: unknown
+
+      approvedAt?: string | null
+      rejectedAt?: string | null
+    }
+  | null
 
 export type BookingLike = {
   id: string
   status?: BookingStatus | null
   source?: BookingSource | null
 
-  // ✅ new: session + consult approval visibility
+  // ✅ session + consult approval visibility
   sessionStep?: string | null
+
+  // ✅ old shape (don’t break imports/components)
   consultationApproval?: ConsultationApprovalLike
+
+  // ✅ new: full consult payload (preferred)
+  consultation?: ConsultationLike
 
   // ✅ Policy A/B: badge support for “NEW aftercare”
   hasUnreadAftercare?: boolean
 
-  // ✅ new: computed on API response for easy UI use
+  // ✅ computed in API response for easy UI use
   hasPendingConsultationApproval?: boolean
 
   scheduledFor?: string | Date | null
