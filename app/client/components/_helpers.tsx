@@ -5,7 +5,7 @@ export type BookingStatus =
   | 'ACCEPTED'
   | 'COMPLETED'
   | 'CANCELLED'
-  | (string & {}) // allow unknown strings without blowing up TS
+  | (string & {})
 
 export type BookingSource =
   | 'REQUESTED'
@@ -13,16 +13,28 @@ export type BookingSource =
   | 'AFTERCARE'
   | (string & {})
 
+export type ConsultationApprovalLike = {
+  status?: string | null
+} | null
+
 export type BookingLike = {
   id: string
   status?: BookingStatus | null
   source?: BookingSource | null
-  scheduledFor?: string | Date | null
-  durationMinutesSnapshot?: number | null
-  priceSnapshot?: unknown
+
+  // ✅ new: session + consult approval visibility
+  sessionStep?: string | null
+  consultationApproval?: ConsultationApprovalLike
 
   // ✅ Policy A/B: badge support for “NEW aftercare”
   hasUnreadAftercare?: boolean
+
+  // ✅ new: computed on API response for easy UI use
+  hasPendingConsultationApproval?: boolean
+
+  scheduledFor?: string | Date | null
+  durationMinutesSnapshot?: number | null
+  priceSnapshot?: unknown
 
   service?: { id?: string; name?: string | null } | null
   professional?: {
@@ -84,15 +96,7 @@ export function sourceUpper(v: unknown): string {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-export function Badge({
-  label,
-  bg,
-  color,
-}: {
-  label: string
-  bg: string
-  color: string
-}) {
+export function Badge({ label, bg, color }: { label: string; bg: string; color: string }) {
   return (
     <span
       style={{

@@ -12,19 +12,41 @@ function addDays(date: Date, days: number) {
 }
 
 function upper(v: unknown) {
-  return typeof v === 'string' ? v.toUpperCase() : ''
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+type ConsultationApprovalRow = {
+  status: string | null
 }
 
 type BookingRow = {
   id: string
   status: string | null
   source: string | null
+  sessionStep: string | null
   scheduledFor: Date
   durationMinutesSnapshot: number | null
   priceSnapshot: any
   service: { id: string; name: string } | null
-  professional: { id: string; businessName: string | null; location: string | null; city: string | null; state: string | null } | null
+  professional: {
+    id: string
+    businessName: string | null
+    location: string | null
+    city: string | null
+    state: string | null
+  } | null
+  consultationApproval: ConsultationApprovalRow | null
   hasUnreadAftercare?: boolean
+  hasPendingConsultationApproval?: boolean
+}
+
+function needsConsultationApproval(b: BookingRow) {
+  // Final-product: if the pro sent consult for approval,
+  // booking.sessionStep should be CONSULTATION_PENDING_CLIENT
+  // and consultationApproval.status should be PENDING.
+  const step = upper(b.sessionStep)
+  const approval = upper(b.consultationApproval?.status)
+  return step === 'CONSULTATION_PENDING_CLIENT' && approval === 'PENDING'
 }
 
 export async function GET() {
@@ -38,7 +60,7 @@ export async function GET() {
     const now = new Date()
     const next30 = addDays(now, 30)
 
-    // Fetch bookings
+    // Fetch bookings (now includes sessionStep + consultationApproval)
     const bookings = (await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
@@ -47,16 +69,21 @@ export async function GET() {
         id: true,
         status: true,
         source: true,
+        sessionStep: true,
         scheduledFor: true,
         durationMinutesSnapshot: true,
         priceSnapshot: true,
         service: { select: { id: true, name: true } },
         professional: { select: { id: true, businessName: true, location: true, city: true, state: true } },
+
+        // Assumes your Prisma schema has a relation called consultationApproval
+        // (1:1 or 1:many but represented as a single latest row).
+        consultationApproval: { select: { status: true } },
       },
     })) as BookingRow[]
 
     /**
-     * ✅ Policy A: show unread-aftercare badges anywhere relevant.
+     * ✅ Policy A: unread-aftercare badges anywhere relevant.
      * Unread = clientNotification(type=AFTERCARE, readAt=null)
      */
     const unread = await prisma.clientNotification.findMany({
@@ -71,11 +98,14 @@ export async function GET() {
     })
 
     const unreadBookingIds = new Set(
-      unread.map((n: any) => (typeof n?.bookingId === 'string' ? n.bookingId : null)).filter(Boolean) as string[],
+      unread
+        .map((n: any) => (typeof n?.bookingId === 'string' ? n.bookingId : null))
+        .filter(Boolean) as string[],
     )
 
     for (const b of bookings) {
       b.hasUnreadAftercare = unreadBookingIds.has(b.id)
+      b.hasPendingConsultationApproval = needsConsultationApproval(b)
     }
 
     // ✅ Waitlist (kept as-is)
@@ -120,27 +150,39 @@ export async function GET() {
       const status = upper(b.status)
       const source = upper(b.source)
 
+      // Past bucket
       if (!isFuture || status === 'COMPLETED' || status === 'CANCELLED') {
         past.push(b)
         continue
       }
 
+      // ✅ Client action required: consultation approval
+      // Put it in Pending so it can’t hide.
+      if (b.hasPendingConsultationApproval) {
+        pending.push(b)
+        continue
+      }
+
+      // Regular “requested booking” pending
       if (status === 'PENDING') {
         pending.push(b)
         continue
       }
 
+      // Prebooked (source AFTERCARE)
       if (source === 'AFTERCARE' && isFuture) {
         prebooked.push(b)
         continue
       }
 
+      // Upcoming
       if (status === 'ACCEPTED' && within30) {
         upcoming.push(b)
         continue
       }
 
-      past.push(b)
+      // Default fallback
+      upcoming.push(b)
     }
 
     return NextResponse.json(
