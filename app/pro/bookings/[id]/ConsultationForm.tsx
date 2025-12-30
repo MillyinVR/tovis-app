@@ -30,7 +30,6 @@ function normalizeMoneyInput(raw: string) {
 
   if (!s) return { value: null as string | null, ok: true }
 
-  // allow "350", "350.00", ".99"
   if (!/^\d*\.?\d{0,2}$/.test(s)) return { value: s, ok: false }
 
   const normalized = s.startsWith('.') ? `0${s}` : s
@@ -61,7 +60,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
   }, [])
 
   const parsed = useMemo(() => normalizeMoneyInput(price), [price])
-  const canSubmit = Boolean(bookingId && !saving && parsed.ok && parsed.value)
+  const canSubmit = Boolean(bookingId && !saving && parsed.ok && parsed.value !== null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -72,7 +71,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     if (saving) return
 
     const normalized = normalizeMoneyInput(price)
-    if (!normalized.ok || !normalized.value) {
+    if (!normalized.ok || normalized.value === null) {
       setError('Enter a valid price (numbers only, up to 2 decimals).')
       return
     }
@@ -83,16 +82,12 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     setSaving(true)
 
     try {
-      // 1) Save consultation notes + price (your existing endpoint)
+      // 1) Save consultation notes + price
       const res1 = await fetch(`/api/pro/bookings/${bookingId}/consultation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({
-          notes,
-          // backend route converts dollars -> cents
-          price: normalized.value,
-        }),
+        body: JSON.stringify({ notes, price: normalized.value }),
       })
 
       const data1 = await safeJson(res1)
@@ -101,26 +96,17 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
         return
       }
 
-      // 2) Create/update consultation approval (PENDING) + advance sessionStep
+      // 2) Create/update consultation approval (PENDING)
       const proposedTotal = normalized.value
       const proposedServicesJson = {
-        items: [
-          {
-            label: 'Service (from booking)',
-            price: proposedTotal,
-          },
-        ],
+        items: [{ label: 'Service (from booking)', price: proposedTotal }],
       }
 
       const res2 = await fetch(`/api/pro/bookings/${bookingId}/consultation-proposal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({
-          proposedServicesJson,
-          proposedTotal,
-          notes,
-        }),
+        body: JSON.stringify({ proposedServicesJson, proposedTotal, notes }),
       })
 
       const data2 = await safeJson(res2)
@@ -131,7 +117,9 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
 
       setMessage('Sent to client for approval.')
       router.refresh()
-      router.push(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+
+      // ✅ Stay on booking detail consult tab (waiting state should display there)
+      router.push(`/pro/bookings/${encodeURIComponent(bookingId)}?step=consult`)
     } catch (err: any) {
       if (err?.name === 'AbortError') return
       console.error(err)

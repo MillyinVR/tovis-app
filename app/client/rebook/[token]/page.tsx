@@ -60,12 +60,15 @@ type RebookInfo =
   | { mode: 'RECOMMENDED_DATE'; label: string; recommendedAt: Date }
   | { mode: 'NONE'; label: null }
 
-function computeRebookInfo(aftercare: {
-  rebookMode: string
-  rebookedFor: Date | null
-  rebookWindowStart: Date | null
-  rebookWindowEnd: Date | null
-}, timeZone: string): RebookInfo {
+function computeRebookInfo(
+  aftercare: {
+    rebookMode: string
+    rebookedFor: Date | null
+    rebookWindowStart: Date | null
+    rebookWindowEnd: Date | null
+  },
+  timeZone: string,
+): RebookInfo {
   const mode = String(aftercare.rebookMode || '').toUpperCase()
 
   if (mode === 'BOOKED_NEXT_APPOINTMENT') {
@@ -89,11 +92,10 @@ function computeRebookInfo(aftercare: {
         windowEnd: e,
       }
     }
-    // If mode says window but dates missing, don’t pretend it’s fine.
     return { mode: 'NONE', label: null }
   }
 
-  // Back-compat / “we set a single date but didn’t set a mode”
+  // Back-compat: single date set without mode
   const legacy = toDate(aftercare.rebookedFor)
   if (legacy) {
     return {
@@ -107,14 +109,14 @@ function computeRebookInfo(aftercare: {
 }
 
 export default async function ClientRebookFromAftercarePage(props: {
-  params: Promise<{ token: string }> | { token: string }
-  searchParams?: Promise<SearchParamsShape> | SearchParamsShape
+  params: { token: string } | Promise<{ token: string }>
+  searchParams?: SearchParamsShape | Promise<SearchParamsShape>
 }) {
-  const { token } = await props.params
+  const { token } = await Promise.resolve(props.params as any)
   const publicToken = pickString(token)
   if (!publicToken) notFound()
 
-  const sp = props.searchParams ? await props.searchParams : undefined
+  const sp = props.searchParams ? await Promise.resolve(props.searchParams as any) : undefined
   const recommendedAtFromUrl = pickString(sp?.recommendedAt)
   const windowStartFromUrl = pickString(sp?.windowStart)
   const windowEndFromUrl = pickString(sp?.windowEnd)
@@ -124,7 +126,6 @@ export default async function ClientRebookFromAftercarePage(props: {
     redirect(`/login?from=${encodeURIComponent(`/client/rebook/${publicToken}`)}`)
   }
 
-  // Find aftercare by token
   const aftercare = await prisma.aftercareSummary.findUnique({
     where: { publicToken },
     select: {
@@ -148,8 +149,6 @@ export default async function ClientRebookFromAftercarePage(props: {
   })
 
   if (!aftercare?.booking) notFound()
-
-  // Security: don’t allow viewing someone else’s aftercare link while logged in
   if (aftercare.booking.clientId !== user.clientProfile.id) notFound()
 
   const booking = aftercare.booking
@@ -168,8 +167,7 @@ export default async function ClientRebookFromAftercarePage(props: {
   }
   if (!offeringId) notFound()
 
-  const appointmentTz =
-    sanitizeTimeZone(booking.professional?.timeZone) ?? 'America/Los_Angeles'
+  const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
 
   const proName =
     booking.professional?.businessName ||
@@ -177,7 +175,6 @@ export default async function ClientRebookFromAftercarePage(props: {
     'your professional'
 
   const serviceName = booking.service?.name || 'Service'
-
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
 
   const rebookInfo = computeRebookInfo(
@@ -191,38 +188,31 @@ export default async function ClientRebookFromAftercarePage(props: {
   )
 
   // If mode = BOOKED_NEXT_APPOINTMENT, try to find the actual “next booking”
-  // based on your schema: Booking.source=AFTERCARE and Booking.rebookOfBookingId=original booking id
-  // Replace your "nextBooking" block with this safer version:
-let nextBooking: { id: string; scheduledFor: Date; status: string } | null = null
+  // Rule: Booking.source=AFTERCARE and Booking.rebookOfBookingId=original booking id
+  let nextBooking: { id: string; scheduledFor: Date; status: string } | null = null
 
-if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
-  try {
-    nextBooking = await prisma.booking.findFirst({
-      where: {
-        // Only keep these filters if they exist in your schema.
-        // If rebookOfBookingId doesn't exist yet, delete that line.
-        rebookOfBookingId: booking.id,
-        source: 'AFTERCARE',
-        status: { not: 'CANCELLED' },
-      } as any,
-      orderBy: { scheduledFor: 'desc' },
-      select: { id: true, scheduledFor: true, status: true },
-    })
-  } catch (e) {
-    // Ignore: schema may not have rebookOfBookingId yet.
-    nextBooking = null
+  if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
+    try {
+      nextBooking = await prisma.booking.findFirst({
+        where: {
+          rebookOfBookingId: booking.id,
+          source: 'AFTERCARE',
+          status: { not: 'CANCELLED' },
+        } as any,
+        orderBy: { scheduledFor: 'desc' },
+        select: { id: true, scheduledFor: true, status: true },
+      })
+    } catch {
+      nextBooking = null
+    }
   }
-}
 
-  // CTA: you’ll wire this to your real “client selects time” flow.
-  // If you already have a booking flow entry page, swap this href.
+  // Build booking CTA URL into your offering page
   const baseParams = new URLSearchParams({
     source: 'AFTERCARE',
     token: publicToken,
     rebookOfBookingId: booking.id,
   })
-
-  const bookHrefBase = `/offerings/${encodeURIComponent(offeringId)}?${baseParams.toString()}`
 
   const bookParams = new URLSearchParams(baseParams)
   if (recommendedAtFromUrl) bookParams.set('recommendedAt', recommendedAtFromUrl)
@@ -238,10 +228,7 @@ if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
     }
   }
 
-  const bookHref =
-    bookParams.toString() === baseParams.toString()
-      ? bookHrefBase
-      : `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
+  const bookHref = `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
 
   return (
     <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
@@ -271,7 +258,6 @@ if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
         With {proName}
       </div>
 
-      {/* Notes */}
       <section style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 16 }}>
         <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>Aftercare notes</div>
         {notes ? (
@@ -281,7 +267,6 @@ if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
         )}
       </section>
 
-      {/* Rebook */}
       <section style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 12 }}>
         <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>Rebook</div>
 

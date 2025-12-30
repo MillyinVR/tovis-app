@@ -1,3 +1,4 @@
+// app/pro/bookings/BookingActions.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -12,8 +13,10 @@ type Props = {
   finishedAt?: string | null
 }
 
+type LoadingAction = 'ACCEPT' | 'CANCEL' | 'START' | 'FINISH'
+
 function normalizeStatus(s: unknown): SafeStatus {
-  const v = String(s || '').toUpperCase()
+  const v = String(s || '').toUpperCase().trim()
   if (v === 'PENDING' || v === 'ACCEPTED' || v === 'COMPLETED' || v === 'CANCELLED') return v
   return 'UNKNOWN'
 }
@@ -24,16 +27,25 @@ function hasValidDate(iso?: string | null) {
   return !Number.isNaN(d.getTime())
 }
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
+async function safeRead(res: Response): Promise<any> {
+  if (res.status === 204) return {}
+  const text = await res.text().catch(() => '')
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { raw: text }
+  }
 }
 
 function extractError(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error
   if (typeof data?.message === 'string') return data.message
+
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
-  if (res.status === 404) return 'That route doesn’t exist (404).'
+  if (res.status === 404) return 'Not found (404).'
+  if (res.status === 409) return 'That action isn’t allowed right now.'
   return `Request failed (${res.status}).`
 }
 
@@ -47,7 +59,10 @@ function extractStatus(data: any, fallback: SafeStatus): SafeStatus {
   return normalizeStatus(candidate)
 }
 
-type LoadingAction = 'ACCEPT' | 'CANCEL' | 'START' | 'FINISH'
+function extractIso(data: any, key: 'startedAt' | 'finishedAt') {
+  const maybe = data?.[key] ?? data?.booking?.[key] ?? data?.data?.[key]
+  return typeof maybe === 'string' && hasValidDate(maybe) ? maybe : null
+}
 
 export default function BookingActions({ bookingId, currentStatus, startedAt, finishedAt }: Props) {
   const [status, setStatus] = useState<SafeStatus>(normalizeStatus(currentStatus))
@@ -59,17 +74,9 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
 
   const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    setStatus(normalizeStatus(currentStatus))
-  }, [currentStatus])
-
-  useEffect(() => {
-    setLocalStartedAt(startedAt ?? null)
-  }, [startedAt])
-
-  useEffect(() => {
-    setLocalFinishedAt(finishedAt ?? null)
-  }, [finishedAt])
+  useEffect(() => setStatus(normalizeStatus(currentStatus)), [currentStatus])
+  useEffect(() => setLocalStartedAt(startedAt ?? null), [startedAt])
+  useEffect(() => setLocalFinishedAt(finishedAt ?? null), [finishedAt])
 
   useEffect(() => {
     return () => abortRef.current?.abort()
@@ -85,10 +92,13 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
   const canAccept = isPending
   const canCancel = status === 'PENDING' || status === 'ACCEPTED'
   const canStart = isAccepted && !started && !finished
+
+  // ⚠️ "Finish" is only allowed once started and not already finished.
+  // But finishing does NOT necessarily mean COMPLETED anymore (aftercare submit completes).
   const canFinish = isAccepted && started && !finished
 
   async function run(action: LoadingAction) {
-    if (!bookingId) {
+    if (!bookingId?.trim()) {
       setError('Missing booking id.')
       return
     }
@@ -105,56 +115,63 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       let res: Response
 
       if (action === 'ACCEPT') {
-        res = await fetch(`/api/pro/bookings/${bookingId}/status`, {
+        // ✅ Correct accept route
+        res = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'ACCEPTED' }),
           signal: controller.signal,
         })
       } else if (action === 'CANCEL') {
-        res = await fetch(`/api/bookings/${bookingId}/cancel`, {
+        res = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}/cancel`, {
           method: 'POST',
           signal: controller.signal,
         })
       } else if (action === 'START') {
-        res = await fetch(`/api/pro/bookings/${bookingId}/start`, {
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, {
           method: 'POST',
           signal: controller.signal,
         })
       } else {
-        res = await fetch(`/api/pro/bookings/${bookingId}/finish`, {
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/finish`, {
           method: 'POST',
           signal: controller.signal,
         })
       }
 
-      const data = await safeJson(res)
+      const data = await safeRead(res)
 
       if (!res.ok) {
         setError(extractError(res, data))
         return
       }
 
-      // status
+      // ✅ Update status conservatively, based on what the API returns.
+      // - ACCEPT should become ACCEPTED.
+      // - CANCEL should become CANCELLED.
+      // - START usually returns startedAt + status.
+      // - FINISH (new flow) does NOT necessarily return COMPLETED anymore.
       const nextStatus =
-        action === 'ACCEPT' ? extractStatus(data, 'ACCEPTED')
-        : action === 'CANCEL' ? extractStatus(data, 'CANCELLED')
-        : action === 'FINISH' ? extractStatus(data, 'COMPLETED')
-        : extractStatus(data, status)
+        action === 'ACCEPT'
+          ? extractStatus(data, 'ACCEPTED')
+          : action === 'CANCEL'
+            ? extractStatus(data, 'CANCELLED')
+            : extractStatus(data, status)
 
       setStatus(nextStatus)
 
       // timestamps (best-effort)
       if (action === 'START') {
-        const maybe = data?.startedAt ?? data?.booking?.startedAt ?? data?.data?.startedAt
-        if (typeof maybe === 'string') setLocalStartedAt(maybe)
-        if (!maybe) setLocalStartedAt(new Date().toISOString())
+        const iso = extractIso(data, 'startedAt')
+        setLocalStartedAt(iso ?? new Date().toISOString())
       }
 
+      // IMPORTANT:
+      // We do NOT set finishedAt here unless the API actually returns it.
+      // Completion should happen when aftercare is submitted.
       if (action === 'FINISH') {
-        const maybe = data?.finishedAt ?? data?.booking?.finishedAt ?? data?.data?.finishedAt
-        if (typeof maybe === 'string') setLocalFinishedAt(maybe)
-        if (!maybe) setLocalFinishedAt(new Date().toISOString())
+        const iso = extractIso(data, 'finishedAt')
+        if (iso) setLocalFinishedAt(iso)
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return
@@ -255,7 +272,7 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
               opacity: loading && loading !== 'FINISH' ? 0.6 : 1,
             }}
           >
-            {loading === 'FINISH' ? 'Saving…' : 'Mark completed'}
+            {loading === 'FINISH' ? 'Saving…' : 'Finish'}
           </button>
         )}
       </div>

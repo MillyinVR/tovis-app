@@ -10,7 +10,6 @@ type BookingSourceNormalized = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 
 type CreateBookingBody = {
   offeringId?: unknown
-  scheduledFor?: unknown
   holdId?: unknown
   source?: unknown
   locationType?: unknown
@@ -18,6 +17,8 @@ type CreateBookingBody = {
   openingId?: unknown
   aftercareToken?: unknown
   rebookOfBookingId?: unknown
+  // scheduledFor may be present, but is ignored in favor of hold truth
+  scheduledFor?: unknown
 }
 
 type ExistingBookingForConflict = {
@@ -199,40 +200,18 @@ export async function POST(request: Request) {
     const holdId = pickString(body.holdId)
 
     const source = normalizeSourceStrict(body.source)
-    if (!source) {
-      return NextResponse.json({ ok: false, error: 'Missing booking source.' }, { status: 400 })
-    }
+    if (!source) return NextResponse.json({ ok: false, error: 'Missing booking source.' }, { status: 400 })
 
     const locationType = normalizeLocationTypeStrict(body.locationType)
-    if (!locationType) {
-      return NextResponse.json({ ok: false, error: 'Missing locationType.' }, { status: 400 })
-    }
+    if (!locationType) return NextResponse.json({ ok: false, error: 'Missing locationType.' }, { status: 400 })
 
-    const mediaId = pickString(body.mediaId) // not stored (yet)
+    if (!offeringId) return NextResponse.json({ ok: false, error: 'Missing offeringId.' }, { status: 400 })
+    if (!holdId) return NextResponse.json({ ok: false, error: 'Missing hold. Please pick a slot again.' }, { status: 409 })
+
+    const mediaId = pickString(body.mediaId) // not stored yet
     const openingId = pickString(body.openingId)
     const aftercareToken = pickString(body.aftercareToken)
     const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
-
-    if (!offeringId || !body.scheduledFor) {
-      return NextResponse.json({ ok: false, error: 'Missing offering or date/time.' }, { status: 400 })
-    }
-
-    if (!holdId) {
-      // hold is required; we treat missing hold as a conflict (matches your UX)
-      return NextResponse.json({ ok: false, error: 'Missing hold. Please pick a slot again.' }, { status: 409 })
-    }
-
-    const scheduledForParsed = new Date(String(body.scheduledFor))
-    if (!isValidDate(scheduledForParsed)) {
-      return NextResponse.json({ ok: false, error: 'Invalid date/time.' }, { status: 400 })
-    }
-
-    const requestedStart = normalizeToMinute(scheduledForParsed)
-
-    const BUFFER_MINUTES = 5
-    if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
-      return NextResponse.json({ ok: false, error: 'Please select a future time.' }, { status: 400 })
-    }
 
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
@@ -270,8 +249,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'This service is not offered as mobile.' }, { status: 400 })
     }
 
-    let rebookOfBookingIdForCreate: string | null = null
+    // Determine duration/price snapshots for this locationType
+    const priceStartingAt = locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+    const durationSnapshot = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
 
+    if (priceStartingAt == null) {
+      return NextResponse.json(
+        { ok: false, error: `Pricing is not set for ${locationType === 'MOBILE' ? 'mobile' : 'salon'} bookings.` },
+        { status: 400 },
+      )
+    }
+
+    const durationMinutes = Number(durationSnapshot ?? 0)
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+      return NextResponse.json({ ok: false, error: 'Offering duration is invalid for this booking type.' }, { status: 400 })
+    }
+
+    const proTz = isValidIanaTimeZone(offering.professional?.timeZone)
+      ? offering.professional!.timeZone!
+      : 'America/Los_Angeles'
+
+    const now = new Date()
+    const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
+    const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
+
+    // Aftercare validation (only if AFTERCARE source)
+    let rebookOfBookingIdForCreate: string | null = null
     if (source === 'AFTERCARE') {
       if (!aftercareToken) {
         return NextResponse.json({ ok: false, error: 'Missing aftercare token.' }, { status: 400 })
@@ -298,68 +301,32 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: 'Invalid aftercare token.' }, { status: 400 })
       }
 
-      const originalBooking = aftercare.booking
+      const original = aftercare.booking
 
-      if (originalBooking.status !== 'COMPLETED') {
+      if (original.status !== 'COMPLETED') {
         return NextResponse.json({ ok: false, error: 'Only COMPLETED bookings can be rebooked.' }, { status: 409 })
       }
 
-      if (originalBooking.clientId !== clientId) {
+      if (original.clientId !== clientId) {
         return NextResponse.json({ ok: false, error: 'Aftercare link does not match this client.' }, { status: 403 })
       }
 
       const matchesOffering =
-        (originalBooking.offeringId && originalBooking.offeringId === offering.id) ||
-        (originalBooking.professionalId === offering.professionalId && originalBooking.serviceId === offering.serviceId)
+        (original.offeringId && original.offeringId === offering.id) ||
+        (original.professionalId === offering.professionalId && original.serviceId === offering.serviceId)
 
       if (!matchesOffering) {
         return NextResponse.json({ ok: false, error: 'Aftercare link does not match this offering.' }, { status: 403 })
       }
 
       rebookOfBookingIdForCreate =
-        requestedRebookOfBookingId && requestedRebookOfBookingId === originalBooking.id
+        requestedRebookOfBookingId && requestedRebookOfBookingId === original.id
           ? requestedRebookOfBookingId
-          : originalBooking.id
+          : original.id
     }
-
-    const priceStartingAt = locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
-    const durationSnapshot = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
-
-    if (priceStartingAt == null) {
-      return NextResponse.json(
-        { ok: false, error: `Pricing is not set for ${locationType === 'MOBILE' ? 'mobile' : 'salon'} bookings.` },
-        { status: 400 },
-      )
-    }
-
-    const durationMinutes = Number(durationSnapshot ?? 0)
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-      return NextResponse.json({ ok: false, error: 'Offering duration is invalid for this booking type.' }, { status: 400 })
-    }
-
-    const requestedEnd = addMinutes(requestedStart, durationMinutes)
-
-    const proTz = isValidIanaTimeZone(offering.professional?.timeZone)
-      ? offering.professional!.timeZone!
-      : 'America/Los_Angeles'
-
-    const whCheck = ensureWithinWorkingHours({
-      scheduledStartUtc: requestedStart,
-      scheduledEndUtc: requestedEnd,
-      workingHours: offering.professional?.workingHours,
-      timeZone: proTz,
-    })
-    if (!whCheck.ok) {
-      return NextResponse.json({ ok: false, error: whCheck.error }, { status: 400 })
-    }
-
-    const now = new Date()
-
-    const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
-    const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
     const booking = await prisma.$transaction(async (tx) => {
-      // 1) Validate hold (SERVER TRUTH)
+      // 1) Validate hold (server truth)
       const hold = await tx.bookingHold.findUnique({
         where: { id: holdId },
         select: {
@@ -374,8 +341,6 @@ export async function POST(request: Request) {
       })
 
       if (!hold) throw new Error('HOLD_NOT_FOUND')
-
-      // Fail closed (do not reveal existence)
       if (hold.clientId !== clientId) throw new Error('HOLD_NOT_FOUND')
 
       if (hold.expiresAt.getTime() <= now.getTime()) throw new Error('HOLD_EXPIRED')
@@ -383,15 +348,32 @@ export async function POST(request: Request) {
       if (hold.professionalId !== offering.professionalId) throw new Error('HOLD_MISMATCH')
       if (hold.locationType !== locationType) throw new Error('HOLD_MISMATCH')
 
+      // 2) Use hold time as truth
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
+      if (!isValidDate(requestedStart)) throw new Error('INVALID_TIME')
+
+      // simple future guard
+      const BUFFER_MINUTES = 5
+      if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
+        throw new Error('TIME_IN_PAST')
+      }
+
       const requestedEnd = addMinutes(requestedStart, durationMinutes)
-      // Use hold-truth time to avoid conflicts based on a tampered request payload.
+
+      // 3) Working-hours enforcement (based on pro TZ)
+      const whCheck = ensureWithinWorkingHours({
+        scheduledStartUtc: requestedStart,
+        scheduledEndUtc: requestedEnd,
+        workingHours: offering.professional?.workingHours,
+        timeZone: proTz,
+      })
+      if (!whCheck.ok) throw new Error(`WH:${whCheck.error}`)
+
+      // 4) Conflict re-check (bookings)
       const windowStart = addMinutes(requestedStart, -durationMinutes * 2)
       const windowEnd = addMinutes(requestedStart, durationMinutes * 2)
 
-
-      // 2) Conflict re-check (bookings)
-      const existing2 = (await tx.booking.findMany({
+      const existing = (await tx.booking.findMany({
         where: {
           professionalId: offering.professionalId,
           scheduledFor: { gte: windowStart, lte: windowEnd },
@@ -401,7 +383,7 @@ export async function POST(request: Request) {
         take: 50,
       })) as ExistingBookingForConflict[]
 
-      const hasConflict2 = existing2.some((b) => {
+      const hasConflict = existing.some((b) => {
         const bDur = Number(b.durationMinutesSnapshot || 0)
         if (!Number.isFinite(bDur) || bDur <= 0) return false
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
@@ -409,9 +391,9 @@ export async function POST(request: Request) {
         return overlaps(bStart, bEnd, requestedStart, requestedEnd)
       })
 
-      if (hasConflict2) throw new Error('TIME_NOT_AVAILABLE')
+      if (hasConflict) throw new Error('TIME_NOT_AVAILABLE')
 
-      // 3) Claim opening if present
+      // 5) Claim opening if present
       if (openingId) {
         const activeOpening = await tx.lastMinuteOpening.findFirst({
           where: { id: openingId, status: 'ACTIVE' },
@@ -434,7 +416,7 @@ export async function POST(request: Request) {
         if (updated.count !== 1) throw new Error('OPENING_NOT_AVAILABLE')
       }
 
-      // 4) Create booking
+      // 6) Create booking
       const created = await tx.booking.create({
         data: {
           clientId,
@@ -464,7 +446,7 @@ export async function POST(request: Request) {
         },
       })
 
-      // 5) Mark notification, if present
+      // 7) Mark notification, if present
       if (openingId) {
         await tx.openingNotification.updateMany({
           where: { clientId, openingId, bookedAt: null },
@@ -472,7 +454,7 @@ export async function POST(request: Request) {
         })
       }
 
-      // 6) Delete hold after success
+      // 8) Delete hold after success
       await tx.bookingHold.delete({ where: { id: hold.id } })
 
       void mediaId
@@ -484,16 +466,10 @@ export async function POST(request: Request) {
     const msg = String(e?.message || '')
 
     if (msg === 'OPENING_NOT_AVAILABLE') {
-      return NextResponse.json(
-        { ok: false, error: 'That opening was just taken. Please pick another slot.' },
-        { status: 409 },
-      )
+      return NextResponse.json({ ok: false, error: 'That opening was just taken. Please pick another slot.' }, { status: 409 })
     }
     if (msg === 'TIME_NOT_AVAILABLE') {
-      return NextResponse.json(
-        { ok: false, error: 'That time is no longer available. Please select a different slot.' },
-        { status: 409 },
-      )
+      return NextResponse.json({ ok: false, error: 'That time is no longer available. Please select a different slot.' }, { status: 409 })
     }
     if (msg === 'HOLD_NOT_FOUND') {
       return NextResponse.json({ ok: false, error: 'Hold not found. Please pick a slot again.' }, { status: 409 })
@@ -503,6 +479,15 @@ export async function POST(request: Request) {
     }
     if (msg === 'HOLD_MISMATCH') {
       return NextResponse.json({ ok: false, error: 'Hold mismatch. Please pick a slot again.' }, { status: 409 })
+    }
+    if (msg === 'TIME_IN_PAST') {
+      return NextResponse.json({ ok: false, error: 'Please select a future time.' }, { status: 400 })
+    }
+    if (msg === 'INVALID_TIME') {
+      return NextResponse.json({ ok: false, error: 'Invalid date/time.' }, { status: 400 })
+    }
+    if (msg.startsWith('WH:')) {
+      return NextResponse.json({ ok: false, error: msg.slice(3) || 'That time is outside working hours.' }, { status: 400 })
     }
 
     console.error('POST /api/bookings error:', e)

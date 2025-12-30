@@ -11,7 +11,6 @@ function fullName(first?: string | null, last?: string | null) {
 
 type Mode = 'IDLE' | 'UPCOMING' | 'ACTIVE'
 type CenterAction = 'GO_SESSION' | 'NONE'
-
 type StepKey = 'consult' | 'session' | 'aftercare'
 
 // Matches your Prisma enum SessionStep (allow unknowns)
@@ -33,29 +32,37 @@ function toUpper(v: unknown) {
 function stepFromSessionStep(step: SessionStep | null): StepKey {
   const s = toUpper(step || 'NONE')
 
-  // Canonical mapping: where should the pro land?
-  if (s === 'CONSULTATION' || s === 'CONSULTATION_PENDING_CLIENT') return 'consult'
+  if (s === 'DONE') return 'aftercare'
 
-  if (s === 'BEFORE_PHOTOS' || s === 'SERVICE_IN_PROGRESS' || s === 'FINISH_REVIEW' || s === 'AFTER_PHOTOS') {
-    return 'session'
-  }
+  if (s === 'CONSULTATION' || s === 'CONSULTATION_PENDING_CLIENT' || s === 'NONE') return 'consult'
 
-  // DONE or NONE: default to consult (or aftercare if you prefer)
-  return 'consult'
+  // BEFORE_PHOTOS .. AFTER_PHOTOS
+  return 'session'
 }
 
 function centerLabelFrom(mode: Mode, step: SessionStep | null) {
-  if (mode === 'IDLE') return 'Start'
-  if (mode === 'UPCOMING') return 'Start'
-
   const s = toUpper(step || 'NONE')
+
+  if (mode === 'IDLE') return 'Start'
+
+  // UPCOMING: pro should land in consult unless already past it (rare)
+  if (mode === 'UPCOMING') {
+    if (s === 'DONE') return 'Aftercare'
+    if (s === 'CONSULTATION_PENDING_CLIENT') return 'Waiting'
+    if (s === 'CONSULTATION' || s === 'NONE') return 'Consult'
+    if (s === 'BEFORE_PHOTOS' || s === 'AFTER_PHOTOS') return 'Camera'
+    if (s === 'SERVICE_IN_PROGRESS' || s === 'FINISH_REVIEW') return 'Session'
+    return 'Start'
+  }
+
+  // ACTIVE
+  if (s === 'DONE') return 'Aftercare'
   if (s === 'CONSULTATION') return 'Consult'
   if (s === 'CONSULTATION_PENDING_CLIENT') return 'Waiting'
   if (s === 'BEFORE_PHOTOS') return 'Camera'
   if (s === 'SERVICE_IN_PROGRESS') return 'Finish'
   if (s === 'FINISH_REVIEW') return 'Finish'
   if (s === 'AFTER_PHOTOS') return 'Camera'
-  if (s === 'DONE') return 'Start'
   return 'Session'
 }
 
@@ -71,12 +78,13 @@ export async function GET() {
     const now = new Date()
 
     // 1) ACTIVE session wins: started but not finished
+    // IMPORTANT: only ACCEPTED should be allowed to be “active”
     const active = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
         startedAt: { not: null },
         finishedAt: null,
-        status: { in: ['ACCEPTED', 'PENDING'] }, // tolerate your current flow
+        status: 'ACCEPTED',
       } as any,
       include: { client: true, service: true },
       orderBy: { startedAt: 'desc' },

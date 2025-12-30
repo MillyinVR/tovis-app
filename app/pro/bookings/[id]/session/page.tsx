@@ -18,6 +18,10 @@ type SessionStep =
   | 'DONE'
   | string
 
+function upper(v: unknown) {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
 function StepPill({ step }: { step: string }) {
   return (
     <div
@@ -86,7 +90,7 @@ function Card({ children }: { children: React.ReactNode }) {
 }
 
 function labelForStep(step: SessionStep) {
-  const s = String(step || 'NONE').toUpperCase()
+  const s = upper(step || 'NONE')
   if (s === 'NONE') return 'Not started'
   if (s === 'CONSULTATION') return 'Consultation'
   if (s === 'CONSULTATION_PENDING_CLIENT') return 'Waiting on client'
@@ -99,25 +103,11 @@ function labelForStep(step: SessionStep) {
 }
 
 function approvalTone(status: unknown) {
-  const s = String(status || '').toUpperCase()
+  const s = upper(status)
   if (s === 'PENDING') return 'warn'
   if (s === 'APPROVED') return 'good'
   if (s === 'REJECTED') return 'bad'
   return 'neutral'
-}
-
-function stepOrderAdvance(step: SessionStep): SessionStep | null {
-  const s = String(step || 'NONE').toUpperCase()
-
-  // Consultation -> Pending is handled by ConsultationForm + proposal route
-  if (s === 'BEFORE_PHOTOS') return 'SERVICE_IN_PROGRESS'
-  if (s === 'SERVICE_IN_PROGRESS') return 'FINISH_REVIEW'
-  if (s === 'FINISH_REVIEW') return 'AFTER_PHOTOS'
-  if (s === 'AFTER_PHOTOS') return 'DONE'
-
-  if (s === 'NONE') return 'CONSULTATION'
-
-  return null
 }
 
 export default async function ProBookingSessionPage(props: { params: Promise<{ id: string }> }) {
@@ -143,19 +133,29 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
   if (!booking) notFound()
   if (booking.professionalId !== proId) redirect('/pro')
 
-  const step = String((booking as any).sessionStep || 'NONE').toUpperCase() as SessionStep
+  const bookingStatus = upper(booking.status)
+  const step = upper((booking as any).sessionStep || 'NONE') as SessionStep
 
   const serviceName = booking.service?.name ?? 'Service'
   const clientName =
     `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
 
   const approval = (booking as any).consultationApproval ?? null
-  const approvalStatus = approval?.status ? String(approval.status).toUpperCase() : 'NONE'
+  const approvalStatus = upper(approval?.status || 'NONE')
 
-  const initialPrice =
-    booking.consultationPrice != null ? (moneyToString(booking.consultationPrice) ?? '') : ''
+  const initialPrice = booking.consultationPrice != null ? (moneyToString(booking.consultationPrice) ?? '') : ''
 
-  async function advance() {
+  // ---- RULES (the “dummy-proof backbone”)
+  const isCancelled = bookingStatus === 'CANCELLED'
+  const isCompleted = bookingStatus === 'COMPLETED'
+  const isAccepted = bookingStatus === 'ACCEPTED'
+  const isPending = bookingStatus === 'PENDING'
+
+  const waitingOnClient = step === 'CONSULTATION_PENDING_CLIENT' && approvalStatus === 'PENDING'
+  const consultationApproved = approvalStatus === 'APPROVED'
+
+  // State corrections (server-side enforcement)
+  async function setStep(next: SessionStep) {
     'use server'
     const u = await getCurrentUser().catch(() => null)
     if (!u || u.role !== 'PRO' || !u.professionalProfile?.id) {
@@ -164,15 +164,24 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
     const b = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, professionalId: true, sessionStep: true },
+      select: { id: true, professionalId: true, status: true, sessionStep: true },
     })
     if (!b) notFound()
     if (b.professionalId !== u.professionalProfile.id) redirect('/pro')
 
-    const current = String(b.sessionStep || 'NONE').toUpperCase() as SessionStep
-    const next = stepOrderAdvance(current)
+    const st = upper(b.status)
 
-    if (!next) redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+    if (st === 'CANCELLED') redirect('/pro')
+    if (st === 'COMPLETED') redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`)
+
+    // If not accepted yet, force consultation only (no session progression)
+    if (st === 'PENDING') {
+      await prisma.booking.update({
+        where: { id: bookingId },
+        data: { sessionStep: 'CONSULTATION' as any },
+      })
+      redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+    }
 
     await prisma.booking.update({
       where: { id: bookingId },
@@ -182,25 +191,24 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
     redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
   }
 
-  const canAdvance =
-    step === 'BEFORE_PHOTOS' ||
-    step === 'SERVICE_IN_PROGRESS' ||
-    step === 'FINISH_REVIEW' ||
-    step === 'AFTER_PHOTOS' ||
-    step === 'NONE'
+  // CTA logic
+  const showConsultForm = step === 'CONSULTATION' || step === 'NONE' || isPending
+  const showWaiting = step === 'CONSULTATION_PENDING_CLIENT' && approvalStatus !== 'APPROVED'
+  const showBeforePhotos = step === 'BEFORE_PHOTOS' && consultationApproved
+  const showService = step === 'SERVICE_IN_PROGRESS'
+  const showFinishReview = step === 'FINISH_REVIEW'
+  const showAfterPhotos = step === 'AFTER_PHOTOS'
+  const showDone = step === 'DONE'
 
-  const advanceLabel =
-    step === 'NONE'
-      ? 'Begin consultation'
-      : step === 'BEFORE_PHOTOS'
-        ? 'Start service'
-        : step === 'SERVICE_IN_PROGRESS'
-          ? 'Finish service'
-          : step === 'FINISH_REVIEW'
-            ? 'Proceed to after photos'
-            : step === 'AFTER_PHOTOS'
-              ? 'Mark session done'
-              : 'Continue'
+  // If pro is sitting in BEFORE_PHOTOS but approval isn’t approved, bounce them back to consult
+  const needsApprovalButMissing = (step === 'BEFORE_PHOTOS' || step === 'SERVICE_IN_PROGRESS' || step === 'FINISH_REVIEW' || step === 'AFTER_PHOTOS') && !consultationApproved
+  if (needsApprovalButMissing) {
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: { sessionStep: 'CONSULTATION' as any },
+    })
+    redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+  }
 
   return (
     <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
@@ -213,37 +221,42 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <StepPill step={labelForStep(step)} />
-        <Badge label={`Booking: ${String(booking.status || 'UNKNOWN')}`} tone="neutral" />
-        <Badge
-          label={`Consultation: ${approvalStatus}`}
-          tone={approvalStatus === 'NONE' ? 'neutral' : (approvalTone(approvalStatus) as any)}
-        />
+        <Badge label={`Booking: ${bookingStatus || 'UNKNOWN'}`} tone="neutral" />
+        <Badge label={`Consultation: ${approvalStatus || 'NONE'}`} tone={approvalTone(approvalStatus) as any} />
       </div>
 
-      {canAdvance ? (
-        <form action={advance} style={{ marginTop: 14 }}>
-          <button
-            type="submit"
+      {isCancelled ? (
+        <Card>
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>This booking is cancelled.</div>
+          <div style={{ fontSize: 13, color: '#6b7280' }}>Nothing to do here.</div>
+        </Card>
+      ) : null}
+
+      {isCompleted ? (
+        <Card>
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>This booking is completed.</div>
+          <a
+            href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
             style={{
+              display: 'inline-block',
+              textDecoration: 'none',
               border: '1px solid #111',
-              background: '#111',
-              color: '#fff',
               borderRadius: 999,
               padding: '10px 14px',
               fontSize: 12,
               fontWeight: 900,
-              cursor: 'pointer',
+              color: '#fff',
+              background: '#111',
+              marginTop: 8,
             }}
           >
-            {advanceLabel}
-          </button>
-          <span style={{ marginLeft: 10, fontSize: 12, color: '#6b7280' }}>
-            (Moves the step forward. Media pages live under this session route.)
-          </span>
-        </form>
+            View aftercare
+          </a>
+        </Card>
       ) : null}
 
-      {step === 'CONSULTATION' && (
+      {/* CONSULTATION */}
+      {showConsultForm && !isCancelled && !isCompleted ? (
         <section style={{ marginTop: 18 }}>
           <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Consultation</h2>
           <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
@@ -257,12 +270,52 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
           />
 
           <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
-            After you submit, the session should move to <strong>Waiting on client</strong> and the client will see the approval CTA.
+            After you submit, it moves to <strong>Waiting on client</strong>.
           </div>
-        </section>
-      )}
 
-      {step === 'BEFORE_PHOTOS' && (
+          {/* If pro is accepted + has approved consultation already, allow jumping into photos */}
+          {isAccepted && consultationApproved ? (
+            <form action={async () => setStep('BEFORE_PHOTOS')} style={{ marginTop: 14 }}>
+              <button
+                type="submit"
+                style={{
+                  border: '1px solid #111',
+                  background: '#111',
+                  color: '#fff',
+                  borderRadius: 999,
+                  padding: '10px 14px',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Proceed to before photos
+              </button>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* WAITING */}
+      {showWaiting ? (
+        <section style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Waiting on client approval</h2>
+          <p style={{ fontSize: 13, color: '#666' }}>
+            Client hasn’t approved yet. This is intentionally locked so you can’t accidentally proceed.
+          </p>
+          <Card>
+            <div style={{ fontSize: 13, color: '#111' }}>
+              Status: <strong>{approvalStatus}</strong>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
+              When they approve, you’ll move to <strong>Before photos</strong>.
+            </div>
+          </Card>
+        </section>
+      ) : null}
+
+      {/* BEFORE PHOTOS */}
+      {showBeforePhotos ? (
         <section style={{ marginTop: 18 }}>
           <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Before photos</h2>
           <p style={{ fontSize: 13, color: '#666' }}>
@@ -286,14 +339,91 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
             >
               Open before photos
             </a>
+
+            <form action={async () => setStep('SERVICE_IN_PROGRESS')} style={{ marginTop: 12 }}>
+              <button
+                type="submit"
+                style={{
+                  border: '1px solid #111',
+                  background: '#fff',
+                  color: '#111',
+                  borderRadius: 999,
+                  padding: '10px 14px',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Start service
+              </button>
+            </form>
           </Card>
         </section>
-      )}
+      ) : null}
 
-      {step === 'AFTER_PHOTOS' && (
+      {/* SERVICE */}
+      {showService ? (
+        <section style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Service in progress</h2>
+          <p style={{ fontSize: 13, color: '#666' }}>Do the fun part. We’ll handle the business part next.</p>
+
+          <Card>
+            <form action={async () => setStep('FINISH_REVIEW')}>
+              <button
+                type="submit"
+                style={{
+                  border: '1px solid #111',
+                  background: '#111',
+                  color: '#fff',
+                  borderRadius: 999,
+                  padding: '10px 14px',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Finish service
+              </button>
+            </form>
+          </Card>
+        </section>
+      ) : null}
+
+      {/* FINISH REVIEW */}
+      {showFinishReview ? (
+        <section style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Finish review</h2>
+          <p style={{ fontSize: 13, color: '#666' }}>
+            Quick check before after photos. This exists to prevent “oops I forgot pictures.”
+          </p>
+
+          <Card>
+            <form action={async () => setStep('AFTER_PHOTOS')}>
+              <button
+                type="submit"
+                style={{
+                  border: '1px solid #111',
+                  background: '#111',
+                  color: '#fff',
+                  borderRadius: 999,
+                  padding: '10px 14px',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Proceed to after photos
+              </button>
+            </form>
+          </Card>
+        </section>
+      ) : null}
+
+      {/* AFTER PHOTOS */}
+      {showAfterPhotos ? (
         <section style={{ marginTop: 18 }}>
           <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>After photos</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>Capture after photos, then mark the session done.</p>
+          <p style={{ fontSize: 13, color: '#666' }}>Capture after photos, then close the session.</p>
 
           <Card>
             <a
@@ -312,14 +442,35 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
             >
               Open after photos
             </a>
+
+            <form action={async () => setStep('DONE')} style={{ marginTop: 12 }}>
+              <button
+                type="submit"
+                style={{
+                  border: '1px solid #111',
+                  background: '#fff',
+                  color: '#111',
+                  borderRadius: 999,
+                  padding: '10px 14px',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Done with session
+              </button>
+            </form>
           </Card>
         </section>
-      )}
+      ) : null}
 
-      {step === 'DONE' && (
+      {/* DONE */}
+      {showDone ? (
         <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Done</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>Session steps are complete. Next stop: aftercare + close out.</p>
+          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Next: Aftercare</h2>
+          <p style={{ fontSize: 13, color: '#666' }}>
+            This is the business side that protects you. Aftercare is what completes the booking.
+          </p>
 
           <Card>
             <a
@@ -340,7 +491,7 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
             </a>
           </Card>
         </section>
-      )}
+      ) : null}
     </main>
   )
 }

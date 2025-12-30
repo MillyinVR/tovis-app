@@ -231,20 +231,33 @@ function buildMonthGrid(args: { monthStartUtc: Date; proTz: string }) {
   return days
 }
 
-function clearHoldParams(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>) {
+function replaceQuery(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>, mut: (qs: URLSearchParams) => void) {
   if (typeof window === 'undefined') return
   const qs = new URLSearchParams(searchParams?.toString() || '')
-  qs.delete('holdId')
-  qs.delete('holdUntil')
-  qs.delete('scheduledFor')
-  router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
+  mut(qs)
+  const base = window.location.pathname
+  const next = qs.toString()
+  router.replace(next ? `${base}?${next}` : base, { scroll: false })
+}
+
+function clearHoldParamsOnly(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>) {
+  replaceQuery(router, searchParams, (qs) => {
+    qs.delete('holdId')
+    qs.delete('holdUntil')
+    qs.delete('scheduledFor')
+    qs.delete('locationType')
+  })
 }
 
 async function deleteHoldById(holdId: string) {
-  const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' })
-  if (res.ok) return
-  const data = await safeJson(res)
-  throw new Error(data?.error || `Failed to delete hold (${res.status}).`)
+  if (!holdId) return
+  try {
+    const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' })
+    // If it’s already gone, that’s fine. Humans love drama, code doesn’t need to.
+    if (res.status === 404) return
+  } catch {
+    // ignore
+  }
 }
 
 async function clearHoldAndParams(args: {
@@ -253,8 +266,8 @@ async function clearHoldAndParams(args: {
   searchParams: ReturnType<typeof useSearchParams>
 }) {
   const { holdId, router, searchParams } = args
-  if (holdId) await deleteHoldById(holdId).catch(() => {})
-  clearHoldParams(router, searchParams)
+  if (holdId) await deleteHoldById(holdId)
+  clearHoldParamsOnly(router, searchParams)
 }
 
 function parseHoldResponse(data: any): {
@@ -286,7 +299,8 @@ async function createHoldForSelectedSlot(args: {
 }) {
   const { offeringId, scheduledFor, locationType, router, searchParams, previousHoldId } = args
 
-  if (previousHoldId) await deleteHoldById(previousHoldId).catch(() => {})
+  // Best effort: delete previous hold if we still think it exists.
+  if (previousHoldId) await deleteHoldById(previousHoldId)
 
   const res = await fetch('/api/holds', {
     method: 'POST',
@@ -299,26 +313,37 @@ async function createHoldForSelectedSlot(args: {
 
   const parsed = parseHoldResponse(data)
 
-  if (typeof window !== 'undefined') {
-    const qs = new URLSearchParams(searchParams?.toString() || '')
+  // Persist hold in URL (so refresh/back works)
+  replaceQuery(router, searchParams, (qs) => {
     qs.set('holdId', parsed.holdId)
     qs.set('holdUntil', String(parsed.holdUntilMs))
     qs.set('scheduledFor', parsed.scheduledForISO)
     qs.set('locationType', locationType)
-    router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
-  }
+  })
 
   return { holdId: parsed.holdId, holdUntilMs: parsed.holdUntilMs, scheduledFor: parsed.scheduledForISO }
 }
 
 async function fetchHoldById(holdId: string) {
   const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'GET' })
+
+  // This is the key correction: 404 means “already deleted”, not “explode the UI”.
+  if (res.status === 404) {
+    return { missing: true as const }
+  }
+
   const data = await safeJson(res)
   if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to load hold (${res.status}).`)
   const parsed = parseHoldResponse(data)
-  return { scheduledForISO: parsed.scheduledForISO, holdUntilMs: parsed.holdUntilMs, locationType: parsed.locationType ?? null }
+  return {
+    missing: false as const,
+    scheduledForISO: parsed.scheduledForISO,
+    holdUntilMs: parsed.holdUntilMs,
+    locationType: parsed.locationType ?? null,
+  }
 }
 
+/** timezone helpers for waitlist default */
 function getZonedParts(dateUtc: Date, timeZone: string) {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -404,11 +429,13 @@ export default function BookingPanel(props: BookingPanelProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // URL state
   const holdIdFromUrl = (searchParams?.get('holdId') || '').trim() || null
   const scheduledForFromUrl = (searchParams?.get('scheduledFor') || '').trim() || null
   const holdUntilFromUrl = searchParams?.get('holdUntil') || ''
   const hasHold = Boolean(holdIdFromUrl)
 
+  // optional flow signals
   const openingId = (searchParams?.get('openingId') || '').trim() || null
   const aftercareTokenFromUrl = (searchParams?.get('token') || '').trim() || null
   const rebookOfBookingIdFromUrl = (searchParams?.get('rebookOfBookingId') || '').trim() || null
@@ -439,7 +466,6 @@ export default function BookingPanel(props: BookingPanelProps) {
   const holdTickRef = useRef<number | null>(null)
 
   const [error, setError] = useState<string | null>(null)
-
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [confirmChecked, setConfirmChecked] = useState(false)
@@ -487,7 +513,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     return Number.isFinite(d) && d > 0 ? d : 60
   }, [modeFields.durationMinutes])
 
-  // ✅ backend decides validity; we just normalize
+  // backend decides validity; we just normalize
   const normalizedSource = useMemo(() => String(source).trim().toUpperCase(), [source])
 
   const todayYMDInProTz = useMemo(() => ymdFromDateInTz(new Date(), proTz), [proTz])
@@ -532,12 +558,14 @@ export default function BookingPanel(props: BookingPanelProps) {
     return ymd >= todayYMDInProTz && ymd <= maxYMDInProTz
   }
 
+  // hydrate holdUntil from URL if present
   useEffect(() => {
     const ms = Number(holdUntilFromUrl)
     if (Number.isFinite(ms) && ms > Date.now()) setHoldUntil(ms)
     else if (!holdIdFromUrl) setHoldUntil(null)
   }, [holdUntilFromUrl, holdIdFromUrl])
 
+  // fetch hold (server truth) if we have holdId
   useEffect(() => {
     let cancelled = false
 
@@ -551,16 +579,23 @@ export default function BookingPanel(props: BookingPanelProps) {
         const h = await fetchHoldById(holdIdFromUrl)
         if (cancelled) return
 
+        if (h.missing) {
+          // Hold already deleted (likely because booking succeeded). Clean URL + local state quietly.
+          setHoldUntil(null)
+          setScheduledForFromHold(null)
+          clearHoldParamsOnly(router, searchParams)
+          return
+        }
+
         setHoldUntil(h.holdUntilMs)
         setNowMs(Date.now())
         setScheduledForFromHold(h.scheduledForISO)
-
         if (h.locationType) setLocationType(h.locationType)
       } catch (e: any) {
         if (cancelled) return
         setHoldUntil(null)
         setScheduledForFromHold(null)
-        void clearHoldAndParams({ holdId: holdIdFromUrl, router, searchParams })
+        await clearHoldAndParams({ holdId: holdIdFromUrl, router, searchParams })
         setError(e?.message || 'Your hold is no longer valid. Please pick another time.')
       }
     }
@@ -569,8 +604,10 @@ export default function BookingPanel(props: BookingPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [holdIdFromUrl, router, searchParams])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdIdFromUrl])
 
+  // tick while hold exists
   useEffect(() => {
     if (!holdUntil) return
     setNowMs(Date.now())
@@ -582,6 +619,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
   }, [holdUntil])
 
+  // expire behavior
   useEffect(() => {
     if (!holdUntil) return
     if (nowMs < holdUntil) return
@@ -590,15 +628,20 @@ export default function BookingPanel(props: BookingPanelProps) {
     setScheduledForFromHold(null)
     void clearHoldAndParams({ holdId: holdIdFromUrl, router, searchParams })
     setError('Your hold expired. Please pick another time.')
-  }, [nowMs, holdUntil, holdIdFromUrl, router, searchParams])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowMs, holdUntil])
 
+  // best-effort cleanup on unmount if booking wasn't created
   useEffect(() => {
     return () => {
       if (createdBookingId) return
       if (!holdIdFromUrl) return
+      // Only try cleanup if it’s likely still active, to avoid pointless 404 spam.
+      const ms = Number(holdUntilFromUrl)
+      if (!Number.isFinite(ms) || ms <= Date.now()) return
       void fetch(`/api/holds/${encodeURIComponent(holdIdFromUrl)}`, { method: 'DELETE' }).catch(() => {})
     }
-  }, [createdBookingId, holdIdFromUrl])
+  }, [createdBookingId, holdIdFromUrl, holdUntilFromUrl])
 
   const holdLabel = useMemo(() => {
     if (!holdUntil) return null
@@ -614,6 +657,7 @@ export default function BookingPanel(props: BookingPanelProps) {
     return holdUntil - nowMs <= 2 * 60_000
   }, [holdUntil, nowMs])
 
+  // Load day availability (only when we DON'T have a hold locking us)
   useEffect(() => {
     let cancelled = false
 
@@ -726,14 +770,7 @@ export default function BookingPanel(props: BookingPanelProps) {
   const missingHeldScheduledFor = Boolean(hasHold && !lockedIso)
   const missingLocationType = Boolean(!locationType)
 
-  const canSubmit = Boolean(
-    !missingHeldScheduledFor &&
-      !missingLocationType &&
-      confirmChecked &&
-      !loading &&
-      finalScheduledForISO &&
-      normalizedSource.length > 0,
-  )
+  const canSubmit = Boolean(!missingHeldScheduledFor && !missingLocationType && confirmChecked && !loading && finalScheduledForISO)
 
   async function copyShareLink() {
     try {
@@ -819,11 +856,11 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
 
     setLoading(true)
-    try {
-      // Ensure we have a hold (server-truth wins)
-      let effectiveScheduledFor = lockedIso
+    let effectiveHoldId = holdIdFromUrl
 
-      if (!holdIdFromUrl || !effectiveScheduledFor) {
+    try {
+      // Ensure hold exists BEFORE booking
+      if (!effectiveHoldId || !lockedIso) {
         const h = await createHoldForSelectedSlot({
           offeringId,
           scheduledFor: finalScheduledForISO,
@@ -833,34 +870,39 @@ export default function BookingPanel(props: BookingPanelProps) {
           previousHoldId: holdIdFromUrl,
         })
 
-        effectiveScheduledFor = h.scheduledFor
+        effectiveHoldId = h.holdId
         setHoldUntil(h.holdUntilMs)
         setNowMs(Date.now())
         setScheduledForFromHold(h.scheduledFor)
       }
 
-      const res = await fetch('/api/client/bookings/create', {
+      const res = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offeringId,
-          scheduledFor: effectiveScheduledFor,
-          proTimeZone: proTz,
+          holdId: effectiveHoldId,
+          scheduledFor: finalScheduledForISO,
           locationType,
           source: normalizedSource,
+
+          mediaId: mediaId || null,
           openingId: openingId || undefined,
           aftercareToken: aftercareTokenFromUrl || undefined,
           rebookOfBookingId: rebookOfBookingIdFromUrl || undefined,
         }),
       })
 
+      const data = await safeJson(res)
+
       if (res.status === 401) {
         redirectToLogin(router, 'book')
         return
       }
 
-      const data = await safeJson(res)
-      if (!res.ok) {
+      if (!res.ok || !data?.ok) {
+        // booking failed, clear hold + params so we don’t ghost-hold anything
+        await clearHoldAndParams({ holdId: effectiveHoldId || null, router, searchParams }).catch(() => {})
         setError(errorFromResponse(res, data))
         return
       }
@@ -868,10 +910,18 @@ export default function BookingPanel(props: BookingPanelProps) {
       const bookingId = data?.booking?.id ? String(data.booking.id) : null
       setCreatedBookingId(bookingId)
 
+      // ✅ IMPORTANT: server already deleted the hold on success.
+      // Do NOT call DELETE /api/holds/:id here or you’ll get the 404 spam.
+      clearHoldParamsOnly(router, searchParams)
+
+      setHoldUntil(null)
+      setScheduledForFromHold(null)
+
       setSuccess('Booked. You’re officially on the calendar.')
       router.refresh()
-      setTimeout(() => router.push('/client'), 900)
+      setTimeout(() => router.push('/client'), 700)
     } catch (err: any) {
+      await clearHoldAndParams({ holdId: effectiveHoldId || null, router, searchParams }).catch(() => {})
       setError(err?.message || 'Network error while creating booking.')
     } finally {
       setLoading(false)
@@ -1146,8 +1196,6 @@ export default function BookingPanel(props: BookingPanelProps) {
           </div>
 
           {missingHeldScheduledFor ? <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div> : null}
-
-          {hasHold && (!holdIdFromUrl || !holdUntil) ? <div style={{ fontSize: 12, color: '#b91c1c' }}>No valid hold found. Go back and pick a slot again.</div> : null}
 
           <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#111', padding: 12, borderRadius: 12, border: '1px solid #eee', background: '#fff' }}>
             <input

@@ -94,11 +94,32 @@ export default async function BookingDetailPage(props: {
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    include: {
-      client: { include: { user: true } },
-      service: true,
+    select: {
+      id: true,
+      professionalId: true,
+      status: true,
+      scheduledFor: true,
+      startedAt: true,
+      finishedAt: true,
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+      discountAmount: true,
+      totalAmount: true,
+      consultationNotes: true,
+      consultationPrice: true,
+      client: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          user: { select: { email: true } },
+        },
+      },
+      service: { select: { name: true } },
     },
   })
+
 
   if (!booking) notFound()
   if (booking.professionalId !== user.professionalProfile.id) redirect('/pro')

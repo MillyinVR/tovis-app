@@ -27,16 +27,12 @@ export async function POST(_req: Request, { params }: Ctx) {
         status: true,
         clientId: true,
         professionalId: true,
-        startedAt: true,
-        finishedAt: true,
       },
     })
-
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
 
     const isClient = user.role === 'CLIENT' && !!user.clientProfile?.id
     const isPro = user.role === 'PRO' && !!user.professionalProfile?.id
-
     if (!isClient && !isPro) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const clientId = user.clientProfile?.id ?? null
@@ -44,10 +40,7 @@ export async function POST(_req: Request, { params }: Ctx) {
 
     const isOwnerClient = Boolean(clientId && booking.clientId === clientId)
     const isOwnerPro = Boolean(proId && booking.professionalId === proId)
-
-    if (!isOwnerClient && !isOwnerPro) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    if (!isOwnerClient && !isOwnerPro) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     if (booking.status === 'COMPLETED') {
       return NextResponse.json({ error: 'Completed bookings cannot be cancelled.' }, { status: 409 })
@@ -57,15 +50,14 @@ export async function POST(_req: Request, { params }: Ctx) {
       return NextResponse.json({ ok: true, id: booking.id, status: booking.status }, { status: 200 })
     }
 
-    // Optional policy: if session started, only pro can cancel.
-    // If you want this rule, uncomment:
-    // if (booking.startedAt && isOwnerClient) {
-    //   return NextResponse.json({ error: 'This booking has started. Ask your pro to cancel.' }, { status: 409 })
-    // }
-
     const updated = await prisma.booking.update({
       where: { id: bookingId },
-      data: { status: 'CANCELLED', finishedAt: null },
+      data: {
+        status: 'CANCELLED',
+        sessionStep: 'NONE' as any,
+        startedAt: null,
+        finishedAt: null,
+      } as any,
       select: { id: true, status: true },
     })
 

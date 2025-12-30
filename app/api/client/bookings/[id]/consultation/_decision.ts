@@ -4,10 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
-
-export type ConsultationDecisionCtx = {
-  params: { id: string } | Promise<{ id: string }>
-}
+export type ConsultationDecisionCtx = { params: { id: string } | Promise<{ id: string }> }
 
 function pickString(v: unknown) {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -17,7 +14,7 @@ function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-function isFinalBooking(b: { status: string | null; finishedAt: Date | null }) {
+function isFinalBooking(b: { status: unknown; finishedAt: Date | null }) {
   const s = upper(b.status)
   return s === 'CANCELLED' || s === 'COMPLETED' || Boolean(b.finishedAt)
 }
@@ -51,23 +48,20 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
     if (booking.clientId !== clientId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const bookingStatus = upper(booking.status)
-
     if (isFinalBooking({ status: booking.status, finishedAt: booking.finishedAt })) {
       return NextResponse.json({ error: 'This booking is finalized.' }, { status: 409 })
     }
 
-    if (bookingStatus === 'CANCELLED') {
-      return NextResponse.json({ error: 'This booking is cancelled.' }, { status: 409 })
-    }
-
     if (!booking.consultationApproval?.id) {
-      return NextResponse.json({ error: 'No consultation proposal found for this booking yet.' }, { status: 409 })
+      return NextResponse.json(
+        { error: 'No consultation proposal found for this booking yet.' },
+        { status: 409 },
+      )
     }
 
     const approvalStatus = upper(booking.consultationApproval.status)
 
-    // ✅ Idempotent behavior
+    // ✅ Idempotent
     if (action === 'APPROVE' && approvalStatus === 'APPROVED') {
       return NextResponse.json(
         { ok: true, alreadyApproved: true, sessionStep: booking.sessionStep, status: booking.status },
@@ -81,28 +75,27 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
       )
     }
 
-    // MVP rule: once approved, don’t allow reject via this endpoint
+    // MVP rule: once approved, don’t allow rejecting via this endpoint
     if (action === 'REJECT' && approvalStatus === 'APPROVED') {
       return NextResponse.json({ error: 'Consultation is already approved.' }, { status: 409 })
     }
 
     if (approvalStatus !== 'PENDING') {
-      return NextResponse.json({ error: `Consultation is not pending (status=${approvalStatus}).` }, { status: 409 })
+      return NextResponse.json(
+        { error: `Consultation is not pending (status=${approvalStatus}).` },
+        { status: 409 },
+      )
     }
 
-    // ✅ Be forgiving: allow approval/reject while in CONSULTATION or CONSULTATION_PENDING_CLIENT
+    // Allow decision while in CONSULTATION or CONSULTATION_PENDING_CLIENT (be forgiving)
     const step = upper(booking.sessionStep)
-    const allowed = step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || step === ''
+    const allowed = step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || step === 'NONE' || step === ''
     if (!allowed) {
       return NextResponse.json(
         { error: `Booking is not waiting for client decision (step=${step || 'UNKNOWN'}).` },
         { status: 409 },
       )
     }
-
-    // IMPORTANT:
-    // We intentionally do NOT hard-block based on startedAt here.
-    // If you later guarantee startedAt only sets when service truly begins, we can reintroduce a strict gate.
 
     const now = new Date()
 
@@ -122,8 +115,10 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
           where: { id: bookingId },
           data: {
             consultationConfirmedAt: now,
+            // ✅ After approval, the next pro-facing step is BEFORE_PHOTOS
             sessionStep: 'BEFORE_PHOTOS',
-            status: bookingStatus === 'PENDING' ? 'ACCEPTED' : (booking.status as any),
+            // ✅ If it was still pending, approving implicitly accepts it
+            status: upper(booking.status) === 'PENDING' ? 'ACCEPTED' : (booking.status as any),
           } as any,
           select: { id: true, sessionStep: true, status: true },
         })
@@ -152,6 +147,7 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
       const b = await tx.booking.update({
         where: { id: bookingId },
         data: {
+          // ✅ Kick back to pro to revise
           sessionStep: 'CONSULTATION',
           consultationConfirmedAt: null,
         } as any,

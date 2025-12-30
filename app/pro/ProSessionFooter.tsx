@@ -133,7 +133,10 @@ export default function ProSessionFooter() {
       setSessionState(normalizeUiState(data))
       setBooking(data.booking ?? null)
 
-      const lbl = typeof data.centerLabel === 'string' && data.centerLabel.trim() ? data.centerLabel.trim() : 'Start'
+      const lbl =
+        typeof data.centerLabel === 'string' && data.centerLabel.trim()
+          ? data.centerLabel.trim()
+          : 'Start'
       setCenterLabel(lbl)
 
       const ts = data.targetStep
@@ -198,7 +201,11 @@ export default function ProSessionFooter() {
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
         const data = await safeJson(res)
-        if (!res.ok) throw new Error(errorFromResponse(res, data))
+
+        if (!res.ok) {
+          // ✅ Show backend error (e.g., waiting for client approval)
+          throw new Error(errorFromResponse(res, data))
+        }
 
         await loadSession({ silent: true })
         router.push(proBookingHref(bookingId, targetStep))
@@ -223,7 +230,8 @@ export default function ProSessionFooter() {
     return pathname === href || pathname.startsWith(href + '/')
   }
 
-  const displayLabel = actionLoading === 'start' ? 'Starting…' : actionLoading === 'nav' ? 'Opening…' : centerLabel
+  const displayLabel =
+    actionLoading === 'start' ? 'Starting…' : actionLoading === 'nav' ? 'Opening…' : centerLabel
   const showCameraIcon = isCameraLabel(centerLabel)
 
   return (
@@ -287,7 +295,7 @@ export default function ProSessionFooter() {
             borderRadius: 8,
             padding: '6px 10px',
             fontSize: 11,
-            maxWidth: 260,
+            maxWidth: 280,
           }}
         >
           {error}

@@ -10,9 +10,9 @@ export const dynamic = 'force-dynamic'
 type BookingRow = {
   id: string
   status: string
-  scheduledFor: Date | string
-  startedAt: Date | string | null
-  finishedAt: Date | string | null
+  scheduledFor: Date
+  startedAt: Date | null
+  finishedAt: Date | null
   durationMinutesSnapshot: number
   priceSnapshot: any
   discountAmount: any | null
@@ -22,20 +22,13 @@ type BookingRow = {
     id: string
     firstName: string
     lastName: string
-    phone?: string | null
-    user?: { email?: string | null } | null
+    phone: string | null
+    user: { email: string } | null
   }
 }
 
-function toDate(value: Date | string) {
-  const d = typeof value === 'string' ? new Date(value) : value
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-function formatDate(d: Date | string) {
-  const date = toDate(d)
-  if (!date) return '—'
-  return date.toLocaleString(undefined, {
+function formatDate(d: Date) {
+  return d.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -59,7 +52,6 @@ function formatStatus(status: string) {
 }
 
 function moneyNumber(maybeMoney: any) {
-  // Handles Prisma Decimal-ish, number-ish, string-ish.
   if (maybeMoney == null) return 0
   if (typeof maybeMoney === 'number') return Number.isFinite(maybeMoney) ? maybeMoney : 0
   if (typeof maybeMoney === 'string') {
@@ -180,8 +172,8 @@ function Section({ title, items }: { title: string; items: BookingRow[] }) {
                 <BookingActions
                   bookingId={b.id}
                   currentStatus={b.status}
-                  startedAt={b.startedAt ? new Date(b.startedAt).toISOString() : null}
-                  finishedAt={b.finishedAt ? new Date(b.finishedAt).toISOString() : null}
+                  startedAt={b.startedAt ? b.startedAt.toISOString() : null}
+                  finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
                 />
               </div>
             </div>
@@ -202,29 +194,37 @@ export default async function ProBookingsPage() {
 
   const bookings = (await prisma.booking.findMany({
     where: { professionalId: proId },
-    include: {
-      client: { include: { user: true } },
-      service: true,
-    },
     orderBy: { scheduledFor: 'asc' },
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+      startedAt: true,
+      finishedAt: true,
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+      discountAmount: true,
+      totalAmount: true,
+      service: { select: { name: true } },
+      client: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          user: { select: { email: true } },
+        },
+      },
+    },
   })) as BookingRow[]
 
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
 
-  const todayBookings = bookings.filter((b) => {
-    const d = toDate(b.scheduledFor)
-    return d ? d >= startOfToday && d < endOfToday : false
-  })
-  const upcomingBookings = bookings.filter((b) => {
-    const d = toDate(b.scheduledFor)
-    return d ? d >= endOfToday : false
-  })
-  const pastBookings = bookings.filter((b) => {
-    const d = toDate(b.scheduledFor)
-    return d ? d < startOfToday : false
-  })
+  const todayBookings = bookings.filter((b) => b.scheduledFor >= startOfToday && b.scheduledFor < endOfToday)
+  const upcomingBookings = bookings.filter((b) => b.scheduledFor >= endOfToday)
+  const pastBookings = bookings.filter((b) => b.scheduledFor < startOfToday)
 
   return (
     <main style={{ maxWidth: 960, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
