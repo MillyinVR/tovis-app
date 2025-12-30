@@ -5,27 +5,8 @@ import { getCurrentUser } from '@/lib/currentUser'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
 
-/**
- * Next route handlers commonly pass:
- * - { params: { id: string } }
- * - { params: Promise<{ id: string }> }
- */
 export type ConsultationDecisionCtx = {
   params: { id: string } | Promise<{ id: string }>
-}
-
-type BookingRow = {
-  id: string
-  clientId: string
-  status: string | null
-  startedAt: Date | null
-  finishedAt: Date | null
-  sessionStep: string | null
-}
-
-type ApprovalRow = {
-  id: string
-  status: string | null
 }
 
 function pickString(v: unknown) {
@@ -45,119 +26,143 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // ✅ Folder is [id], so ctx.params must provide id
-    const { id: rawId } = await Promise.resolve(ctx.params as any)
-    const bookingId = pickString(rawId)
-    if (!bookingId) {
-      return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
-    }
+    const { id } = await Promise.resolve(ctx.params as any)
+    const bookingId = pickString(id)
+    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
 
-    const booking = (await prisma.booking.findUnique({
+    const clientId = user.clientProfile.id
+
+    const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
         id: true,
-        clientId: true,
         status: true,
-        startedAt: true,
-        finishedAt: true,
+        clientId: true,
         sessionStep: true,
+        finishedAt: true,
+        startedAt: true,
+        consultationApproval: { select: { id: true, status: true } },
       },
-    })) as BookingRow | null
+    })
 
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.clientId !== user.clientProfile.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    if (booking.clientId !== clientId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    const bookingStatus = upper(booking.status)
 
     if (isFinalBooking({ status: booking.status, finishedAt: booking.finishedAt })) {
       return NextResponse.json({ error: 'This booking is finalized.' }, { status: 409 })
     }
 
-    // Product policy: if pro already started the session, freeze consult decision.
-    if (booking.startedAt) {
+    if (bookingStatus === 'CANCELLED') {
+      return NextResponse.json({ error: 'This booking is cancelled.' }, { status: 409 })
+    }
+
+    if (!booking.consultationApproval?.id) {
+      return NextResponse.json({ error: 'No consultation proposal found for this booking yet.' }, { status: 409 })
+    }
+
+    const approvalStatus = upper(booking.consultationApproval.status)
+
+    // ✅ Idempotent behavior
+    if (action === 'APPROVE' && approvalStatus === 'APPROVED') {
       return NextResponse.json(
-        { error: "Session already started. Consultation can't be changed." },
-        { status: 409 },
+        { ok: true, alreadyApproved: true, sessionStep: booking.sessionStep, status: booking.status },
+        { status: 200 },
+      )
+    }
+    if (action === 'REJECT' && approvalStatus === 'REJECTED') {
+      return NextResponse.json(
+        { ok: true, alreadyRejected: true, sessionStep: booking.sessionStep, status: booking.status },
+        { status: 200 },
       )
     }
 
-    const approval = (await prisma.consultationApproval.findUnique({
-      where: { bookingId: booking.id },
-      select: { id: true, status: true },
-    })) as ApprovalRow | null
-
-    if (!approval) return NextResponse.json({ error: 'No consultation proposal found.' }, { status: 404 })
-
-    if (upper(approval.status) !== 'PENDING') {
-      return NextResponse.json({ error: 'This consultation is already decided.' }, { status: 409 })
+    // MVP rule: once approved, don’t allow reject via this endpoint
+    if (action === 'REJECT' && approvalStatus === 'APPROVED') {
+      return NextResponse.json({ error: 'Consultation is already approved.' }, { status: 409 })
     }
 
+    if (approvalStatus !== 'PENDING') {
+      return NextResponse.json({ error: `Consultation is not pending (status=${approvalStatus}).` }, { status: 409 })
+    }
+
+    // ✅ Be forgiving: allow approval/reject while in CONSULTATION or CONSULTATION_PENDING_CLIENT
     const step = upper(booking.sessionStep)
-    const expected = 'CONSULTATION_PENDING_CLIENT'
-    if (step && step !== expected) {
+    const allowed = step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || step === ''
+    if (!allowed) {
       return NextResponse.json(
-        { error: `Not expecting client approval right now (step: ${step}).` },
+        { error: `Booking is not waiting for client decision (step=${step || 'UNKNOWN'}).` },
         { status: 409 },
       )
     }
+
+    // IMPORTANT:
+    // We intentionally do NOT hard-block based on startedAt here.
+    // If you later guarantee startedAt only sets when service truly begins, we can reintroduce a strict gate.
 
     const now = new Date()
 
     if (action === 'APPROVE') {
-      const result = await prisma.$transaction(async (tx) => {
-        const updatedApproval = await tx.consultationApproval.update({
-          where: { id: approval.id },
-          data: { status: 'APPROVED', approvedAt: now },
-          select: { status: true, approvedAt: true },
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.consultationApproval.update({
+          where: { bookingId },
+          data: {
+            status: 'APPROVED',
+            approvedAt: now,
+            rejectedAt: null,
+            clientId,
+          } as any,
         })
 
-        const updatedBooking = await tx.booking.update({
-          where: { id: booking.id },
-          data: { sessionStep: 'BEFORE_PHOTOS' },
-          select: { sessionStep: true },
+        const b = await tx.booking.update({
+          where: { id: bookingId },
+          data: {
+            consultationConfirmedAt: now,
+            sessionStep: 'BEFORE_PHOTOS',
+            status: bookingStatus === 'PENDING' ? 'ACCEPTED' : (booking.status as any),
+          } as any,
+          select: { id: true, sessionStep: true, status: true },
         })
 
-        return { updatedApproval, updatedBooking }
+        return b
       })
 
       return NextResponse.json(
-        {
-          ok: true,
-          status: result.updatedApproval.status,
-          approvedAt: result.updatedApproval.approvedAt,
-          sessionStep: result.updatedBooking.sessionStep,
-        },
+        { ok: true, bookingId: updated.id, sessionStep: updated.sessionStep, status: updated.status },
         { status: 200 },
       )
     }
 
     // action === 'REJECT'
-    const result = await prisma.$transaction(async (tx) => {
-      const updatedApproval = await tx.consultationApproval.update({
-        where: { id: approval.id },
-        data: { status: 'REJECTED', rejectedAt: now },
-        select: { status: true, rejectedAt: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.consultationApproval.update({
+        where: { bookingId },
+        data: {
+          status: 'REJECTED',
+          rejectedAt: now,
+          approvedAt: null,
+          clientId,
+        } as any,
       })
 
-      const updatedBooking = await tx.booking.update({
-        where: { id: booking.id },
-        data: { sessionStep: 'CONSULTATION' },
-        select: { sessionStep: true },
+      const b = await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          sessionStep: 'CONSULTATION',
+          consultationConfirmedAt: null,
+        } as any,
+        select: { id: true, sessionStep: true, status: true },
       })
 
-      return { updatedApproval, updatedBooking }
+      return b
     })
 
     return NextResponse.json(
-      {
-        ok: true,
-        status: result.updatedApproval.status,
-        rejectedAt: result.updatedApproval.rejectedAt,
-        sessionStep: result.updatedBooking.sessionStep,
-      },
+      { ok: true, bookingId: updated.id, sessionStep: updated.sessionStep, status: updated.status },
       { status: 200 },
     )
   } catch (e) {

@@ -5,13 +5,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { FormEvent } from 'react'
 
-type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE'
+type BookingSource = string
 type ServiceLocationType = 'SALON' | 'MOBILE'
 
-/**
- * Canonical waitlist payload (align this with AvailabilityDrawer + /api/waitlist):
- * - notes + preferredTimeBucket optional
- */
 type WaitlistPayload = {
   professionalId: string
   serviceId: string
@@ -232,31 +228,32 @@ function buildMonthGrid(args: { monthStartUtc: Date; proTz: string }) {
     const inMonth = ymd.slice(0, 7) === monthKey
     days.push({ ymd, inMonth, dateUtc: dUtc })
   }
-
   return days
 }
 
-// Pure URL cleanup (no async, no hold deletion)
 function clearHoldParams(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>) {
   if (typeof window === 'undefined') return
   const qs = new URLSearchParams(searchParams?.toString() || '')
   qs.delete('holdId')
   qs.delete('holdUntil')
   qs.delete('scheduledFor')
-  // NOTE: do NOT delete locationType here. That’s a user choice.
   router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
 }
 
-// Optional: delete hold, then clear URL params (use when you intentionally want to free the slot)
+async function deleteHoldById(holdId: string) {
+  const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' })
+  if (res.ok) return
+  const data = await safeJson(res)
+  throw new Error(data?.error || `Failed to delete hold (${res.status}).`)
+}
+
 async function clearHoldAndParams(args: {
   holdId: string | null
   router: ReturnType<typeof useRouter>
   searchParams: ReturnType<typeof useSearchParams>
 }) {
   const { holdId, router, searchParams } = args
-  if (holdId) {
-    await deleteHoldById(holdId).catch(() => {})
-  }
+  if (holdId) await deleteHoldById(holdId).catch(() => {})
   clearHoldParams(router, searchParams)
 }
 
@@ -276,18 +273,7 @@ function parseHoldResponse(data: any): {
   if (!holdId || !scheduledForIso || !Number.isFinite(holdUntilMs)) {
     throw new Error('Hold response was missing fields.')
   }
-
   return { holdId, holdUntilMs, scheduledForISO: scheduledForIso, locationType }
-}
-
-async function deleteHoldById(holdId: string) {
-  const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' })
-  if (res.ok) return
-  const data = await safeJson(res)
-  const msg = data?.error || `Failed to delete hold (${res.status}).`
-  const err: any = new Error(msg)
-  err.status = res.status
-  throw err
 }
 
 async function createHoldForSelectedSlot(args: {
@@ -300,14 +286,7 @@ async function createHoldForSelectedSlot(args: {
 }) {
   const { offeringId, scheduledFor, locationType, router, searchParams, previousHoldId } = args
 
-  // Delete old hold before creating a new one
-  if (previousHoldId) {
-    try {
-      await deleteHoldById(previousHoldId)
-    } catch {
-      // holds expire server-side too
-    }
-  }
+  if (previousHoldId) await deleteHoldById(previousHoldId).catch(() => {})
 
   const res = await fetch('/api/holds', {
     method: 'POST',
@@ -335,31 +314,11 @@ async function createHoldForSelectedSlot(args: {
 async function fetchHoldById(holdId: string) {
   const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'GET' })
   const data = await safeJson(res)
-
-  if (!res.ok || !data?.ok) {
-    const msg = data?.error || `Failed to load hold (${res.status}).`
-    const err: any = new Error(msg)
-    err.status = res.status
-    throw err
-  }
-
+  if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to load hold (${res.status}).`)
   const parsed = parseHoldResponse(data)
-  return {
-    scheduledForISO: parsed.scheduledForISO,
-    holdUntilMs: parsed.holdUntilMs,
-    locationType: parsed.locationType ?? null,
-  }
+  return { scheduledForISO: parsed.scheduledForISO, holdUntilMs: parsed.holdUntilMs, locationType: parsed.locationType ?? null }
 }
 
-/**
- * Optional UX polish: If user joins waitlist with no selection, default to tomorrow noon in pro tz,
- * converted to UTC ISO.
- *
- * This uses Intl parts to build a "YYYY-MM-DDT12:00:00.000Z-ish" by finding tomorrow's YMD in pro tz,
- * then anchoring at 12:00 "local" and converting by offset inference.
- *
- * It's not perfect around DST edges, but it's miles better than "2 hours from now at 2am."
- */
 function getZonedParts(dateUtc: Date, timeZone: string) {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -392,25 +351,19 @@ function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
 
 function zonedTimeToUtc(args: { year: number; month: number; day: number; hour: number; minute: number; timeZone: string }) {
   const { year, month, day, hour, minute, timeZone } = args
-
-  // initial guess pretending local = utc
   let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
   const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
   guess = new Date(guess.getTime() - offset1 * 60_000)
-
-  // correct for DST boundary if needed
   const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
   if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
-
   return guess
 }
 
 function defaultWaitlistDesiredISO(proTz: string) {
   const tomorrowNoonUtc = zonedTimeToUtc({
     ...(() => {
-      // get tomorrow's YMD in pro tz
       const tomorrow = addDays(new Date(), 1)
-      const ymd = ymdFromDateInTz(tomorrow, proTz) // in pro tz
+      const ymd = ymdFromDateInTz(tomorrow, proTz)
       return {
         year: Number(ymd.slice(0, 4)),
         month: Number(ymd.slice(5, 7)),
@@ -479,32 +432,23 @@ export default function BookingPanel(props: BookingPanelProps) {
     })
   }, [offersInSalon, offersMobile, initialEffectiveLocationType])
 
-  // -----------------------
-  // Hold truth (server wins)
-  // -----------------------
   const [scheduledForFromHold, setScheduledForFromHold] = useState<string | null>(null)
 
-  // -----------------------
-  // Hold countdown
-  // -----------------------
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [nowMs, setNowMs] = useState<number>(() => Date.now())
   const holdTickRef = useRef<number | null>(null)
 
   const [error, setError] = useState<string | null>(null)
 
-  // submit/success/etc
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [confirmChecked, setConfirmChecked] = useState(false)
   const [createdBookingId, setCreatedBookingId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  // waitlist
   const [waitlistBusy, setWaitlistBusy] = useState(false)
   const [waitlistSuccess, setWaitlistSuccess] = useState<string | null>(null)
 
-  // availability
   const [availabilityBusy, setAvailabilityBusy] = useState(false)
   const [availabilityError, setAvailabilityError] = useState<string | null>(null)
   const [availableSlots, setAvailableSlots] = useState<string[]>([])
@@ -543,14 +487,12 @@ export default function BookingPanel(props: BookingPanelProps) {
     return Number.isFinite(d) && d > 0 ? d : 60
   }, [modeFields.durationMinutes])
 
-  // ✅ improvement: trim + uppercase so "discovery " doesn't brick the flow
+  // ✅ backend decides validity; we just normalize
   const normalizedSource = useMemo(() => String(source).trim().toUpperCase(), [source])
 
-  // Date picker window
   const todayYMDInProTz = useMemo(() => ymdFromDateInTz(new Date(), proTz), [proTz])
   const maxYMDInProTz = useMemo(() => ymdFromDateInTz(addDays(new Date(), 365), proTz), [proTz])
 
-  // When a hold exists, lock to server-truth (fallback to URL only briefly)
   const lockedIso = useMemo(() => {
     if (!hasHold) return null
     return scheduledForFromHold || scheduledForFromUrl || null
@@ -590,14 +532,12 @@ export default function BookingPanel(props: BookingPanelProps) {
     return ymd >= todayYMDInProTz && ymd <= maxYMDInProTz
   }
 
-  // Fast initial paint: if URL has a future holdUntil, show it immediately.
   useEffect(() => {
     const ms = Number(holdUntilFromUrl)
     if (Number.isFinite(ms) && ms > Date.now()) setHoldUntil(ms)
     else if (!holdIdFromUrl) setHoldUntil(null)
   }, [holdUntilFromUrl, holdIdFromUrl])
 
-  // Hydrate hold from server (prevents URL editing from lying)
   useEffect(() => {
     let cancelled = false
 
@@ -615,30 +555,7 @@ export default function BookingPanel(props: BookingPanelProps) {
         setNowMs(Date.now())
         setScheduledForFromHold(h.scheduledForISO)
 
-        // server-truth locationType wins if present
-        if (h.locationType) {
-          setLocationType(h.locationType)
-        }
-
-        // Normalize URL to server truth (only if different)
-        if (typeof window !== 'undefined') {
-          const qs = new URLSearchParams(searchParams?.toString() || '')
-          const urlScheduled = (qs.get('scheduledFor') || '').trim() || null
-          const urlHoldUntil = Number(qs.get('holdUntil') || '')
-          const urlLoc = normalizeLocationType(qs.get('locationType'))
-
-          const needsFix =
-            urlScheduled !== h.scheduledForISO ||
-            !(Number.isFinite(urlHoldUntil) && urlHoldUntil === h.holdUntilMs) ||
-            (h.locationType && urlLoc !== h.locationType)
-
-          if (needsFix) {
-            qs.set('scheduledFor', h.scheduledForISO)
-            qs.set('holdUntil', String(h.holdUntilMs))
-            if (h.locationType) qs.set('locationType', h.locationType)
-            router.replace(`${window.location.pathname}?${qs.toString()}`, { scroll: false })
-          }
-        }
+        if (h.locationType) setLocationType(h.locationType)
       } catch (e: any) {
         if (cancelled) return
         setHoldUntil(null)
@@ -654,21 +571,17 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
   }, [holdIdFromUrl, router, searchParams])
 
-  // Tick
   useEffect(() => {
     if (!holdUntil) return
     setNowMs(Date.now())
-
     if (holdTickRef.current) window.clearInterval(holdTickRef.current)
     holdTickRef.current = window.setInterval(() => setNowMs(Date.now()), 500)
-
     return () => {
       if (holdTickRef.current) window.clearInterval(holdTickRef.current)
       holdTickRef.current = null
     }
   }, [holdUntil])
 
-  // Expire behavior
   useEffect(() => {
     if (!holdUntil) return
     if (nowMs < holdUntil) return
@@ -679,7 +592,6 @@ export default function BookingPanel(props: BookingPanelProps) {
     setError('Your hold expired. Please pick another time.')
   }, [nowMs, holdUntil, holdIdFromUrl, router, searchParams])
 
-  // Optional UX polish: "tap backdrop / navigate away" is hard to detect, but at least on unmount delete hold.
   useEffect(() => {
     return () => {
       if (createdBookingId) return
@@ -702,7 +614,6 @@ export default function BookingPanel(props: BookingPanelProps) {
     return holdUntil - nowMs <= 2 * 60_000
   }, [holdUntil, nowMs])
 
-  // Fetch day availability
   useEffect(() => {
     let cancelled = false
 
@@ -717,7 +628,6 @@ export default function BookingPanel(props: BookingPanelProps) {
           return
         }
 
-        // Holds lock the time
         if (hasHold && lockedIso) {
           setAvailableSlots([])
           setSelectedSlotISO(lockedIso)
@@ -779,22 +689,9 @@ export default function BookingPanel(props: BookingPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [
-    professionalId,
-    serviceId,
-    locationType,
-    selectedYMD,
-    hasHold,
-    lockedIso,
-    defaultScheduledForISO,
-    todayYMDInProTz,
-    maxYMDInProTz,
-  ])
+  }, [professionalId, serviceId, locationType, selectedYMD, hasHold, lockedIso, defaultScheduledForISO, todayYMDInProTz, maxYMDInProTz])
 
-  const finalScheduledForISO = useMemo(
-    () => (hasHold ? lockedIso : selectedSlotISO),
-    [hasHold, lockedIso, selectedSlotISO],
-  )
+  const finalScheduledForISO = useMemo(() => (hasHold ? lockedIso : selectedSlotISO), [hasHold, lockedIso, selectedSlotISO])
 
   const prettyTimePro = useMemo(() => {
     if (!finalScheduledForISO) return null
@@ -834,8 +731,8 @@ export default function BookingPanel(props: BookingPanelProps) {
       !missingLocationType &&
       confirmChecked &&
       !loading &&
-      ['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource) &&
-      finalScheduledForISO,
+      finalScheduledForISO &&
+      normalizedSource.length > 0,
   )
 
   async function copyShareLink() {
@@ -851,7 +748,6 @@ export default function BookingPanel(props: BookingPanelProps) {
     }
   }
 
-  // ✅ improvement: unified payload + better default desired time
   async function joinWaitlist() {
     setError(null)
     setWaitlistSuccess(null)
@@ -861,11 +757,7 @@ export default function BookingPanel(props: BookingPanelProps) {
       return
     }
 
-    const desiredISO =
-      lockedIso ||
-      finalScheduledForISO ||
-      defaultScheduledForISO ||
-      defaultWaitlistDesiredISO(proTz)
+    const desiredISO = lockedIso || finalScheduledForISO || defaultScheduledForISO || defaultWaitlistDesiredISO(proTz)
 
     const payload: WaitlistPayload = {
       professionalId,
@@ -911,11 +803,6 @@ export default function BookingPanel(props: BookingPanelProps) {
       return
     }
 
-    if (!['DISCOVERY', 'REQUESTED', 'AFTERCARE'].includes(normalizedSource)) {
-      setError('Missing booking source. Please go back and try again.')
-      return
-    }
-
     if (!locationType) {
       setError('Missing booking location type. Please pick in-salon or mobile.')
       return
@@ -934,10 +821,9 @@ export default function BookingPanel(props: BookingPanelProps) {
     setLoading(true)
     try {
       // Ensure we have a hold (server-truth wins)
-      let effectiveHoldId = holdIdFromUrl
       let effectiveScheduledFor = lockedIso
 
-      if (!effectiveHoldId || !effectiveScheduledFor) {
+      if (!holdIdFromUrl || !effectiveScheduledFor) {
         const h = await createHoldForSelectedSlot({
           offeringId,
           scheduledFor: finalScheduledForISO,
@@ -947,26 +833,24 @@ export default function BookingPanel(props: BookingPanelProps) {
           previousHoldId: holdIdFromUrl,
         })
 
-        effectiveHoldId = h.holdId
         effectiveScheduledFor = h.scheduledFor
         setHoldUntil(h.holdUntilMs)
         setNowMs(Date.now())
         setScheduledForFromHold(h.scheduledFor)
       }
 
-      const res = await fetch('/api/bookings', {
+      const res = await fetch('/api/client/bookings/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offeringId,
           scheduledFor: effectiveScheduledFor,
-          holdId: effectiveHoldId,
-          source: normalizedSource,
+          proTimeZone: proTz,
           locationType,
-          mediaId: mediaId || null,
-          openingId: openingId || null,
-          aftercareToken: aftercareTokenFromUrl,
-          rebookOfBookingId: rebookOfBookingIdFromUrl,
+          source: normalizedSource,
+          openingId: openingId || undefined,
+          aftercareToken: aftercareTokenFromUrl || undefined,
+          rebookOfBookingId: rebookOfBookingIdFromUrl || undefined,
         }),
       })
 
@@ -976,7 +860,6 @@ export default function BookingPanel(props: BookingPanelProps) {
       }
 
       const data = await safeJson(res)
-
       if (!res.ok) {
         setError(errorFromResponse(res, data))
         return
@@ -1019,35 +902,15 @@ export default function BookingPanel(props: BookingPanelProps) {
   }
 
   return (
-    <section
-      style={{
-        border: '1px solid #eee',
-        borderRadius: 12,
-        padding: 16,
-        alignSelf: 'flex-start',
-        background: '#fff',
-      }}
-    >
-      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>
-        {success ? 'You’re booked' : 'Confirm your booking'}
-      </h2>
+    <section style={{ border: '1px solid #eee', borderRadius: 12, padding: 16, alignSelf: 'flex-start', background: '#fff' }}>
+      <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{success ? 'You’re booked' : 'Confirm your booking'}</h2>
 
-      <div
-        style={{
-          border: '1px solid #eee',
-          borderRadius: 12,
-          padding: 12,
-          background: success ? '#f0fdf4' : '#fafafa',
-          marginBottom: 12,
-        }}
-      >
+      <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: success ? '#f0fdf4' : '#fafafa', marginBottom: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
           <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>{success ? 'Confirmed' : 'Review'}</div>
 
           {holdLabel && !success ? (
-            <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>
-              Slot held for {holdLabel}
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: holdUrgent ? '#b91c1c' : '#111' }}>Slot held for {holdLabel}</div>
           ) : !success ? (
             <div style={{ fontSize: 12, color: '#6b7280' }}>Confirm and book</div>
           ) : (
@@ -1066,66 +929,24 @@ export default function BookingPanel(props: BookingPanelProps) {
           {viewerTimeLine ? <div style={{ fontSize: 12, color: '#6b7280' }}>{viewerTimeLine}</div> : null}
 
           <div style={{ fontSize: 12, color: success ? '#166534' : '#6b7280' }}>
-            {success
-              ? 'Nice. Future You can’t pretend this never happened.'
-              : holdLabel
-                ? 'Finish booking before the hold expires.'
-                : `Times are shown in the appointment timezone: ${proTz}.`}
+            {success ? 'Nice. Future You can’t pretend this never happened.' : holdLabel ? 'Finish booking before the hold expires.' : `Times are shown in the appointment timezone: ${proTz}.`}
           </div>
         </div>
       </div>
 
       {success && createdBookingId ? (
         <div style={{ display: 'grid', gap: 10 }}>
-          <a
-            href="/client"
-            style={{
-              textDecoration: 'none',
-              background: '#111',
-              color: '#fff',
-              padding: '10px 12px',
-              borderRadius: 12,
-              fontWeight: 900,
-              fontSize: 13,
-              textAlign: 'center',
-            }}
-          >
+          <a href="/client" style={{ textDecoration: 'none', background: '#111', color: '#fff', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
             View my bookings
           </a>
 
           {calendarHref ? (
-            <a
-              href={calendarHref}
-              style={{
-                textDecoration: 'none',
-                border: '1px solid #ddd',
-                background: '#fff',
-                color: '#111',
-                padding: '10px 12px',
-                borderRadius: 12,
-                fontWeight: 900,
-                fontSize: 13,
-                textAlign: 'center',
-              }}
-            >
+            <a href={calendarHref} style={{ textDecoration: 'none', border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
               Add to calendar
             </a>
           ) : null}
 
-          <button
-            type="button"
-            onClick={copyShareLink}
-            style={{
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#111',
-              padding: '10px 12px',
-              borderRadius: 12,
-              fontWeight: 900,
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
+          <button type="button" onClick={copyShareLink} style={{ border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}>
             {copied ? 'Link copied' : 'Copy booking link'}
           </button>
 
@@ -1189,41 +1010,19 @@ export default function BookingPanel(props: BookingPanelProps) {
               </div>
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: '#6b7280' }}>
-              {locationType === 'MOBILE' ? 'Mobile appointment' : 'In-salon appointment'}
-            </div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>{locationType === 'MOBILE' ? 'Mobile appointment' : 'In-salon appointment'}</div>
           )}
 
-          {!locationType ? (
-            <div style={{ fontSize: 12, color: '#b91c1c' }}>
-              This offering has no valid appointment type enabled. (No salon or mobile.)
-            </div>
-          ) : null}
+          {!locationType ? <div style={{ fontSize: 12, color: '#b91c1c' }}>This offering has no valid appointment type enabled. (No salon or mobile.)</div> : null}
 
           {/* Calendar */}
           <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: '#fff' }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 8,
-                marginBottom: 10,
-              }}
-            >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <button
                 type="button"
                 disabled={hasHold || !canGoPrevMonth()}
                 onClick={() => setMonthStartUtc((d) => addMonthsUtc(d, -1))}
-                style={{
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  fontWeight: 900,
-                  cursor: hasHold ? 'default' : 'pointer',
-                  opacity: hasHold || !canGoPrevMonth() ? 0.5 : 1,
-                }}
+                style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', fontWeight: 900, cursor: hasHold ? 'default' : 'pointer', opacity: hasHold || !canGoPrevMonth() ? 0.5 : 1 }}
                 title={hasHold ? 'Date is locked while a hold exists.' : undefined}
               >
                 ‹
@@ -1235,31 +1034,14 @@ export default function BookingPanel(props: BookingPanelProps) {
                 type="button"
                 disabled={hasHold || !canGoNextMonth()}
                 onClick={() => setMonthStartUtc((d) => addMonthsUtc(d, +1))}
-                style={{
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  fontWeight: 900,
-                  cursor: hasHold ? 'default' : 'pointer',
-                  opacity: hasHold || !canGoNextMonth() ? 0.5 : 1,
-                }}
+                style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', fontWeight: 900, cursor: hasHold ? 'default' : 'pointer', opacity: hasHold || !canGoNextMonth() ? 0.5 : 1 }}
                 title={hasHold ? 'Date is locked while a hold exists.' : undefined}
               >
                 ›
               </button>
             </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(7, 1fr)',
-                gap: 6,
-                marginBottom: 6,
-                fontSize: 11,
-                color: '#6b7280',
-              }}
-            >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6, fontSize: 11, color: '#6b7280' }}>
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
                 <div key={d} style={{ textAlign: 'center', fontWeight: 900 }}>
                   {d}
@@ -1321,9 +1103,7 @@ export default function BookingPanel(props: BookingPanelProps) {
             ) : hasHold ? (
               <div style={{ fontSize: 12, color: '#6b7280' }}>Time is locked while the slot is held.</div>
             ) : availableSlots.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
-                No available times for this day. Pick another day or join the waitlist.
-              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>No available times for this day. Pick another day or join the waitlist.</div>
             ) : (
               <select
                 value={selectedSlotISO ?? ''}
@@ -1353,14 +1133,7 @@ export default function BookingPanel(props: BookingPanelProps) {
                   }
                 }}
                 disabled={loading || hasHold}
-                style={{
-                  width: '100%',
-                  marginTop: 4,
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  opacity: hasHold ? 0.7 : 1,
-                }}
+                style={{ width: '100%', marginTop: 4, padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', opacity: hasHold ? 0.7 : 1 }}
                 title={hasHold ? 'This time is locked because a slot is being held.' : undefined}
               >
                 {availableSlots.map((iso) => (
@@ -1372,31 +1145,11 @@ export default function BookingPanel(props: BookingPanelProps) {
             )}
           </div>
 
-          {missingHeldScheduledFor ? (
-            <div style={{ fontSize: 12, color: '#b91c1c' }}>
-              Hold is present but scheduledFor is missing. Go back and pick a slot again.
-            </div>
-          ) : null}
+          {missingHeldScheduledFor ? <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div> : null}
 
-          {hasHold && (!holdIdFromUrl || !holdUntil) ? (
-            <div style={{ fontSize: 12, color: '#b91c1c' }}>
-              No valid hold found. Go back and pick a slot again.
-            </div>
-          ) : null}
+          {hasHold && (!holdIdFromUrl || !holdUntil) ? <div style={{ fontSize: 12, color: '#b91c1c' }}>No valid hold found. Go back and pick a slot again.</div> : null}
 
-          <label
-            style={{
-              display: 'flex',
-              gap: 10,
-              alignItems: 'flex-start',
-              fontSize: 13,
-              color: '#111',
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid #eee',
-              background: '#fff',
-            }}
-          >
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#111', padding: 12, borderRadius: 12, border: '1px solid #eee', background: '#fff' }}>
             <input
               type="checkbox"
               checked={confirmChecked}
@@ -1411,30 +1164,14 @@ export default function BookingPanel(props: BookingPanelProps) {
           </label>
 
           {error ? <p style={{ color: '#b91c1c', fontSize: 13, margin: 0 }}>{error}</p> : null}
-          {waitlistSuccess ? (
-            <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p>
-          ) : null}
+          {waitlistSuccess ? <p style={{ color: '#166534', fontSize: 13, margin: 0, fontWeight: 800 }}>{waitlistSuccess}</p> : null}
 
           <button
             type="submit"
             disabled={!canSubmit}
-            style={{
-              padding: '10px 12px',
-              borderRadius: 10,
-              border: 'none',
-              background: '#111',
-              color: '#fff',
-              fontSize: 14,
-              fontWeight: 900,
-              cursor: !canSubmit ? 'default' : 'pointer',
-              opacity: !canSubmit ? 0.7 : 1,
-            }}
+            style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: '#111', color: '#fff', fontSize: 14, fontWeight: 900, cursor: !canSubmit ? 'default' : 'pointer', opacity: !canSubmit ? 0.7 : 1 }}
           >
-            {loading
-              ? 'Booking…'
-              : holdLabel
-                ? `Confirm now · Starting at $${displayPrice}`
-                : `Confirm booking · Starting at $${displayPrice}`}
+            {loading ? 'Booking…' : holdLabel ? `Confirm now · Starting at $${displayPrice}` : `Confirm booking · Starting at $${displayPrice}`}
           </button>
 
           {showWaitlistCTA ? (
@@ -1442,31 +1179,15 @@ export default function BookingPanel(props: BookingPanelProps) {
               type="button"
               onClick={joinWaitlist}
               disabled={waitlistBusy || loading}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid #ddd',
-                background: '#fff',
-                color: '#111',
-                fontSize: 13,
-                fontWeight: 900,
-                cursor: waitlistBusy ? 'default' : 'pointer',
-                opacity: waitlistBusy ? 0.7 : 1,
-              }}
+              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', color: '#111', fontSize: 13, fontWeight: 900, cursor: waitlistBusy ? 'default' : 'pointer', opacity: waitlistBusy ? 0.7 : 1 }}
             >
               {waitlistBusy ? 'Joining waitlist…' : 'No time works? Join waitlist'}
             </button>
           ) : null}
 
-          {!isLoggedInAsClient ? (
-            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-              You’ll need to log in as a client to complete your booking.
-            </p>
-          ) : null}
+          {!isLoggedInAsClient ? <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>You’ll need to log in as a client to complete your booking.</p> : null}
 
-          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-            {holdLabel ? 'If the hold expires, the time might disappear.' : 'Pick a date, pick a time, and you’re done.'}
-          </p>
+          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>{holdLabel ? 'If the hold expires, the time might disappear.' : 'Pick a date, pick a time, and you’re done.'}</p>
         </form>
       )}
     </section>

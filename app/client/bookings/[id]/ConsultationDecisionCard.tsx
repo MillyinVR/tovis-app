@@ -11,6 +11,7 @@ function errorFrom(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
+  if (res.status === 409) return data?.error || 'This consultation can’t be changed right now.'
   return `Request failed (${res.status}).`
 }
 
@@ -26,10 +27,12 @@ export default function ConsultationDecisionCard(props: {
 
   const [loading, setLoading] = useState<'approve' | 'reject' | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [done, setDone] = useState<'approve' | 'reject' | null>(null)
 
   async function decide(action: 'approve' | 'reject') {
     if (disabled || loading) return
     setErr(null)
+    setDone(null)
     setLoading(action)
 
     try {
@@ -38,10 +41,14 @@ export default function ConsultationDecisionCard(props: {
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorFrom(res, data))
 
+      setDone(action)
+
       // Refresh server component data (booking.sessionStep + consultationApproval.status)
       router.refresh()
-      // Optional: kick them back to overview after decision
-      // router.push(`/client/bookings/${encodeURIComponent(bookingId)}?step=overview`)
+
+      // Keep UX consistent: land back in the canonical booking page.
+      // You can change step=overview if you prefer.
+      router.push(`/client/bookings/${encodeURIComponent(bookingId)}?step=consult&consultation=${action}`)
     } catch (e: any) {
       setErr(e?.message || 'Something went wrong.')
     } finally {
@@ -59,11 +66,14 @@ export default function ConsultationDecisionCard(props: {
         marginTop: 8,
       }}
     >
-      <div style={{ fontWeight: 900, color: '#854d0e', marginBottom: 6 }}>Approve this consultation?</div>
+      <div style={{ fontWeight: 900, color: '#854d0e', marginBottom: 6 }}>
+        Approve this consultation?
+      </div>
 
       <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Proposed total</div>
       <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
-        {proposedTotalLabel || 'Not provided'} <span style={{ fontSize: 12, color: '#6b7280' }}>· {appointmentTz}</span>
+        {proposedTotalLabel || 'Not provided'}{' '}
+        <span style={{ fontSize: 12, color: '#6b7280' }}>· {appointmentTz}</span>
       </div>
 
       <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Notes</div>
@@ -110,6 +120,12 @@ export default function ConsultationDecisionCard(props: {
           {loading === 'reject' ? 'Rejecting…' : 'Reject'}
         </button>
       </div>
+
+      {done ? (
+        <div style={{ marginTop: 10, fontSize: 12, color: '#065f46', fontWeight: 800 }}>
+          {done === 'approve' ? 'Approved. Your pro can proceed.' : 'Rejected. Your pro will revise and resend.'}
+        </div>
+      ) : null}
 
       {err ? (
         <div style={{ marginTop: 10, fontSize: 12, color: '#7f1d1d', fontWeight: 700 }}>

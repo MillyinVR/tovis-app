@@ -97,8 +97,16 @@ type BookingOut = {
 function needsConsultationApproval(b: BookingRow) {
   const step = upper(b.sessionStep)
   const approval = upper(b.consultationApproval?.status)
-  return step === 'CONSULTATION_PENDING_CLIENT' && approval === 'PENDING'
+
+  if (approval !== 'PENDING') return false
+  const status = upper(b.status)
+  if (status === 'CANCELLED' || status === 'COMPLETED') return false
+
+  // be forgiving: pending approval should surface even if step is slightly off
+  if (step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step) return true
+  return false
 }
+
 
 export async function GET() {
   try {

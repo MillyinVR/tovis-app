@@ -5,6 +5,8 @@ import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
 
+export const dynamic = 'force-dynamic'
+
 type BookingRow = {
   id: string
   status: string
@@ -25,10 +27,14 @@ type BookingRow = {
   }
 }
 
-export const dynamic = 'force-dynamic'
+function toDate(value: Date | string) {
+  const d = typeof value === 'string' ? new Date(value) : value
+  return Number.isNaN(d.getTime()) ? null : d
+}
 
 function formatDate(d: Date | string) {
-  const date = typeof d === 'string' ? new Date(d) : d
+  const date = toDate(d)
+  if (!date) return '—'
   return date.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -52,12 +58,32 @@ function formatStatus(status: string) {
   }
 }
 
-function PriceBlock(b: BookingRow) {
-  const baseStr = moneyToString(b.priceSnapshot) ?? '0.00'
-  const discountStr = b.discountAmount != null ? moneyToString(b.discountAmount) : null
-  const totalStr = b.totalAmount != null ? moneyToString(b.totalAmount) : baseStr
+function moneyNumber(maybeMoney: any) {
+  // Handles Prisma Decimal-ish, number-ish, string-ish.
+  if (maybeMoney == null) return 0
+  if (typeof maybeMoney === 'number') return Number.isFinite(maybeMoney) ? maybeMoney : 0
+  if (typeof maybeMoney === 'string') {
+    const n = Number(maybeMoney)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof maybeMoney?.toNumber === 'function') {
+    const n = maybeMoney.toNumber()
+    return Number.isFinite(n) ? n : 0
+  }
+  try {
+    const n = Number(String(maybeMoney))
+    return Number.isFinite(n) ? n : 0
+  } catch {
+    return 0
+  }
+}
 
-  const discountNum = discountStr ? Number(discountStr) : 0
+function PriceBlock({ b }: { b: BookingRow }) {
+  const baseStr = moneyToString(b.priceSnapshot) ?? '0.00'
+  const discountStr = b.discountAmount != null ? moneyToString(b.discountAmount) ?? '0.00' : null
+  const totalStr = b.totalAmount != null ? moneyToString(b.totalAmount) ?? baseStr : baseStr
+
+  const discountNum = moneyNumber(b.discountAmount)
 
   if (discountNum > 0) {
     return (
@@ -119,8 +145,8 @@ function Section({ title, items }: { title: string; items: BookingRow[] }) {
                   {formatDate(b.scheduledFor)} • {Math.round(b.durationMinutesSnapshot)} min
                 </div>
 
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                  <PriceBlock {...b} />
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+                  <PriceBlock b={b} />
                 </div>
 
                 <a
@@ -187,11 +213,18 @@ export default async function ProBookingsPage() {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
 
-  const todayBookings = bookings.filter(
-    (b) => new Date(b.scheduledFor) >= startOfToday && new Date(b.scheduledFor) < endOfToday,
-  )
-  const upcomingBookings = bookings.filter((b) => new Date(b.scheduledFor) >= endOfToday)
-  const pastBookings = bookings.filter((b) => new Date(b.scheduledFor) < startOfToday)
+  const todayBookings = bookings.filter((b) => {
+    const d = toDate(b.scheduledFor)
+    return d ? d >= startOfToday && d < endOfToday : false
+  })
+  const upcomingBookings = bookings.filter((b) => {
+    const d = toDate(b.scheduledFor)
+    return d ? d >= endOfToday : false
+  })
+  const pastBookings = bookings.filter((b) => {
+    const d = toDate(b.scheduledFor)
+    return d ? d < startOfToday : false
+  })
 
   return (
     <main style={{ maxWidth: 960, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>

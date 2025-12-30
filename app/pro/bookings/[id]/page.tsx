@@ -4,13 +4,10 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from './ConsultationForm'
-import AftercareForm from './aftercare/AftercareForm'
-import MediaUploader from './session/MediaUploader'
 import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
-type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
 type StepKey = 'consult' | 'session' | 'aftercare'
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -42,10 +39,7 @@ function formatDateTime(d: Date) {
 }
 
 function formatTime(d: Date) {
-  return d.toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
 function formatStatus(status: string) {
@@ -61,10 +55,6 @@ function formatStatus(status: string) {
     default:
       return status
   }
-}
-
-function isRebookMode(x: unknown): x is RebookMode {
-  return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
 }
 
 function tabStyle(active: boolean): React.CSSProperties {
@@ -107,22 +97,6 @@ export default async function BookingDetailPage(props: {
     include: {
       client: { include: { user: true } },
       service: true,
-      aftercareSummary: true,
-      mediaAssets: {
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          url: true,
-          thumbUrl: true,
-          mediaType: true,
-          visibility: true,
-          isFeaturedInPortfolio: true,
-          isEligibleForLooks: true,
-          uploadedByRole: true,
-          reviewId: true,
-          createdAt: true,
-        },
-      },
     },
   })
 
@@ -149,37 +123,6 @@ export default async function BookingDetailPage(props: {
   const duration =
     typeof booking.durationMinutesSnapshot === 'number' && Number.isFinite(booking.durationMinutesSnapshot)
       ? Math.round(booking.durationMinutesSnapshot)
-      : null
-
-  const mediaForUI = (booking.mediaAssets || []).map((m) => ({
-    id: m.id,
-    url: m.url,
-    thumbUrl: m.thumbUrl ?? null,
-    mediaType: m.mediaType,
-    visibility: m.visibility,
-    uploadedByRole: m.uploadedByRole ?? null,
-    reviewId: m.reviewId ?? null,
-    createdAt: m.createdAt.toISOString(),
-  }))
-
-  const aftercare = booking.aftercareSummary
-
-  const existingRebookModeRaw = (aftercare as any)?.rebookMode
-  const existingRebookMode = isRebookMode(existingRebookModeRaw)
-    ? (existingRebookModeRaw as RebookMode)
-    : null
-
-  const existingRebookedFor =
-    aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
-
-  const existingRebookWindowStart =
-    (aftercare as any)?.rebookWindowStart instanceof Date
-      ? (aftercare as any).rebookWindowStart.toISOString()
-      : null
-
-  const existingRebookWindowEnd =
-    (aftercare as any)?.rebookWindowEnd instanceof Date
-      ? (aftercare as any).rebookWindowEnd.toISOString()
       : null
 
   const baseHref = `/pro/bookings/${encodeURIComponent(booking.id)}`
@@ -288,7 +231,7 @@ export default async function BookingDetailPage(props: {
         </div>
       </section>
 
-      {/* Step tabs (canonical, non-brittle) */}
+      {/* Tabs */}
       <nav style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
         <a href={`${baseHref}?step=consult`} style={tabStyle(step === 'consult')}>
           Consultation
@@ -301,7 +244,7 @@ export default async function BookingDetailPage(props: {
         </a>
 
         <a
-          href={`${baseHref}?step=aftercare`}
+          href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
           style={{
             marginLeft: 'auto',
             display: 'inline-block',
@@ -338,33 +281,51 @@ export default async function BookingDetailPage(props: {
         <section style={{ marginBottom: 28 }}>
           <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Session</h2>
           <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
-            Capture before/after media and anything you want associated with this appointment.
+            Run the appointment flow, capture before/after, and advance the session steps.
           </p>
 
-          <div style={{ display: 'grid', gap: 12 }}>
-            <MediaUploader bookingId={booking.id} phase="BEFORE" />
-            <MediaUploader bookingId={booking.id} phase="AFTER" />
-            <MediaUploader bookingId={booking.id} phase="OTHER" />
-          </div>
+          <a
+            href={`/pro/bookings/${encodeURIComponent(booking.id)}/session`}
+            style={{
+              display: 'inline-block',
+              textDecoration: 'none',
+              border: '1px solid #111',
+              borderRadius: 999,
+              padding: '10px 14px',
+              fontSize: 12,
+              fontWeight: 900,
+              color: '#fff',
+              background: '#111',
+            }}
+          >
+            Open session flow
+          </a>
         </section>
       ) : null}
 
       {step === 'aftercare' ? (
-        <section style={{ marginBottom: 40 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Aftercare & rebooking</h2>
+        <section style={{ marginBottom: 28 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Aftercare</h2>
           <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
-            Record what you actually did, recommendations, and when they should come back.
+            Write aftercare, set rebook guidance, and notify the client.
           </p>
 
-          <AftercareForm
-            bookingId={booking.id}
-            existingNotes={aftercare?.notes ?? ''}
-            existingRebookMode={existingRebookMode}
-            existingRebookedFor={existingRebookedFor}
-            existingRebookWindowStart={existingRebookWindowStart}
-            existingRebookWindowEnd={existingRebookWindowEnd}
-            existingMedia={mediaForUI}
-          />
+          <a
+            href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
+            style={{
+              display: 'inline-block',
+              textDecoration: 'none',
+              border: '1px solid #111',
+              borderRadius: 999,
+              padding: '10px 14px',
+              fontSize: 12,
+              fontWeight: 900,
+              color: '#fff',
+              background: '#111',
+            }}
+          >
+            Open aftercare
+          </a>
         </section>
       ) : null}
     </main>

@@ -11,10 +11,12 @@ type SearchParamsShape = {
   mediaId?: string
   proTimeZone?: string
   source?: string
-  locationType?: string // "SALON" | "MOBILE"
-  openingId?: string // optional: BookingPanel reads from URL too, but keep for sanity
+  locationType?: string
+  openingId?: string
   holdId?: string
   holdUntil?: string
+  token?: string
+  rebookOfBookingId?: string
 }
 
 type PageProps = {
@@ -23,7 +25,6 @@ type PageProps = {
 }
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
-type BookingSource = 'DISCOVERY' | 'REQUESTED' | 'AFTERCARE'
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -51,12 +52,9 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
   return null
 }
 
-function normalizeSource(v: unknown): BookingSource | null {
+function normalizeSourceLoose(v: unknown): string | null {
   const s = upper(v)
-  if (s === 'DISCOVERY') return 'DISCOVERY'
-  if (s === 'REQUESTED') return 'REQUESTED'
-  if (s === 'AFTERCARE') return 'AFTERCARE'
-  return null
+  return s ? s : null
 }
 
 function toNumberOrNull(v: unknown): number | null {
@@ -66,7 +64,6 @@ function toNumberOrNull(v: unknown): number | null {
     const n = Number(v)
     return Number.isFinite(n) ? n : null
   }
-  // Prisma Decimal often has toNumber()
   if (typeof (v as any)?.toNumber === 'function') {
     const n = (v as any).toNumber()
     return Number.isFinite(n) ? n : null
@@ -102,15 +99,11 @@ export default async function OfferingPage(props: PageProps) {
   const scheduledFor = pickString(sp?.scheduledFor)
   const mediaId = pickString(sp?.mediaId)
 
-  // NOTE: openingId/holdId/holdUntil are intentionally NOT handled here.
-  // BookingPanel reads them from useSearchParams and sends openingId automatically.
-  // (Keep them in SearchParamsShape for clarity and future server-side UI logic.)
-
   const proTimeZoneFromUrl = sanitizeTimeZone(pickString(sp?.proTimeZone))
   const requestedLocationType = normalizeLocationType(sp?.locationType)
 
-  const sourceFromUrl = normalizeSource(sp?.source)
-  const sourceForPanel: BookingSource = sourceFromUrl ?? 'DISCOVERY'
+  const sourceFromUrl = normalizeSourceLoose(sp?.source)
+  const sourceForPanel = sourceFromUrl ?? 'DISCOVERY'
 
   const offering = await prisma.professionalServiceOffering.findUnique({
     where: { id },
@@ -160,23 +153,17 @@ export default async function OfferingPage(props: PageProps) {
   const prof = offering.professional
 
   const proTimeZoneFromDb = sanitizeTimeZone(prof?.timeZone ?? null)
-
-  // ✅ FIX: honor URL timezone (from drawer) when present, otherwise DB, otherwise null
   const effectiveProTimeZone = proTimeZoneFromUrl ?? proTimeZoneFromDb ?? null
 
-  // ✅ offering capabilities + per-mode fields (new world)
   const offersInSalon = Boolean(offering.offersInSalon)
   const offersMobile = Boolean(offering.offersMobile)
 
   const salonPriceStartingAt = toNumberOrNull(offering.salonPriceStartingAt)
-  const salonDurationMinutes =
-    typeof offering.salonDurationMinutes === 'number' ? offering.salonDurationMinutes : null
+  const salonDurationMinutes = typeof offering.salonDurationMinutes === 'number' ? offering.salonDurationMinutes : null
 
   const mobilePriceStartingAt = toNumberOrNull(offering.mobilePriceStartingAt)
-  const mobileDurationMinutes =
-    typeof offering.mobileDurationMinutes === 'number' ? offering.mobileDurationMinutes : null
+  const mobileDurationMinutes = typeof offering.mobileDurationMinutes === 'number' ? offering.mobileDurationMinutes : null
 
-  // ✅ default mode (for initial selection on BookingPanel)
   const defaultLocationType = pickEffectiveLocationType({
     requested: requestedLocationType,
     offersInSalon,
@@ -185,13 +172,6 @@ export default async function OfferingPage(props: PageProps) {
 
   const titleForUI = offering.title || svc?.name || 'Service'
   const descriptionForUI = offering.description ?? svc?.description ?? ''
-
-  const defaultModeConfigured =
-    defaultLocationType === 'SALON'
-      ? salonPriceStartingAt !== null && salonDurationMinutes !== null
-      : defaultLocationType === 'MOBILE'
-        ? mobilePriceStartingAt !== null && mobileDurationMinutes !== null
-        : false
 
   const proName = prof.businessName || prof.user?.email || 'Professional'
   const locationLabel = (prof.city || prof.location) ?? null
@@ -236,17 +216,6 @@ export default async function OfferingPage(props: PageProps) {
               Appointment timezone: <strong>{effectiveProTimeZone}</strong>
             </div>
           ) : null}
-
-          <div style={{ marginTop: 12, fontSize: 12, color: defaultModeConfigured ? '#6b7280' : '#b91c1c' }}>
-            {defaultLocationType ? (
-              <>
-                Default booking mode: <strong>{defaultLocationType}</strong>
-                {!defaultModeConfigured ? ' (pricing/duration not fully set for this mode yet)' : null}
-              </>
-            ) : (
-              <>This offering doesn’t have salon/mobile enabled yet.</>
-            )}
-          </div>
         </div>
 
         <BookingPanel

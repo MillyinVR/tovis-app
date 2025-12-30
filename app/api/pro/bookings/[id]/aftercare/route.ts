@@ -1,8 +1,7 @@
 // app/api/pro/bookings/[id]/aftercare/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import crypto from 'crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +9,6 @@ type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
 
 type Body = {
   notes?: unknown
-
   rebookMode?: unknown
 
   // BOOKED_NEXT_APPOINTMENT
@@ -29,9 +27,16 @@ type Body = {
 
   // Option B: default false (aftercare does NOT auto-complete booking)
   completeBooking?: unknown
+
+  // Optional behavior knobs (defaults chosen to avoid “NEW spam”)
+  markClientNotifUnreadOnEdit?: unknown
 }
 
 const NOTES_MAX = 4000
+
+function upper(v: unknown) {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
 
 function toBool(x: unknown): boolean {
   return x === true || x === 'true' || x === 1 || x === '1'
@@ -67,7 +72,7 @@ function isRebookMode(x: unknown): x is RebookMode {
   return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
 }
 
-function makeDedupeKey(bookingId: string, type: 'REBOOK' | 'PRODUCT_FOLLOWUP') {
+function makeReminderDedupeKey(bookingId: string, type: 'REBOOK' | 'PRODUCT_FOLLOWUP') {
   return `aftercare:${bookingId}:${type}`
 }
 
@@ -76,7 +81,60 @@ function makeClientNotifDedupeKey(bookingId: string) {
   return `client_aftercare:${bookingId}`
 }
 
-export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+/**
+ * GET: Pro fetches current aftercare state for this booking.
+ * Useful for your pro AftercareForm to load existing values.
+ */
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  try {
+    const { id: bookingId } = await props.params
+    if (!bookingId?.trim()) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+
+    const user = await getCurrentUser().catch(() => null)
+    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
+    }
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        professionalId: true,
+        status: true,
+        sessionStep: true,
+        scheduledFor: true,
+        finishedAt: true,
+        aftercareSummary: {
+          select: {
+            id: true,
+            notes: true,
+            rebookMode: true,
+            rebookedFor: true,
+            rebookWindowStart: true,
+            rebookWindowEnd: true,
+            publicToken: true,
+            createdAt: true as any, // if you have it; if not, remove
+          } as any,
+        },
+      },
+    })
+
+    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
+    if (booking.professionalId !== user.professionalProfile.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    return NextResponse.json({ ok: true, booking }, { status: 200 })
+  } catch (e) {
+    console.error('GET /api/pro/bookings/[id]/aftercare error', e)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
+ * POST: Pro creates/updates aftercare + (optionally) completes booking + creates reminders + creates/updates client notification.
+ */
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
     const { id: bookingId } = await props.params
     if (!bookingId?.trim()) {
@@ -91,7 +149,6 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     const body = (await request.json().catch(() => ({}))) as Body
 
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, NOTES_MAX) : ''
-
     const modeRaw = body.rebookMode
     const rebookMode: RebookMode = isRebookMode(modeRaw) ? modeRaw : 'NONE'
 
@@ -118,8 +175,11 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     const rebookReminderDaysBefore = clamp(toInt(body.rebookReminderDaysBefore, 2), 1, 30)
     const productReminderDaysAfter = clamp(toInt(body.productReminderDaysAfter, 7), 1, 180)
 
-    // ✅ Option B default: do NOT auto-complete unless explicitly requested
+    // Option B default: do NOT auto-complete unless explicitly requested
     const completeBooking = body.completeBooking == null ? false : toBool(body.completeBooking)
+
+    // Optional: if you want edits to re-alert client, you can toggle this
+    const markClientNotifUnreadOnEdit = toBool(body.markClientNotifUnreadOnEdit)
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -130,8 +190,16 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     if (booking.professionalId !== user.professionalProfile.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (booking.status === 'CANCELLED') {
+
+    const bookingStatus = upper(booking.status)
+
+    // Guardrails: don’t allow aftercare on cancelled/pending.
+    // If you ever want “draft aftercare,” tie it to sessionStep instead.
+    if (bookingStatus === 'CANCELLED') {
       return NextResponse.json({ error: 'This booking is cancelled.' }, { status: 409 })
+    }
+    if (bookingStatus === 'PENDING') {
+      return NextResponse.json({ error: 'Aftercare can’t be posted until the booking is confirmed.' }, { status: 409 })
     }
 
     // Resolve booked-next-appointment date if provided
@@ -146,7 +214,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       if (nb.clientId !== booking.clientId || nb.professionalId !== booking.professionalId) {
         return NextResponse.json({ error: 'nextBookingId does not match this client/pro.' }, { status: 409 })
       }
-      if (nb.status === 'CANCELLED') {
+      if (upper(nb.status) === 'CANCELLED') {
         return NextResponse.json({ error: 'nextBookingId is cancelled.' }, { status: 409 })
       }
       verifiedNextBooking = { id: nb.id, scheduledFor: nb.scheduledFor }
@@ -168,9 +236,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       }
       rebookWindowStart = null
       rebookWindowEnd = null
-    }
-
-    if (rebookMode === 'RECOMMENDED_WINDOW') {
+    } else if (rebookMode === 'RECOMMENDED_WINDOW') {
       if (!windowStartParsed || !windowEndParsed) {
         return NextResponse.json(
           { error: 'RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.' },
@@ -183,9 +249,8 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       rebookWindowStart = windowStartParsed
       rebookWindowEnd = windowEndParsed
       rebookedFor = null
-    }
-
-    if (rebookMode === 'NONE') {
+    } else {
+      // NONE
       rebookedFor = null
       rebookWindowStart = null
       rebookWindowEnd = null
@@ -195,15 +260,17 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     // Reminder policy: only when a single date exists
     const allowRebookReminder = Boolean(rebookedFor)
 
-    // Keep/ensure public token
-    const publicToken = booking.aftercareSummary?.publicToken || crypto.randomUUID()
-
     const result = await prisma.$transaction(async (tx) => {
+      // IMPORTANT:
+      // - Never overwrite publicToken if it already exists.
+      // - If it doesn't exist, omit it and let Prisma default generate (cuid()).
+      const existingToken = booking.aftercareSummary?.publicToken ?? null
+
       const aftercare = await tx.aftercareSummary.upsert({
         where: { bookingId: booking.id },
         create: {
           bookingId: booking.id,
-          publicToken,
+          ...(existingToken ? { publicToken: existingToken } : {}), // usually null here, but harmless
           notes: notes || null,
           rebookMode: normalizedMode as any,
           rebookedFor,
@@ -211,46 +278,57 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
           rebookWindowEnd,
         } as any,
         update: {
-          publicToken,
           notes: notes || null,
           rebookMode: normalizedMode as any,
           rebookedFor,
           rebookWindowStart,
           rebookWindowEnd,
+          // do NOT update publicToken
         } as any,
-        select: { id: true, publicToken: true },
+        select: { id: true, publicToken: true, rebookMode: true, rebookedFor: true, rebookWindowStart: true, rebookWindowEnd: true },
       })
 
       /**
-       * ✅ Policy A (for now): ALWAYS create/update a client notification when aftercare is saved.
-       * Deduped per booking so we don’t spam.
+       * Client notification:
+       * - Deduped per booking so we don’t spam.
+       * - Default behavior: do NOT flip readAt back to null on edits.
+       * - Optional: mark unread on edit if markClientNotifUnreadOnEdit=true
        */
       const notifKey = makeClientNotifDedupeKey(booking.id)
       const title = `Aftercare: ${booking.service?.name ?? 'Your appointment'}`
       const bodyPreview = notes.trim() ? notes.trim().slice(0, 240) : null
 
-      await tx.clientNotification.upsert({
-        where: { dedupeKey: notifKey } as any,
-        create: {
-          dedupeKey: notifKey,
-          clientId: booking.clientId,
-          type: 'AFTERCARE',
-          title,
-          body: bodyPreview,
-          bookingId: booking.id,
-          aftercareId: aftercare.id,
-          readAt: null,
-        } as any,
-        update: {
-          type: 'AFTERCARE',
-          title,
-          body: bodyPreview,
-          bookingId: booking.id,
-          aftercareId: aftercare.id,
-          // NOTE: we do NOT force readAt back to null on edits.
-          // If you WANT edits to show “NEW” again, set readAt: null here.
-        } as any,
+      const existingNotif = await tx.clientNotification.findFirst({
+        where: { dedupeKey: notifKey },
+        select: { id: true, readAt: true },
       })
+
+      if (!existingNotif) {
+        await tx.clientNotification.create({
+          data: {
+            dedupeKey: notifKey,
+            clientId: booking.clientId,
+            type: 'AFTERCARE' as any,
+            title,
+            body: bodyPreview,
+            bookingId: booking.id,
+            aftercareId: aftercare.id,
+            readAt: null,
+          } as any,
+        })
+      } else {
+        await tx.clientNotification.update({
+          where: { id: existingNotif.id },
+          data: {
+            type: 'AFTERCARE' as any,
+            title,
+            body: bodyPreview,
+            bookingId: booking.id,
+            aftercareId: aftercare.id,
+            ...(markClientNotifUnreadOnEdit ? { readAt: null } : {}),
+          } as any,
+        })
+      }
 
       // Option B: only complete booking if explicitly requested
       if (completeBooking) {
@@ -267,7 +345,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       let remindersTouched = 0
 
       // REBOOK reminder (PRO reminder)
-      const rebookKey = makeDedupeKey(booking.id, 'REBOOK')
+      const rebookKey = makeReminderDedupeKey(booking.id, 'REBOOK')
 
       if (allowRebookReminder && createRebookReminder && rebookedFor) {
         const due = new Date(rebookedFor)
@@ -275,7 +353,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
         const safeDueAt = Number.isNaN(due.getTime()) ? rebookedFor : due
 
         await tx.reminder.upsert({
-          where: { dedupeKey: rebookKey },
+          where: { dedupeKey: rebookKey } as any,
           create: {
             dedupeKey: rebookKey,
             professionalId: booking.professionalId,
@@ -303,7 +381,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       }
 
       // PRODUCT_FOLLOWUP reminder (PRO reminder)
-      const productKey = makeDedupeKey(booking.id, 'PRODUCT_FOLLOWUP')
+      const productKey = makeReminderDedupeKey(booking.id, 'PRODUCT_FOLLOWUP')
 
       if (createProductReminder) {
         const base = booking.finishedAt ?? booking.scheduledFor
@@ -312,7 +390,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
 
         if (!Number.isNaN(due.getTime())) {
           await tx.reminder.upsert({
-            where: { dedupeKey: productKey },
+            where: { dedupeKey: productKey } as any,
             create: {
               dedupeKey: productKey,
               professionalId: booking.professionalId,
@@ -340,7 +418,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
         remindersTouched += del.count
       }
 
-      return { aftercareId: aftercare.id, publicToken: aftercare.publicToken, remindersTouched }
+      return { aftercareId: aftercare.id, publicToken: aftercare.publicToken, remindersTouched, aftercare }
     })
 
     return NextResponse.json(
@@ -349,10 +427,10 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
         aftercareId: result.aftercareId,
         publicToken: result.publicToken,
         remindersTouched: result.remindersTouched,
-        rebookMode: normalizedMode,
-        rebookedFor: rebookedFor ? rebookedFor.toISOString() : null,
-        rebookWindowStart: rebookWindowStart ? rebookWindowStart.toISOString() : null,
-        rebookWindowEnd: rebookWindowEnd ? rebookWindowEnd.toISOString() : null,
+        rebookMode: result.aftercare.rebookMode,
+        rebookedFor: result.aftercare.rebookedFor ? result.aftercare.rebookedFor.toISOString() : null,
+        rebookWindowStart: result.aftercare.rebookWindowStart ? result.aftercare.rebookWindowStart.toISOString() : null,
+        rebookWindowEnd: result.aftercare.rebookWindowEnd ? result.aftercare.rebookWindowEnd.toISOString() : null,
         nextBookingId: verifiedNextBooking?.id ?? null,
         completed: completeBooking,
       },

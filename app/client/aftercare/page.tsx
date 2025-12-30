@@ -76,7 +76,7 @@ export default async function ClientAftercareInboxPage() {
     <main style={{ maxWidth: 860, margin: '28px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
       <h1 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>Aftercare</h1>
       <div style={{ marginTop: 6, color: '#6b7280', fontSize: 13 }}>
-        Every aftercare summary you’ve received, all in one place. Revolutionary organization.
+        Every aftercare summary you’ve received, all in one place. Humans love reinventing inboxes.
       </div>
 
       {items.length === 0 ? (
@@ -88,6 +88,7 @@ export default async function ClientAftercareInboxPage() {
         <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
           {items.map((n) => {
             const b = n.booking
+            const bookingId = b?.id || n.bookingId
             const serviceName = b?.service?.name ?? n.title ?? 'Aftercare'
             const date = b?.scheduledFor instanceof Date ? b.scheduledFor : null
             const proName = b?.professional?.businessName ?? 'Your pro'
@@ -101,10 +102,15 @@ export default async function ClientAftercareInboxPage() {
                   ? 'Recommended rebook date'
                   : 'Aftercare notes'
 
+            const href =
+              bookingId && typeof bookingId === 'string' && bookingId.trim()
+                ? `/client/bookings/${encodeURIComponent(bookingId)}?step=aftercare`
+                : null
+
             return (
               <a
                 key={n.id}
-                href={`/client/bookings/${encodeURIComponent(b?.id || n.bookingId || '')}#aftercare`}
+                href={href || '#'}
                 style={{
                   textDecoration: 'none',
                   color: '#111',
@@ -114,8 +120,8 @@ export default async function ClientAftercareInboxPage() {
                   padding: 14,
                   display: 'grid',
                   gap: 6,
-                  opacity: b?.id || n.bookingId ? 1 : 0.6,
-                  pointerEvents: b?.id || n.bookingId ? 'auto' : 'none',
+                  opacity: href ? 1 : 0.6,
+                  pointerEvents: href ? 'auto' : 'none',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
@@ -144,7 +150,6 @@ export default async function ClientAftercareInboxPage() {
                 </div>
 
                 <div style={{ fontSize: 13, color: '#374151' }}>{proName}</div>
-
                 <div style={{ fontSize: 12, color: '#6b7280' }}>{hint}</div>
 
                 {n.body ? (

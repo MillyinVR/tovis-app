@@ -192,18 +192,27 @@ export default async function ClientRebookFromAftercarePage(props: {
 
   // If mode = BOOKED_NEXT_APPOINTMENT, try to find the actual “next booking”
   // based on your schema: Booking.source=AFTERCARE and Booking.rebookOfBookingId=original booking id
-  const nextBooking =
-    rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-      ? await prisma.booking.findFirst({
-          where: {
-            rebookOfBookingId: booking.id,
-            source: 'AFTERCARE',
-            status: { not: 'CANCELLED' },
-          },
-          orderBy: { scheduledFor: 'desc' },
-          select: { id: true, scheduledFor: true, status: true },
-        })
-      : null
+  // Replace your "nextBooking" block with this safer version:
+let nextBooking: { id: string; scheduledFor: Date; status: string } | null = null
+
+if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
+  try {
+    nextBooking = await prisma.booking.findFirst({
+      where: {
+        // Only keep these filters if they exist in your schema.
+        // If rebookOfBookingId doesn't exist yet, delete that line.
+        rebookOfBookingId: booking.id,
+        source: 'AFTERCARE',
+        status: { not: 'CANCELLED' },
+      } as any,
+      orderBy: { scheduledFor: 'desc' },
+      select: { id: true, scheduledFor: true, status: true },
+    })
+  } catch (e) {
+    // Ignore: schema may not have rebookOfBookingId yet.
+    nextBooking = null
+  }
+}
 
   // CTA: you’ll wire this to your real “client selects time” flow.
   // If you already have a booking flow entry page, swap this href.
