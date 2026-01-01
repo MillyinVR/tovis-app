@@ -52,16 +52,17 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
 
     if (!media) return NextResponse.json({ error: 'Media not found.' }, { status: 404 })
 
-    // Must belong to this review + this user + client upload
+    // Must belong to this review + must be uploaded by this user as CLIENT
     if (
       media.reviewId !== reviewId ||
       media.uploadedByUserId !== user.id ||
       media.uploadedByRole !== 'CLIENT'
     ) {
+      // 404 to avoid leaking existence
       return NextResponse.json({ error: 'Media not found.' }, { status: 404 })
     }
 
-    // Business rule: can't delete if pro has promoted it
+    // 🔒 Business rule: can't delete if pro has promoted it
     if (media.isFeaturedInPortfolio || media.isEligibleForLooks) {
       return NextResponse.json(
         { error: 'This media is in the professional’s portfolio/Looks and cannot be removed.' },

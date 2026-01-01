@@ -1,4 +1,3 @@
-// app/api/pro/bookings/[id]/aftercare/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -6,6 +5,13 @@ import { getCurrentUser } from '@/lib/currentUser'
 export const dynamic = 'force-dynamic'
 
 type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
+
+type RecommendedProductIn = {
+  id?: unknown
+  name?: unknown
+  url?: unknown
+  note?: unknown
+}
 
 type Body = {
   notes?: unknown
@@ -23,14 +29,17 @@ type Body = {
   productReminderDaysAfter?: unknown
 
   completeBooking?: unknown
-
-  // NEW: allow saving “draft” aftercare earlier than DONE
   allowDraft?: unknown
-
   markClientNotifUnreadOnEdit?: unknown
+
+  recommendedProducts?: unknown
 }
 
 const NOTES_MAX = 4000
+const MAX_PRODUCTS = 10
+const PRODUCT_NAME_MAX = 80
+const PRODUCT_NOTE_MAX = 140
+const PRODUCT_URL_MAX = 2048
 
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -57,6 +66,44 @@ function parseOptionalISODate(x: unknown): Date | null | 'invalid' {
 }
 function isRebookMode(x: unknown): x is RebookMode {
   return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
+}
+function isValidHttpUrl(raw: string) {
+  const s = raw.trim()
+  if (!s || s.length > PRODUCT_URL_MAX) return false
+  try {
+    const u = new URL(s)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function normalizeRecommendedProducts(input: unknown) {
+  if (input == null) return []
+
+  if (!Array.isArray(input)) return { error: 'recommendedProducts must be an array.' as const }
+  if (input.length > MAX_PRODUCTS) return { error: `recommendedProducts max is ${MAX_PRODUCTS}.` as const }
+
+  const out: Array<{ id: string; name: string; url: string; note: string | null }> = []
+
+  for (const row of input as RecommendedProductIn[]) {
+    const id = typeof row?.id === 'string' && row.id.trim() ? row.id.trim() : crypto.randomUUID()
+    const name = typeof row?.name === 'string' ? row.name.trim().slice(0, PRODUCT_NAME_MAX) : ''
+    const url = typeof row?.url === 'string' ? row.url.trim().slice(0, PRODUCT_URL_MAX) : ''
+    const noteRaw = typeof row?.note === 'string' ? row.note.trim() : ''
+    const note = noteRaw ? noteRaw.slice(0, PRODUCT_NOTE_MAX) : null
+
+    // ignore blank rows
+    if (!name && !url && !note) continue
+
+    if (!name) return { error: 'Each recommended product needs a name.' as const }
+    if (!url) return { error: 'Each recommended product needs a link.' as const }
+    if (!isValidHttpUrl(url)) return { error: 'Product link must be a valid http/https URL.' as const }
+
+    out.push({ id, name, url, note })
+  }
+
+  return out
 }
 
 function makeReminderDedupeKey(bookingId: string, type: 'REBOOK' | 'PRODUCT_FOLLOWUP') {
@@ -94,6 +141,17 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
             rebookWindowStart: true,
             rebookWindowEnd: true,
             publicToken: true,
+            recommendations: {
+              select: {
+                id: true,
+                note: true,
+                productId: true,
+                externalName: true,
+                externalUrl: true,
+                product: { select: { id: true, name: true, brand: true } },
+              },
+              orderBy: { id: 'asc' },
+            },
           } as any,
         },
       },
@@ -123,6 +181,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     const body = (await request.json().catch(() => ({}))) as Body
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, NOTES_MAX) : ''
+
+    const normalizedProducts = normalizeRecommendedProducts(body.recommendedProducts)
+    if ((normalizedProducts as any)?.error) {
+      return NextResponse.json({ error: (normalizedProducts as any).error }, { status: 400 })
+    }
 
     const rebookMode: RebookMode = isRebookMode(body.rebookMode) ? (body.rebookMode as any) : 'NONE'
     const nextBookingId = pickString(body.nextBookingId)
@@ -157,23 +220,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const step = upper((booking as any).sessionStep || 'NONE')
 
     if (bookingStatus === 'CANCELLED') return NextResponse.json({ error: 'This booking is cancelled.' }, { status: 409 })
-    if (bookingStatus === 'PENDING') return NextResponse.json({ error: 'Aftercare can’t be posted until the booking is confirmed.' }, { status: 409 })
+    if (bookingStatus === 'PENDING') {
+      return NextResponse.json({ error: 'Aftercare can’t be posted until the booking is confirmed.' }, { status: 409 })
+    }
 
-    // Backbone rule: aftercare should happen after session is DONE (or at least AFTER_PHOTOS)
     const eligibleStep = step === 'DONE' || step === 'AFTER_PHOTOS'
     if (!eligibleStep && !allowDraft) {
       return NextResponse.json(
-        { error: `Aftercare is locked until the session is complete. Current step: ${step || 'NONE'}.` },
+        { error: `Aftercare is locked until after-photos is complete. Current step: ${step || 'NONE'}.` },
         { status: 409 },
       )
     }
 
-    // Default completion behavior:
-    // If session is DONE and user didn’t explicitly send completeBooking, complete it.
-    const completeBooking =
-      body.completeBooking == null
-        ? step === 'DONE' // default true when DONE
-        : toBool(body.completeBooking)
+    const completeBooking = body.completeBooking == null ? step === 'DONE' : toBool(body.completeBooking)
 
     // Validate next booking if provided
     let verifiedNextBooking: { id: string; scheduledFor: Date } | null = null
@@ -238,15 +297,26 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
           rebookWindowStart,
           rebookWindowEnd,
         } as any,
-        select: {
-          id: true,
-          publicToken: true,
-          rebookMode: true,
-          rebookedFor: true,
-          rebookWindowStart: true,
-          rebookWindowEnd: true,
-        },
+        select: { id: true, publicToken: true, rebookMode: true, rebookedFor: true, rebookWindowStart: true, rebookWindowEnd: true },
       })
+
+      // ✅ Replace recommendations with the submitted external list (simple + deterministic)
+      // Long-term we can diff, but for now: deleteMany + createMany is clean and correct.
+      await tx.productRecommendation.deleteMany({
+        where: { aftercareSummaryId: aftercare.id },
+      })
+
+      if ((normalizedProducts as any[]).length) {
+        await tx.productRecommendation.createMany({
+          data: (normalizedProducts as any[]).map((p) => ({
+            aftercareSummaryId: aftercare.id,
+            productId: null,
+            externalName: p.name,
+            externalUrl: p.url,
+            note: p.note,
+          })),
+        })
+      }
 
       // Client notification (deduped per booking)
       const notifKey = makeClientNotifDedupeKey(booking.id)
@@ -284,7 +354,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         })
       }
 
-      // Completion policy: aftercare completes the booking
       if (completeBooking) {
         await tx.booking.update({
           where: { id: booking.id },
@@ -363,6 +432,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       return { aftercare, remindersTouched, completed: completeBooking, nextBookingId: verifiedNextBooking?.id ?? null }
     })
 
+    const nextHref = result.completed ? '/pro/calendar' : `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`
+
     return NextResponse.json(
       {
         ok: true,
@@ -375,6 +446,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         rebookWindowEnd: result.aftercare.rebookWindowEnd ? result.aftercare.rebookWindowEnd.toISOString() : null,
         nextBookingId: result.nextBookingId,
         completed: result.completed,
+        nextHref,
       },
       { status: 200 },
     )

@@ -7,20 +7,36 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function upper(v: unknown) {
+function asTrimmedString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function upper(v: unknown): string {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ ok: false, error: message }, { status })
+}
+
+/**
+ * Start window: 15 min before -> 15 min after scheduledFor
+ */
+function isWithinStartWindow(scheduledFor: Date, now: Date) {
+  const start = new Date(scheduledFor.getTime() - 15 * 60 * 1000)
+  const end = new Date(scheduledFor.getTime() + 15 * 60 * 1000)
+  return now >= start && now <= end
 }
 
 export async function POST(_request: Request, ctx: Ctx) {
   try {
     const { id } = await Promise.resolve(ctx.params)
-    const bookingId = String(id || '').trim()
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    const bookingId = asTrimmedString(id)
+    if (!bookingId) return jsonError('Missing booking id.', 400)
 
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
+    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
+    if (!proId) return jsonError('Not authorized', 401)
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -28,60 +44,62 @@ export async function POST(_request: Request, ctx: Ctx) {
         id: true,
         professionalId: true,
         status: true,
+        scheduledFor: true,
         startedAt: true,
         finishedAt: true,
         sessionStep: true,
-        consultationApproval: { select: { status: true } },
       },
     })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'You can only start your own bookings.' }, { status: 403 })
-    }
+    if (!booking) return jsonError('Booking not found.', 404)
+    if (booking.professionalId !== proId) return jsonError('You can only start your own bookings.', 403)
 
-    const status = upper(booking.status)
+    const st = upper(booking.status)
 
-    if (status === 'CANCELLED') {
-      return NextResponse.json({ error: 'Cancelled bookings cannot be started.' }, { status: 409 })
-    }
-    if (status === 'COMPLETED' || booking.finishedAt) {
-      return NextResponse.json({ error: 'This session is already finished.' }, { status: 409 })
-    }
+    if (st === 'CANCELLED') return jsonError('Cancelled bookings cannot be started.', 409)
+    if (st === 'COMPLETED' || booking.finishedAt) return jsonError('This session is already finished.', 409)
 
-    // ✅ Gate: client must approve consultation before pro can start
-    const approvalStatus = upper(booking.consultationApproval?.status)
-    if (approvalStatus !== 'APPROVED') {
-      return NextResponse.json(
-        { error: 'Waiting for client to approve services and pricing before you can start.' },
-        { status: 409 },
-      )
-    }
-
-    // ✅ Idempotent: already started is fine
-    if (booking.startedAt) {
-      return NextResponse.json(
-        { id: booking.id, startedAt: booking.startedAt, status: booking.status, sessionStep: booking.sessionStep },
-        { status: 200 },
-      )
+    // ✅ HARD RULE: You must accept before you can start.
+    if (st === 'PENDING') {
+      return jsonError('You must accept this appointment before you can start it.', 409)
     }
 
     const now = new Date()
 
+    // ✅ Enforce start window
+    if (!isWithinStartWindow(booking.scheduledFor, now)) {
+      return jsonError('You can start this appointment 15 minutes before or after the scheduled time.', 409)
+    }
+
+    // ✅ Idempotent
+    if (booking.startedAt) {
+      return NextResponse.json(
+        {
+          ok: true,
+          booking: {
+            id: booking.id,
+            startedAt: booking.startedAt,
+            status: booking.status,
+            sessionStep: booking.sessionStep,
+          },
+        },
+        { status: 200 },
+      )
+    }
+
+    // ✅ Start begins consultation
     const updated = await prisma.booking.update({
       where: { id: booking.id },
       data: {
         startedAt: now,
-        status: status === 'PENDING' ? 'ACCEPTED' : (booking.status as any),
-        // ✅ Once started, we are in the session.
-        sessionStep: 'SERVICE_IN_PROGRESS',
-      } as any,
+        sessionStep: 'CONSULTATION' as any,
+      },
       select: { id: true, startedAt: true, status: true, sessionStep: true },
     })
 
-    return NextResponse.json(updated, { status: 200 })
+    return NextResponse.json({ ok: true, booking: updated }, { status: 200 })
   } catch (err) {
-    console.error('Booking start error', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('POST /api/pro/bookings/[id]/start error', err)
+    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 })
   }
 }

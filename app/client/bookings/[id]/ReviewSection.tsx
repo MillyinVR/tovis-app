@@ -22,6 +22,15 @@ type ExistingReview = {
   }>
 }
 
+type AppointmentMediaOption = {
+  id: string
+  url: string
+  thumbUrl: string | null
+  mediaType: MediaType
+  createdAt: string
+  phase?: 'BEFORE' | 'AFTER' | 'OTHER'
+}
+
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/'
   return window.location.pathname + window.location.search + window.location.hash
@@ -29,8 +38,7 @@ function currentPathWithQuery() {
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
   const from = currentPathWithQuery()
-  const url =
-    `/login?from=${encodeURIComponent(from)}` + (reason ? `&reason=${encodeURIComponent(reason)}` : '')
+  const url = `/login?from=${encodeURIComponent(from)}` + (reason ? `&reason=${encodeURIComponent(reason)}` : '')
   router.push(url)
 }
 
@@ -64,29 +72,30 @@ export default function ReviewSection({
   const router = useRouter()
   const hasReview = !!existingReview
 
-  // Editable review fields (create + edit)
   const [rating, setRating] = useState<number>(existingReview?.rating ?? 5)
   const [headline, setHeadline] = useState(existingReview?.headline ?? '')
   const [body, setBody] = useState(existingReview?.body ?? '')
 
-  // Keep state in sync if props change after refresh
   useEffect(() => {
     setRating(existingReview?.rating ?? 5)
     setHeadline(existingReview?.headline ?? '')
     setBody(existingReview?.body ?? '')
-  }, [existingReview?.id]) // only resync when switching to a different review
+  }, [existingReview?.id])
 
-  // URL-based media queue
+  // Appointment media options (pro-uploaded booking media)
+  const [apptMedia, setApptMedia] = useState<AppointmentMediaOption[]>([])
+  const [selectedApptMediaIds, setSelectedApptMediaIds] = useState<string[]>([])
+  const APPT_SELECT_MAX = 2
+
+  // URL-based media queue (client uploads, placeholder)
   const [mediaUrl, setMediaUrl] = useState('')
   const [mediaType, setMediaType] = useState<MediaType>('IMAGE')
   const [pendingMedia, setPendingMedia] = useState<Array<{ url: string; mediaType: MediaType }>>([])
 
-  // UX state
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Modal preview
   const [preview, setPreview] = useState<{ url: string; mediaType: MediaType } | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
@@ -97,16 +106,43 @@ export default function ReviewSection({
 
   const stars = useMemo(() => [1, 2, 3, 4, 5], [])
   const mediaList = existingReview?.mediaAssets ?? []
-
-  const lockedCount = useMemo(() => {
-    return mediaList.filter((m) => Boolean(m.isFeaturedInPortfolio || m.isEligibleForLooks)).length
-  }, [mediaList])
-
-  const canDeleteReview = hasReview && lockedCount === 0
+  const hasReviewMedia = mediaList.length > 0
 
   function resetAlerts() {
     setError(null)
     setSuccess(null)
+  }
+
+  // Load appointment media options
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!bookingId || hasReview) return // only needed on first creation (simpler UX)
+      try {
+        const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/review-media-options`, { method: 'GET' })
+        if (res.status === 401) return
+        const data = await safeJson(res)
+        if (!res.ok) return
+        if (cancelled) return
+        setApptMedia(Array.isArray(data?.items) ? data.items : [])
+      } catch {
+        // ignore
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId, hasReview])
+
+  function toggleApptMedia(id: string) {
+    resetAlerts()
+    setSelectedApptMediaIds((prev) => {
+      const has = prev.includes(id)
+      if (has) return prev.filter((x) => x !== id)
+      if (prev.length >= APPT_SELECT_MAX) return prev // silently enforce max 2
+      return [...prev, id]
+    })
   }
 
   function addPendingMedia() {
@@ -162,7 +198,8 @@ export default function ReviewSection({
             rating,
             headline,
             body,
-            media: pendingMedia.map((m) => ({ url: m.url, mediaType: m.mediaType })),
+            attachedMediaIds: selectedApptMediaIds, // ✅ pro booking media selected by client
+            media: pendingMedia.map((m) => ({ url: m.url, mediaType: m.mediaType })), // ✅ client uploads
           }),
         },
         'login_required_review_submit',
@@ -176,6 +213,7 @@ export default function ReviewSection({
 
       setSuccess('Review submitted.')
       setPendingMedia([])
+      setSelectedApptMediaIds([])
       router.refresh()
     } catch (e: any) {
       if (e?.name === 'AbortError') return
@@ -260,49 +298,17 @@ export default function ReviewSection({
     }
   }
 
-  async function removeMedia(mediaId: string) {
-    if (!existingReview || loading) return
-    resetAlerts()
-    setLoading(true)
-
-    try {
-      const result = await requestOrRedirect(
-        `/api/client/reviews/${encodeURIComponent(existingReview.id)}/media/${encodeURIComponent(mediaId)}`,
-        { method: 'DELETE' },
-        'login_required_review_remove_media',
-      )
-
-      if (!result.ok) {
-        if ('handled' in result) return
-        setError(result.error)
-        return
-      }
-
-      setSuccess('Media removed.')
-      router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
-      console.error(e)
-      setError('Network error.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   async function deleteReview() {
     if (!existingReview || loading) return
     resetAlerts()
 
-    if (!canDeleteReview) {
-      setError(
-        lockedCount > 0
-          ? `You can’t delete this review because ${lockedCount} media item(s) are being used in the pro’s portfolio/Looks.`
-          : 'You can’t delete this review right now.',
-      )
+    // ✅ Your rule: if the review has images, it’s permanent (no “oops” later)
+    if (hasReviewMedia) {
+      setError('This review has media attached, so it can’t be deleted.')
       return
     }
 
-    const ok = window.confirm('Delete this review? This removes your review + its media. This cannot be undone.')
+    const ok = window.confirm('Delete this review? This cannot be undone.')
     if (!ok) return
 
     setLoading(true)
@@ -421,7 +427,7 @@ export default function ReviewSection({
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ fontSize: 12, color: '#6b7280', width: 70 }}>Rating</div>
           <div style={{ display: 'flex', gap: 4 }}>
-            {stars.map((s) => (
+            {[1, 2, 3, 4, 5].map((s) => (
               <button
                 key={s}
                 type="button"
@@ -461,20 +467,72 @@ export default function ReviewSection({
           style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e7eb', padding: 10, fontSize: 13, resize: 'vertical', opacity: loading ? 0.7 : 1 }}
         />
 
-        {/* Existing media */}
+        {/* Appointment media selector (only when creating a review) */}
+        {!hasReview ? (
+          <div style={{ borderRadius: 10, border: '1px solid #f3f4f6', padding: 10, background: '#fafafa' }}>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>Add photos from your appointment (optional)</div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+              Select up to {APPT_SELECT_MAX}. If you don’t select any, they stay private inside your aftercare summary.
+            </div>
+
+            {apptMedia.length ? (
+              <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                {apptMedia.map((m) => {
+                  const selected = selectedApptMediaIds.includes(m.id)
+                  const thumb = m.thumbUrl || m.url
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleApptMedia(m.id)}
+                      disabled={loading}
+                      style={{
+                        border: selected ? '2px solid #111' : '1px solid #eee',
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        padding: 0,
+                        background: '#f3f4f6',
+                        cursor: loading ? 'default' : 'pointer',
+                        position: 'relative',
+                      }}
+                      title="Click to select"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={thumb} alt="Appointment media" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: 8,
+                          bottom: 8,
+                          background: selected ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)',
+                          color: selected ? '#fff' : '#111',
+                          borderRadius: 999,
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {selected ? 'Selected' : 'Select'}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>No appointment photos available.</div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Existing media (immutable) */}
         {hasReview ? (
           <div style={{ marginTop: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>Your media</div>
-              {lockedCount > 0 ? <div style={{ fontSize: 11, color: '#6b7280' }}>{lockedCount} locked (used in portfolio/Looks)</div> : null}
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Your media</div>
 
             {mediaList.length ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
                 {mediaList.map((m) => {
-                  const locked = Boolean(m.isFeaturedInPortfolio || m.isEligibleForLooks)
                   const thumb = m.thumbUrl || m.url
-
                   return (
                     <div key={m.id} style={{ border: '1px solid #eee', borderRadius: 10, overflow: 'hidden', background: '#f3f4f6' }}>
                       <button
@@ -487,27 +545,8 @@ export default function ReviewSection({
                         <img src={thumb} alt="Review media" style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
                       </button>
 
-                      <div style={{ padding: 8, display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                        <div style={{ fontSize: 11, color: '#6b7280' }}>{locked ? 'Locked' : 'Removable'}</div>
-
-                        <button
-                          type="button"
-                          disabled={locked || loading}
-                          onClick={() => removeMedia(m.id)}
-                          style={{
-                            border: 'none',
-                            borderRadius: 999,
-                            padding: '6px 10px',
-                            background: locked ? '#9ca3af' : '#111',
-                            color: '#fff',
-                            cursor: locked ? 'default' : 'pointer',
-                            fontSize: 11,
-                            opacity: loading ? 0.7 : 1,
-                          }}
-                          title={locked ? 'This media is used by the pro, so it cannot be removed.' : 'Remove'}
-                        >
-                          Remove
-                        </button>
+                      <div style={{ padding: 8, fontSize: 11, color: '#6b7280' }}>
+                        Attached to your review (can’t be removed)
                       </div>
                     </div>
                   )
@@ -519,9 +558,9 @@ export default function ReviewSection({
           </div>
         ) : null}
 
-        {/* Media adder */}
+        {/* Client upload queue */}
         <div style={{ borderRadius: 10, border: '1px solid #f3f4f6', padding: 10, background: '#fafafa', display: 'grid', gap: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600 }}>Add photos/videos</div>
+          <div style={{ fontSize: 12, fontWeight: 600 }}>Add your own photos/videos</div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 8 }}>
             <input
@@ -625,25 +664,19 @@ export default function ReviewSection({
 
               <button
                 type="button"
-                disabled={loading || !canDeleteReview}
+                disabled={loading || hasReviewMedia}
                 onClick={deleteReview}
                 style={{
                   border: 'none',
                   borderRadius: 999,
                   padding: '10px 14px',
-                  background: canDeleteReview ? '#b91c1c' : '#f3f4f6',
-                  color: canDeleteReview ? '#fff' : '#6b7280',
-                  cursor: canDeleteReview && !loading ? 'pointer' : 'default',
+                  background: hasReviewMedia ? '#f3f4f6' : '#b91c1c',
+                  color: hasReviewMedia ? '#6b7280' : '#fff',
+                  cursor: !hasReviewMedia && !loading ? 'pointer' : 'default',
                   fontSize: 13,
                   opacity: loading ? 0.7 : 1,
                 }}
-                title={
-                  canDeleteReview
-                    ? 'Delete your review'
-                    : lockedCount > 0
-                      ? 'Cannot delete while pro is using one of your images'
-                      : 'Cannot delete'
-                }
+                title={hasReviewMedia ? 'This review has media attached, so it can’t be deleted.' : 'Delete your review'}
               >
                 Delete review
               </button>

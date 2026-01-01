@@ -1,3 +1,5 @@
+// app/pro/profile/ReviewsPanel.tsx
+
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -17,10 +19,17 @@ export type ReviewForPanel = {
     thumbUrl: string | null
     mediaType: MediaType
     isFeaturedInPortfolio?: boolean
+    isEligibleForLooks?: boolean
   }>
 }
 
-export default function ReviewsPanel({ reviews }: { reviews: ReviewForPanel[] }) {
+export default function ReviewsPanel({
+  reviews,
+  editable = false,
+}: {
+  reviews: ReviewForPanel[]
+  editable?: boolean
+}) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [busyMediaId, setBusyMediaId] = useState<string | null>(null)
 
@@ -50,12 +59,11 @@ export default function ReviewsPanel({ reviews }: { reviews: ReviewForPanel[] })
   }, [lightboxSrc])
 
   async function setPortfolio(mediaId: string, value: boolean) {
+    if (!editable) return
     setBusyMediaId(mediaId)
     try {
-      const res = await fetch(`/api/pro/media/${mediaId}/toggle-portfolio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value }),
+      const res = await fetch(`/api/pro/media/${encodeURIComponent(mediaId)}/portfolio`, {
+        method: value ? 'POST' : 'DELETE',
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to update portfolio.')
@@ -120,15 +128,11 @@ export default function ReviewsPanel({ reviews }: { reviews: ReviewForPanel[] })
                 </div>
 
                 {rev.headline ? (
-                  <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>
-                    {rev.headline}
-                  </div>
+                  <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>{rev.headline}</div>
                 ) : null}
 
                 {rev.body ? (
-                  <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>
-                    {rev.body}
-                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>{rev.body}</div>
                 ) : null}
 
                 {/* thumbnails */}
@@ -160,38 +164,32 @@ export default function ReviewsPanel({ reviews }: { reviews: ReviewForPanel[] })
                             <img
                               src={src}
                               alt="Review media"
-                              style={{
-                                width: '100%',
-                                height: '100%',
-                                objectFit: 'cover',
-                                display: 'block',
-                              }}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                             />
                           </button>
 
-                          <button
-                            type="button"
-                            disabled={busyMediaId === m.id}
-                            onClick={() => setPortfolio(m.id, !inPortfolio)}
-                            style={{
-                              marginTop: 6,
-                              width: '100%',
-                              border: '1px solid #e5e7eb',
-                              borderRadius: 999,
-                              padding: '6px 8px',
-                              background: inPortfolio ? '#111' : '#fff',
-                              color: inPortfolio ? '#fff' : '#111',
-                              cursor: busyMediaId === m.id ? 'default' : 'pointer',
-                              fontSize: 11,
-                            }}
-                            title={inPortfolio ? 'Remove from portfolio' : 'Add to portfolio'}
-                          >
-                            {busyMediaId === m.id
-                              ? 'Saving…'
-                              : inPortfolio
-                                ? 'Remove'
-                                : 'Add'}
-                          </button>
+                          {editable ? (
+                            <button
+                              type="button"
+                              disabled={busyMediaId === m.id}
+                              onClick={() => setPortfolio(m.id, !inPortfolio)}
+                              style={{
+                                marginTop: 6,
+                                width: '100%',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: 999,
+                                padding: '6px 8px',
+                                background: inPortfolio ? '#111' : '#fff',
+                                color: inPortfolio ? '#fff' : '#111',
+                                cursor: busyMediaId === m.id ? 'default' : 'pointer',
+                                fontSize: 11,
+                                opacity: busyMediaId === m.id ? 0.75 : 1,
+                              }}
+                              title={inPortfolio ? 'Remove from portfolio' : 'Add to portfolio'}
+                            >
+                              {busyMediaId === m.id ? 'Saving…' : inPortfolio ? 'Remove' : 'Add'}
+                            </button>
+                          ) : null}
                         </div>
                       )
                     })}
@@ -226,12 +224,7 @@ export default function ReviewsPanel({ reviews }: { reviews: ReviewForPanel[] })
                   <img
                     src={primarySrc}
                     alt="Primary review media"
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      display: 'block',
-                    }}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                   />
                 </button>
               ) : null}
@@ -265,11 +258,7 @@ export default function ReviewsPanel({ reviews }: { reviews: ReviewForPanel[] })
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={lightboxSrc}
-              alt="Full size"
-              style={{ width: '100%', height: 'auto', display: 'block' }}
-            />
+            <img src={lightboxSrc} alt="Full size" style={{ width: '100%', height: 'auto', display: 'block' }} />
             <div style={{ padding: 10, display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 type="button"

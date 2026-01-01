@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SafeStatus = BookingStatus | 'UNKNOWN'
@@ -64,7 +65,14 @@ function extractIso(data: any, key: 'startedAt' | 'finishedAt') {
   return typeof maybe === 'string' && hasValidDate(maybe) ? maybe : null
 }
 
+function extractNextHref(data: any): string | null {
+  const maybe = data?.nextHref ?? data?.booking?.nextHref ?? data?.data?.nextHref
+  return typeof maybe === 'string' && maybe.startsWith('/') ? maybe : null
+}
+
 export default function BookingActions({ bookingId, currentStatus, startedAt, finishedAt }: Props) {
+  const router = useRouter()
+
   const [status, setStatus] = useState<SafeStatus>(normalizeStatus(currentStatus))
   const [localStartedAt, setLocalStartedAt] = useState<string | null>(startedAt ?? null)
   const [localFinishedAt, setLocalFinishedAt] = useState<string | null>(finishedAt ?? null)
@@ -91,14 +99,17 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
 
   const canAccept = isPending
   const canCancel = status === 'PENDING' || status === 'ACCEPTED'
+
+  // Start must never be allowed unless ACCEPTED.
   const canStart = isAccepted && !started && !finished
 
-  // ⚠️ "Finish" is only allowed once started and not already finished.
-  // But finishing does NOT necessarily mean COMPLETED anymore (aftercare submit completes).
+  // Finish allowed once started and not already finished.
+  // (Completion happens on aftercare submit, not here.)
   const canFinish = isAccepted && started && !finished
 
   async function run(action: LoadingAction) {
-    if (!bookingId?.trim()) {
+    const id = String(bookingId || '').trim()
+    if (!id) {
       setError('Missing booking id.')
       return
     }
@@ -115,25 +126,26 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       let res: Response
 
       if (action === 'ACCEPT') {
-        // ✅ Correct accept route
-        res = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}/status`, {
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'ACCEPTED' }),
           signal: controller.signal,
         })
       } else if (action === 'CANCEL') {
-        res = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}/cancel`, {
+        // ✅ Use the pro cancel endpoint (matches your pro booking routes)
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/cancel`, {
           method: 'POST',
           signal: controller.signal,
         })
       } else if (action === 'START') {
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, {
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/start`, {
           method: 'POST',
           signal: controller.signal,
         })
       } else {
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/finish`, {
+        // ✅ Finish endpoint decides next step and returns nextHref
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/finish`, {
           method: 'POST',
           signal: controller.signal,
         })
@@ -146,11 +158,6 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
         return
       }
 
-      // ✅ Update status conservatively, based on what the API returns.
-      // - ACCEPT should become ACCEPTED.
-      // - CANCEL should become CANCELLED.
-      // - START usually returns startedAt + status.
-      // - FINISH (new flow) does NOT necessarily return COMPLETED anymore.
       const nextStatus =
         action === 'ACCEPT'
           ? extractStatus(data, 'ACCEPTED')
@@ -160,18 +167,21 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
 
       setStatus(nextStatus)
 
-      // timestamps (best-effort)
       if (action === 'START') {
         const iso = extractIso(data, 'startedAt')
         setLocalStartedAt(iso ?? new Date().toISOString())
       }
 
-      // IMPORTANT:
-      // We do NOT set finishedAt here unless the API actually returns it.
-      // Completion should happen when aftercare is submitted.
+      // FINISH: route to whatever the backend decided.
       if (action === 'FINISH') {
-        const iso = extractIso(data, 'finishedAt')
-        if (iso) setLocalFinishedAt(iso)
+        const nextHref = extractNextHref(data)
+        if (nextHref) {
+          router.push(nextHref)
+          return
+        }
+
+        // If backend didn’t return a nextHref, still don’t lie to the user.
+        // Keep them on the page and let /api/pro/session drive the footer state.
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return
@@ -272,7 +282,7 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
               opacity: loading && loading !== 'FINISH' ? 0.6 : 1,
             }}
           >
-            {loading === 'FINISH' ? 'Saving…' : 'Finish'}
+            {loading === 'FINISH' ? 'Finishing…' : 'Finish'}
           </button>
         )}
       </div>

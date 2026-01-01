@@ -2,62 +2,47 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getProOwnedBooking, ensureNotTerminal, ensurePendingToAccepted, upper } from '@/lib/booking/guards'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function pickString(v: unknown) {
+function asTrimmedString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-export async function PATCH(req: Request, { params }: Ctx) {
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ ok: false, error: message }, { status })
+}
+
+export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ ok: false, error: 'Not authorized' }, { status: 401 })
-    }
+    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
+    if (!proId) return jsonError('Not authorized', 401)
 
-    const { id } = await Promise.resolve(params)
-    const bookingId = pickString(id)
-    if (!bookingId) {
-      return NextResponse.json({ ok: false, error: 'Missing booking id' }, { status: 400 })
-    }
+    const { id } = await Promise.resolve(ctx.params)
+    const bookingId = asTrimmedString(id)
+    if (!bookingId) return jsonError('Missing booking id', 400)
 
     const body = (await req.json().catch(() => ({}))) as { status?: unknown }
-    const next = pickString(body.status)?.toUpperCase()
+    const next = upper(body.status)
 
-    // This endpoint is ACCEPT-only. Start/finish/cancel are separate routes.
     if (next !== 'ACCEPTED') {
-      return NextResponse.json(
-        { ok: false, error: 'Invalid status. Use start/finish/cancel endpoints.' },
-        { status: 400 },
-      )
+      return jsonError('Invalid status. Use start/finish/cancel endpoints.', 400)
     }
 
-    const proId = user.professionalProfile.id
+    const found = await getProOwnedBooking({ bookingId, proId, select: { id: true, professionalId: true, status: true, finishedAt: true } })
+    if (!found.ok) return jsonError(found.error, found.status)
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: { id: true, professionalId: true, status: true, finishedAt: true },
-    })
+    const booking = found.booking
 
-    if (!booking) return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 })
-    if (booking.professionalId !== proId) return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+    const nt = ensureNotTerminal(booking)
+    if (!nt.ok) return jsonError(nt.error, 409)
 
-    if (booking.status === 'CANCELLED' || booking.status === 'COMPLETED' || booking.finishedAt) {
-      return NextResponse.json(
-        { ok: false, error: 'Cannot accept a completed/cancelled booking.' },
-        { status: 409 },
-      )
-    }
-
-    if (booking.status !== 'PENDING') {
-      return NextResponse.json(
-        { ok: false, error: `Invalid transition: ${booking.status} -> ACCEPTED` },
-        { status: 409 },
-      )
-    }
+    const tr = ensurePendingToAccepted(booking.status)
+    if (!tr.ok) return jsonError(tr.error, 409)
 
     const updated = await prisma.booking.update({
       where: { id: booking.id },

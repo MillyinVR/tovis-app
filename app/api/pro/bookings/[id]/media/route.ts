@@ -24,8 +24,6 @@ function safeUrl(raw: unknown): string | null {
   if (!s) return null
   if (s.length > URL_MAX) return null
 
-  // Only allow http/https URLs.
-  // This blocks "javascript:", "file:", "data:", etc.
   try {
     const u = new URL(s)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
@@ -34,8 +32,6 @@ function safeUrl(raw: unknown): string | null {
     return null
   }
 }
-
-// ---- Enum parsers (return correct Prisma enum types) -------------------------
 
 function parsePhase(v: unknown): MediaPhase | null {
   const s = upper(v)
@@ -52,15 +48,6 @@ function parseMediaType(v: unknown): MediaType | null {
   return null
 }
 
-function parseVisibility(v: unknown): MediaVisibility | null {
-  const s = upper(v)
-  if (s === 'PUBLIC') return MediaVisibility.PUBLIC
-  if (s === 'PRIVATE') return MediaVisibility.PRIVATE
-  return null
-}
-
-// ---- Flow guardrails ---------------------------------------------------------
-
 type SessionStep =
   | 'NONE'
   | 'CONSULTATION'
@@ -75,12 +62,14 @@ type SessionStep =
 function canUploadPhase(sessionStepRaw: unknown, phase: MediaPhase): boolean {
   const step = upper(sessionStepRaw || 'NONE')
 
-  // Conservative gates:
-  // - BEFORE uploads allowed once we are at/after BEFORE_PHOTOS
-  // - AFTER uploads allowed once we are at/after AFTER_PHOTOS
-  // - OTHER allowed anytime after booking is accepted (handled elsewhere)
   if (phase === MediaPhase.BEFORE) {
-    return step === 'BEFORE_PHOTOS' || step === 'SERVICE_IN_PROGRESS' || step === 'FINISH_REVIEW' || step === 'AFTER_PHOTOS' || step === 'DONE'
+    return (
+      step === 'BEFORE_PHOTOS' ||
+      step === 'SERVICE_IN_PROGRESS' ||
+      step === 'FINISH_REVIEW' ||
+      step === 'AFTER_PHOTOS' ||
+      step === 'DONE'
+    )
   }
 
   if (phase === MediaPhase.AFTER) {
@@ -118,7 +107,6 @@ export async function GET(req: Request, ctx: Ctx) {
     const urlObj = new URL(req.url)
     const phaseParam = urlObj.searchParams.get('phase')
 
-    // Fail loud if phase is provided but invalid.
     const phase = phaseParam == null ? null : parsePhase(phaseParam)
     if (phaseParam != null && !phase) {
       return NextResponse.json({ error: 'Invalid phase query param.' }, { status: 400 })
@@ -136,10 +124,9 @@ export async function GET(req: Request, ctx: Ctx) {
         mediaType: true,
         visibility: true,
         phase: true,
-        isEligibleForLooks: true,
-        isFeaturedInPortfolio: true,
         caption: true,
         createdAt: true,
+        reviewId: true,
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -162,43 +149,12 @@ export async function POST(req: Request, ctx: Ctx) {
     const bookingId = pickString(id)
     if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        status: true,
-        sessionStep: true,
-        finishedAt: true,
-      },
-    })
-
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-
-    const status = upperStatus(booking.status)
-    if (status === 'CANCELLED') {
-      return NextResponse.json({ error: 'This booking is cancelled.' }, { status: 409 })
-    }
-    if (status === 'PENDING') {
-      return NextResponse.json({ error: 'Media uploads require an accepted booking.' }, { status: 409 })
-    }
-    if (status === 'COMPLETED' || booking.finishedAt) {
-      // You can loosen this later if you want “late uploads”
-      return NextResponse.json({ error: 'This booking is completed. Media uploads are locked.' }, { status: 409 })
-    }
-
     const body = (await req.json().catch(() => ({}))) as {
       url?: unknown
       thumbUrl?: unknown
       caption?: unknown
       phase?: unknown
       mediaType?: unknown
-      visibility?: unknown
-      isEligibleForLooks?: unknown
-      isFeaturedInPortfolio?: unknown
     }
 
     const url = safeUrl(body.url)
@@ -215,62 +171,87 @@ export async function POST(req: Request, ctx: Ctx) {
     const mediaType = parseMediaType(body.mediaType)
     if (!mediaType) return NextResponse.json({ error: 'Invalid mediaType.' }, { status: 400 })
 
-    const visibility = parseVisibility(body.visibility ?? 'PUBLIC')
-    if (!visibility) return NextResponse.json({ error: 'Invalid visibility.' }, { status: 400 })
-
     const captionRaw = pickString(body.caption)
     const caption = captionRaw ? captionRaw.slice(0, CAPTION_MAX) : null
 
-    // Flow gate: keep the session honest.
-    if (!canUploadPhase(booking.sessionStep as SessionStep, phase)) {
-      return NextResponse.json(
-        { error: `You can’t upload ${phase} media at session step: ${String(booking.sessionStep || 'NONE')}.` },
-        { status: 409 },
-      )
-    }
+    const result = await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        select: {
+          id: true,
+          professionalId: true,
+          status: true,
+          sessionStep: true,
+          finishedAt: true,
+        },
+      })
 
-    const wantsEligible = body.isEligibleForLooks === true
-    const wantsFeatured = body.isFeaturedInPortfolio === true
+      if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
+      if (booking.professionalId !== user.professionalProfile!.id) return { ok: false as const, status: 403, error: 'Forbidden' }
 
-    // Rule: private media can’t be eligible for Looks.
-    const isEligibleForLooks = visibility === MediaVisibility.PUBLIC ? wantsEligible : false
+      const status = upperStatus(booking.status)
+      if (status === 'CANCELLED') return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
+      if (status === 'PENDING') return { ok: false as const, status: 409, error: 'Media uploads require an accepted booking.' }
+      if (status === 'COMPLETED' || booking.finishedAt) return { ok: false as const, status: 409, error: 'This booking is completed. Media uploads are locked.' }
 
-    // Rule: “featured” only makes sense if public (portfolio).
-    const isFeaturedInPortfolio = visibility === MediaVisibility.PUBLIC ? wantsFeatured : false
+      if (!canUploadPhase(booking.sessionStep as SessionStep, phase)) {
+        return {
+          ok: false as const,
+          status: 409,
+          error: `You can’t upload ${phase} media at session step: ${String(booking.sessionStep || 'NONE')}.`,
+        }
+      }
 
-    const created = await prisma.mediaAsset.create({
-      data: {
-        professionalId: booking.professionalId,
-        bookingId: booking.id,
+      // 🔒 Booking media is ALWAYS private + never eligible for Looks/portfolio
+      const created = await tx.mediaAsset.create({
+        data: {
+          professionalId: booking.professionalId,
+          bookingId: booking.id,
+          uploadedByUserId: user.id,
+          uploadedByRole: 'PRO',
+          url,
+          thumbUrl,
+          mediaType,
+          visibility: MediaVisibility.PRIVATE,
+          phase,
+          caption,
+          isEligibleForLooks: false,
+          isFeaturedInPortfolio: false,
+          reviewId: null,
+        } as any,
+        select: {
+          id: true,
+          url: true,
+          thumbUrl: true,
+          mediaType: true,
+          visibility: true,
+          phase: true,
+          caption: true,
+          createdAt: true,
+          reviewId: true,
+        },
+      })
 
-        uploadedByUserId: user.id,
-        uploadedByRole: 'PRO',
+      // Auto-advance logic:
+      const step = upper(booking.sessionStep || 'NONE')
+      let advancedTo: string | null = null
+      if (phase === MediaPhase.AFTER && step === 'AFTER_PHOTOS') {
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { sessionStep: 'DONE' as any },
+          select: { id: true },
+        })
+        advancedTo = 'DONE'
+      }
 
-        url,
-        thumbUrl,
-        mediaType,
-        visibility,
-        phase,
-
-        caption,
-        isEligibleForLooks,
-        isFeaturedInPortfolio,
-      } as any,
-      select: {
-        id: true,
-        url: true,
-        thumbUrl: true,
-        mediaType: true,
-        visibility: true,
-        phase: true,
-        caption: true,
-        isEligibleForLooks: true,
-        isFeaturedInPortfolio: true,
-        createdAt: true,
-      },
+      return { ok: true as const, created, advancedTo }
     })
 
-    return NextResponse.json({ ok: true, item: created }, { status: 200 })
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status })
+    }
+
+    return NextResponse.json({ ok: true, item: result.created, advancedTo: result.advancedTo }, { status: 200 })
   } catch (e) {
     console.error('POST /api/pro/bookings/[id]/media error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -202,6 +202,15 @@ function tabStyle(active: boolean): React.CSSProperties {
   }
 }
 
+function disabledTabStyle(): React.CSSProperties {
+  return {
+    ...tabStyle(false),
+    opacity: 0.45,
+    cursor: 'not-allowed',
+    userSelect: 'none',
+  }
+}
+
 export default async function ClientBookingPage(props: {
   params: Promise<{ id: string }> | { id: string }
   searchParams?:
@@ -279,6 +288,26 @@ export default async function ClientBookingPage(props: {
     upper(booking.status) !== 'CANCELLED' &&
     upper(booking.status) !== 'COMPLETED'
 
+  // ✅ Gate tabs: consultation/aftercare should not appear as “available” until they are real.
+  const statusUpper = upper(booking.status)
+  const sessionStepUpper = upper((booking as any).sessionStep || 'NONE')
+
+  // Client should only see Consultation when there's an actual client-facing action/state.
+  // "CONSULTATION" is a PRO working state. Client-visible starts at CONSULTATION_PENDING_CLIENT.
+  const canShowConsultTab =
+    statusUpper !== 'CANCELLED' &&
+    statusUpper !== 'COMPLETED' &&
+    statusUpper !== 'PENDING' &&
+    (sessionStepUpper === 'CONSULTATION_PENDING_CLIENT' || showConsultationApproval)
+
+  const canShowAftercareTab = statusUpper === 'COMPLETED' || Boolean(aftercare?.id)
+
+  const baseHref = `/client/bookings/${encodeURIComponent(booking.id)}`
+
+  // ✅ If user manually navigates to a locked tab, shove them back to overview.
+  if (step === 'consult' && !canShowConsultTab) redirect(`${baseHref}?step=overview`)
+  if (step === 'aftercare' && !canShowAftercareTab) redirect(`${baseHref}?step=overview`)
+
   // ✅ Aftercare unread badge for this booking + mark read when viewing booking page
   let hasUnreadAftercareNotifForThisBooking = false
   if (aftercare?.id) {
@@ -309,7 +338,6 @@ export default async function ClientBookingPage(props: {
     }
   }
 
-  const baseHref = `/client/bookings/${encodeURIComponent(booking.id)}`
   const consultNotes = (booking.consultationApproval as any)?.notes || booking.consultationNotes || ''
   const proposedTotalLabel = formatMoneyLoose((booking.consultationApproval as any)?.proposedTotal) || null
   const proposedFallback = basePriceLabel || null
@@ -386,12 +414,26 @@ export default async function ClientBookingPage(props: {
         <a href={`${baseHref}?step=overview`} style={tabStyle(step === 'overview')}>
           Overview
         </a>
-        <a href={`${baseHref}?step=consult`} style={tabStyle(step === 'consult')}>
-          Consultation
-        </a>
-        <a href={`${baseHref}?step=aftercare`} style={tabStyle(step === 'aftercare')}>
-          Aftercare
-        </a>
+
+        {canShowConsultTab ? (
+          <a href={`${baseHref}?step=consult`} style={tabStyle(step === 'consult')}>
+            Consultation
+          </a>
+        ) : (
+          <span style={disabledTabStyle()} title="Consultation becomes available after your booking is confirmed and started by your pro.">
+            Consultation
+          </span>
+        )}
+
+        {canShowAftercareTab ? (
+          <a href={`${baseHref}?step=aftercare`} style={tabStyle(step === 'aftercare')}>
+            Aftercare
+          </a>
+        ) : (
+          <span style={disabledTabStyle()} title="Aftercare becomes available after your appointment is completed.">
+            Aftercare
+          </span>
+        )}
 
         {showConsultationApproval ? (
           <span
@@ -477,11 +519,8 @@ export default async function ClientBookingPage(props: {
                 notes={String(consultNotes || '')}
                 proposedTotalLabel={proposedTotalLabel || proposedFallback}
               />
-
             ) : (
-              <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
-                No consultation approval needed right now.
-              </div>
+              <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>No consultation approval needed right now.</div>
             )}
           </div>
         </section>
@@ -578,9 +617,7 @@ export default async function ClientBookingPage(props: {
             <div style={{ fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap' }}>{aftercare.notes}</div>
           ) : (
             <div style={{ fontSize: 12, color: '#9ca3af' }}>
-              {upper(booking.status) === 'COMPLETED'
-                ? 'No aftercare notes provided.'
-                : 'Aftercare will appear here once the service is completed.'}
+              {upper(booking.status) === 'COMPLETED' ? 'No aftercare notes provided.' : 'Aftercare will appear here once the service is completed.'}
             </div>
           )}
 
@@ -617,9 +654,7 @@ export default async function ClientBookingPage(props: {
               ) : null}
 
               {!aftercareToken && upper(booking.status) === 'COMPLETED' ? (
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>
-                  Rebook link not available yet (missing aftercare token).
-                </div>
+                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Rebook link not available yet (missing aftercare token).</div>
               ) : null}
             </div>
           ) : null}

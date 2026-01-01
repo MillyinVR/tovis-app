@@ -401,7 +401,7 @@ export default async function ProProfilePage({
       {activeTab === 'reviews' && (
         <section>
           <h2 style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Reviews</h2>
-          <ReviewsPanel reviews={reviewsForUI} />
+          <ReviewsPanel reviews={reviewsForUI} editable />
         </section>
       )}
     </main>

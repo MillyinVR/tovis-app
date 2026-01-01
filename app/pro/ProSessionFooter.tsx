@@ -2,29 +2,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-
-type UiSessionState = 'idle' | 'ready' | 'active'
-type StepKey = 'consult' | 'session' | 'aftercare'
-
-type SessionBooking = {
-  id: string
-  serviceName?: string
-  clientName?: string
-  scheduledFor?: string
-  sessionStep?: string | null
-}
-
-type SessionPayload = {
-  mode?: string
-  sessionStep?: string | null
-  targetStep?: StepKey | null
-  centerLabel?: string
-  centerAction?: 'GO_SESSION' | 'NONE'
-  booking?: SessionBooking | null
-  error?: string
-}
+import type { ProSessionPayload, SessionBooking, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/'
@@ -37,6 +17,10 @@ function sanitizeFrom(from: string) {
   if (!trimmed.startsWith('/')) return '/'
   if (trimmed.startsWith('//')) return '/'
   return trimmed
+}
+
+function isSafeInternalHref(href: unknown): href is string {
+  return typeof href === 'string' && href.startsWith('/') && !href.startsWith('//')
 }
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
@@ -52,46 +36,60 @@ async function safeJson(res: Response) {
 
 function errorFromResponse(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error
+  if (typeof data?.message === 'string') return data.message
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
+  if (res.status === 404) return 'Not found.'
+  if (res.status === 409) return 'That action isn’t allowed right now.'
   return `Request failed (${res.status}).`
 }
 
-function normalizeUiState(data: SessionPayload): UiSessionState {
-  const m = String(data?.mode || '').toUpperCase()
-  if (m === 'ACTIVE') return 'active'
-  if (m === 'UPCOMING') return 'ready'
-  return 'idle'
+function normalizeMode(v: unknown): UiSessionMode {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'UPCOMING') return 'UPCOMING'
+  if (s === 'ACTIVE') return 'ACTIVE'
+  return 'IDLE'
 }
 
-function isCameraLabel(label: string) {
-  return label.trim().toLowerCase() === 'camera'
-}
-
-function proBookingHref(bookingId: string, step?: StepKey | null) {
-  const base = `/pro/bookings/${encodeURIComponent(bookingId)}`
-  if (!step) return base
-  return `${base}?step=${encodeURIComponent(step)}`
+function normalizeAction(v: unknown): UiSessionCenterAction {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  // Keep this permissive so adding new actions later doesn’t break the footer.
+  if (s === 'START') return 'START'
+  if (s === 'FINISH') return 'FINISH'
+  if (s === 'NAVIGATE') return 'NAVIGATE'
+  if (s === 'CAPTURE_BEFORE') return 'CAPTURE_BEFORE'
+  if (s === 'CAPTURE_AFTER') return 'CAPTURE_AFTER'
+  return 'NONE'
 }
 
 export default function ProSessionFooter() {
   const router = useRouter()
   const pathname = usePathname()
 
+  // Don’t render on auth pages.
   if (!pathname) return null
   if (pathname.startsWith('/login') || pathname.startsWith('/signup')) return null
 
-  const [sessionState, setSessionState] = useState<UiSessionState>('idle')
+  const [mode, setMode] = useState<UiSessionMode>('IDLE')
   const [booking, setBooking] = useState<SessionBooking | null>(null)
-  const [centerLabel, setCenterLabel] = useState('Start')
-  const [targetStep, setTargetStep] = useState<StepKey>('consult')
+  const [center, setCenter] = useState<{
+    label: string
+    action: UiSessionCenterAction
+    href: string | null
+  }>({ label: 'Start', action: 'NONE', href: null })
 
   const [loading, setLoading] = useState(false)
-  const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(null)
+  const [actionLoading, setActionLoading] = useState<'start' | 'finish' | 'nav' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const inFlightRef = useRef<AbortController | null>(null)
   const redirectedRef = useRef(false)
+
+  const isReadyOrActive = mode === 'UPCOMING' || mode === 'ACTIVE'
+
+  const centerDisabled = useMemo(() => {
+    return !booking || loading || !!actionLoading || !isReadyOrActive || center.action === 'NONE'
+  }, [booking, loading, actionLoading, isReadyOrActive, center.action])
 
   async function loadSession(opts?: { silent?: boolean }) {
     inFlightRef.current?.abort()
@@ -119,28 +117,25 @@ export default function ProSessionFooter() {
       }
 
       redirectedRef.current = false
-      const data = (await safeJson(res)) as SessionPayload
+      const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean; error?: string }
 
-      if (!res.ok) {
-        setSessionState('idle')
+      if (!res.ok || data?.ok !== true) {
+        setMode('IDLE')
         setBooking(null)
-        setCenterLabel('Start')
-        setTargetStep('consult')
+        setCenter({ label: 'Start', action: 'NONE', href: null })
         setError(errorFromResponse(res, data))
         return
       }
 
-      setSessionState(normalizeUiState(data))
-      setBooking(data.booking ?? null)
+      setMode(normalizeMode(data.mode))
+      setBooking((data.booking as SessionBooking) ?? null)
 
-      const lbl =
-        typeof data.centerLabel === 'string' && data.centerLabel.trim()
-          ? data.centerLabel.trim()
-          : 'Start'
-      setCenterLabel(lbl)
+      const c = data.center as any
+      const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
+      const action = normalizeAction(c?.action)
+      const href = isSafeInternalHref(c?.href) ? (c.href as string) : null
 
-      const ts = data.targetStep
-      setTargetStep(ts === 'consult' || ts === 'session' || ts === 'aftercare' ? ts : 'consult')
+      setCenter({ label, action, href })
     } catch (err: any) {
       if (err?.name === 'AbortError') return
       if (!opts?.silent) setError('Network error loading session.')
@@ -173,10 +168,8 @@ export default function ProSessionFooter() {
     function onVisibility() {
       if (document.visibilityState === 'visible') loadSession({ silent: true })
     }
-
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onVisibility)
-
     return () => {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
@@ -184,37 +177,71 @@ export default function ProSessionFooter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const isActive = sessionState === 'active'
-  const isReady = sessionState === 'ready'
-  const centerDisabled = !booking || loading || !!actionLoading || (!isReady && !isActive)
-
   async function handleCenterClick() {
     if (!booking || centerDisabled) return
-
-    const bookingId = booking.id
     setError(null)
 
-    try {
-      if (sessionState === 'ready') {
-        setActionLoading('start')
+    const bookingId = booking.id
+    const fallbackBookingRoot = `/pro/bookings/${encodeURIComponent(bookingId)}`
 
+    try {
+      // START: POST /start, then navigate to server-specified href (or consult fallback)
+      if (center.action === 'START') {
+        setActionLoading('start')
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
         const data = await safeJson(res)
-
-        if (!res.ok) {
-          // ✅ Show backend error (e.g., waiting for client approval)
-          throw new Error(errorFromResponse(res, data))
-        }
+        if (!res.ok) throw new Error(errorFromResponse(res, data))
 
         await loadSession({ silent: true })
-        router.push(proBookingHref(bookingId, targetStep))
+        const target = center.href ?? `${fallbackBookingRoot}?step=consult`
+        if (target === currentPathWithQuery()) {
+          router.refresh()
+        } else {
+          router.push(target)
+        }
         return
       }
 
-      if (sessionState === 'active') {
+      // FINISH: POST /finish, then navigate to server-decided nextHref.
+      // If server says "stay here" (eg missing after media), show a real error.
+      if (center.action === 'FINISH') {
+        setActionLoading('finish')
+        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/finish`, { method: 'POST' })
+        if (res.status === 401) return redirectToLogin(router, 'pro-finish')
+        const data = await safeJson(res)
+        if (!res.ok) throw new Error(errorFromResponse(res, data))
+
+        const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
+        await loadSession({ silent: true })
+
+        const target = nextHref ?? `${fallbackBookingRoot}/session/after-photos`
+
+        // If "next" equals current, we are blocked. Do NOT pretend this is navigation.
+        if (target === currentPathWithQuery()) {
+          const afterCount = typeof data?.afterCount === 'number' ? data.afterCount : null
+          if (afterCount === 0) {
+            setError('Add at least one after photo to continue to aftercare.')
+          } else {
+            setError('Nothing to advance right now. Try again in a moment.')
+          }
+          router.refresh()
+          return
+        }
+
+        router.push(target)
+        return
+      }
+
+      // NAVIGATE / CAPTURE: go to center.href or booking root.
+      if (center.action === 'NAVIGATE' || center.action === 'CAPTURE_BEFORE' || center.action === 'CAPTURE_AFTER') {
         setActionLoading('nav')
-        router.push(proBookingHref(bookingId, targetStep))
+        const target = center.href ?? fallbackBookingRoot
+        if (target === currentPathWithQuery()) {
+          router.refresh()
+        } else {
+          router.push(target)
+        }
         return
       }
     } catch (err: any) {
@@ -231,8 +258,16 @@ export default function ProSessionFooter() {
   }
 
   const displayLabel =
-    actionLoading === 'start' ? 'Starting…' : actionLoading === 'nav' ? 'Opening…' : centerLabel
-  const showCameraIcon = isCameraLabel(centerLabel)
+    actionLoading === 'start'
+      ? 'Starting…'
+      : actionLoading === 'finish'
+        ? 'Finishing…'
+        : actionLoading === 'nav'
+          ? 'Opening…'
+          : center.label
+
+  const showCameraIcon = displayLabel.trim().toLowerCase() === 'camera'
+  const isActive = mode === 'ACTIVE'
 
   return (
     <div

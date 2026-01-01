@@ -14,9 +14,19 @@ type UpdateReviewBody = {
 const HEADLINE_MAX = 120
 const BODY_MAX = 4000
 
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
 function parseRating(x: unknown): number | undefined | 'invalid' {
   if (x === undefined) return undefined
-  const n = typeof x === 'number' ? x : typeof x === 'string' ? Number(x.trim()) : NaN
+  const n =
+    typeof x === 'number'
+      ? x
+      : typeof x === 'string'
+        ? Number(x.trim())
+        : Number.NaN
+
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 5) return 'invalid'
   return n
 }
@@ -35,13 +45,10 @@ function normalizeText(
   return { value: trimmed }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
+export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params
-    const reviewId = id
+    const reviewId = pickString(id)
     if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
 
     const user = await getCurrentUser().catch(() => null)
@@ -71,20 +78,20 @@ export async function PATCH(
       return NextResponse.json({ error: `Headline: ${headlineNorm.invalid}` }, { status: 400 })
     }
 
-    const reviewBodyNorm = normalizeText(body.body, BODY_MAX)
-    if ('invalid' in reviewBodyNorm) {
-      return NextResponse.json({ error: `Body: ${reviewBodyNorm.invalid}` }, { status: 400 })
+    const bodyNorm = normalizeText(body.body, BODY_MAX)
+    if ('invalid' in bodyNorm) {
+      return NextResponse.json({ error: `Body: ${bodyNorm.invalid}` }, { status: 400 })
     }
 
     const hasAnyChange =
-      ratingParsed !== undefined || !('unset' in headlineNorm) || !('unset' in reviewBodyNorm)
+      ratingParsed !== undefined || !('unset' in headlineNorm) || !('unset' in bodyNorm)
 
     if (!hasAnyChange) {
       const current = await prisma.review.findUnique({
         where: { id: reviewId },
         include: { mediaAssets: true },
       })
-      return NextResponse.json({ review: current }, { status: 200 })
+      return NextResponse.json({ ok: true, review: current }, { status: 200 })
     }
 
     const updated = await prisma.review.update({
@@ -92,25 +99,22 @@ export async function PATCH(
       data: {
         ...(ratingParsed !== undefined ? { rating: ratingParsed } : {}),
         ...(!('unset' in headlineNorm) ? { headline: headlineNorm.value } : {}),
-        ...(!('unset' in reviewBodyNorm) ? { body: reviewBodyNorm.value } : {}),
+        ...(!('unset' in bodyNorm) ? { body: bodyNorm.value } : {}),
       },
       include: { mediaAssets: true },
     })
 
-    return NextResponse.json({ review: updated }, { status: 200 })
+    return NextResponse.json({ ok: true, review: updated }, { status: 200 })
   } catch (e) {
     console.error('PATCH /api/client/reviews/[id] error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-export async function DELETE(
-  _req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
+export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params
-    const reviewId = id
+    const reviewId = pickString(id)
     if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
 
     const user = await getCurrentUser().catch(() => null)
@@ -128,15 +132,25 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
     }
 
+    // 🔒 Server-side lock enforcement (don’t trust the UI)
+    const lockedCount = await prisma.mediaAsset.count({
+      where: {
+        reviewId: review.id,
+        OR: [{ isFeaturedInPortfolio: true }, { isEligibleForLooks: true }],
+      },
+    })
+
+    if (lockedCount > 0) {
+      return NextResponse.json(
+        { error: `You can’t delete this review because ${lockedCount} media item(s) are used in portfolio/Looks.` },
+        { status: 409 },
+      )
+    }
+
     await prisma.$transaction(async (tx) => {
-      await tx.mediaAsset.updateMany({
+      // If the review owns media, delete it. Don’t “orphan” junk records.
+      await tx.mediaAsset.deleteMany({
         where: { reviewId: review.id },
-        data: {
-          isFeaturedInPortfolio: false,
-          isEligibleForLooks: false,
-          visibility: 'PRIVATE',
-          reviewId: null,
-        },
       })
 
       await tx.review.delete({ where: { id: review.id } })

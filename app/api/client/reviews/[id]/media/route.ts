@@ -17,6 +17,25 @@ type IncomingMediaItem = {
   mediaType: MediaType
 }
 
+const URL_MAX = 2048
+
+function pickString(v: unknown) {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function safeUrl(raw: unknown): string | null {
+  const s = pickString(raw)
+  if (!s) return null
+  if (s.length > URL_MAX) return null
+  try {
+    const u = new URL(s)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    return u.toString()
+  } catch {
+    return null
+  }
+}
+
 function isMediaType(x: unknown): x is MediaType {
   return x === 'IMAGE' || x === 'VIDEO'
 }
@@ -29,24 +48,26 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
     if (!raw || typeof raw !== 'object') continue
     const obj = raw as Record<string, unknown>
 
-    const url = typeof obj.url === 'string' ? obj.url.trim() : ''
-    const thumbUrl = typeof obj.thumbUrl === 'string' ? obj.thumbUrl.trim() : null
+    const url = safeUrl(obj.url)
+    if (!url) continue
+
+    const thumbUrlRaw = obj.thumbUrl
+    const thumbUrl = thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
+    if (thumbUrlRaw && !thumbUrl) continue
+
     const mediaType: MediaType = isMediaType(obj.mediaType) ? obj.mediaType : 'IMAGE'
 
-    if (!url) continue
     items.push({ url, thumbUrl, mediaType })
   }
 
   return items
 }
 
-export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
+export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params
-    const reviewId = id
+    const reviewId = pickString(id)
+    if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
 
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
@@ -56,7 +77,7 @@ export async function POST(
     const body = (await req.json().catch(() => ({}))) as AddReviewMediaBody
     const mediaItems = parseMedia(body.media)
     if (!mediaItems.length) {
-      return NextResponse.json({ error: 'No media provided.' }, { status: 400 })
+      return NextResponse.json({ error: 'No valid media provided.' }, { status: 400 })
     }
 
     const review = await prisma.review.findUnique({
@@ -71,30 +92,40 @@ export async function POST(
 
     if (!review.bookingId) {
       return NextResponse.json(
-        {
-          error:
-            'This review is not linked to a booking. Media must be attached to a booking to appear in aftercare.',
-        },
+        { error: 'This review is not linked to a booking. Media must be attached to a booking to appear in aftercare.' },
         { status: 409 },
       )
     }
 
-    const created = await prisma.mediaAsset.createMany({
-      data: mediaItems.map((m) => ({
-        professionalId: review.professionalId,
-        bookingId: review.bookingId!,
-        reviewId: review.id,
-        url: m.url,
-        thumbUrl: m.thumbUrl ?? null,
-        mediaType: m.mediaType,
-        visibility: 'PRIVATE',
-        uploadedByUserId: user.id,
-        uploadedByRole: 'CLIENT',
-        isFeaturedInPortfolio: false,
-        isEligibleForLooks: false,
-      })),
-      skipDuplicates: true,
-    })
+    // Create individually so we can return the created items (createMany can’t return IDs)
+    const created = await prisma.$transaction(
+      mediaItems.map((m) =>
+        prisma.mediaAsset.create({
+          data: {
+            professionalId: review.professionalId,
+            bookingId: review.bookingId!,
+            reviewId: review.id,
+            url: m.url,
+            thumbUrl: m.thumbUrl ?? null,
+            mediaType: m.mediaType,
+            visibility: 'PRIVATE',
+            uploadedByUserId: user.id,
+            uploadedByRole: 'CLIENT',
+            isFeaturedInPortfolio: false,
+            isEligibleForLooks: false,
+          },
+          select: {
+            id: true,
+            url: true,
+            thumbUrl: true,
+            mediaType: true,
+            createdAt: true,
+            isFeaturedInPortfolio: true,
+            isEligibleForLooks: true,
+          },
+        }),
+      ),
+    )
 
     const updated = await prisma.review.findUnique({
       where: { id: reviewId },
@@ -102,7 +133,7 @@ export async function POST(
     })
 
     return NextResponse.json(
-      { ok: true, createdCount: created.count, review: updated },
+      { ok: true, createdCount: created.length, created, review: updated },
       { status: 201 },
     )
   } catch (e) {

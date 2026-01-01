@@ -3,14 +3,9 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
-type Body = {
-  value?: unknown // boolean optional
-}
+type Body = { value?: unknown }
 
-export async function POST(
-  req: Request,
-  props: { params: Promise<{ id: string }> },
-) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await props.params
 
@@ -21,42 +16,26 @@ export async function POST(
 
     const media = await prisma.mediaAsset.findUnique({
       where: { id },
-      select: {
-        id: true,
-        professionalId: true,
-        isFeaturedInPortfolio: true,
-      },
+      select: { id: true, professionalId: true, isFeaturedInPortfolio: true, reviewId: true },
     })
 
-    if (!media) {
-      return NextResponse.json({ error: 'Media not found.' }, { status: 404 })
-    }
-
-    if (media.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    if (!media) return NextResponse.json({ error: 'Media not found.' }, { status: 404 })
+    if (media.professionalId !== user.professionalProfile.id) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    if (!media.reviewId) {
+      return NextResponse.json({ error: 'Only review media can be added to portfolio.' }, { status: 409 })
     }
 
     const body = (await req.json().catch(() => ({}))) as Body
 
     let nextValue: boolean
-    if (body.value === undefined) {
-      nextValue = !media.isFeaturedInPortfolio // toggle fallback
-    } else if (typeof body.value === 'boolean') {
-      nextValue = body.value
-    } else {
-      return NextResponse.json(
-        { error: 'value must be boolean if provided.' },
-        { status: 400 },
-      )
-    }
+    if (body.value === undefined) nextValue = !media.isFeaturedInPortfolio
+    else if (typeof body.value === 'boolean') nextValue = body.value
+    else return NextResponse.json({ error: 'value must be boolean if provided.' }, { status: 400 })
 
     const updated = await prisma.mediaAsset.update({
       where: { id },
       data: { isFeaturedInPortfolio: nextValue },
-      select: {
-        id: true,
-        isFeaturedInPortfolio: true,
-      },
+      select: { id: true, isFeaturedInPortfolio: true },
     })
 
     return NextResponse.json({ media: updated }, { status: 200 })

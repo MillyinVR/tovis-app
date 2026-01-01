@@ -652,6 +652,7 @@ model Booking {
   client              ClientProfile                @relation(fields: [clientId], references: [id])
   professional        ProfessionalProfile          @relation(fields: [professionalId], references: [id])
   service             Service                      @relation(fields: [serviceId], references: [id])
+  serviceNotes        String?
   offering            ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
   aftercareSummary    AftercareSummary?
   clientNotifications ClientNotification[]
@@ -700,6 +701,7 @@ model AftercareSummary {
   bookingId   String    @unique
   notes       String?
   rebookedFor DateTime?
+  serviceNotes String?
 
   // ✅ NEW: timeframe-based recommendation (client self-rebooks)
   rebookWindowStart DateTime?
@@ -731,12 +733,23 @@ model Product {
 model ProductRecommendation {
   id                 String  @id @default(cuid())
   aftercareSummaryId String
-  productId          String
-  note               String?
+
+  // Existing path (internal store)
+  productId String?
+
+  // ✅ External link path (Amazon storefront, pro shop, etc.)
+  externalName String?
+  externalUrl  String?
+
+  note String?
 
   aftercareSummary AftercareSummary @relation(fields: [aftercareSummaryId], references: [id])
-  product          Product          @relation(fields: [productId], references: [id])
+  product          Product?         @relation(fields: [productId], references: [id])
+
+  @@index([aftercareSummaryId])
+  @@index([productId])
 }
+
 
 model ProductSale {
   id             String   @id @default(cuid())
@@ -865,6 +878,7 @@ model MediaAsset {
   visibility            MediaVisibility @default(PUBLIC)
   isFeaturedInPortfolio Boolean         @default(false)
   isEligibleForLooks    Boolean         @default(false)
+  reviewLocked          Boolean         @default(false)
 
   professional   ProfessionalProfile @relation(fields: [professionalId], references: [id])
   booking        Booking?            @relation(fields: [bookingId], references: [id])

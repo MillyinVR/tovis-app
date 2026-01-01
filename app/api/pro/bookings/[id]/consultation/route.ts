@@ -7,90 +7,81 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function pickString(v: unknown) {
+function asTrimmedString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
+function upper(v: unknown): string {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ ok: false, error: message }, { status })
+}
+
+/**
+ * Parses money-ish input into a number with 2 decimals max.
+ * Accepts: 350, "350", "350.00", "$350", "1,200.50", ".99"
+ */
 function parseMoneyToNumber(raw: unknown): number | null {
   if (raw === null || raw === undefined || raw === '') return null
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0 ? Math.round(raw * 100) / 100 : null
   if (typeof raw !== 'string') return null
 
   const cleaned = raw.replace(/\$/g, '').replace(/,/g, '').trim()
   if (!cleaned) return null
 
-  // allow "350", "350.00", ".99"
   const normalized = cleaned.startsWith('.') ? `0${cleaned}` : cleaned
   const n = Number(normalized)
   if (!Number.isFinite(n) || n < 0) return null
 
-  // clamp to 2 decimals (avoid floating garbage)
   return Math.round(n * 100) / 100
 }
 
 export async function POST(request: Request, ctx: Ctx) {
   try {
     const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    const bookingId = asTrimmedString(id)
+    if (!bookingId) return jsonError('Missing booking id.', 400)
 
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
+    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
+    if (!proId) return jsonError('Not authorized', 401)
 
     const body = (await request.json().catch(() => ({}))) as any
 
     const notes = typeof body?.notes === 'string' ? body.notes.trim() : ''
 
     // accept either key to reduce “client/server mismatch” misery
-    const proposedTotal =
-      parseMoneyToNumber(body?.proposedTotal) ?? parseMoneyToNumber(body?.price)
-
-    if (proposedTotal === null) {
-      return NextResponse.json({ error: 'Enter a valid consultation price.' }, { status: 400 })
-    }
+    const proposedTotal = parseMoneyToNumber(body?.proposedTotal) ?? parseMoneyToNumber(body?.price)
+    if (proposedTotal === null) return jsonError('Enter a valid consultation price.', 400)
 
     const proposedServicesJson =
-      body?.proposedServicesJson && typeof body.proposedServicesJson === 'object'
-        ? body.proposedServicesJson
-        : null
+      body?.proposedServicesJson && typeof body.proposedServicesJson === 'object' ? body.proposedServicesJson : null
 
-    // Confirm booking exists + belongs to this pro
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        status: true,
-        sessionStep: true,
-      },
+      select: { id: true, professionalId: true, status: true, finishedAt: true, sessionStep: true },
     })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'You can only edit your own bookings.' }, { status: 403 })
-    }
+    if (!booking) return jsonError('Booking not found.', 404)
+    if (booking.professionalId !== proId) return jsonError('You can only edit your own bookings.', 403)
 
-    if (booking.status === 'CANCELLED') {
-      return NextResponse.json({ error: 'Cancelled bookings cannot be updated.' }, { status: 409 })
-    }
-
-    if (booking.status === 'COMPLETED') {
-      return NextResponse.json({ error: 'Completed bookings cannot be updated.' }, { status: 409 })
-    }
+    const st = upper(booking.status)
+    if (st === 'CANCELLED') return jsonError('Cancelled bookings cannot be updated.', 409)
+    if (st === 'COMPLETED' || booking.finishedAt) return jsonError('Completed bookings cannot be updated.', 409)
 
     const now = new Date()
 
-    // One transaction: save consultation + create/update approval + advance session step
     const result = await prisma.$transaction(async (tx) => {
+      // booking stores a client-visible snapshot
       const updatedBooking = await tx.booking.update({
         where: { id: bookingId },
         data: {
           consultationNotes: notes || null,
-          consultationPrice: proposedTotal, // Decimal or Float in Prisma is fine with number
+          consultationPrice: proposedTotal,
           consultationConfirmedAt: now,
-          sessionStep: 'CONSULTATION_PENDING_CLIENT',
+          sessionStep: 'CONSULTATION_PENDING_CLIENT' as any,
         },
         select: {
           id: true,
@@ -101,26 +92,33 @@ export async function POST(request: Request, ctx: Ctx) {
         },
       })
 
+      // approval is the “state machine” for approve/reject
       const approval = await tx.consultationApproval.upsert({
-        where: { bookingId: bookingId },
+        where: { bookingId },
         create: {
-          bookingId: bookingId,
+          bookingId,
           status: 'PENDING',
-          proposedTotal: proposedTotal,
-          proposedServicesJson: proposedServicesJson,
+          proposedTotal,
+          proposedServicesJson,
           notes: notes || null,
         },
         update: {
           status: 'PENDING',
-          proposedTotal: proposedTotal,
-          proposedServicesJson: proposedServicesJson,
+          proposedTotal,
+          proposedServicesJson,
           notes: notes || null,
+          approvedAt: null,
+          rejectedAt: null,
         },
         select: {
           id: true,
           bookingId: true,
           status: true,
           proposedTotal: true,
+          proposedServicesJson: true,
+          notes: true,
+          approvedAt: true,
+          rejectedAt: true,
         },
       })
 
@@ -130,19 +128,13 @@ export async function POST(request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         ok: true,
-        booking: {
-          id: result.updatedBooking.id,
-          sessionStep: result.updatedBooking.sessionStep,
-          consultationNotes: result.updatedBooking.consultationNotes,
-          consultationPrice: result.updatedBooking.consultationPrice,
-          consultationConfirmedAt: result.updatedBooking.consultationConfirmedAt,
-        },
+        booking: result.updatedBooking,
         consultationApproval: result.approval,
       },
       { status: 200 },
     )
   } catch (error) {
     console.error('POST /api/pro/bookings/[id]/consultation error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 })
   }
 }

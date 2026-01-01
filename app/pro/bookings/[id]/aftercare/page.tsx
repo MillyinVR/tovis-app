@@ -7,9 +7,14 @@ import AftercareForm from './AftercareForm'
 export const dynamic = 'force-dynamic'
 
 type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
+type MediaPhase = 'BEFORE' | 'AFTER' | 'OTHER'
 
 function isRebookMode(x: unknown): x is RebookMode {
   return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
+}
+
+function isMediaPhase(x: unknown): x is MediaPhase {
+  return x === 'BEFORE' || x === 'AFTER' || x === 'OTHER'
 }
 
 export default async function ProAftercarePage(props: { params: Promise<{ id: string }> }) {
@@ -27,7 +32,14 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
     include: {
       service: true,
       client: { include: { user: true } },
-      aftercareSummary: true,
+      aftercareSummary: {
+        include: {
+          recommendations: {
+            include: { product: true },
+            orderBy: { id: 'asc' },
+          },
+        },
+      },
       mediaAssets: {
         orderBy: { createdAt: 'desc' },
         select: {
@@ -39,6 +51,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
           uploadedByRole: true,
           reviewId: true,
           createdAt: true,
+          phase: true, // ✅ PASS PHASE DOWN
         },
       },
     },
@@ -52,18 +65,13 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const existingRebookModeRaw = (aftercare as any)?.rebookMode
   const existingRebookMode = isRebookMode(existingRebookModeRaw) ? (existingRebookModeRaw as RebookMode) : null
 
-  const existingRebookedFor =
-    aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
+  const existingRebookedFor = aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
 
   const existingRebookWindowStart =
-    (aftercare as any)?.rebookWindowStart instanceof Date
-      ? (aftercare as any).rebookWindowStart.toISOString()
-      : null
+    (aftercare as any)?.rebookWindowStart instanceof Date ? (aftercare as any).rebookWindowStart.toISOString() : null
 
   const existingRebookWindowEnd =
-    (aftercare as any)?.rebookWindowEnd instanceof Date
-      ? (aftercare as any).rebookWindowEnd.toISOString()
-      : null
+    (aftercare as any)?.rebookWindowEnd instanceof Date ? (aftercare as any).rebookWindowEnd.toISOString() : null
 
   const mediaForUI = (booking.mediaAssets || []).map((m) => ({
     id: m.id,
@@ -74,11 +82,19 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
     uploadedByRole: m.uploadedByRole ?? null,
     reviewId: m.reviewId ?? null,
     createdAt: m.createdAt.toISOString(),
+    phase: isMediaPhase((m as any).phase) ? ((m as any).phase as MediaPhase) : ('OTHER' as MediaPhase),
   }))
 
+  const existingRecommendedProducts =
+    aftercare?.recommendations?.map((r) => ({
+      id: r.id,
+      name: r.product?.name ?? (r as any).externalName ?? '',
+      url: (r as any).externalUrl ?? '',
+      note: r.note ?? '',
+    })) ?? []
+
   const serviceName = booking.service?.name ?? 'Service'
-  const clientName =
-    `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
+  const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
 
   return (
     <main style={{ maxWidth: 860, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
@@ -89,16 +105,12 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
         ← Back to session
       </a>
 
-      <h1 style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>
-        Aftercare: {serviceName}
-      </h1>
-      <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>
-        Client: {clientName}
-      </div>
+      <h1 style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>Aftercare: {serviceName}</h1>
+      <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>Client: {clientName}</div>
 
       <div style={{ marginTop: 14, border: '1px solid #eee', background: '#fff', borderRadius: 12, padding: 14 }}>
         <div style={{ fontSize: 13, color: '#374151' }}>
-          Write clear instructions, set rebook guidance, save. Client gets notified (deduped) via your API route.
+          Write clear instructions, add product links, set rebook guidance, then send.
         </div>
       </div>
 
@@ -111,6 +123,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
           existingRebookWindowStart={existingRebookWindowStart}
           existingRebookWindowEnd={existingRebookWindowEnd}
           existingMedia={mediaForUI}
+          existingRecommendedProducts={existingRecommendedProducts}
         />
       </div>
     </main>

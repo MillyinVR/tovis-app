@@ -32,7 +32,6 @@ type BookingRow = {
   durationMinutesSnapshot: number | null
   priceSnapshot: unknown
 
-  // ✅ client-visible consult proposal (stored on Booking)
   consultationNotes: string | null
   consultationPrice: unknown
   consultationConfirmedAt: Date | null
@@ -61,11 +60,9 @@ type BookingOut = {
   status: string | null
   source: string | null
   sessionStep: string | null
-
   scheduledFor: string
   durationMinutesSnapshot: number | null
   priceSnapshot: unknown
-
   service: { id: string; name: string } | null
   professional: {
     id: string
@@ -79,12 +76,10 @@ type BookingOut = {
 
   hasPendingConsultationApproval: boolean
   consultation: null | {
-    // booking-side proposal
     consultationNotes: string | null
     consultationPrice: string | null
     consultationConfirmedAt: string | null
 
-    // approval-side meta (source of truth for “pending/approved/rejected”)
     approvalStatus: string | null
     approvalNotes: string | null
     proposedTotal: string | null
@@ -95,27 +90,23 @@ type BookingOut = {
 }
 
 function needsConsultationApproval(b: BookingRow) {
-  const step = upper(b.sessionStep)
   const approval = upper(b.consultationApproval?.status)
-
   if (approval !== 'PENDING') return false
+
   const status = upper(b.status)
   if (status === 'CANCELLED' || status === 'COMPLETED') return false
 
-  // be forgiving: pending approval should surface even if step is slightly off
-  if (step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step) return true
-  return false
+  const step = upper(b.sessionStep)
+  // forgiving: if approval is pending, surface it even if step got nudged
+  return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step
 }
-
 
 export async function GET() {
   try {
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Only clients can view bookings.' }, { status: 401 })
-    }
+    const clientId = user?.role === 'CLIENT' ? user.clientProfile?.id : null
+    if (!clientId) return NextResponse.json({ ok: false, error: 'Only clients can view bookings.' }, { status: 401 })
 
-    const clientId = user.clientProfile.id
     const now = new Date()
     const next30 = addDays(now, 30)
 
@@ -152,7 +143,7 @@ export async function GET() {
       },
     })) as BookingRow[]
 
-    // Policy A: unread aftercare badges anywhere relevant
+    // unread aftercare badges
     const unread = await prisma.clientNotification.findMany({
       where: {
         clientId,
@@ -173,6 +164,9 @@ export async function GET() {
     const out: BookingOut[] = bookings.map((b) => {
       const hasPending = needsConsultationApproval(b)
 
+      const shouldSendConsultationBlob =
+        Boolean(b.consultationApproval) || Boolean(b.consultationNotes) || b.consultationPrice != null
+
       return {
         id: b.id,
         status: b.status,
@@ -189,27 +183,25 @@ export async function GET() {
         hasUnreadAftercare: unreadBookingIds.has(b.id),
 
         hasPendingConsultationApproval: hasPending,
-        consultation:
-          // Only send this blob if it exists or is relevant.
-          // Keeps payload smaller + avoids “client sees random empty consultation UI”.
-          b.consultationApproval || b.consultationNotes || b.consultationPrice != null
-            ? {
-                consultationNotes: b.consultationNotes ?? null,
-                consultationPrice: decimalToString(b.consultationPrice),
-                consultationConfirmedAt: b.consultationConfirmedAt ? b.consultationConfirmedAt.toISOString() : null,
 
-                approvalStatus: b.consultationApproval?.status ?? null,
-                approvalNotes: b.consultationApproval?.notes ?? null,
-                proposedTotal: decimalToString(b.consultationApproval?.proposedTotal),
-                proposedServicesJson: b.consultationApproval?.proposedServicesJson ?? null,
-                approvedAt: b.consultationApproval?.approvedAt ? b.consultationApproval.approvedAt.toISOString() : null,
-                rejectedAt: b.consultationApproval?.rejectedAt ? b.consultationApproval.rejectedAt.toISOString() : null,
-              }
-            : null,
+        consultation: shouldSendConsultationBlob
+          ? {
+              consultationNotes: b.consultationNotes ?? null,
+              consultationPrice: decimalToString(b.consultationPrice),
+              consultationConfirmedAt: b.consultationConfirmedAt ? b.consultationConfirmedAt.toISOString() : null,
+
+              approvalStatus: b.consultationApproval?.status ?? null,
+              approvalNotes: b.consultationApproval?.notes ?? null,
+              proposedTotal: decimalToString(b.consultationApproval?.proposedTotal),
+              proposedServicesJson: b.consultationApproval?.proposedServicesJson ?? null,
+              approvedAt: b.consultationApproval?.approvedAt ? b.consultationApproval.approvedAt.toISOString() : null,
+              rejectedAt: b.consultationApproval?.rejectedAt ? b.consultationApproval.rejectedAt.toISOString() : null,
+            }
+          : null,
       }
     })
 
-    // Waitlist (unchanged)
+    // waitlist (leave as-is, but don’t let it crash bookings)
     let waitlist: any[] = []
     try {
       waitlist = await prisma.waitlistEntry.findMany({
@@ -254,7 +246,7 @@ export async function GET() {
         continue
       }
 
-      // ✅ If consult approval required, force into Pending so it can’t hide
+      // force consult pending into Pending bucket so it can’t hide
       if (b.hasPendingConsultationApproval) {
         pending.push(b)
         continue
@@ -288,6 +280,6 @@ export async function GET() {
     )
   } catch (e) {
     console.error('GET /api/client/bookings error:', e)
-    return NextResponse.json({ error: 'Failed to load client bookings.' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'Failed to load client bookings.' }, { status: 500 })
   }
 }
