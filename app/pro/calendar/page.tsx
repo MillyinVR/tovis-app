@@ -464,15 +464,22 @@ export default function ProCalendarPage() {
 
     const pendingRequests = evts.filter((e) => {
       const s = String(e.status || '').toUpperCase()
-      return s === 'PENDING' && new Date(e.startsAt).getTime() >= now.getTime()
+      return s === 'PENDING' && isTodayIso(e.startsAt)
     })
+
 
     const waitlistToday = evts.filter((e) => {
       const s = String(e.status || '').toUpperCase()
       return isTodayIso(e.startsAt) && s === 'WAITLIST'
     })
 
-    const blockedToday = evts.filter((e) => isTodayIso(e.startsAt) && isBlockedEvent(e))
+    const blockedToday = evts.filter((e) => {
+      if (!isBlockedEvent(e)) return false
+      const s = new Date(e.startsAt).getTime()
+      const en = new Date(e.endsAt).getTime()
+      return s < todayEnd.getTime() && en > todayStart.getTime()
+    })
+
 
     return { todaysBookings, pendingRequests, waitlistToday, blockedToday }
   }
@@ -550,6 +557,27 @@ export default function ProCalendarPage() {
   }, [view, currentDate])
 
   const hours = useMemo(() => Array.from({ length: 24 }, (_, h) => h), [])
+
+  function overlapMinutesWithinDay(startsAtIso: string, endsAtIso: string, day: Date) {
+    const dayStart = startOfDay(day)
+    const dayEnd = addDays(dayStart, 1)
+
+    const s = new Date(startsAtIso)
+    const e = new Date(endsAtIso)
+
+    const startMs = Math.max(s.getTime(), dayStart.getTime())
+    const endMs = Math.min(e.getTime(), dayEnd.getTime())
+
+    const mins = Math.round((endMs - startMs) / 60_000)
+    return mins > 0 ? mins : 0
+  }
+
+  function formatHoursFromMinutes(mins: number) {
+    const hours = mins / 60
+    // nice readable: 0h, 0.5h, 1h, 1.25h etc.
+    const rounded = Math.round(hours * 10) / 10
+    return `${rounded}h`
+  }
 
   function eventsForDay(day: Date) {
     return events.filter((ev) => isSameDay(new Date(ev.startsAt), day))
@@ -743,6 +771,49 @@ export default function ProCalendarPage() {
       setSavingReschedule(false)
     }
   }
+
+  async function approveBooking() {
+  if (!booking) return
+  setSavingReschedule(true)
+  setBookingError(null)
+  try {
+    const res = await fetch(`/api/pro/bookings/${encodeURIComponent(booking.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'ACCEPTED', notifyClient: true }),
+    })
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error(data?.error || 'Failed to approve booking.')
+    closeBooking()
+    await loadCalendar()
+  } catch (e: any) {
+    setBookingError(e?.message || 'Failed to approve booking.')
+  } finally {
+    setSavingReschedule(false)
+  }
+}
+
+async function denyBooking() {
+  if (!booking) return
+  setSavingReschedule(true)
+  setBookingError(null)
+  try {
+    const res = await fetch(`/api/pro/bookings/${encodeURIComponent(booking.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'CANCELLED', notifyClient: true }),
+    })
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error(data?.error || 'Failed to deny booking.')
+    closeBooking()
+    await loadCalendar()
+  } catch (e: any) {
+    setBookingError(e?.message || 'Failed to deny booking.')
+  } finally {
+    setSavingReschedule(false)
+  }
+}
+
 
   // -------------------------
   // Confirm modal helpers
@@ -986,6 +1057,15 @@ export default function ProCalendarPage() {
   const activeList = management[managementKey] || []
   const activeCount = activeList.length
 
+  const blockedMinutesToday = useMemo(() => {
+    const today = new Date()
+    return (events ?? [])
+      .filter((ev) => isBlockedEvent(ev))
+      .reduce((sum, ev) => sum + overlapMinutesWithinDay(ev.startsAt, ev.endsAt, today), 0)
+  }, [events])
+
+
+
   return (
     <main style={{ maxWidth: 1100, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <header style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1096,7 +1176,9 @@ export default function ProCalendarPage() {
             }}
           >
             <div style={{ marginBottom: 4, color: '#a1a1aa' }}>Blocked time (today)</div>
-            <div style={{ fontSize: 20, fontWeight: 600 }}>{stats?.blockedHours != null ? `${stats.blockedHours}h` : '0h'}</div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>
+              {formatHoursFromMinutes(blockedMinutesToday)}
+            </div>
             <div style={{ marginTop: 6, fontSize: 11, color: '#a1a1aa' }}>View list</div>
           </button>
         </div>
@@ -1816,9 +1898,120 @@ export default function ProCalendarPage() {
                     </div>
                     <div style={{ fontSize: 12, color: '#444' }}>
                       <b>When:</b>{' '}
+                      {String(booking.status).toUpperCase() === 'PENDING' && (
+                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setBookingError(null)
+                              try {
+                                const res = await fetch(`/api/pro/bookings/${encodeURIComponent(booking.id)}/status`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ status: 'ACCEPTED' }),
+                                })
+                                const data = await safeJson(res)
+                                if (!res.ok) throw new Error(data?.error || 'Failed to approve booking.')
+                                closeBooking()
+                                await loadCalendar()
+                              } catch (e: any) {
+                                setBookingError(e?.message || 'Failed to approve booking.')
+                              }
+                            }}
+                            style={{
+                              border: 'none',
+                              background: '#111',
+                              color: '#fff',
+                              borderRadius: 999,
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              fontSize: 12,
+                              fontWeight: 900,
+                            }}
+                          >
+                            Approve
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setBookingError(null)
+                              try {
+                                const res = await fetch(`/api/pro/bookings/${encodeURIComponent(booking.id)}/cancel`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ reason: 'Declined by professional' }),
+                                })
+                                const data = await safeJson(res)
+                                if (!res.ok) throw new Error(data?.error || 'Failed to deny booking.')
+                                closeBooking()
+                                await loadCalendar()
+                              } catch (e: any) {
+                                setBookingError(e?.message || 'Failed to deny booking.')
+                              }
+                            }}
+                            style={{
+                              border: '1px solid #111',
+                              background: '#fff',
+                              color: '#111',
+                              borderRadius: 999,
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              fontSize: 12,
+                              fontWeight: 900,
+                            }}
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      )}
+
                       {new Date(booking.scheduledFor).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} ({booking.totalDurationMinutes} min)
                     </div>
                   </div>
+
+                {String(booking.status || '').toUpperCase() === 'PENDING' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => void approveBooking()}
+                      disabled={savingReschedule}
+                      style={{
+                        border: 'none',
+                        background: '#111',
+                        color: '#fff',
+                        borderRadius: 999,
+                        padding: '8px 12px',
+                        cursor: savingReschedule ? 'default' : 'pointer',
+                        fontSize: 12,
+                        fontWeight: 900,
+                        opacity: savingReschedule ? 0.7 : 1,
+                      }}
+                    >
+                      Approve
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void denyBooking()}
+                      disabled={savingReschedule}
+                      style={{
+                        border: '1px solid #111',
+                        background: '#fff',
+                        color: '#111',
+                        borderRadius: 999,
+                        padding: '8px 12px',
+                        cursor: savingReschedule ? 'default' : 'pointer',
+                        fontSize: 12,
+                        fontWeight: 900,
+                        opacity: savingReschedule ? 0.7 : 1,
+                      }}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                )}
+
 
                   <div style={{ borderTop: '1px solid #eee', paddingTop: 12 }}>
                     <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Edit appointment</div>

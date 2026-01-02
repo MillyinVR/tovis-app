@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+console.log('PRO BookingActions mounted')
+
 type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SafeStatus = BookingStatus | 'UNKNOWN'
 
@@ -133,9 +135,10 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
           signal: controller.signal,
         })
       } else if (action === 'CANCEL') {
-        // ✅ Use the pro cancel endpoint (matches your pro booking routes)
         res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/cancel`, {
-          method: 'POST',
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'Cancelled by professional', promoteWaitlist: true }),
           signal: controller.signal,
         })
       } else if (action === 'START') {
@@ -166,6 +169,8 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
             : extractStatus(data, status)
 
       setStatus(nextStatus)
+      router.refresh()
+
 
       if (action === 'START') {
         const iso = extractIso(data, 'startedAt')

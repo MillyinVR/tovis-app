@@ -72,8 +72,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     const mins = Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000)
     if (mins < 15 || mins > 24 * 60) {
-  return NextResponse.json({ error: 'Block must be between 15 minutes and 24 hours.' }, { status: 400 })
-}
+        return NextResponse.json({ error: 'Block must be between 15 minutes and 24 hours.' }, { status: 400 })
+    }
 
     // prevent overlap with other blocks
     const conflict = await prisma.calendarBlock.findFirst({
