@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 import ClientBookingsDashboard from './ClientBookingsDashboard'
 import LastMinuteOpenings from './components/LastMinuteOpenings'
+import PendingConsultApprovalBanner from './components/PendingConsultApprovalBanner'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +24,11 @@ export default async function ClientDashboardPage() {
         <p style={{ margin: '6px 0 0', color: '#6b7280' }}>Welcome, {displayName}.</p>
       </div>
 
+      {/* ✅ Shows ONLY when a pending consult approval exists */}
+      <PendingConsultApprovalBanner />
+      <div style={{ height: 12 }} />
+
+      {/* Open now */}
       <LastMinuteOpenings />
       <div style={{ height: 12 }} />
 

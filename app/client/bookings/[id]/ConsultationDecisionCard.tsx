@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 async function safeJson(res: Response) {
   return res.json().catch(() => ({}))
@@ -15,19 +15,28 @@ function errorFrom(res: Response, data: any) {
   return `Request failed (${res.status}).`
 }
 
+function asItems(proposedServicesJson: unknown): Array<{ label?: string; categoryName?: string | null; price?: any }> {
+  const j: any = proposedServicesJson
+  const items = Array.isArray(j?.items) ? j.items : []
+  return items
+}
+
 export default function ConsultationDecisionCard(props: {
   bookingId: string
   appointmentTz: string
   notes: string
   proposedTotalLabel: string | null
+  proposedServicesJson?: unknown
   disabled?: boolean
 }) {
-  const { bookingId, appointmentTz, notes, proposedTotalLabel, disabled } = props
+  const { bookingId, appointmentTz, notes, proposedTotalLabel, proposedServicesJson, disabled } = props
   const router = useRouter()
 
   const [loading, setLoading] = useState<'approve' | 'reject' | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [done, setDone] = useState<'approve' | 'reject' | null>(null)
+
+  const items = useMemo(() => asItems(proposedServicesJson), [proposedServicesJson])
 
   async function decide(action: 'approve' | 'reject') {
     if (disabled || loading) return
@@ -42,12 +51,7 @@ export default function ConsultationDecisionCard(props: {
       if (!res.ok) throw new Error(errorFrom(res, data))
 
       setDone(action)
-
-      // Refresh server component data (booking.sessionStep + consultationApproval.status)
       router.refresh()
-
-      // Keep UX consistent: land back in the canonical booking page.
-      // You can change step=overview if you prefer.
       router.push(`/client/bookings/${encodeURIComponent(bookingId)}?step=consult&consultation=${action}`)
     } catch (e: any) {
       setErr(e?.message || 'Something went wrong.')
@@ -70,7 +74,38 @@ export default function ConsultationDecisionCard(props: {
         Approve this consultation?
       </div>
 
-      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Proposed total</div>
+      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Proposed services</div>
+      {items.length ? (
+        <div style={{ marginTop: 6, display: 'grid', gap: 6 }}>
+          {items.map((it, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 10,
+                background: '#fff',
+                border: '1px solid #f3f4f6',
+                borderRadius: 10,
+                padding: '8px 10px',
+                fontSize: 13,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 900, color: '#111' }}>{it?.label || 'Service'}</div>
+                {it?.categoryName ? <div style={{ fontSize: 12, color: '#6b7280' }}>{it.categoryName}</div> : null}
+              </div>
+              <div style={{ fontWeight: 900, color: '#111' }}>
+                {it?.price != null ? `$${String(it.price)}` : '—'}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>No line items provided.</div>
+      )}
+
+      <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Proposed total</div>
       <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
         {proposedTotalLabel || 'Not provided'}{' '}
         <span style={{ fontSize: 12, color: '#6b7280' }}>· {appointmentTz}</span>

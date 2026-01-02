@@ -17,14 +17,15 @@ type CreateBookingBody = {
   openingId?: unknown
   aftercareToken?: unknown
   rebookOfBookingId?: unknown
-  // scheduledFor may be present, but is ignored in favor of hold truth
-  scheduledFor?: unknown
+  scheduledFor?: unknown // ignored, hold is truth
 }
 
 type ExistingBookingForConflict = {
   id: string
   scheduledFor: Date
+  totalDurationMinutes: number | null
   durationMinutesSnapshot: number | null
+  bufferMinutes: number | null
 }
 
 function pickString(v: unknown): string | null {
@@ -249,9 +250,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'This service is not offered as mobile.' }, { status: 400 })
     }
 
-    // Determine duration/price snapshots for this locationType
-    const priceStartingAt = locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
-    const durationSnapshot = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+    const priceStartingAt =
+      locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+    const durationSnapshot =
+      locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
 
     if (priceStartingAt == null) {
       return NextResponse.json(
@@ -342,7 +344,6 @@ export async function POST(request: Request) {
 
       if (!hold) throw new Error('HOLD_NOT_FOUND')
       if (hold.clientId !== clientId) throw new Error('HOLD_NOT_FOUND')
-
       if (hold.expiresAt.getTime() <= now.getTime()) throw new Error('HOLD_EXPIRED')
       if (hold.offeringId !== offeringId) throw new Error('HOLD_MISMATCH')
       if (hold.professionalId !== offering.professionalId) throw new Error('HOLD_MISMATCH')
@@ -352,7 +353,7 @@ export async function POST(request: Request) {
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
       if (!isValidDate(requestedStart)) throw new Error('INVALID_TIME')
 
-      // simple future guard
+      // future guard
       const BUFFER_MINUTES = 5
       if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
         throw new Error('TIME_IN_PAST')
@@ -360,7 +361,7 @@ export async function POST(request: Request) {
 
       const requestedEnd = addMinutes(requestedStart, durationMinutes)
 
-      // 3) Working-hours enforcement (based on pro TZ)
+      // 3) Working-hours enforcement
       const whCheck = ensureWithinWorkingHours({
         scheduledStartUtc: requestedStart,
         scheduledEndUtc: requestedEnd,
@@ -369,7 +370,7 @@ export async function POST(request: Request) {
       })
       if (!whCheck.ok) throw new Error(`WH:${whCheck.error}`)
 
-      // 4) Conflict re-check (bookings)
+      // 4) Conflict re-check (use totals first, fallback to legacy snapshot)
       const windowStart = addMinutes(requestedStart, -durationMinutes * 2)
       const windowEnd = addMinutes(requestedStart, durationMinutes * 2)
 
@@ -379,15 +380,27 @@ export async function POST(request: Request) {
           scheduledFor: { gte: windowStart, lte: windowEnd },
           NOT: { status: 'CANCELLED' },
         },
-        select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
-        take: 50,
+        select: {
+          id: true,
+          scheduledFor: true,
+          totalDurationMinutes: true,
+          durationMinutesSnapshot: true,
+          bufferMinutes: true,
+        },
+        take: 80,
       })) as ExistingBookingForConflict[]
 
       const hasConflict = existing.some((b) => {
-        const bDur = Number(b.durationMinutesSnapshot || 0)
+        const bDur =
+          Number(b.totalDurationMinutes ?? 0) > 0
+            ? Number(b.totalDurationMinutes)
+            : Number(b.durationMinutesSnapshot ?? 0)
+
+        const bBuf = Number(b.bufferMinutes ?? 0)
+
         if (!Number.isFinite(bDur) || bDur <= 0) return false
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
-        const bEnd = addMinutes(bStart, bDur)
+        const bEnd = addMinutes(bStart, bDur + bBuf)
         return overlaps(bStart, bEnd, requestedStart, requestedEnd)
       })
 
@@ -416,11 +429,13 @@ export async function POST(request: Request) {
         if (updated.count !== 1) throw new Error('OPENING_NOT_AVAILABLE')
       }
 
-      // 6) Create booking
+      // 6) Create booking with Option B totals + initial service item
       const created = await tx.booking.create({
         data: {
           clientId,
           professionalId: offering.professionalId,
+
+          // transition fields
           serviceId: offering.serviceId,
           offeringId: offering.id,
 
@@ -431,8 +446,26 @@ export async function POST(request: Request) {
           locationType,
           rebookOfBookingId: rebookOfBookingIdForCreate,
 
+          // legacy snapshots
           priceSnapshot: priceStartingAt,
           durationMinutesSnapshot: durationMinutes,
+
+          // ✅ Option B totals (required)
+          subtotalSnapshot: priceStartingAt,
+          totalDurationMinutes: durationMinutes,
+
+          // ✅ Create initial service item (so totals are always explainable)
+          serviceItems: {
+            create: [
+              {
+                serviceId: offering.serviceId,
+                offeringId: offering.id,
+                priceSnapshot: priceStartingAt,
+                durationMinutesSnapshot: durationMinutes,
+                sortOrder: 0,
+              },
+            ],
+          },
         },
         select: {
           id: true,
@@ -443,10 +476,12 @@ export async function POST(request: Request) {
           offeringId: true,
           source: true,
           locationType: true,
+          subtotalSnapshot: true,
+          totalDurationMinutes: true,
         },
       })
 
-      // 7) Mark notification, if present
+      // 7) mark notification if needed
       if (openingId) {
         await tx.openingNotification.updateMany({
           where: { clientId, openingId, bookedAt: null },
@@ -454,7 +489,7 @@ export async function POST(request: Request) {
         })
       }
 
-      // 8) Delete hold after success
+      // 8) delete hold
       await tx.bookingHold.delete({ where: { id: hold.id } })
 
       void mediaId

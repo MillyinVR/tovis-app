@@ -29,6 +29,10 @@ function toInt(value: string | null, fallback: number) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function clampInt(n: number, min: number, max: number) {
+  return Math.min(Math.max(n, min), max)
+}
+
 function addMinutes(d: Date, minutes: number) {
   return new Date(d.getTime() + minutes * 60_000)
 }
@@ -112,18 +116,23 @@ function zonedTimeToUtc(args: {
 }) {
   const { year, month, day, hour, minute, timeZone } = args
 
+  // Start with a naive UTC guess, then correct by the timezone offset at that instant.
   let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
   const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
   guess = new Date(guess.getTime() - offset1 * 60_000)
 
+  // Second pass handles DST transitions where offset changes between guess and corrected time.
   const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
-  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
+  if (offset2 !== offset1) {
+    guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
+  }
 
   return guess
 }
 
 function getDayKeyFromYMD(args: { year: number; month: number; day: number; timeZone: string }) {
   const { year, month, day, timeZone } = args
+  // Use noon in the target zone to avoid DST midnight edge weirdness.
   const noonUtc = zonedTimeToUtc({ year, month, day, hour: 12, minute: 0, timeZone })
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
   const w = fmt.format(noonUtc).toLowerCase()
@@ -154,62 +163,66 @@ async function computeDaySlots(args: {
   workingHours: unknown | null
   bufferMinutes: number
 }): Promise<
-  | { ok: true; slots: string[]; dayStartUtc: Date; dayEndUtc: Date }
-  | { ok: false; error: string; dayStartUtc: Date; dayEndUtc: Date }
+  | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date }
+  | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date }
 > {
   const { professionalId, dateYMD, durationMinutes, stepMinutes, timeZone, workingHours, bufferMinutes } = args
 
   const nowUtc = new Date()
+
+  // IMPORTANT: use [start, endExclusive) rather than lte 23:59 to avoid day-boundary rounding issues.
   const dayStartUtc = zonedTimeToUtc({ ...dateYMD, hour: 0, minute: 0, timeZone })
-  const dayEndUtc = zonedTimeToUtc({ ...dateYMD, hour: 23, minute: 59, timeZone })
+  const dayEndExclusiveUtc = zonedTimeToUtc({ ...dateYMD, hour: 0, minute: 0, timeZone })
+  dayEndExclusiveUtc.setUTCDate(dayEndExclusiveUtc.getUTCDate() + 1)
 
   const wh = workingHours && typeof workingHours === 'object' ? (workingHours as WorkingHours) : null
   if (!wh) {
-    return { ok: false, error: 'This professional has not set working hours yet.', dayStartUtc, dayEndUtc }
+    return { ok: false, error: 'This professional has not set working hours yet.', dayStartUtc, dayEndExclusiveUtc }
   }
 
   const dayKey = getDayKeyFromYMD({ ...dateYMD, timeZone })
   const rule = wh[dayKey]
 
   if (!rule) {
-    return { ok: false, error: 'This professional’s working hours are misconfigured.', dayStartUtc, dayEndUtc }
+    return { ok: false, error: 'This professional’s working hours are misconfigured.', dayStartUtc, dayEndExclusiveUtc }
   }
   if (rule.enabled === false) {
-    return { ok: true, slots: [], dayStartUtc, dayEndUtc }
+    return { ok: true, slots: [], dayStartUtc, dayEndExclusiveUtc }
   }
 
   const startParsed = parseHHMM(String(rule.start ?? ''))
   const endParsed = parseHHMM(String(rule.end ?? ''))
   if (!startParsed || !endParsed) {
-    return { ok: false, error: 'This professional’s working hours are misconfigured.', dayStartUtc, dayEndUtc }
+    return { ok: false, error: 'This professional’s working hours are misconfigured.', dayStartUtc, dayEndExclusiveUtc }
   }
 
   const startMinute = startParsed.hh * 60 + startParsed.mm
   const endMinute = endParsed.hh * 60 + endParsed.mm
   if (endMinute <= startMinute) {
-    return { ok: false, error: 'This professional’s working hours are misconfigured.', dayStartUtc, dayEndUtc }
+    return { ok: false, error: 'This professional’s working hours are misconfigured.', dayStartUtc, dayEndExclusiveUtc }
   }
 
   const [bookings, holds] = await Promise.all([
     prisma.booking.findMany({
       where: {
         professionalId,
-        scheduledFor: { gte: dayStartUtc, lte: dayEndUtc },
-        NOT: { status: 'CANCELLED' as any },
+        scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
+        // Cancelled bookings should not block availability.
+        NOT: { status: 'CANCELLED' },
       },
       select: { scheduledFor: true, durationMinutesSnapshot: true },
       take: 2000,
-    }) as any as Promise<BookingForBusy[]>,
+    }) as unknown as Promise<BookingForBusy[]>,
 
     prisma.bookingHold.findMany({
       where: {
         professionalId,
-        scheduledFor: { gte: dayStartUtc, lte: dayEndUtc },
+        scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
         expiresAt: { gt: nowUtc },
       },
       select: { scheduledFor: true, expiresAt: true },
       take: 2000,
-    }) as any as Promise<HoldForBusy[]>,
+    }) as unknown as Promise<HoldForBusy[]>,
   ])
 
   const busy: BusyInterval[] = [
@@ -225,6 +238,7 @@ async function computeDaySlots(args: {
   ]
 
   const slots: string[] = []
+  const bufferCutoffUtc = addMinutes(nowUtc, bufferMinutes)
 
   for (let minute = startMinute; minute + durationMinutes <= endMinute; minute += stepMinutes) {
     const hh = Math.floor(minute / 60)
@@ -239,16 +253,15 @@ async function computeDaySlots(args: {
       timeZone,
     })
 
-    if (slotStartUtc.getTime() < addMinutes(nowUtc, bufferMinutes).getTime()) continue
+    if (slotStartUtc.getTime() < bufferCutoffUtc.getTime()) continue
 
     const slotEndUtc = addMinutes(slotStartUtc, durationMinutes)
-    const conflict = busy.some((bi) => overlaps(slotStartUtc, slotEndUtc, bi.start, bi.end))
-    if (conflict) continue
+    if (busy.some((bi) => overlaps(slotStartUtc, slotEndUtc, bi.start, bi.end))) continue
 
     slots.push(slotStartUtc.toISOString())
   }
 
-  return { ok: true, slots, dayStartUtc, dayEndUtc }
+  return { ok: true, slots, dayStartUtc, dayEndExclusiveUtc }
 }
 
 export async function GET(req: Request) {
@@ -263,8 +276,8 @@ export async function GET(req: Request) {
     const stepRaw = pickString(searchParams.get('stepMinutes')) ?? pickString(searchParams.get('step'))
     const bufferRaw = pickString(searchParams.get('bufferMinutes')) ?? pickString(searchParams.get('buffer'))
 
-    const stepMinutes = Math.min(Math.max(toInt(stepRaw, 5), 5), 60)
-    const bufferMinutes = Math.min(Math.max(toInt(bufferRaw, 10), 0), 120)
+    const stepMinutes = clampInt(toInt(stepRaw, 5), 5, 60)
+    const bufferMinutes = clampInt(toInt(bufferRaw, 10), 0, 120)
 
     if (!professionalId || !serviceId || !locationType || !dateStr) {
       return NextResponse.json({ ok: false, error: 'Missing required params.' }, { status: 400 })
@@ -281,11 +294,13 @@ export async function GET(req: Request) {
     })
     if (!pro) return NextResponse.json({ ok: false, error: 'Professional not found.' }, { status: 404 })
 
+    // If timeZone is missing, default is a footgun. Better than crashing, but still a footgun.
     const timeZone = pro.timeZone || 'America/Los_Angeles'
 
-    // booking window based on PRO calendar days (not UTC milliseconds)
+    // Booking window based on PRO calendar days (not naive UTC date math)
     const nowUtc = new Date()
     const nowParts = getZonedParts(nowUtc, timeZone)
+
     const reqNoonUtc = zonedTimeToUtc({ ...ymd, hour: 12, minute: 0, timeZone })
     const todayNoonUtc = zonedTimeToUtc({
       year: nowParts.year,
@@ -342,8 +357,18 @@ export async function GET(req: Request) {
       bufferMinutes,
     })
 
+    const serverNowInProTz = getZonedParts(nowUtc, timeZone)
+
     if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error, timeZone }, { status: 400 })
+      return NextResponse.json(
+        {
+          ok: false,
+          error: result.error,
+          timeZone,
+          debug: { serverNowUtc: nowUtc.toISOString(), serverNowInProTz },
+        },
+        { status: 400 },
+      )
     }
 
     return NextResponse.json({
@@ -357,8 +382,9 @@ export async function GET(req: Request) {
       stepMinutes,
       bufferMinutes,
       dayStartUtc: result.dayStartUtc.toISOString(),
-      dayEndUtc: result.dayEndUtc.toISOString(),
+      dayEndExclusiveUtc: result.dayEndExclusiveUtc.toISOString(),
       slots: result.slots,
+      debug: { serverNowUtc: nowUtc.toISOString(), serverNowInProTz },
     })
   } catch (e) {
     console.error('GET /api/availability/day error', e)

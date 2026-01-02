@@ -231,7 +231,11 @@ function buildMonthGrid(args: { monthStartUtc: Date; proTz: string }) {
   return days
 }
 
-function replaceQuery(router: ReturnType<typeof useRouter>, searchParams: ReturnType<typeof useSearchParams>, mut: (qs: URLSearchParams) => void) {
+function replaceQuery(
+  router: ReturnType<typeof useRouter>,
+  searchParams: ReturnType<typeof useSearchParams>,
+  mut: (qs: URLSearchParams) => void,
+) {
   if (typeof window === 'undefined') return
   const qs = new URLSearchParams(searchParams?.toString() || '')
   mut(qs)
@@ -327,7 +331,7 @@ async function createHoldForSelectedSlot(args: {
 async function fetchHoldById(holdId: string) {
   const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'GET' })
 
-  // This is the key correction: 404 means “already deleted”, not “explode the UI”.
+  // 404 means “already deleted”, not “explode the UI”.
   if (res.status === 404) {
     return { missing: true as const }
   }
@@ -467,6 +471,8 @@ export default function BookingPanel(props: BookingPanelProps) {
 
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const submittingRef = useRef(false)
+
   const [success, setSuccess] = useState<string | null>(null)
   const [confirmChecked, setConfirmChecked] = useState(false)
   const [createdBookingId, setCreatedBookingId] = useState<string | null>(null)
@@ -733,7 +739,17 @@ export default function BookingPanel(props: BookingPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [professionalId, serviceId, locationType, selectedYMD, hasHold, lockedIso, defaultScheduledForISO, todayYMDInProTz, maxYMDInProTz])
+  }, [
+    professionalId,
+    serviceId,
+    locationType,
+    selectedYMD,
+    hasHold,
+    lockedIso,
+    defaultScheduledForISO,
+    todayYMDInProTz,
+    maxYMDInProTz,
+  ])
 
   const finalScheduledForISO = useMemo(() => (hasHold ? lockedIso : selectedSlotISO), [hasHold, lockedIso, selectedSlotISO])
 
@@ -829,7 +845,7 @@ export default function BookingPanel(props: BookingPanelProps) {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (loading) return
+    if (loading || submittingRef.current) return
 
     setError(null)
     setSuccess(null)
@@ -855,12 +871,31 @@ export default function BookingPanel(props: BookingPanelProps) {
       return
     }
 
+    submittingRef.current = true
     setLoading(true)
-    let effectiveHoldId = holdIdFromUrl
+
+    // We will decide hold validity based on actual hold signals, not “UI has hydrated yet”.
+    const holdUntilFromUrlMs = (() => {
+    const n = Number(holdUntilFromUrl)
+    return Number.isFinite(n) ? n : null
+  })()
+
+  const holdUntilMs = holdUntil ?? holdUntilFromUrlMs
+
+
+    const now = Date.now()
+    const hasValidHold =
+      Boolean(holdIdFromUrl) &&
+      Boolean(lockedIso) &&
+      holdUntilMs != null &&
+      holdUntilMs > now
+
+
+    let effectiveHoldId: string | null = holdIdFromUrl
 
     try {
-      // Ensure hold exists BEFORE booking
-      if (!effectiveHoldId || !lockedIso) {
+      // Ensure hold exists BEFORE booking (only if missing/expired)
+      if (!hasValidHold) {
         const h = await createHoldForSelectedSlot({
           offeringId,
           scheduledFor: finalScheduledForISO,
@@ -910,10 +945,8 @@ export default function BookingPanel(props: BookingPanelProps) {
       const bookingId = data?.booking?.id ? String(data.booking.id) : null
       setCreatedBookingId(bookingId)
 
-      // ✅ IMPORTANT: server already deleted the hold on success.
-      // Do NOT call DELETE /api/holds/:id here or you’ll get the 404 spam.
+      // ✅ server already deleted the hold on success.
       clearHoldParamsOnly(router, searchParams)
-
       setHoldUntil(null)
       setScheduledForFromHold(null)
 
@@ -925,6 +958,7 @@ export default function BookingPanel(props: BookingPanelProps) {
       setError(err?.message || 'Network error while creating booking.')
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
   }
 
@@ -979,24 +1013,66 @@ export default function BookingPanel(props: BookingPanelProps) {
           {viewerTimeLine ? <div style={{ fontSize: 12, color: '#6b7280' }}>{viewerTimeLine}</div> : null}
 
           <div style={{ fontSize: 12, color: success ? '#166534' : '#6b7280' }}>
-            {success ? 'Nice. Future You can’t pretend this never happened.' : holdLabel ? 'Finish booking before the hold expires.' : `Times are shown in the appointment timezone: ${proTz}.`}
+            {success
+              ? 'Nice. Future You can’t pretend this never happened.'
+              : holdLabel
+                ? 'Finish booking before the hold expires.'
+                : `Times are shown in the appointment timezone: ${proTz}.`}
           </div>
         </div>
       </div>
 
       {success && createdBookingId ? (
         <div style={{ display: 'grid', gap: 10 }}>
-          <a href="/client" style={{ textDecoration: 'none', background: '#111', color: '#fff', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
+          <a
+            href="/client"
+            style={{
+              textDecoration: 'none',
+              background: '#111',
+              color: '#fff',
+              padding: '10px 12px',
+              borderRadius: 12,
+              fontWeight: 900,
+              fontSize: 13,
+              textAlign: 'center',
+            }}
+          >
             View my bookings
           </a>
 
           {calendarHref ? (
-            <a href={calendarHref} style={{ textDecoration: 'none', border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>
+            <a
+              href={calendarHref}
+              style={{
+                textDecoration: 'none',
+                border: '1px solid #ddd',
+                background: '#fff',
+                color: '#111',
+                padding: '10px 12px',
+                borderRadius: 12,
+                fontWeight: 900,
+                fontSize: 13,
+                textAlign: 'center',
+              }}
+            >
               Add to calendar
             </a>
           ) : null}
 
-          <button type="button" onClick={copyShareLink} style={{ border: '1px solid #ddd', background: '#fff', color: '#111', padding: '10px 12px', borderRadius: 12, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}>
+          <button
+            type="button"
+            onClick={copyShareLink}
+            style={{
+              border: '1px solid #ddd',
+              background: '#fff',
+              color: '#111',
+              padding: '10px 12px',
+              borderRadius: 12,
+              fontWeight: 900,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
             {copied ? 'Link copied' : 'Copy booking link'}
           </button>
 
@@ -1063,7 +1139,11 @@ export default function BookingPanel(props: BookingPanelProps) {
             <div style={{ fontSize: 12, color: '#6b7280' }}>{locationType === 'MOBILE' ? 'Mobile appointment' : 'In-salon appointment'}</div>
           )}
 
-          {!locationType ? <div style={{ fontSize: 12, color: '#b91c1c' }}>This offering has no valid appointment type enabled. (No salon or mobile.)</div> : null}
+          {!locationType ? (
+            <div style={{ fontSize: 12, color: '#b91c1c' }}>
+              This offering has no valid appointment type enabled. (No salon or mobile.)
+            </div>
+          ) : null}
 
           {/* Calendar */}
           <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: '#fff' }}>
@@ -1072,7 +1152,15 @@ export default function BookingPanel(props: BookingPanelProps) {
                 type="button"
                 disabled={hasHold || !canGoPrevMonth()}
                 onClick={() => setMonthStartUtc((d) => addMonthsUtc(d, -1))}
-                style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', fontWeight: 900, cursor: hasHold ? 'default' : 'pointer', opacity: hasHold || !canGoPrevMonth() ? 0.5 : 1 }}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid #ddd',
+                  background: '#fff',
+                  fontWeight: 900,
+                  cursor: hasHold ? 'default' : 'pointer',
+                  opacity: hasHold || !canGoPrevMonth() ? 0.5 : 1,
+                }}
                 title={hasHold ? 'Date is locked while a hold exists.' : undefined}
               >
                 ‹
@@ -1084,7 +1172,15 @@ export default function BookingPanel(props: BookingPanelProps) {
                 type="button"
                 disabled={hasHold || !canGoNextMonth()}
                 onClick={() => setMonthStartUtc((d) => addMonthsUtc(d, +1))}
-                style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', fontWeight: 900, cursor: hasHold ? 'default' : 'pointer', opacity: hasHold || !canGoNextMonth() ? 0.5 : 1 }}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid #ddd',
+                  background: '#fff',
+                  fontWeight: 900,
+                  cursor: hasHold ? 'default' : 'pointer',
+                  opacity: hasHold || !canGoNextMonth() ? 0.5 : 1,
+                }}
                 title={hasHold ? 'Date is locked while a hold exists.' : undefined}
               >
                 ›
@@ -1183,7 +1279,14 @@ export default function BookingPanel(props: BookingPanelProps) {
                   }
                 }}
                 disabled={loading || hasHold}
-                style={{ width: '100%', marginTop: 4, padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', opacity: hasHold ? 0.7 : 1 }}
+                style={{
+                  width: '100%',
+                  marginTop: 4,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #ddd',
+                  opacity: hasHold ? 0.7 : 1,
+                }}
                 title={hasHold ? 'This time is locked because a slot is being held.' : undefined}
               >
                 {availableSlots.map((iso) => (
@@ -1195,7 +1298,9 @@ export default function BookingPanel(props: BookingPanelProps) {
             )}
           </div>
 
-          {missingHeldScheduledFor ? <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div> : null}
+          {missingHeldScheduledFor ? (
+            <div style={{ fontSize: 12, color: '#b91c1c' }}>Hold is present but scheduledFor is missing. Go back and pick a slot again.</div>
+          ) : null}
 
           <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#111', padding: 12, borderRadius: 12, border: '1px solid #eee', background: '#fff' }}>
             <input
@@ -1217,7 +1322,17 @@ export default function BookingPanel(props: BookingPanelProps) {
           <button
             type="submit"
             disabled={!canSubmit}
-            style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: '#111', color: '#fff', fontSize: 14, fontWeight: 900, cursor: !canSubmit ? 'default' : 'pointer', opacity: !canSubmit ? 0.7 : 1 }}
+            style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: 'none',
+              background: '#111',
+              color: '#fff',
+              fontSize: 14,
+              fontWeight: 900,
+              cursor: !canSubmit ? 'default' : 'pointer',
+              opacity: !canSubmit ? 0.7 : 1,
+            }}
           >
             {loading ? 'Booking…' : holdLabel ? `Confirm now · Starting at $${displayPrice}` : `Confirm booking · Starting at $${displayPrice}`}
           </button>
@@ -1227,13 +1342,25 @@ export default function BookingPanel(props: BookingPanelProps) {
               type="button"
               onClick={joinWaitlist}
               disabled={waitlistBusy || loading}
-              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', color: '#111', fontSize: 13, fontWeight: 900, cursor: waitlistBusy ? 'default' : 'pointer', opacity: waitlistBusy ? 0.7 : 1 }}
+              style={{
+                padding: '10px 12px',
+                borderRadius: 10,
+                border: '1px solid #ddd',
+                background: '#fff',
+                color: '#111',
+                fontSize: 13,
+                fontWeight: 900,
+                cursor: waitlistBusy ? 'default' : 'pointer',
+                opacity: waitlistBusy ? 0.7 : 1,
+              }}
             >
               {waitlistBusy ? 'Joining waitlist…' : 'No time works? Join waitlist'}
             </button>
           ) : null}
 
-          {!isLoggedInAsClient ? <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>You’ll need to log in as a client to complete your booking.</p> : null}
+          {!isLoggedInAsClient ? (
+            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>You’ll need to log in as a client to complete your booking.</p>
+          ) : null}
 
           <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>{holdLabel ? 'If the hold expires, the time might disappear.' : 'Pick a date, pick a time, and you’re done.'}</p>
         </form>

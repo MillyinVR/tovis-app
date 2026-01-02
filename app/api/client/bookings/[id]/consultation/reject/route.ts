@@ -48,19 +48,9 @@ export async function POST(_req: Request, ctx: Ctx) {
       return NextResponse.json({ error: 'This booking is completed.' }, { status: 409 })
     }
 
-    // Optional but strongly recommended guard:
-    if (booking.status !== BookingStatus.ACCEPTED) {
-      return NextResponse.json({ error: 'This booking has not been accepted yet.' }, { status: 409 })
-    }
-
-    if (booking.sessionStep !== SessionStep.CONSULTATION_PENDING_CLIENT) {
-      return NextResponse.json({ error: 'No consultation approval is pending for this booking.' }, { status: 409 })
-    }
-
     if (!booking.consultationApproval?.id) {
       return NextResponse.json({ error: 'Missing consultation approval record.' }, { status: 409 })
     }
-
     if (booking.consultationApproval.status !== ConsultationApprovalStatus.PENDING) {
       return NextResponse.json({ error: 'This consultation is not pending.' }, { status: 409 })
     }
@@ -74,8 +64,6 @@ export async function POST(_req: Request, ctx: Ctx) {
           status: ConsultationApprovalStatus.REJECTED,
           rejectedAt: now,
           approvedAt: null,
-
-          // stamp ownership for audit clarity
           clientId,
           proId: booking.professionalId,
         },
@@ -84,17 +72,17 @@ export async function POST(_req: Request, ctx: Ctx) {
 
       const updatedBooking = await tx.booking.update({
         where: { id: booking.id },
-        data: { sessionStep: SessionStep.CONSULTATION },
-        select: { id: true, sessionStep: true },
+        data: {
+          sessionStep: SessionStep.CONSULTATION,
+          consultationConfirmedAt: null,
+        } as any,
+        select: { id: true, sessionStep: true, status: true },
       })
 
-      return { approval, updatedBooking }
+      return { approval, booking: updatedBooking }
     })
 
-    return NextResponse.json(
-      { ok: true, approval: result.approval, booking: result.updatedBooking },
-      { status: 200 },
-    )
+    return NextResponse.json({ ok: true, approval: result.approval, booking: result.booking }, { status: 200 })
   } catch (e) {
     console.error('POST /api/client/bookings/[id]/consultation/reject error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

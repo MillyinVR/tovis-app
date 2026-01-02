@@ -27,13 +27,79 @@ type BookingRow = {
   }
 }
 
-function formatDate(d: Date) {
-  return d.toLocaleString(undefined, {
+function isValidIanaTimeZone(tz: string | null | undefined) {
+  if (!tz || typeof tz !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** TZ wall-clock parts for a UTC instant rendered in timeZone */
+function getZonedParts(dateUtc: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+
+  const parts = dtf.formatToParts(dateUtc)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  }
+}
+
+/** offset minutes between UTC and tz at a given UTC instant */
+function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
+  const z = getZonedParts(dateUtc, timeZone)
+  const asIfUtc = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, z.second)
+  return Math.round((asIfUtc - dateUtc.getTime()) / 60_000)
+}
+
+/** Convert a wall-clock time in timeZone into UTC Date (two-pass for DST) */
+function zonedTimeToUtc(args: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  timeZone: string
+}) {
+  const { year, month, day, hour, minute, timeZone } = args
+
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
+  const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
+  guess = new Date(guess.getTime() - offset1 * 60_000)
+
+  const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
+  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
+
+  return guess
+}
+
+function formatDate(d: Date, timeZone: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  })
+  }).format(d)
 }
 
 function formatStatus(status: string) {
@@ -95,7 +161,7 @@ function PriceBlock({ b }: { b: BookingRow }) {
   return <div>Price: ${totalStr ?? baseStr}</div>
 }
 
-function Section({ title, items }: { title: string; items: BookingRow[] }) {
+function Section({ title, items, timeZone }: { title: string; items: BookingRow[]; timeZone: string }) {
   return (
     <section style={{ marginBottom: 28 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>{title}</h2>
@@ -134,7 +200,7 @@ function Section({ title, items }: { title: string; items: BookingRow[] }) {
                 </div>
 
                 <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                  {formatDate(b.scheduledFor)} • {Math.round(b.durationMinutesSnapshot)} min
+                  {formatDate(b.scheduledFor, timeZone)} • {Math.round(b.durationMinutesSnapshot)} min
                 </div>
 
                 <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
@@ -191,6 +257,9 @@ export default async function ProBookingsPage() {
   }
 
   const proId = user.professionalProfile.id
+  const timeZone = isValidIanaTimeZone(user.professionalProfile.timeZone)
+    ? user.professionalProfile.timeZone!
+    : 'America/Los_Angeles'
 
   const bookings = (await prisma.booking.findMany({
     where: { professionalId: proId },
@@ -218,24 +287,44 @@ export default async function ProBookingsPage() {
     },
   })) as BookingRow[]
 
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  // ---- Pro-timezone day bucketing (THIS is what fixes "already January" + wrong "today") ----
+  const nowUtc = new Date()
+  const nowParts = getZonedParts(nowUtc, timeZone)
 
-  const todayBookings = bookings.filter((b) => b.scheduledFor >= startOfToday && b.scheduledFor < endOfToday)
-  const upcomingBookings = bookings.filter((b) => b.scheduledFor >= endOfToday)
-  const pastBookings = bookings.filter((b) => b.scheduledFor < startOfToday)
+  const startOfTodayUtc = zonedTimeToUtc({
+    year: nowParts.year,
+    month: nowParts.month,
+    day: nowParts.day,
+    hour: 0,
+    minute: 0,
+    timeZone,
+  })
+
+  const startOfTomorrowUtc = zonedTimeToUtc({
+    year: nowParts.year,
+    month: nowParts.month,
+    day: nowParts.day + 1,
+    hour: 0,
+    minute: 0,
+    timeZone,
+  })
+
+  const todayBookings = bookings.filter((b) => b.scheduledFor >= startOfTodayUtc && b.scheduledFor < startOfTomorrowUtc)
+  const upcomingBookings = bookings.filter((b) => b.scheduledFor >= startOfTomorrowUtc)
+  const pastBookings = bookings.filter((b) => b.scheduledFor < startOfTodayUtc)
 
   return (
     <main style={{ maxWidth: 960, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <header style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Bookings</h1>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>Today, upcoming, and past.</div>
+        <div style={{ fontSize: 13, color: '#6b7280' }}>
+          Today, upcoming, and past. <span style={{ color: '#9ca3af' }}>({timeZone})</span>
+        </div>
       </header>
 
-      <Section title="Today" items={todayBookings} />
-      <Section title="Upcoming" items={upcomingBookings} />
-      <Section title="Past" items={pastBookings} />
+      <Section title="Today" items={todayBookings} timeZone={timeZone} />
+      <Section title="Upcoming" items={upcomingBookings} timeZone={timeZone} />
+      <Section title="Past" items={pastBookings} timeZone={timeZone} />
     </main>
   )
 }

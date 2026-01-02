@@ -26,9 +26,10 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   if (!hold) return new NextResponse(null, { status: 204 })
 
   // Must belong to this client
-  if (hold.clientId && hold.clientId !== user.clientProfile.id) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  if (hold.clientId !== user.clientProfile.id) {
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+}
+
 
   await prisma.bookingHold.delete({ where: { id: holdId } })
   return new NextResponse(null, { status: 204 })

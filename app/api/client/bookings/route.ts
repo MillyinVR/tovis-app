@@ -23,6 +23,14 @@ function decimalToString(v: unknown): string | null {
   return null
 }
 
+function moneyNumber(v: unknown): number | null {
+  if (v == null) return null
+  const s = typeof v === 'string' ? v : typeof v === 'number' ? String(v) : String((v as any)?.toString?.() ?? '')
+  const n = Number(String(s).replace(/[^0-9.]/g, ''))
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.round(n * 100) / 100
+}
+
 type BookingRow = {
   id: string
   status: string | null
@@ -73,8 +81,8 @@ type BookingOut = {
   } | null
 
   hasUnreadAftercare: boolean
-
   hasPendingConsultationApproval: boolean
+
   consultation: null | {
     consultationNotes: string | null
     consultationPrice: string | null
@@ -97,7 +105,6 @@ function needsConsultationApproval(b: BookingRow) {
   if (status === 'CANCELLED' || status === 'COMPLETED') return false
 
   const step = upper(b.sessionStep)
-  // forgiving: if approval is pending, surface it even if step got nudged
   return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step
 }
 
@@ -143,7 +150,6 @@ export async function GET() {
       },
     })) as BookingRow[]
 
-    // unread aftercare badges
     const unread = await prisma.clientNotification.findMany({
       where: {
         clientId,
@@ -164,6 +170,12 @@ export async function GET() {
     const out: BookingOut[] = bookings.map((b) => {
       const hasPending = needsConsultationApproval(b)
 
+      const approvalStatus = upper(b.consultationApproval?.status)
+      const approvedTotalNum = approvalStatus === 'APPROVED' ? moneyNumber(b.consultationApproval?.proposedTotal) : null
+
+      // ✅ Critical: if consult is approved, show that price everywhere in client dashboards/cards
+      const effectivePriceSnapshot = approvedTotalNum != null ? approvedTotalNum : b.priceSnapshot
+
       const shouldSendConsultationBlob =
         Boolean(b.consultationApproval) || Boolean(b.consultationNotes) || b.consultationPrice != null
 
@@ -175,13 +187,12 @@ export async function GET() {
 
         scheduledFor: b.scheduledFor.toISOString(),
         durationMinutesSnapshot: b.durationMinutesSnapshot,
-        priceSnapshot: b.priceSnapshot,
+        priceSnapshot: effectivePriceSnapshot,
 
         service: b.service,
         professional: b.professional,
 
         hasUnreadAftercare: unreadBookingIds.has(b.id),
-
         hasPendingConsultationApproval: hasPending,
 
         consultation: shouldSendConsultationBlob
@@ -201,7 +212,7 @@ export async function GET() {
       }
     })
 
-    // waitlist (leave as-is, but don’t let it crash bookings)
+    // waitlist (leave as-is)
     let waitlist: any[] = []
     try {
       waitlist = await prisma.waitlistEntry.findMany({
@@ -246,7 +257,6 @@ export async function GET() {
         continue
       }
 
-      // force consult pending into Pending bucket so it can’t hide
       if (b.hasPendingConsultationApproval) {
         pending.push(b)
         continue
@@ -283,3 +293,4 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: 'Failed to load client bookings.' }, { status: 500 })
   }
 }
+

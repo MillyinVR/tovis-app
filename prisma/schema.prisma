@@ -133,6 +133,7 @@ enum AftercareRebookMode {
 }
 
 enum ClientNotificationType {
+  BOOKING
   AFTERCARE
   LAST_MINUTE
 }
@@ -279,6 +280,7 @@ model ProfessionalProfile {
   intentEvents       ClientIntentEvent[]
   adminPermissions   AdminPermission[]
   messageThreads     MessageThread[]        @relation("ProThreads")
+  calendarBlocks     CalendarBlock[]
 
   location String @default("")
 
@@ -398,16 +400,17 @@ model Service {
   lastMinuteOpenings     LastMinuteOpening[] @relation("ServiceOpenings")
   adminPermissions       AdminPermission[]
 
-  category         ServiceCategory               @relation(fields: [categoryId], references: [id])
-  offerings        ProfessionalServiceOffering[]
-  bookings         Booking[]
-  lastMinuteRules  LastMinuteServiceRule[]       @relation("ServiceLastMinuteRules")
-  permissions      ServicePermission[]
-  mediaServiceTags MediaServiceTag[]
-  waitlistEntries  WaitlistEntry[]
-  adminActionLogs  AdminActionLog[]              @relation("ServiceLogs")
-  messageThreads   MessageThread[]               @relation("ServiceThreads")
-  quotes           Quote[]                       @relation("ServiceQuotes")
+  category            ServiceCategory               @relation(fields: [categoryId], references: [id])
+  offerings           ProfessionalServiceOffering[]
+  bookings            Booking[]
+  lastMinuteRules     LastMinuteServiceRule[]       @relation("ServiceLastMinuteRules")
+  permissions         ServicePermission[]
+  mediaServiceTags    MediaServiceTag[]
+  waitlistEntries     WaitlistEntry[]
+  adminActionLogs     AdminActionLog[]              @relation("ServiceLogs")
+  messageThreads      MessageThread[]               @relation("ServiceThreads")
+  quotes              Quote[]                       @relation("ServiceQuotes")
+  bookingServiceItems BookingServiceItem[]
 }
 
 model ServicePermission {
@@ -456,8 +459,9 @@ model ProfessionalServiceOffering {
   service      Service             @relation(fields: [serviceId], references: [id])
   bookings     Booking[]
 
-  intentEvents       ClientIntentEvent[]
-  lastMinuteOpenings LastMinuteOpening[] @relation("OfferingOpenings")
+  intentEvents        ClientIntentEvent[]
+  lastMinuteOpenings  LastMinuteOpening[]  @relation("OfferingOpenings")
+  bookingServiceItems BookingServiceItem[]
 
   @@unique([professionalId, serviceId])
 }
@@ -617,15 +621,20 @@ model ClientNotificationSettings {
 }
 
 model Booking {
-  id             String              @id @default(cuid())
+  id             String               @id @default(cuid())
   clientId       String
   professionalId String
   serviceId      String
   offeringId     String?
   scheduledFor   DateTime
-  status         BookingStatus       @default(PENDING)
-  locationType   ServiceLocationType @default(SALON)
+  status         BookingStatus        @default(PENDING)
+  locationType   ServiceLocationType  @default(SALON)
+  serviceItems   BookingServiceItem[]
 
+  internalNotes String?
+  clientNotes   String?
+
+  // (Legacy snapshots - keep for now, but stop using)
   priceSnapshot           Decimal @db.Decimal(10, 2)
   durationMinutesSnapshot Int
 
@@ -641,6 +650,11 @@ model Booking {
   consultationPrice       Decimal?              @db.Decimal(10, 2)
   consultationConfirmedAt DateTime?
   consultationApproval    ConsultationApproval?
+
+  // ✅ Option B fields (new source of truth)
+  subtotalSnapshot     Decimal @db.Decimal(10, 2)
+  totalDurationMinutes Int
+  bufferMinutes        Int     @default(0)
 
   // ✅ Source tracking
   source            BookingSource @default(DISCOVERY)
@@ -697,10 +711,10 @@ model BookingHold {
 }
 
 model AftercareSummary {
-  id          String    @id @default(cuid())
-  bookingId   String    @unique
-  notes       String?
-  rebookedFor DateTime?
+  id           String    @id @default(cuid())
+  bookingId    String    @unique
+  notes        String?
+  rebookedFor  DateTime?
   serviceNotes String?
 
   // ✅ NEW: timeframe-based recommendation (client self-rebooks)
@@ -731,7 +745,7 @@ model Product {
 }
 
 model ProductRecommendation {
-  id                 String  @id @default(cuid())
+  id                 String @id @default(cuid())
   aftercareSummaryId String
 
   // Existing path (internal store)
@@ -749,7 +763,6 @@ model ProductRecommendation {
   @@index([aftercareSummaryId])
   @@index([productId])
 }
-
 
 model ProductSale {
   id             String   @id @default(cuid())
@@ -1059,4 +1072,43 @@ model ClientNotification {
 
   @@index([clientId, createdAt])
   @@index([clientId, readAt])
+}
+
+model BookingServiceItem {
+  id         String  @id @default(cuid())
+  bookingId  String
+  serviceId  String
+  offeringId String? // optional but useful if pricing/duration comes from offering
+
+  // Snapshots at the time of booking
+  priceSnapshot           Decimal @db.Decimal(10, 2)
+  durationMinutesSnapshot Int
+
+  // Optional: ordering + notes
+  sortOrder Int      @default(0)
+  notes     String?
+  createdAt DateTime @default(now())
+
+  booking  Booking                      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  service  Service                      @relation(fields: [serviceId], references: [id])
+  offering ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
+
+  @@index([bookingId])
+  @@index([serviceId])
+  @@index([bookingId, sortOrder])
+}
+
+model CalendarBlock {
+  id             String   @id @default(cuid())
+  professionalId String
+  startsAt       DateTime
+  endsAt         DateTime
+  note           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  professionalProfile ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId, startsAt])
+  @@index([professionalId, endsAt])
 }

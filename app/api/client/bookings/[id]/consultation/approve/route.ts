@@ -12,6 +12,14 @@ function pickString(v: unknown) {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
+function moneyNumber(v: any): number | null {
+  if (v == null) return null
+  const s = typeof v === 'string' ? v : typeof v === 'number' ? String(v) : String(v?.toString?.() ?? '')
+  const n = Number(String(s).replace(/[^0-9.]/g, ''))
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.round(n * 100) / 100
+}
+
 export async function POST(_req: Request, ctx: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -34,7 +42,10 @@ export async function POST(_req: Request, ctx: Ctx) {
         status: true,
         sessionStep: true,
         finishedAt: true,
-        consultationApproval: { select: { id: true, status: true } },
+        discountAmount: true,
+        consultationApproval: {
+          select: { id: true, status: true, proposedTotal: true, proposedServicesJson: true },
+        },
       },
     })
 
@@ -48,21 +59,21 @@ export async function POST(_req: Request, ctx: Ctx) {
       return NextResponse.json({ error: 'This booking is completed.' }, { status: 409 })
     }
 
-    // Optional but strongly recommended guard:
-    if (booking.status !== BookingStatus.ACCEPTED) {
-      return NextResponse.json({ error: 'This booking has not been accepted yet.' }, { status: 409 })
-    }
-
-    if (booking.sessionStep !== SessionStep.CONSULTATION_PENDING_CLIENT) {
-      return NextResponse.json({ error: 'No consultation approval is pending for this booking.' }, { status: 409 })
-    }
-
     if (!booking.consultationApproval?.id) {
       return NextResponse.json({ error: 'Missing consultation approval record.' }, { status: 409 })
     }
-
     if (booking.consultationApproval.status !== ConsultationApprovalStatus.PENDING) {
       return NextResponse.json({ error: 'This consultation is not pending.' }, { status: 409 })
+    }
+
+    // Allow approving even if someone nudged the step slightly, but it should usually be pending-client
+    if (booking.sessionStep !== SessionStep.CONSULTATION_PENDING_CLIENT && booking.sessionStep !== SessionStep.CONSULTATION) {
+      return NextResponse.json({ error: 'No consultation approval is pending for this booking.' }, { status: 409 })
+    }
+
+    const proposedTotalNum = moneyNumber(booking.consultationApproval.proposedTotal)
+    if (proposedTotalNum == null || proposedTotalNum <= 0) {
+      return NextResponse.json({ error: 'Proposed total is missing or invalid.' }, { status: 409 })
     }
 
     const now = new Date()
@@ -74,27 +85,33 @@ export async function POST(_req: Request, ctx: Ctx) {
           status: ConsultationApprovalStatus.APPROVED,
           approvedAt: now,
           rejectedAt: null,
-
-          // stamp ownership for audit clarity
           clientId,
           proId: booking.professionalId,
         },
         select: { id: true, status: true, approvedAt: true, rejectedAt: true },
       })
 
+      // Apply the approved consult total as the canonical booking price snapshot
+      // This is what makes the rest of the app show the correct price without rewriting every UI component.
       const updatedBooking = await tx.booking.update({
         where: { id: booking.id },
-        data: { sessionStep: SessionStep.BEFORE_PHOTOS },
-        select: { id: true, sessionStep: true },
+        data: {
+          sessionStep: SessionStep.BEFORE_PHOTOS,
+          consultationConfirmedAt: now,
+          consultationPrice: proposedTotalNum as any,
+
+          priceSnapshot: proposedTotalNum as any,
+          totalAmount: proposedTotalNum as any,
+
+          status: booking.status === BookingStatus.PENDING ? BookingStatus.ACCEPTED : booking.status,
+        } as any,
+        select: { id: true, sessionStep: true, status: true },
       })
 
-      return { approval, updatedBooking }
+      return { approval, booking: updatedBooking }
     })
 
-    return NextResponse.json(
-      { ok: true, approval: result.approval, booking: result.updatedBooking },
-      { status: 200 },
-    )
+    return NextResponse.json({ ok: true, approval: result.approval, booking: result.booking }, { status: 200 })
   } catch (e) {
     console.error('POST /api/client/bookings/[id]/consultation/approve error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

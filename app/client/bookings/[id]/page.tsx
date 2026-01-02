@@ -518,7 +518,9 @@ export default async function ClientBookingPage(props: {
                 appointmentTz={appointmentTz}
                 notes={String(consultNotes || '')}
                 proposedTotalLabel={proposedTotalLabel || proposedFallback}
+                proposedServicesJson={(booking.consultationApproval as any)?.proposedServicesJson ?? null}
               />
+
             ) : (
               <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>No consultation approval needed right now.</div>
             )}
