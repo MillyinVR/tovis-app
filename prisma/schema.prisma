@@ -60,6 +60,7 @@ enum VerificationStatus {
   PENDING
   APPROVED
   REJECTED
+  NEEDS_INFO
 }
 
 enum VerificationDocumentType {
@@ -166,6 +167,12 @@ enum ConsultationApprovalStatus {
   REJECTED
 }
 
+enum NfcCardType {
+  CLIENT_REFERRAL
+  PRO_BOOKING
+  SALON_WHITE_LABEL
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -219,18 +226,25 @@ model AdminPermission {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  email            String            @unique
-  password         String
-  role             Role
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   adminActionLogs  AdminActionLog[]  @relation("AdminUserLogs")
   adminPermissions AdminPermission[]
   sentMessages     Message[]         @relation("UserSentMessages")
 
+  // NFC attribution events
+  attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
+  attributionCreditedEvents AttributionEvent[] @relation("AttributionCredited")
+
+  // favorites (clients favoriting pros)
   favoritePros ProfessionalFavorite[]
 
+  // role profiles
   clientProfile       ClientProfile?
   professionalProfile ProfessionalProfile?
 
@@ -240,14 +254,17 @@ model User {
 
   // opposite relation for MediaAsset.uploadedByUser
   uploadedMedia MediaAsset[] @relation("UploadedMedia")
+  nfcCards      NfcCard[]
+  tapIntents    TapIntent[]
 }
 
 model ClientProfile {
   id                   String                      @id @default(cuid())
   userId               String                      @unique
-  firstName            String
-  lastName             String
+  firstName            String                      @default("")
+  lastName             String                      @default("")
   phone                String?
+  phoneVerifiedAt      DateTime?
   avatarUrl            String?
   intentEvents         ClientIntentEvent[]
   openingNotifications OpeningNotification[]
@@ -330,6 +347,7 @@ model ProfessionalProfile {
   // ✅ Store tracking (you added this)
   productSales    ProductSale[]
   adminActionLogs AdminActionLog[] @relation("ProfessionalLogs")
+  nfcCards        NfcCard[]
 }
 
 model AdminActionLog {
@@ -706,7 +724,7 @@ model BookingHold {
   clientId String?
   client   ClientProfile? @relation(fields: [clientId], references: [id])
 
-  @@unique([professionalId, scheduledFor, locationType])
+  @@unique([professionalId, scheduledFor])
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
 }
@@ -1112,4 +1130,79 @@ model CalendarBlock {
 
   @@index([professionalId, startsAt])
   @@index([professionalId, endsAt])
+}
+
+model NfcCard {
+  id   String      @id // this is what’s encoded in the NFC URL
+  type NfcCardType
+
+  // “ownership” (never changes once claimed)
+  claimedAt       DateTime?
+  claimedByUserId String?
+  claimedByUser   User?     @relation(fields: [claimedByUserId], references: [id])
+
+  // referral attribution (for future rewards)
+  referralCount Int @default(0)
+
+  // pro booking cards
+  professionalId String?
+  professional   ProfessionalProfile? @relation(fields: [professionalId], references: [id])
+
+  // white-label salon cards (minimal tenant pointer)
+  salonSlug String? // or salonId if you already have a Salon model
+
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  tapIntents        TapIntent[]
+  attributionEvents AttributionEvent[]
+
+  @@index([type])
+  @@index([claimedByUserId])
+  @@index([professionalId])
+  @@index([salonSlug])
+}
+
+model TapIntent {
+  id     String  @id @default(cuid())
+  cardId String
+  card   NfcCard @relation(fields: [cardId], references: [id])
+
+  // who it eventually belongs to (set after login/signup)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  // what the user was trying to do
+  intentType  String // "SIGNUP_CLIENT" | "SIGNUP_PRO" | "BOOK_PRO" | "WL_SIGNUP" etc.
+  payloadJson Json?
+
+  // anti-abuse + cleanup
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([cardId])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AttributionEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  eventType String
+
+  cardId String?
+  card   NfcCard? @relation(fields: [cardId], references: [id])
+
+  actorUserId String?
+  actorUser   User?   @relation("AttributionActor", fields: [actorUserId], references: [id])
+
+  creditedUserId String?
+  creditedUser   User?   @relation("AttributionCredited", fields: [creditedUserId], references: [id])
+
+  metaJson Json?
+
+  @@index([cardId])
+  @@index([actorUserId])
+  @@index([creditedUserId])
 }
