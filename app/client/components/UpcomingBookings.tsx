@@ -11,14 +11,22 @@ function prettyWhere(b: BookingLike) {
   return bits.length ? bits.join(', ') : null
 }
 
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
+      {children}
+    </span>
+  )
+}
+
 export default function UpcomingBookings({ items }: { items: BookingLike[] }) {
   if (!items?.length) return null
 
   return (
-    <section style={{ marginTop: 18 }}>
-      <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 8 }}>Upcoming</h2>
+    <section className="mt-5">
+      <h2 className="mb-2 text-base font-black text-textPrimary">Upcoming</h2>
 
-      <div style={{ display: 'grid', gap: 10 }}>
+      <div className="grid gap-3">
         {items.map((b) => {
           const when = prettyWhen(b.scheduledFor)
           const serviceName = b.service?.name || 'Appointment'
@@ -29,41 +37,21 @@ export default function UpcomingBookings({ items }: { items: BookingLike[] }) {
             <Link
               key={b.id}
               href={`/client/bookings/${encodeURIComponent(b.id)}`}
-              style={{ textDecoration: 'none', color: 'inherit' }}
+              className="block no-underline"
             >
-              <div
-                style={{
-                  border: '1px solid #eee',
-                  borderRadius: 12,
-                  padding: 12,
-                  background: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ fontWeight: 900, fontSize: 14 }}>{serviceName}</div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 900,
-                      color: '#166534',
-                      background: '#f0fdf4',
-                      border: '1px solid #dcfce7',
-                      padding: '2px 8px',
-                      borderRadius: 999,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    Confirmed
-                  </div>
+              <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="text-sm font-black">{serviceName}</div>
+                  <Pill>Confirmed</Pill>
                 </div>
 
-                <div style={{ marginTop: 6, fontSize: 13, color: '#111' }}>
-                  <span style={{ fontWeight: 800 }}>{when}</span> · <span>{proName}</span>
-                  {where ? <span style={{ color: '#6b7280' }}> · {where}</span> : null}
+                <div className="mt-2 text-sm">
+                  <span className="font-black">{when}</span>
+                  <span className="text-textSecondary"> · {proName}</span>
+                  {where ? <span className="text-textSecondary"> · {where}</span> : null}
                 </div>
 
-                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+                <div className="mt-2 text-xs font-medium text-textSecondary">
                   Tap to view details.
                 </div>
               </div>

@@ -36,6 +36,10 @@ function prettyWhen(iso?: string | null) {
   })
 }
 
+async function safeJson(res: Response) {
+  return (await res.json().catch(() => ({}))) as any
+}
+
 export default function PendingConsultApprovalBanner() {
   const [loading, setLoading] = useState(true)
   const [item, setItem] = useState<BookingLike | null>(null)
@@ -47,13 +51,11 @@ export default function PendingConsultApprovalBanner() {
       setLoading(true)
       try {
         const res = await fetch('/api/client/bookings', { cache: 'no-store' })
-        const data: any = await res.json().catch(() => ({}))
+        const data = await safeJson(res)
         if (!res.ok) throw new Error(data?.error || 'Failed to load bookings.')
 
         const buckets: Buckets = data?.buckets || {}
 
-        // Scan in a sensible priority order:
-        // 1) upcoming (because it’s soonest), 2) pending, 3) prebooked
         const all = [
           ...asArray<BookingLike>(buckets.upcoming),
           ...asArray<BookingLike>(buckets.pending),
@@ -63,7 +65,6 @@ export default function PendingConsultApprovalBanner() {
         const found = all.find((b) => Boolean(b?.hasPendingConsultationApproval))
         if (!cancelled) setItem(found || null)
       } catch {
-        // If this fails, don’t block the dashboard. Just show nothing.
         if (!cancelled) setItem(null)
       } finally {
         if (!cancelled) setLoading(false)
@@ -81,46 +82,25 @@ export default function PendingConsultApprovalBanner() {
     return `/client/bookings/${encodeURIComponent(item.id)}?step=consult`
   }, [item?.id])
 
-  // ✅ “No sign of it” when there isn’t one.
   if (loading) return null
   if (!item || !href) return null
 
   return (
-    <section
-      style={{
-        border: '1px solid #fde68a',
-        background: '#fffbeb',
-        borderRadius: 16,
-        padding: 14,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <div style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 12, fontWeight: 900, color: '#854d0e' }}>Action required</div>
-          <div style={{ fontSize: 14, fontWeight: 900, color: '#111' }}>
-            Consultation approval needed
-          </div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
-            {item.service?.name ? item.service.name : 'A booking'}{' '}
-            {item.professional?.businessName ? `· ${item.professional.businessName}` : ''}{' '}
-            {item.scheduledFor ? `· ${prettyWhen(item.scheduledFor)}` : ''}
+    <section className="rounded-card border border-white/10 bg-surfaceGlass p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div className="grid gap-1">
+          <div className="text-xs font-black text-microAccent">Action required</div>
+          <div className="text-sm font-black text-textPrimary">Consultation approval needed</div>
+          <div className="text-xs font-medium text-textSecondary">
+            {item.service?.name ? item.service.name : 'A booking'}
+            {item.professional?.businessName ? ` · ${item.professional.businessName}` : ''}
+            {item.scheduledFor ? ` · ${prettyWhen(item.scheduledFor)}` : ''}
           </div>
         </div>
 
         <a
           href={href}
-          style={{
-            textDecoration: 'none',
-            border: '1px solid #111',
-            borderRadius: 999,
-            padding: '8px 12px',
-            fontSize: 12,
-            fontWeight: 900,
-            color: '#fff',
-            background: '#111',
-            whiteSpace: 'nowrap',
-            alignSelf: 'flex-start',
-          }}
+          className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-3 py-2 text-xs font-black text-bgPrimary shadow-sm transition hover:bg-accentPrimaryHover"
         >
           Review &amp; approve
         </a>

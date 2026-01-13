@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import type { BookingLike } from './_helpers'
-import { Badge, prettyWhen, locationLabel, statusUpper } from './_helpers'
+import { prettyWhen, locationLabel, statusUpper } from './_helpers'
 
 async function safeJson(res: Response) {
   return (await res.json().catch(() => ({}))) as any
@@ -15,6 +15,14 @@ function errorFrom(res: Response, data: any) {
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
+      {children}
+    </span>
+  )
 }
 
 export default function PendingBookings({
@@ -44,12 +52,12 @@ export default function PendingBookings({
     setBusyId(bookingId)
 
     try {
-      const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/consultation/${action}`, {
-        method: 'POST',
-      })
+      const res = await fetch(
+        `/api/client/bookings/${encodeURIComponent(bookingId)}/consultation/${action}`,
+        { method: 'POST' },
+      )
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorFrom(res, data))
-
       onChanged?.()
     } catch (e: any) {
       setError(e?.message || 'Something went wrong.')
@@ -58,22 +66,27 @@ export default function PendingBookings({
     }
   }
 
+  function statusLabel(statusRaw: unknown) {
+    const s = statusUpper(statusRaw)
+    if (s === 'PENDING') return 'Requested'
+    if (s === 'ACCEPTED') return 'Confirmed'
+    if (s) return s
+    return 'Pending'
+  }
+
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ fontWeight: 900, marginBottom: 4 }}>Pending</div>
+    <div className="grid gap-2">
+      <div className="text-sm font-black text-textPrimary">Pending</div>
 
       {error ? (
-        <div style={{ border: '1px solid #fee2e2', background: '#fff1f2', padding: 10, borderRadius: 12, color: '#7f1d1d', fontSize: 12, fontWeight: 800 }}>
+        <div className="rounded-card border border-white/10 bg-surfaceGlass p-3 text-xs font-semibold text-microAccent">
           {error}
         </div>
       ) : null}
 
-      {/* ✅ Action required section */}
       {actionRequired.length ? (
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>
-            Action required
-          </div>
+        <div className="grid gap-3">
+          <div className="text-xs font-black text-textSecondary">Action required</div>
 
           {actionRequired.map((b) => {
             const svc = b?.service?.name || 'Appointment'
@@ -83,76 +96,62 @@ export default function PendingBookings({
 
             const price =
               b?.consultation?.consultationPrice ??
-              (typeof (b as any)?.consultationPrice === 'string' ? (b as any).consultationPrice : null)
+              (typeof (b as any)?.consultationPrice === 'string'
+                ? (b as any).consultationPrice
+                : null)
+
+            const isBusy = busyId === b.id
 
             return (
-              <div key={b.id} style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 12, padding: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                  <div style={{ fontWeight: 900 }}>{svc}</div>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>{when}</div>
+              <div key={b.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="text-sm font-black text-textPrimary">{svc}</div>
+                  <div className="text-xs font-semibold text-textSecondary">{when}</div>
                 </div>
 
-                <div style={{ fontSize: 13, marginTop: 4 }}>
-                  <span style={{ fontWeight: 900 }}>{pro}</span>
-                  {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
+                <div className="mt-1 text-sm text-textPrimary">
+                  <span className="font-black">{pro}</span>
+                  {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
-                  <Badge label="Action required" bg="#fff7ed" color="#9a3412" />
-                  <Badge label="Approve consultation" bg="#fffbeb" color="#854d0e" />
-                  {price ? <Badge label={`Proposed: $${price}`} bg="#eef2ff" color="#1e3a8a" /> : null}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Pill>Action required</Pill>
+                  <Pill>Approve consultation</Pill>
+                  {price ? <Pill>Proposed: ${price}</Pill> : null}
 
                   <Link
                     href={`/client/bookings/${encodeURIComponent(b.id)}?step=consult`}
-                    style={{
-                      marginLeft: 'auto',
-                      textDecoration: 'none',
-                      border: '1px solid #111',
-                      borderRadius: 999,
-                      padding: '8px 12px',
-                      fontSize: 12,
-                      fontWeight: 900,
-                      color: '#fff',
-                      background: '#111',
-                    }}
+                    className="ml-auto inline-flex items-center justify-center rounded-full border border-white/10 bg-accentPrimary px-3 py-2 text-xs font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
                   >
                     Review
                   </Link>
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => decide(b.id, 'approve')}
-                    disabled={busyId === b.id}
-                    style={{
-                      border: '1px solid #16a34a',
-                      background: busyId === b.id ? '#d1d5db' : '#16a34a',
-                      color: '#fff',
-                      borderRadius: 999,
-                      padding: '10px 14px',
-                      fontSize: 12,
-                      fontWeight: 900,
-                      cursor: busyId === b.id ? 'not-allowed' : 'pointer',
-                    }}
+                    disabled={isBusy}
+                    className={[
+                      'rounded-full px-4 py-2 text-xs font-black transition',
+                      isBusy
+                        ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
+                        : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+                    ].join(' ')}
                   >
-                    {busyId === b.id ? 'Working…' : 'Approve'}
+                    {isBusy ? 'Working…' : 'Approve'}
                   </button>
 
                   <button
                     type="button"
                     onClick={() => decide(b.id, 'reject')}
-                    disabled={busyId === b.id}
-                    style={{
-                      border: '1px solid #ef4444',
-                      background: busyId === b.id ? '#d1d5db' : '#fff',
-                      color: '#ef4444',
-                      borderRadius: 999,
-                      padding: '10px 14px',
-                      fontSize: 12,
-                      fontWeight: 900,
-                      cursor: busyId === b.id ? 'not-allowed' : 'pointer',
-                    }}
+                    disabled={isBusy}
+                    className={[
+                      'rounded-full px-4 py-2 text-xs font-black transition',
+                      isBusy
+                        ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
+                        : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                    ].join(' ')}
                   >
                     Reject
                   </button>
@@ -163,41 +162,40 @@ export default function PendingBookings({
         </div>
       ) : null}
 
-      {/* Regular pending bookings (requested etc.) */}
       {regularPending.map((b) => {
         const svc = b?.service?.name || 'Appointment'
         const pro = b?.professional?.businessName || 'Professional'
         const when = prettyWhen(b?.scheduledFor)
         const loc = locationLabel(b?.professional)
 
-        const s = statusUpper(b?.status)
-        const statusLabel =
-          s === 'PENDING' ? 'Requested' : s === 'ACCEPTED' ? 'Confirmed' : s || 'Pending'
-
         return (
           <Link
             key={b.id}
             href={`/client/bookings/${encodeURIComponent(b.id)}`}
-            style={{ textDecoration: 'none', color: 'inherit' }}
+            className="block no-underline"
           >
-            <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, cursor: 'pointer', background: '#fff' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                <div style={{ fontWeight: 900 }}>{svc}</div>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{when}</div>
+            <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="text-sm font-black">{svc}</div>
+                <div className="text-xs font-semibold text-textSecondary">{when}</div>
               </div>
 
-              <div style={{ fontSize: 13, marginTop: 4 }}>
-                <span style={{ fontWeight: 900 }}>{pro}</span>
-                {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
+              <div className="mt-1 text-sm">
+                <span className="font-black">{pro}</span>
+                {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
               </div>
 
-              <div style={{ marginTop: 10 }}>
-                <Badge label={statusLabel} bg="#fef9c3" color="#854d0e" />
+              <div className="mt-3">
+                <Pill>{statusLabel(b?.status)}</Pill>
               </div>
             </div>
           </Link>
         )
       })}
+
+      {list.length === 0 ? (
+        <div className="text-sm font-medium text-textSecondary">No pending items.</div>
+      ) : null}
     </div>
   )
 }

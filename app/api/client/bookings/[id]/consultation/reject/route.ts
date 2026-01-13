@@ -74,7 +74,6 @@ export async function POST(_req: Request, ctx: Ctx) {
         where: { id: booking.id },
         data: {
           sessionStep: SessionStep.CONSULTATION,
-          consultationConfirmedAt: null,
         } as any,
         select: { id: true, sessionStep: true, status: true },
       })

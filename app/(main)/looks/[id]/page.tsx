@@ -44,16 +44,23 @@ export default async function LookDetailPage({
   const pro = media.professional
 
   return (
-    <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
+    <main
+      className="text-textPrimary"
+      style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}
+    >
       <Link
         href="/looks"
-        style={{ fontSize: 12, textDecoration: 'none', color: '#111', display: 'inline-block', marginBottom: 10 }}
+        className="text-textPrimary"
+        style={{ fontSize: 12, textDecoration: 'none', display: 'inline-block', marginBottom: 10 }}
       >
         ← Back to Looks
       </Link>
 
-      <section style={{ borderRadius: 16, border: '1px solid #eee', background: '#fff', overflow: 'hidden' }}>
-        <div style={{ background: '#000', display: 'grid', placeItems: 'center', maxHeight: 520 }}>
+      <section
+        className="border border-surfaceGlass/10 bg-bgSecondary"
+        style={{ borderRadius: 16, overflow: 'hidden' }}
+      >
+        <div className="bg-bgPrimary" style={{ display: 'grid', placeItems: 'center', maxHeight: 520 }}>
           {isVideo ? (
             <video src={src} controls style={{ width: '100%', maxHeight: 520 }} />
           ) : (
@@ -77,9 +84,8 @@ export default async function LookDetailPage({
                 (t: { id: string; service?: { name?: string | null } | null }) => (
                   <span
                     key={t.id}
+                    className="bg-surfaceGlass/16 text-textPrimary"
                     style={{
-                      background: '#111',
-                      color: '#fff',
                       fontSize: 11,
                       padding: '4px 8px',
                       borderRadius: 999,
@@ -95,7 +101,10 @@ export default async function LookDetailPage({
           {media.caption && <div style={{ fontSize: 13, color: '#374151' }}>{media.caption}</div>}
 
           {media.review && (
-            <div style={{ marginTop: 6, borderTop: '1px solid #eee', paddingTop: 10, display: 'grid', gap: 6 }}>
+            <div
+              className="border-t border-surfaceGlass/10"
+              style={{ marginTop: 6, paddingTop: 10, display: 'grid', gap: 6 }}
+            >
               <div style={{ fontSize: 12, color: '#f59e0b' }}>{'★'.repeat(media.review.rating).padEnd(5, '☆')}</div>
               {media.review.headline && <div style={{ fontSize: 14, fontWeight: 600 }}>{media.review.headline}</div>}
               {media.review.body && <div style={{ fontSize: 13, color: '#374151' }}>{media.review.body}</div>}
@@ -106,10 +115,10 @@ export default async function LookDetailPage({
             <div style={{ marginTop: 6 }}>
               <Link
                 href={`/professionals/${pro.id}`}
+                className="border border-surfaceGlass/25 text-textPrimary"
                 style={{
                   fontSize: 12,
                   textDecoration: 'none',
-                  border: '1px solid #111',
                   padding: '8px 12px',
                   borderRadius: 999,
                   display: 'inline-block',

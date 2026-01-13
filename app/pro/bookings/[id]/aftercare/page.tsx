@@ -51,7 +51,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
           uploadedByRole: true,
           reviewId: true,
           createdAt: true,
-          phase: true, // ✅ PASS PHASE DOWN
+          phase: true,
         },
       },
     },
@@ -66,10 +66,8 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const existingRebookMode = isRebookMode(existingRebookModeRaw) ? (existingRebookModeRaw as RebookMode) : null
 
   const existingRebookedFor = aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
-
   const existingRebookWindowStart =
     (aftercare as any)?.rebookWindowStart instanceof Date ? (aftercare as any).rebookWindowStart.toISOString() : null
-
   const existingRebookWindowEnd =
     (aftercare as any)?.rebookWindowEnd instanceof Date ? (aftercare as any).rebookWindowEnd.toISOString() : null
 
@@ -97,24 +95,24 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
 
   return (
-    <main style={{ maxWidth: 860, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
+    <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
       <a
         href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
-        style={{ fontSize: 12, color: '#555', textDecoration: 'none' }}
+        className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
       >
         ← Back to session
       </a>
 
-      <h1 style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>Aftercare: {serviceName}</h1>
-      <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>Client: {clientName}</div>
+      <h1 className="mt-4 text-xl font-black">Aftercare: {serviceName}</h1>
+      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
 
-      <div style={{ marginTop: 14, border: '1px solid #eee', background: '#fff', borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 13, color: '#374151' }}>
+      <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="text-sm font-semibold text-textSecondary">
           Write clear instructions, add product links, set rebook guidance, then send.
         </div>
       </div>
 
-      <div style={{ marginTop: 12 }}>
+      <div className="mt-4">
         <AftercareForm
           bookingId={bookingId}
           existingNotes={aftercare?.notes ?? ''}

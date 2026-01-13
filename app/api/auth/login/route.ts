@@ -1,16 +1,19 @@
+// app/api/auth/login/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyPassword, createToken } from '@/lib/auth'
+import { consumeTapIntent } from '@/lib/tapIntentConsume'
 
 type LoginBody = {
   email: string
   password: string
+  tapIntentId?: string
 }
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as LoginBody
-    const { email, password } = body
+    const { email, password, tapIntentId } = body
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Missing email or password' }, { status: 400 })
@@ -34,6 +37,12 @@ export async function POST(request: Request) {
 
     const token = createToken({ userId: user.id, role: user.role })
 
+    // ✅ If this login came from an NFC tap flow, consume it (claim card, log attribution, get nextUrl)
+    const consumed = await consumeTapIntent({
+      tapIntentId: tapIntentId ?? null,
+      userId: user.id,
+    })
+
     const response = NextResponse.json(
       {
         user: {
@@ -41,6 +50,7 @@ export async function POST(request: Request) {
           email: user.email,
           role: user.role,
         },
+        nextUrl: consumed.nextUrl,
       },
       { status: 200 },
     )

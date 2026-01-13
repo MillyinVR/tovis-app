@@ -20,8 +20,12 @@ export default async function ClientDashboardPage() {
   return (
     <main style={{ maxWidth: 980, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <div style={{ marginBottom: 18 }}>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>Your calendar</h1>
-        <p style={{ margin: '6px 0 0', color: '#6b7280' }}>Welcome, {displayName}.</p>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }} className="text-textPrimary">
+          Your calendar
+        </h1>
+        <p style={{ margin: '6px 0 0' }} className="text-textSecondary">
+          Welcome, {displayName}.
+        </p>
       </div>
 
       {/* ✅ Shows ONLY when a pending consult approval exists */}
@@ -32,7 +36,13 @@ export default async function ClientDashboardPage() {
       <LastMinuteOpenings />
       <div style={{ height: 12 }} />
 
-      <Suspense fallback={<div style={{ color: '#6b7280', fontSize: 13 }}>Loading your bookings…</div>}>
+      <Suspense
+        fallback={
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>
+            Loading your bookings…
+          </div>
+        }
+      >
         <ClientBookingsDashboard />
       </Suspense>
     </main>

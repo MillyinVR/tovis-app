@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { moneyToFixed2String } from '@/lib/money/serializeMoney'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -278,7 +280,7 @@ export async function GET(_req: Request, { params }: Ctx) {
           bufferMinutes: buffer,
           durationMinutes: totalDur, // 🔥 UI expects durationMinutes
           totalDurationMinutes: totalDur,
-          subtotalSnapshot: String(booking.subtotalSnapshot ?? booking.priceSnapshot ?? 0),
+          subtotalSnapshot: moneyToFixed2String(booking.subtotalSnapshot ?? booking.priceSnapshot),
 
           client: {
             fullName,
@@ -292,7 +294,7 @@ export async function GET(_req: Request, { params }: Ctx) {
             serviceId: i.serviceId,
             offeringId: i.offeringId ?? null,
             serviceName: i.service?.name ?? 'Service',
-            priceSnapshot: String(i.priceSnapshot ?? 0),
+            priceSnapshot: moneyToFixed2String(i.priceSnapshot),
             durationMinutesSnapshot: i.durationMinutesSnapshot ?? 0,
             sortOrder: i.sortOrder,
           })),

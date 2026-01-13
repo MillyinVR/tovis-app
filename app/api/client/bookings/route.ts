@@ -1,7 +1,8 @@
 // app/api/client/bookings/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import type { BookingSource, ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +14,10 @@ function addDays(date: Date, days: number) {
 
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
 function decimalToString(v: unknown): string | null {
@@ -29,6 +34,29 @@ function moneyNumber(v: unknown): number | null {
   const n = Number(String(s).replace(/[^0-9.]/g, ''))
   if (!Number.isFinite(n) || n < 0) return null
   return Math.round(n * 100) / 100
+}
+
+function normalizeSource(v: unknown): BookingSource {
+  const s = upper(v)
+  if (s === 'REQUESTED') return 'REQUESTED'
+  if (s === 'AFTERCARE') return 'AFTERCARE'
+  return 'DISCOVERY'
+}
+
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
+  const s = upper(v)
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60_000)
+}
+
+/** existingStart < requestedEnd AND existingEnd > requestedStart */
+function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
+  return aStart < bEnd && aEnd > bStart
 }
 
 type BookingRow = {
@@ -108,6 +136,9 @@ function needsConsultationApproval(b: BookingRow) {
   return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step
 }
 
+/**
+ * GET: list client bookings (your existing behavior)
+ */
 export async function GET() {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -173,7 +204,7 @@ export async function GET() {
       const approvalStatus = upper(b.consultationApproval?.status)
       const approvedTotalNum = approvalStatus === 'APPROVED' ? moneyNumber(b.consultationApproval?.proposedTotal) : null
 
-      // ✅ Critical: if consult is approved, show that price everywhere in client dashboards/cards
+      // ✅ If consult approved, show that price everywhere
       const effectivePriceSnapshot = approvedTotalNum != null ? approvedTotalNum : b.priceSnapshot
 
       const shouldSendConsultationBlob =
@@ -294,3 +325,206 @@ export async function GET() {
   }
 }
 
+/**
+ * POST: create a booking from a holdId
+ * Used by Looks flow (AvailabilityDrawer "Book now")
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const user = await getCurrentUser().catch(() => null)
+    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
+      return NextResponse.json({ ok: false, error: 'Only clients can book.' }, { status: 401 })
+    }
+
+    const clientId = user.clientProfile.id
+
+    const body = (await req.json().catch(() => ({}))) as {
+      holdId?: unknown
+      source?: unknown
+      mediaId?: unknown
+      locationType?: unknown
+    }
+
+    const holdId = pickString(body.holdId)
+    if (!holdId) return NextResponse.json({ ok: false, error: 'Missing holdId.' }, { status: 400 })
+
+    const source = normalizeSource(body.source)
+    const mediaId = pickString(body.mediaId) // optional
+    const requestedLocationType = normalizeLocationType(body.locationType) // optional sanity check
+
+    const now = new Date()
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1) Load hold and verify ownership + expiry
+      const hold = await tx.bookingHold.findUnique({
+        where: { id: holdId },
+        select: {
+          id: true,
+          offeringId: true,
+          professionalId: true,
+          scheduledFor: true,
+          expiresAt: true,
+          locationType: true,
+          clientId: true,
+        },
+      })
+
+      if (!hold) return { ok: false as const, status: 404, error: 'Hold not found.' }
+      if (!hold.clientId || hold.clientId !== clientId) {
+        return { ok: false as const, status: 403, error: 'Forbidden.' }
+      }
+      if (hold.expiresAt.getTime() <= now.getTime()) {
+        return { ok: false as const, status: 409, error: 'That hold expired. Please pick another time.' }
+      }
+
+      // Optional consistency check: if client UI sends locationType, it must match hold
+      if (requestedLocationType && requestedLocationType !== hold.locationType) {
+        return { ok: false as const, status: 400, error: 'Location type mismatch. Please try again.' }
+      }
+
+      // 2) Load offering for service + pricing/duration
+      const offering = await tx.professionalServiceOffering.findUnique({
+        where: { id: hold.offeringId },
+        select: {
+          id: true,
+          isActive: true,
+          professionalId: true,
+          serviceId: true,
+          offersInSalon: true,
+          offersMobile: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+        },
+      })
+
+      if (!offering || !offering.isActive) {
+        return { ok: false as const, status: 400, error: 'That service is no longer available.' }
+      }
+
+      // 3) Validate the offering still supports this mode
+      if (hold.locationType === 'SALON' && !offering.offersInSalon) {
+        return { ok: false as const, status: 400, error: 'This service is no longer offered in-salon.' }
+      }
+      if (hold.locationType === 'MOBILE' && !offering.offersMobile) {
+        return { ok: false as const, status: 400, error: 'This service is no longer offered as mobile.' }
+      }
+
+      const duration =
+        hold.locationType === 'MOBILE'
+          ? Number(offering.mobileDurationMinutes ?? 0)
+          : Number(offering.salonDurationMinutes ?? 0)
+
+      const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 60
+
+      const priceDecimal =
+        hold.locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+
+      const priceNum = moneyNumber(priceDecimal)
+      if (priceNum == null) {
+        // You have priceSnapshot + subtotalSnapshot required, so we cannot proceed without a price.
+        return { ok: false as const, status: 400, error: 'This service is missing pricing. Pro must update the offering.' }
+      }
+
+      // 4) Conflict check right before create (paranoia is healthy)
+      const start = new Date(hold.scheduledFor)
+      const end = addMinutes(start, safeDuration)
+      const windowStart = addMinutes(start, -safeDuration * 2)
+      const windowEnd = addMinutes(start, safeDuration * 2)
+
+      const existing = await tx.booking.findMany({
+        where: {
+          professionalId: hold.professionalId,
+          scheduledFor: { gte: windowStart, lte: windowEnd },
+          NOT: { status: 'CANCELLED' as any },
+        },
+        select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
+        orderBy: { scheduledFor: 'asc' },
+        take: 100,
+      })
+
+      const hasConflict = existing.some((b) => {
+        const bDur = Number(b.durationMinutesSnapshot || 0)
+        if (!Number.isFinite(bDur) || bDur <= 0) return false
+        const bStart = new Date(b.scheduledFor)
+        const bEnd = addMinutes(bStart, bDur)
+        return overlaps(bStart, bEnd, start, end)
+      })
+
+      if (hasConflict) {
+        // delete the hold because it's now invalid
+        await tx.bookingHold.delete({ where: { id: hold.id } }).catch(() => {})
+        return { ok: false as const, status: 409, error: 'That time was just taken. Please pick another slot.' }
+      }
+
+      // 5) Create booking + delete hold
+      const booking = await tx.booking.create({
+        data: {
+          clientId,
+          professionalId: hold.professionalId,
+          serviceId: offering.serviceId,
+          offeringId: offering.id,
+          scheduledFor: start,
+          status: 'PENDING' as any,
+          locationType: hold.locationType,
+
+          // legacy snapshots (required in schema)
+          priceSnapshot: priceNum as any,
+          durationMinutesSnapshot: safeDuration,
+
+          // option B required fields
+          subtotalSnapshot: priceNum as any,
+          totalDurationMinutes: safeDuration,
+          bufferMinutes: 0,
+
+          source,
+
+          // if you want to track look attribution later,
+          // do it with an intent event or separate table.
+          // mediaId is NOT a booking field in your schema.
+        },
+        select: { id: true },
+      })
+
+      await tx.bookingHold.delete({ where: { id: hold.id } })
+
+      // Optional: create an intent event if mediaId exists
+      if (mediaId) {
+        try {
+          await tx.clientIntentEvent.create({
+            data: {
+              clientId,
+              type: 'VIEW_MEDIA' as any,
+              professionalId: hold.professionalId,
+              serviceId: offering.serviceId,
+              offeringId: offering.id,
+              mediaId,
+              source,
+            },
+          })
+        } catch {
+          // do not fail booking if analytics write fails
+        }
+      }
+
+      return { ok: true as const, status: 201, bookingId: booking.id }
+    })
+
+    if (!result.ok) {
+      return NextResponse.json({ ok: false, error: result.error }, { status: result.status })
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        bookingId: result.bookingId,
+        redirectTo: `/bookings/${encodeURIComponent(result.bookingId)}`,
+      },
+      { status: 201 },
+    )
+  } catch (e) {
+    console.error('POST /api/client/bookings error:', e)
+    return NextResponse.json({ ok: false, error: 'Failed to create booking.' }, { status: 500 })
+  }
+}

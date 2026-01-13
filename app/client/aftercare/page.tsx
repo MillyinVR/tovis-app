@@ -14,6 +14,12 @@ function formatDate(d: Date) {
   })
 }
 
+function toDate(v: unknown): Date | null {
+  if (!v) return null
+  const d = v instanceof Date ? v : new Date(String(v))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 type InboxRow = {
   id: string
   title: string | null
@@ -74,15 +80,24 @@ export default async function ClientAftercareInboxPage() {
 
   return (
     <main style={{ maxWidth: 860, margin: '28px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>Aftercare</h1>
-      <div style={{ marginTop: 6, color: '#6b7280', fontSize: 13 }}>
+      <h1 className="text-textPrimary" style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+        Aftercare
+      </h1>
+      <div className="text-textSecondary" style={{ marginTop: 6, fontSize: 13 }}>
         Every aftercare summary you’ve received, all in one place. Humans love reinventing inboxes.
       </div>
 
       {items.length === 0 ? (
-        <div style={{ marginTop: 18, border: '1px solid #eee', borderRadius: 14, background: '#fff', padding: 16 }}>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>Nothing yet</div>
-          <div style={{ color: '#6b7280', fontSize: 13 }}>After your appointments, your pro will post aftercare here.</div>
+        <div
+          className="border border-surfaceGlass/10 bg-bgSecondary"
+          style={{ marginTop: 18, borderRadius: 14, padding: 16 }}
+        >
+          <div className="text-textPrimary" style={{ fontWeight: 900, marginBottom: 6 }}>
+            Nothing yet
+          </div>
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>
+            After your appointments, your pro will post aftercare here.
+          </div>
         </div>
       ) : (
         <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
@@ -90,7 +105,7 @@ export default async function ClientAftercareInboxPage() {
             const b = n.booking
             const bookingId = b?.id || n.bookingId
             const serviceName = b?.service?.name ?? n.title ?? 'Aftercare'
-            const date = b?.scheduledFor instanceof Date ? b.scheduledFor : null
+            const date = toDate(b?.scheduledFor)
             const proName = b?.professional?.businessName ?? 'Your pro'
             const isUnread = !n.readAt
 
@@ -111,12 +126,10 @@ export default async function ClientAftercareInboxPage() {
               <a
                 key={n.id}
                 href={href || '#'}
+                className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
                 style={{
                   textDecoration: 'none',
-                  color: '#111',
-                  border: '1px solid #eee',
                   borderRadius: 14,
-                  background: '#fff',
                   padding: 14,
                   display: 'grid',
                   gap: 6,
@@ -129,15 +142,13 @@ export default async function ClientAftercareInboxPage() {
                     {serviceName}{' '}
                     {isUnread ? (
                       <span
+                        className="border border-accentPrimary/35 bg-accentPrimary/12 text-accentPrimary"
                         style={{
                           marginLeft: 8,
                           fontSize: 10,
                           fontWeight: 900,
                           padding: '3px 8px',
                           borderRadius: 999,
-                          border: '1px solid #fde68a',
-                          background: '#fffbeb',
-                          color: '#854d0e',
                           letterSpacing: 0.3,
                         }}
                       >
@@ -146,14 +157,20 @@ export default async function ClientAftercareInboxPage() {
                     ) : null}
                   </div>
 
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>{date ? formatDate(date) : ''}</div>
+                  <div className="text-textSecondary" style={{ fontSize: 12 }}>
+                    {date ? formatDate(date) : ''}
+                  </div>
                 </div>
 
-                <div style={{ fontSize: 13, color: '#374151' }}>{proName}</div>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{hint}</div>
+                <div className="text-textSecondary" style={{ fontSize: 13 }}>
+                  {proName}
+                </div>
+                <div className="text-textSecondary" style={{ fontSize: 12, opacity: 0.85 }}>
+                  {hint}
+                </div>
 
                 {n.body ? (
-                  <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.35 }}>
+                  <div className="text-textSecondary" style={{ fontSize: 12, lineHeight: 1.35, opacity: 0.9 }}>
                     {n.body}
                   </div>
                 ) : null}

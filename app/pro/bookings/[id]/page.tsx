@@ -1,45 +1,118 @@
-// app/pro/bookings/[id]/page.tsx
-import React from 'react'
-import { redirect, notFound } from 'next/navigation'
+// app/pro/bookings/page.tsx
+import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import ConsultationForm from './ConsultationForm'
+import BookingActions from '../BookingActions'
 import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
-type StepKey = 'consult' | 'session' | 'aftercare'
+type BookingRow = {
+  id: string
+  status: string
+  scheduledFor: Date
+  startedAt: Date | null
+  finishedAt: Date | null
+  durationMinutesSnapshot: number
+  priceSnapshot: any
+  discountAmount: any | null
+  totalAmount: any | null
+  service: { name: string }
+  client: {
+    id: string
+    firstName: string
+    lastName: string
+    phone: string | null
+    user: { email: string } | null
+  }
+}
+
+type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SearchParams = Record<string, string | string[] | undefined>
 
 function firstParam(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
 }
 
-function normalizeStep(raw: unknown): StepKey {
-  const s = String(raw || '').toLowerCase().trim()
-  if (s === 'consult' || s === 'consultation') return 'consult'
-  if (s === 'session') return 'session'
-  if (s === 'aftercare') return 'aftercare'
-  return 'consult'
+function normalizeStatusFilter(raw: unknown): StatusFilter {
+  const s = String(raw || '').toUpperCase().trim()
+  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') return s
+  return 'ALL'
 }
 
-function toDate(value: Date | string) {
-  const d = typeof value === 'string' ? new Date(value) : value
-  return Number.isNaN(d.getTime()) ? null : d
+function isValidIanaTimeZone(tz: string | null | undefined) {
+  if (!tz || typeof tz !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
+    return true
+  } catch {
+    return false
+  }
 }
 
-function formatDateTime(d: Date) {
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
+/** TZ wall-clock parts for a UTC instant rendered in timeZone */
+function getZonedParts(dateUtc: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+
+  const parts = dtf.formatToParts(dateUtc)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  }
+}
+
+/** offset minutes between UTC and tz at a given UTC instant */
+function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
+  const z = getZonedParts(dateUtc, timeZone)
+  const asIfUtc = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, z.second)
+  return Math.round((asIfUtc - dateUtc.getTime()) / 60_000)
+}
+
+/** Convert a wall-clock time in timeZone into UTC Date (two-pass for DST) */
+function zonedTimeToUtc(args: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  timeZone: string
+}) {
+  const { year, month, day, hour, minute, timeZone } = args
+
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
+  const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
+  guess = new Date(guess.getTime() - offset1 * 60_000)
+
+  const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
+  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
+
+  return guess
+}
+
+function formatDate(d: Date, timeZone: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  })
-}
-
-function formatTime(d: Date) {
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  }).format(d)
 }
 
 function formatStatus(status: string) {
@@ -57,298 +130,287 @@ function formatStatus(status: string) {
   }
 }
 
-function tabStyle(active: boolean): React.CSSProperties {
-  return {
-    padding: '8px 12px',
-    borderRadius: 999,
-    border: '1px solid #ddd',
-    textDecoration: 'none',
-    color: active ? '#fff' : '#111',
-    background: active ? '#111' : '#fafafa',
-    fontSize: 12,
-    fontWeight: 900,
+function moneyNumber(maybeMoney: any) {
+  if (maybeMoney == null) return 0
+  if (typeof maybeMoney === 'number') return Number.isFinite(maybeMoney) ? maybeMoney : 0
+  if (typeof maybeMoney === 'string') {
+    const n = Number(maybeMoney)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof maybeMoney?.toNumber === 'function') {
+    const n = maybeMoney.toNumber()
+    return Number.isFinite(n) ? n : 0
+  }
+  try {
+    const n = Number(String(maybeMoney))
+    return Number.isFinite(n) ? n : 0
+  } catch {
+    return 0
   }
 }
 
-function moneyNumber(maybeMoneyString: string | null) {
-  if (!maybeMoneyString) return 0
-  const n = Number(String(maybeMoneyString).replace(/[^0-9.]/g, ''))
-  return Number.isFinite(n) ? n : 0
-}
+function PriceBlock({ b }: { b: BookingRow }) {
+  const baseStr = moneyToString(b.priceSnapshot) ?? '0.00'
+  const discountStr = b.discountAmount != null ? moneyToString(b.discountAmount) ?? '0.00' : null
+  const totalStr = b.totalAmount != null ? moneyToString(b.totalAmount) ?? baseStr : baseStr
 
-export default async function BookingDetailPage(props: {
-  params: Promise<{ id: string }>
-  searchParams?: Promise<SearchParams>
-}) {
-  const { id } = await props.params
+  const discountNum = moneyNumber(b.discountAmount)
 
-  const sp =
-    (await props.searchParams?.catch(() => ({} as SearchParams))) ?? ({} as SearchParams)
-
-  const step = normalizeStep(firstParam(sp.step))
-
-  const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    redirect(`/login?from=/pro/bookings/${encodeURIComponent(id)}`)
+  if (discountNum > 0) {
+    return (
+      <div className="grid gap-1 text-[12px] text-textSecondary">
+        <div>
+          Base:{' '}
+          <span className="line-through text-textSecondary">${baseStr}</span>
+        </div>
+        <div>Last-minute discount: -${discountStr ?? '0.00'}</div>
+        <div className="font-black text-textPrimary">Total: ${totalStr ?? '0.00'}</div>
+      </div>
+    )
   }
 
-  const booking = await prisma.booking.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      professionalId: true,
-      status: true,
-      scheduledFor: true,
-      startedAt: true,
-      finishedAt: true,
-      durationMinutesSnapshot: true,
-      priceSnapshot: true,
-      discountAmount: true,
-      totalAmount: true,
-      consultationNotes: true,
-      consultationPrice: true,
-      client: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          phone: true,
-          user: { select: { email: true } },
-        },
-      },
-      service: { select: { name: true } },
-    },
-  })
+  return <div className="text-[12px] text-textSecondary">Total: ${totalStr ?? baseStr}</div>
+}
 
-
-  if (!booking) notFound()
-  if (booking.professionalId !== user.professionalProfile.id) redirect('/pro')
-
-  const scheduled = toDate(booking.scheduledFor)
-  if (!scheduled) notFound()
-
-  const now = new Date()
-  const isToday = scheduled.toDateString() === now.toDateString()
-
-  const startedAt = booking.startedAt ? toDate(booking.startedAt) : null
-  const finishedAt = booking.finishedAt ? toDate(booking.finishedAt) : null
-
-  const baseStr = moneyToString(booking.priceSnapshot) ?? '0.00'
-  const discountStr =
-    booking.discountAmount != null ? moneyToString(booking.discountAmount) ?? '0.00' : null
-  const totalStr =
-    booking.totalAmount != null ? moneyToString(booking.totalAmount) ?? baseStr : baseStr
-
-  const hasDiscount = booking.discountAmount != null && moneyNumber(discountStr) > 0
-
-  const duration =
-    typeof booking.durationMinutesSnapshot === 'number' && Number.isFinite(booking.durationMinutesSnapshot)
-      ? Math.round(booking.durationMinutesSnapshot)
-      : null
-
-  const baseHref = `/pro/bookings/${encodeURIComponent(booking.id)}`
+function StatusPill({ status }: { status: string }) {
+  const s = String(status || '')
+  const tone =
+    s === 'PENDING'
+      ? 'border-white/10 bg-bgPrimary text-textPrimary'
+      : s === 'ACCEPTED'
+        ? 'border-accentPrimary/30 bg-bgPrimary text-textPrimary'
+        : s === 'COMPLETED'
+          ? 'border-toneSuccess/30 bg-bgPrimary text-toneSuccess'
+          : s === 'CANCELLED'
+            ? 'border-toneDanger/30 bg-bgPrimary text-toneDanger'
+            : 'border-white/10 bg-bgPrimary text-textSecondary'
 
   return (
-    <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <a
-          href="/pro/bookings"
-          style={{ fontSize: 12, color: '#555', textDecoration: 'none', display: 'inline-block' }}
-        >
-          ← Back to bookings
-        </a>
+    <span className={['inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black', tone].join(' ')}>
+      {formatStatus(s)}
+    </span>
+  )
+}
 
-        <a
-          href="/pro/bookings/new"
-          style={{
-            display: 'inline-block',
-            padding: '8px 12px',
-            borderRadius: 999,
-            border: '1px solid #111',
-            textDecoration: 'none',
-            color: '#111',
-            fontSize: 12,
-            fontWeight: 800,
-          }}
-        >
-          + New booking
-        </a>
+function FilterPills({ active }: { active: StatusFilter }) {
+  const pills: Array<{ key: StatusFilter; label: string }> = [
+    { key: 'ALL', label: 'All' },
+    { key: 'PENDING', label: 'Pending' },
+    { key: 'ACCEPTED', label: 'Accepted' },
+    { key: 'COMPLETED', label: 'Completed' },
+    { key: 'CANCELLED', label: 'Cancelled' },
+  ]
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {pills.map((p) => {
+        const isActive = active === p.key
+        const href = p.key === 'ALL' ? '/pro/bookings' : `/pro/bookings?status=${encodeURIComponent(p.key)}`
+        return (
+          <a
+            key={p.key}
+            href={href}
+            className={[
+              'rounded-full border px-4 py-2 text-[12px] font-black transition',
+              isActive
+                ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
+                : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+            ].join(' ')}
+          >
+            {p.label}
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
+function Section({ title, items, timeZone }: { title: string; items: BookingRow[]; timeZone: string }) {
+  return (
+    <section className="grid gap-3">
+      <div className="flex items-end justify-between gap-3">
+        <h2 className="text-[15px] font-black text-textPrimary">{title}</h2>
+        <div className="text-[12px] text-textSecondary">{items.length ? `${items.length} total` : ''}</div>
       </div>
 
-      <section
-        style={{
-          marginTop: 12,
-          borderRadius: 12,
-          border: '1px solid #eee',
-          padding: 16,
-          marginBottom: 16,
-          background: '#fff',
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: 12,
-          alignItems: 'flex-start',
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: '#777', marginBottom: 4 }}>
-            {isToday ? 'Today' : 'Appointment'}
-          </div>
-
-          <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>
-            {booking.service?.name ?? 'Appointment'}
-          </h1>
-
-          <div style={{ fontSize: 13, color: '#555', marginTop: 6 }}>
-            {formatDateTime(scheduled)}
-            {duration != null ? ` • ${duration} min` : ''}
-          </div>
-
-          <div style={{ fontSize: 13, color: '#555', marginTop: 6 }}>
-            {booking.client?.firstName ?? ''} {booking.client?.lastName ?? ''}
-            {booking.client?.user?.email ? ` • ${booking.client.user.email}` : ''}
-            {booking.client?.phone ? ` • ${booking.client.phone}` : ''}
-          </div>
+      {items.length === 0 ? (
+        <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] text-textSecondary">
+          No bookings here yet.
         </div>
+      ) : (
+        <div className="grid gap-3">
+          {items.map((b) => (
+            <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="truncate text-[13px] font-black text-textPrimary">{b.service.name}</div>
+                    <StatusPill status={b.status} />
+                  </div>
 
-        <div style={{ textAlign: 'right', fontSize: 12, minWidth: 220 }}>
-          <div
-            style={{
-              display: 'inline-block',
-              padding: '2px 8px',
-              borderRadius: 999,
-              border: '1px solid #ddd',
-              marginBottom: 8,
-              fontSize: 11,
-            }}
-          >
-            {formatStatus(String(booking.status || ''))}
-          </div>
+                  <div className="mt-1 text-[12px] text-textSecondary">
+                    <a
+                      href={`/pro/clients/${b.client.id}`}
+                      className="font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                    >
+                      {b.client.firstName} {b.client.lastName}
+                    </a>
+                    {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
+                    {b.client.phone ? ` • ${b.client.phone}` : ''}
+                  </div>
 
-          <div style={{ color: '#6b7280', display: 'grid', gap: 4, justifyItems: 'end' }}>
-            {hasDiscount ? (
-              <>
-                <div>
-                  Base: <span style={{ textDecoration: 'line-through' }}>${baseStr}</span>
+                  <div className="mt-2 text-[12px] text-textSecondary">
+                    {formatDate(b.scheduledFor, timeZone)} • {Math.round(b.durationMinutesSnapshot)} min
+                  </div>
+
+                  <div className="mt-2">
+                    <PriceBlock b={b} />
+                  </div>
+
+                  <a
+                    href={`/pro/bookings/${b.id}`}
+                    className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                  >
+                    Details &amp; aftercare
+                  </a>
                 </div>
-                <div>Last-minute discount: -${discountStr}</div>
-                <div style={{ color: '#111', fontWeight: 900 }}>Total: ${totalStr}</div>
-              </>
-            ) : (
-              <div style={{ color: '#777' }}>Total: ${totalStr}</div>
-            )}
+
+                <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
+                  <BookingActions
+                    bookingId={b.id}
+                    currentStatus={b.status}
+                    startedAt={b.startedAt ? b.startedAt.toISOString() : null}
+                    finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+export default async function ProBookingsPage(props: { searchParams?: Promise<SearchParams> }) {
+  const user = await getCurrentUser()
+  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
+    redirect('/login?from=/pro/bookings')
+  }
+
+  const sp = (await props.searchParams?.catch(() => ({} as SearchParams))) ?? ({} as SearchParams)
+  const statusFilter = normalizeStatusFilter(firstParam(sp.status))
+
+  const proId = user.professionalProfile.id
+  const timeZone = isValidIanaTimeZone(user.professionalProfile.timeZone)
+    ? user.professionalProfile.timeZone!
+    : 'America/Los_Angeles'
+
+  const nowUtc = new Date()
+  const nowParts = getZonedParts(nowUtc, timeZone)
+
+  const startOfTodayUtc = zonedTimeToUtc({
+    year: nowParts.year,
+    month: nowParts.month,
+    day: nowParts.day,
+    hour: 0,
+    minute: 0,
+    timeZone,
+  })
+
+  const startOfTomorrowUtc = zonedTimeToUtc({
+    year: nowParts.year,
+    month: nowParts.month,
+    day: nowParts.day + 1,
+    hour: 0,
+    minute: 0,
+    timeZone,
+  })
+
+  const select = {
+    id: true,
+    status: true,
+    scheduledFor: true,
+    startedAt: true,
+    finishedAt: true,
+    durationMinutesSnapshot: true,
+    priceSnapshot: true,
+    discountAmount: true,
+    totalAmount: true,
+    service: { select: { name: true } },
+    client: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        user: { select: { email: true } },
+      },
+    },
+  } as const
+
+  const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
+
+  const [todayBookings, upcomingBookings, pastBookings] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        ...statusWhere,
+        scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      select,
+    }),
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        ...statusWhere,
+        scheduledFor: { gte: startOfTomorrowUtc },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      select,
+    }),
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        ...statusWhere,
+        scheduledFor: { lt: startOfTodayUtc },
+      },
+      orderBy: { scheduledFor: 'desc' },
+      select,
+    }),
+  ])
+
+  return (
+    <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
+      <header className="mb-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
+            <div className="mt-1 text-[12px] text-textSecondary">
+              Today, upcoming, and past. <span className="text-textSecondary/70">({timeZone})</span>
+            </div>
           </div>
 
-          {startedAt && !finishedAt && (
-            <div style={{ marginTop: 10, fontSize: 11, color: '#16a34a' }}>
-              Session started {formatTime(startedAt)} (in progress)
-            </div>
-          )}
-
-          {finishedAt && (
-            <div style={{ marginTop: 10, fontSize: 11, color: '#6b7280' }}>
-              Session finished {formatTime(finishedAt)}
-            </div>
-          )}
+          <a
+            href="/pro/bookings/new"
+            className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+          >
+            + New booking
+          </a>
         </div>
-      </section>
 
-      {/* Tabs */}
-      <nav style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
-        <a href={`${baseHref}?step=consult`} style={tabStyle(step === 'consult')}>
-          Consultation
-        </a>
-        <a href={`${baseHref}?step=session`} style={tabStyle(step === 'session')}>
-          Session
-        </a>
-        <a href={`${baseHref}?step=aftercare`} style={tabStyle(step === 'aftercare')}>
-          Aftercare
-        </a>
+        <div className="mt-4">
+          <div className="text-[12px] font-black text-textPrimary mb-2">Filter</div>
+          <FilterPills active={statusFilter} />
+        </div>
+      </header>
 
-        <a
-          href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
-          style={{
-            marginLeft: 'auto',
-            display: 'inline-block',
-            textDecoration: 'none',
-            border: '1px solid #111',
-            borderRadius: 999,
-            padding: '10px 14px',
-            fontSize: 12,
-            fontWeight: 900,
-            color: '#fff',
-            background: '#111',
-          }}
-        >
-          Open aftercare
-        </a>
-      </nav>
-
-      {step === 'consult' ? (
-        <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Consultation</h2>
-          <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
-            Capture what you agreed on before starting the service: look goals, techniques, and pricing.
-          </p>
-
-          <ConsultationForm
-            bookingId={booking.id}
-            initialNotes={booking.consultationNotes ?? ''}
-            initialPrice={moneyToString(booking.consultationPrice) ?? ''}
-          />
-        </section>
-      ) : null}
-
-      {step === 'session' ? (
-        <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Session</h2>
-          <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
-            Run the appointment flow, capture before/after, and advance the session steps.
-          </p>
-
-          <a
-            href={`/pro/bookings/${encodeURIComponent(booking.id)}/session`}
-            style={{
-              display: 'inline-block',
-              textDecoration: 'none',
-              border: '1px solid #111',
-              borderRadius: 999,
-              padding: '10px 14px',
-              fontSize: 12,
-              fontWeight: 900,
-              color: '#fff',
-              background: '#111',
-            }}
-          >
-            Open session flow
-          </a>
-        </section>
-      ) : null}
-
-      {step === 'aftercare' ? (
-        <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Aftercare</h2>
-          <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
-            Write aftercare, set rebook guidance, and notify the client.
-          </p>
-
-          <a
-            href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
-            style={{
-              display: 'inline-block',
-              textDecoration: 'none',
-              border: '1px solid #111',
-              borderRadius: 999,
-              padding: '10px 14px',
-              fontSize: 12,
-              fontWeight: 900,
-              color: '#fff',
-              background: '#111',
-            }}
-          >
-            Open aftercare
-          </a>
-        </section>
-      ) : null}
+      <div className="grid gap-6">
+        <Section title="Today" items={todayBookings as BookingRow[]} timeZone={timeZone} />
+        <Section title="Upcoming" items={upcomingBookings as BookingRow[]} timeZone={timeZone} />
+        <Section title="Past" items={pastBookings as BookingRow[]} timeZone={timeZone} />
+      </div>
     </main>
   )
 }

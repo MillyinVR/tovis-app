@@ -8,12 +8,14 @@ import { Prisma } from '@prisma/client'
 type CreateOfferingBody = {
   serviceId: string
 
-  // pro overrides
+  // legacy (ignored)
   title?: string | null
+
+  // pro fields
   description?: string | null
   customImageUrl?: string | null
 
-  // location toggles
+  // toggles
   offersInSalon?: boolean
   offersMobile?: boolean
 
@@ -26,13 +28,44 @@ type CreateOfferingBody = {
   mobileDurationMinutes?: number | null
 }
 
+function isPositiveInt(n: unknown) {
+  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
+}
+
+function trimOrNull(v: unknown) {
+  if (v === null) return null
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t ? t : null
+}
+
+function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: string) {
+  const s = raw.trim()
+  if (!s) throw new Error(`Missing ${label}PriceStartingAt`)
+
+  let dec: Prisma.Decimal
+  try {
+    dec = parseMoney(s)
+  } catch {
+    throw new Error(`Invalid ${label} price. Use 50 or 49.99`)
+  }
+
+  if (dec.lessThan(minPrice)) {
+    throw new Error(`${label} price must be at least $${moneyToString(minPrice)}`)
+  }
+
+  return dec
+}
+
 function toDto(off: any) {
   return {
-    id: off.id,
-    serviceId: off.serviceId,
+    id: String(off.id),
+    serviceId: String(off.serviceId),
 
-    title: off.title ?? off.service.name,
-    description: off.description ?? off.service.description,
+    // legacy field kept for typing compatibility
+    title: null as string | null,
+
+    description: off.description ?? null,
     customImageUrl: off.customImageUrl ?? null,
 
     offersInSalon: Boolean(off.offersInSalon),
@@ -44,28 +77,27 @@ function toDto(off: any) {
     mobilePriceStartingAt: off.mobilePriceStartingAt ? moneyToString(off.mobilePriceStartingAt) : null,
     mobileDurationMinutes: off.mobileDurationMinutes ?? null,
 
+    // canonical display
     serviceName: off.service.name,
     categoryName: off.service.category?.name ?? null,
-    categoryDescription: off.service.category?.description ?? null,
-    defaultImageUrl: off.service.defaultImageUrl ?? null,
-  }
-}
+    serviceDefaultImageUrl: off.service.defaultImageUrl ?? null,
 
-function isPositiveInt(n: unknown) {
-  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
+    // admin floor
+    minPrice: moneyToString(off.service.minPrice) ?? '0.00',
+  }
 }
 
 export async function GET() {
   try {
-    const user = await getCurrentUser()
+    const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'PRO' || !user.professionalProfile) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const prof = user.professionalProfile
+    const profId = user.professionalProfile.id
 
     const offerings = await prisma.professionalServiceOffering.findMany({
-      where: { professionalId: prof.id, isActive: true },
+      where: { professionalId: profId, isActive: true },
       include: { service: { include: { category: true } } },
       orderBy: [{ createdAt: 'asc' }],
     })
@@ -79,7 +111,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser()
+    const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'PRO' || !user.professionalProfile) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -92,9 +124,8 @@ export async function POST(request: Request) {
     const serviceId = String(body.serviceId || '').trim()
     if (!serviceId) return NextResponse.json({ error: 'Missing serviceId' }, { status: 400 })
 
-    const title = typeof body.title === 'string' ? body.title.trim() : null
-    const description = typeof body.description === 'string' ? body.description.trim() : null
-    const customImageUrl = typeof body.customImageUrl === 'string' ? body.customImageUrl.trim() : null
+    const description = trimOrNull(body.description)
+    const customImageUrl = trimOrNull(body.customImageUrl)
 
     const offersInSalon = typeof body.offersInSalon === 'boolean' ? body.offersInSalon : true
     const offersMobile = typeof body.offersMobile === 'boolean' ? body.offersMobile : false
@@ -105,28 +136,21 @@ export async function POST(request: Request) {
 
     const service = await prisma.service.findUnique({
       where: { id: serviceId },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        isActive: true,
-        minPrice: true,
-      },
+      select: { id: true, isActive: true, minPrice: true },
     })
 
     if (!service || !service.isActive) {
       return NextResponse.json({ error: 'Invalid service' }, { status: 400 })
     }
 
-    let salonPriceDecimal: Prisma.Decimal | null = null
-    let mobilePriceDecimal: Prisma.Decimal | null = null
-
     const data: any = {
       professionalId: profId,
       serviceId: service.id,
 
-      title: title || service.name,
-      description: description || service.description,
+      // ✅ canonical naming enforcement: do not store custom title
+      title: null,
+
+      description: description || null,
       customImageUrl: customImageUrl || null,
 
       offersInSalon,
@@ -135,33 +159,19 @@ export async function POST(request: Request) {
 
     // SALON validation
     if (offersInSalon) {
-      const priceInput = typeof body.salonPriceStartingAt === 'string' ? body.salonPriceStartingAt.trim() : ''
       const durInput = body.salonDurationMinutes
+      if (!isPositiveInt(durInput)) return NextResponse.json({ error: 'Invalid salonDurationMinutes' }, { status: 400 })
 
-      if (!priceInput) {
-        return NextResponse.json({ error: 'Missing salonPriceStartingAt' }, { status: 400 })
-      }
-      if (!isPositiveInt(durInput)) {
-        return NextResponse.json({ error: 'Invalid salonDurationMinutes' }, { status: 400 })
-      }
-
+      const priceInput = typeof body.salonPriceStartingAt === 'string' ? body.salonPriceStartingAt : ''
       try {
-        salonPriceDecimal = parseMoney(priceInput)
-      } catch {
-        return NextResponse.json({ error: 'Invalid salon price. Use 50 or 49.99' }, { status: 400 })
-      }
-
-      if (salonPriceDecimal.lessThan(service.minPrice)) {
+        data.salonPriceStartingAt = parsePriceOrThrow(priceInput, service.minPrice, 'Salon')
+      } catch (e: any) {
         return NextResponse.json(
-          {
-            error: `Salon price must be at least $${moneyToString(service.minPrice)}`,
-            minPrice: moneyToString(service.minPrice),
-          },
+          { error: e?.message || 'Invalid salon price.', minPrice: moneyToString(service.minPrice) },
           { status: 400 },
         )
       }
 
-      data.salonPriceStartingAt = salonPriceDecimal
       data.salonDurationMinutes = durInput
     } else {
       data.salonPriceStartingAt = null
@@ -170,33 +180,19 @@ export async function POST(request: Request) {
 
     // MOBILE validation
     if (offersMobile) {
-      const priceInput = typeof body.mobilePriceStartingAt === 'string' ? body.mobilePriceStartingAt.trim() : ''
       const durInput = body.mobileDurationMinutes
+      if (!isPositiveInt(durInput)) return NextResponse.json({ error: 'Invalid mobileDurationMinutes' }, { status: 400 })
 
-      if (!priceInput) {
-        return NextResponse.json({ error: 'Missing mobilePriceStartingAt' }, { status: 400 })
-      }
-      if (!isPositiveInt(durInput)) {
-        return NextResponse.json({ error: 'Invalid mobileDurationMinutes' }, { status: 400 })
-      }
-
+      const priceInput = typeof body.mobilePriceStartingAt === 'string' ? body.mobilePriceStartingAt : ''
       try {
-        mobilePriceDecimal = parseMoney(priceInput)
-      } catch {
-        return NextResponse.json({ error: 'Invalid mobile price. Use 50 or 49.99' }, { status: 400 })
-      }
-
-      if (mobilePriceDecimal.lessThan(service.minPrice)) {
+        data.mobilePriceStartingAt = parsePriceOrThrow(priceInput, service.minPrice, 'Mobile')
+      } catch (e: any) {
         return NextResponse.json(
-          {
-            error: `Mobile price must be at least $${moneyToString(service.minPrice)}`,
-            minPrice: moneyToString(service.minPrice),
-          },
+          { error: e?.message || 'Invalid mobile price.', minPrice: moneyToString(service.minPrice) },
           { status: 400 },
         )
       }
 
-      data.mobilePriceStartingAt = mobilePriceDecimal
       data.mobileDurationMinutes = durInput
     } else {
       data.mobilePriceStartingAt = null

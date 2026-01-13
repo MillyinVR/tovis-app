@@ -26,7 +26,7 @@ export default async function AdminLogsPage() {
       <div style={{ display: 'grid', gap: 12 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 1000 }}>Admin Logs</h1>
 
-        <div style={{ border: '1px solid #eee', borderRadius: 16, background: '#fff', overflow: 'hidden' }}>
+        <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, overflow: 'hidden' }}>
           <div style={{ display: 'grid' }}>
             {logs.length === 0 ? (
               <div style={{ padding: 12, color: '#6b7280' }}>No logs yet.</div>

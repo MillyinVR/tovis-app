@@ -9,15 +9,13 @@ function NavLink({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
+      className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
       style={{
         textDecoration: 'none',
-        color: '#111',
         fontWeight: 900,
         fontSize: 13,
         padding: '8px 10px',
         borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: '#fff',
       }}
     >
       {label}
@@ -34,12 +32,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <AdminGuard>
       <div style={{ fontFamily: 'system-ui' }}>
         <header
+          className="border-b border-surfaceGlass/10 bg-bgSecondary"
           style={{
             position: 'sticky',
             top: 0,
             zIndex: 10,
-            background: '#fff',
-            borderBottom: '1px solid #eee',
           }}
         >
           <div

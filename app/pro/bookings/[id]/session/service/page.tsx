@@ -29,37 +29,12 @@ function fmtDateTime(v: any) {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        marginTop: 12,
-        border: '1px solid #eee',
-        background: '#fff',
-        borderRadius: 12,
-        padding: 14,
-      }}
-    >
-      {children}
-    </div>
-  )
+  return <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary">{children}</div>
 }
 
 function Badge({ label }: { label: string }) {
   return (
-    <span
-      style={{
-        fontSize: 11,
-        fontWeight: 900,
-        padding: '3px 10px',
-        borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: '#f9fafb',
-        color: '#111827',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-      }}
-    >
+    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
       {label}
     </span>
   )
@@ -129,9 +104,8 @@ export default async function ProServicePage(props: { params: Promise<{ id: stri
     }
 
     const notesRaw = formData.get('notes')
-    const notes = typeof notesRaw === 'string' ? notesRaw.trim() : ''
+    const notes = typeof notesRaw === 'string' ? notesRaw.trim().slice(0, 4000) : ''
 
-    // ✅ Save onto AftercareSummary.serviceNotes (already exists in your schema)
     await prisma.aftercareSummary.upsert({
       where: { bookingId },
       create: { bookingId, serviceNotes: notes || null },
@@ -142,85 +116,53 @@ export default async function ProServicePage(props: { params: Promise<{ id: stri
     redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session/service?saved=1`)
   }
 
+  const btnPrimary =
+    'inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover'
+  const btnSecondary =
+    'inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass'
+
   return (
-    <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <a
-        href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
-        style={{ fontSize: 12, color: '#555', textDecoration: 'none' }}
-      >
+    <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
+      <a href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`} className={btnSecondary}>
         ← Back to session
       </a>
 
-      <h1 style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>Service: {serviceName}</h1>
-      <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>Client: {clientName}</div>
+      <h1 className="mt-4 text-xl font-black">Service: {serviceName}</h1>
+      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
 
-      <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Badge label={`Scheduled: ${scheduledFor || '—'}`} />
         <Badge label={`Step: ${step || 'UNKNOWN'}`} />
         <Badge label={`Status: ${st || 'UNKNOWN'}`} />
       </div>
 
       <Card>
-        <div style={{ fontWeight: 900, marginBottom: 6 }}>During-service hub</div>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>
+        <div className="text-sm font-black">During-service hub</div>
+        <div className="mt-1 text-sm font-semibold text-textSecondary">
           Leave this open during the appointment. Save notes anytime. These feed straight into aftercare.
         </div>
       </Card>
 
-      <section style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 900 }}>Live service notes</div>
-        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+      <section className="mt-6">
+        <div className="text-lg font-black">Live service notes</div>
+        <div className="mt-1 text-sm font-semibold text-textSecondary">
           Formulas, adjustments, client requests, anything you’ll want remembered.
         </div>
 
-        <form action={saveNotes} style={{ marginTop: 10 }}>
+        <form action={saveNotes} className="mt-4">
           <textarea
             name="notes"
             defaultValue={existingNotes}
             placeholder="Type notes during the service..."
-            style={{
-              width: '100%',
-              minHeight: 180,
-              borderRadius: 12,
-              border: '1px solid #e5e7eb',
-              padding: 12,
-              fontSize: 13,
-              fontFamily: 'system-ui',
-              outline: 'none',
-            }}
+            className="w-full min-h-[180px] rounded-card border border-white/10 bg-bgPrimary p-3 text-sm text-textPrimary outline-none focus:border-white/20"
           />
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-            <button
-              type="submit"
-              style={{
-                border: '1px solid #111',
-                background: '#111',
-                color: '#fff',
-                borderRadius: 999,
-                padding: '10px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                cursor: 'pointer',
-              }}
-            >
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="submit" className={btnPrimary}>
               Save notes
             </button>
 
-            <a
-              href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
-              style={{
-                display: 'inline-block',
-                textDecoration: 'none',
-                border: '1px solid #e5e7eb',
-                borderRadius: 999,
-                padding: '10px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                color: '#111',
-                background: '#fff',
-              }}
-            >
+            <a href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`} className={btnSecondary}>
               Back to session
             </a>
           </div>

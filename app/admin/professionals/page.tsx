@@ -10,13 +10,12 @@ export const dynamic = 'force-dynamic'
 function Pill({ label }: { label: string }) {
   return (
     <span
+      className="border border-surfaceGlass/10 bg-bgSecondary"
       style={{
         fontSize: 12,
         fontWeight: 900,
         padding: '4px 10px',
         borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: '#fff',
       }}
     >
       {label}
@@ -28,15 +27,17 @@ function Tab({ href, label, active }: { href: string; label: string; active: boo
   return (
     <Link
       href={href}
+      className={
+        active
+          ? 'border border-surfaceGlass/25 bg-bgPrimary text-textPrimary'
+          : 'border border-surfaceGlass/10 bg-bgSecondary text-textPrimary'
+      }
       style={{
         textDecoration: 'none',
         fontSize: 13,
         fontWeight: 1000,
         padding: '8px 10px',
         borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: active ? '#111' : '#fff',
-        color: active ? '#fff' : '#111',
       }}
     >
       {label}
@@ -103,7 +104,7 @@ export default async function AdminProfessionalsPage({
 
         <div style={{ display: 'grid', gap: 10 }}>
           {pros.length === 0 ? (
-            <div style={{ border: '1px solid #eee', borderRadius: 16, padding: 16, background: '#fff' }}>
+            <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
               Nothing here. Humans are either behaving or you haven’t seeded pros.
             </div>
           ) : (
@@ -111,14 +112,12 @@ export default async function AdminProfessionalsPage({
               <Link
                 key={p.id}
                 href={`/admin/professionals/${encodeURIComponent(p.id)}`}
-                style={{ textDecoration: 'none', color: '#111' }}
+                className="text-textPrimary" style={{ textDecoration: 'none' }}
               >
                 <div
-                  style={{
-                    border: '1px solid #eee',
+                  className="border border-surfaceGlass/10 bg-bgSecondary" style={{
                     borderRadius: 16,
                     padding: 14,
-                    background: '#fff',
                     display: 'grid',
                     gap: 10,
                   }}

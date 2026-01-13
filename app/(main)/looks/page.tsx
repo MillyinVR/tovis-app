@@ -1,17 +1,11 @@
 // app/looks/page.tsx (or app/(main)/looks/page.tsx)
-import LooksFeed from './LooksFeed'
+import LooksFeed from './_components/LooksFeed'
 
 export const dynamic = 'force-dynamic'
 
 export default function LooksPage() {
   return (
-    <main
-      style={{
-        height: '100dvh',
-        overflow: 'hidden', // ✅ page never scrolls
-        background: '#000',
-      }}
-    >
+    <main className="bg-bgPrimary" style={{ height: '100dvh', overflow: 'hidden' }}>
       <LooksFeed />
     </main>
   )

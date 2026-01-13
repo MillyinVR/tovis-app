@@ -1,3 +1,4 @@
+// app/pro/media/[id]/page.tsx
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
@@ -7,17 +8,23 @@ type PageProps = {
   params: Promise<{ id: string }>
 }
 
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
 export default async function ProMediaDetailPage({ params }: PageProps) {
-  const { id } = await params
+  const { id: rawId } = await params
+  const id = pickString(rawId)
+
   const user = await getCurrentUser()
 
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    redirect('/login?from=/pro/profile')
+    redirect('/login?from=/pro/media')
   }
 
-  const db: any = prisma
+  if (!id) redirect('/pro/media')
 
-  const media = await db.mediaAsset.findUnique({
+  const media = await prisma.mediaAsset.findUnique({
     where: { id },
     include: {
       services: { include: { service: true } },
@@ -27,76 +34,51 @@ export default async function ProMediaDetailPage({ params }: PageProps) {
   })
 
   if (!media || media.professionalId !== user.professionalProfile.id) {
-    redirect('/pro/profile')
+    redirect('/pro/media')
   }
 
   const src = media.url
   const isVideo = media.mediaType === 'VIDEO'
 
   return (
-    <main
-      style={{
-        maxWidth: 960,
-        margin: '80px auto 80px',
-        padding: '0 16px',
-        fontFamily: 'system-ui',
-      }}
-    >
-      <div style={{ marginBottom: 12 }}>
-        <Link href="/pro/profile" style={{ fontSize: 12, textDecoration: 'none' }}>
-          ← Back to profile
+    <main className="mx-auto max-w-5xl px-4 pb-24 pt-20 font-sans">
+      <div className="mb-3">
+        <Link href="/pro/media" className="text-[12px] font-extrabold text-textSecondary hover:text-textPrimary">
+          ← Back to media
         </Link>
       </div>
 
-      <div
-        style={{
-          borderRadius: 16,
-          border: '1px solid #eee',
-          background: '#fff',
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ background: '#111' }}>
+      <div className="tovis-glass overflow-hidden rounded-card border border-white/10">
+        <div className="bg-black/40">
           {isVideo ? (
-            <video
-              src={src}
-              controls
-              style={{ width: '100%', maxHeight: 520, display: 'block' }}
-            />
+            <video src={src} controls className="block w-full max-h-[520px]" />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={src}
               alt={media.caption || 'Media'}
-              style={{ width: '100%', maxHeight: 520, objectFit: 'contain', display: 'block' }}
+              className="block w-full max-h-96 object-contain"
             />
           )}
         </div>
 
-        <div style={{ padding: 14, display: 'grid', gap: 10 }}>
-          {media.caption && (
-            <div style={{ fontSize: 13, color: '#111' }}>{media.caption}</div>
-          )}
+        <div className="grid gap-3 p-4">
+          {media.caption ? (
+            <div className="text-[13px] text-textPrimary">{media.caption}</div>
+          ) : null}
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {media.services?.map((t: any) => (
+          <div className="flex flex-wrap gap-2">
+            {media.services?.map((t) => (
               <span
                 key={t.id}
-                style={{
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 999,
-                  padding: '4px 8px',
-                  fontSize: 12,
-                  color: '#111',
-                  background: '#fafafa',
-                }}
+                className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[12px] font-extrabold text-textPrimary"
               >
                 {t.service?.name || 'Service'}
               </span>
             ))}
           </div>
 
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
+          <div className="text-[12px] text-textSecondary">
             {media.likes?.length ?? 0} likes • {media.comments?.length ?? 0} comments
           </div>
         </div>

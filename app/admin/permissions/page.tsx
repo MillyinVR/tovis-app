@@ -10,13 +10,12 @@ type PermissionRole = 'SUPER_ADMIN' | 'SUPPORT' | 'REVIEWER'
 function Badge({ text }: { text: string }) {
   return (
     <span
+      className="border border-surfaceGlass/10 bg-bgSecondary"
       style={{
         fontSize: 12,
         fontWeight: 900,
         padding: '4px 8px',
         borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: '#fff',
       }}
     >
       {text}
@@ -116,7 +115,7 @@ export default async function AdminPermissionsPage() {
       </div>
 
       {/* Create permission */}
-      <div style={{ border: '1px solid #eee', borderRadius: 16, padding: 14, background: '#fff' }}>
+      <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 1000, marginBottom: 10 }}>Assign permission</div>
 
         <form
@@ -190,12 +189,10 @@ export default async function AdminPermissionsPage() {
 
           <button
             type="submit"
+            className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover"
             style={{
               padding: '10px 12px',
               borderRadius: 12,
-              border: '1px solid #111',
-              background: '#111',
-              color: '#fff',
               fontWeight: 900,
               cursor: 'pointer',
               height: 42,
@@ -211,7 +208,7 @@ export default async function AdminPermissionsPage() {
       </div>
 
       {/* Existing permissions */}
-      <div style={{ border: '1px solid #eee', borderRadius: 16, padding: 14, background: '#fff' }}>
+      <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 1000, marginBottom: 10 }}>Existing permissions</div>
 
         {permissions.length === 0 ? (
@@ -223,8 +220,8 @@ export default async function AdminPermissionsPage() {
               return (
                 <div
                   key={p.id}
+                  className="border border-surfaceGlass/10"
                   style={{
-                    border: '1px solid #eee',
                     borderRadius: 14,
                     padding: 12,
                     display: 'grid',
@@ -252,11 +249,11 @@ export default async function AdminPermissionsPage() {
                     <input type="hidden" name="_method" value="DELETE" />
                     <button
                       type="submit"
+                      className="bg-bgSecondary"
                       style={{
                         padding: '8px 10px',
                         borderRadius: 12,
                         border: '1px solid #ef4444',
-                        background: '#fff',
                         color: '#b91c1c',
                         fontWeight: 900,
                         cursor: 'pointer',

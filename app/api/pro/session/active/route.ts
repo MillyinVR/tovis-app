@@ -3,20 +3,23 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
-  const user = await getCurrentUser()
+  const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const db: any = prisma
+  const professionalId = user.professionalProfile.id
 
-  // 1) active session first
-  const active = await db.booking.findFirst({
+  // 1) active session first (started, not finished)
+  const active = await prisma.booking.findFirst({
     where: {
-      professionalId: user.professionalProfile.id,
+      professionalId,
       startedAt: { not: null },
       finishedAt: null,
+      status: 'ACCEPTED',
     },
     include: {
       client: true,
@@ -31,20 +34,23 @@ export async function GET() {
       booking: {
         id: active.id,
         scheduledFor: active.scheduledFor,
-        clientName: `${active.client.firstName} ${active.client.lastName}`,
-        serviceName: active.service.name,
+        clientName: `${active.client.firstName} ${active.client.lastName}`.trim(),
+        serviceName: active.service?.name ?? 'Appointment',
       },
     })
   }
 
-  // 2) otherwise, find the next upcoming within, say, 60 minutes
+  // 2) otherwise, find the next upcoming within 60 minutes
+  // IMPORTANT: PENDING is NOT startable. Only ACCEPTED should appear here.
   const now = new Date()
   const inOneHour = new Date(now.getTime() + 60 * 60 * 1000)
 
-  const next = await db.booking.findFirst({
+  const next = await prisma.booking.findFirst({
     where: {
-      professionalId: user.professionalProfile.id,
-      status: { in: ['PENDING', 'ACCEPTED'] },
+      professionalId,
+      status: 'ACCEPTED',
+      startedAt: null,
+      finishedAt: null,
       scheduledFor: {
         gte: now,
         lte: inOneHour,
@@ -66,8 +72,8 @@ export async function GET() {
     booking: {
       id: next.id,
       scheduledFor: next.scheduledFor,
-      clientName: `${next.client.firstName} ${next.client.lastName}`,
-      serviceName: next.service.name,
+      clientName: `${next.client.firstName} ${next.client.lastName}`.trim(),
+      serviceName: next.service?.name ?? 'Appointment',
     },
   })
 }

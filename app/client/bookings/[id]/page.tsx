@@ -9,6 +9,7 @@ import ConsultationDecisionCard from './ConsultationDecisionCard'
 export const dynamic = 'force-dynamic'
 
 type StepKey = 'overview' | 'consult' | 'aftercare'
+type StatusVariant = 'danger' | 'success' | 'warn' | 'info' | 'neutral'
 
 function normalizeStep(raw: unknown): StepKey {
   const s = String(raw || '').toLowerCase().trim()
@@ -75,22 +76,22 @@ function friendlySource(v: unknown) {
   return null
 }
 
-function statusPillTone(statusRaw: unknown) {
+function statusPillVariant(statusRaw: unknown): Exclude<StatusVariant, 'neutral'> {
   const s = upper(statusRaw)
-  if (s === 'CANCELLED') return { bg: '#fff1f2', color: '#9f1239' }
-  if (s === 'COMPLETED') return { bg: '#ecfdf5', color: '#065f46' }
-  if (s === 'PENDING') return { bg: '#fffbeb', color: '#854d0e' }
-  return { bg: '#ecfeff', color: '#155e75' }
+  if (s === 'CANCELLED') return 'danger'
+  if (s === 'COMPLETED') return 'success'
+  if (s === 'PENDING') return 'warn'
+  return 'info'
 }
 
-function statusMessage(statusRaw: unknown) {
+function statusMessage(statusRaw: unknown): { title: string; body: string; variant: StatusVariant } {
   const s = upper(statusRaw)
 
   if (s === 'PENDING') {
     return {
       title: 'Request sent',
       body: 'Your professional hasn’t approved this yet. You’ll see it move to Confirmed once accepted.',
-      tone: { bg: '#fffbeb', border: '#fde68a', color: '#854d0e' },
+      variant: 'warn',
     }
   }
 
@@ -98,7 +99,7 @@ function statusMessage(statusRaw: unknown) {
     return {
       title: 'Confirmed',
       body: 'You’re booked. Show up cute and on time. Future-you will thank you.',
-      tone: { bg: '#ecfeff', border: '#a5f3fc', color: '#155e75' },
+      variant: 'info',
     }
   }
 
@@ -106,7 +107,7 @@ function statusMessage(statusRaw: unknown) {
     return {
       title: 'Completed',
       body: 'All done. Leave a review if you haven’t already (professionals live for that).',
-      tone: { bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
+      variant: 'success',
     }
   }
 
@@ -114,14 +115,14 @@ function statusMessage(statusRaw: unknown) {
     return {
       title: 'Cancelled',
       body: 'This booking is cancelled. If you still want the service, book a new time.',
-      tone: { bg: '#fff1f2', border: '#fecdd3', color: '#9f1239' },
+      variant: 'danger',
     }
   }
 
   return {
     title: 'Booking status',
     body: 'We’re tracking this booking. Status updates will show here.',
-    tone: { bg: '#f3f4f6', border: '#e5e7eb', color: '#111827' },
+    variant: 'neutral',
   }
 }
 
@@ -178,6 +179,7 @@ function getAftercareRebookInfo(aftercare: any, timeZone: string): AftercareRebo
 
   if (modeRaw === 'NONE') return { mode: 'NONE', label: null }
 
+  // legacy single date set without mode
   const legacy = toDate(aftercare?.rebookedFor)
   if (legacy) return { mode: 'RECOMMENDED_DATE', label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}` }
 
@@ -189,26 +191,27 @@ function pickToken(aftercare: any): string | null {
   return typeof t === 'string' && t.trim() ? t.trim() : null
 }
 
-function tabStyle(active: boolean): React.CSSProperties {
-  return {
-    padding: '8px 12px',
-    borderRadius: 999,
-    border: '1px solid #ddd',
-    textDecoration: 'none',
-    color: active ? '#fff' : '#111',
-    background: active ? '#111' : '#fafafa',
-    fontSize: 12,
-    fontWeight: 900,
-  }
+function pillClassByVariant(_variant: Exclude<StatusVariant, 'neutral'>) {
+  return 'border border-white/10 bg-bgPrimary text-textPrimary'
 }
 
-function disabledTabStyle(): React.CSSProperties {
-  return {
-    ...tabStyle(false),
-    opacity: 0.45,
-    cursor: 'not-allowed',
-    userSelect: 'none',
-  }
+function alertClassByVariant(_variant: StatusVariant) {
+  return 'border border-white/10 bg-bgSecondary'
+}
+
+function tabClass(active: boolean) {
+  return [
+    'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
+    'border border-white/10',
+    active ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+  ].join(' ')
+}
+
+function tabDisabledClass() {
+  return [
+    'inline-flex items-center rounded-full px-4 py-2 text-xs font-black',
+    'border border-white/10 bg-bgPrimary text-textSecondary opacity-50 cursor-not-allowed select-none',
+  ].join(' ')
 }
 
 export default async function ClientBookingPage(props: {
@@ -218,7 +221,8 @@ export default async function ClientBookingPage(props: {
     | Record<string, string | string[] | undefined>
 }) {
   const resolvedParams = await Promise.resolve(props.params as any)
-  const bookingId = resolvedParams.id
+  const bookingId = String(resolvedParams?.id || '').trim()
+  if (!bookingId) notFound()
 
   const sp = (await Promise.resolve(props.searchParams as any).catch(() => ({}))) ?? {}
   const step = normalizeStep((sp as any)?.step)
@@ -262,38 +266,50 @@ export default async function ClientBookingPage(props: {
 
   const scheduled = toDate(booking.scheduledFor)
 
-  // ✅ Rule: always display in PRO’s timezone
-  const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
-  const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : 'Unknown time'
+  // ✅ Rule: always display in PRO’s timezone (prefer snapshot if present)
+  const appointmentTz =
+    sanitizeTimeZone((booking as any).locationTimeZone) ??
+    sanitizeTimeZone((booking.professional as any)?.timeZone) ??
+    'America/Los_Angeles'
 
+  const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : 'Unknown time'
   const loc = locationLine(booking.professional as any)
-  const pill = statusPillTone(booking.status)
+
+  const pillVariant = statusPillVariant(booking.status)
   const msg = statusMessage(booking.status)
 
-  const duration = booking.durationMinutesSnapshot ?? null
-  const basePriceLabel = formatMoneyLoose((booking as any).priceSnapshot)
+  // Prefer Option B snapshots, fallback to legacy
+  const duration =
+    (typeof (booking as any).totalDurationMinutes === 'number' ? (booking as any).totalDurationMinutes : null) ??
+    (typeof (booking as any).durationMinutesSnapshot === 'number' ? (booking as any).durationMinutesSnapshot : null)
+
+  const basePriceLabel =
+    formatMoneyLoose((booking as any).subtotalSnapshot) ??
+    formatMoneyLoose((booking as any).priceSnapshot) ??
+    formatMoneyLoose((booking as any).totalAmount) ??
+    null
 
   const modeLabel = friendlyLocationType((booking as any).locationType)
   const sourceLabel = friendlySource((booking as any).source)
 
   const aftercare = booking.aftercareSummary
-  const rebookInfo = aftercare ? getAftercareRebookInfo(aftercare, appointmentTz) : { mode: 'NONE', label: null }
+  const rebookInfo = aftercare
+    ? getAftercareRebookInfo(aftercare, appointmentTz)
+    : { mode: 'NONE' as const, label: null }
+
   const aftercareToken = aftercare ? pickToken(aftercare) : null
   const showRebookCTA = upper(booking.status) === 'COMPLETED' && Boolean(aftercareToken)
 
-  // ✅ Consultation approval required?
-  const showConsultationApproval =
-    upper(booking.consultationApproval?.status) === 'PENDING' &&
-    upper(booking.sessionStep) === 'CONSULTATION_PENDING_CLIENT' &&
-    upper(booking.status) !== 'CANCELLED' &&
-    upper(booking.status) !== 'COMPLETED'
-
-  // ✅ Gate tabs: consultation/aftercare should not appear as “available” until they are real.
   const statusUpper = upper(booking.status)
   const sessionStepUpper = upper((booking as any).sessionStep || 'NONE')
 
-  // Client should only see Consultation when there's an actual client-facing action/state.
-  // "CONSULTATION" is a PRO working state. Client-visible starts at CONSULTATION_PENDING_CLIENT.
+  const showConsultationApproval =
+    upper(booking.consultationApproval?.status) === 'PENDING' &&
+    sessionStepUpper === 'CONSULTATION_PENDING_CLIENT' &&
+    statusUpper !== 'CANCELLED' &&
+    statusUpper !== 'COMPLETED'
+
+  // Tabs should only be clickable when meaningful
   const canShowConsultTab =
     statusUpper !== 'CANCELLED' &&
     statusUpper !== 'COMPLETED' &&
@@ -304,13 +320,12 @@ export default async function ClientBookingPage(props: {
 
   const baseHref = `/client/bookings/${encodeURIComponent(booking.id)}`
 
-  // ✅ If user manually navigates to a locked tab, shove them back to overview.
   if (step === 'consult' && !canShowConsultTab) redirect(`${baseHref}?step=overview`)
   if (step === 'aftercare' && !canShowAftercareTab) redirect(`${baseHref}?step=overview`)
 
-  // ✅ Aftercare unread badge for this booking + mark read when viewing booking page
-  let hasUnreadAftercareNotifForThisBooking = false
-  if (aftercare?.id) {
+  // ✅ Only mark AFTERCARE notifications read when they are actually viewing aftercare
+  let showUnreadAftercareBadge = false
+  if (step === 'aftercare' && aftercare?.id) {
     const unread = await prisma.clientNotification.findFirst({
       where: {
         clientId: user.clientProfile.id,
@@ -322,7 +337,7 @@ export default async function ClientBookingPage(props: {
       select: { id: true },
     })
 
-    hasUnreadAftercareNotifForThisBooking = Boolean(unread)
+    showUnreadAftercareBadge = Boolean(unread)
 
     if (unread) {
       await prisma.clientNotification.updateMany({
@@ -335,122 +350,97 @@ export default async function ClientBookingPage(props: {
         } as any,
         data: { readAt: new Date() } as any,
       })
+      // After marking read, don’t keep showing NEW on the page they’re literally reading.
+      showUnreadAftercareBadge = false
     }
   }
 
-  const consultNotes = (booking.consultationApproval as any)?.notes || booking.consultationNotes || ''
+  const consultNotes = (booking.consultationApproval as any)?.notes || (booking as any).consultationNotes || ''
   const proposedTotalLabel = formatMoneyLoose((booking.consultationApproval as any)?.proposedTotal) || null
   const proposedFallback = basePriceLabel || null
 
   return (
-    <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>{booking.service?.name || 'Booking'}</h1>
+    <main className="mx-auto mt-20 w-full max-w-2xl px-4 pb-10 text-textPrimary">
+      <h1 className="mb-3 text-lg font-black">{booking.service?.name || 'Booking'}</h1>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 }}>
+      <div className="mb-4 flex items-center justify-between gap-3">
         <a
           href="/client/bookings"
-          style={{
-            textDecoration: 'none',
-            border: '1px solid #e5e7eb',
-            background: '#fff',
-            color: '#111',
-            borderRadius: 999,
-            padding: '8px 12px',
-            fontSize: 12,
-            fontWeight: 900,
-          }}
+          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
         >
           ← Back to bookings
         </a>
 
         <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '4px 10px',
-            borderRadius: 999,
-            fontSize: 12,
-            fontWeight: 900,
-            border: '1px solid #e5e7eb',
-            background: pill.bg,
-            color: pill.color,
-          }}
+          className={[
+            'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
+            pillClassByVariant(pillVariant),
+          ].join(' ')}
         >
           {String(booking.status || 'UNKNOWN').toUpperCase()}
         </span>
       </div>
 
-      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 10 }}>
+      <div className="mb-2 text-sm font-semibold text-textSecondary">
         With {(booking.professional as any)?.businessName || (booking.professional as any)?.user?.email || 'your professional'}
       </div>
 
-      <div style={{ fontSize: 13, color: '#111', marginBottom: 10 }}>
-        <span style={{ fontWeight: 800 }}>{whenLabel}</span>
-        <span style={{ color: '#6b7280' }}> · {appointmentTz}</span>
-        {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
+      <div className="mb-3 text-sm text-textPrimary">
+        <span className="font-black">{whenLabel}</span>
+        <span className="text-textSecondary"> · {appointmentTz}</span>
+        {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
       </div>
 
       {duration || basePriceLabel || modeLabel || sourceLabel ? (
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {duration ? <span style={{ fontWeight: 800, color: '#111' }}>{duration} min</span> : null}
-          {basePriceLabel ? <span style={{ fontWeight: 800, color: '#111' }}>{basePriceLabel}</span> : null}
+        <div className="mb-5 flex flex-wrap gap-3 text-xs font-semibold text-textSecondary">
+          {duration ? <span className="font-black text-textPrimary">{duration} min</span> : null}
+          {basePriceLabel ? <span className="font-black text-textPrimary">{basePriceLabel}</span> : null}
           {modeLabel ? (
             <span>
-              <span style={{ fontWeight: 800, color: '#111' }}>Mode:</span> {modeLabel}
+              <span className="font-black text-textPrimary">Mode:</span> {modeLabel}
             </span>
           ) : null}
           {sourceLabel ? (
             <span>
-              <span style={{ fontWeight: 800, color: '#111' }}>Source:</span> {sourceLabel}
+              <span className="font-black text-textPrimary">Source:</span> {sourceLabel}
             </span>
           ) : null}
         </div>
       ) : (
-        <div style={{ marginBottom: 16 }} />
+        <div className="mb-5" />
       )}
 
-      {/* Tabs */}
-      <nav style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
-        <a href={`${baseHref}?step=overview`} style={tabStyle(step === 'overview')}>
+      <nav className="mb-5 flex flex-wrap items-center gap-2">
+        <a href={`${baseHref}?step=overview`} className={tabClass(step === 'overview')}>
           Overview
         </a>
 
         {canShowConsultTab ? (
-          <a href={`${baseHref}?step=consult`} style={tabStyle(step === 'consult')}>
+          <a href={`${baseHref}?step=consult`} className={tabClass(step === 'consult')}>
             Consultation
           </a>
         ) : (
-          <span style={disabledTabStyle()} title="Consultation becomes available after your booking is confirmed and started by your pro.">
+          <span
+            className={tabDisabledClass()}
+            title="Consultation becomes available after your booking is confirmed and started by your pro."
+          >
             Consultation
           </span>
         )}
 
         {canShowAftercareTab ? (
-          <a href={`${baseHref}?step=aftercare`} style={tabStyle(step === 'aftercare')}>
+          <a href={`${baseHref}?step=aftercare`} className={tabClass(step === 'aftercare')}>
             Aftercare
           </a>
         ) : (
-          <span style={disabledTabStyle()} title="Aftercare becomes available after your appointment is completed.">
+          <span className={tabDisabledClass()} title="Aftercare becomes available after your appointment is completed.">
             Aftercare
           </span>
         )}
 
         {showConsultationApproval ? (
           <span
-            style={{
-              marginLeft: 'auto',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '6px 10px',
-              borderRadius: 999,
-              border: '1px solid #fde68a',
-              background: '#fffbeb',
-              color: '#854d0e',
-              fontSize: 11,
-              fontWeight: 900,
-              whiteSpace: 'nowrap',
-            }}
+            className="ml-auto inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary"
             title="Consultation approval needed"
           >
             Action required
@@ -458,57 +448,37 @@ export default async function ClientBookingPage(props: {
         ) : null}
       </nav>
 
-      {/* Status message */}
-      <section
-        style={{
-          borderRadius: 12,
-          border: `1px solid ${msg.tone.border}`,
-          background: msg.tone.bg,
-          padding: 12,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ fontWeight: 900, color: msg.tone.color, marginBottom: 4 }}>{msg.title}</div>
-        <div style={{ fontSize: 13, color: '#111' }}>{msg.body}</div>
+      <section className={['mb-5 rounded-card p-3', alertClassByVariant(msg.variant)].join(' ')}>
+        <div className="mb-1 text-sm font-black text-textPrimary">{msg.title}</div>
+        <div className="text-sm text-textSecondary">{msg.body}</div>
       </section>
 
-      {/* CONSULTATION */}
       {step === 'consult' ? (
-        <section style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
-            <div style={{ fontWeight: 900, fontSize: 14 }}>Consultation</div>
+        <section className="mb-5 rounded-card border border-white/10 bg-bgSecondary p-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-sm font-black">Consultation</div>
 
             {showConsultationApproval ? (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 900,
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  border: '1px solid #fde68a',
-                  background: '#fffbeb',
-                  color: '#854d0e',
-                }}
-              >
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
                 Approval needed
               </span>
             ) : null}
           </div>
 
-          <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-            <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Notes</div>
-            <div style={{ fontSize: 13, color: '#111', whiteSpace: 'pre-wrap' }}>
-              {consultNotes?.trim() ? consultNotes : 'No consultation notes provided.'}
+          <div className="mt-3 grid gap-3">
+            <div className="text-xs font-black text-textSecondary">Notes</div>
+            <div className="whitespace-pre-wrap text-sm text-textPrimary">
+              {String(consultNotes || '').trim() ? String(consultNotes) : 'No consultation notes provided.'}
             </div>
 
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
-                <span style={{ fontWeight: 900, color: '#111' }}>Proposed total:</span>{' '}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="text-xs font-semibold text-textSecondary">
+                <span className="font-black text-textPrimary">Proposed total:</span>{' '}
                 {proposedTotalLabel || proposedFallback || 'Not provided'}
               </div>
 
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                Times shown in <span style={{ fontWeight: 900 }}>{appointmentTz}</span>
+              <div className="text-xs font-semibold text-textSecondary">
+                Times shown in <span className="font-black text-textPrimary">{appointmentTz}</span>
               </div>
             </div>
 
@@ -520,44 +490,24 @@ export default async function ClientBookingPage(props: {
                 proposedTotalLabel={proposedTotalLabel || proposedFallback}
                 proposedServicesJson={(booking.consultationApproval as any)?.proposedServicesJson ?? null}
               />
-
             ) : (
-              <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>No consultation approval needed right now.</div>
+              <div className="text-xs font-semibold text-textSecondary">No consultation approval needed right now.</div>
             )}
           </div>
         </section>
       ) : null}
 
-      {/* OVERVIEW actions */}
       {step === 'overview' ? (
         <>
           {showConsultationApproval ? (
-            <section
-              style={{
-                borderRadius: 12,
-                border: '1px solid #fde68a',
-                background: '#fffbeb',
-                padding: 12,
-                marginBottom: 16,
-              }}
-            >
-              <div style={{ fontWeight: 900, color: '#854d0e', marginBottom: 4 }}>Action needed: approve consultation</div>
-              <div style={{ fontSize: 13, color: '#111', marginBottom: 10 }}>
+            <section className="mb-5 rounded-card border border-white/10 bg-bgSecondary p-3">
+              <div className="mb-1 text-sm font-black text-textPrimary">Action needed: approve consultation</div>
+              <div className="mb-3 text-sm text-textSecondary">
                 Your pro updated services and pricing. Review it so they can proceed.
               </div>
               <a
                 href={`${baseHref}?step=consult`}
-                style={{
-                  display: 'inline-block',
-                  textDecoration: 'none',
-                  border: '1px solid #111',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  color: '#fff',
-                  background: '#111',
-                }}
+                className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
               >
                 Review &amp; approve
               </a>
@@ -566,18 +516,7 @@ export default async function ClientBookingPage(props: {
 
           <a
             href={`/api/calendar?bookingId=${encodeURIComponent(booking.id)}`}
-            style={{
-              display: 'inline-block',
-              textDecoration: 'none',
-              border: '1px solid #ddd',
-              borderRadius: 999,
-              padding: '10px 14px',
-              fontSize: 12,
-              fontWeight: 900,
-              color: '#111',
-              background: '#fff',
-              marginBottom: 16,
-            }}
+            className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
           >
             Add to calendar
           </a>
@@ -591,90 +530,62 @@ export default async function ClientBookingPage(props: {
         </>
       ) : null}
 
-      {/* AFTERCARE */}
       {step === 'aftercare' ? (
-        <section id="aftercare" style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Aftercare summary</div>
+        <section id="aftercare" className="mt-5 rounded-card border border-white/10 bg-bgSecondary p-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-sm font-black">Aftercare summary</div>
 
-            {hasUnreadAftercareNotifForThisBooking ? (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 900,
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  border: '1px solid #fde68a',
-                  background: '#fffbeb',
-                  color: '#854d0e',
-                  letterSpacing: 0.3,
-                }}
-              >
+            {showUnreadAftercareBadge ? (
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[10px] font-black text-textPrimary">
                 NEW
               </span>
             ) : null}
           </div>
 
           {aftercare?.notes ? (
-            <div style={{ fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap' }}>{aftercare.notes}</div>
+            <div className="whitespace-pre-wrap text-sm text-textPrimary">{aftercare.notes}</div>
           ) : (
-            <div style={{ fontSize: 12, color: '#9ca3af' }}>
-              {upper(booking.status) === 'COMPLETED' ? 'No aftercare notes provided.' : 'Aftercare will appear here once the service is completed.'}
+            <div className="text-xs font-semibold text-textSecondary">
+              {upper(booking.status) === 'COMPLETED'
+                ? 'No aftercare notes provided.'
+                : 'Aftercare will appear here once the service is completed.'}
             </div>
           )}
 
           {aftercare && (rebookInfo.label || showRebookCTA) ? (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
-              <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 6 }}>Rebook</div>
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <div className="mb-2 text-xs font-black">Rebook</div>
 
               {rebookInfo.label ? (
-                <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                <div className="mb-3 text-sm text-textPrimary">
                   {rebookInfo.label}
-                  <span style={{ color: '#9ca3af' }}> · {appointmentTz}</span>
+                  <span className="text-textSecondary"> · {appointmentTz}</span>
                 </div>
               ) : (
-                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10 }}>No rebook recommendation yet.</div>
+                <div className="mb-3 text-xs font-semibold text-textSecondary">No rebook recommendation yet.</div>
               )}
 
               {showRebookCTA ? (
                 <a
                   href={`/client/rebook/${encodeURIComponent(aftercareToken as string)}`}
-                  style={{
-                    display: 'inline-block',
-                    textDecoration: 'none',
-                    border: '1px solid #111',
-                    borderRadius: 999,
-                    padding: '10px 14px',
-                    fontSize: 12,
-                    fontWeight: 900,
-                    color: '#fff',
-                    background: '#111',
-                  }}
+                  className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
                 >
                   {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT' ? 'View rebook details' : 'Rebook now'}
                 </a>
               ) : null}
 
               {!aftercareToken && upper(booking.status) === 'COMPLETED' ? (
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Rebook link not available yet (missing aftercare token).</div>
+                <div className="mt-2 text-xs font-semibold text-textSecondary">
+                  Rebook link not available yet (missing aftercare token).
+                </div>
               ) : null}
             </div>
           ) : null}
 
-          <div style={{ marginTop: 12 }}>
+          <div className="mt-4">
             <a
               href="/client/aftercare"
-              style={{
-                display: 'inline-block',
-                textDecoration: 'none',
-                fontSize: 12,
-                fontWeight: 900,
-                color: '#111',
-                border: '1px solid #e5e7eb',
-                background: '#fff',
-                padding: '8px 12px',
-                borderRadius: 999,
-              }}
+              className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
             >
               View all aftercare
             </a>
@@ -682,8 +593,7 @@ export default async function ClientBookingPage(props: {
         </section>
       ) : null}
 
-      {/* Reviews always available at bottom */}
-      <div style={{ marginTop: 16 }}>
+      <div className="mt-5">
         <ReviewSection
           bookingId={booking.id}
           existingReview={

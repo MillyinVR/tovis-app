@@ -1,4 +1,5 @@
 // app/client/components/_helpers.tsx
+import React from 'react'
 
 export type BookingStatus =
   | 'PENDING'

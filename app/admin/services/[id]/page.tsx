@@ -51,12 +51,12 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>{service.name}</h1>
             <div style={{ color: '#6b7280', fontSize: 13 }}>Category: {service.category?.name || '—'}</div>
           </div>
-          <Link href="/admin/services" style={{ fontSize: 12, fontWeight: 900, textDecoration: 'none', color: '#111' }}>
+          <Link href="/admin/services" className="text-textPrimary" style={{ fontSize: 12, fontWeight: 900, textDecoration: 'none' }}>
             ← Back
           </Link>
         </div>
 
-        <section style={{ border: '1px solid #eee', background: '#fff', borderRadius: 16, padding: 16, display: 'grid', gap: 12 }}>
+        <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16, display: 'grid', gap: 12 }}>
           <div style={{ fontWeight: 900 }}>Edit service</div>
 
           <form action={`/api/admin/services/${encodeURIComponent(service.id)}`} method="post" style={{ display: 'grid', gap: 10 }}>
@@ -64,12 +64,12 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
 
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Name</div>
-              <input name="name" defaultValue={service.name} required style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }} />
+              <input name="name" defaultValue={service.name} required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
             </label>
 
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Category</div>
-              <select name="categoryId" defaultValue={service.categoryId} required style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }}>
+              <select name="categoryId" defaultValue={service.categoryId} required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }}>
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.parentId ? '  ↳ ' : ''}
@@ -88,7 +88,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
                 step={5}
                 defaultValue={service.defaultDurationMinutes}
                 required
-                style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }}
+                className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }}
               />
             </label>
 
@@ -101,13 +101,13 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
                 step="0.01"
                 defaultValue={String(service.minPrice)}
                 required
-                style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }}
+                className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }}
               />
             </label>
 
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Description (optional)</div>
-              <textarea name="description" defaultValue={service.description ?? ''} rows={3} style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }} />
+              <textarea name="description" defaultValue={service.description ?? ''} rows={3} className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
             </label>
 
             <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
@@ -116,14 +116,14 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
             </label>
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="submit" style={{ border: '1px solid #111', background: '#111', color: '#fff', borderRadius: 12, padding: '10px 12px', fontWeight: 900 }}>
+              <button type="submit" className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover" style={{ borderRadius: 12, padding: '10px 12px', fontWeight: 900 }}>
                 Save
               </button>
             </div>
           </form>
         </section>
 
-        <section style={{ border: '1px solid #eee', background: '#fff', borderRadius: 16, padding: 16, display: 'grid', gap: 12 }}>
+        <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16, display: 'grid', gap: 12 }}>
           <div style={{ fontWeight: 900 }}>Permissions</div>
           <div style={{ fontSize: 13, color: '#6b7280' }}>
             Choose which professions can offer this service. Optional: limit to a state (2-letter code). Leaving state blank = all states.
@@ -132,7 +132,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
           <form action={`/api/admin/services/${encodeURIComponent(service.id)}/permissions`} method="post" style={{ display: 'grid', gap: 10 }}>
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>State code filter (optional)</div>
-              <input name="stateCode" placeholder="CA" maxLength={2} style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }} />
+              <input name="stateCode" placeholder="CA" maxLength={2} className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
             </label>
 
             <div style={{ display: 'grid', gap: 8 }}>
@@ -145,7 +145,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
             </div>
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="submit" style={{ border: '1px solid #111', background: '#111', color: '#fff', borderRadius: 12, padding: '10px 12px', fontWeight: 900 }}>
+              <button type="submit" className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover" style={{ borderRadius: 12, padding: '10px 12px', fontWeight: 900 }}>
                 Replace permissions
               </button>
             </div>

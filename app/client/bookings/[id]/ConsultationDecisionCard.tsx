@@ -1,3 +1,4 @@
+// app/client/bookings/[id]/ConsultationDecisionCard.tsx
 'use client'
 
 import { useRouter } from 'next/navigation'
@@ -17,8 +18,15 @@ function errorFrom(res: Response, data: any) {
 
 function asItems(proposedServicesJson: unknown): Array<{ label?: string; categoryName?: string | null; price?: any }> {
   const j: any = proposedServicesJson
-  const items = Array.isArray(j?.items) ? j.items : []
-  return items
+  return Array.isArray(j?.items) ? j.items : []
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
+      {children}
+    </span>
+  )
 }
 
 export default function ConsultationDecisionCard(props: {
@@ -61,77 +69,60 @@ export default function ConsultationDecisionCard(props: {
   }
 
   return (
-    <section
-      style={{
-        borderRadius: 12,
-        border: '1px solid #fde68a',
-        background: '#fffbeb',
-        padding: 12,
-        marginTop: 8,
-      }}
-    >
-      <div style={{ fontWeight: 900, color: '#854d0e', marginBottom: 6 }}>
-        Approve this consultation?
+    <section className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div className="text-sm font-black text-accentPrimary">Approve this consultation?</div>
+        <Pill>{appointmentTz}</Pill>
       </div>
 
-      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Proposed services</div>
+      <div className="mt-3 text-xs font-black text-textSecondary">Proposed services</div>
+
       {items.length ? (
-        <div style={{ marginTop: 6, display: 'grid', gap: 6 }}>
+        <div className="mt-2 grid gap-2">
           {items.map((it, idx) => (
-            <div
-              key={idx}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 10,
-                background: '#fff',
-                border: '1px solid #f3f4f6',
-                borderRadius: 10,
-                padding: '8px 10px',
-                fontSize: 13,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 900, color: '#111' }}>{it?.label || 'Service'}</div>
-                {it?.categoryName ? <div style={{ fontSize: 12, color: '#6b7280' }}>{it.categoryName}</div> : null}
+            <div key={idx} className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3">
+              <div className="min-w-0">
+                <div className="text-sm font-black text-textPrimary">{it?.label || 'Service'}</div>
+                {it?.categoryName ? (
+                  <div className="text-xs font-semibold text-textSecondary">{it.categoryName}</div>
+                ) : null}
               </div>
-              <div style={{ fontWeight: 900, color: '#111' }}>
-                {it?.price != null ? `$${String(it.price)}` : '—'}
+              <div className="text-sm font-black text-textPrimary">
+                {it?.price != null ? (
+                  <span>{String(it.price).trim().startsWith('$') ? String(it.price).trim() : `$${String(it.price).trim()}`}</span>
+                ) : (
+                  '—'
+                )}
+
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>No line items provided.</div>
+        <div className="mt-2 text-sm font-medium text-textSecondary">No line items provided.</div>
       )}
 
-      <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Proposed total</div>
-      <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 10 }}>
-        {proposedTotalLabel || 'Not provided'}{' '}
-        <span style={{ fontSize: 12, color: '#6b7280' }}>· {appointmentTz}</span>
+      <div className="mt-3 text-xs font-black text-textSecondary">Proposed total</div>
+      <div className="mt-1 text-base font-black text-textPrimary">
+        {proposedTotalLabel || 'Not provided'}
       </div>
 
-      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Notes</div>
-      <div style={{ fontSize: 13, color: '#111', whiteSpace: 'pre-wrap', marginBottom: 10 }}>
+      <div className="mt-3 text-xs font-black text-textSecondary">Notes</div>
+      <div className="mt-1 whitespace-pre-wrap text-sm text-textPrimary">
         {notes?.trim() ? notes : 'No consultation notes provided.'}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => decide('approve')}
           disabled={disabled || loading !== null}
-          style={{
-            border: '1px solid #111',
-            borderRadius: 999,
-            padding: '10px 14px',
-            fontSize: 12,
-            fontWeight: 900,
-            color: '#fff',
-            background: '#111',
-            cursor: disabled || loading ? 'not-allowed' : 'pointer',
-            opacity: loading === 'approve' ? 0.7 : 1,
-          }}
+          className={[
+            'rounded-full px-4 py-2 text-sm font-black transition',
+            disabled || loading
+              ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
+              : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+          ].join(' ')}
         >
           {loading === 'approve' ? 'Approving…' : 'Approve'}
         </button>
@@ -140,35 +131,28 @@ export default function ConsultationDecisionCard(props: {
           type="button"
           onClick={() => decide('reject')}
           disabled={disabled || loading !== null}
-          style={{
-            border: '1px solid #111',
-            borderRadius: 999,
-            padding: '10px 14px',
-            fontSize: 12,
-            fontWeight: 900,
-            color: '#111',
-            background: '#fff',
-            cursor: disabled || loading ? 'not-allowed' : 'pointer',
-            opacity: loading === 'reject' ? 0.7 : 1,
-          }}
+          className={[
+            'rounded-full px-4 py-2 text-sm font-black transition',
+            disabled || loading
+              ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
+              : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+          ].join(' ')}
         >
           {loading === 'reject' ? 'Rejecting…' : 'Reject'}
         </button>
       </div>
 
       {done ? (
-        <div style={{ marginTop: 10, fontSize: 12, color: '#065f46', fontWeight: 800 }}>
-          {done === 'approve' ? 'Approved. Your pro can proceed.' : 'Rejected. Your pro will revise and resend.'}
+        <div className="mt-3 text-sm font-semibold text-textSecondary">
+          {done === 'approve'
+            ? 'Approved. Your pro can proceed.'
+            : 'Rejected. Your pro will revise and resend.'}
         </div>
       ) : null}
 
-      {err ? (
-        <div style={{ marginTop: 10, fontSize: 12, color: '#7f1d1d', fontWeight: 700 }}>
-          {err}
-        </div>
-      ) : null}
+      {err ? <div className="mt-3 text-sm font-semibold text-microAccent">{err}</div> : null}
 
-      <div style={{ marginTop: 10, fontSize: 11, color: '#6b7280' }}>
+      <div className="mt-3 text-xs font-medium text-textSecondary">
         If you reject, the pro gets kicked back to consultation to revise.
       </div>
     </section>

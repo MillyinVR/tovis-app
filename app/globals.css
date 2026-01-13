@@ -1,33 +1,20 @@
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@import "tailwindcss";
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* App-wide hygiene */
 html,
 body {
+  height: 100%;
   max-width: 100vw;
   overflow-x: hidden;
 }
 
+/* Let the BRAND system define bg + text via CSS vars */
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: rgb(var(--bg-primary));
+  color: rgb(var(--text-primary));
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
 }
 
 a {
@@ -35,8 +22,73 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+/* Prefer explicit theme mode via BrandProvider. */
+html {
+  color-scheme: dark;
+}
+
+:root {
+  /* Brand tokens (RGB triplets, no commas) */
+  --bg-primary: 10 10 12;
+  --bg-secondary: 18 18 22;
+
+  --text-primary: 245 245 247;
+  --text-secondary: 170 170 180;
+
+  /* “Glass” surface layers */
+  --surface-glass: 255 255 255;
+
+  /* Accents */
+  --accent-primary: 212 175 55;
+  --accent-primary-hover: 230 195 85;
+
+  /* Micro accent */
+  --micro-accent: 255 90 120;
+
+  /* Semantic tones */
+  --tone-danger: 255 90 120;
+  --tone-warn: 245 158 11;
+  --tone-success: 34 197 94;
+  --tone-info: 56 189 248;
+
+  /* Overlay token (scrims/modals) */
+  --overlay: 10 10 12; /* slightly lifted black reads better */
+  --radius-card: 18px;
+}
+/* “TikTok-ish” glass surface helpers */
+.tovis-glass {
+  background: rgba(18, 18, 22, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.tovis-glass-soft {
+  background: rgba(18, 18, 22, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Optional: light mode */
+[data-theme='light'] {
+  --bg-primary: 255 255 255;
+  --bg-secondary: 245 245 247;
+
+  --text-primary: 17 24 39;
+  --text-secondary: 107 114 128;
+
+  --surface-glass: 0 0 0;
+
+  --accent-primary: 212 175 55;
+  --accent-primary-hover: 200 160 40;
+
+  --micro-accent: 220 38 38;
+
+  --tone-danger: 220 38 38;
+  --tone-warn: 217 119 6;
+  --tone-success: 22 163 74;
+  --tone-info: 2 132 199;
+
+  --overlay: 0 0 0;
 }

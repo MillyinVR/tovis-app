@@ -24,7 +24,7 @@ type LineItem = {
   serviceId: string
   label: string
   categoryName: string | null
-  price: string // keep as string for input control
+  price: string
 }
 
 async function safeJson(res: Response) {
@@ -40,18 +40,11 @@ function errorFromResponse(res: Response, data: any) {
 }
 
 function normalizeMoneyInput(raw: string) {
-  const s = String(raw || '')
-    .replace(/\$/g, '')
-    .replace(/,/g, '')
-    .trim()
-
+  const s = String(raw || '').replace(/\$/g, '').replace(/,/g, '').trim()
   if (!s) return { value: null as string | null, ok: true }
-
   if (!/^\d*\.?\d{0,2}$/.test(s)) return { value: s, ok: false }
-
   const normalized = s.startsWith('.') ? `0${s}` : s
   if (normalized === '.' || normalized === '0.') return { value: null, ok: false }
-
   return { value: normalized, ok: true }
 }
 
@@ -63,7 +56,6 @@ function sumMoneyStrings(items: Array<{ price: string }>) {
     const n = Number(p.value)
     if (Number.isFinite(n)) total += n
   }
-  // round to 2 decimals
   total = Math.round(total * 100) / 100
   return total
 }
@@ -94,7 +86,6 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     }
   }, [])
 
-  // Load offered services for this pro/booking
   useEffect(() => {
     let cancelled = false
 
@@ -127,17 +118,12 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     }
   }, [bookingId])
 
-  // Seed: if you previously had a plain consultation price, put it in one “Booking service” line item
   useEffect(() => {
-    // Only seed once, and only if empty
     if (items.length) return
-
     const raw = initialPrice !== null && initialPrice !== undefined ? String(initialPrice) : ''
     const parsed = normalizeMoneyInput(raw)
     if (!parsed.ok || parsed.value == null) return
 
-    // We don’t know the exact service label here without another fetch,
-    // so we seed a generic line. The pro can replace it with real dropdown picks.
     setItems([
       {
         key: uid(),
@@ -182,9 +168,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
   }
 
   function updateItemPrice(key: string, price: string) {
-    setItems((prev) =>
-      prev.map((x) => (x.key === key ? { ...x, price } : x)),
-    )
+    setItems((prev) => prev.map((x) => (x.key === key ? { ...x, price } : x)))
   }
 
   const itemsValid = useMemo(() => {
@@ -214,7 +198,6 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     setSaving(true)
 
     try {
-      // Build proposedServicesJson that is actually useful across the app.
       const proposedServicesJson = {
         currency: 'USD',
         items: items.map((it) => ({
@@ -222,22 +205,17 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
           serviceId: it.serviceId || null,
           label: it.label,
           categoryName: it.categoryName || null,
-          price: normalizeMoneyInput(it.price).value, // string number
+          price: normalizeMoneyInput(it.price).value,
         })),
       }
 
       const proposedTotal = total.toFixed(2)
 
-      // One canonical call. Your existing /consultation already upserts approval + moves step.
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/consultation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({
-          notes,
-          proposedTotal,
-          proposedServicesJson,
-        }),
+        body: JSON.stringify({ notes, proposedTotal, proposedServicesJson }),
       })
 
       const data = await safeJson(res)
@@ -259,46 +237,29 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     }
   }
 
+  const field =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{
-        borderRadius: 12,
-        border: '1px solid #eee',
-        padding: 16,
-        background: '#fff',
-        display: 'grid',
-        gap: 12,
-        fontSize: 13,
-      }}
-    >
-      {/* Service picker */}
+    <form onSubmit={handleSubmit} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4">
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 800 }}>
-            Services (what you’re actually doing)
-          </label>
-          <div style={{ fontSize: 12, fontWeight: 900, color: '#111' }}>
-            Total: <span style={{ color: '#111' }}>{totalLabel}</span>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="text-[12px] font-black text-textPrimary">Services (what you’re actually doing)</div>
+          <div className="text-[12px] font-black text-textPrimary">
+            Total: <span className="text-textPrimary">{totalLabel}</span>
           </div>
         </div>
 
         {loadingServices ? (
-          <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>Loading your services…</div>
+          <div className="mt-3 text-[12px] text-textSecondary">Loading your services…</div>
         ) : services.length ? (
-          <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <select
               value={selectedOfferingId}
               disabled={saving}
               onChange={(e) => setSelectedOfferingId(e.target.value)}
-              style={{
-                borderRadius: 8,
-                border: '1px solid #ddd',
-                padding: '8px 10px',
-                fontSize: 13,
-                background: '#fff',
-                minWidth: 280,
-              }}
+              className={field}
+              style={{ minWidth: 280 }}
             >
               {services.map((s) => (
                 <option key={s.offeringId} value={s.offeringId}>
@@ -312,151 +273,94 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
               type="button"
               onClick={addSelectedService}
               disabled={saving}
-              style={{
-                border: '1px solid #111',
-                borderRadius: 999,
-                padding: '8px 12px',
-                fontSize: 12,
-                fontWeight: 900,
-                background: '#fff',
-                cursor: saving ? 'not-allowed' : 'pointer',
-              }}
+              className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
             >
               + Add
             </button>
           </div>
         ) : (
-          <div style={{ marginTop: 8, fontSize: 12, color: '#7f1d1d' }}>
+          <div className="mt-3 rounded-card border border-toneDanger/30 bg-bgPrimary p-3 text-[12px] text-toneDanger">
             No services found for your profile. Add offerings before sending consult approvals.
           </div>
         )}
       </div>
 
-      {/* Line items */}
-      <div style={{ display: 'grid', gap: 8 }}>
+      <div className="grid gap-2">
         {items.length ? (
           items.map((it) => {
             const parsed = normalizeMoneyInput(it.price)
             return (
-              <div
-                key={it.key}
-                style={{
-                  border: '1px solid #eee',
-                  borderRadius: 10,
-                  padding: 10,
-                  background: '#fafafa',
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div style={{ minWidth: 220 }}>
-                  <div style={{ fontWeight: 900, color: '#111' }}>{it.label}</div>
-                  {it.categoryName ? (
-                    <div style={{ fontSize: 12, color: '#6b7280' }}>{it.categoryName}</div>
-                  ) : null}
-                </div>
+              <div key={it.key} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="min-w-[220px]">
+                    <div className="text-[13px] font-black text-textPrimary">{it.label}</div>
+                    {it.categoryName ? <div className="text-[12px] text-textSecondary">{it.categoryName}</div> : null}
+                  </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 13 }}>$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={it.price}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] text-textSecondary">$</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={it.price}
+                      disabled={saving}
+                      onChange={(e) => updateItemPrice(it.key, e.target.value)}
+                      placeholder="0.00"
+                      className={[
+                        field,
+                        'w-[140px]',
+                        parsed.ok ? '' : 'ring-2 ring-toneDanger/40',
+                      ].join(' ')}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removeItem(it.key)}
                     disabled={saving}
-                    onChange={(e) => updateItemPrice(it.key, e.target.value)}
-                    placeholder="0.00"
-                    style={{
-                      width: 120,
-                      borderRadius: 8,
-                      border: `1px solid ${parsed.ok ? '#ddd' : '#ef4444'}`,
-                      padding: '6px 8px',
-                      fontSize: 13,
-                      fontFamily: 'inherit',
-                      background: '#fff',
-                    }}
-                  />
+                    className="ml-auto rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+                  >
+                    Remove
+                  </button>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeItem(it.key)}
-                  disabled={saving}
-                  style={{
-                    marginLeft: 'auto',
-                    border: '1px solid #ddd',
-                    borderRadius: 999,
-                    padding: '6px 10px',
-                    fontSize: 12,
-                    fontWeight: 900,
-                    background: '#fff',
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  Remove
-                </button>
               </div>
             )
           })
         ) : (
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
+          <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] text-textSecondary">
             Add services above. Sending a consult with “nothing” is not a personality trait.
           </div>
         )}
       </div>
 
-      {/* Notes */}
-      <div>
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
-          Consultation notes
-        </label>
+      <div className="grid gap-2">
+        <label className="text-[12px] font-black text-textPrimary">Consultation notes</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={4}
           disabled={saving}
           placeholder="Goals, techniques, anything you agreed on…"
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            padding: 8,
-            fontSize: 13,
-            fontFamily: 'inherit',
-            resize: 'vertical',
-            opacity: saving ? 0.85 : 1,
-          }}
+          className={field}
         />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
           disabled={!canSubmit}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 999,
-            border: 'none',
-            fontSize: 13,
-            fontWeight: 900,
-            background: !canSubmit ? '#374151' : '#111',
-            color: '#fff',
-            cursor: !canSubmit ? 'not-allowed' : 'pointer',
-            opacity: saving ? 0.9 : 1,
-          }}
+          className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? 'Sending…' : 'Send to client for approval'}
         </button>
 
-        <span style={{ fontSize: 12, color: '#6b7280' }}>
-          Client sees the line items + total and must approve before you can proceed.
+        <span className="text-[12px] text-textSecondary">
+          Client sees line items + total and must approve before you proceed.
         </span>
 
-        {message ? <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 800 }}>{message}</span> : null}
-        {error ? <span style={{ fontSize: 11, color: '#ef4444', fontWeight: 800 }}>{error}</span> : null}
+        {message ? <span className="text-[12px] font-black text-toneSuccess">{message}</span> : null}
+        {error ? <span className="text-[12px] font-black text-toneDanger">{error}</span> : null}
       </div>
     </form>
   )
 }
-

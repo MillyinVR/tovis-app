@@ -1,3 +1,4 @@
+// app/pro/bookings/[id]/session/MediaUploader.tsx
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
@@ -22,13 +23,7 @@ function upper(v: string) {
   return v.trim().toUpperCase()
 }
 
-export default function MediaUploader({
-  bookingId,
-  phase,
-}: {
-  bookingId: string
-  phase: Phase
-}) {
+export default function MediaUploader({ bookingId, phase }: { bookingId: string; phase: Phase }) {
   const router = useRouter()
 
   const [url, setUrl] = useState('')
@@ -47,11 +42,7 @@ export default function MediaUploader({
 
   const canSubmit = useMemo(() => {
     const u = url.trim()
-    return Boolean(
-      bookingId &&
-        u.length > 10 &&
-        (u.startsWith('http://') || u.startsWith('https://')),
-    )
+    return Boolean(bookingId && u.length > 10 && (u.startsWith('http://') || u.startsWith('https://')))
   }, [bookingId, url])
 
   async function submit() {
@@ -104,154 +95,77 @@ export default function MediaUploader({
     }
   }
 
+  const inputClass =
+    'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-white/20'
+
+  const selectClass =
+    'rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary outline-none focus:border-white/20'
+
+  const btnClass = [
+    'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
+    canSubmit && !loading
+      ? 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
+      : 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60',
+  ].join(' ')
+
   return (
-    <div
-      style={{
-        border: '1px solid #eee',
-        background: '#fff',
-        borderRadius: 12,
-        padding: 14,
-        display: 'grid',
-        gap: 10,
-      }}
-    >
-      <div style={{ fontSize: 12, color: '#6b7280' }}>
+    <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary">
+      <div className="text-xs font-semibold text-textSecondary">
         Temporary uploader: paste a hosted URL (real uploads next).
       </div>
 
-      <div>
-        <label style={{ display: 'block', fontSize: 12, fontWeight: 900, marginBottom: 6 }}>
-          Media URL
-        </label>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://…"
-          disabled={loading}
-          style={{
-            width: '100%',
-            borderRadius: 10,
-            border: '1px solid #ddd',
-            padding: '10px 10px',
-            fontSize: 13,
-            fontFamily: 'inherit',
-          }}
-        />
-      </div>
-
-      <div>
-        <label style={{ display: 'block', fontSize: 12, fontWeight: 900, marginBottom: 6 }}>
-          Thumb URL (optional)
-        </label>
-        <input
-          value={thumbUrl}
-          onChange={(e) => setThumbUrl(e.target.value)}
-          placeholder="https://…"
-          disabled={loading}
-          style={{
-            width: '100%',
-            borderRadius: 10,
-            border: '1px solid #ddd',
-            padding: '10px 10px',
-            fontSize: 13,
-            fontFamily: 'inherit',
-          }}
-        />
-      </div>
-
-      <div>
-        <label style={{ display: 'block', fontSize: 12, fontWeight: 900, marginBottom: 6 }}>
-          Caption (optional)
-        </label>
-        <input
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          placeholder="e.g. Before: grown-out blonde"
-          disabled={loading}
-          style={{
-            width: '100%',
-            borderRadius: 10,
-            border: '1px solid #ddd',
-            padding: '10px 10px',
-            fontSize: 13,
-            fontFamily: 'inherit',
-          }}
-        />
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div className="mt-4 grid gap-3">
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 900, marginBottom: 6 }}>
-            Type
-          </label>
-          <select
-            value={mediaType}
-            onChange={(e) => setMediaType(e.target.value as any)}
-            disabled={loading}
-            style={{ borderRadius: 10, border: '1px solid #ddd', padding: '10px 10px', fontSize: 13 }}
-          >
-            <option value="IMAGE">Image</option>
-            <option value="VIDEO">Video</option>
-          </select>
+          <label className="mb-1 block text-xs font-black text-textSecondary">Media URL</label>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" disabled={loading} className={inputClass} />
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 900, marginBottom: 6 }}>
-            Visibility
-          </label>
-          <select
-            value={visibility}
-            onChange={(e) => setVisibility(e.target.value as any)}
-            disabled={loading}
-            style={{ borderRadius: 10, border: '1px solid #ddd', padding: '10px 10px', fontSize: 13 }}
-          >
-            <option value="PUBLIC">Public</option>
-            <option value="PRIVATE">Private</option>
-          </select>
+          <label className="mb-1 block text-xs font-black text-textSecondary">Thumb URL (optional)</label>
+          <input value={thumbUrl} onChange={(e) => setThumbUrl(e.target.value)} placeholder="https://…" disabled={loading} className={inputClass} />
         </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginTop: 22 }}>
-          <input
-            type="checkbox"
-            checked={eligible}
-            disabled={loading}
-            onChange={(e) => setEligible(e.target.checked)}
-          />
-          Eligible for Looks
-        </label>
+        <div>
+          <label className="mb-1 block text-xs font-black text-textSecondary">Caption (optional)</label>
+          <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="e.g. Before: grown-out blonde" disabled={loading} className={inputClass} />
+        </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginTop: 22 }}>
-          <input
-            type="checkbox"
-            checked={featured}
-            disabled={loading}
-            onChange={(e) => setFeatured(e.target.checked)}
-          />
-          Featured in portfolio
-        </label>
-      </div>
+        <div className="flex flex-wrap gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-black text-textSecondary">Type</label>
+            <select value={mediaType} onChange={(e) => setMediaType(e.target.value as any)} disabled={loading} className={selectClass}>
+              <option value="IMAGE">Image</option>
+              <option value="VIDEO">Video</option>
+            </select>
+          </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canSubmit || loading}
-          style={{
-            border: '1px solid #111',
-            background: !canSubmit || loading ? '#374151' : '#111',
-            color: '#fff',
-            borderRadius: 999,
-            padding: '10px 14px',
-            fontSize: 12,
-            fontWeight: 900,
-            cursor: !canSubmit || loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {loading ? 'Adding…' : 'Add media'}
-        </button>
+          <div>
+            <label className="mb-1 block text-xs font-black text-textSecondary">Visibility</label>
+            <select value={visibility} onChange={(e) => setVisibility(e.target.value as any)} disabled={loading} className={selectClass}>
+              <option value="PUBLIC">Public</option>
+              <option value="PRIVATE">Private</option>
+            </select>
+          </div>
 
-        {message ? <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 900 }}>{message}</span> : null}
-        {error ? <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 900 }}>{error}</span> : null}
+          <label className="mt-6 flex items-center gap-2 text-xs font-semibold text-textPrimary">
+            <input type="checkbox" checked={eligible} disabled={loading} onChange={(e) => setEligible(e.target.checked)} />
+            Eligible for Looks
+          </label>
+
+          <label className="mt-6 flex items-center gap-2 text-xs font-semibold text-textPrimary">
+            <input type="checkbox" checked={featured} disabled={loading} onChange={(e) => setFeatured(e.target.checked)} />
+            Featured in portfolio
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" onClick={submit} disabled={!canSubmit || loading} className={btnClass}>
+            {loading ? 'Adding…' : 'Add media'}
+          </button>
+
+          {message ? <span className="text-xs font-black text-textPrimary">{message}</span> : null}
+          {error ? <span className="text-xs font-black text-microAccent">{error}</span> : null}
+        </div>
       </div>
     </div>
   )

@@ -13,6 +13,5 @@ export default async function ClientConsultationLegacyPage(props: { params: Prom
     redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}?step=consult`)}`)
   }
 
-  // Canonical location for consultation decisions:
   redirect(`/client/bookings/${encodeURIComponent(bookingId)}?step=consult`)
 }

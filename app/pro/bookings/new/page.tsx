@@ -1,13 +1,11 @@
+// app/pro/bookings/new/page.tsx
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import NewBookingForm from './NewBookingForm'
 
-export default async function NewBookingPage(props: {
-  searchParams: Promise<{ clientId?: string }>
-}) {
+export default async function NewBookingPage(props: { searchParams: Promise<{ clientId?: string }> }) {
   const { clientId } = await props.searchParams
-
   const user = await getCurrentUser()
 
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
@@ -17,65 +15,32 @@ export default async function NewBookingPage(props: {
   const db: any = prisma
 
   const clients = await db.clientProfile.findMany({
-    include: {
-      user: true,
-    },
-    orderBy: {
-      firstName: 'asc',
-    },
+    include: { user: true },
+    orderBy: { firstName: 'asc' },
   })
 
   const offerings = await db.professionalServiceOffering.findMany({
-    where: {
-      professionalId: user.professionalProfile.id,
-      isActive: true,
-    },
-    include: {
-      service: {
-        include: {
-          category: true,
-        },
-      },
-    },
-    orderBy: {
-      service: {
-        name: 'asc',
-      },
-    },
+    where: { professionalId: user.professionalProfile.id, isActive: true },
+    include: { service: { include: { category: true } } },
+    orderBy: { service: { name: 'asc' } },
   })
 
   return (
-    <main
-      style={{
-        maxWidth: 800,
-        margin: '40px auto',
-        padding: '0 16px',
-        fontFamily: 'system-ui',
-      }}
-    >
-      <a
-        href="/pro"
-        style={{
-          fontSize: 12,
-          color: '#555',
-          marginBottom: 8,
-          display: 'inline-block',
-          textDecoration: 'none',
-        }}
-      >
+    <main className="mx-auto w-full max-w-215 px-4 pb-24 pt-8">
+      <a href="/pro" className="inline-block text-[12px] font-black text-textSecondary hover:text-textPrimary">
         ← Back to dashboard
       </a>
 
-      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 8 }}>New booking</h1>
-      <p style={{ fontSize: 13, color: '#555', marginBottom: 16 }}>
-        Create a booking for a client. You can always tweak times and services later.
-      </p>
+      <div className="mt-3">
+        <h1 className="text-[22px] font-black text-textPrimary">New booking</h1>
+        <p className="mt-1 text-[12px] text-textSecondary">
+          Create a booking for a client. You can tweak times and services later.
+        </p>
+      </div>
 
-      <NewBookingForm
-        clients={clients}
-        offerings={offerings}
-        defaultClientId={clientId}
-      />
+      <div className="mt-5">
+        <NewBookingForm clients={clients} offerings={offerings} defaultClientId={clientId} />
+      </div>
     </main>
   )
 }

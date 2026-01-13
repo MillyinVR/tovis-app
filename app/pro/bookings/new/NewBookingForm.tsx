@@ -1,3 +1,4 @@
+// app/pro/bookings/new/NewBookingForm.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -72,9 +73,7 @@ function defaultDatetimeLocal(): string {
   d.setMinutes(0, 0, 0)
   d.setHours(d.getHours() + 1)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes(),
-  )}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export default function NewBookingForm({ clients, offerings, defaultClientId }: Props) {
@@ -82,7 +81,7 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
 
   const [clientId, setClientId] = useState(defaultClientId ?? '')
   const [offeringId, setOfferingId] = useState('')
-  const [scheduledAt, setScheduledAt] = useState(() => defaultDatetimeLocal()) // ✅ prefilled
+  const [scheduledAt, setScheduledAt] = useState(() => defaultDatetimeLocal())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -124,11 +123,7 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
       const res = await fetch('/api/pro/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          offeringId,
-          scheduledFor: scheduledForISO,
-        }),
+        body: JSON.stringify({ clientId, offeringId, scheduledFor: scheduledForISO }),
       })
 
       if (res.status === 401) {
@@ -143,12 +138,9 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
         return
       }
 
-      // ✅ Go to the booking details page (or swap to '/pro/bookings' if you don’t have details yet)
-      if (data?.id) {
-        router.push(`/pro/bookings/${data.id}`)
-      } else {
-        router.push('/pro/bookings')
-      }
+      if (data?.id) router.push(`/pro/bookings/${data.id}`)
+      else router.push('/pro/bookings')
+
       router.refresh()
     } catch (err) {
       console.error(err)
@@ -158,36 +150,24 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
     }
   }
 
+  const field =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+  const label = 'text-[12px] font-black text-textPrimary'
+  const helper = 'mt-2 text-[12px] text-textSecondary'
+
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{
-        border: '1px solid #eee',
-        borderRadius: 12,
-        padding: 16,
-        display: 'grid',
-        gap: 14,
-        background: '#fff',
-      }}
-    >
-      <div>
-        <label htmlFor="client" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-          Client *
+    <form onSubmit={handleSubmit} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4">
+      <div className="grid gap-2">
+        <label htmlFor="client" className={label}>
+          Client <span className="text-textSecondary">*</span>
         </label>
+
         <select
           id="client"
           value={clientId}
           disabled={loading}
           onChange={(e) => setClientId(e.target.value)}
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            padding: 8,
-            fontSize: 13,
-            fontFamily: 'inherit',
-            opacity: loading ? 0.85 : 1,
-          }}
+          className={field}
         >
           <option value="">Select client</option>
           {clientOptions.map((c) => (
@@ -197,31 +177,22 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
           ))}
         </select>
 
-        {defaultClientId && (
-          <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
-            Client preselected from chart. You can change it if needed.
-          </div>
-        )}
+        {defaultClientId ? (
+          <div className={helper}>Client preselected from chart. You can change it if needed.</div>
+        ) : null}
       </div>
 
-      <div>
-        <label htmlFor="offering" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-          Service *
+      <div className="grid gap-2">
+        <label htmlFor="offering" className={label}>
+          Service <span className="text-textSecondary">*</span>
         </label>
+
         <select
           id="offering"
           value={offeringId}
           disabled={loading}
           onChange={(e) => setOfferingId(e.target.value)}
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            padding: 8,
-            fontSize: 13,
-            fontFamily: 'inherit',
-            opacity: loading ? 0.85 : 1,
-          }}
+          className={field}
         >
           <option value="">Select service</option>
           {offeringOptions.map((o) => (
@@ -232,62 +203,39 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
         </select>
       </div>
 
-      <div>
-        <label htmlFor="datetime" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-          Date & time *
+      <div className="grid gap-2">
+        <label htmlFor="datetime" className={label}>
+          Date &amp; time <span className="text-textSecondary">*</span>
         </label>
+
         <input
           id="datetime"
           type="datetime-local"
           value={scheduledAt}
           disabled={loading}
           onChange={(e) => setScheduledAt(e.target.value)}
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            padding: 8,
-            fontSize: 13,
-            fontFamily: 'inherit',
-            opacity: loading ? 0.85 : 1,
-          }}
+          className={field}
         />
-        <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
-          Uses your browser&apos;s local timezone, stored as ISO.
-        </div>
+
+        <div className={helper}>Uses your browser&apos;s local timezone, stored as ISO.</div>
       </div>
 
-      {error && <div style={{ fontSize: 12, color: 'red' }}>{error}</div>}
+      {error ? <div className="text-[12px] font-black text-toneDanger">{error}</div> : null}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+      <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={() => router.back()}
           disabled={loading}
-          style={{
-            padding: '6px 14px',
-            borderRadius: 999,
-            border: '1px solid #ccc',
-            fontSize: 13,
-            background: '#f7f7f7',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.85 : 1,
-          }}
+          className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
         >
           Cancel
         </button>
+
         <button
           type="submit"
           disabled={loading}
-          style={{
-            padding: '6px 16px',
-            borderRadius: 999,
-            border: 'none',
-            fontSize: 13,
-            background: loading ? '#374151' : '#111',
-            color: '#fff',
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
+          className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
         >
           {loading ? 'Creating…' : 'Create booking'}
         </button>

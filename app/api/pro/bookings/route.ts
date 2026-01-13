@@ -64,7 +64,10 @@ function parseHHMM(v?: string) {
   return { hh, mm }
 }
 
-function getWeekdayKeyInTimeZone(dateUtc: Date, timeZone: string): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
+function getWeekdayKeyInTimeZone(
+  dateUtc: Date,
+  timeZone: string,
+): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
     .format(dateUtc)
     .toLowerCase()
@@ -164,8 +167,48 @@ function inDev() {
   return process.env.NODE_ENV !== 'production'
 }
 
+/**
+ * Money helpers: store cents as int; store Decimal dollars via string "12.34"
+ */
+function moneyToCents(v: unknown): number {
+  if (v == null) return 0
+  if (typeof v === 'number') {
+    // numbers are still risky, but we can at least round safely to cents
+    if (!Number.isFinite(v)) return 0
+    return Math.max(0, Math.round(v * 100))
+  }
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (!s) return 0
+    return moneyStringToCents(s)
+  }
+  // Prisma Decimal: has toString()
+  const s = (v as any)?.toString?.()
+  if (typeof s === 'string') return moneyStringToCents(s)
+  return 0
+}
+
+function moneyStringToCents(raw: string): number {
+  // Accept "123", "123.4", "123.45", "$1,234.50"
+  const cleaned = raw.replace(/\$/g, '').replace(/,/g, '').trim()
+  if (!cleaned) return 0
+  const m = /^(\d+)(?:\.(\d{0,}))?$/.exec(cleaned)
+  if (!m) return 0
+  const whole = m[1] || '0'
+  let frac = (m[2] || '').slice(0, 2)
+  while (frac.length < 2) frac += '0'
+  const cents = Number(whole) * 100 + Number(frac || '0')
+  return Number.isFinite(cents) ? Math.max(0, cents) : 0
+}
+
+function centsToMoneyString(cents: number): string {
+  const c = Math.max(0, Math.trunc(cents))
+  const dollars = Math.trunc(c / 100)
+  const rem = c % 100
+  return `${dollars}.${String(rem).padStart(2, '0')}`
+}
+
 export async function POST(req: Request) {
-  // handy: makes it obvious in your terminal that this file is being hit
   console.log('POST /api/pro/bookings HIT ✅')
 
   try {
@@ -177,7 +220,6 @@ export async function POST(req: Request) {
     const professionalId = (user as any).professionalProfile.id as string
     const body = (await req.json().catch(() => ({}))) as any
 
-    // DEV logging (don’t ship full payloads to prod logs)
     if (inDev()) {
       console.log('Create booking payload:', {
         clientId: body?.clientId,
@@ -215,7 +257,6 @@ export async function POST(req: Request) {
       return snap15(n)
     })()
 
-    // pro settings
     const pro = await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
       select: { id: true, timeZone: true, workingHours: true },
@@ -224,12 +265,11 @@ export async function POST(req: Request) {
 
     const proTz = isValidIanaTimeZone(pro.timeZone) ? pro.timeZone! : 'America/Los_Angeles'
 
-    // offerings (DON’T assume `service` relation exists)
     const offerings = await prisma.professionalServiceOffering.findMany({
       where: {
         professionalId,
         isActive: true,
-        serviceId: { in: uniqueServiceIds }, // ✅ string[]
+        serviceId: { in: uniqueServiceIds },
       },
       select: {
         id: true,
@@ -254,7 +294,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // fetch service rows separately (fixes “service does not exist” TS/runtime issues)
     const serviceRows = await prisma.service.findMany({
       where: { id: { in: uniqueServiceIds } },
       select: { id: true, name: true, defaultDurationMinutes: true },
@@ -271,23 +310,23 @@ export async function POST(req: Request) {
           ? Number(off.mobileDurationMinutes ?? svc?.defaultDurationMinutes ?? 0)
           : Number(off.salonDurationMinutes ?? svc?.defaultDurationMinutes ?? 0)
 
-      const priceRaw = locationType === 'MOBILE' ? off.mobilePriceStartingAt : off.salonPriceStartingAt
-
       const dur = clamp(snap15(Number(durRaw || 0)), 15, 12 * 60)
-      const price = Number(priceRaw ?? 0)
+
+      const priceRaw = locationType === 'MOBILE' ? off.mobilePriceStartingAt : off.salonPriceStartingAt
+      const priceCents = moneyToCents(priceRaw)
 
       return {
         serviceId: sid,
         offeringId: off.id,
         serviceName: svc?.name ?? 'Service',
         durationMinutesSnapshot: dur,
-        priceSnapshot: price,
+        priceCents,
         sortOrder: idx,
       }
     })
 
     const computedDuration = items.reduce((sum, i) => sum + Number(i.durationMinutesSnapshot || 0), 0)
-    const computedSubtotal = items.reduce((sum, i) => sum + Number(i.priceSnapshot || 0), 0)
+    const computedSubtotalCents = items.reduce((sum, i) => sum + Number(i.priceCents || 0), 0)
 
     const uiDuration = Number(totalDurationMinutesRaw)
     const totalDurationMinutes =
@@ -305,7 +344,6 @@ export async function POST(req: Request) {
     })
     if (!whCheck.ok) return NextResponse.json({ error: whCheck.error }, { status: 400 })
 
-    // conflict check
     const windowStart = addMinutes(scheduledStart, -(totalDurationMinutes + bufferMinutes) * 2)
     const windowEnd = addMinutes(scheduledStart, (totalDurationMinutes + bufferMinutes) * 2)
 
@@ -327,7 +365,9 @@ export async function POST(req: Request) {
 
     const hasConflict = others.some((b: any) => {
       const bDur =
-        Number(b.totalDurationMinutes ?? 0) > 0 ? Number(b.totalDurationMinutes) : Number(b.durationMinutesSnapshot ?? 0)
+        Number(b.totalDurationMinutes ?? 0) > 0
+          ? Number(b.totalDurationMinutes)
+          : Number(b.durationMinutesSnapshot ?? 0)
       const bBuf = Number(b.bufferMinutes ?? 0)
       if (!Number.isFinite(bDur) || bDur <= 0) return false
       const bStart = normalizeToMinute(new Date(b.scheduledFor))
@@ -337,8 +377,9 @@ export async function POST(req: Request) {
 
     if (hasConflict) return NextResponse.json({ error: 'That time is not available.' }, { status: 409 })
 
-    // NOTE: if your Prisma schema does NOT have some of these fields/relations,
-    // Prisma will throw. That’s why we’re surfacing the error below.
+    const subtotalMoney = centsToMoneyString(computedSubtotalCents)
+    const primaryItem = items[0]
+
     const created = await prisma.booking.create({
       data: {
         professionalId,
@@ -350,20 +391,23 @@ export async function POST(req: Request) {
         internalNotes: internalNotes ?? null,
         bufferMinutes,
         totalDurationMinutes,
-        subtotalSnapshot: computedSubtotal as any,
+
+        // ✅ store as Decimal via string, derived from cents
+        subtotalSnapshot: subtotalMoney as any,
 
         // legacy mirrors (first service)
-        serviceId: items[0]?.serviceId ?? null,
-        offeringId: items[0]?.offeringId ?? null,
-        durationMinutesSnapshot: items[0]?.durationMinutesSnapshot ?? null,
-        priceSnapshot: items[0]?.priceSnapshot ?? null,
+        serviceId: primaryItem?.serviceId ?? null,
+        offeringId: primaryItem?.offeringId ?? null,
+        durationMinutesSnapshot: primaryItem?.durationMinutesSnapshot ?? 0,
 
-        // relation name must match your Prisma schema
+        // legacy priceSnapshot: still required by schema
+        priceSnapshot: centsToMoneyString(primaryItem?.priceCents ?? 0) as any,
+
         serviceItems: {
           create: items.map((i) => ({
             serviceId: i.serviceId,
             offeringId: i.offeringId,
-            priceSnapshot: i.priceSnapshot as any,
+            priceSnapshot: centsToMoneyString(i.priceCents) as any,
             durationMinutesSnapshot: i.durationMinutesSnapshot,
             sortOrder: i.sortOrder,
           })),
@@ -408,26 +452,14 @@ export async function POST(req: Request) {
           status: created.status,
           serviceName,
           clientName,
+          subtotalCents: computedSubtotalCents, // ✅ nice for UI/debug
         },
       },
       { status: 200 },
     )
   } catch (e: any) {
     console.error('POST /api/pro/bookings error', e)
-
-    // ✅ Surface the real reason in dev so you can actually fix it.
-    const msg =
-      typeof e?.message === 'string' && e.message.trim()
-        ? e.message
-        : 'Failed to create booking.'
-
-    return NextResponse.json(
-      {
-        error: msg,
-        name: e?.name,
-        code: e?.code,
-      },
-      { status: 500 },
-    )
+    const msg = typeof e?.message === 'string' && e.message.trim() ? e.message : 'Failed to create booking.'
+    return NextResponse.json({ error: msg, name: e?.name, code: e?.code }, { status: 500 })
   }
 }

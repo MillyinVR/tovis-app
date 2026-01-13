@@ -41,7 +41,6 @@ type Props = {
 
   existingMedia: MediaItem[]
 
-  // ✅ passed from server page
   existingRecommendedProducts?: RecommendedProduct[]
 }
 
@@ -124,48 +123,53 @@ function isValidHttpUrl(url: string) {
   }
 }
 
-function ModeChip({
-  active,
-  onClick,
-  disabled,
-  children,
-  title,
-}: {
-  active: boolean
-  onClick: () => void
-  disabled?: boolean
-  children: React.ReactNode
-  title?: string
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        borderRadius: 999,
-        border: `1px solid ${active ? '#111' : '#d1d5db'}`,
-        background: active ? '#111' : '#fff',
-        color: active ? '#fff' : '#111',
-        padding: '6px 10px',
-        fontSize: 12,
-        fontWeight: 800,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.7 : 1,
-      }}
-    >
-      {children}
-    </button>
-  )
+function cardClass() {
+  return 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.2, color: '#111' }}>{children}</div>
+function subtleTextClass() {
+  return 'text-xs font-semibold text-textSecondary'
 }
 
-function SubtleText({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 11, color: '#6b7280' }}>{children}</div>
+function sectionTitleClass() {
+  return 'text-xs font-black tracking-wide text-textPrimary'
+}
+
+function pillClass(active: boolean) {
+  return [
+    'inline-flex items-center rounded-full px-3 py-1 text-xs font-black transition',
+    'border border-white/10',
+    active ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+  ].join(' ')
+}
+
+function primaryBtn(disabled: boolean) {
+  return [
+    'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
+    disabled
+      ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60'
+      : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+  ].join(' ')
+}
+
+function secondaryBtn(disabled: boolean) {
+  return [
+    'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
+    disabled
+      ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60'
+      : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+  ].join(' ')
+}
+
+function inputClass(disabled: boolean) {
+  return [
+    'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
+    disabled ? 'opacity-60 cursor-not-allowed' : 'focus:border-white/20',
+  ].join(' ')
+}
+
+function labelClass() {
+  return 'block text-xs font-black text-textSecondary mb-1'
 }
 
 export default function AftercareForm({
@@ -186,9 +190,9 @@ export default function AftercareForm({
   const [productsError, setProductsError] = useState<string | null>(null)
 
   const [rebookMode, setRebookMode] = useState<RebookMode>('NONE')
-  const [rebookAt, setRebookAt] = useState<string>('')
-  const [windowStart, setWindowStart] = useState<string>('')
-  const [windowEnd, setWindowEnd] = useState<string>('')
+  const [rebookAt, setRebookAt] = useState<string>('') // datetime-local
+  const [windowStart, setWindowStart] = useState<string>('') // datetime-local
+  const [windowEnd, setWindowEnd] = useState<string>('') // datetime-local
 
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
   const [rebookDaysBefore, setRebookDaysBefore] = useState('2')
@@ -265,6 +269,7 @@ export default function AftercareForm({
         })()
       : null
 
+  // Guard: rebook reminders only apply to single date mode
   useEffect(() => {
     if (rebookMode !== 'BOOKED_NEXT_APPOINTMENT' && createRebookReminder) setCreateRebookReminder(false)
   }, [rebookMode, createRebookReminder])
@@ -443,198 +448,122 @@ export default function AftercareForm({
   const showWindow = rebookMode === 'RECOMMENDED_WINDOW'
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div
-        style={{
-          borderRadius: 12,
-          border: '1px solid #fecaca',
-          background: '#fff1f2',
-          padding: 14,
-        }}
-      >
-        <div style={{ fontSize: 12, fontWeight: 900, color: '#9f1239' }}>Visible to client</div>
-        <div style={{ fontSize: 12, color: '#9f1239', marginTop: 4 }}>
-          Everything you add on this page will be shown to the client as their official appointment summary.
+    <div className="grid gap-3">
+      {/* Visibility warning */}
+      <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="text-xs font-black text-accentPrimary">Visible to client</div>
+        <div className="mt-1 text-sm font-semibold text-textSecondary">
+          Everything on this page shows up as the client’s official appointment summary.
         </div>
       </div>
 
-      {completed && (
-        <div
-          style={{
-            borderRadius: 12,
-            border: '1px solid #bbf7d0',
-            background: '#f0fdf4',
-            padding: 16,
-            display: 'grid',
-            gap: 10,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 900, color: '#166534' }}>Aftercare sent</div>
-          <div style={{ fontSize: 12, color: '#166534' }}>The client can now view their summary and rebook guidance.</div>
+      {completed ? (
+        <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
+          <div className="text-sm font-black text-textPrimary">Aftercare sent</div>
+          <div className="mt-1 text-sm font-semibold text-textSecondary">
+            The client can view their summary and rebook guidance.
+          </div>
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={goCalendar}
-              style={{
-                borderRadius: 999,
-                border: '1px solid #166534',
-                background: '#166534',
-                color: '#fff',
-                padding: '8px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                cursor: 'pointer',
-              }}
-            >
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={goCalendar} className={primaryBtn(false)}>
               Back to calendar
             </button>
-
-            <button
-              type="button"
-              onClick={goDashboard}
-              style={{
-                borderRadius: 999,
-                border: '1px solid #166534',
-                background: '#fff',
-                color: '#166534',
-                padding: '8px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                cursor: 'pointer',
-              }}
-            >
+            <button type="button" onClick={goDashboard} className={secondaryBtn(false)}>
               Dashboard overview
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      <div style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 16 }}>
-        <SectionTitle>Photos</SectionTitle>
-        <SubtleText>These appear in the client’s appointment summary.</SubtleText>
+      {/* Photos */}
+      <div className={cardClass()}>
+        <div className={sectionTitleClass()}>Photos</div>
+        <div className={subtleTextClass()}>These appear in the client’s appointment summary.</div>
 
-        <div style={{ marginTop: 10, display: 'grid', gap: 14 }}>
+        <div className="mt-3 grid gap-4">
           <div>
-            <div style={{ fontSize: 12, fontWeight: 900 }}>Before</div>
-            <SubtleText>Before photos/videos from this appointment.</SubtleText>
+            <div className="text-sm font-black text-textPrimary">Before</div>
+            <div className={subtleTextClass()}>Before photos/videos from this appointment.</div>
             <MediaGrid items={beforeMedia} />
           </div>
 
           <div>
-            <div style={{ fontSize: 12, fontWeight: 900 }}>After</div>
-            <SubtleText>After photos/videos from this appointment.</SubtleText>
+            <div className="text-sm font-black text-textPrimary">After</div>
+            <div className={subtleTextClass()}>After photos/videos from this appointment.</div>
             <MediaGrid items={afterMedia} />
           </div>
 
-          {otherMedia.length > 0 ? (
+          {otherMedia.length ? (
             <div>
-              <div style={{ fontSize: 12, fontWeight: 900 }}>Other</div>
-              <SubtleText>Extra photos/videos attached to this appointment.</SubtleText>
+              <div className="text-sm font-black text-textPrimary">Other</div>
+              <div className={subtleTextClass()}>Extra photos/videos attached to this appointment.</div>
               <MediaGrid items={otherMedia} />
             </div>
           ) : null}
         </div>
       </div>
 
-      <div style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 16 }}>
-        <SectionTitle>Recommended products</SectionTitle>
-        <SubtleText>Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.</SubtleText>
+      {/* Products */}
+      <div className={cardClass()}>
+        <div className={sectionTitleClass()}>Recommended products</div>
+        <div className={subtleTextClass()}>Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.</div>
 
-        <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+        <div className="mt-3 grid gap-3">
           {products.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#6b7280' }}>No products added yet.</div>
+            <div className="text-sm font-semibold text-textSecondary">No products added yet.</div>
           ) : (
             products.map((p, idx) => (
-              <div
-                key={p.id}
-                style={{
-                  border: '1px solid #eee',
-                  borderRadius: 12,
-                  padding: 12,
-                  display: 'grid',
-                  gap: 8,
-                  background: '#fafafa',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 900 }}>Product {idx + 1}</div>
+              <div key={p.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-black text-textPrimary">Product {idx + 1}</div>
                   <button
                     type="button"
                     onClick={() => removeProduct(p.id)}
                     disabled={loading || completed}
-                    style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 999,
-                      padding: '4px 10px',
-                      fontSize: 11,
-                      fontWeight: 900,
-                      background: '#fff',
-                      cursor: loading || completed ? 'not-allowed' : 'pointer',
-                      opacity: loading || completed ? 0.6 : 1,
-                    }}
+                    className={secondaryBtn(Boolean(loading || completed))}
                   >
                     Remove
                   </button>
                 </div>
 
-                <div style={{ display: 'grid', gap: 8 }}>
+                <div className="mt-3 grid gap-3">
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Product name</label>
+                    <label className={labelClass()}>Product name</label>
                     <input
                       value={p.name}
                       disabled={loading || completed}
                       maxLength={PRODUCT_NAME_MAX}
                       onChange={(e) => updateProduct(p.id, { name: e.target.value })}
                       placeholder="e.g. Sulfate-free shampoo"
-                      style={{
-                        width: '100%',
-                        borderRadius: 8,
-                        border: '1px solid #ddd',
-                        padding: 8,
-                        fontSize: 13,
-                        fontFamily: 'inherit',
-                      }}
+                      className={inputClass(Boolean(loading || completed))}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Product link</label>
+                    <label className={labelClass()}>Product link</label>
                     <input
                       value={p.url}
                       disabled={loading || completed}
                       onChange={(e) => updateProduct(p.id, { url: e.target.value })}
-                      placeholder="https://amazon.com/..."
-                      style={{
-                        width: '100%',
-                        borderRadius: 8,
-                        border: '1px solid #ddd',
-                        padding: 8,
-                        fontSize: 13,
-                        fontFamily: 'inherit',
-                      }}
+                      placeholder="https://amazon.com/…"
+                      className={inputClass(Boolean(loading || completed))}
                     />
                     {p.url.trim() && !isValidHttpUrl(p.url) ? (
-                      <div style={{ marginTop: 4, fontSize: 11, color: '#b91c1c' }}>Link must be a valid http/https URL.</div>
+                      <div className="mt-1 text-xs font-semibold text-microAccent">
+                        Link must be a valid http/https URL.
+                      </div>
                     ) : null}
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Note (optional)</label>
+                    <label className={labelClass()}>Note (optional)</label>
                     <input
                       value={pickString(p.note)}
                       disabled={loading || completed}
                       maxLength={PRODUCT_NOTE_MAX}
                       onChange={(e) => updateProduct(p.id, { note: e.target.value })}
                       placeholder="e.g. Use 2–3x/week to maintain shine"
-                      style={{
-                        width: '100%',
-                        borderRadius: 8,
-                        border: '1px solid #ddd',
-                        padding: 8,
-                        fontSize: 13,
-                        fontFamily: 'inherit',
-                      }}
+                      className={inputClass(Boolean(loading || completed))}
                     />
                   </div>
                 </div>
@@ -646,44 +575,22 @@ export default function AftercareForm({
             type="button"
             onClick={addProduct}
             disabled={loading || completed || products.length >= MAX_PRODUCTS}
-            style={{
-              borderRadius: 999,
-              border: '1px solid #111',
-              background: products.length >= MAX_PRODUCTS ? '#e5e7eb' : '#fff',
-              color: '#111',
-              padding: '8px 12px',
-              fontSize: 12,
-              fontWeight: 900,
-              cursor: loading || completed || products.length >= MAX_PRODUCTS ? 'not-allowed' : 'pointer',
-              opacity: loading || completed ? 0.7 : 1,
-              justifySelf: 'start',
-            }}
+            className={secondaryBtn(Boolean(loading || completed || products.length >= MAX_PRODUCTS))}
           >
             + Add product
           </button>
 
-          {productsError ? <div style={{ fontSize: 12, color: '#b91c1c' }}>{productsError}</div> : null}
+          {productsError ? <div className="text-sm font-semibold text-microAccent">{productsError}</div> : null}
         </div>
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          borderRadius: 12,
-          border: '1px solid #eee',
-          padding: 16,
-          background: '#fff',
-          display: 'grid',
-          gap: 12,
-          fontSize: 13,
-          opacity: completed ? 0.85 : 1,
-        }}
-      >
-        <SectionTitle>Aftercare instructions</SectionTitle>
-        <SubtleText>Write this like doctor instructions: clear, specific, and actionable.</SubtleText>
+      {/* Form */}
+      <form onSubmit={handleSubmit} className={cardClass()}>
+        <div className={sectionTitleClass()}>Aftercare instructions</div>
+        <div className={subtleTextClass()}>Write this like doctor instructions: clear, specific, and actionable.</div>
 
-        <div>
-          <label htmlFor="notes" style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+        <div className="mt-3">
+          <label className={labelClass()} htmlFor="notes">
             Notes
           </label>
           <textarea
@@ -693,51 +600,49 @@ export default function AftercareForm({
             rows={5}
             disabled={loading || completed}
             placeholder="E.g. wash after 48 hours, use sulfate-free shampoo, avoid tight ponytails for 7 days…"
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-              resize: 'vertical',
-            }}
+            className={[
+              'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none resize-y',
+              loading || completed ? 'opacity-60 cursor-not-allowed' : 'focus:border-white/20',
+            ].join(' ')}
           />
-          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+          <div className="mt-1 text-xs font-semibold text-textSecondary">
             {notes.length}/{NOTES_MAX}
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, border: '1px solid #eee', background: '#fafafa', padding: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Rebook guidance</div>
+        {/* Rebook */}
+        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
+          <div className="text-sm font-black text-textPrimary">Rebook guidance</div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <ModeChip active={rebookMode === 'NONE'} onClick={() => onChangeMode('NONE')} disabled={loading || completed}>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => onChangeMode('NONE')} disabled={loading || completed} className={pillClass(rebookMode === 'NONE')}>
               None
-            </ModeChip>
+            </button>
 
-            <ModeChip
-              active={rebookMode === 'BOOKED_NEXT_APPOINTMENT'}
+            <button
+              type="button"
               onClick={() => onChangeMode('BOOKED_NEXT_APPOINTMENT')}
               disabled={loading || completed}
+              className={pillClass(rebookMode === 'BOOKED_NEXT_APPOINTMENT')}
               title="Recommend a single ideal next visit date"
             >
               Next visit date
-            </ModeChip>
+            </button>
 
-            <ModeChip
-              active={rebookMode === 'RECOMMENDED_WINDOW'}
+            <button
+              type="button"
               onClick={() => onChangeMode('RECOMMENDED_WINDOW')}
               disabled={loading || completed}
+              className={pillClass(rebookMode === 'RECOMMENDED_WINDOW')}
               title="Recommend a date range the client should book within"
             >
               Booking window
-            </ModeChip>
+            </button>
           </div>
 
-          {showBooked && (
-            <div style={{ marginTop: 10 }}>
-              <label htmlFor="rebookAt" style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+          {showBooked ? (
+            <div className="mt-4">
+              <label className={labelClass()} htmlFor="rebookAt">
                 Recommended next visit
               </label>
               <input
@@ -746,80 +651,60 @@ export default function AftercareForm({
                 value={rebookAt}
                 disabled={loading || completed}
                 onChange={(e) => setRebookAt(e.target.value)}
-                style={{
-                  width: '100%',
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  padding: 8,
-                  fontSize: 13,
-                  fontFamily: 'inherit',
-                }}
+                className={inputClass(Boolean(loading || completed))}
               />
-              <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>This shows on the client’s summary and can power a reminder.</div>
+              <div className="mt-1 text-xs font-semibold text-textSecondary">
+                This shows on the client’s summary and can power a reminder.
+              </div>
             </div>
-          )}
+          ) : null}
 
-          {showWindow && (
-            <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
+          {showWindow ? (
+            <div className="mt-4 grid gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Window start</label>
+                  <label className={labelClass()}>Window start</label>
                   <input
                     type="datetime-local"
                     value={windowStart}
                     disabled={loading || completed}
                     onChange={(e) => setWindowStart(e.target.value)}
-                    style={{
-                      width: '100%',
-                      borderRadius: 8,
-                      border: '1px solid #ddd',
-                      padding: 8,
-                      fontSize: 13,
-                      fontFamily: 'inherit',
-                    }}
+                    className={inputClass(Boolean(loading || completed))}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Window end</label>
+                  <label className={labelClass()}>Window end</label>
                   <input
                     type="datetime-local"
                     value={windowEnd}
                     disabled={loading || completed}
                     onChange={(e) => setWindowEnd(e.target.value)}
-                    style={{
-                      width: '100%',
-                      borderRadius: 8,
-                      border: '1px solid #ddd',
-                      padding: 8,
-                      fontSize: 13,
-                      fontFamily: 'inherit',
-                    }}
+                    className={inputClass(Boolean(loading || completed))}
                   />
                 </div>
               </div>
 
               {windowError ? (
-                <div style={{ fontSize: 12, color: '#b91c1c' }}>{windowError}</div>
+                <div className="text-sm font-semibold text-microAccent">{windowError}</div>
               ) : (
-                <div style={{ fontSize: 11, color: '#777' }}>Client will be prompted to book within this range.</div>
+                <div className="text-xs font-semibold text-textSecondary">
+                  Client will be prompted to book within this range.
+                </div>
               )}
             </div>
-          )}
+          ) : null}
         </div>
 
-        <div style={{ borderRadius: 10, border: '1px solid #eee', padding: 10, background: '#fafafa', opacity: loading || completed ? 0.9 : 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 6 }}>Smart reminders</div>
+        {/* Smart reminders */}
+        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
+          <div className="text-sm font-black text-textPrimary">Smart reminders</div>
 
           <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 12,
-              marginBottom: 6,
-              opacity: rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate ? 1 : 0.6,
-            }}
+            className={[
+              'mt-3 flex items-center gap-2 text-sm font-semibold',
+              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate ? 'text-textPrimary' : 'text-textSecondary opacity-60',
+            ].join(' ')}
             title={
               rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
                 ? undefined
@@ -838,14 +723,10 @@ export default function AftercareForm({
                 value={rebookDaysBefore}
                 disabled={!(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || loading || completed}
                 onChange={(e) => setRebookDaysBefore(e.target.value)}
-                style={{
-                  borderRadius: 999,
-                  border: '1px solid #ddd',
-                  padding: '2px 8px',
-                  fontSize: 11,
-                  marginLeft: 2,
-                  marginRight: 2,
-                }}
+                className={[
+                  'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
+                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || loading || completed ? 'opacity-60 cursor-not-allowed' : '',
+                ].join(' ')}
               >
                 <option value="1">1 day</option>
                 <option value="2">2 days</option>
@@ -856,7 +737,7 @@ export default function AftercareForm({
             </span>
           </label>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-textPrimary">
             <input
               type="checkbox"
               checked={createProductReminder}
@@ -869,14 +750,10 @@ export default function AftercareForm({
                 value={productDaysAfter}
                 disabled={loading || completed}
                 onChange={(e) => setProductDaysAfter(e.target.value)}
-                style={{
-                  borderRadius: 999,
-                  border: '1px solid #ddd',
-                  padding: '2px 8px',
-                  fontSize: 11,
-                  marginLeft: 2,
-                  marginRight: 2,
-                }}
+                className={[
+                  'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
+                  loading || completed ? 'opacity-60 cursor-not-allowed' : '',
+                ].join(' ')}
               >
                 <option value="3">3 days</option>
                 <option value="7">7 days</option>
@@ -887,27 +764,15 @@ export default function AftercareForm({
             </span>
           </label>
 
-          <div style={{ fontSize: 11, color: '#777', marginTop: 6 }}>These go into your Reminders tab so Future You remembers to check in.</div>
+          <div className="mt-2 text-xs font-semibold text-textSecondary">
+            These go into your Reminders tab so Future You remembers to check in.
+          </div>
         </div>
 
-        {error && <div style={{ fontSize: 12, color: '#b91c1c' }}>{error}</div>}
+        {error ? <div className="mt-3 text-sm font-semibold text-microAccent">{error}</div> : null}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-          <button
-            type="submit"
-            disabled={loading || !!windowError || completed}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 999,
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 900,
-              background: loading || windowError || completed ? '#374151' : '#111',
-              color: '#fff',
-              cursor: loading || windowError || completed ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.95 : 1,
-            }}
-          >
+        <div className="mt-4 flex justify-end">
+          <button type="submit" disabled={loading || !!windowError || completed} className={primaryBtn(Boolean(loading || !!windowError || completed))}>
             {loading ? 'Sending…' : completed ? 'Sent' : 'Send aftercare'}
           </button>
         </div>
@@ -918,11 +783,11 @@ export default function AftercareForm({
 
 function MediaGrid({ items }: { items: MediaItem[] }) {
   if (!items || items.length === 0) {
-    return <div style={{ marginTop: 8, fontSize: 12, color: '#777' }}>None yet.</div>
+    return <div className="mt-2 text-sm font-semibold text-textSecondary">None yet.</div>
   }
 
   return (
-    <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
+    <div className="mt-3 grid grid-cols-3 gap-2">
       {items.map((m) => {
         const deleted = isDeletedByClient(m)
         const thumb = m.thumbUrl || m.url
@@ -932,22 +797,11 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
           return (
             <div
               key={m.id}
-              style={{
-                aspectRatio: '1 / 1',
-                borderRadius: 10,
-                border: '1px solid #f1f5f9',
-                background: '#f8fafc',
-                display: 'grid',
-                placeItems: 'center',
-                padding: 10,
-                textAlign: 'center',
-                color: '#64748b',
-                fontSize: 11,
-              }}
+              className="grid aspect-square place-items-center rounded-card border border-white/10 bg-bgPrimary p-2 text-center"
               title="Private · Deleted by client"
             >
-              <div style={{ fontWeight: 700 }}>Private</div>
-              <div>Deleted by client</div>
+              <div className="text-xs font-black text-textPrimary">Private</div>
+              <div className="text-xs font-semibold text-textSecondary">Deleted by client</div>
             </div>
           )
         }
@@ -958,65 +812,33 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
             href={m.url}
             target="_blank"
             rel="noreferrer"
-            style={{
-              position: 'relative',
-              display: 'block',
-              aspectRatio: '1 / 1',
-              borderRadius: 10,
-              overflow: 'hidden',
-              background: '#f3f4f6',
-              textDecoration: 'none',
-              border: m.visibility === 'PRIVATE' ? '1px solid #e5e7eb' : 'none',
-            }}
+            className={[
+              'relative block aspect-square overflow-hidden rounded-card bg-bgPrimary',
+              m.visibility === 'PRIVATE' ? 'border border-white/10' : 'border border-transparent',
+            ].join(' ')}
             title={m.visibility === 'PRIVATE' ? 'Private' : 'Open'}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={thumb}
               alt="Booking media"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                display: 'block',
-                filter: m.visibility === 'PRIVATE' ? 'blur(10px)' : 'none',
-                opacity: m.visibility === 'PRIVATE' ? 0.8 : 1,
-              }}
+              className={[
+                'h-full w-full object-cover',
+                m.visibility === 'PRIVATE' ? 'blur-md opacity-80' : '',
+              ].join(' ')}
             />
 
-            {isVideo && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 6,
-                  right: 6,
-                  background: 'rgba(0,0,0,0.65)',
-                  color: '#fff',
-                  fontSize: 10,
-                  padding: '2px 6px',
-                  borderRadius: 999,
-                }}
-              >
+            {isVideo ? (
+              <div className="absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                 VIDEO
               </div>
-            )}
+            ) : null}
 
-            {m.visibility === 'PRIVATE' && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: 8,
-                  bottom: 8,
-                  background: 'rgba(0,0,0,0.65)',
-                  color: '#fff',
-                  fontSize: 10,
-                  padding: '2px 6px',
-                  borderRadius: 999,
-                }}
-              >
+            {m.visibility === 'PRIVATE' ? (
+              <div className="absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                 PRIVATE
               </div>
-            )}
+            ) : null}
           </a>
         )
       })}

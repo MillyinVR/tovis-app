@@ -173,6 +173,13 @@ enum NfcCardType {
   SALON_WHITE_LABEL
 }
 
+enum ProfessionalLocationType {
+  SALON
+  SUITE
+  MOBILE_BASE
+  OTHER
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -287,14 +294,26 @@ model ClientProfile {
 }
 
 model ProfessionalProfile {
-  id                 String                 @id @default(cuid())
-  userId             String                 @unique
-  businessName       String?
-  bio                String?
-  avatarUrl          String?
+  id       String @id @default(cuid())
+  userId   String @unique
+
+  firstName String @default("")
+  lastName  String @default("")
+  phone     String?
+  phoneVerifiedAt DateTime?
+
+  businessName String?
+  handle           String?
+  handleNormalized String? @unique
+  
+
+  bio       String?
+  avatarUrl String?
   favorites          ProfessionalFavorite[] @relation("ProFavorites")
   autoAcceptBookings Boolean                @default(false)
   timeZone           String? // IANA tz like "America/New_York"
+    // ✅ New: multi-location + correct timezone source
+  locations ProfessionalLocation[]
   intentEvents       ClientIntentEvent[]
   adminPermissions   AdminPermission[]
   messageThreads     MessageThread[]        @relation("ProThreads")
@@ -348,6 +367,62 @@ model ProfessionalProfile {
   productSales    ProductSale[]
   adminActionLogs AdminActionLog[] @relation("ProfessionalLogs")
   nfcCards        NfcCard[]
+  
+  @@index([handleNormalized])
+}
+
+model ProfessionalLocation {
+  id             String @id @default(cuid())
+  professionalId String
+
+  type       ProfessionalLocationType @default(SALON)
+  name       String?
+  isPrimary  Boolean @default(false)
+  isBookable Boolean @default(true)
+
+  // Address (canonical display is formattedAddress; keep the parts for editing/search)
+  formattedAddress String?
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  state             String?
+  postalCode        String?
+  countryCode       String?
+
+  // Places provider reference (Google Places / Mapbox)
+  placeId String?
+
+  // Geo (for timezone + radius search)
+  lat Float?
+  lng Float?
+
+  // ✅ IANA timezone (source of truth for booking math)
+  timeZone String?
+
+  /// Weekly schedule JSON (location-scoped):
+  /// { "mon": { "enabled": true, "start": "09:00", "end": "17:00" }, ... }
+  workingHours Json?
+
+  // Optional location-level defaults (nice long-term)
+  bufferMinutes        Int?
+  stepMinutes          Int?
+  advanceNoticeMinutes Int?
+  maxDaysAhead         Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  // Relations (for snapshot + multi-location calendar)
+  bookings Booking[]
+  holds    BookingHold[]
+  blocks   CalendarBlock[]
+
+  @@index([professionalId])
+  @@index([professionalId, isPrimary])
+  @@index([professionalId, isBookable])
+  @@index([lat, lng])
 }
 
 model AdminActionLog {
@@ -707,6 +782,21 @@ model Booking {
   mediaAssets  MediaAsset[]
   productSales ProductSale[]
 
+    // ✅ Location reference (recommended for correct timezone + multi-location)
+  locationId String?
+  location   ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  // ✅ Snapshot timezone/address used at booking time (immutable truth)
+  locationTimeZone        String?
+  locationAddressSnapshot Json?
+  locationLatSnapshot     Float?
+  locationLngSnapshot     Float?
+
+  // Optional: useful for messaging/UI (“Times shown in your timezone”)
+  clientTimeZoneAtBooking String?
+
+  @@index([locationId])
+  @@index([locationTimeZone])
   @@index([professionalId, scheduledFor])
   @@index([professionalId, clientId])
   @@index([professionalId, source])
@@ -723,7 +813,17 @@ model BookingHold {
 
   clientId String?
   client   ClientProfile? @relation(fields: [clientId], references: [id])
+  // ✅ Location reference + timezone snapshot for holds (prevents tz drift)
+  locationId String?
+  location   ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
+  locationTimeZone        String?
+  locationAddressSnapshot Json?
+  locationLatSnapshot     Float?
+  locationLngSnapshot     Float?
+
+  @@index([locationId])
+  @@index([locationTimeZone])
   @@unique([professionalId, scheduledFor])
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
@@ -923,6 +1023,11 @@ model MediaAsset {
   comments MediaComment[]
 
   waitlistEntries WaitlistEntry[]
+
+  storageBucket String // 'media-public' | 'media-private'
+  storagePath   String
+  thumbBucket   String?
+  thumbPath     String?
 }
 
 model MediaServiceTag {
@@ -1127,7 +1232,11 @@ model CalendarBlock {
   updatedAt      DateTime @updatedAt
 
   professionalProfile ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  // ✅ Optional: tie blocks to a specific location calendar
+  locationId String?
+  location   ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
+  @@index([locationId])
   @@index([professionalId, startsAt])
   @@index([professionalId, endsAt])
 }

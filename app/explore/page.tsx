@@ -104,8 +104,8 @@ export default async function ExplorePage() {
               <Link
                 key={off.id}
                 href={href}
+                className="border border-surfaceGlass/10 bg-bgSecondary"
                 style={{
-                  border: '1px solid #eee',
                   borderRadius: 12,
                   padding: 12,
                   display: 'flex',
@@ -113,7 +113,6 @@ export default async function ExplorePage() {
                   gap: 8,
                   textDecoration: 'none',
                   color: 'inherit',
-                  background: '#fff',
                 }}
               >
                 <div

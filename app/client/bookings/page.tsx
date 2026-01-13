@@ -14,14 +14,24 @@ export default async function ClientBookingsPage() {
   return (
     <main style={{ maxWidth: 980, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <div style={{ marginBottom: 18 }}>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>Your bookings</h1>
-        <p style={{ margin: '6px 0 0', color: '#6b7280' }}>Everything in one place.</p>
+        <h1 className="text-textPrimary" style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>
+          Your bookings
+        </h1>
+        <p className="text-textSecondary" style={{ margin: '6px 0 0' }}>
+          Everything in one place.
+        </p>
       </div>
 
       <LastMinuteOpenings />
       <div style={{ height: 12 }} />
 
-      <Suspense fallback={<div style={{ color: '#6b7280', fontSize: 13 }}>Loading your bookings…</div>}>
+      <Suspense
+        fallback={
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>
+            Loading your bookings…
+          </div>
+        }
+      >
         <ClientBookingsDashboard />
       </Suspense>
     </main>

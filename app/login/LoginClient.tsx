@@ -1,3 +1,4 @@
+// app/login/LoginClient.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -20,12 +21,25 @@ function sanitizeFrom(from: string | null): string | null {
   return trimmed
 }
 
+/** internal-only URL */
+function sanitizeNextUrl(nextUrl: unknown): string | null {
+  if (typeof nextUrl !== 'string') return null
+  const s = nextUrl.trim()
+  if (!s) return null
+  if (!s.startsWith('/')) return null
+  if (s.startsWith('//')) return null
+  return s
+}
+
 export default function LoginClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
   const fromRaw = searchParams.get('from')
   const from = useMemo(() => sanitizeFrom(fromRaw), [fromRaw])
+
+  // ✅ NFC tap intent (if user came from /t/[cardId] -> login)
+  const ti = searchParams.get('ti')
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -43,7 +57,11 @@ export default function LoginClient() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email,
+          password,
+          tapIntentId: ti ?? undefined,
+        }),
       })
 
       const data = await safeJson(res)
@@ -56,6 +74,13 @@ export default function LoginClient() {
       // Make server components reflect the new auth state immediately
       router.refresh()
 
+      // ✅ If NFC flow (or any server-driven redirect) provided a nextUrl, use it first
+      const nextUrl = sanitizeNextUrl(data?.nextUrl)
+      if (nextUrl) {
+        router.replace(nextUrl)
+        return
+      }
+
       // If we were redirected here from a protected route, go back there
       if (from) {
         router.replace(from)
@@ -65,7 +90,7 @@ export default function LoginClient() {
       // Otherwise redirect by role (your "dashboard" behavior)
       const role = data?.user?.role
       if (role === 'CLIENT') router.replace('/client')
-      else if (role === 'PRO') router.replace('/pro')
+      else if (role === 'PRO') router.replace('/pro/dashboard')
       else router.replace('/')
     } catch (err) {
       console.error(err)

@@ -10,20 +10,12 @@ function isProRole(role: unknown) {
   return r === 'PROFESSIONAL' || r === 'PRO'
 }
 
-function startOfDay(d: Date) {
-  const nd = new Date(d)
-  nd.setHours(0, 0, 0, 0)
-  return nd
-}
-
-function endOfDay(d: Date) {
-  const nd = new Date(d)
-  nd.setHours(23, 59, 59, 999)
-  return nd
-}
-
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
+}
+
+function addDaysUtc(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
 
 function pickPositiveNumber(v: any, fallback: number) {
@@ -33,8 +25,70 @@ function pickPositiveNumber(v: any, fallback: number) {
 
 function hoursRounded(minutes: number) {
   const h = minutes / 60
-  // round to nearest 0.5h for nicer display
   return Math.round(h * 2) / 2
+}
+
+function isValidIanaTimeZone(tz: string | null | undefined) {
+  if (!tz || typeof tz !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
+    return true
+  } catch {
+    return false
+  }
+}
+
+function dtfPartsInTimeZone(date: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const parts = dtf.formatToParts(date)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  }
+}
+
+function timeZoneOffsetMinutes(at: Date, timeZone: string) {
+  const p = dtfPartsInTimeZone(at, timeZone)
+  const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
+  const offsetMs = asIfUtc - at.getTime()
+  return Math.round(offsetMs / 60_000)
+}
+
+function zonedToUtc(
+  args: { year: number; month: number; day: number; hour: number; minute: number; second?: number },
+  timeZone: string,
+) {
+  const { year, month, day, hour, minute } = args
+  const second = args.second ?? 0
+
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  for (let i = 0; i < 4; i++) {
+    const off = timeZoneOffsetMinutes(guess, timeZone)
+    const corrected = new Date(Date.UTC(year, month - 1, day, hour, minute, second) - off * 60_000)
+    if (Math.abs(corrected.getTime() - guess.getTime()) < 500) return corrected
+    guess = corrected
+  }
+  return guess
+}
+
+function startOfDayUtcInTimeZone(date: Date, timeZone: string) {
+  const p = dtfPartsInTimeZone(date, timeZone)
+  return zonedToUtc({ year: p.year, month: p.month, day: p.day, hour: 0, minute: 0, second: 0 }, timeZone)
 }
 
 export async function GET() {
@@ -57,36 +111,42 @@ export async function GET() {
 
     const professionalId = (user as any).professionalProfile.id as string
 
-    // Pro settings used by calendar page
     const proProfile = await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
       select: {
         workingHours: true,
         autoAcceptBookings: true,
+        timeZone: true,
       },
     })
 
-    // Window: today -> ~60 days
+    if (!proProfile) {
+      return NextResponse.json({ error: 'Professional profile not found.' }, { status: 404 })
+    }
+
+    // ✅ Use DB timezone if valid; otherwise fall back to UTC *and* tell UI to prompt setup
+    const tzRaw = typeof proProfile.timeZone === 'string' ? proProfile.timeZone.trim() : ''
+    const tzValid = isValidIanaTimeZone(tzRaw)
+    const proTz = tzValid ? tzRaw : 'UTC'
+    const needsTimeZoneSetup = !tzValid
+
+    // Window: start of "today" in pro timezone (or UTC fallback) -> +60 days
     const now = new Date()
-    const from = startOfDay(now)
-    const to = endOfDay(addMinutes(from, 60 * 24 * 60))
+    const from = startOfDayUtcInTimeZone(now, proTz)
+    const toExclusive = addDaysUtc(from, 60)
 
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        scheduledFor: { gte: from, lte: to },
+        scheduledFor: { gte: from, lt: toExclusive },
         NOT: { status: 'CANCELLED' as any },
       },
       select: {
         id: true,
         scheduledFor: true,
         status: true,
-
-        // ✅ Source of truth
         totalDurationMinutes: true,
         bufferMinutes: true,
-
-        // ⛑ Migration fallback
         durationMinutesSnapshot: true,
 
         client: {
@@ -97,7 +157,20 @@ export async function GET() {
           },
         },
 
+        // Keep this for fallback
         service: { select: { name: true } },
+
+        // ✅ Requested service truth: serviceItems
+        serviceItems: {
+          select: {
+            id: true,
+            sortOrder: true,
+            durationMinutesSnapshot: true,
+            priceSnapshot: true,
+            service: { select: { name: true } },
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
       } as any,
       orderBy: { scheduledFor: 'asc' },
       take: 500,
@@ -106,26 +179,31 @@ export async function GET() {
     const events = bookings.map((b: any) => {
       const start = new Date(b.scheduledFor)
 
-      // Prefer totalDurationMinutes, fallback to snapshot, then 60.
-      const baseDuration = pickPositiveNumber(b.totalDurationMinutes, pickPositiveNumber(b.durationMinutesSnapshot, 60))
+      const baseDuration = pickPositiveNumber(
+        b.totalDurationMinutes,
+        pickPositiveNumber(b.durationMinutesSnapshot, 60),
+      )
 
-      // Buffer is extra time that should appear in end time.
       const buffer = pickPositiveNumber(b.bufferMinutes, 0)
-
       const end = addMinutes(start, baseDuration + buffer)
 
       const status = String(b.status || '').toUpperCase()
+
+      const firstItemName =
+        Array.isArray(b.serviceItems) && b.serviceItems.length
+          ? String(b.serviceItems[0]?.service?.name || '').trim()
+          : ''
 
       const serviceName =
         status === 'BLOCKED'
           ? 'Blocked time'
           : status === 'WAITLIST'
             ? 'Waitlist'
-            : b.service?.name || 'Appointment'
+            : firstItemName || b.service?.name || 'Appointment'
 
-      const fn = (b.client?.firstName || '').trim()
-      const ln = (b.client?.lastName || '').trim()
-      const email = (b.client?.user?.email || '').trim()
+      const fn = String(b.client?.firstName || '').trim()
+      const ln = String(b.client?.lastName || '').trim()
+      const email = String(b.client?.user?.email || '').trim()
 
       const clientName =
         status === 'BLOCKED'
@@ -141,19 +219,31 @@ export async function GET() {
         title: serviceName,
         clientName,
         status: status as any,
-        // UI helper (duration *without* buffer so resize/maths are stable)
-        durationMinutes: baseDuration,
+        durationMinutes: baseDuration, // without buffer
+
+        // Optional: expose details so click view can show it reliably
+        details: {
+          serviceName,
+          serviceItems: Array.isArray(b.serviceItems)
+            ? b.serviceItems.map((si: any) => ({
+                id: String(si.id),
+                name: String(si.service?.name || '').trim() || null,
+                durationMinutes: pickPositiveNumber(si.durationMinutesSnapshot, 0),
+                price: si.priceSnapshot ?? null,
+                sortOrder: Number(si.sortOrder ?? 0),
+              }))
+            : [],
+        },
       }
     })
 
-    // Today window
-    const todayStart = startOfDay(now)
-    const todayEnd = endOfDay(now)
+    // "Today" boundaries in pro timezone (or UTC fallback)
+    const todayStart = startOfDayUtcInTimeZone(now, proTz)
+    const todayEndExclusive = addDaysUtc(todayStart, 1)
 
-    // Stats + management lists
     const isToday = (iso: string) => {
       const t = new Date(iso).getTime()
-      return t >= todayStart.getTime() && t <= todayEnd.getTime()
+      return t >= todayStart.getTime() && t < todayEndExclusive.getTime()
     }
 
     const todaysBookingsEvents = events.filter((e: any) => {
@@ -164,7 +254,6 @@ export async function GET() {
     const pendingRequestEvents = events.filter((e: any) => {
       const s = String(e.status || '').toUpperCase()
       if (s !== 'PENDING') return false
-      // Future-facing: pending on/after now
       return new Date(e.startsAt).getTime() >= now.getTime()
     })
 
@@ -186,7 +275,6 @@ export async function GET() {
     }, 0)
 
     const stats = {
-      // NOTE: this is now the real interpretation: accepted+completed today
       todaysBookings: todaysBookingsEvents.length,
       availableHours: null,
       pendingRequests: pendingRequestEvents.length,
@@ -196,12 +284,12 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: true,
+        timeZone: proTz,
+        needsTimeZoneSetup,
         events,
-        workingHours: proProfile?.workingHours ?? null,
+        workingHours: proProfile.workingHours ?? null,
         stats,
-        autoAcceptBookings: Boolean(proProfile?.autoAcceptBookings),
-
-        // ✅ new: management lists (safe, additive)
+        autoAcceptBookings: Boolean(proProfile.autoAcceptBookings),
         management: {
           todaysBookings: todaysBookingsEvents,
           pendingRequests: pendingRequestEvents,

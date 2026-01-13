@@ -1,4 +1,5 @@
 // app/pro/media/MediaTile.tsx
+
 'use client'
 
 import { useState } from 'react'
@@ -9,6 +10,7 @@ type MediaTileProps = {
   src: string
   caption?: string | null
   isFeaturedInPortfolio: boolean
+  uploadedByRole?: string | null
 }
 
 async function safeJson(res: Response) {
@@ -21,22 +23,20 @@ export default function MediaTile({ id, src, caption, isFeaturedInPortfolio }: M
   const [featured, setFeatured] = useState(Boolean(isFeaturedInPortfolio))
   const [error, setError] = useState<string | null>(null)
 
-  async function toggle() {
+  async function togglePortfolio() {
     if (saving) return
     setSaving(true)
     setError(null)
 
     try {
-      const res = await fetch(`/api/pro/media/${encodeURIComponent(id)}/toggle-portfolio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isFeaturedInPortfolio: !featured }),
-      })
+      const endpoint = `/api/pro/media/${encodeURIComponent(id)}/portfolio`
+      const nextFeatured = !featured
 
+      const res = await fetch(endpoint, { method: nextFeatured ? 'POST' : 'DELETE' })
       const body = await safeJson(res)
       if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
 
-      setFeatured((v) => !v)
+      setFeatured(nextFeatured)
       router.refresh()
     } catch (e: any) {
       setError(e?.message || 'Failed to update.')
@@ -45,33 +45,66 @@ export default function MediaTile({ id, src, caption, isFeaturedInPortfolio }: M
     }
   }
 
+  async function deleteMedia() {
+    if (saving) return
+    setError(null)
+
+    const ok = window.confirm('Delete this media? This cannot be undone.')
+    if (!ok) return
+
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/pro/media/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const body = await safeJson(res)
+      if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
+
+      router.refresh()
+    } catch (e: any) {
+      setError(e?.message || 'Failed to delete.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <div style={{ border: '1px solid #eee', borderRadius: 14, overflow: 'hidden', background: '#fff' }}>
+    <div className="tovis-glass overflow-hidden rounded-card border border-white/10">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="" style={{ width: '100%', height: 160, objectFit: 'cover', display: 'block' }} />
+      <img src={src} alt="" className="block h-40 w-full object-cover" />
 
-      <div style={{ padding: 10, display: 'grid', gap: 8 }}>
-        {caption ? <div style={{ fontSize: 12, color: '#111' }}>{caption}</div> : null}
-        {error ? <div style={{ fontSize: 12, color: '#b91c1c' }}>{error}</div> : null}
+      <div className="grid gap-2 p-3">
+        {caption ? <div className="text-[12px] text-textPrimary">{caption}</div> : null}
+        {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
 
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={saving}
-          style={{
-            border: '1px solid #ddd',
-            background: featured ? '#111' : '#fff',
-            color: featured ? '#fff' : '#111',
-            padding: '8px 10px',
-            borderRadius: 10,
-            fontWeight: 800,
-            fontSize: 12,
-            cursor: saving ? 'default' : 'pointer',
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? 'Saving…' : featured ? 'In portfolio' : 'Add to portfolio'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={togglePortfolio}
+            disabled={saving}
+            className={[
+              'flex-1 rounded-card border px-3 py-2 text-[12px] font-black transition',
+              saving ? 'cursor-not-allowed opacity-70' : 'hover:border-white/20',
+              featured
+                ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
+                : 'border-white/10 bg-bgSecondary text-textPrimary',
+            ].join(' ')}
+          >
+            {saving ? 'Saving…' : featured ? 'In portfolio (and Looks)' : 'Add to portfolio'}
+          </button>
+
+          <button
+            type="button"
+            onClick={deleteMedia}
+            disabled={saving}
+            className={[
+              'rounded-card border px-3 py-2 text-[12px] font-black transition',
+              'border-white/10 bg-bgSecondary text-toneDanger hover:border-white/20',
+              saving ? 'cursor-not-allowed opacity-70' : '',
+            ].join(' ')}
+            title="Delete media"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   )

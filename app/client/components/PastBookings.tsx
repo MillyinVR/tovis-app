@@ -3,48 +3,59 @@
 
 import Link from 'next/link'
 import type { BookingLike } from './_helpers'
-import { prettyWhen, locationLabel, Badge } from './_helpers'
+import { prettyWhen, locationLabel } from './_helpers'
+
+function StatusPill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
+      {label}
+    </span>
+  )
+}
 
 export default function PastBookings({ items }: { items: BookingLike[] }) {
   const list = items || []
 
-  function statusBadge(statusRaw: any) {
+  function statusLabel(statusRaw: any) {
     const s = String(statusRaw || '').toUpperCase()
-    if (s === 'COMPLETED') return <Badge label="Completed" bg="#d1fae5" color="#065f46" />
-    if (s === 'CANCELLED') return <Badge label="Cancelled" bg="#fee2e2" color="#991b1b" />
-    if (s === 'ACCEPTED') return <Badge label="Confirmed" bg="#ecfeff" color="#155e75" />
-    if (s === 'PENDING') return <Badge label="Requested" bg="#fef9c3" color="#854d0e" />
-    return <Badge label={s || 'Unknown'} bg="#f3f4f6" color="#111827" />
+    if (s === 'COMPLETED') return 'Completed'
+    if (s === 'CANCELLED') return 'Cancelled'
+    if (s === 'ACCEPTED') return 'Confirmed'
+    if (s === 'PENDING') return 'Requested'
+    return s || 'Unknown'
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ fontWeight: 900, marginBottom: 4 }}>Past</div>
+    <div className="grid gap-2">
+      <div className="text-sm font-black text-textPrimary">Past</div>
 
       {list.map((b) => {
         const svc = b?.service?.name || 'Appointment'
         const pro = b?.professional?.businessName || 'Professional'
         const when = prettyWhen(b?.scheduledFor)
         const loc = locationLabel(b?.professional)
-
         const hasUnreadAftercare = Boolean((b as any)?.hasUnreadAftercare)
 
         return (
-          <Link key={b.id} href={`/client/bookings/${encodeURIComponent(b.id)}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-            <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, cursor: 'pointer' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                <div style={{ fontWeight: 900 }}>{svc}</div>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{when}</div>
+          <Link
+            key={b.id}
+            href={`/client/bookings/${encodeURIComponent(b.id)}`}
+            className="block no-underline"
+          >
+            <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="text-sm font-black">{svc}</div>
+                <div className="text-xs font-semibold text-textSecondary">{when}</div>
               </div>
 
-              <div style={{ fontSize: 13, marginTop: 4 }}>
-                <span style={{ fontWeight: 900 }}>{pro}</span>
-                {loc ? <span style={{ color: '#6b7280' }}> · {loc}</span> : null}
+              <div className="mt-1 text-sm">
+                <span className="font-black">{pro}</span>
+                {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
               </div>
 
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
-                {statusBadge(b?.status)}
-                {hasUnreadAftercare ? <Badge label="New aftercare" bg="#fffbeb" color="#854d0e" /> : null}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <StatusPill label={statusLabel(b?.status)} />
+                {hasUnreadAftercare ? <StatusPill label="New aftercare" /> : null}
               </div>
             </div>
           </Link>

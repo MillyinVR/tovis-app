@@ -169,11 +169,7 @@ export default async function ClientRebookFromAftercarePage(props: {
 
   const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
 
-  const proName =
-    booking.professional?.businessName ||
-    booking.professional?.user?.email ||
-    'your professional'
-
+  const proName = booking.professional?.businessName || booking.professional?.user?.email || 'your professional'
   const serviceName = booking.service?.name || 'Service'
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
 
@@ -199,7 +195,8 @@ export default async function ClientRebookFromAftercarePage(props: {
           source: 'AFTERCARE',
           status: { not: 'CANCELLED' },
         } as any,
-        orderBy: { scheduledFor: 'desc' },
+        // closest upcoming booking is usually what you want
+        orderBy: { scheduledFor: 'asc' },
         select: { id: true, scheduledFor: true, status: true },
       })
     } catch {
@@ -219,6 +216,7 @@ export default async function ClientRebookFromAftercarePage(props: {
   if (windowStartFromUrl) bookParams.set('windowStart', windowStartFromUrl)
   if (windowEndFromUrl) bookParams.set('windowEnd', windowEndFromUrl)
 
+  // If no URL params provided, seed them from aftercare
   if (!recommendedAtFromUrl && !windowStartFromUrl && !windowEndFromUrl) {
     if (rebookInfo.mode === 'RECOMMENDED_DATE') {
       bookParams.set('recommendedAt', rebookInfo.recommendedAt.toISOString())
@@ -234,11 +232,9 @@ export default async function ClientRebookFromAftercarePage(props: {
     <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <a
         href={`/client/bookings/${encodeURIComponent(booking.id)}`}
+        className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
         style={{
           textDecoration: 'none',
-          border: '1px solid #e5e7eb',
-          background: '#fff',
-          color: '#111',
           borderRadius: 999,
           padding: '8px 12px',
           fontSize: 12,
@@ -250,33 +246,41 @@ export default async function ClientRebookFromAftercarePage(props: {
         ← Back to booking
       </a>
 
-      <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>
+      <h1 className="text-textPrimary" style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>
         Aftercare for {serviceName}
       </h1>
 
-      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>
+      <div className="text-textSecondary" style={{ fontSize: 13, marginTop: 6 }}>
         With {proName}
       </div>
 
-      <section style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 16 }}>
-        <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>Aftercare notes</div>
+      <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 12, padding: 12, marginTop: 16 }}>
+        <div className="text-textPrimary" style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
+          Aftercare notes
+        </div>
         {notes ? (
-          <div style={{ fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap' }}>{notes}</div>
+          <div className="text-textSecondary" style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>
+            {notes}
+          </div>
         ) : (
-          <div style={{ fontSize: 12, color: '#9ca3af' }}>No aftercare notes provided.</div>
+          <div className="text-textSecondary" style={{ fontSize: 12, opacity: 0.75 }}>
+            No aftercare notes provided.
+          </div>
         )}
       </section>
 
-      <section style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12, marginTop: 12 }}>
-        <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>Rebook</div>
+      <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 12, padding: 12, marginTop: 12 }}>
+        <div className="text-textPrimary" style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
+          Rebook
+        </div>
 
         {rebookInfo.label ? (
-          <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+          <div className="text-textSecondary" style={{ fontSize: 13, marginBottom: 10 }}>
             {rebookInfo.label}
-            <span style={{ color: '#9ca3af' }}> · {appointmentTz}</span>
+            <span style={{ opacity: 0.75 }}> · {appointmentTz}</span>
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10 }}>
+          <div className="text-textSecondary" style={{ fontSize: 12, opacity: 0.75, marginBottom: 10 }}>
             No rebook recommendation yet.
           </div>
         )}
@@ -284,16 +288,14 @@ export default async function ClientRebookFromAftercarePage(props: {
         {nextBooking ? (
           <a
             href={`/client/bookings/${encodeURIComponent(nextBooking.id)}`}
+            className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover"
             style={{
               display: 'inline-block',
               textDecoration: 'none',
-              border: '1px solid #111',
               borderRadius: 999,
               padding: '10px 14px',
               fontSize: 12,
               fontWeight: 900,
-              color: '#fff',
-              background: '#111',
             }}
           >
             View your booked appointment
@@ -301,16 +303,14 @@ export default async function ClientRebookFromAftercarePage(props: {
         ) : (
           <a
             href={bookHref}
+            className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover"
             style={{
               display: 'inline-block',
               textDecoration: 'none',
-              border: '1px solid #111',
               borderRadius: 999,
               padding: '10px 14px',
               fontSize: 12,
               fontWeight: 900,
-              color: '#fff',
-              background: '#111',
               opacity: rebookInfo.mode === 'NONE' ? 0.7 : 1,
             }}
           >
@@ -318,12 +318,12 @@ export default async function ClientRebookFromAftercarePage(props: {
           </a>
         )}
 
-        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>
+        <div className="text-textSecondary" style={{ fontSize: 11, opacity: 0.75, marginTop: 8 }}>
           If you don’t see times you want, your pro may need to open more availability.
         </div>
       </section>
 
-      <section style={{ marginTop: 12, fontSize: 11, color: '#9ca3af' }}>
+      <section className="text-textSecondary" style={{ marginTop: 12, fontSize: 11, opacity: 0.75 }}>
         <div>Aftercare link</div>
         <div style={{ wordBreak: 'break-all' }}>/client/rebook/{publicToken}</div>
       </section>

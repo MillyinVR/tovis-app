@@ -1,10 +1,13 @@
 // app/pro/services/page.tsx
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import ServicePicker from './ServicePicker'
 import OfferingManager from './OfferingManager'
+
+export const dynamic = 'force-dynamic'
 
 export default async function ProServicesPage() {
   const user = await getCurrentUser()
@@ -20,7 +23,9 @@ export default async function ProServicesPage() {
     include: {
       children: {
         where: { isActive: true },
-        include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } },
+        include: {
+          services: { where: { isActive: true }, orderBy: { name: 'asc' } },
+        },
         orderBy: { name: 'asc' },
       },
       services: { where: { isActive: true }, orderBy: { name: 'asc' } },
@@ -30,36 +35,43 @@ export default async function ProServicesPage() {
 
   const offerings = await prisma.professionalServiceOffering.findMany({
     where: { professionalId: profId, isActive: true },
-    include: { service: { include: { category: true } } },
+    include: {
+      service: { include: { category: true } },
+    },
     orderBy: { createdAt: 'asc' },
   })
 
   const categoryPayload = categories.map((cat) => ({
-    id: cat.id,
+    id: String(cat.id),
     name: cat.name,
     services: cat.services.map((s) => ({
-      id: s.id,
+      id: String(s.id),
       name: s.name,
       minPrice: moneyToString(s.minPrice) ?? '0.00',
-      defaultDurationMinutes: s.defaultDurationMinutes,
+      defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
+      defaultImageUrl: (s as any).defaultImageUrl ?? null,
     })),
     children: cat.children.map((child) => ({
-      id: child.id,
+      id: String(child.id),
       name: child.name,
       services: child.services.map((s) => ({
-        id: s.id,
+        id: String(s.id),
         name: s.name,
         minPrice: moneyToString(s.minPrice) ?? '0.00',
-        defaultDurationMinutes: s.defaultDurationMinutes,
+        defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
+        defaultImageUrl: (s as any).defaultImageUrl ?? null,
       })),
     })),
   }))
 
   const offeringsPayload = offerings.map((o) => ({
-    id: o.id,
-    serviceId: o.serviceId,
-    title: o.title,
-    description: o.description,
+    id: String(o.id),
+    serviceId: String(o.serviceId),
+
+    // legacy typing support only
+    title: null as string | null,
+
+    description: o.description ?? null,
     customImageUrl: o.customImageUrl ?? null,
 
     offersInSalon: Boolean(o.offersInSalon),
@@ -71,38 +83,58 @@ export default async function ProServicesPage() {
     mobilePriceStartingAt: o.mobilePriceStartingAt ? moneyToString(o.mobilePriceStartingAt) : null,
     mobileDurationMinutes: o.mobileDurationMinutes ?? null,
 
-    defaultImageUrl: (o.service as any).defaultImageUrl ?? null,
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,
+    serviceDefaultImageUrl: (o.service as any).defaultImageUrl ?? null,
+
+    minPrice: moneyToString((o.service as any).minPrice) ?? '0.00',
   }))
 
   return (
-    <main style={{ maxWidth: 960, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <header style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between' }}>
+    <main className="mx-auto max-w-[960px] px-4 pb-28 pt-6">
+      <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 4 }}>My services</h1>
-          <p style={{ fontSize: 13, color: '#555' }}>
-            Choose from the TOVIS service library, then set pricing for Salon and/or Mobile.
+          <h1 className="text-[22px] font-black text-textPrimary">My services</h1>
+          <p className="mt-1 max-w-[680px] text-[13px] text-textSecondary">
+            Pick from the TOVIS service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.
           </p>
         </div>
 
-        <a href="/pro" style={{ fontSize: 12, color: '#555', textDecoration: 'none', alignSelf: 'flex-start' }}>
+        <Link
+          href="/pro"
+          className="inline-flex w-fit items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+        >
           ← Back to pro dashboard
-        </a>
+        </Link>
       </header>
 
-      <section style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Add a service to your menu</h2>
+      {/* Add service */}
+      <section className="tovis-glass mb-5 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="mb-3">
+          <div className="text-[14px] font-black text-textPrimary">Add a service</div>
+          <div className="mt-1 text-[12px] text-textSecondary">
+            Choose from categories, then add it to your menu. Pricing is yours. Naming is not.
+          </div>
+        </div>
+
         <ServicePicker categories={categoryPayload} offerings={offeringsPayload} />
       </section>
 
-      <section>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Your current offerings</h2>
+      {/* Current offerings */}
+      <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="mb-3">
+          <div className="text-[14px] font-black text-textPrimary">Your current offerings</div>
+          <div className="mt-1 text-[12px] text-textSecondary">
+            Upload a custom image per service if you want. It only affects how your services look in your menu.
+          </div>
+        </div>
 
         {offeringsPayload.length === 0 ? (
-          <p style={{ fontSize: 13, color: '#777' }}>You haven&apos;t added any services yet.</p>
+          <div className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] text-textSecondary">
+            You haven&apos;t added any services yet.
+          </div>
         ) : (
-          <OfferingManager initialOfferings={offeringsPayload} />
+          <OfferingManager initialOfferings={offeringsPayload} enforceCanonicalServiceNames enableServiceImageUpload />
         )}
       </section>
     </main>

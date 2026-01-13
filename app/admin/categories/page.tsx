@@ -33,12 +33,12 @@ export default async function AdminCategoriesPage() {
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Categories</h1>
           <div style={{ color: '#6b7280', fontSize: 13 }}>Taxonomy control so discovery doesn’t become chaos.</div>
         </div>
-        <Link href="/admin" style={{ fontSize: 12, fontWeight: 900, textDecoration: 'none', color: '#111' }}>
+        <Link href="/admin" className="text-textPrimary" style={{ fontSize: 12, fontWeight: 900, textDecoration: 'none' }}>
           ← Admin Home
         </Link>
       </div>
 
-      <section style={{ border: '1px solid #eee', background: '#fff', borderRadius: 16, padding: 16 }}>
+      <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
           <div style={{ fontWeight: 900 }}>All categories</div>
           <span style={{ fontSize: 12, color: '#6b7280' }}>{categories.length} total</span>
@@ -52,11 +52,11 @@ export default async function AdminCategoriesPage() {
           <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Create category</div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <input name="name" placeholder="Name (ex: Hair)" required style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }} />
-            <input name="slug" placeholder="Slug (ex: hair)" required style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }} />
+            <input name="name" placeholder="Name (ex: Hair)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
+            <input name="slug" placeholder="Slug (ex: hair)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
           </div>
 
-          <select name="parentId" defaultValue="" style={{ border: '1px solid #ddd', borderRadius: 12, padding: 10 }}>
+          <select name="parentId" defaultValue="" className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }}>
             <option value="">No parent (top-level)</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
@@ -67,7 +67,7 @@ export default async function AdminCategoriesPage() {
 
           <button
             type="submit"
-            style={{ border: '1px solid #111', background: '#111', color: '#fff', borderRadius: 12, padding: '10px 12px', fontWeight: 900, width: 'fit-content' }}
+            className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover" style={{ borderRadius: 12, padding: '10px 12px', fontWeight: 900, width: 'fit-content' }}
           >
             Create
           </button>
@@ -77,7 +77,7 @@ export default async function AdminCategoriesPage() {
           {topCats.map((c) => {
             const kids = childrenByParent.get(c.id) ?? []
             return (
-              <div key={c.id} style={{ border: '1px solid #eee', borderRadius: 12, padding: 12 }}>
+              <div key={c.id} className="border border-surfaceGlass/10" style={{ borderRadius: 12, padding: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                   <div style={{ fontWeight: 900 }}>
                     {c.name} <span style={{ color: '#6b7280', fontSize: 12 }}>({c.slug})</span>
@@ -87,9 +87,7 @@ export default async function AdminCategoriesPage() {
                     <input type="hidden" name="isActive" value={String(!c.isActive)} />
                     <button
                       type="submit"
-                      style={{
-                        border: '1px solid #ddd',
-                        background: '#fff',
+                      className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary" style={{
                         borderRadius: 999,
                         padding: '6px 10px',
                         fontSize: 12,
@@ -114,9 +112,8 @@ export default async function AdminCategoriesPage() {
                           <input type="hidden" name="isActive" value={String(!k.isActive)} />
                           <button
                             type="submit"
+                            className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary"
                             style={{
-                              border: '1px solid #ddd',
-                              background: '#fff',
                               borderRadius: 999,
                               padding: '6px 10px',
                               fontSize: 12,

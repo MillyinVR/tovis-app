@@ -150,7 +150,10 @@ export default async function BookingReceiptPage(props: PageProps) {
   const statusLabel = friendlyStatus(booking.status)
 
   return (
-    <main style={{ maxWidth: 860, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
+    <main
+      className="text-textPrimary"
+      style={{ maxWidth: 860, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}
+    >
       <div
         style={{
           display: 'flex',
@@ -167,7 +170,7 @@ export default async function BookingReceiptPage(props: PageProps) {
             {serviceName} with {proName}
           </h1>
 
-          <div style={{ marginTop: 6, color: '#111', fontSize: 14 }}>
+          <div style={{ marginTop: 6, fontSize: 14 }}>
             <strong>{when}</strong>
             <span style={{ color: '#6b7280' }}> · {appointmentTz}</span>
             {location ? <span style={{ color: '#6b7280' }}> · {location}</span> : null}
@@ -175,52 +178,53 @@ export default async function BookingReceiptPage(props: PageProps) {
 
           <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <span>
-              <strong style={{ color: '#111' }}>Status:</strong> {statusLabel}
+                <strong className="text-textPrimary">Status:</strong> {statusLabel}
             </span>
 
             {locationTypeLabel ? (
               <span>
-                <strong style={{ color: '#111' }}>Mode:</strong> {locationTypeLabel}
+                <strong className="text-textPrimary">Mode:</strong> {locationTypeLabel}
               </span>
             ) : null}
 
             {duration ? (
               <span>
-                <strong style={{ color: '#111' }}>Duration:</strong> {duration} min
+                <strong className="text-textPrimary">Duration:</strong> {duration} min
               </span>
             ) : null}
 
             {price ? (
               <span>
-                <strong style={{ color: '#111' }}>Price:</strong> {price}
+                <strong className="text-textPrimary">Price:</strong> {price}
               </span>
             ) : null}
 
             {sourceLabel ? (
               <span>
-                <strong style={{ color: '#111' }}>Source:</strong> {sourceLabel}
+                <strong className="text-textPrimary">Source:</strong> {sourceLabel}
               </span>
             ) : null}
           </div>
         </div>
 
         {/* Looks = discovery home */}
-        <Link href="/looks" style={{ textDecoration: 'none', color: '#111', fontWeight: 900 }}>
+        <Link href="/looks" className="text-textPrimary" style={{ textDecoration: 'none', fontWeight: 900 }}>
           ← Back to Looks
         </Link>
       </div>
 
-      <div style={{ marginTop: 18, border: '1px solid #eee', borderRadius: 14, padding: 14, background: '#fff' }}>
+      <div
+        className="border border-surfaceGlass/10 bg-bgSecondary"
+        style={{ marginTop: 18, borderRadius: 14, padding: 14 }}
+      >
         <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Next moves</div>
 
         <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
           <a
             href={calendarHref}
+            className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary"
             style={{
               textDecoration: 'none',
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#111',
               padding: '10px 12px',
               borderRadius: 12,
               fontWeight: 900,
@@ -233,10 +237,9 @@ export default async function BookingReceiptPage(props: PageProps) {
 
           <Link
             href={aftercareHref}
+            className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover"
             style={{
               textDecoration: 'none',
-              background: '#111',
-              color: '#fff',
               padding: '10px 12px',
               borderRadius: 12,
               fontWeight: 900,
@@ -249,11 +252,9 @@ export default async function BookingReceiptPage(props: PageProps) {
 
           <Link
             href={rebookHref}
+            className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary"
             style={{
               textDecoration: 'none',
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#111',
               padding: '10px 12px',
               borderRadius: 12,
               fontWeight: 900,
@@ -266,11 +267,10 @@ export default async function BookingReceiptPage(props: PageProps) {
 
           <Link
             href={isProViewer ? '/professional/bookings' : '/client/bookings'}
+            className="border border-surfaceGlass/10 text-textPrimary"
             style={{
               textDecoration: 'none',
-              border: '1px solid #eee',
               background: '#fafafa',
-              color: '#111',
               padding: '10px 12px',
               borderRadius: 12,
               fontWeight: 800,
@@ -290,7 +290,7 @@ export default async function BookingReceiptPage(props: PageProps) {
       {/* Optional little extra context (kept tiny) */}
       {svc?.category?.name ? (
         <div style={{ marginTop: 14, fontSize: 12, color: '#6b7280' }}>
-          Category: <strong style={{ color: '#111' }}>{svc.category.name}</strong>
+          Category: <strong className="text-textPrimary">{svc.category.name}</strong>
         </div>
       ) : null}
     </main>

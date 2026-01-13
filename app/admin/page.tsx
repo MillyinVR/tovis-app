@@ -18,13 +18,11 @@ function Card({
   return (
     <Link
       href={href}
+      className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
       style={{
         textDecoration: 'none',
-        color: '#111',
-        border: '1px solid #eee',
         borderRadius: 16,
         padding: 16,
-        background: '#fff',
         display: 'grid',
         gap: 8,
       }}
@@ -95,7 +93,7 @@ export default async function AdminHomePage() {
         ) : null}
       </div>
 
-      <div style={{ border: '1px dashed #e5e7eb', borderRadius: 16, padding: 14, background: '#fff' }}>
+      <div className="bg-bgSecondary" style={{ border: '1px dashed #e5e7eb', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 1000, marginBottom: 6 }}>Next we’re building</div>
         <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
           1) Pro approval workflow (status + notes + audit trail), 2) Services/categories CRUD, 3) License expiry dashboard + reminders.

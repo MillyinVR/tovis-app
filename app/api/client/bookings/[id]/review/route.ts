@@ -2,35 +2,98 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import type { MediaType, MediaVisibility, Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type MediaType = 'IMAGE' | 'VIDEO'
 
 type CreateReviewBody = {
   rating?: unknown
   headline?: unknown
   body?: unknown
-  media?: unknown // array of { url, thumbUrl?, mediaType } (client-provided)
-  attachedMediaIds?: unknown // array of booking media IDs chosen by client
+  media?: unknown
+  attachedMediaIds?: unknown
 }
 
 type IncomingMediaItem = {
   url: string
   thumbUrl?: string | null
   mediaType: MediaType
+
+  // preferred: explicit storage pointers
+  storageBucket?: string | null
+  storagePath?: string | null
+  thumbBucket?: string | null
+  thumbPath?: string | null
 }
 
-type Ctx = {
-  params: Promise<{ id: string }>
+type Ctx = { params: Promise<{ id: string }> }
+
+const URL_MAX = 2048
+
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function safeUrl(raw: unknown): string | null {
+  const s = pickString(raw)
+  if (!s) return null
+  if (s.length > URL_MAX) return null
+  try {
+    const u = new URL(s)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    return u.toString()
+  } catch {
+    return null
+  }
 }
 
 function isMediaType(x: unknown): x is MediaType {
   return x === 'IMAGE' || x === 'VIDEO'
 }
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+/**
+ * Extract bucket/path from Supabase Storage URLs (public or signed).
+ * Supports:
+ *  - /storage/v1/object/public/<bucket>/<path>
+ *  - /storage/v1/object/sign/<bucket>/<path>
+ *  - /storage/v1/object/<bucket>/<path>   (some setups)
+ */
+function parseSupabaseStoragePointer(urlStr: string): { bucket: string; path: string } | null {
+  try {
+    const u = new URL(urlStr)
+    const parts = u.pathname.split('/').filter(Boolean)
+
+    const idx = parts.findIndex((p) => p === 'storage')
+    if (idx === -1) return null
+
+    // expected: storage / v1 / object / (public|sign|...) / bucket / ...path
+    const v1 = parts[idx + 1]
+    const object = parts[idx + 2]
+    if (v1 !== 'v1' || object !== 'object') return null
+
+    const mode = parts[idx + 3] // public | sign | bucket (depending)
+    const bucket = parts[idx + 4]
+    const restStart = idx + 5
+
+    if (!mode || !bucket || restStart > parts.length) {
+      // maybe it's /storage/v1/object/<bucket>/<path>
+      const bucketAlt = parts[idx + 3]
+      const restAltStart = idx + 4
+      if (!bucketAlt || restAltStart > parts.length) return null
+      return { bucket: bucketAlt, path: parts.slice(restAltStart).join('/') }
+    }
+
+    if (mode === 'public' || mode === 'sign') {
+      const path = parts.slice(restStart).join('/')
+      if (!path) return null
+      return { bucket, path }
+    }
+
+    // fallback: /storage/v1/object/<bucket>/<path> (mode is actually bucket)
+    return { bucket: mode, path: parts.slice(idx + 4).join('/') }
+  } catch {
+    return null
+  }
 }
 
 function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
@@ -41,25 +104,28 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
     if (!raw || typeof raw !== 'object') continue
     const obj = raw as Record<string, unknown>
 
-    const url = typeof obj.url === 'string' ? obj.url.trim() : ''
-    const thumbUrl = typeof obj.thumbUrl === 'string' ? obj.thumbUrl.trim() : null
-    const mediaType: MediaType = isMediaType(obj.mediaType) ? obj.mediaType : 'IMAGE'
+    const url = safeUrl(obj.url)
     if (!url) continue
 
-    items.push({ url, thumbUrl, mediaType })
+    const thumbUrlRaw = obj.thumbUrl
+    const thumbUrl = thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
+    if (thumbUrlRaw && !thumbUrl) continue
+
+    const mediaType: MediaType = isMediaType(obj.mediaType) ? obj.mediaType : 'IMAGE'
+
+    const storageBucket = pickString(obj.storageBucket) ?? null
+    const storagePath = pickString(obj.storagePath) ?? null
+    const thumbBucket = pickString(obj.thumbBucket) ?? null
+    const thumbPath = pickString(obj.thumbPath) ?? null
+
+    items.push({ url, thumbUrl, mediaType, storageBucket, storagePath, thumbBucket, thumbPath })
   }
 
   return items
 }
 
 function parseRating(x: unknown): number | null {
-  const n =
-    typeof x === 'number'
-      ? x
-      : typeof x === 'string'
-        ? Number.parseInt(x, 10)
-        : Number.NaN
-
+  const n = typeof x === 'number' ? x : typeof x === 'string' ? Number.parseInt(x, 10) : Number.NaN
   if (!Number.isFinite(n) || n < 1 || n > 5) return null
   return n
 }
@@ -74,6 +140,36 @@ function parseIdArray(x: unknown, max: number): string[] {
     if (out.length >= max) break
   }
   return Array.from(new Set(out))
+}
+
+function resolveStoragePointers(m: IncomingMediaItem): {
+  storageBucket: string
+  storagePath: string
+  thumbBucket: string | null
+  thumbPath: string | null
+} | null {
+  // If client provided explicit pointers, trust them.
+  if (m.storageBucket && m.storagePath) {
+    return {
+      storageBucket: m.storageBucket,
+      storagePath: m.storagePath,
+      thumbBucket: m.thumbBucket ?? null,
+      thumbPath: m.thumbPath ?? null,
+    }
+  }
+
+  // Otherwise try to extract from URL(s)
+  const ptr = parseSupabaseStoragePointer(m.url)
+  if (!ptr) return null
+
+  const thumbPtr = m.thumbUrl ? parseSupabaseStoragePointer(m.thumbUrl) : null
+
+  return {
+    storageBucket: ptr.bucket,
+    storagePath: ptr.path,
+    thumbBucket: thumbPtr?.bucket ?? null,
+    thumbPath: thumbPtr?.path ?? null,
+  }
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
@@ -95,10 +191,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const headline = typeof body.headline === 'string' ? body.headline.trim() : null
     const reviewBody = typeof body.body === 'string' ? body.body.trim() : null
 
-    // client-uploaded media (URL placeholder)
     const clientMediaItems = parseMedia(body.media)
-
-    // client-selected booking media to attach (max 2 as per your spec)
     const attachedMediaIds = parseIdArray(body.attachedMediaIds, 2)
 
     const booking = await prisma.booking.findUnique({
@@ -115,11 +208,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     })
 
     if (existing) {
-      return NextResponse.json({ error: 'Review already exists for this booking.', reviewId: existing.id }, { status: 409 })
+      return NextResponse.json(
+        { error: 'Review already exists for this booking.', reviewId: existing.id },
+        { status: 409 },
+      )
     }
 
+    // Validate storage pointers before we start the transaction (fast fail)
+    const resolvedClientMedia = clientMediaItems.map((m) => {
+      const ptrs = resolveStoragePointers(m)
+      if (!ptrs) {
+        throw new Error(
+          'Media items must include storageBucket/storagePath or a Supabase Storage URL that can be parsed.',
+        )
+      }
+      return { ...m, ...ptrs }
+    })
+
     const created = await prisma.$transaction(async (tx) => {
-      // Validate attachables belong to this booking, are pro-uploaded, and not already in a review
       const attachables = attachedMediaIds.length
         ? await tx.mediaAsset.findMany({
             where: {
@@ -149,35 +255,42 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         select: { id: true },
       })
 
-      // Attach booking media to the review (these were uploaded by the pro)
       if (attachables.length) {
         await tx.mediaAsset.updateMany({
           where: { id: { in: attachables.map((a) => a.id) } },
           data: {
             reviewId: review.id,
-            // keep private forever:
-            visibility: 'PRIVATE',
+            visibility: 'PRIVATE' as MediaVisibility,
             isEligibleForLooks: false,
             isFeaturedInPortfolio: false,
+            reviewLocked: true,
           },
         })
       }
 
-      // Create client-uploaded media directly on the review
-      if (clientMediaItems.length) {
+      if (resolvedClientMedia.length) {
         await tx.mediaAsset.createMany({
-          data: clientMediaItems.map((m) => ({
+          data: resolvedClientMedia.map((m) => ({
             professionalId: booking.professionalId,
             bookingId: booking.id,
             reviewId: review.id,
+
             url: m.url,
             thumbUrl: m.thumbUrl ?? null,
             mediaType: m.mediaType,
-            visibility: 'PRIVATE',
+
+            visibility: 'PRIVATE' as MediaVisibility,
             uploadedByUserId: user.id,
-            uploadedByRole: 'CLIENT',
+            uploadedByRole: 'CLIENT' as Role,
+
             isFeaturedInPortfolio: false,
             isEligibleForLooks: false,
+            reviewLocked: true,
+
+            storageBucket: m.storageBucket!,
+            storagePath: m.storagePath!,
+            thumbBucket: m.thumbBucket ?? null,
+            thumbPath: m.thumbPath ?? null,
           })),
         })
       }
@@ -187,7 +300,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         include: {
           mediaAssets: {
             orderBy: { createdAt: 'desc' },
-            select: { id: true, url: true, thumbUrl: true, mediaType: true, createdAt: true, isFeaturedInPortfolio: true, isEligibleForLooks: true },
+            select: {
+              id: true,
+              url: true,
+              thumbUrl: true,
+              mediaType: true,
+              createdAt: true,
+              isFeaturedInPortfolio: true,
+              isEligibleForLooks: true,
+              storageBucket: true,
+              storagePath: true,
+              thumbBucket: true,
+              thumbPath: true,
+            },
           },
         },
       })
@@ -200,8 +325,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     return NextResponse.json({ ok: true, review: created.review }, { status: 201 })
-  } catch (e) {
+  } catch (e: any) {
     console.error('POST /api/client/bookings/[id]/review error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const msg =
+      typeof e?.message === 'string' && e.message.includes('storageBucket')
+        ? e.message
+        : 'Internal server error'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

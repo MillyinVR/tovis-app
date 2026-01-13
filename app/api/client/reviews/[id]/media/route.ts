@@ -2,19 +2,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import type { MediaType, MediaVisibility, Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-type MediaType = 'IMAGE' | 'VIDEO'
-
-type AddReviewMediaBody = {
-  media?: unknown
-}
+type AddReviewMediaBody = { media?: unknown }
 
 type IncomingMediaItem = {
   url: string
   thumbUrl?: string | null
   mediaType: MediaType
+  storageBucket?: string | null
+  storagePath?: string | null
+  thumbBucket?: string | null
+  thumbPath?: string | null
 }
 
 const URL_MAX = 2048
@@ -40,6 +41,37 @@ function isMediaType(x: unknown): x is MediaType {
   return x === 'IMAGE' || x === 'VIDEO'
 }
 
+function parseSupabaseStoragePointer(urlStr: string): { bucket: string; path: string } | null {
+  try {
+    const u = new URL(urlStr)
+    const parts = u.pathname.split('/').filter(Boolean)
+
+    const idx = parts.findIndex((p) => p === 'storage')
+    if (idx === -1) return null
+    const v1 = parts[idx + 1]
+    const object = parts[idx + 2]
+    if (v1 !== 'v1' || object !== 'object') return null
+
+    const mode = parts[idx + 3]
+    const bucket = parts[idx + 4]
+    const restStart = idx + 5
+
+    if (mode && bucket && (mode === 'public' || mode === 'sign')) {
+      const path = parts.slice(restStart).join('/')
+      if (!path) return null
+      return { bucket, path }
+    }
+
+    // fallback: /storage/v1/object/<bucket>/<path>
+    const bucketAlt = parts[idx + 3]
+    const pathAlt = parts.slice(idx + 4).join('/')
+    if (!bucketAlt || !pathAlt) return null
+    return { bucket: bucketAlt, path: pathAlt }
+  } catch {
+    return null
+  }
+}
+
 function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   if (!Array.isArray(bodyMedia)) return []
   const items: IncomingMediaItem[] = []
@@ -57,10 +89,40 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
 
     const mediaType: MediaType = isMediaType(obj.mediaType) ? obj.mediaType : 'IMAGE'
 
-    items.push({ url, thumbUrl, mediaType })
+    items.push({
+      url,
+      thumbUrl,
+      mediaType,
+      storageBucket: pickString(obj.storageBucket) ?? null,
+      storagePath: pickString(obj.storagePath) ?? null,
+      thumbBucket: pickString(obj.thumbBucket) ?? null,
+      thumbPath: pickString(obj.thumbPath) ?? null,
+    })
   }
 
   return items
+}
+
+function resolveStoragePointers(m: IncomingMediaItem) {
+  if (m.storageBucket && m.storagePath) {
+    return {
+      storageBucket: m.storageBucket,
+      storagePath: m.storagePath,
+      thumbBucket: m.thumbBucket ?? null,
+      thumbPath: m.thumbPath ?? null,
+    }
+  }
+
+  const ptr = parseSupabaseStoragePointer(m.url)
+  if (!ptr) return null
+  const thumbPtr = m.thumbUrl ? parseSupabaseStoragePointer(m.thumbUrl) : null
+
+  return {
+    storageBucket: ptr.bucket,
+    storagePath: ptr.path,
+    thumbBucket: thumbPtr?.bucket ?? null,
+    thumbPath: thumbPtr?.path ?? null,
+  }
 }
 
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -80,6 +142,14 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'No valid media provided.' }, { status: 400 })
     }
 
+    const resolved = mediaItems.map((m) => {
+      const ptrs = resolveStoragePointers(m)
+      if (!ptrs) {
+        throw new Error('Media must include storageBucket/storagePath or a parsable Supabase Storage URL.')
+      }
+      return { ...m, ...ptrs }
+    })
+
     const review = await prisma.review.findUnique({
       where: { id: reviewId },
       select: { id: true, clientId: true, professionalId: true, bookingId: true },
@@ -97,22 +167,30 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       )
     }
 
-    // Create individually so we can return the created items (createMany can’t return IDs)
     const created = await prisma.$transaction(
-      mediaItems.map((m) =>
+      resolved.map((m) =>
         prisma.mediaAsset.create({
           data: {
             professionalId: review.professionalId,
             bookingId: review.bookingId!,
             reviewId: review.id,
+
             url: m.url,
             thumbUrl: m.thumbUrl ?? null,
             mediaType: m.mediaType,
-            visibility: 'PRIVATE',
+
+            visibility: 'PRIVATE' as MediaVisibility,
             uploadedByUserId: user.id,
-            uploadedByRole: 'CLIENT',
+            uploadedByRole: 'CLIENT' as Role,
+
             isFeaturedInPortfolio: false,
             isEligibleForLooks: false,
+            reviewLocked: true,
+
+            storageBucket: m.storageBucket!,
+            storagePath: m.storagePath!,
+            thumbBucket: m.thumbBucket ?? null,
+            thumbPath: m.thumbPath ?? null,
           },
           select: {
             id: true,
@@ -122,6 +200,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
             createdAt: true,
             isFeaturedInPortfolio: true,
             isEligibleForLooks: true,
+            storageBucket: true,
+            storagePath: true,
+            thumbBucket: true,
+            thumbPath: true,
           },
         }),
       ),
@@ -132,12 +214,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       include: { mediaAssets: true },
     })
 
-    return NextResponse.json(
-      { ok: true, createdCount: created.length, created, review: updated },
-      { status: 201 },
-    )
-  } catch (e) {
+    return NextResponse.json({ ok: true, createdCount: created.length, created, review: updated }, { status: 201 })
+  } catch (e: any) {
     console.error('POST /api/client/reviews/[id]/media error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const msg =
+      typeof e?.message === 'string' && e.message.includes('storage')
+        ? e.message
+        : 'Internal server error'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

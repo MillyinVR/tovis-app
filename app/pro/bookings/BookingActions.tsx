@@ -4,8 +4,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-console.log('PRO BookingActions mounted')
-
 type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SafeStatus = BookingStatus | 'UNKNOWN'
 
@@ -101,12 +99,7 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
 
   const canAccept = isPending
   const canCancel = status === 'PENDING' || status === 'ACCEPTED'
-
-  // Start must never be allowed unless ACCEPTED.
   const canStart = isAccepted && !started && !finished
-
-  // Finish allowed once started and not already finished.
-  // (Completion happens on aftercare submit, not here.)
   const canFinish = isAccepted && started && !finished
 
   async function run(action: LoadingAction) {
@@ -116,6 +109,12 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       return
     }
     if (loading) return
+
+    // ✅ Cancel confirm (recommendation applied)
+    if (action === 'CANCEL') {
+      const ok = window.confirm('Cancel this booking? This will notify the client.')
+      if (!ok) return
+    }
 
     setError(null)
     setLoading(action)
@@ -147,7 +146,6 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
           signal: controller.signal,
         })
       } else {
-        // ✅ Finish endpoint decides next step and returns nextHref
         res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/finish`, {
           method: 'POST',
           signal: controller.signal,
@@ -171,22 +169,17 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       setStatus(nextStatus)
       router.refresh()
 
-
       if (action === 'START') {
         const iso = extractIso(data, 'startedAt')
         setLocalStartedAt(iso ?? new Date().toISOString())
       }
 
-      // FINISH: route to whatever the backend decided.
       if (action === 'FINISH') {
         const nextHref = extractNextHref(data)
         if (nextHref) {
           router.push(nextHref)
           return
         }
-
-        // If backend didn’t return a nextHref, still don’t lie to the user.
-        // Keep them on the page and let /api/pro/session drive the footer state.
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return
@@ -197,99 +190,76 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
     }
   }
 
-  const buttonBase: React.CSSProperties = {
-    padding: '4px 8px',
-    borderRadius: 999,
-    fontSize: 12,
-    cursor: 'pointer',
-  }
+  const btnBase =
+    'rounded-full border px-3 py-2 text-[12px] font-black transition disabled:cursor-not-allowed disabled:opacity-60'
 
   if (isTerminal) {
     const label = status === 'UNKNOWN' ? String(currentStatus) : status
-    return <div style={{ fontSize: 12, color: '#777' }}>Status: {label}</div>
+    return <div className="text-[12px] text-textSecondary">Status: {label}</div>
   }
 
   return (
-    <div style={{ display: 'grid', gap: 6, justifyItems: 'flex-end' }}>
-      <div style={{ fontSize: 12, color: '#777' }}>
-        Status: {status}
-        {started ? <span style={{ marginLeft: 6 }}>• Started</span> : null}
+    <div className="grid gap-2 justify-items-start md:justify-items-end">
+      <div className="text-[12px] text-textSecondary">
+        Status: <span className="font-black text-textPrimary">{status}</span>
+        {started ? <span className="ml-2 text-textSecondary">• Started</span> : null}
       </div>
 
-      {error && (
-        <div aria-live="polite" style={{ fontSize: 11, color: 'red', maxWidth: 240, textAlign: 'right' }}>
+      {error ? (
+        <div aria-live="polite" className="max-w-65 text-right text-[11px] font-black text-toneDanger">
           {error}
         </div>
-      )}
+      ) : null}
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        {canAccept && (
+      <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+        {canAccept ? (
           <button
             type="button"
             onClick={() => run('ACCEPT')}
             disabled={loading !== null}
-            style={{
-              ...buttonBase,
-              border: '1px solid #111',
-              background: loading === 'ACCEPT' ? '#111' : '#fff',
-              color: loading === 'ACCEPT' ? '#fff' : '#111',
-              opacity: loading && loading !== 'ACCEPT' ? 0.6 : 1,
-            }}
+            className={[btnBase, 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'].join(
+              ' ',
+            )}
           >
             {loading === 'ACCEPT' ? 'Accepting…' : 'Accept'}
           </button>
-        )}
+        ) : null}
 
-        {canCancel && (
+        {canCancel ? (
           <button
             type="button"
             onClick={() => run('CANCEL')}
             disabled={loading !== null}
-            style={{
-              ...buttonBase,
-              border: '1px solid #ddd',
-              background: loading === 'CANCEL' ? '#eee' : '#fafafa',
-              color: '#444',
-              opacity: loading && loading !== 'CANCEL' ? 0.6 : 1,
-            }}
+            className={[btnBase, 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20'].join(' ')}
           >
             {loading === 'CANCEL' ? 'Cancelling…' : 'Cancel'}
           </button>
-        )}
+        ) : null}
 
-        {canStart && (
+        {canStart ? (
           <button
             type="button"
             onClick={() => run('START')}
             disabled={loading !== null}
-            style={{
-              ...buttonBase,
-              border: '1px solid #111',
-              background: loading === 'START' ? '#111' : '#fff',
-              color: loading === 'START' ? '#fff' : '#111',
-              opacity: loading && loading !== 'START' ? 0.6 : 1,
-            }}
+            className={[btnBase, 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20'].join(' ')}
           >
             {loading === 'START' ? 'Starting…' : 'Start'}
           </button>
-        )}
+        ) : null}
 
-        {canFinish && (
+        {canFinish ? (
           <button
             type="button"
             onClick={() => run('FINISH')}
             disabled={loading !== null}
-            style={{
-              ...buttonBase,
-              border: 'none',
-              background: '#111',
-              color: '#fff',
-              opacity: loading && loading !== 'FINISH' ? 0.6 : 1,
-            }}
+            className={[
+              btnBase,
+              'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+            ].join(' ')}
           >
             {loading === 'FINISH' ? 'Finishing…' : 'Finish'}
           </button>
-        )}
+        ) : null}
       </div>
     </div>
   )

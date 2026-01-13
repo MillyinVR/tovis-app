@@ -8,6 +8,9 @@ import FavoriteButton from './FavoriteButton'
 import ShareButton from './ShareButton'
 import { moneyToString } from '@/lib/money'
 
+// If you want the pro footer to show when a pro "views as client"
+import ProSessionFooter from '@/app/pro/_components/ProSessionFooter/ProSessionFooter'
+
 export const dynamic = 'force-dynamic'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
@@ -41,12 +44,6 @@ function formatOfferingPricing(off: any) {
   return lines
 }
 
-function pickFirstOfferingId(offerings: any[]): string | null {
-  if (!Array.isArray(offerings) || offerings.length === 0) return null
-  const first = offerings[0]
-  return first?.id ? String(first.id) : null
-}
-
 export default async function PublicProfessionalProfilePage({
   params,
   searchParams,
@@ -67,6 +64,7 @@ export default async function PublicProfessionalProfilePage({
     select: {
       id: true,
       userId: true,
+      verificationStatus: true,
       businessName: true,
       bio: true,
       avatarUrl: true,
@@ -92,6 +90,30 @@ export default async function PublicProfessionalProfilePage({
   })
 
   if (!pro) notFound()
+
+  // ✅ Visibility gate: pending/unapproved pros are only viewable by themselves
+  const isOwner = viewer?.role === 'PRO' && viewer?.professionalProfile?.id === pro.id
+  const isApproved = pro.verificationStatus === 'APPROVED'
+
+  if (!isOwner && !isApproved) {
+    return (
+      <main className="mx-auto max-w-180 px-4 pb-24 pt-10">
+        <Link href="/looks" className="text-[12px] font-black text-textPrimary hover:opacity-80">
+          ← Back to Looks
+        </Link>
+
+        <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
+          <div className="text-[16px] font-black text-textPrimary">This profile is pending verification</div>
+          <div className="mt-2 text-[13px] text-textSecondary">
+            We’re verifying the professional’s license and details. Check back soon.
+          </div>
+        </div>
+
+        {/* show pro footer if they’re the pro and ended up here */}
+        {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
+      </main>
+    )
+  }
 
   const reviewStats = await prisma.review.aggregate({
     where: { professionalId: pro.id },
@@ -125,14 +147,8 @@ export default async function PublicProfessionalProfilePage({
     include: { services: { include: { service: true } } },
   })
 
-  const tabItems = [
-    { id: 'portfolio', label: 'Portfolio' },
-    { id: 'services', label: 'Services' },
-    { id: 'reviews', label: 'Reviews' },
-  ] as const
-
   const displayName = pro.businessName || 'Beauty professional'
-  const avatar = pro.avatarUrl as string | null | undefined
+  const avatar = (pro.avatarUrl as string | null | undefined) || null
 
   const reviewsForUI = (pro.reviews || []).map((rev: any) => {
     const u = rev.client?.user
@@ -162,119 +178,79 @@ export default async function PublicProfessionalProfilePage({
     }
   })
 
-  const isOwner = viewer?.role === 'PRO' && viewer?.professionalProfile?.id === pro.id
-
   const tabQS = activeTab === 'portfolio' ? '' : `?tab=${activeTab}`
   const fromPath = `/professionals/${pro.id}${tabQS}`
   const loginHref = buildLoginHref(fromPath)
 
   const mustLogin = !viewer
-
-  // You DO NOT have /offerings/book. So don’t route there.
-  // The canonical booking route is /offerings/[offeringId].
-  // This button should take them to the Services tab where each offering is bookable.
   const servicesHref = `/professionals/${pro.id}?tab=services`
   const messageHref = mustLogin ? loginHref : `/messages?to=${pro.id}`
 
-  // Useful for passing down to offering booking page (your offering page already supports proTimeZone in URL)
   const proTimeZone = typeof pro.timeZone === 'string' && pro.timeZone.trim() ? pro.timeZone.trim() : null
 
+  const tabs = [
+    { id: 'portfolio' as const, label: 'Portfolio', href: `/professionals/${pro.id}` },
+    { id: 'services' as const, label: 'Services', href: `/professionals/${pro.id}?tab=services` },
+    { id: 'reviews' as const, label: 'Reviews', href: `/professionals/${pro.id}?tab=reviews` },
+  ]
+
   return (
-    <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <Link
-        href="/looks"
-        style={{
-          fontSize: 12,
-          textDecoration: 'none',
-          color: '#111',
-          display: 'inline-block',
-          marginBottom: 10,
-        }}
-      >
+    <main className="mx-auto max-w-240 px-4 pb-28 pt-6">
+      <Link href="/looks" className="inline-block text-[12px] font-black text-textPrimary hover:opacity-80">
         ← Back to Looks
       </Link>
 
-      {/* HEADER */}
-      <section
-        style={{
-          borderRadius: 16,
-          border: '1px solid #eee',
-          overflow: 'hidden',
-          background: '#fff',
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ height: 80, background: 'linear-gradient(135deg, #0f172a 0%, #4b5563 50%, #020617 100%)' }} />
+      {/* HEADER CARD */}
+      <section className="tovis-glass mt-3 overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
+        <div className="h-24 w-full bg-[linear-gradient(135deg,#0f172a_0%,#4b5563_50%,#020617_100%)]" />
 
-        <div style={{ padding: 16, display: 'flex', gap: 16, alignItems: 'flex-end' }}>
-          <div
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: '50%',
-              marginTop: -40,
-              border: '3px solid #fff',
-              background: '#111',
-              overflow: 'hidden',
-              display: 'grid',
-              placeItems: 'center',
-              color: '#f9fafb',
-              fontSize: 28,
-              fontWeight: 700,
-            }}
-            title={displayName}
-          >
+        <div className="relative -mt-10 flex gap-4 p-4">
+          {/* avatar */}
+          <div className="h-20 w-20 overflow-hidden rounded-full border-[3px] border-bgSecondary bg-bgPrimary">
             {avatar ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatar} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              <img src={avatar} alt={displayName} className="h-full w-full object-cover" />
             ) : (
-              displayName.charAt(0).toUpperCase()
+              <div className="grid h-full w-full place-items-center text-[26px] font-black text-textPrimary">
+                {displayName.charAt(0).toUpperCase()}
+              </div>
             )}
           </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>{displayName}</div>
-            <div style={{ fontSize: 13, color: '#6b7280' }}>
+          {/* name + meta */}
+          <div className="min-w-0 flex-1">
+            <div className="text-[18px] font-black text-textPrimary">{displayName}</div>
+            <div className="mt-0.5 text-[12px] font-black text-textSecondary">
               {pro.professionType || 'Beauty professional'}
               {pro.location ? ` • ${pro.location}` : ''}
             </div>
-            {pro.bio && <div style={{ fontSize: 13, color: '#4b5563', marginTop: 6, maxWidth: 520 }}>{pro.bio}</div>}
+            {pro.bio ? <div className="mt-2 max-w-130 text-[13px] text-textSecondary">{pro.bio}</div> : null}
           </div>
 
-          <div style={{ display: 'grid', gap: 10, justifyItems: 'end' }}>
-            <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#4b5563' }}>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 600 }}>{reviewCount > 0 ? averageRating : '–'}</div>
-                <div style={{ fontSize: 11 }}>Rating</div>
+          {/* right controls */}
+          <div className="relative z-10 grid shrink-0 justify-items-end gap-2">
+            <div className="flex gap-4 text-right text-[11px] text-textSecondary">
+              <div>
+                <div className="text-[12px] font-black text-textPrimary">{reviewCount > 0 ? averageRating : '–'}</div>
+                <div>Rating</div>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 600 }}>{reviewCount}</div>
-                <div style={{ fontSize: 11 }}>Reviews</div>
+              <div>
+                <div className="text-[12px] font-black text-textPrimary">{reviewCount}</div>
+                <div>Reviews</div>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 600 }}>{favoritesCount}</div>
-                <div style={{ fontSize: 11 }}>Favorites</div>
+              <div>
+                <div className="text-[12px] font-black text-textPrimary">{favoritesCount}</div>
+                <div>Favorites</div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div className="flex items-center gap-2">
               {isClientViewer ? (
                 <FavoriteButton professionalId={pro.id} initialFavorited={isFavoritedByMe} initialCount={favoritesCount} />
               ) : (
                 <Link
                   href={loginHref}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 999,
-                    border: '1px solid #e5e7eb',
-                    background: '#fff',
-                    display: 'grid',
-                    placeItems: 'center',
-                    textDecoration: 'none',
-                    color: '#111',
-                    fontSize: 18,
-                  }}
+                  className="grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-bgPrimary text-[18px] text-textPrimary hover:border-white/20"
                   title="Log in to favorite"
                 >
                   ♡
@@ -286,30 +262,14 @@ export default async function PublicProfessionalProfilePage({
               {isOwner ? (
                 <Link
                   href="/pro/profile"
-                  style={{
-                    fontSize: 12,
-                    textDecoration: 'none',
-                    padding: '6px 10px',
-                    borderRadius: 999,
-                    border: '1px solid #111',
-                    color: '#111',
-                    background: '#fff',
-                  }}
+                  className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
                 >
                   Edit
                 </Link>
               ) : (
                 <Link
                   href={messageHref}
-                  style={{
-                    fontSize: 12,
-                    textDecoration: 'none',
-                    padding: '6px 10px',
-                    borderRadius: 999,
-                    border: '1px solid #e5e7eb',
-                    color: '#111',
-                    background: '#fff',
-                  }}
+                  className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
                   title={mustLogin ? 'Log in to message' : 'Message'}
                 >
                   Message
@@ -319,64 +279,50 @@ export default async function PublicProfessionalProfilePage({
           </div>
         </div>
 
-        <div style={{ padding: '0 16px 16px' }}>
+        <div className="px-4 pb-4">
           <Link
             href={servicesHref}
-            style={{
-              display: 'inline-block',
-              padding: '10px 14px',
-              borderRadius: 999,
-              background: '#111',
-              color: '#fff',
-              textDecoration: 'none',
-              fontSize: 13,
-              fontWeight: 700,
-            }}
+            className="inline-block rounded-full bg-accentPrimary px-4 py-3 text-[13px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
             title={mustLogin ? 'Log in to book' : `View services for ${displayName}`}
           >
             View services
           </Link>
 
-          {mustLogin && <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>Log in to book, favorite, or message.</div>}
+          {mustLogin ? <div className="mt-2 text-[12px] text-textSecondary">Log in to book, favorite, or message.</div> : null}
         </div>
       </section>
 
       {/* TABS */}
-      <nav style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', marginBottom: 12, gap: 12 }}>
-        {tabItems.map((tab) => {
-          const isActive = activeTab === tab.id
-          const href = tab.id === 'portfolio' ? `/professionals/${pro.id}` : `/professionals/${pro.id}?tab=${tab.id}`
-
+      <nav className="mt-4 flex gap-2 border-b border-white/10 pb-3">
+        {tabs.map((t) => {
+          const isActive = activeTab === t.id
           return (
             <Link
-              key={tab.id}
-              href={href}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 999,
-                fontSize: 13,
-                textDecoration: 'none',
-                border: isActive ? '1px solid #111' : '1px solid transparent',
-                background: isActive ? '#111' : 'transparent',
-                color: isActive ? '#fff' : '#111',
-              }}
+              key={t.id}
+              href={t.href}
+              className={[
+                'rounded-full border px-3 py-2 text-[13px] font-black transition',
+                isActive
+                  ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
+                  : 'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20',
+              ].join(' ')}
             >
-              {tab.label}
+              {t.label}
             </Link>
           )
         })}
       </nav>
 
       {/* PORTFOLIO */}
-      {activeTab === 'portfolio' && (
-        <section>
-          <h2 style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Portfolio</h2>
+      {activeTab === 'portfolio' ? (
+        <section className="mt-4">
+          <div className="mb-2 text-[13px] font-black text-textPrimary">Portfolio</div>
 
-          <div style={{ borderRadius: 12, border: '1px solid #eee', background: '#fff', padding: 12 }}>
+          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3">
             {portfolioMedia.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#6b7280' }}>No portfolio posts yet.</div>
+              <div className="text-[12px] text-textSecondary">No portfolio posts yet.</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 4 }}>
+              <div className="grid grid-cols-3 gap-1">
                 {portfolioMedia.map((m: any) => {
                   const src = m.thumbUrl || m.url
                   const isVideo = m.mediaType === 'VIDEO'
@@ -384,35 +330,16 @@ export default async function PublicProfessionalProfilePage({
                     <Link
                       key={m.id}
                       href={`/looks/${m.id}`}
-                      style={{
-                        position: 'relative',
-                        display: 'block',
-                        aspectRatio: '1 / 1',
-                        borderRadius: 6,
-                        overflow: 'hidden',
-                        background: '#f3f4f6',
-                        textDecoration: 'none',
-                      }}
+                      className="relative block aspect-square overflow-hidden rounded-xl border border-white/10 bg-bgPrimary"
                       title={m.caption || 'View'}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={src} alt={m.caption || 'Portfolio media'} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                      {isVideo && (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            top: 6,
-                            right: 6,
-                            background: 'rgba(0,0,0,0.65)',
-                            color: '#fff',
-                            fontSize: 10,
-                            padding: '2px 6px',
-                            borderRadius: 999,
-                          }}
-                        >
+                      <img src={src} alt={m.caption || 'Portfolio media'} className="h-full w-full object-cover" />
+                      {isVideo ? (
+                        <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
                           VIDEO
                         </div>
-                      )}
+                      ) : null}
                     </Link>
                   )
                 })}
@@ -420,25 +347,16 @@ export default async function PublicProfessionalProfilePage({
             )}
           </div>
         </section>
-      )}
+      ) : null}
 
       {/* SERVICES */}
-      {activeTab === 'services' && (
-        <section>
-          <h2 style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Services</h2>
+      {activeTab === 'services' ? (
+        <section className="mt-4">
+          <div className="mb-2 text-[13px] font-black text-textPrimary">Services</div>
 
-          <div
-            style={{
-              borderRadius: 12,
-              border: '1px solid #eee',
-              background: '#fff',
-              padding: 12,
-              display: 'grid',
-              gap: 8,
-            }}
-          >
+          <div className="tovis-glass grid gap-2 rounded-card border border-white/10 bg-bgSecondary p-3">
             {pro.offerings.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#6b7280' }}>No services listed yet.</div>
+              <div className="text-[12px] text-textSecondary">No services listed yet.</div>
             ) : (
               pro.offerings.map((off: any) => {
                 const imgSrc = pickOfferingImage(off)
@@ -454,74 +372,45 @@ export default async function PublicProfessionalProfilePage({
                   <Link
                     key={off.id}
                     href={offeringHref}
-                    style={{
-                      borderRadius: 12,
-                      border: '1px solid #f3f4f6',
-                      padding: 10,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      alignItems: 'flex-start',
-                      fontSize: 13,
-                      textDecoration: 'none',
-                      color: '#111',
-                      background: '#fff',
-                    }}
+                    className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary hover:border-white/20"
                     title="Book this service"
                   >
-                    <div style={{ display: 'flex', gap: 12, flex: 1, minWidth: 0, alignItems: 'flex-start' }}>
-                      <div
-                        style={{
-                          width: 52,
-                          height: 52,
-                          borderRadius: 12,
-                          border: '1px solid #eee',
-                          overflow: 'hidden',
-                          background: '#f7f7f7',
-                          flexShrink: 0,
-                        }}
-                      >
+                    <div className="flex min-w-0 flex-1 gap-3">
+                      <div className="h-13 w-13 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgSecondary">
                         {imgSrc ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imgSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          <img src={imgSrc} alt="" className="h-full w-full object-cover" />
                         ) : null}
                       </div>
 
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] font-black">
                           {off.title || off.service?.name}
                         </div>
 
-                        {off.description ? <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{off.description}</div> : null}
+                        {off.description ? (
+                          <div className="mt-1 text-[12px] text-textSecondary">{off.description}</div>
+                        ) : null}
 
                         {pricingLines.length ? (
-                          <div style={{ marginTop: 8, display: 'grid', gap: 3, fontSize: 12, color: '#374151' }}>
+                          <div className="mt-2 grid gap-1 text-[12px] text-textPrimary">
                             {pricingLines.map((line: string) => (
-                              <div key={line}>{line}</div>
+                              <div key={line} className="text-textSecondary">
+                                {line}
+                              </div>
                             ))}
                           </div>
                         ) : (
-                          <div style={{ marginTop: 8, fontSize: 12, color: '#9ca3af' }}>Pricing not set</div>
+                          <div className="mt-2 text-[12px] text-textSecondary opacity-80">Pricing not set</div>
                         )}
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gap: 6, justifyItems: 'end' }}>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          padding: '6px 10px',
-                          borderRadius: 999,
-                          border: '1px solid #111',
-                          background: '#111',
-                          color: '#fff',
-                          fontWeight: 800,
-                        }}
-                      >
+                    <div className="grid justify-items-end gap-2">
+                      <div className="rounded-full bg-accentPrimary px-3 py-2 text-[12px] font-black text-bgPrimary">
                         Book
                       </div>
-
-                      <div style={{ fontSize: 11, color: '#6b7280' }}>→</div>
+                      <div className="text-[12px] text-textSecondary">→</div>
                     </div>
                   </Link>
                 )
@@ -529,15 +418,20 @@ export default async function PublicProfessionalProfilePage({
             )}
           </div>
         </section>
-      )}
+      ) : null}
 
       {/* REVIEWS */}
-      {activeTab === 'reviews' && (
-        <section>
-          <h2 style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Reviews</h2>
-          <ReviewsPanel reviews={reviewsForUI} />
+      {activeTab === 'reviews' ? (
+        <section className="mt-4">
+          <div className="mb-2 text-[13px] font-black text-textPrimary">Reviews</div>
+          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3">
+            <ReviewsPanel reviews={reviewsForUI} />
+          </div>
         </section>
-      )}
+      ) : null}
+
+      {/* ✅ If a pro is viewing this page (ex: "view as client"), show the pro footer */}
+      {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
     </main>
   )
 }

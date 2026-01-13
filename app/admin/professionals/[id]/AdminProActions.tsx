@@ -15,14 +15,26 @@ async function safeJson(res: Response) {
   return res.json().catch(() => ({})) as Promise<any>
 }
 
-function btnStyle(kind: 'primary' | 'warn' | 'danger') {
+function btnBase(disabled: boolean) {
+  return [
+    'inline-flex items-center justify-center',
+    'px-3 py-2 rounded-xl',
+    'font-black',
+    'transition',
+    disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+  ].join(' ')
+}
+
+function btnVariant(kind: 'primary' | 'warn' | 'danger') {
   if (kind === 'primary') {
-    return { border: '1px solid #111', background: '#111', color: '#fff' }
+    return 'border border-surfaceGlass/25 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
   }
+  // Keep warn/danger readable without introducing new token work right now.
+  // (We can token-ize status colors later.)
   if (kind === 'warn') {
-    return { border: '1px solid #b45309', background: '#fff', color: '#b45309' }
+    return 'border border-amber-700/70 text-amber-600 bg-bgSecondary hover:bg-surfaceGlass/10'
   }
-  return { border: '1px solid #b91c1c', background: '#fff', color: '#b91c1c' }
+  return 'border border-red-700/70 text-red-500 bg-bgSecondary hover:bg-surfaceGlass/10'
 }
 
 export default function AdminProActions({ professionalId, currentStatus, licenseVerified }: Props) {
@@ -34,6 +46,7 @@ export default function AdminProActions({ professionalId, currentStatus, license
     if (busy) return
     setBusy(true)
     setErr(null)
+
     try {
       const res = await fetch(`/api/admin/professionals/${encodeURIComponent(professionalId)}`, {
         method: 'PATCH',
@@ -43,6 +56,7 @@ export default function AdminProActions({ professionalId, currentStatus, license
           ...(typeof setLicenseVerified === 'boolean' ? { licenseVerified: setLicenseVerified } : {}),
         }),
       })
+
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Update failed.')
 
@@ -55,20 +69,13 @@ export default function AdminProActions({ professionalId, currentStatus, license
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+    <div className="grid gap-2.5">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           disabled={busy}
           onClick={() => setStatus('APPROVED', true)}
-          style={{
-            padding: '10px 12px',
-            borderRadius: 12,
-            fontWeight: 1000,
-            cursor: busy ? 'not-allowed' : 'pointer',
-            opacity: busy ? 0.6 : 1,
-            ...btnStyle('primary'),
-          }}
+          className={[btnBase(busy), btnVariant('primary')].join(' ')}
         >
           Approve
         </button>
@@ -77,14 +84,7 @@ export default function AdminProActions({ professionalId, currentStatus, license
           type="button"
           disabled={busy}
           onClick={() => setStatus('PENDING')}
-          style={{
-            padding: '10px 12px',
-            borderRadius: 12,
-            fontWeight: 1000,
-            cursor: busy ? 'not-allowed' : 'pointer',
-            opacity: busy ? 0.6 : 1,
-            ...btnStyle('warn'),
-          }}
+          className={[btnBase(busy), btnVariant('warn')].join(' ')}
         >
           Mark Pending
         </button>
@@ -93,25 +93,19 @@ export default function AdminProActions({ professionalId, currentStatus, license
           type="button"
           disabled={busy}
           onClick={() => setStatus('REJECTED')}
-          style={{
-            padding: '10px 12px',
-            borderRadius: 12,
-            fontWeight: 1000,
-            cursor: busy ? 'not-allowed' : 'pointer',
-            opacity: busy ? 0.6 : 1,
-            ...btnStyle('danger'),
-          }}
+          className={[btnBase(busy), btnVariant('danger')].join(' ')}
         >
           Reject
         </button>
       </div>
 
-      <div style={{ fontSize: 12, color: '#6b7280' }}>
-        Current: <b style={{ color: '#111' }}>{currentStatus}</b> · License verified:{' '}
-        <b style={{ color: '#111' }}>{String(licenseVerified)}</b>
+      <div className="text-[12px] text-textSecondary">
+        Status: <span className="font-bold text-textPrimary">{currentStatus}</span>
+        {' · '}
+        License verified: <span className="font-bold text-textPrimary">{licenseVerified ? 'Yes' : 'No'}</span>
       </div>
 
-      {err ? <div style={{ fontSize: 12, color: '#b91c1c' }}>{err}</div> : null}
+      {err ? <div className="text-[13px] text-red-500">{err}</div> : null}
     </div>
   )
 }

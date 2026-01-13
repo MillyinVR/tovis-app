@@ -3,7 +3,6 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from '../ConsultationForm'
-import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,17 +45,7 @@ function approvalTone(status: unknown) {
 function StepPill({ step }: { step: string }) {
   return (
     <div
-      style={{
-        display: 'inline-block',
-        fontSize: 11,
-        padding: '3px 10px',
-        borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: '#fafafa',
-        fontWeight: 900,
-        color: '#111',
-        marginTop: 10,
-      }}
+      className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary"
       title="Session step"
     >
       {step}
@@ -65,29 +54,21 @@ function StepPill({ step }: { step: string }) {
 }
 
 function Badge({ label, tone }: { label: string; tone?: 'warn' | 'good' | 'bad' | 'neutral' }) {
-  const styles =
+  const cls =
     tone === 'warn'
-      ? { bg: '#fffbeb', border: '#fde68a', color: '#854d0e' }
+      ? 'bg-bgSecondary text-textPrimary'
       : tone === 'good'
-        ? { bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' }
+        ? 'bg-bgSecondary text-textPrimary'
         : tone === 'bad'
-          ? { bg: '#fff1f2', border: '#fecdd3', color: '#9f1239' }
-          : { bg: '#f3f4f6', border: '#e5e7eb', color: '#111827' }
+          ? 'bg-bgSecondary text-textPrimary'
+          : 'bg-bgSecondary text-textPrimary'
 
   return (
     <span
-      style={{
-        fontSize: 11,
-        fontWeight: 900,
-        padding: '3px 10px',
-        borderRadius: 999,
-        border: `1px solid ${styles.border}`,
-        background: styles.bg,
-        color: styles.color,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-      }}
+      className={[
+        'inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-[11px] font-black',
+        cls,
+      ].join(' ')}
     >
       {label}
     </span>
@@ -95,28 +76,11 @@ function Badge({ label, tone }: { label: string; tone?: 'warn' | 'good' | 'bad' 
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        marginTop: 12,
-        border: '1px solid #eee',
-        background: '#fff',
-        borderRadius: 12,
-        padding: 14,
-      }}
-    >
-      {children}
-    </div>
-  )
+  return <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">{children}</div>
 }
 
-/**
- * Helper: call the canonical session-step API from a server action.
- * We avoid Prisma writes directly inside the page/action.
- */
 async function postStepChange(bookingId: string, step: SessionStep) {
   const base = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || ''
-
   const url = base
     ? `${base}/api/pro/bookings/${encodeURIComponent(bookingId)}/session-step`
     : `/api/pro/bookings/${encodeURIComponent(bookingId)}/session-step`
@@ -129,6 +93,13 @@ async function postStepChange(bookingId: string, step: SessionStep) {
   }).catch(() => null)
 
   return res
+}
+
+function moneyString(v: unknown): string {
+  if (v == null) return ''
+  const s = String(v).trim()
+  if (!s) return ''
+  return s.startsWith('$') ? s : s
 }
 
 export default async function ProBookingSessionPage(props: { params: Promise<{ id: string }> }) {
@@ -161,20 +132,21 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
   const approval = (booking as any).consultationApproval ?? null
   const approvalStatus = upper(approval?.status || 'NONE')
 
-  const initialPrice = booking.consultationPrice != null ? moneyToString(booking.consultationPrice) ?? '' : ''
+  // ✅ initialPrice now aligned with the new flow:
+  // pending proposal total > booking snapshot > subtotal snapshot
+  const initialPrice =
+    moneyString(approval?.proposedTotal) ||
+    moneyString((booking as any).priceSnapshot) ||
+    moneyString((booking as any).subtotalSnapshot) ||
+    ''
 
   const isCancelled = bookingStatus === 'CANCELLED'
   const isCompleted = bookingStatus === 'COMPLETED'
   const consultationApproved = approvalStatus === 'APPROVED'
   const waitingOnClient = step === 'CONSULTATION_PENDING_CLIENT' && approvalStatus === 'PENDING'
 
-  /**
-   * Server action: validates auth then delegates to API endpoint.
-   * No Prisma writes here, no render-time corrections.
-   */
   async function setStep(next: SessionStep) {
     'use server'
-
     const u = await getCurrentUser().catch(() => null)
     const uProId = u?.role === 'PRO' ? u.professionalProfile?.id : null
     if (!uProId) redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/session`)
@@ -183,8 +155,6 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
     redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
   }
 
-  // ✅ IMPORTANT: do NOT wrap server actions in inline arrow functions in JSX.
-  // Next.js will throw "Functions cannot be passed..." if you do.
   async function goBeforePhotos() {
     'use server'
     await setStep('BEFORE_PHOTOS')
@@ -215,16 +185,23 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
   const showAfterPhotos = step === 'AFTER_PHOTOS'
   const showDone = step === 'DONE'
 
+  const primaryLinkClass =
+    'inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover'
+  const primaryBtnClass =
+    'inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover'
+  const secondaryBtnClass =
+    'inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass'
+
   return (
-    <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <a href="/pro" style={{ fontSize: 12, color: '#555', textDecoration: 'none' }}>
+    <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
+      <a href="/pro" className={secondaryBtnClass}>
         ← Back to dashboard
       </a>
 
-      <h1 style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>Session: {serviceName}</h1>
-      <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>Client: {clientName}</div>
+      <h1 className="mt-4 text-xl font-black">Session: {serviceName}</h1>
+      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
 
-      <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <StepPill step={labelForStep(step)} />
         <Badge label={`Booking: ${bookingStatus || 'UNKNOWN'}`} tone="neutral" />
         <Badge label={`Consultation: ${approvalStatus || 'NONE'}`} tone={approvalTone(approvalStatus) as any} />
@@ -232,29 +209,15 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {isCancelled ? (
         <Card>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>This booking is cancelled.</div>
-          <div style={{ fontSize: 13, color: '#6b7280' }}>Nothing to do here.</div>
+          <div className="text-sm font-black text-textPrimary">This booking is cancelled.</div>
+          <div className="mt-1 text-sm font-semibold text-textSecondary">Nothing to do here.</div>
         </Card>
       ) : null}
 
       {isCompleted ? (
         <Card>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>This booking is completed.</div>
-          <a
-            href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
-            style={{
-              display: 'inline-block',
-              textDecoration: 'none',
-              border: '1px solid #111',
-              borderRadius: 999,
-              padding: '10px 14px',
-              fontSize: 12,
-              fontWeight: 900,
-              color: '#fff',
-              background: '#111',
-              marginTop: 8,
-            }}
-          >
+          <div className="text-sm font-black text-textPrimary">This booking is completed.</div>
+          <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`} className={[primaryLinkClass, 'mt-3'].join(' ')}>
             View aftercare
           </a>
         </Card>
@@ -262,63 +225,53 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {/* CONSULTATION */}
       {showConsultForm && !isCancelled && !isCompleted ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Consultation</h2>
-          <p style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">Consultation</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">
             Confirm services + price with the client, then send it for client approval.
           </p>
 
-          <ConsultationForm
-            bookingId={booking.id}
-            initialNotes={(booking as any).consultationNotes ?? ''}
-            initialPrice={initialPrice}
-          />
+          <div className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
+            <ConsultationForm
+              bookingId={booking.id}
+              initialNotes={(booking as any).consultationNotes ?? ''}
+              initialPrice={initialPrice}
+            />
 
-          <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
-            After you submit, it moves to <strong>Waiting on client</strong>.
+            <div className="mt-3 text-xs font-semibold text-textSecondary">
+              After you submit, it moves to <span className="font-black text-textPrimary">Waiting on client</span>.
+            </div>
+
+            {bookingStatus === 'ACCEPTED' && consultationApproved ? (
+              <form action={goBeforePhotos} className="mt-4">
+                <button type="submit" className={primaryBtnClass}>
+                  Proceed to before photos
+                </button>
+              </form>
+            ) : null}
           </div>
-
-          {bookingStatus === 'ACCEPTED' && consultationApproved ? (
-            <form action={goBeforePhotos} style={{ marginTop: 14 }}>
-              <button
-                type="submit"
-                style={{
-                  border: '1px solid #111',
-                  background: '#111',
-                  color: '#fff',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                }}
-              >
-                Proceed to before photos
-              </button>
-            </form>
-          ) : null}
         </section>
       ) : null}
 
       {/* WAITING */}
       {showWaiting ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Waiting on client approval</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">Waiting on client approval</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">
             Client hasn’t approved yet. This is intentionally locked so you can’t accidentally proceed.
           </p>
 
           <Card>
-            <div style={{ fontSize: 13, color: '#111' }}>
-              Status: <strong>{approvalStatus}</strong>
+            <div className="text-sm font-semibold text-textSecondary">
+              Status: <span className="font-black text-textPrimary">{approvalStatus}</span>
             </div>
 
-            <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
-              When they approve, you’ll move to <strong>Before photos</strong>.
+            <div className="mt-2 text-xs font-semibold text-textSecondary">
+              When they approve, you’ll move to <span className="font-black text-textPrimary">Before photos</span>.
             </div>
 
             {waitingOnClient ? (
-              <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+              <div className="mt-3 text-xs font-semibold text-textSecondary">
                 (Yes, it’s “stuck” on purpose. Humans love to click buttons.)
               </div>
             ) : null}
@@ -328,42 +281,19 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {/* BEFORE PHOTOS */}
       {showBeforePhotos ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Before photos</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>Client approved. Capture before photos, then start the service.</p>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">Before photos</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">
+            Client approved. Capture before photos, then start the service.
+          </p>
 
           <Card>
-            <a
-              href={`/pro/bookings/${encodeURIComponent(booking.id)}/session/before-photos`}
-              style={{
-                display: 'inline-block',
-                textDecoration: 'none',
-                border: '1px solid #111',
-                borderRadius: 999,
-                padding: '10px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                color: '#fff',
-                background: '#111',
-              }}
-            >
+            <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/session/before-photos`} className={primaryLinkClass}>
               Open before photos
             </a>
 
-            <form action={goServiceInProgress} style={{ marginTop: 12 }}>
-              <button
-                type="submit"
-                style={{
-                  border: '1px solid #111',
-                  background: '#fff',
-                  color: '#111',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                }}
-              >
+            <form action={goServiceInProgress} className="mt-3">
+              <button type="submit" className={secondaryBtnClass}>
                 Start service
               </button>
             </form>
@@ -373,25 +303,13 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {/* SERVICE */}
       {showService ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Service in progress</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>Do the fun part. We’ll handle the business part next.</p>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">Service in progress</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">Do the fun part. We’ll handle the business part next.</p>
 
           <Card>
             <form action={goFinishReview}>
-              <button
-                type="submit"
-                style={{
-                  border: '1px solid #111',
-                  background: '#111',
-                  color: '#fff',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                }}
-              >
+              <button type="submit" className={primaryBtnClass}>
                 Finish service
               </button>
             </form>
@@ -401,27 +319,15 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {/* FINISH REVIEW */}
       {showFinishReview ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Finish review</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">Finish review</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">
             Quick check before after photos. This exists to prevent “oops I forgot pictures.”
           </p>
 
           <Card>
             <form action={goAfterPhotos}>
-              <button
-                type="submit"
-                style={{
-                  border: '1px solid #111',
-                  background: '#111',
-                  color: '#fff',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                }}
-              >
+              <button type="submit" className={primaryBtnClass}>
                 Proceed to after photos
               </button>
             </form>
@@ -431,42 +337,17 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {/* AFTER PHOTOS */}
       {showAfterPhotos ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>After photos</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>Capture after photos, then close the session.</p>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">After photos</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">Capture after photos, then close the session.</p>
 
           <Card>
-            <a
-              href={`/pro/bookings/${encodeURIComponent(booking.id)}/session/after-photos`}
-              style={{
-                display: 'inline-block',
-                textDecoration: 'none',
-                border: '1px solid #111',
-                borderRadius: 999,
-                padding: '10px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                color: '#fff',
-                background: '#111',
-              }}
-            >
+            <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/session/after-photos`} className={primaryLinkClass}>
               Open after photos
             </a>
 
-            <form action={goDone} style={{ marginTop: 12 }}>
-              <button
-                type="submit"
-                style={{
-                  border: '1px solid #111',
-                  background: '#fff',
-                  color: '#111',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                }}
-              >
+            <form action={goDone} className="mt-3">
+              <button type="submit" className={secondaryBtnClass}>
                 Done with session
               </button>
             </form>
@@ -476,26 +357,15 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
       {/* DONE */}
       {showDone ? (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 900, marginBottom: 6 }}>Next: Aftercare</h2>
-          <p style={{ fontSize: 13, color: '#666' }}>This is the business side that protects you. Aftercare completes the booking.</p>
+        <section className="mt-6">
+          <h2 className="text-lg font-black">Next: Aftercare</h2>
+          <p className="mt-1 text-sm font-semibold text-textSecondary">
+            This is the business side that protects you. Aftercare completes the booking.
+          </p>
 
           <Card>
-            <a
-              href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`}
-              style={{
-                display: 'inline-block',
-                textDecoration: 'none',
-                border: '1px solid #111',
-                borderRadius: 999,
-                padding: '10px 14px',
-                fontSize: 12,
-                fontWeight: 900,
-                color: '#fff',
-                background: '#111',
-              }}
-            >
-              Add aftercare & complete booking
+            <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`} className={primaryLinkClass}>
+              Add aftercare &amp; complete booking
             </a>
           </Card>
         </section>

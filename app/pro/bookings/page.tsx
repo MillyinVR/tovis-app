@@ -145,102 +145,98 @@ function PriceBlock({ b }: { b: BookingRow }) {
 
   if (discountNum > 0) {
     return (
-      <div style={{ display: 'grid', gap: 2 }}>
+      <div className="grid gap-1 text-[12px] text-textSecondary">
         <div>
           Base:{' '}
-          <span style={{ textDecoration: 'line-through' }}>
-            ${baseStr}
-          </span>
+          <span className="line-through text-textSecondary">${baseStr}</span>
         </div>
         <div>Last-minute discount: -${discountStr ?? '0.00'}</div>
-        <div style={{ color: '#111', fontWeight: 800 }}>Total: ${totalStr ?? '0.00'}</div>
+        <div className="font-black text-textPrimary">Total: ${totalStr ?? '0.00'}</div>
       </div>
     )
   }
 
-  return <div>Price: ${totalStr ?? baseStr}</div>
+  return <div className="text-[12px] text-textSecondary">Total: ${totalStr ?? baseStr}</div>
+}
+
+function StatusPill({ status }: { status: string }) {
+  const s = String(status || '')
+  const tone =
+    s === 'PENDING'
+      ? 'border-white/10 bg-bgPrimary text-textPrimary'
+      : s === 'ACCEPTED'
+        ? 'border-accentPrimary/30 bg-bgPrimary text-textPrimary'
+        : s === 'COMPLETED'
+          ? 'border-toneSuccess/30 bg-bgPrimary text-toneSuccess'
+          : s === 'CANCELLED'
+            ? 'border-toneDanger/30 bg-bgPrimary text-toneDanger'
+            : 'border-white/10 bg-bgPrimary text-textSecondary'
+
+  return (
+    <span className={['inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black', tone].join(' ')}>
+      {formatStatus(s)}
+    </span>
+  )
 }
 
 function Section({ title, items, timeZone }: { title: string; items: BookingRow[]; timeZone: string }) {
   return (
-    <section style={{ marginBottom: 28 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>{title}</h2>
+    <section className="grid gap-3">
+      <div className="flex items-end justify-between gap-3">
+        <h2 className="text-[15px] font-black text-textPrimary">{title}</h2>
+        <div className="text-[12px] text-textSecondary">{items.length ? `${items.length} total` : ''}</div>
+      </div>
 
       {items.length === 0 ? (
-        <div style={{ fontSize: 13, color: '#6b7280' }}>No bookings here yet.</div>
+        <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] text-textSecondary">
+          No bookings here yet.
+        </div>
       ) : (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div className="grid gap-3">
           {items.map((b) => (
-            <div
-              key={b.id}
-              style={{
-                borderRadius: 14,
-                border: '1px solid #eee',
-                padding: 12,
-                background: '#fff',
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 12,
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
-                  {b.service.name}
-                </div>
+            <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="truncate text-[13px] font-black text-textPrimary">{b.service.name}</div>
+                    <StatusPill status={b.status} />
+                  </div>
 
-                <div style={{ fontSize: 12, color: '#4b5563' }}>
+                  <div className="mt-1 text-[12px] text-textSecondary">
+                    <a
+                      href={`/pro/clients/${b.client.id}`}
+                      className="font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                    >
+                      {b.client.firstName} {b.client.lastName}
+                    </a>
+                    {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
+                    {b.client.phone ? ` • ${b.client.phone}` : ''}
+                  </div>
+
+                  <div className="mt-2 text-[12px] text-textSecondary">
+                    {formatDate(b.scheduledFor, timeZone)} • {Math.round(b.durationMinutesSnapshot)} min
+                  </div>
+
+                  <div className="mt-2">
+                    <PriceBlock b={b} />
+                  </div>
+
                   <a
-                    href={`/pro/clients/${b.client.id}`}
-                    style={{ color: '#111', textDecoration: 'underline' }}
+                    href={`/pro/bookings/${b.id}`}
+                    className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
                   >
-                    {b.client.firstName} {b.client.lastName}
+                    Details &amp; aftercare
                   </a>
-                  {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
-                  {b.client.phone ? ` • ${b.client.phone}` : ''}
                 </div>
 
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                  {formatDate(b.scheduledFor, timeZone)} • {Math.round(b.durationMinutesSnapshot)} min
+                <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
+                  <BookingActions
+                    bookingId={b.id}
+                    currentStatus={b.status}
+                    startedAt={b.startedAt ? b.startedAt.toISOString() : null}
+                    finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
+                  />
                 </div>
-
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-                  <PriceBlock b={b} />
-                </div>
-
-                <a
-                  href={`/pro/bookings/${b.id}`}
-                  style={{
-                    fontSize: 11,
-                    color: '#111',
-                    textDecoration: 'underline',
-                    marginTop: 8,
-                    display: 'inline-block',
-                  }}
-                >
-                  Details &amp; aftercare
-                </a>
-              </div>
-
-              <div style={{ minWidth: 180, textAlign: 'right' }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    display: 'inline-block',
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    border: '1px solid #ddd',
-                    marginBottom: 8,
-                  }}
-                >
-                  {formatStatus(b.status)}
-                </div>
-
-                <BookingActions
-                  bookingId={b.id}
-                  currentStatus={b.status}
-                  startedAt={b.startedAt ? b.startedAt.toISOString() : null}
-                  finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
-                />
               </div>
             </div>
           ))}
@@ -261,33 +257,7 @@ export default async function ProBookingsPage() {
     ? user.professionalProfile.timeZone!
     : 'America/Los_Angeles'
 
-  const bookings = (await prisma.booking.findMany({
-    where: { professionalId: proId },
-    orderBy: { scheduledFor: 'asc' },
-    select: {
-      id: true,
-      status: true,
-      scheduledFor: true,
-      startedAt: true,
-      finishedAt: true,
-      durationMinutesSnapshot: true,
-      priceSnapshot: true,
-      discountAmount: true,
-      totalAmount: true,
-      service: { select: { name: true } },
-      client: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          phone: true,
-          user: { select: { email: true } },
-        },
-      },
-    },
-  })) as BookingRow[]
-
-  // ---- Pro-timezone day bucketing (THIS is what fixes "already January" + wrong "today") ----
+  // ---- Pro-timezone day bucketing (fixes "already January" + wrong "today") ----
   const nowUtc = new Date()
   const nowParts = getZonedParts(nowUtc, timeZone)
 
@@ -309,22 +279,80 @@ export default async function ProBookingsPage() {
     timeZone,
   })
 
-  const todayBookings = bookings.filter((b) => b.scheduledFor >= startOfTodayUtc && b.scheduledFor < startOfTomorrowUtc)
-  const upcomingBookings = bookings.filter((b) => b.scheduledFor >= startOfTomorrowUtc)
-  const pastBookings = bookings.filter((b) => b.scheduledFor < startOfTodayUtc)
+  const select = {
+    id: true,
+    status: true,
+    scheduledFor: true,
+    startedAt: true,
+    finishedAt: true,
+    durationMinutesSnapshot: true,
+    priceSnapshot: true,
+    discountAmount: true,
+    totalAmount: true,
+    service: { select: { name: true } },
+    client: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        user: { select: { email: true } },
+      },
+    },
+  } as const
+
+  const [todayBookings, upcomingBookings, pastBookings] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      select,
+    }),
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        scheduledFor: { gte: startOfTomorrowUtc },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      select,
+    }),
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        scheduledFor: { lt: startOfTodayUtc },
+      },
+      orderBy: { scheduledFor: 'desc' },
+      select,
+    }),
+  ])
 
   return (
-    <main style={{ maxWidth: 960, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <header style={{ marginBottom: 18 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Bookings</h1>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>
-          Today, upcoming, and past. <span style={{ color: '#9ca3af' }}>({timeZone})</span>
+    <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
+      <header className="mb-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
+            <div className="mt-1 text-[12px] text-textSecondary">
+              Today, upcoming, and past. <span className="text-textSecondary/70">({timeZone})</span>
+            </div>
+          </div>
+
+          <a
+            href="/pro/bookings/new"
+            className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+          >
+            + New booking
+          </a>
         </div>
       </header>
 
-      <Section title="Today" items={todayBookings} timeZone={timeZone} />
-      <Section title="Upcoming" items={upcomingBookings} timeZone={timeZone} />
-      <Section title="Past" items={pastBookings} timeZone={timeZone} />
+      <div className="grid gap-6">
+        <Section title="Today" items={todayBookings as BookingRow[]} timeZone={timeZone} />
+        <Section title="Upcoming" items={upcomingBookings as BookingRow[]} timeZone={timeZone} />
+        <Section title="Past" items={pastBookings as BookingRow[]} timeZone={timeZone} />
+      </div>
     </main>
   )
 }

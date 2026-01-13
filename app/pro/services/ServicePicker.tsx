@@ -1,13 +1,16 @@
+// app/pro/services/ServicePicker.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabaseBrowser } from '@/lib/supabaseBrowser'
 
 type ServiceDTO = {
   id: string
   name: string
-  minPrice: string // dollars, e.g. "49.99"
+  minPrice: string // dollars "49.99"
   defaultDurationMinutes: number
+  defaultImageUrl?: string | null
 }
 
 type CategoryDTO = {
@@ -24,19 +27,6 @@ type CategoryDTO = {
 type OfferingDTO = {
   id: string
   serviceId: string
-  title: string | null
-  description?: string | null
-  customImageUrl: string | null
-  defaultImageUrl?: string | null
-  serviceName: string
-  categoryName: string | null
-
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonPriceStartingAt: string | null
-  salonDurationMinutes: number | null
-  mobilePriceStartingAt: string | null
-  mobileDurationMinutes: number | null
 }
 
 type Props = {
@@ -44,7 +34,7 @@ type Props = {
   offerings: OfferingDTO[]
 }
 
-// ---------- money helpers (frontend only) ----------
+// ---------- money helpers ----------
 function isValidMoneyString(v: string) {
   const s = v.trim()
   return /^\d+(\.\d{1,2})?$/.test(s)
@@ -66,29 +56,34 @@ function moneyToCentsInt(v: string) {
   return parseInt(a, 10) * 100 + parseInt(b, 10)
 }
 
-export default function ServicePicker({ categories }: Props) {
+async function safeJson(res: Response) {
+  return res.json().catch(() => ({})) as Promise<any>
+}
+
+function pickString(v: unknown) {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+export default function ServicePicker({ categories, offerings }: Props) {
   const router = useRouter()
 
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState('')
   const [selectedServiceId, setSelectedServiceId] = useState('')
 
-  // overrides
-  const [title, setTitle] = useState('')
-  const [customImageUrl, setCustomImageUrl] = useState('')
   const [description, setDescription] = useState('')
-
-  // location toggles
   const [offersInSalon, setOffersInSalon] = useState(true)
   const [offersMobile, setOffersMobile] = useState(false)
 
-  // SALON fields
-  const [salonPrice, setSalonPrice] = useState<string>('') // dollars string
-  const [salonDuration, setSalonDuration] = useState<string>('') // minutes
+  const [salonPrice, setSalonPrice] = useState('')
+  const [salonDuration, setSalonDuration] = useState('')
 
-  // MOBILE fields
-  const [mobilePrice, setMobilePrice] = useState<string>('') // dollars string
-  const [mobileDuration, setMobileDuration] = useState<string>('') // minutes
+  const [mobilePrice, setMobilePrice] = useState('')
+  const [mobileDuration, setMobileDuration] = useState('')
+
+  // ✅ service image upload (for new offering creation)
+  const [serviceImageUrl, setServiceImageUrl] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -107,9 +102,7 @@ export default function ServicePicker({ categories }: Props) {
 
   const servicesForSelection: ServiceDTO[] = useMemo(() => {
     if (selectedSubcategory) return selectedSubcategory.services
-    if (selectedCategory) {
-      return [...selectedCategory.services, ...selectedCategory.children.flatMap((child) => child.services)]
-    }
+    if (selectedCategory) return [...selectedCategory.services, ...selectedCategory.children.flatMap((c) => c.services)]
     return []
   }, [selectedCategory, selectedSubcategory])
 
@@ -118,33 +111,31 @@ export default function ServicePicker({ categories }: Props) {
     [servicesForSelection, selectedServiceId],
   )
 
-  function resetAll() {
-    setTitle('')
-    setDescription('')
-    setCustomImageUrl('')
+  const existingServiceIds = useMemo(() => new Set(offerings.map((o) => o.serviceId)), [offerings])
+  const alreadyAdded = selectedService ? existingServiceIds.has(selectedService.id) : false
 
+  function resetAll() {
+    setDescription('')
     setOffersInSalon(true)
     setOffersMobile(false)
-
     setSalonPrice('')
     setSalonDuration('')
     setMobilePrice('')
     setMobileDuration('')
-
+    setServiceImageUrl(null)
     setSuccess(null)
     setError(null)
   }
 
   function resetFormForService(service: ServiceDTO | null) {
+    setServiceImageUrl(null)
+
     if (!service) {
       resetAll()
       return
     }
 
-    setTitle(service.name)
     setDescription('')
-    setCustomImageUrl('')
-
     setOffersInSalon(true)
     setOffersMobile(false)
 
@@ -184,6 +175,73 @@ export default function ServicePicker({ categories }: Props) {
     return null
   }
 
+  async function uploadServiceImage(file: File) {
+    if (!selectedService) {
+      setError('Pick a service first, then upload an image.')
+      return
+    }
+
+    setError(null)
+    setSuccess(null)
+    setUploadingImage(true)
+
+    try {
+      // 1) Ask API for bucket/path/token + publicUrl
+      const initRes = await fetch('/api/pro/uploads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'SERVICE_IMAGE_PUBLIC',
+          serviceId: selectedService.id,
+          contentType: file.type,
+          size: file.size,
+        }),
+      })
+
+      const init = await safeJson(initRes)
+      if (!initRes.ok) {
+        setError(init?.error || 'Failed to prepare upload.')
+        return
+      }
+
+      const bucket = pickString(init?.bucket)
+      const path = pickString(init?.path)
+      const token = pickString(init?.token)
+      const publicUrl = pickString(init?.publicUrl)
+      const cacheBuster = typeof init?.cacheBuster === 'number' ? init.cacheBuster : null
+
+      if (!bucket || !path || !token) {
+        setError('Upload init missing bucket/path/token.')
+        return
+      }
+      if (!publicUrl) {
+        setError('Upload init missing publicUrl (this should be public).')
+        return
+      }
+
+      // 2) Upload using the correct Supabase client flow
+      const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
+        contentType: file.type,
+        upsert: true,
+      })
+
+      if (upErr) {
+        setError(upErr.message || 'Upload failed.')
+        return
+      }
+
+      // 3) Store URL in local state to be saved with offering creation
+      const finalUrl = cacheBuster ? `${publicUrl}?v=${cacheBuster}` : publicUrl
+      setServiceImageUrl(finalUrl)
+      setSuccess('Image uploaded. It will be used once you add the service.')
+    } catch (err) {
+      console.error(err)
+      setError('Network error during upload.')
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return
@@ -191,37 +249,24 @@ export default function ServicePicker({ categories }: Props) {
     setError(null)
     setSuccess(null)
 
-    if (!selectedService) {
-      setError('Please choose a service from the library first.')
-      return
-    }
-
-    if (!offersInSalon && !offersMobile) {
-      setError('Enable at least Salon or Mobile.')
-      return
-    }
+    if (!selectedService) return setError('Please choose a service from the library first.')
+    if (alreadyAdded) return setError('You already added this service.')
+    if (!offersInSalon && !offersMobile) return setError('Enable at least Salon or Mobile.')
 
     // SALON validate if enabled
     let salonPriceNorm: string | null = null
     let salonDurationInt: number | null = null
     if (offersInSalon) {
       salonPriceNorm = normalizeMoney2(salonPrice)
-      if (!salonPriceNorm) {
-        setError('Salon price must be a valid amount like 50 or 49.99')
-        return
-      }
+      if (!salonPriceNorm) return setError('Salon price must be a valid amount like 50 or 49.99')
 
       salonDurationInt = parseInt(salonDuration, 10)
       if (Number.isNaN(salonDurationInt) || salonDurationInt <= 0) {
-        setError('Salon duration must be a positive number of minutes.')
-        return
+        return setError('Salon duration must be a positive number of minutes.')
       }
 
       const minErr = validatePriceMin(salonPriceNorm, selectedService.minPrice, 'Salon')
-      if (minErr) {
-        setError(minErr)
-        return
-      }
+      if (minErr) return setError(minErr)
     }
 
     // MOBILE validate if enabled
@@ -229,22 +274,15 @@ export default function ServicePicker({ categories }: Props) {
     let mobileDurationInt: number | null = null
     if (offersMobile) {
       mobilePriceNorm = normalizeMoney2(mobilePrice)
-      if (!mobilePriceNorm) {
-        setError('Mobile price must be a valid amount like 50 or 49.99')
-        return
-      }
+      if (!mobilePriceNorm) return setError('Mobile price must be a valid amount like 50 or 49.99')
 
       mobileDurationInt = parseInt(mobileDuration, 10)
       if (Number.isNaN(mobileDurationInt) || mobileDurationInt <= 0) {
-        setError('Mobile duration must be a positive number of minutes.')
-        return
+        return setError('Mobile duration must be a positive number of minutes.')
       }
 
       const minErr = validatePriceMin(mobilePriceNorm, selectedService.minPrice, 'Mobile')
-      if (minErr) {
-        setError(minErr)
-        return
-      }
+      if (minErr) return setError(minErr)
     }
 
     setLoading(true)
@@ -255,9 +293,12 @@ export default function ServicePicker({ categories }: Props) {
         body: JSON.stringify({
           serviceId: selectedService.id,
 
-          title: title.trim() || null,
+          // canonical name only
+          title: null,
           description: description.trim() || null,
-          customImageUrl: customImageUrl.trim() || null,
+
+          // ✅ service image override for THIS pro's offering only
+          customImageUrl: serviceImageUrl,
 
           offersInSalon,
           offersMobile,
@@ -270,15 +311,17 @@ export default function ServicePicker({ categories }: Props) {
         }),
       })
 
-      const data = await res.json().catch(() => ({}))
-
+      const data = await safeJson(res)
       if (!res.ok) {
-        setError((data && (data.error as string)) || 'Something went wrong while saving this service.')
+        setError(data?.error || 'Something went wrong while saving this service.')
         return
       }
 
       setSuccess('Service added to your menu.')
       router.refresh()
+
+      // keep selection, but prevent accidental reuse
+      setServiceImageUrl(null)
     } catch (err) {
       console.error(err)
       setError('Network error while saving service.')
@@ -287,378 +330,243 @@ export default function ServicePicker({ categories }: Props) {
     }
   }
 
+  const inputClass =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
+  const selectClass =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
+
   return (
-    <div
-      style={{
-        borderRadius: 12,
-        border: '1px solid #eee',
-        padding: 16,
-        background: '#fff',
-        display: 'grid',
-        gap: 16,
-      }}
-    >
-      <div
-        style={{
-          display: 'grid',
-          gap: 12,
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        }}
-      >
-        {/* CATEGORY */}
-        <div>
-          <label htmlFor="category" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-            Main category
+    <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
+      <div className="grid gap-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="grid gap-2">
+            <div className="text-[12px] font-black text-textPrimary">Main category</div>
+            <select value={selectedCategoryId} onChange={(e) => handleCategoryChange(e.target.value)} className={selectClass}>
+              <option value="">Select category</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </label>
-          <select
-            id="category"
-            value={selectedCategoryId}
-            onChange={(e) => handleCategoryChange(e.target.value)}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-            }}
-          >
-            <option value="">Select category</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+
+          <label className="grid gap-2">
+            <div className="text-[12px] font-black text-textPrimary">Subcategory</div>
+            <select
+              value={selectedSubcategoryId}
+              onChange={(e) => handleSubcategoryChange(e.target.value)}
+              disabled={!selectedCategory}
+              className={[selectClass, !selectedCategory ? 'opacity-60 cursor-not-allowed' : ''].join(' ')}
+            >
+              <option value="">All under this category</option>
+              {selectedCategory?.children.map((child) => (
+                <option key={child.id} value={child.id}>
+                  {child.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-2">
+            <div className="text-[12px] font-black text-textPrimary">Service</div>
+            <select
+              value={selectedServiceId}
+              onChange={(e) => handleServiceChange(e.target.value)}
+              disabled={!selectedCategory}
+              className={[selectClass, !selectedCategory ? 'opacity-60 cursor-not-allowed' : ''].join(' ')}
+            >
+              <option value="">Select service</option>
+              {servicesForSelection.map((s) => (
+                <option key={s.id} value={s.id} disabled={existingServiceIds.has(s.id)}>
+                  {s.name}
+                  {existingServiceIds.has(s.id) ? ' (added)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        {/* SUBCATEGORY */}
-        <div>
-          <label htmlFor="subcategory" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-            Subcategory (optional)
-          </label>
-          <select
-            id="subcategory"
-            value={selectedSubcategoryId}
-            onChange={(e) => handleSubcategoryChange(e.target.value)}
-            disabled={!selectedCategory}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-              background: !selectedCategory ? '#f7f7f7' : '#fff',
-            }}
-          >
-            <option value="">All under this category</option>
-            {selectedCategory?.children.map((child) => (
-              <option key={child.id} value={child.id}>
-                {child.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <form onSubmit={handleSubmit} className="grid gap-4 border-t border-white/10 pt-4">
+          {/* ✅ Service image upload */}
+          <div className="grid gap-2">
+            <div className="text-[12px] font-black text-textPrimary">Service image (optional)</div>
 
-        {/* SERVICE */}
-        <div>
-          <label htmlFor="service" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-            Service
-          </label>
-          <select
-            id="service"
-            value={selectedServiceId}
-            onChange={(e) => handleServiceChange(e.target.value)}
-            disabled={!selectedCategory}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-              background: !selectedCategory ? '#f7f7f7' : '#fff',
-            }}
-          >
-            <option value="">Select service</option>
-            {servicesForSelection.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+            <div className="rounded-card border border-white/10 bg-bgSecondary p-3">
+              <input
+                type="file"
+                accept="image/*"
+                disabled={!selectedService || loading || uploadingImage}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null
+                  if (f) uploadServiceImage(f)
+                  e.currentTarget.value = ''
+                }}
+                className="block w-full text-[12px] text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-3 file:py-2 file:text-[12px] file:font-black file:text-textPrimary hover:file:border-white/20"
+              />
 
-      {/* CUSTOMIZATION FORM */}
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          borderTop: '1px solid #f0f0f0',
-          paddingTop: 12,
-          display: 'grid',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ display: 'grid', gap: 6 }}>
-            <label htmlFor="title" style={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
-              How it shows on your menu
-            </label>
-            <input
-              id="title"
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={selectedService ? selectedService.name : 'Choose a service first'}
-              disabled={!selectedService}
-              style={{
-                width: '100%',
-                borderRadius: 8,
-                border: '1px solid #ddd',
-                padding: 8,
-                fontSize: 13,
-                fontFamily: 'inherit',
-                background: !selectedService ? '#f7f7f7' : '#fff',
-              }}
-            />
+              <div className="mt-2 text-[12px] text-textSecondary">
+                This image only overrides how this service displays on <span className="font-black text-textPrimary">your</span> menu.
+              </div>
+
+              {uploadingImage ? <div className="mt-2 text-[12px] text-textSecondary">Uploading…</div> : null}
+
+              {serviceImageUrl ? (
+                <div className="mt-3 flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={serviceImageUrl}
+                    alt="Service image preview"
+                    className="h-16 w-16 rounded-xl border border-white/10 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setServiceImageUrl(null)}
+                    disabled={loading || uploadingImage}
+                    className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gap: 6 }}>
-            <label htmlFor="desc" style={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
-              Description (optional)
-            </label>
+          <label className="grid gap-2">
+            <div className="text-[12px] font-black text-textPrimary">Description (optional)</div>
             <textarea
-              id="desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               disabled={!selectedService || loading}
               rows={3}
-              style={{
-                width: '100%',
-                borderRadius: 8,
-                border: '1px solid #ddd',
-                padding: 8,
-                fontSize: 13,
-                fontFamily: 'inherit',
-                resize: 'vertical',
-                background: !selectedService ? '#f7f7f7' : '#fff',
-              }}
+              className={inputClass}
+              placeholder="Short, clear, client-friendly."
             />
-          </div>
+          </label>
 
-          <div>
-            <label htmlFor="imageUrl" style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-              Custom image URL (optional)
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+              <input
+                type="checkbox"
+                checked={offersInSalon}
+                onChange={(e) => setOffersInSalon(e.target.checked)}
+                disabled={!selectedService || loading}
+                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+              />
+              Offer in Salon
             </label>
-            <input
-              id="imageUrl"
-              type="text"
-              value={customImageUrl}
-              onChange={(e) => setCustomImageUrl(e.target.value)}
-              placeholder="Paste a hosted image URL for now"
-              disabled={loading}
-              style={{
-                width: '100%',
-                borderRadius: 8,
-                border: '1px solid #ddd',
-                padding: 8,
-                fontSize: 13,
-                fontFamily: 'inherit',
+
+            <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+              <input
+                type="checkbox"
+                checked={offersMobile}
+                onChange={(e) => setOffersMobile(e.target.checked)}
+                disabled={!selectedService || loading}
+                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+              />
+              Offer Mobile
+            </label>
+
+            {selectedService ? (
+              <div className="text-[12px] text-textSecondary">
+                Min price:{' '}
+                <span className="font-black text-textPrimary">${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersInSalon ? '' : 'opacity-70'].join(' ')}>
+              <div className="mb-2 text-[12px] font-black text-textPrimary">Salon pricing</div>
+
+              <div className="grid gap-2">
+                <label className="grid gap-1">
+                  <div className="text-[11px] font-black text-textSecondary">Starting at</div>
+                  <input
+                    value={salonPrice}
+                    onChange={(e) => setSalonPrice(e.target.value)}
+                    disabled={!selectedService || loading || !offersInSalon}
+                    inputMode="decimal"
+                    className={inputClass}
+                    placeholder="e.g. 120 or 120.00"
+                  />
+                </label>
+
+                <label className="grid gap-1">
+                  <div className="text-[11px] font-black text-textSecondary">Duration (minutes)</div>
+                  <input
+                    value={salonDuration}
+                    onChange={(e) => setSalonDuration(e.target.value)}
+                    disabled={!selectedService || loading || !offersInSalon}
+                    type="number"
+                    min={1}
+                    className={inputClass}
+                    placeholder="e.g. 90"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersMobile ? '' : 'opacity-70'].join(' ')}>
+              <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile pricing</div>
+
+              <div className="grid gap-2">
+                <label className="grid gap-1">
+                  <div className="text-[11px] font-black text-textSecondary">Starting at</div>
+                  <input
+                    value={mobilePrice}
+                    onChange={(e) => setMobilePrice(e.target.value)}
+                    disabled={!selectedService || loading || !offersMobile}
+                    inputMode="decimal"
+                    className={inputClass}
+                    placeholder="e.g. 150 or 150.00"
+                  />
+                </label>
+
+                <label className="grid gap-1">
+                  <div className="text-[11px] font-black text-textSecondary">Duration (minutes)</div>
+                  <input
+                    value={mobileDuration}
+                    onChange={(e) => setMobileDuration(e.target.value)}
+                    disabled={!selectedService || loading || !offersMobile}
+                    type="number"
+                    min={1}
+                    className={inputClass}
+                    placeholder="e.g. 90"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
+          {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCategoryId('')
+                setSelectedSubcategoryId('')
+                setSelectedServiceId('')
+                resetFormForService(null)
               }}
-            />
-            <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
-              Later this becomes “upload a photo” from gallery / camera.
-            </div>
+              disabled={loading}
+              className="rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+            >
+              Reset
+            </button>
+
+            <button
+              type="submit"
+              disabled={loading || uploadingImage || !selectedService || alreadyAdded}
+              className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
+            >
+              {loading ? 'Adding…' : alreadyAdded ? 'Already added' : 'Add to my menu'}
+            </button>
           </div>
-        </div>
-
-        {/* LOCATION TOGGLES */}
-        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={offersInSalon}
-              onChange={(e) => setOffersInSalon(e.target.checked)}
-              disabled={!selectedService || loading}
-            />
-            Offer in Salon
-          </label>
-
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={offersMobile}
-              onChange={(e) => setOffersMobile(e.target.checked)}
-              disabled={!selectedService || loading}
-            />
-            Offer Mobile
-          </label>
-
-          {selectedService ? (
-            <div style={{ fontSize: 12, color: '#6b7280' }}>
-              Service min price: <b>${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}</b>
-            </div>
-          ) : null}
-        </div>
-
-        {/* SALON */}
-        <div
-          style={{
-            border: '1px solid #eee',
-            borderRadius: 12,
-            padding: 12,
-            background: offersInSalon ? '#fff' : '#fafafa',
-            opacity: offersInSalon ? 1 : 0.6,
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Salon pricing</div>
-
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Starting at</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 13 }}>$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={salonPrice}
-                  onChange={(e) => setSalonPrice(e.target.value)}
-                  disabled={!selectedService || loading || !offersInSalon}
-                  style={{
-                    flex: 1,
-                    borderRadius: 8,
-                    border: '1px solid #ddd',
-                    padding: 8,
-                    fontSize: 13,
-                    fontFamily: 'inherit',
-                    background: !offersInSalon ? '#f3f4f6' : '#fff',
-                  }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Duration (minutes)</label>
-              <input
-                type="number"
-                min={1}
-                value={salonDuration}
-                onChange={(e) => setSalonDuration(e.target.value)}
-                disabled={!selectedService || loading || !offersInSalon}
-                style={{
-                  width: '100%',
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  padding: 8,
-                  fontSize: 13,
-                  fontFamily: 'inherit',
-                  background: !offersInSalon ? '#f3f4f6' : '#fff',
-                }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* MOBILE */}
-        <div
-          style={{
-            border: '1px solid #eee',
-            borderRadius: 12,
-            padding: 12,
-            background: offersMobile ? '#fff' : '#fafafa',
-            opacity: offersMobile ? 1 : 0.6,
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Mobile pricing</div>
-
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Starting at</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 13 }}>$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={mobilePrice}
-                  onChange={(e) => setMobilePrice(e.target.value)}
-                  disabled={!selectedService || loading || !offersMobile}
-                  style={{
-                    flex: 1,
-                    borderRadius: 8,
-                    border: '1px solid #ddd',
-                    padding: 8,
-                    fontSize: 13,
-                    fontFamily: 'inherit',
-                    background: !offersMobile ? '#f3f4f6' : '#fff',
-                  }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Duration (minutes)</label>
-              <input
-                type="number"
-                min={1}
-                value={mobileDuration}
-                onChange={(e) => setMobileDuration(e.target.value)}
-                disabled={!selectedService || loading || !offersMobile}
-                style={{
-                  width: '100%',
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  padding: 8,
-                  fontSize: 13,
-                  fontFamily: 'inherit',
-                  background: !offersMobile ? '#f3f4f6' : '#fff',
-                }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {error ? <div style={{ fontSize: 12, color: 'red' }}>{error}</div> : null}
-        {success ? <div style={{ fontSize: 12, color: 'green' }}>{success}</div> : null}
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedServiceId('')
-              resetFormForService(null)
-            }}
-            disabled={loading}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 999,
-              border: '1px solid #ccc',
-              fontSize: 13,
-              background: '#f7f7f7',
-              cursor: loading ? 'default' : 'pointer',
-            }}
-          >
-            Reset
-          </button>
-
-          <button
-            type="submit"
-            disabled={loading || !selectedService}
-            style={{
-              padding: '6px 16px',
-              borderRadius: 999,
-              border: 'none',
-              fontSize: 13,
-              background: selectedService ? '#111' : '#999',
-              color: '#fff',
-              cursor: selectedService && !loading ? 'pointer' : 'default',
-            }}
-          >
-            {loading ? 'Adding…' : 'Add to my menu'}
-          </button>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   )
 }

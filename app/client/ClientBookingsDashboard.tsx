@@ -61,11 +61,11 @@ function normalizeBuckets(input: unknown): Buckets {
 
 function nextStatusBadge(b: BookingLike) {
   const s = statusUpper(b.status)
-  if (s === 'ACCEPTED') return <Badge label="Confirmed" bg="#ecfeff" color="#155e75" />
-  if (s === 'PENDING') return <Badge label="Requested" bg="#fef9c3" color="#854d0e" />
-  if (s === 'COMPLETED') return <Badge label="Completed" bg="#d1fae5" color="#065f46" />
-  if (s === 'CANCELLED') return <Badge label="Cancelled" bg="#fee2e2" color="#991b1b" />
-  return <Badge label={s || 'Unknown'} bg="#f3f4f6" color="#111827" />
+  if (s === 'ACCEPTED') return <Badge label="Confirmed" bg="rgb(var(--surface-glass) / 0.10)" color="rgb(var(--text-primary))" />
+  if (s === 'PENDING') return <Badge label="Requested" bg="rgb(var(--accent-primary) / 0.14)" color="rgb(var(--accent-primary))" />
+  if (s === 'COMPLETED') return <Badge label="Completed" bg="rgb(16 185 129 / 0.14)" color="rgb(16 185 129)" />
+  if (s === 'CANCELLED') return <Badge label="Cancelled" bg="rgb(239 68 68 / 0.14)" color="rgb(239 68 68)" />
+  return <Badge label={s || 'Unknown'} bg="rgb(var(--surface-glass) / 0.10)" color="rgb(var(--text-primary))" />
 }
 
 function normalizeTabKey(raw: string): TabKey | null {
@@ -132,25 +132,24 @@ export default function ClientBookingsDashboard() {
   // If any booking requires consult approval, we surface a "Action required" CTA in the Next card
   const nextNeedsConsultApproval = Boolean(nextAppt?.hasPendingConsultationApproval)
 
-  if (loading) return <div style={{ color: '#6b7280', fontSize: 13 }}>Loading your bookings…</div>
+  if (loading) return <div className="text-textSecondary" style={{ fontSize: 13 }}>Loading your bookings…</div>
 
   if (err) {
     return (
-      <div style={{ border: '1px solid #fee2e2', background: '#fff1f2', padding: 14, borderRadius: 12 }}>
+      <div className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary" style={{ padding: 14, borderRadius: 12 }}>
         <div style={{ fontWeight: 900, marginBottom: 6 }}>Couldn’t load your bookings</div>
-        <div style={{ color: '#7f1d1d', fontSize: 13 }}>{err}</div>
+        <div className="text-textSecondary" style={{ fontSize: 13 }}>{err}</div>
 
         <button
           type="button"
           onClick={reload}
+          className="border border-surfaceGlass/15 bg-bgPrimary text-textPrimary"
           style={{
             marginTop: 10,
-            border: '1px solid #ddd',
             borderRadius: 999,
             padding: '8px 12px',
             fontSize: 12,
             fontWeight: 900,
-            background: '#fff',
             cursor: 'pointer',
           }}
         >
@@ -163,38 +162,40 @@ export default function ClientBookingsDashboard() {
   return (
     <section style={{ display: 'grid', gap: 16 }}>
       {/* Next appointment card */}
-      <div style={{ border: '1px solid #eee', borderRadius: 16, padding: 16, background: '#fff' }}>
+      <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
-          <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 900 }}>Next appointment</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
+          <div className="text-textSecondary" style={{ fontSize: 13, fontWeight: 900 }}>
+            Next appointment
+          </div>
+          <div className="text-textSecondary" style={{ fontSize: 12 }}>
             {counts.pending ? `${counts.pending} pending item${counts.pending === 1 ? '' : 's'}` : 'All caught up'}
           </div>
         </div>
 
         {nextAppt ? (
           <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>
+            <div className="text-textPrimary" style={{ fontSize: 18, fontWeight: 900 }}>
               {nextAppt.service?.name || 'Appointment'}
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#6b7280' }}>
+              <span className="text-textSecondary" style={{ fontSize: 13, fontWeight: 700 }}>
                 {' '}
                 · {prettyWhen(nextAppt.scheduledFor)}
               </span>
             </div>
 
-            <div style={{ color: '#111', fontSize: 13 }}>
+            <div className="text-textPrimary" style={{ fontSize: 13 }}>
               <span style={{ fontWeight: 900 }}>{nextAppt.professional?.businessName || 'Professional'}</span>
               {locationLabel(nextAppt.professional) ? (
-                <span style={{ color: '#6b7280' }}> · {locationLabel(nextAppt.professional)}</span>
+                <span className="text-textSecondary"> · {locationLabel(nextAppt.professional)}</span>
               ) : null}
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
               {sourceUpper(nextAppt.source) === 'AFTERCARE' ? (
-                <Badge label="Prebooked" bg="#eef2ff" color="#1e3a8a" />
+                <Badge label="Prebooked" bg="rgb(var(--surface-glass) / 0.10)" color="rgb(var(--text-primary))" />
               ) : null}
 
               {nextNeedsConsultApproval ? (
-                <Badge label="Action required" bg="#fffbeb" color="#854d0e" />
+                <Badge label="Action required" bg="rgb(var(--accent-primary) / 0.14)" color="rgb(var(--accent-primary))" />
               ) : null}
 
               {nextStatusBadge(nextAppt)}
@@ -202,16 +203,14 @@ export default function ClientBookingsDashboard() {
               {nextNeedsConsultApproval ? (
                 <a
                   href={`/client/bookings/${encodeURIComponent(nextAppt.id)}?step=consult`}
+                  className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover"
                   style={{
                     marginLeft: 'auto',
                     textDecoration: 'none',
-                    border: '1px solid #111',
                     borderRadius: 999,
                     padding: '8px 12px',
                     fontSize: 12,
                     fontWeight: 900,
-                    color: '#fff',
-                    background: '#111',
                   }}
                 >
                   Review &amp; approve
@@ -219,16 +218,14 @@ export default function ClientBookingsDashboard() {
               ) : (
                 <a
                   href={`/api/calendar?bookingId=${encodeURIComponent(nextAppt.id)}`}
+                  className="border border-surfaceGlass/15 bg-bgPrimary text-textPrimary"
                   style={{
                     marginLeft: 'auto',
                     textDecoration: 'none',
-                    border: '1px solid #ddd',
                     borderRadius: 999,
                     padding: '8px 12px',
                     fontSize: 12,
                     fontWeight: 900,
-                    color: '#111',
-                    background: '#fff',
                   }}
                 >
                   Add to calendar
@@ -237,7 +234,7 @@ export default function ClientBookingsDashboard() {
             </div>
           </div>
         ) : (
-          <div style={{ marginTop: 10, color: '#6b7280', fontSize: 13 }}>
+          <div className="text-textSecondary" style={{ marginTop: 10, fontSize: 13 }}>
             No upcoming appointments yet. Go scroll Looks like a responsible adult.
           </div>
         )}
@@ -245,29 +242,34 @@ export default function ClientBookingsDashboard() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 999,
-              border: '1px solid #ddd',
-              background: tab === key ? '#111' : '#fff',
-              color: tab === key ? '#fff' : '#111',
-              fontSize: 12,
-              fontWeight: 900,
-              cursor: 'pointer',
-            }}
-          >
-            {label} ({counts[key]})
-          </button>
-        ))}
+        {TABS.map(({ key, label }) => {
+          const active = tab === key
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={
+                active
+                  ? 'bg-accentPrimary text-bgPrimary'
+                  : 'border border-surfaceGlass/15 bg-bgPrimary text-textPrimary'
+              }
+              style={{
+                padding: '8px 12px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 900,
+                cursor: 'pointer',
+              }}
+            >
+              {label} ({counts[key]})
+            </button>
+          )
+        })}
       </div>
 
       {/* Section container */}
-      <div style={{ border: '1px solid #eee', borderRadius: 16, background: '#fff', padding: 14 }}>
+      <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 14 }}>
         {tab === 'upcoming' ? <UpcomingBookings items={buckets.upcoming} /> : null}
 
         {/* ✅ important: pending needs reload after approve/reject */}
@@ -278,19 +280,19 @@ export default function ClientBookingsDashboard() {
         {tab === 'past' ? <PastBookings items={buckets.past} /> : null}
 
         {tab === 'upcoming' && buckets.upcoming.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: 13 }}>No upcoming bookings.</div>
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>No upcoming bookings.</div>
         ) : null}
         {tab === 'pending' && buckets.pending.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: 13 }}>No pending items.</div>
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>No pending items.</div>
         ) : null}
         {tab === 'waitlist' && buckets.waitlist.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: 13 }}>No waitlist entries.</div>
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>No waitlist entries.</div>
         ) : null}
         {tab === 'prebooked' && buckets.prebooked.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: 13 }}>No prebooked appointments yet.</div>
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>No prebooked appointments yet.</div>
         ) : null}
         {tab === 'past' && buckets.past.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: 13 }}>No history yet.</div>
+          <div className="text-textSecondary" style={{ fontSize: 13 }}>No history yet.</div>
         ) : null}
       </div>
     </section>

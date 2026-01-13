@@ -2,10 +2,13 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { isValidIanaTimeZone, zonedToUtc, ymdInTimeZone } from './_utils/date'
+import { computeDurationMinutesFromIso } from './_utils/calendarMath'
 
 type Props = {
   open: boolean
   blockId: string | null
+  timeZone: string
   onClose: () => void
   onSaved: () => void
 }
@@ -21,26 +24,25 @@ async function safeJson(res: Response) {
   return res.json().catch(() => ({})) as Promise<any>
 }
 
-function toDateInputValue(d: Date) {
-  const yyyy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-function toTimeInputValue(d: Date) {
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mm = String(d.getMinutes()).padStart(2, '0')
+function toTimeInputValueFromMinutes(minutes: number) {
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+  const mm = String(minutes % 60).padStart(2, '0')
   return `${hh}:${mm}`
 }
 
-function setDateTimeParts(baseDate: Date, hhmm: string) {
-  const [hhStr, mmStr] = (hhmm || '').split(':')
-  const hh = Number(hhStr)
-  const mm = Number(mmStr)
-  const out = new Date(baseDate)
-  out.setHours(Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0, 0)
-  return out
+function minutesSinceMidnightInTz(date: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const parts = dtf.formatToParts(date)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  const hh = Number(map.hour)
+  const mm = Number(map.minute)
+  return (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0)
 }
 
 function roundTo15(mins: number) {
@@ -48,7 +50,9 @@ function roundTo15(mins: number) {
   return Math.max(15, Math.min(12 * 60, snapped))
 }
 
-export default function EditBlockModal({ open, blockId, onClose, onSaved }: Props) {
+export default function EditBlockModal({ open, blockId, timeZone, onClose, onSaved }: Props) {
+  const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'America/Los_Angeles'
+
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -64,36 +68,50 @@ export default function EditBlockModal({ open, blockId, onClose, onSaved }: Prop
   const canEdit = useMemo(() => open && Boolean(blockId), [open, blockId])
 
   useEffect(() => {
-  if (!open) return
-  if (!blockId) return
+    if (!open) return
+    if (!blockId) return
 
-  let cancelled = false
-  ;(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { cache: 'no-store' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Failed to load block (${res.status}).`)
+    let cancelled = false
 
-      const b = (data?.block ?? data) as BlockDto
-      if (cancelled) return
-      setBlock(b)
-    } catch (e: any) {
-      if (!cancelled) setError(e?.message || 'Failed to load block.')
-    } finally {
-      if (!cancelled) setLoading(false)
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { cache: 'no-store' })
+        const data = await safeJson(res)
+        if (!res.ok) throw new Error(data?.error || `Failed to load block (${res.status}).`)
+
+        const b = (data?.block ?? data) as BlockDto
+        if (cancelled) return
+
+        setBlock(b)
+
+        const start = new Date(b.startsAt)
+        const ymd = ymdInTimeZone(start, tz)
+        setDateStr(ymd)
+
+        const startMins = minutesSinceMidnightInTz(start, tz)
+        setStartTime(toTimeInputValueFromMinutes(startMins))
+
+        const dur = roundTo15(computeDurationMinutesFromIso(b.startsAt, b.endsAt))
+        setDurationMinutes(dur)
+
+        setNote((b.note ?? '').toString())
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Failed to load block.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
-  })()
-
-  return () => {
-    cancelled = true
-  }
-}, [open, blockId])
-
+  }, [open, blockId, tz])
 
   async function save() {
-    if (!blockId) return // ✅ fixes your TS error source cleanly
+    if (!blockId) return
     if (!block) return
     if (saving) return
 
@@ -104,18 +122,21 @@ export default function EditBlockModal({ open, blockId, onClose, onSaved }: Prop
       const [yyyy, mm, dd] = (dateStr || '').split('-').map((x) => Number(x))
       if (!yyyy || !mm || !dd) throw new Error('Pick a valid date.')
 
-      const base = new Date(block.startsAt)
-      const day = new Date(yyyy, mm - 1, dd, base.getHours(), base.getMinutes(), 0, 0)
-      const start = setDateTimeParts(day, startTime)
+      const [hhStr, miStr] = (startTime || '').split(':')
+      const hh = Number(hhStr)
+      const mi = Number(miStr)
+      if (!Number.isFinite(hh) || !Number.isFinite(mi)) throw new Error('Pick a valid start time.')
+
       const dur = roundTo15(Number(durationMinutes || 60))
-      const end = new Date(start.getTime() + dur * 60_000)
+      const startUtc = zonedToUtc({ year: yyyy, month: mm, day: dd, hour: hh, minute: mi }, tz)
+      const endUtc = new Date(startUtc.getTime() + dur * 60_000)
 
       const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          startsAt: start.toISOString(),
-          endsAt: end.toISOString(),
+          startsAt: startUtc.toISOString(),
+          endsAt: endUtc.toISOString(),
           note: note.trim() ? note.trim() : null,
         }),
       })
@@ -132,11 +153,12 @@ export default function EditBlockModal({ open, blockId, onClose, onSaved }: Prop
   }
 
   async function remove() {
-    if (!blockId) return // ✅ fixes TS + runtime
+    if (!blockId) return
     if (deleting) return
 
     setDeleting(true)
     setError(null)
+
     try {
       const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
@@ -155,74 +177,68 @@ export default function EditBlockModal({ open, blockId, onClose, onSaved }: Prop
 
   return (
     <div
+      className="fixed inset-0 z-1400 flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.45)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        zIndex: 1400,
-      }}
     >
       <div
+        className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          maxWidth: 560,
-          background: '#fff',
-          borderRadius: 14,
-          border: '1px solid #eee',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-          overflow: 'hidden',
-        }}
       >
-        <div style={{ padding: 14, borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontWeight: 900 }}>Blocked time</div>
-          <button type="button" onClick={onClose} style={{ border: '1px solid #ddd', background: '#fff', borderRadius: 999, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+        {/* header */}
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-bgSecondary px-4 py-3">
+          <div className="text-sm font-extrabold text-textPrimary">Blocked time</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/60"
+          >
             Close
           </button>
         </div>
 
-        <div style={{ padding: 14 }}>
+        {/* body */}
+        <div className="px-4 py-4">
           {!blockId && (
-            <div style={{ fontSize: 12, color: '#666' }}>
-              No block selected.
+            <div className="text-xs text-textSecondary">No block selected.</div>
+          )}
+
+          {blockId && loading && (
+            <div className="text-xs text-textSecondary">Loading…</div>
+          )}
+
+          {error && (
+            <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              {error}
             </div>
           )}
 
-          {blockId && loading && <div style={{ fontSize: 12, color: '#666' }}>Loading…</div>}
-          {error && <div style={{ fontSize: 12, color: 'red', marginBottom: 10 }}>{error}</div>}
-
           {canEdit && block && !loading && (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Date</div>
+                  <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Date</div>
                   <input
                     type="date"
                     value={dateStr}
                     onChange={(e) => setDateStr(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                    className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 placeholder:text-textSecondary focus:border-white/20"
                   />
                 </div>
 
                 <div>
-                  <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Start time</div>
+                  <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Start time</div>
                   <input
                     type="time"
                     step={15 * 60}
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                    className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 focus:border-white/20"
                   />
                 </div>
               </div>
 
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Duration (minutes)</div>
+              <div className="mt-3">
+                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Duration (minutes)</div>
                 <input
                   type="number"
                   step={15}
@@ -230,65 +246,57 @@ export default function EditBlockModal({ open, blockId, onClose, onSaved }: Prop
                   max={720}
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                  className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 focus:border-white/20"
                 />
               </div>
 
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Note (optional)</div>
+              <div className="mt-3">
+                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Note (optional)</div>
                 <input
                   type="text"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Lunch, admin time, school pickup…"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                  className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 placeholder:text-textSecondary focus:border-white/20"
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 14 }}>
+              <div className="mt-5 flex items-center justify-between gap-3">
                 <button
                   type="button"
                   onClick={() => void remove()}
                   disabled={deleting || saving}
-                  style={{
-                    border: '1px solid #ef4444',
-                    background: '#fff',
-                    color: '#ef4444',
-                    borderRadius: 999,
-                    padding: '8px 12px',
-                    cursor: deleting || saving ? 'default' : 'pointer',
-                    fontSize: 12,
-                    fontWeight: 900,
-                    opacity: deleting || saving ? 0.7 : 1,
-                  }}
+                  className={[
+                    'rounded-full border px-4 py-2 text-xs font-extrabold',
+                    'border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/15',
+                    deleting || saving ? 'cursor-not-allowed opacity-60' : '',
+                  ].join(' ')}
                 >
                   {deleting ? 'Deleting…' : 'Delete block'}
                 </button>
 
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={onClose}
                     disabled={saving || deleting}
-                    style={{ border: '1px solid #ddd', background: '#fff', borderRadius: 999, padding: '8px 12px', cursor: saving || deleting ? 'default' : 'pointer', fontSize: 12 }}
+                    className={[
+                      'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/60',
+                      saving || deleting ? 'cursor-not-allowed opacity-60' : '',
+                    ].join(' ')}
                   >
                     Cancel
                   </button>
+
                   <button
                     type="button"
                     onClick={() => void save()}
                     disabled={saving || deleting}
-                    style={{
-                      border: 'none',
-                      background: '#111',
-                      color: '#fff',
-                      borderRadius: 999,
-                      padding: '8px 12px',
-                      cursor: saving || deleting ? 'default' : 'pointer',
-                      fontSize: 12,
-                      fontWeight: 900,
-                      opacity: saving || deleting ? 0.7 : 1,
-                    }}
+                    className={[
+                      'rounded-full px-4 py-2 text-xs font-extrabold text-black',
+                      'bg-brandGold hover:brightness-110',
+                      saving || deleting ? 'cursor-not-allowed opacity-60' : '',
+                    ].join(' ')}
                   >
                     {saving ? 'Saving…' : 'Save'}
                   </button>

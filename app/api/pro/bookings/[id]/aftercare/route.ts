@@ -1,6 +1,9 @@
+// app/api/pro/bookings/[id]/aftercare/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import crypto from 'node:crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,8 +31,13 @@ type Body = {
   createProductReminder?: unknown
   productReminderDaysAfter?: unknown
 
+  // If true, marks booking COMPLETED + sessionStep DONE (only if allowed)
   completeBooking?: unknown
+
+  // If true, allow saving before AFTER_PHOTOS/DONE
   allowDraft?: unknown
+
+  // If true, editing aftercare makes the client notif unread again
   markClientNotifUnreadOnEdit?: unknown
 
   recommendedProducts?: unknown
@@ -44,19 +52,24 @@ const PRODUCT_URL_MAX = 2048
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
+
 function toBool(x: unknown): boolean {
   return x === true || x === 'true' || x === 1 || x === '1'
 }
+
 function toInt(x: unknown, fallback: number): number {
   const n = typeof x === 'number' ? x : typeof x === 'string' ? parseInt(x.trim(), 10) : NaN
   return Number.isFinite(n) ? n : fallback
 }
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
+
 function pickString(x: unknown) {
   return typeof x === 'string' && x.trim() ? x.trim() : null
 }
+
 function parseOptionalISODate(x: unknown): Date | null | 'invalid' {
   if (x === null || x === undefined || x === '') return null
   if (typeof x !== 'string') return 'invalid'
@@ -64,9 +77,11 @@ function parseOptionalISODate(x: unknown): Date | null | 'invalid' {
   if (Number.isNaN(d.getTime())) return 'invalid'
   return d
 }
+
 function isRebookMode(x: unknown): x is RebookMode {
   return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
 }
+
 function isValidHttpUrl(raw: string) {
   const s = raw.trim()
   if (!s || s.length > PRODUCT_URL_MAX) return false
@@ -78,16 +93,20 @@ function isValidHttpUrl(raw: string) {
   }
 }
 
+function newPublicToken() {
+  // 32 hex chars; unguessable enough for “public view” tokens
+  return crypto.randomBytes(16).toString('hex')
+}
+
 function normalizeRecommendedProducts(input: unknown) {
-  if (input == null) return []
+  if (input == null) return [] as Array<{ name: string; url: string; note: string | null }>
 
   if (!Array.isArray(input)) return { error: 'recommendedProducts must be an array.' as const }
   if (input.length > MAX_PRODUCTS) return { error: `recommendedProducts max is ${MAX_PRODUCTS}.` as const }
 
-  const out: Array<{ id: string; name: string; url: string; note: string | null }> = []
+  const out: Array<{ name: string; url: string; note: string | null }> = []
 
   for (const row of input as RecommendedProductIn[]) {
-    const id = typeof row?.id === 'string' && row.id.trim() ? row.id.trim() : crypto.randomUUID()
     const name = typeof row?.name === 'string' ? row.name.trim().slice(0, PRODUCT_NAME_MAX) : ''
     const url = typeof row?.url === 'string' ? row.url.trim().slice(0, PRODUCT_URL_MAX) : ''
     const noteRaw = typeof row?.note === 'string' ? row.note.trim() : ''
@@ -100,7 +119,7 @@ function normalizeRecommendedProducts(input: unknown) {
     if (!url) return { error: 'Each recommended product needs a link.' as const }
     if (!isValidHttpUrl(url)) return { error: 'Product link must be a valid http/https URL.' as const }
 
-    out.push({ id, name, url, note })
+    out.push({ name, url, note })
   }
 
   return out
@@ -111,6 +130,30 @@ function makeReminderDedupeKey(bookingId: string, type: 'REBOOK' | 'PRODUCT_FOLL
 }
 function makeClientNotifDedupeKey(bookingId: string) {
   return `client_aftercare:${bookingId}`
+}
+
+/**
+ * For rebook reminders:
+ * - BOOKED_NEXT_APPOINTMENT / single rebookedFor: dueAt = target - daysBefore
+ * - RECOMMENDED_WINDOW: dueAt = windowStart - daysBefore (so they’re nudged at the beginning)
+ */
+function computeRebookReminderDueAt(args: {
+  mode: RebookMode
+  rebookedFor: Date | null
+  windowStart: Date | null
+  daysBefore: number
+}) {
+  const { mode, rebookedFor, windowStart, daysBefore } = args
+  const base =
+    mode === 'RECOMMENDED_WINDOW'
+      ? windowStart
+      : rebookedFor
+
+  if (!base) return null
+
+  const due = new Date(base)
+  due.setDate(due.getDate() - daysBefore)
+  return Number.isNaN(due.getTime()) ? base : due
 }
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -152,7 +195,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
               },
               orderBy: { id: 'asc' },
             },
-          } as any,
+          },
         },
       },
     })
@@ -187,7 +230,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       return NextResponse.json({ error: (normalizedProducts as any).error }, { status: 400 })
     }
 
-    const rebookMode: RebookMode = isRebookMode(body.rebookMode) ? (body.rebookMode as any) : 'NONE'
+    const rawMode: RebookMode = isRebookMode(body.rebookMode) ? (body.rebookMode as RebookMode) : 'NONE'
     const nextBookingId = pickString(body.nextBookingId)
 
     const rebookedForParsed = parseOptionalISODate(body.rebookedFor)
@@ -232,7 +275,12 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       )
     }
 
-    const completeBooking = body.completeBooking == null ? step === 'DONE' : toBool(body.completeBooking)
+    // Important: don’t auto-complete booking just because someone saved a draft.
+    // Default behavior:
+    // - If already eligible step DONE, we can complete unless explicitly disabled
+    // - If not DONE, default false unless explicitly true
+    const completeBookingDefault = step === 'DONE'
+    const completeBooking = body.completeBooking == null ? completeBookingDefault : toBool(body.completeBooking)
 
     // Validate next booking if provided
     let verifiedNextBooking: { id: string; scheduledFor: Date } | null = null
@@ -249,20 +297,28 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       verifiedNextBooking = { id: nb.id, scheduledFor: nb.scheduledFor }
     }
 
-    // Normalize rebook fields
+    // Normalize rebook fields (explicitly clear unrelated fields)
+    let normalizedMode: RebookMode = rawMode
     let rebookedFor: Date | null = null
     let rebookWindowStart: Date | null = null
     let rebookWindowEnd: Date | null = null
-    let normalizedMode: RebookMode = rebookMode
 
-    if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
+    if (rawMode === 'BOOKED_NEXT_APPOINTMENT') {
       rebookedFor = verifiedNextBooking?.scheduledFor ?? (rebookedForParsed as Date | null)
       if (!rebookedFor) {
-        return NextResponse.json({ error: 'BOOKED_NEXT_APPOINTMENT requires nextBookingId or rebookedFor.' }, { status: 400 })
+        return NextResponse.json(
+          { error: 'BOOKED_NEXT_APPOINTMENT requires nextBookingId or rebookedFor.' },
+          { status: 400 },
+        )
       }
-    } else if (rebookMode === 'RECOMMENDED_WINDOW') {
+      rebookWindowStart = null
+      rebookWindowEnd = null
+    } else if (rawMode === 'RECOMMENDED_WINDOW') {
       if (!windowStartParsed || !windowEndParsed) {
-        return NextResponse.json({ error: 'RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.' }, { status: 400 })
+        return NextResponse.json(
+          { error: 'RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.' },
+          { status: 400 },
+        )
       }
       if (windowEndParsed <= windowStartParsed) {
         return NextResponse.json({ error: 'rebookWindowEnd must be after rebookWindowStart.' }, { status: 400 })
@@ -272,18 +328,20 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       rebookedFor = null
     } else {
       normalizedMode = 'NONE'
+      rebookedFor = null
+      rebookWindowStart = null
+      rebookWindowEnd = null
     }
-
-    const allowRebookReminder = Boolean(rebookedFor)
 
     const result = await prisma.$transaction(async (tx) => {
       const existingToken = booking.aftercareSummary?.publicToken ?? null
+      const tokenToUse = existingToken || newPublicToken()
 
       const aftercare = await tx.aftercareSummary.upsert({
         where: { bookingId: booking.id },
         create: {
           bookingId: booking.id,
-          ...(existingToken ? { publicToken: existingToken } : {}),
+          publicToken: tokenToUse,
           notes: notes || null,
           rebookMode: normalizedMode as any,
           rebookedFor,
@@ -291,24 +349,32 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
           rebookWindowEnd,
         } as any,
         update: {
+          publicToken: tokenToUse,
           notes: notes || null,
           rebookMode: normalizedMode as any,
           rebookedFor,
           rebookWindowStart,
           rebookWindowEnd,
         } as any,
-        select: { id: true, publicToken: true, rebookMode: true, rebookedFor: true, rebookWindowStart: true, rebookWindowEnd: true },
+        select: {
+          id: true,
+          publicToken: true,
+          rebookMode: true,
+          rebookedFor: true,
+          rebookWindowStart: true,
+          rebookWindowEnd: true,
+        },
       })
 
-      // ✅ Replace recommendations with the submitted external list (simple + deterministic)
-      // Long-term we can diff, but for now: deleteMany + createMany is clean and correct.
+      // Replace recommendations (simple + reliable)
       await tx.productRecommendation.deleteMany({
         where: { aftercareSummaryId: aftercare.id },
       })
 
-      if ((normalizedProducts as any[]).length) {
+      const products = normalizedProducts as Array<{ name: string; url: string; note: string | null }>
+      if (products.length) {
         await tx.productRecommendation.createMany({
-          data: (normalizedProducts as any[]).map((p) => ({
+          data: products.map((p) => ({
             aftercareSummaryId: aftercare.id,
             productId: null,
             externalName: p.name,
@@ -354,6 +420,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         })
       }
 
+      // Only complete if requested + not a draft save situation
       if (completeBooking) {
         await tx.booking.update({
           where: { id: booking.id },
@@ -367,12 +434,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
       let remindersTouched = 0
 
+      // Rebook reminder (supports both single-date and window)
       const rebookKey = makeReminderDedupeKey(booking.id, 'REBOOK')
-      if (allowRebookReminder && createRebookReminder && rebookedFor) {
-        const due = new Date(rebookedFor)
-        due.setDate(due.getDate() - rebookReminderDaysBefore)
-        const safeDueAt = Number.isNaN(due.getTime()) ? rebookedFor : due
+      const rebookDue = computeRebookReminderDueAt({
+        mode: normalizedMode,
+        rebookedFor,
+        windowStart: rebookWindowStart,
+        daysBefore: rebookReminderDaysBefore,
+      })
 
+      if (createRebookReminder && rebookDue) {
         await tx.reminder.upsert({
           where: { dedupeKey: rebookKey } as any,
           create: {
@@ -382,13 +453,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             bookingId: booking.id,
             type: 'REBOOK',
             title: `Rebook: ${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim(),
-            body: `Target date: ${rebookedFor.toISOString()}`,
-            dueAt: safeDueAt,
+            body:
+              normalizedMode === 'RECOMMENDED_WINDOW'
+                ? `Recommended window: ${rebookWindowStart?.toISOString()} → ${rebookWindowEnd?.toISOString()}`
+                : `Target date: ${rebookedFor?.toISOString()}`,
+            dueAt: rebookDue,
           } as any,
           update: {
             title: `Rebook: ${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim(),
-            body: `Target date: ${rebookedFor.toISOString()}`,
-            dueAt: safeDueAt,
+            body:
+              normalizedMode === 'RECOMMENDED_WINDOW'
+                ? `Recommended window: ${rebookWindowStart?.toISOString()} → ${rebookWindowEnd?.toISOString()}`
+                : `Target date: ${rebookedFor?.toISOString()}`,
+            dueAt: rebookDue,
           } as any,
         })
         remindersTouched++
@@ -397,9 +474,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         remindersTouched += del.count
       }
 
+      // Product follow-up reminder
       const productKey = makeReminderDedupeKey(booking.id, 'PRODUCT_FOLLOWUP')
       if (createProductReminder) {
-        const base = booking.finishedAt ?? booking.scheduledFor
+        const base = booking.finishedAt ?? booking.scheduledFor ?? new Date()
         const due = new Date(base)
         due.setDate(due.getDate() + productReminderDaysAfter)
 
@@ -429,7 +507,12 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         remindersTouched += del.count
       }
 
-      return { aftercare, remindersTouched, completed: completeBooking, nextBookingId: verifiedNextBooking?.id ?? null }
+      return {
+        aftercare,
+        remindersTouched,
+        completed: completeBooking,
+        nextBookingId: verifiedNextBooking?.id ?? null,
+      }
     })
 
     const nextHref = result.completed ? '/pro/calendar' : `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`

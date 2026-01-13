@@ -4,28 +4,24 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 
-type SummaryResponse = {
-  hasUnread: boolean
-  count: number
-}
+type SummaryResponse = { hasUnread: boolean; count: number }
 
 function titleFromPath(pathname: string | null): string {
   if (!pathname) return 'TOVIS Pro'
-
-  if (pathname === '/pro') return 'Professional Dashboard'
+  if (pathname === '/pro/dashboard') return 'Professional Dashboard'
   if (pathname.startsWith('/pro/calendar')) return 'Calendar'
   if (pathname.startsWith('/pro/notifications')) return 'Notifications'
   if (pathname.startsWith('/pro/bookings')) return 'Bookings'
   if (pathname.startsWith('/pro/clients')) return 'Clients'
   if (pathname.startsWith('/pro/profile')) return 'Profile'
-
+  if (pathname.startsWith('/pro/public-profile')) return 'Public Profile'
+  if (pathname.startsWith('/pro/media')) return 'Media'
   return 'TOVIS Pro'
 }
 
 export default function ProHeader() {
   const router = useRouter()
   const pathname = usePathname()
-
   const [hasUnread, setHasUnread] = useState(false)
 
   useEffect(() => {
@@ -33,112 +29,56 @@ export default function ProHeader() {
 
     async function loadSummary() {
       try {
-        const res = await fetch('/api/pro/notifications/summary', {
-          cache: 'no-store',
-        })
+        const res = await fetch('/api/pro/notifications/summary', { cache: 'no-store' })
         if (!res.ok) return
         const data = (await res.json()) as SummaryResponse
-        if (!cancelled) {
-          setHasUnread(!!data.hasUnread)
-        }
+        if (!cancelled) setHasUnread(!!data.hasUnread)
       } catch {
-        // ignore, header still works
+        // ignore
       }
     }
 
-    // only on /pro subtree
-    if (pathname && pathname.startsWith('/pro')) {
-      loadSummary()
-    }
-
+    if (pathname?.startsWith('/pro')) loadSummary()
     return () => {
       cancelled = true
     }
   }, [pathname])
 
-  // Don’t show header at all outside /pro
-  if (!pathname || !pathname.startsWith('/pro')) {
-    return null
-  }
+  if (!pathname?.startsWith('/pro')) return null
 
   const title = titleFromPath(pathname)
 
   return (
-    <header
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 48,
-        padding: '8px 12px',
-        background: '#ffffff',
-        borderBottom: '1px solid #e5e5e5',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        zIndex: 50,
-        fontFamily: 'system-ui',
-      }}
-    >
-      {/* Back button */}
-      <button
-        type="button"
-        onClick={() => router.back()}
-        style={{
-          border: 'none',
-          background: 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          cursor: 'pointer',
-          fontSize: 13,
-          color: '#111',
-        }}
-      >
-        <span style={{ fontSize: 18 }}>‹</span>
-        <span>Back</span>
-      </button>
+    <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-bgPrimary/80 backdrop-blur">
+      <div className="mx-auto flex h-12 max-w-5xl items-center justify-between px-3 font-sans">
+        {/* Back */}
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-[12px] font-black text-textPrimary hover:border-white/20"
+        >
+          <span className="text-[16px] leading-none">‹</span>
+          <span>Back</span>
+        </button>
 
-      {/* Page title */}
-      <div
-        style={{
-          fontSize: 15,
-          fontWeight: 600,
-          textAlign: 'center',
-          flex: 1,
-        }}
-      >
-        {title}
+        {/* Title */}
+        <div className="px-3 text-center text-[13px] font-black text-textPrimary">
+          {title}
+        </div>
+
+        {/* Bell */}
+        <button
+          type="button"
+          onClick={() => router.push('/pro/notifications')}
+          className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20"
+          aria-label="Notifications"
+        >
+          <span className="text-[16px]">🔔</span>
+          {hasUnread && (
+            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-toneDanger ring-2 ring-bgSecondary" />
+          )}
+        </button>
       </div>
-
-      {/* Bell → notifications page */}
-      <button
-        type="button"
-        onClick={() => router.push('/pro/notifications')}
-        style={{
-          border: 'none',
-          background: 'transparent',
-          position: 'relative',
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ fontSize: 18 }}>🔔</span>
-        {hasUnread && (
-          <span
-            style={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              width: 9,
-              height: 9,
-              borderRadius: '50%',
-              background: '#ef4444',
-              border: '1px solid #fff',
-            }}
-          />
-        )}
-      </button>
     </header>
   )
 }

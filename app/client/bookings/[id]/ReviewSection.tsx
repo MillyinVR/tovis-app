@@ -62,6 +62,30 @@ function isProbablyUrl(s: string) {
   }
 }
 
+function btnBase(disabled?: boolean) {
+  return [
+    'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
+    'border border-white/10',
+    disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass',
+  ].join(' ')
+}
+
+function btnPrimary(disabled?: boolean) {
+  return [
+    'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
+    'border border-white/10',
+    disabled ? 'cursor-not-allowed opacity-70 bg-bgPrimary text-textSecondary' : 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+  ].join(' ')
+}
+
+function btnDanger(disabled?: boolean) {
+  return [
+    'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
+    'border border-white/10',
+    disabled ? 'cursor-not-allowed opacity-70 bg-bgPrimary text-textSecondary' : 'bg-bgPrimary text-microAccent hover:bg-surfaceGlass',
+  ].join(' ')
+}
+
 export default function ReviewSection({
   bookingId,
   existingReview,
@@ -82,12 +106,10 @@ export default function ReviewSection({
     setBody(existingReview?.body ?? '')
   }, [existingReview?.id])
 
-  // Appointment media options (pro-uploaded booking media)
   const [apptMedia, setApptMedia] = useState<AppointmentMediaOption[]>([])
   const [selectedApptMediaIds, setSelectedApptMediaIds] = useState<string[]>([])
   const APPT_SELECT_MAX = 2
 
-  // URL-based media queue (client uploads, placeholder)
   const [mediaUrl, setMediaUrl] = useState('')
   const [mediaType, setMediaType] = useState<MediaType>('IMAGE')
   const [pendingMedia, setPendingMedia] = useState<Array<{ url: string; mediaType: MediaType }>>([])
@@ -100,9 +122,7 @@ export default function ReviewSection({
 
   const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    return () => abortRef.current?.abort()
-  }, [])
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const stars = useMemo(() => [1, 2, 3, 4, 5], [])
   const mediaList = existingReview?.mediaAssets ?? []
@@ -113,11 +133,10 @@ export default function ReviewSection({
     setSuccess(null)
   }
 
-  // Load appointment media options
   useEffect(() => {
     let cancelled = false
     async function load() {
-      if (!bookingId || hasReview) return // only needed on first creation (simpler UX)
+      if (!bookingId || hasReview) return
       try {
         const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/review-media-options`, { method: 'GET' })
         if (res.status === 401) return
@@ -140,7 +159,7 @@ export default function ReviewSection({
     setSelectedApptMediaIds((prev) => {
       const has = prev.includes(id)
       if (has) return prev.filter((x) => x !== id)
-      if (prev.length >= APPT_SELECT_MAX) return prev // silently enforce max 2
+      if (prev.length >= APPT_SELECT_MAX) return prev
       return [...prev, id]
     })
   }
@@ -198,8 +217,8 @@ export default function ReviewSection({
             rating,
             headline,
             body,
-            attachedMediaIds: selectedApptMediaIds, // ✅ pro booking media selected by client
-            media: pendingMedia.map((m) => ({ url: m.url, mediaType: m.mediaType })), // ✅ client uploads
+            attachedMediaIds: selectedApptMediaIds,
+            media: pendingMedia.map((m) => ({ url: m.url, mediaType: m.mediaType })),
           }),
         },
         'login_required_review_submit',
@@ -302,7 +321,6 @@ export default function ReviewSection({
     if (!existingReview || loading) return
     resetAlerts()
 
-    // ✅ Your rule: if the review has images, it’s permanent (no “oops” later)
     if (hasReviewMedia) {
       setError('This review has media attached, so it can’t be deleted.')
       return
@@ -344,109 +362,59 @@ export default function ReviewSection({
           role="dialog"
           aria-modal="true"
           onClick={() => setPreview(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-            zIndex: 9999,
-          }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-bgPrimary/70 p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{
-              width: 'min(920px, 100%)',
-              borderRadius: 16,
-              background: '#fff',
-              overflow: 'hidden',
-              boxShadow: '0 10px 40px rgba(0,0,0,0.25)',
-            }}
+            className="w-full max-w-4xl overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-2xl"
           >
-            <div
-              style={{
-                padding: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                borderBottom: '1px solid #eee',
-              }}
-            >
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
+            <div className="flex items-center justify-between border-b border-white/10 p-3">
+              <div className="text-xs font-semibold text-textSecondary">
                 {preview.mediaType === 'VIDEO' ? 'Video preview' : 'Image preview'}
               </div>
-              <button
-                type="button"
-                onClick={() => setPreview(null)}
-                style={{
-                  border: 'none',
-                  background: '#111',
-                  color: '#fff',
-                  borderRadius: 999,
-                  padding: '6px 10px',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                }}
-              >
+              <button type="button" onClick={() => setPreview(null)} className={btnPrimary(false)}>
                 Close
               </button>
             </div>
 
-            <div style={{ background: '#000' }}>
+            <div className="bg-bgPrimary">
               {preview.mediaType === 'VIDEO' ? (
-                <video src={preview.url} controls style={{ width: '100%', maxHeight: '75vh', display: 'block' }} />
+                <video src={preview.url} controls className="block max-h-[75vh] w-full" />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={preview.url}
-                  alt="Full size preview"
-                  style={{ width: '100%', maxHeight: '75vh', objectFit: 'contain', display: 'block' }}
-                />
+                <img src={preview.url} alt="Full size preview" className="block max-h-[75vh] w-full object-contain" />
               )}
             </div>
           </div>
         </div>
       ) : null}
 
-      <section
-        style={{
-          borderRadius: 12,
-          border: '1px solid #eee',
-          background: '#fff',
-          padding: 12,
-          marginTop: 16,
-          display: 'grid',
-          gap: 10,
-        }}
-      >
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{hasReview ? 'Your review' : 'Leave a review'}</div>
+      <section className="mt-5 grid gap-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+        <div className="text-sm font-black">{hasReview ? 'Your review' : 'Leave a review'}</div>
 
         {/* Rating */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{ fontSize: 12, color: '#6b7280', width: 70 }}>Rating</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {[1, 2, 3, 4, 5].map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setRating(s)}
-                disabled={loading}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: loading ? 'default' : 'pointer',
-                  fontSize: 18,
-                  lineHeight: 1,
-                  color: s <= rating ? '#f59e0b' : '#d1d5db',
-                  opacity: loading ? 0.7 : 1,
-                }}
-                aria-label={`${s} star`}
-              >
-                ★
-              </button>
-            ))}
+        <div className="flex items-center gap-3">
+          <div className="w-20 text-xs font-semibold text-textSecondary">Rating</div>
+          <div className="flex gap-1">
+            {stars.map((s) => {
+              const on = s <= rating
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setRating(s)}
+                  disabled={loading}
+                  className={[
+                    'text-lg leading-none transition',
+                    loading ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
+                    on ? 'text-accentPrimary' : 'text-textSecondary',
+                  ].join(' ')}
+                  aria-label={`${s} star`}
+                >
+                  ★
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -455,7 +423,7 @@ export default function ReviewSection({
           onChange={(e) => setHeadline(e.target.value)}
           placeholder="Headline (optional)"
           disabled={loading}
-          style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e7eb', padding: 10, fontSize: 13, opacity: loading ? 0.7 : 1 }}
+          className="w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
         />
 
         <textarea
@@ -464,19 +432,19 @@ export default function ReviewSection({
           placeholder="Write your review (optional)"
           rows={4}
           disabled={loading}
-          style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e7eb', padding: 10, fontSize: 13, resize: 'vertical', opacity: loading ? 0.7 : 1 }}
+          className="w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
         />
 
-        {/* Appointment media selector (only when creating a review) */}
+        {/* Appointment media selector */}
         {!hasReview ? (
-          <div style={{ borderRadius: 10, border: '1px solid #f3f4f6', padding: 10, background: '#fafafa' }}>
-            <div style={{ fontSize: 12, fontWeight: 600 }}>Add photos from your appointment (optional)</div>
-            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+          <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+            <div className="text-xs font-black">Add photos from your appointment (optional)</div>
+            <div className="mt-1 text-xs font-semibold text-textSecondary">
               Select up to {APPT_SELECT_MAX}. If you don’t select any, they stay private inside your aftercare summary.
             </div>
 
             {apptMedia.length ? (
-              <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+              <div className="mt-3 grid grid-cols-3 gap-2">
                 {apptMedia.map((m) => {
                   const selected = selectedApptMediaIds.includes(m.id)
                   const thumb = m.thumbUrl || m.url
@@ -486,31 +454,20 @@ export default function ReviewSection({
                       type="button"
                       onClick={() => toggleApptMedia(m.id)}
                       disabled={loading}
-                      style={{
-                        border: selected ? '2px solid #111' : '1px solid #eee',
-                        borderRadius: 10,
-                        overflow: 'hidden',
-                        padding: 0,
-                        background: '#f3f4f6',
-                        cursor: loading ? 'default' : 'pointer',
-                        position: 'relative',
-                      }}
+                      className={[
+                        'relative overflow-hidden rounded-card border bg-bgSecondary transition',
+                        selected ? 'border-accentPrimary' : 'border-white/10',
+                        loading ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-surfaceGlass',
+                      ].join(' ')}
                       title="Click to select"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={thumb} alt="Appointment media" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
+                      <img src={thumb} alt="Appointment media" className="block h-36 w-full object-cover" />
                       <div
-                        style={{
-                          position: 'absolute',
-                          left: 8,
-                          bottom: 8,
-                          background: selected ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)',
-                          color: selected ? '#fff' : '#111',
-                          borderRadius: 999,
-                          padding: '4px 8px',
-                          fontSize: 11,
-                          fontWeight: 700,
-                        }}
+                        className={[
+                          'absolute left-2 bottom-2 rounded-full px-3 py-1 text-[11px] font-black',
+                          selected ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary text-textPrimary border border-white/10',
+                        ].join(' ')}
                       >
                         {selected ? 'Selected' : 'Select'}
                       </div>
@@ -519,33 +476,32 @@ export default function ReviewSection({
                 })}
               </div>
             ) : (
-              <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>No appointment photos available.</div>
+              <div className="mt-2 text-sm text-textSecondary">No appointment photos available.</div>
             )}
           </div>
         ) : null}
 
-        {/* Existing media (immutable) */}
+        {/* Existing media */}
         {hasReview ? (
-          <div style={{ marginTop: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Your media</div>
+          <div className="mt-1">
+            <div className="mb-2 text-xs font-black">Your media</div>
 
             {mediaList.length ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+              <div className="grid grid-cols-3 gap-2">
                 {mediaList.map((m) => {
                   const thumb = m.thumbUrl || m.url
                   return (
-                    <div key={m.id} style={{ border: '1px solid #eee', borderRadius: 10, overflow: 'hidden', background: '#f3f4f6' }}>
+                    <div key={m.id} className="overflow-hidden rounded-card border border-white/10 bg-bgPrimary">
                       <button
                         type="button"
                         onClick={() => setPreview({ url: m.url, mediaType: m.mediaType })}
-                        style={{ border: 'none', padding: 0, margin: 0, cursor: 'pointer', width: '100%', display: 'block', background: 'transparent' }}
+                        className="block w-full bg-transparent p-0"
                         title="Click to preview"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={thumb} alt="Review media" style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
+                        <img src={thumb} alt="Review media" className="block h-36 w-full object-cover" />
                       </button>
-
-                      <div style={{ padding: 8, fontSize: 11, color: '#6b7280' }}>
+                      <div className="p-2 text-[11px] font-semibold text-textSecondary">
                         Attached to your review (can’t be removed)
                       </div>
                     </div>
@@ -553,45 +509,40 @@ export default function ReviewSection({
                 })}
               </div>
             ) : (
-              <div style={{ fontSize: 12, color: '#6b7280' }}>No media added yet.</div>
+              <div className="text-sm text-textSecondary">No media added yet.</div>
             )}
           </div>
         ) : null}
 
         {/* Client upload queue */}
-        <div style={{ borderRadius: 10, border: '1px solid #f3f4f6', padding: 10, background: '#fafafa', display: 'grid', gap: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600 }}>Add your own photos/videos</div>
+        <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
+          <div className="text-xs font-black">Add your own photos/videos</div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 8 }}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_140px]">
             <input
               value={mediaUrl}
               onChange={(e) => setMediaUrl(e.target.value)}
               placeholder="Paste media URL (we’ll replace with real upload later)"
               disabled={loading}
-              style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e7eb', padding: 10, fontSize: 13, background: '#fff', opacity: loading ? 0.7 : 1 }}
+              className="w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
             />
             <select
               value={mediaType}
               onChange={(e) => setMediaType(e.target.value as MediaType)}
               disabled={loading}
-              style={{ borderRadius: 10, border: '1px solid #e5e7eb', padding: 10, fontSize: 13, background: '#fff', opacity: loading ? 0.7 : 1 }}
+              className="w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
             >
               <option value="IMAGE">Image</option>
               <option value="VIDEO">Video</option>
             </select>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button
-              type="button"
-              onClick={addPendingMedia}
-              disabled={loading}
-              style={{ border: 'none', borderRadius: 999, padding: '8px 12px', background: '#111', color: '#fff', cursor: loading ? 'default' : 'pointer', fontSize: 12, opacity: loading ? 0.7 : 1 }}
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={addPendingMedia} disabled={loading} className={btnPrimary(loading)}>
               Add to list
             </button>
 
-            <div style={{ fontSize: 12, color: '#6b7280' }}>{pendingMedia.length} item(s) queued</div>
+            <div className="text-xs font-semibold text-textSecondary">{pendingMedia.length} item(s) queued</div>
 
             {pendingMedia.length > 0 ? (
               <button
@@ -601,7 +552,7 @@ export default function ReviewSection({
                   setPendingMedia([])
                 }}
                 disabled={loading}
-                style={{ border: 'none', borderRadius: 999, padding: '8px 12px', background: '#e5e7eb', color: '#111', cursor: loading ? 'default' : 'pointer', fontSize: 12, opacity: loading ? 0.7 : 1 }}
+                className={btnBase(loading)}
               >
                 Clear queue
               </button>
@@ -609,9 +560,9 @@ export default function ReviewSection({
           </div>
 
           {pendingMedia.length > 0 ? (
-            <div style={{ fontSize: 12, color: '#374151' }}>
+            <div className="text-xs font-semibold text-textSecondary">
               {pendingMedia.map((m, idx) => (
-                <div key={`${m.url}-${idx}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div key={`${m.url}-${idx}`} className="truncate">
                   • {m.mediaType}: {m.url}
                 </div>
               ))}
@@ -619,28 +570,22 @@ export default function ReviewSection({
           ) : null}
         </div>
 
-        {error ? <div style={{ color: 'red', fontSize: 12 }}>{error}</div> : null}
-        {success ? <div style={{ color: 'green', fontSize: 12 }}>{success}</div> : null}
+        {error ? <div className="text-sm font-semibold text-microAccent">{error}</div> : null}
+        {success ? <div className="text-sm font-semibold text-textSecondary">{success}</div> : null}
 
-        {/* Actions */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+        <div className="flex flex-wrap justify-end gap-2">
           {!hasReview ? (
             <button
               type="button"
               disabled={loading || !bookingId}
               onClick={submitReview}
-              style={{ border: 'none', borderRadius: 999, padding: '10px 14px', background: '#111', color: '#fff', cursor: loading ? 'default' : 'pointer', fontSize: 13, opacity: loading ? 0.7 : 1 }}
+              className={btnPrimary(loading || !bookingId)}
             >
               {loading ? 'Submitting…' : 'Submit review'}
             </button>
           ) : (
             <>
-              <button
-                type="button"
-                disabled={loading}
-                onClick={saveEdits}
-                style={{ border: 'none', borderRadius: 999, padding: '10px 14px', background: '#111', color: '#fff', cursor: loading ? 'default' : 'pointer', fontSize: 13, opacity: loading ? 0.7 : 1 }}
-              >
+              <button type="button" disabled={loading} onClick={saveEdits} className={btnPrimary(loading)}>
                 {loading ? 'Saving…' : 'Save changes'}
               </button>
 
@@ -648,16 +593,7 @@ export default function ReviewSection({
                 type="button"
                 disabled={loading || pendingMedia.length === 0}
                 onClick={addMediaToExistingReview}
-                style={{
-                  border: 'none',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  background: pendingMedia.length === 0 ? '#9ca3af' : '#111',
-                  color: '#fff',
-                  cursor: loading || pendingMedia.length === 0 ? 'default' : 'pointer',
-                  fontSize: 13,
-                  opacity: loading ? 0.7 : 1,
-                }}
+                className={btnPrimary(loading || pendingMedia.length === 0)}
               >
                 {loading ? 'Saving…' : 'Add queued media'}
               </button>
@@ -666,16 +602,7 @@ export default function ReviewSection({
                 type="button"
                 disabled={loading || hasReviewMedia}
                 onClick={deleteReview}
-                style={{
-                  border: 'none',
-                  borderRadius: 999,
-                  padding: '10px 14px',
-                  background: hasReviewMedia ? '#f3f4f6' : '#b91c1c',
-                  color: hasReviewMedia ? '#6b7280' : '#fff',
-                  cursor: !hasReviewMedia && !loading ? 'pointer' : 'default',
-                  fontSize: 13,
-                  opacity: loading ? 0.7 : 1,
-                }}
+                className={btnDanger(loading || hasReviewMedia)}
                 title={hasReviewMedia ? 'This review has media attached, so it can’t be deleted.' : 'Delete your review'}
               >
                 Delete review
