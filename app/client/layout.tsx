@@ -2,6 +2,8 @@
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import ClientSessionFooterPortal from '@/app/_components/ClientSessionFooter/ClientSessionFooterPortal'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -72,6 +74,10 @@ export default async function ClientLayout({ children }: { children: React.React
 
       {/* Page content */}
       <div style={{ maxWidth: 980, margin: '0 auto', padding: '18px 16px 90px' }}>{children}</div>
+
+      {/* ✅ Bottom footer (client only) */}
+      <ClientSessionFooterPortal inboxBadge={aftercareBadge} />
+
     </div>
   )
 }
