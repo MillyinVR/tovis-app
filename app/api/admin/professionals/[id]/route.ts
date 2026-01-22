@@ -1,18 +1,22 @@
 // app/api/admin/professionals/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { pickBool, pickString } from '@/app/api/_utils/pick'
 import { AdminPermissionRole, VerificationStatus } from '@prisma/client'
-import { hasAdminPermission } from '@/lib/adminPermissions'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+type Params = { id: string }
+type Ctx = { params: Params | Promise<Params> }
+
+async function getParams(ctx: Ctx): Promise<Params> {
+  return await Promise.resolve(ctx.params)
 }
 
-function pickBool(v: unknown) {
-  return typeof v === 'boolean' ? v : null
+function trimId(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
 }
 
 function normalizeStatus(v: unknown): VerificationStatus | null {
@@ -23,32 +27,44 @@ function normalizeStatus(v: unknown): VerificationStatus | null {
   return null
 }
 
-export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
-    const { id } = await context.params
-    if (!id) return NextResponse.json({ error: 'Missing professional id.' }, { status: 400 })
+    const { id } = await getParams(ctx)
+    const professionalId = trimId(id)
+    if (!professionalId) {
+      return NextResponse.json({ error: 'Missing professional id.' }, { status: 400 })
+    }
 
-    // Permission: reviewer or super admin, scoped to this professional if applicable
-    const ok = await hasAdminPermission({
+    const perm = await requireAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER],
-      scope: { professionalId: id },
+      scope: { professionalId },
     })
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!perm.ok) return perm.res
 
-    const body = await req.json().catch(() => ({}))
+    const body = await req.json().catch(() => ({} as any))
+
     const status = normalizeStatus(body?.verificationStatus)
     const licenseVerified = pickBool(body?.licenseVerified)
 
-    if (!status && licenseVerified == null) {
+    // If they sent a non-empty string but it’s invalid, reject (don’t silently ignore)
+    const rawStatus = pickString(body?.verificationStatus)
+    if (rawStatus && !status) {
+      return NextResponse.json(
+        { error: 'Invalid verificationStatus. Use PENDING, APPROVED, or REJECTED.' },
+        { status: 400 },
+      )
+    }
+
+    if (status === null && licenseVerified == null) {
       return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 })
     }
 
     const updated = await prisma.professionalProfile.update({
-      where: { id },
+      where: { id: professionalId },
       data: {
         ...(status ? { verificationStatus: status } : {}),
         ...(licenseVerified != null ? { licenseVerified } : {}),
@@ -56,11 +72,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       select: { id: true, verificationStatus: true, licenseVerified: true },
     })
 
+    // best-effort log (never fail request)
     await prisma.adminActionLog
       .create({
         data: {
           adminUserId: user.id,
-          professionalId: id,
+          professionalId,
           action: 'PRO_VERIFICATION_UPDATED',
           note: `status=${status ?? 'UNCHANGED'} licenseVerified=${licenseVerified ?? 'UNCHANGED'}`,
         },

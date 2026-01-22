@@ -1,14 +1,10 @@
 // app/api/pro/calendar/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { isValidIanaTimeZone, sanitizeTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
+import type { ProfessionalLocationType, BookingStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-function isProRole(role: unknown) {
-  const r = typeof role === 'string' ? role.toUpperCase() : ''
-  return r === 'PROFESSIONAL' || r === 'PRO'
-}
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
@@ -18,9 +14,10 @@ function addDaysUtc(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
 
-function pickPositiveNumber(v: any, fallback: number) {
-  const n = Number(v)
-  return Number.isFinite(n) && n > 0 ? n : fallback
+function clampInt(n: unknown, fallback: number, min: number, max: number) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return fallback
+  return Math.min(Math.max(Math.trunc(x), min), max)
 }
 
 function hoursRounded(minutes: number) {
@@ -28,109 +25,48 @@ function hoursRounded(minutes: number) {
   return Math.round(h * 2) / 2
 }
 
-function isValidIanaTimeZone(tz: string | null | undefined) {
-  if (!tz || typeof tz !== 'string') return false
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return true
-  } catch {
-    return false
-  }
+function locationSupportsSalon(type: ProfessionalLocationType) {
+  return type === 'SALON' || type === 'SUITE'
 }
 
-function dtfPartsInTimeZone(date: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = dtf.formatToParts(date)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
-}
-
-function timeZoneOffsetMinutes(at: Date, timeZone: string) {
-  const p = dtfPartsInTimeZone(at, timeZone)
-  const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
-  const offsetMs = asIfUtc - at.getTime()
-  return Math.round(offsetMs / 60_000)
-}
-
-function zonedToUtc(
-  args: { year: number; month: number; day: number; hour: number; minute: number; second?: number },
-  timeZone: string,
-) {
-  const { year, month, day, hour, minute } = args
-  const second = args.second ?? 0
-
-  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
-  for (let i = 0; i < 4; i++) {
-    const off = timeZoneOffsetMinutes(guess, timeZone)
-    const corrected = new Date(Date.UTC(year, month - 1, day, hour, minute, second) - off * 60_000)
-    if (Math.abs(corrected.getTime() - guess.getTime()) < 500) return corrected
-    guess = corrected
-  }
-  return guess
-}
-
-function startOfDayUtcInTimeZone(date: Date, timeZone: string) {
-  const p = dtfPartsInTimeZone(date, timeZone)
-  return zonedToUtc({ year: p.year, month: p.month, day: p.day, hour: 0, minute: 0, second: 0 }, timeZone)
+function locationSupportsMobile(type: ProfessionalLocationType) {
+  return type === 'MOBILE_BASE'
 }
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-
-    if (!user || !isProRole((user as any).role) || !(user as any).professionalProfile?.id) {
-      return NextResponse.json(
-        {
-          error: 'Only professionals can view the pro calendar.',
-          debug: {
-            hasUser: Boolean(user),
-            role: (user as any)?.role ?? null,
-            hasProfessionalProfile: Boolean((user as any)?.professionalProfile?.id),
-          },
-        },
-        { status: 401 },
-      )
-    }
-
-    const professionalId = (user as any).professionalProfile.id as string
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
     const proProfile = await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
-      select: {
-        workingHours: true,
-        autoAcceptBookings: true,
-        timeZone: true,
-      },
+      select: { id: true, timeZone: true, autoAcceptBookings: true },
+    })
+    if (!proProfile) return jsonFail(404, 'Professional profile not found.')
+
+    const locations = await prisma.professionalLocation.findMany({
+      where: { professionalId, isBookable: true },
+      select: { id: true, type: true, isPrimary: true, timeZone: true },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      take: 50,
     })
 
-    if (!proProfile) {
-      return NextResponse.json({ error: 'Professional profile not found.' }, { status: 404 })
-    }
+    const canSalon = locations.some((l) => locationSupportsSalon(l.type))
+    const canMobile = locations.some((l) => locationSupportsMobile(l.type))
 
-    // ✅ Use DB timezone if valid; otherwise fall back to UTC *and* tell UI to prompt setup
-    const tzRaw = typeof proProfile.timeZone === 'string' ? proProfile.timeZone.trim() : ''
+    const primaryLocTz =
+      locations.find((l) => l.isPrimary && typeof l.timeZone === 'string' && l.timeZone.trim())?.timeZone ?? null
+
+    const tzRaw =
+      (typeof primaryLocTz === 'string' && primaryLocTz.trim()) ||
+      (typeof proProfile.timeZone === 'string' && proProfile.timeZone.trim()) ||
+      ''
+
     const tzValid = isValidIanaTimeZone(tzRaw)
-    const proTz = tzValid ? tzRaw : 'UTC'
+    const proTz = sanitizeTimeZone(tzRaw, 'UTC')
     const needsTimeZoneSetup = !tzValid
 
-    // Window: start of "today" in pro timezone (or UTC fallback) -> +60 days
     const now = new Date()
     const from = startOfDayUtcInTimeZone(now, proTz)
     const toExclusive = addDaysUtc(from, 60)
@@ -139,7 +75,7 @@ export async function GET() {
       where: {
         professionalId,
         scheduledFor: { gte: from, lt: toExclusive },
-        NOT: { status: 'CANCELLED' as any },
+        NOT: { status: 'CANCELLED' satisfies BookingStatus },
       },
       select: {
         id: true,
@@ -147,20 +83,10 @@ export async function GET() {
         status: true,
         totalDurationMinutes: true,
         bufferMinutes: true,
-        durationMinutesSnapshot: true,
-
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            user: { select: { email: true } },
-          },
-        },
-
-        // Keep this for fallback
+        locationType: true,
+        locationId: true,
+        client: { select: { firstName: true, lastName: true, user: { select: { email: true } } } },
         service: { select: { name: true } },
-
-        // ✅ Requested service truth: serviceItems
         serviceItems: {
           select: {
             id: true,
@@ -171,64 +97,56 @@ export async function GET() {
           },
           orderBy: { sortOrder: 'asc' },
         },
-      } as any,
+      },
       orderBy: { scheduledFor: 'asc' },
-      take: 500,
+      take: 800,
     })
 
-    const events = bookings.map((b: any) => {
+    const blocks = await prisma.calendarBlock.findMany({
+      where: { professionalId, startsAt: { lt: toExclusive }, endsAt: { gt: from } },
+      select: { id: true, startsAt: true, endsAt: true, note: true, locationId: true },
+      orderBy: { startsAt: 'asc' },
+      take: 800,
+    })
+
+    const bookingEvents = bookings.map((b) => {
       const start = new Date(b.scheduledFor)
-
-      const baseDuration = pickPositiveNumber(
-        b.totalDurationMinutes,
-        pickPositiveNumber(b.durationMinutesSnapshot, 60),
-      )
-
-      const buffer = pickPositiveNumber(b.bufferMinutes, 0)
+      const baseDuration = clampInt(b.totalDurationMinutes, 60, 15, 12 * 60)
+      const buffer = clampInt(b.bufferMinutes, 0, 0, 180)
       const end = addMinutes(start, baseDuration + buffer)
 
       const status = String(b.status || '').toUpperCase()
-
       const firstItemName =
         Array.isArray(b.serviceItems) && b.serviceItems.length
           ? String(b.serviceItems[0]?.service?.name || '').trim()
           : ''
 
-      const serviceName =
-        status === 'BLOCKED'
-          ? 'Blocked time'
-          : status === 'WAITLIST'
-            ? 'Waitlist'
-            : firstItemName || b.service?.name || 'Appointment'
+      const serviceName = firstItemName || b.service?.name || 'Appointment'
 
       const fn = String(b.client?.firstName || '').trim()
       const ln = String(b.client?.lastName || '').trim()
       const email = String(b.client?.user?.email || '').trim()
-
-      const clientName =
-        status === 'BLOCKED'
-          ? 'Personal'
-          : fn || ln
-            ? `${fn} ${ln}`.trim()
-            : email || (status === 'WAITLIST' ? 'Client' : 'Client')
+      const clientName = fn || ln ? `${fn} ${ln}`.trim() : email || 'Client'
 
       return {
         id: String(b.id),
+        kind: 'BOOKING' as const,
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
         title: serviceName,
         clientName,
         status: status as any,
-        durationMinutes: baseDuration, // without buffer
-
-        // Optional: expose details so click view can show it reliably
+        locationType: b.locationType ?? null,
+        locationId: b.locationId ?? null,
+        durationMinutes: baseDuration,
         details: {
           serviceName,
+          bufferMinutes: buffer,
           serviceItems: Array.isArray(b.serviceItems)
-            ? b.serviceItems.map((si: any) => ({
+            ? b.serviceItems.map((si) => ({
                 id: String(si.id),
                 name: String(si.service?.name || '').trim() || null,
-                durationMinutes: pickPositiveNumber(si.durationMinutesSnapshot, 0),
+                durationMinutes: clampInt(si.durationMinutesSnapshot, 0, 0, 12 * 60),
                 price: si.priceSnapshot ?? null,
                 sortOrder: Number(si.sortOrder ?? 0),
               }))
@@ -237,7 +155,30 @@ export async function GET() {
       }
     })
 
-    // "Today" boundaries in pro timezone (or UTC fallback)
+    const blockEvents = blocks.map((bl) => {
+      const start = new Date(bl.startsAt)
+      const end = new Date(bl.endsAt)
+      const title = bl.note?.trim() ? bl.note.trim() : 'Blocked time'
+
+      return {
+        id: `block_${String(bl.id)}`,
+        kind: 'BLOCK' as const,
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+        title,
+        clientName: 'Personal',
+        status: 'BLOCKED' as const,
+        locationType: null,
+        locationId: bl.locationId ?? null,
+        durationMinutes: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000)),
+        details: { note: bl.note ?? null },
+      }
+    })
+
+    const events = [...bookingEvents, ...blockEvents].sort(
+      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+    )
+
     const todayStart = startOfDayUtcInTimeZone(now, proTz)
     const todayEndExclusive = addDaysUtc(todayStart, 1)
 
@@ -246,33 +187,20 @@ export async function GET() {
       return t >= todayStart.getTime() && t < todayEndExclusive.getTime()
     }
 
-    const todaysBookingsEvents = events.filter((e: any) => {
+    const todaysBookingsEvents = bookingEvents.filter((e) => {
       const s = String(e.status || '').toUpperCase()
       return isToday(e.startsAt) && (s === 'ACCEPTED' || s === 'COMPLETED')
     })
 
-    const pendingRequestEvents = events.filter((e: any) => {
+    const pendingRequestEvents = bookingEvents.filter((e) => {
       const s = String(e.status || '').toUpperCase()
       if (s !== 'PENDING') return false
       return new Date(e.startsAt).getTime() >= now.getTime()
     })
 
-    const waitlistTodayEvents = events.filter((e: any) => {
-      const s = String(e.status || '').toUpperCase()
-      return isToday(e.startsAt) && s === 'WAITLIST'
-    })
-
-    const blockedTodayEvents = events.filter((e: any) => {
-      const s = String(e.status || '').toUpperCase()
-      return isToday(e.startsAt) && s === 'BLOCKED'
-    })
-
-    const blockedMinutesToday = blockedTodayEvents.reduce((acc: number, e: any) => {
-      const s = new Date(e.startsAt).getTime()
-      const en = new Date(e.endsAt).getTime()
-      const mins = Math.max(0, Math.round((en - s) / 60_000))
-      return acc + mins
-    }, 0)
+    const waitlistTodayEvents = bookingEvents.filter((e) => isToday(e.startsAt) && String(e.status).toUpperCase() === 'WAITLIST')
+    const blockedTodayEvents = blockEvents.filter((e) => isToday(e.startsAt))
+    const blockedMinutesToday = blockedTodayEvents.reduce((acc, e) => acc + (e.durationMinutes || 0), 0)
 
     const stats = {
       todaysBookings: todaysBookingsEvents.length,
@@ -281,13 +209,13 @@ export async function GET() {
       blockedHours: blockedMinutesToday ? hoursRounded(blockedMinutesToday) : 0,
     }
 
-    return NextResponse.json(
+    return jsonOk(
       {
-        ok: true,
         timeZone: proTz,
         needsTimeZoneSetup,
         events,
-        workingHours: proProfile.workingHours ?? null,
+        canSalon,
+        canMobile,
         stats,
         autoAcceptBookings: Boolean(proProfile.autoAcceptBookings),
         management: {
@@ -297,10 +225,10 @@ export async function GET() {
           blockedToday: blockedTodayEvents,
         },
       },
-      { status: 200 },
+      200,
     )
   } catch (e) {
     console.error('GET /api/pro/calendar error:', e)
-    return NextResponse.json({ error: 'Failed to load pro calendar.' }, { status: 500 })
+    return jsonFail(500, 'Failed to load pro calendar.')
   }
 }

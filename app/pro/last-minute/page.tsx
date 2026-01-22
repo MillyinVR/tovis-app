@@ -1,4 +1,3 @@
-// app/pro/last-minute/page.tsx
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -16,6 +15,13 @@ export default async function ProLastMinutePage() {
 
   const proId = user.professionalProfile.id
 
+  // Pull the pro timezone (single source of truth: schedule owner)
+  // If your schema uses a different field name, adjust here.
+  const proProfile = await prisma.professionalProfile.findUnique({
+    where: { id: proId },
+    select: { timeZone: true },
+  })
+
   const settings = await prisma.lastMinuteSettings.upsert({
     where: { professionalId: proId },
     create: { professionalId: proId },
@@ -30,6 +36,9 @@ export default async function ProLastMinutePage() {
   })
 
   const payload = {
+    // ✅ required by settingsClient: interpret datetime-local in THIS TZ
+    timeZone: proProfile?.timeZone ?? null,
+
     settings: {
       ...settings,
       minPrice: settings.minPrice ? moneyToString(settings.minPrice) : null,
@@ -37,14 +46,16 @@ export default async function ProLastMinutePage() {
         ...r,
         minPrice: r.minPrice ? moneyToString(r.minPrice) : null,
       })),
+      blocks: settings.blocks.map((b) => ({
+        id: b.id,
+        startAt: new Date(b.startAt).toISOString(),
+        endAt: new Date(b.endAt).toISOString(),
+        reason: b.reason ?? null,
+      })),
     },
+
     offerings: offerings.map((o) => {
-      // Option B: pick a reasonable “base” price for display/rules
-      const base =
-        o.salonPriceStartingAt ??
-        o.mobilePriceStartingAt ??
-        o.service.minPrice ??
-        null
+      const base = o.salonPriceStartingAt ?? o.mobilePriceStartingAt ?? o.service.minPrice ?? null
 
       return {
         id: o.id,
@@ -52,7 +63,7 @@ export default async function ProLastMinutePage() {
         name: o.title || o.service.name,
         basePrice: base ? moneyToString(base) : '0.00',
 
-        // Optional extras if your OpeningsClient wants them later
+        // Optional extras (fine to keep)
         offersInSalon: o.offersInSalon,
         offersMobile: o.offersMobile,
         salonPriceStartingAt: o.salonPriceStartingAt ? moneyToString(o.salonPriceStartingAt) : null,
@@ -64,17 +75,19 @@ export default async function ProLastMinutePage() {
   }
 
   return (
-    <main style={{ padding: '18px 0', fontFamily: 'system-ui' }}>
-      <h1 style={{ fontSize: 18, margin: 0 }}>Last Minute</h1>
-      <p style={{ marginTop: 6, fontSize: 13, color: '#6b7280' }}>
-        Configure same-day (20%) and within-24-hours (10%) booking rules without wrecking your brand.
-      </p>
+    <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <h1 className="text-[18px] font-black text-textPrimary m-0">Last Minute</h1>
+        <p className="mt-2 text-[13px] font-semibold text-textSecondary">
+          Configure same-day and within-24-hours booking rules without wrecking your brand.
+        </p>
+      </div>
 
-      <div style={{ marginTop: 14 }}>
+      <div className="mt-4">
         <LastMinuteSettingsClient initial={payload as any} />
       </div>
 
-      <div style={{ marginTop: 14 }}>
+      <div className="mt-4">
         <OpeningsClient offerings={payload.offerings as any} />
       </div>
     </main>

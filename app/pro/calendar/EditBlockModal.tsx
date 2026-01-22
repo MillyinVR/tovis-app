@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { isValidIanaTimeZone, zonedToUtc, ymdInTimeZone } from './_utils/date'
+import { isValidIanaTimeZone, zonedToUtc, ymdInTimeZone, minutesSinceMidnightInTimeZone } from './_utils/date'
 import { computeDurationMinutesFromIso } from './_utils/calendarMath'
 
 type Props = {
@@ -91,7 +91,7 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
         const ymd = ymdInTimeZone(start, tz)
         setDateStr(ymd)
 
-        const startMins = minutesSinceMidnightInTz(start, tz)
+        const startMins = minutesSinceMidnightInTimeZone(start, tz)
         setStartTime(toTimeInputValueFromMinutes(startMins))
 
         const dur = roundTo15(computeDurationMinutesFromIso(b.startsAt, b.endsAt))
@@ -128,7 +128,7 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       if (!Number.isFinite(hh) || !Number.isFinite(mi)) throw new Error('Pick a valid start time.')
 
       const dur = roundTo15(Number(durationMinutes || 60))
-      const startUtc = zonedToUtc({ year: yyyy, month: mm, day: dd, hour: hh, minute: mi }, tz)
+      const startUtc = zonedToUtc({ year: yyyy, month: mm, day: dd, hour: hh, minute: mi, timeZone: tz })
       const endUtc = new Date(startUtc.getTime() + dur * 60_000)
 
       const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {

@@ -1,47 +1,40 @@
-import { NextResponse } from 'next/server'
+// app/api/pro/clients/[id]/alert/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
-export async function PATCH(
-  req: Request,
-  context: { params: Promise<{ id: string }> }
-) {
-  const { id } = await context.params
+export const dynamic = 'force-dynamic'
 
-  const user = await getCurrentUser()
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  let body: { alertBanner?: string | null }
-
+export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
 
-  const alertBanner =
-    body.alertBanner && body.alertBanner.trim() !== ''
-      ? body.alertBanner.trim()
-      : null
+    const { id } = await context.params
+    const clientId = pickString(id)
+    if (!clientId) return jsonFail(400, 'Missing client id.')
 
-  try {
+    const body = (await req.json().catch(() => ({}))) as { alertBanner?: unknown }
+
+    const raw = pickString(body.alertBanner)
+    const alertBanner = raw ? raw.slice(0, 300) : null // keep it sane
+
     const updated = await prisma.clientProfile.update({
-      where: { id },
+      where: { id: clientId },
       data: { alertBanner },
-      select: {
-        id: true,
-        alertBanner: true,
-      },
+      select: { id: true, alertBanner: true },
     })
 
-    return NextResponse.json(updated)
-  } catch (err) {
-    console.error('Error updating client alertBanner', err)
-    return NextResponse.json(
-      { error: 'Failed to update client alert' },
-      { status: 500 }
+    return jsonOk(
+      {
+        client: {
+          id: String(updated.id),
+          alertBanner: updated.alertBanner ?? null,
+        },
+      },
+      200,
     )
+  } catch (err) {
+    console.error('PATCH /api/pro/clients/[id]/alert error', err)
+    return jsonFail(500, 'Failed to update client alert.')
   }
 }

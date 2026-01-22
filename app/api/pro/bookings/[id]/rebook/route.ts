@@ -1,20 +1,18 @@
 // app/api/pro/bookings/[id]/rebook/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requirePro } from '@/app/api/_utils'
+import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type RebookMode = 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
 
 type Body = {
-  mode?: unknown // 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
-  // BOOK
-  scheduledFor?: unknown // ISO string (required for BOOK)
-
-  // RECOMMEND_WINDOW
-  windowStart?: unknown // ISO string (required for RECOMMEND_WINDOW)
-  windowEnd?: unknown // ISO string (required for RECOMMEND_WINDOW)
+  mode?: unknown
+  scheduledFor?: unknown
+  windowStart?: unknown
+  windowEnd?: unknown
 }
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -38,51 +36,61 @@ function badRequest(msg: string) {
   return NextResponse.json({ error: msg }, { status: 400 })
 }
 
-export async function POST(req: Request, { params }: Ctx) {
-  try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+// ✅ Strongly type the payload so booking.id is always string
+const bookingSelect = {
+  id: true,
+  status: true,
+  clientId: true,
+  professionalId: true,
+  locationType: true,
+  serviceItems: {
+    orderBy: { sortOrder: 'asc' },
+    select: {
+      serviceId: true,
+      offeringId: true,
+      priceSnapshot: true,
+      durationMinutesSnapshot: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
 
-    const { id: originalBookingId } = await Promise.resolve(params)
+type BookingPayload = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+
+export async function POST(req: Request, ctx: Ctx) {
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proId = auth.professionalId
+
+    const { id: originalBookingId } = await Promise.resolve(ctx.params)
     if (!originalBookingId?.trim()) return badRequest('Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as Body
     const modeRaw = body.mode ?? 'BOOK'
     const mode: RebookMode = isMode(modeRaw) ? modeRaw : 'BOOK'
 
-    const booking = await prisma.booking.findUnique({
+    const booking = (await prisma.booking.findUnique({
       where: { id: originalBookingId },
-      select: {
-        id: true,
-        status: true,
-        clientId: true,
-        professionalId: true,
-        serviceId: true,
-        offeringId: true,
-        priceSnapshot: true,
-        durationMinutesSnapshot: true,
-        locationType: true,
-      },
-    })
+      select: bookingSelect,
+    })) as BookingPayload | null
 
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    if (booking.professionalId !== proId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    // ✅ Make the ID explicit & stable for Prisma typings
+    const bookingId: string = booking.id
 
     // Policy: only completed bookings can produce aftercare-driven rebooks
-    if (booking.status !== 'COMPLETED') {
+    if (String(booking.status) !== 'COMPLETED') {
       return NextResponse.json({ error: 'Only COMPLETED bookings can be rebooked.' }, { status: 409 })
     }
 
-    // ✅ CLEAR mode: wipe rebook guidance (sometimes pros change their mind)
+    // ✅ CLEAR mode
     if (mode === 'CLEAR') {
       const aftercare = await prisma.aftercareSummary.upsert({
-        where: { bookingId: booking.id },
+        where: { bookingId },
         create: {
-          bookingId: booking.id,
+          bookingId,
           rebookMode: 'NONE' as any,
           rebookedFor: null,
           rebookWindowStart: null,
@@ -108,18 +116,16 @@ export async function POST(req: Request, { params }: Ctx) {
       if (!windowStart || !windowEnd) {
         return badRequest('windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.')
       }
-      if (windowEnd <= windowStart) {
-        return badRequest('windowEnd must be after windowStart.')
-      }
+      if (windowEnd <= windowStart) return badRequest('windowEnd must be after windowStart.')
 
       const aftercare = await prisma.aftercareSummary.upsert({
-        where: { bookingId: booking.id },
+        where: { bookingId },
         create: {
-          bookingId: booking.id,
+          bookingId,
           rebookMode: 'RECOMMENDED_WINDOW' as any,
           rebookWindowStart: windowStart,
           rebookWindowEnd: windowEnd,
-          rebookedFor: null, // important: don’t pretend there’s a booked date
+          rebookedFor: null,
         } as any,
         update: {
           rebookMode: 'RECOMMENDED_WINDOW' as any,
@@ -136,25 +142,21 @@ export async function POST(req: Request, { params }: Ctx) {
         },
       })
 
-      return NextResponse.json(
-        {
-          ok: true,
-          mode,
-          aftercare,
-        },
-        { status: 200 },
-      )
+      return NextResponse.json({ ok: true, mode, aftercare }, { status: 200 })
     }
 
-    // ✅ BOOK mode: create the next booking now
+    // ✅ BOOK mode
     const scheduledFor = parseISODate(body.scheduledFor)
-    if (!scheduledFor) {
-      return badRequest('scheduledFor is required (ISO string) for BOOK mode.')
-    }
+    if (!scheduledFor) return badRequest('scheduledFor is required (ISO string) for BOOK mode.')
 
     const now = new Date()
     if (scheduledFor.getTime() < now.getTime() - 60_000) {
       return badRequest('scheduledFor must be in the future.')
+    }
+
+    const primary = booking.serviceItems?.[0] ?? null
+    if (!primary?.serviceId || !primary?.offeringId) {
+      return NextResponse.json({ error: 'This booking has no service items to rebook.' }, { status: 409 })
     }
 
     const created = await prisma.$transaction(async (tx) => {
@@ -162,24 +164,29 @@ export async function POST(req: Request, { params }: Ctx) {
         data: {
           clientId: booking.clientId,
           professionalId: booking.professionalId,
-          serviceId: booking.serviceId,
-          offeringId: booking.offeringId,
-          scheduledFor,
-          status: 'ACCEPTED',
-          locationType: booking.locationType,
-          priceSnapshot: booking.priceSnapshot,
-          durationMinutesSnapshot: booking.durationMinutesSnapshot,
 
-          source: 'AFTERCARE',
-          rebookOfBookingId: booking.id,
+          serviceId: primary.serviceId,
+          offeringId: primary.offeringId,
+
+          scheduledFor,
+          status: 'ACCEPTED' as any,
+          locationType: booking.locationType as any,
+
+          // Keep legacy mirrors ONLY if your schema actually has them.
+          // If TS complains here next, we’ll remove them.
+          priceSnapshot: primary.priceSnapshot as any,
+          durationMinutesSnapshot: primary.durationMinutesSnapshot as any,
+
+          source: 'AFTERCARE' as any,
+          rebookOfBookingId: bookingId,
         } as any,
         select: { id: true, scheduledFor: true, status: true },
       })
 
       const aftercare = await tx.aftercareSummary.upsert({
-        where: { bookingId: booking.id },
+        where: { bookingId },
         create: {
-          bookingId: booking.id,
+          bookingId,
           rebookMode: 'BOOKED_NEXT_APPOINTMENT' as any,
           rebookedFor: scheduledFor,
           rebookWindowStart: null,
@@ -198,12 +205,7 @@ export async function POST(req: Request, { params }: Ctx) {
     })
 
     return NextResponse.json(
-      {
-        ok: true,
-        mode,
-        nextBookingId: created.nextBooking.id,
-        aftercare: created.aftercare,
-      },
+      { ok: true, mode, nextBookingId: created.nextBooking.id, aftercare: created.aftercare },
       { status: 201 },
     )
   } catch (e) {

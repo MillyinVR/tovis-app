@@ -1,4 +1,4 @@
-// app/explore/page.tsx  (or wherever your ExplorePage lives)
+// app/explore/page.tsx
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 
@@ -32,6 +32,21 @@ function pickStartingAt(off: any): { price: number | null; duration: number | nu
   return { price: null, duration: null }
 }
 
+function formatPrimaryLocationLine(loc: {
+  formattedAddress: string | null
+  name: string | null
+  city: string | null
+  state: string | null
+} | null) {
+  if (!loc) return null
+  return (
+    loc.formattedAddress?.trim() ||
+    loc.name?.trim() ||
+    [loc.city, loc.state].filter(Boolean).join(', ') ||
+    null
+  )
+}
+
 export default async function ExplorePage() {
   const offerings = await prisma.professionalServiceOffering.findMany({
     where: { isActive: true },
@@ -56,13 +71,25 @@ export default async function ExplorePage() {
           category: { select: { name: true } },
         },
       },
+
       professional: {
         select: {
           id: true,
           businessName: true,
-          city: true,
+          // ✅ legacy string can stay if your schema still has it
           location: true,
           user: { select: { email: true } },
+          // ✅ new source of truth
+          locations: {
+            where: { isPrimary: true },
+            take: 1,
+            select: {
+              name: true,
+              formattedAddress: true,
+              city: true,
+              state: true,
+            },
+          },
         },
       },
     },
@@ -94,10 +121,21 @@ export default async function ExplorePage() {
             const { price, duration } = pickStartingAt(off)
 
             const proName = prof?.businessName || prof?.user?.email || 'Professional'
-            const location = prof?.city || prof?.location || null
-            const modeLabel = off.offersInSalon && off.offersMobile ? 'Salon + Mobile' : off.offersInSalon ? 'Salon' : off.offersMobile ? 'Mobile' : 'Unconfigured'
 
-            // REQUESTED is default in offerings/[id]/page.tsx, so no need to add ?source=REQUESTED here.
+            const primaryLoc = prof?.locations?.[0] ?? null
+            const locFromLocations = formatPrimaryLocationLine(primaryLoc)
+            const location = locFromLocations || prof?.location || null
+
+            const modeLabel =
+              off.offersInSalon && off.offersMobile
+                ? 'Salon + Mobile'
+                : off.offersInSalon
+                  ? 'Salon'
+                  : off.offersMobile
+                    ? 'Mobile'
+                    : 'Unconfigured'
+
+            // REQUESTED is default in offerings/[id]/page.tsx
             const href = `/offerings/${off.id}`
 
             return (

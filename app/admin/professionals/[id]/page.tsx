@@ -1,10 +1,33 @@
-// app/admin/professionals/[id]/page.tsx
 import AdminGuard from '../../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
 import { AdminPermissionRole } from '@prisma/client'
 import AdminProActions from './AdminProActions'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
+
+function fmtUtcDate(d: Date) {
+  const tz = sanitizeTimeZone('UTC', 'UTC')
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  }).format(d)
+}
+
+function fmtUtcDateTime(d: Date) {
+  const tz = sanitizeTimeZone('UTC', 'UTC')
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(d)
+}
 
 export default async function AdminProfessionalDetailPage({
   params,
@@ -44,106 +67,144 @@ export default async function AdminProfessionalDetailPage({
     },
   })
 
-  // Still wrap the "not found" state in AdminGuard so unauthorized people don't learn anything.
+  const fromHref = `/admin/professionals/${encodeURIComponent(id)}`
+
   if (!pro) {
     return (
       <AdminGuard
-        from={`/admin/professionals/${encodeURIComponent(id)}`}
+        from={fromHref}
         allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
         scope={{ professionalId: id }}
       >
-        <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
-          Professional not found.
-        </div>
+        <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
+            Professional not found.
+          </div>
+        </main>
       </AdminGuard>
     )
   }
 
   const proId = pro.id
+  const from = `/admin/professionals/${encodeURIComponent(proId)}`
+
+  const proName = pro.businessName || 'Unnamed business'
+  const email = pro.user?.email || 'No email'
+  const profession = pro.professionType || 'Unknown'
+  const location = pro.location || 'No location'
+
+  const licenseLine = (() => {
+    const state = pro.licenseState || '??'
+    const num = pro.licenseNumber || '—'
+    const exp = pro.licenseExpiry ? ` · Exp ${fmtUtcDate(new Date(pro.licenseExpiry))}` : ''
+    return `License: ${state} ${num}${exp}`
+  })()
+
+  const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
+  const hint = 'text-[12px] font-semibold text-textSecondary'
 
   return (
     <AdminGuard
-      from={`/admin/professionals/${encodeURIComponent(proId)}`}
+      from={from}
       allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
       scope={{ professionalId: proId }}
     >
-      <div style={{ display: 'grid', gap: 14 }}>
-        {/* PRO SUMMARY + ACTIONS */}
-        <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ display: 'grid', gap: 6 }}>
-              <div style={{ fontSize: 18, fontWeight: 1000 }}>{pro.businessName || 'Unnamed business'}</div>
-              <div style={{ fontSize: 13, color: '#6b7280' }}>{pro.user.email}</div>
+      <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+        <div className="grid gap-4">
+          {/* PRO SUMMARY + ACTIONS */}
+          <section className={card}>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-240px">
+                <div className="text-[16px] font-black text-textPrimary">{proName}</div>
+                <div className={`${hint} mt-1`}>{email}</div>
 
-              <div style={{ fontSize: 13, color: '#6b7280' }}>
-                {pro.professionType || 'Unknown'} · {pro.location || 'No location'}
+                <div className={`${hint} mt-2`}>
+                  {profession} · {location}
+                </div>
+
+                <div className={`${hint} mt-1`}>{licenseLine}</div>
               </div>
 
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
-                License: {pro.licenseState || '??'} {pro.licenseNumber || '—'}{' '}
-                {pro.licenseExpiry ? `· Exp ${new Date(pro.licenseExpiry).toLocaleDateString()}` : ''}
-              </div>
+              {/* IMPORTANT:
+                  Keep mutations in client component so auth cookies are included.
+                  Server actions calling /api/* will bite you later. */}
+              <AdminProActions
+                professionalId={proId}
+                currentStatus={pro.verificationStatus}
+                licenseVerified={pro.licenseVerified}
+              />
             </div>
 
-            {/* IMPORTANT:
-                Use the client component for mutations so auth cookies are included.
-                Server actions calling /api/* will bite you later. */}
-            <AdminProActions
-              professionalId={proId}
-              currentStatus={pro.verificationStatus}
-              licenseVerified={pro.licenseVerified}
-            />
-          </div>
+            {pro.bio ? (
+              <div className="mt-3 text-[13px] leading-relaxed text-textPrimary/90 whitespace-pre-wrap">
+                {pro.bio}
+              </div>
+            ) : null}
 
-          {pro.bio ? (
-            <div style={{ marginTop: 10, fontSize: 13, color: '#374151', lineHeight: 1.5 }}>{pro.bio}</div>
-          ) : null}
+            <div className={`${hint} mt-3`}>
+              Current: <span className="font-black text-textPrimary">{pro.verificationStatus}</span> · License
+              verified:{' '}
+              <span className="font-black text-textPrimary">{String(pro.licenseVerified)}</span>
+              <span className="ml-2 opacity-80">· Times shown in UTC</span>
+            </div>
+          </section>
 
-          <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
-            Current: <b>{pro.verificationStatus}</b> · License verified: <b>{String(pro.licenseVerified)}</b>
-          </div>
-        </div>
+          {/* VERIFICATION DOCS */}
+          <section className={card}>
+            <div className="text-[14px] font-black text-textPrimary">Verification documents</div>
+            <div className={`${hint} mt-1`}>Newest first. Times shown in UTC.</div>
 
-        {/* VERIFICATION DOCS */}
-        <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
-          <div style={{ fontWeight: 1000, marginBottom: 10 }}>Verification documents</div>
+            {pro.verificationDocs.length === 0 ? (
+              <div className="mt-3 text-[13px] font-semibold text-textSecondary">No docs uploaded.</div>
+            ) : (
+              <div className="mt-4 grid gap-3">
+                {pro.verificationDocs.map((d) => {
+                  const href = d.url || d.imageUrl || null
+                  const created = fmtUtcDateTime(new Date(d.createdAt))
 
-          {pro.verificationDocs.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#6b7280' }}>No docs uploaded.</div>
-          ) : (
-            <div style={{ display: 'grid', gap: 10 }}>
-              {pro.verificationDocs.map((d) => {
-                const href = d.url || d.imageUrl || null
-                return (
-                  <div key={d.id} style={{ border: '1px solid #f3f4f6', borderRadius: 14, padding: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                      <div style={{ fontWeight: 1000 }}>
-                        {d.type}{' '}
-                        <span style={{ fontWeight: 800, fontSize: 12, color: '#6b7280' }}>({d.status})</span>
+                  return (
+                    <div
+                      key={d.id}
+                      className="rounded-card border border-white/10 bg-bgPrimary p-3"
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-3">
+                        <div className="text-[13px] font-black text-textPrimary">
+                          {d.type}{' '}
+                          <span className="text-[12px] font-semibold text-textSecondary">
+                            ({d.status})
+                          </span>
+                        </div>
+                        <div className={hint}>{created}</div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>{new Date(d.createdAt).toLocaleString()}</div>
+
+                      {d.label ? <div className={`${hint} mt-2`}>{d.label}</div> : null}
+
+                      {href ? (
+                        <div className="mt-3">
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                          >
+                            Open document
+                          </a>
+                        </div>
+                      ) : null}
+
+                      {d.adminNote ? (
+                        <div className={`${hint} mt-3`}>
+                          Admin note: <span className="text-textPrimary">{d.adminNote}</span>
+                        </div>
+                      ) : null}
                     </div>
-
-                    {d.label ? <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>{d.label}</div> : null}
-
-                    {href ? (
-                      <div style={{ fontSize: 12, marginTop: 8 }}>
-                        <a href={href} target="_blank" rel="noreferrer">
-                          Open document
-                        </a>
-                      </div>
-                    ) : null}
-
-                    {d.adminNote ? (
-                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>Admin note: {d.adminNote}</div>
-                    ) : null}
-                  </div>
-                )
-              })}
-            </div>
-          )}
+                  )
+                })}
+              </div>
+            )}
+          </section>
         </div>
-      </div>
+      </main>
     </AdminGuard>
   )
 }

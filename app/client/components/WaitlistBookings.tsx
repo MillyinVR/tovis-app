@@ -4,28 +4,67 @@
 import { useMemo, useState } from 'react'
 import type { WaitlistLike } from './_helpers'
 import { prettyWhen, locationLabel } from './_helpers'
+import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
 
 type Props = {
   items: WaitlistLike[]
   onChanged?: () => void
 }
 
-function toDatetimeLocalValue(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours(),
-  )}:${pad(d.getMinutes())}`
-}
-
-function datetimeLocalToISO(value: string) {
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
+function getBrowserTimeZone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (tz && isValidIanaTimeZone(tz)) return tz
+  } catch {
+    // ignore
+  }
+  return 'UTC'
 }
 
 function clampMinutes(n: number) {
   if (!Number.isFinite(n)) return 60
   return Math.max(15, Math.min(24 * 60, Math.floor(n)))
+}
+
+function toDate(v: unknown): Date | null {
+  if (!v) return null
+  const d = v instanceof Date ? v : new Date(String(v))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/**
+ * ISO UTC -> datetime-local value in the given timeZone
+ * (avoid browser implicit conversions)
+ */
+function toDatetimeLocalValueInTimeZone(isoUtc: string, timeZone: string) {
+  const d = toDate(isoUtc)
+  if (!d) return ''
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const p = getZonedParts(d, tz)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
+}
+
+/**
+ * datetime-local -> UTC ISO, interpreting wall-clock time in timeZone
+ */
+function datetimeLocalToIsoInTimeZone(value: string, timeZone: string) {
+  if (!value || typeof value !== 'string') return null
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!m) return null
+
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const hour = Number(m[4])
+  const minute = Number(m[5])
+
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
+  return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -39,44 +78,44 @@ function Pill({ children }: { children: React.ReactNode }) {
 export default function WaitlistBookings({ items, onChanged }: Props) {
   const list = items ?? []
 
+  // Client UX: treat datetime-local as browser timezone wall clock
+  const tz = useMemo(() => getBrowserTimeZone(), [])
+
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const [desiredForLocal, setDesiredForLocal] = useState<string>('') // datetime-local
+  const [desiredForLocal, setDesiredForLocal] = useState<string>('') // datetime-local (wall clock)
   const [flexMinutes, setFlexMinutes] = useState<number>(60)
   const [timeBucket, setTimeBucket] = useState<string>('')
 
-  const editingItem = useMemo(
-    () => list.find((x) => x.id === editingId) ?? null,
-    [list, editingId],
-  )
+  const editingItem = useMemo(() => list.find((x) => x.id === editingId) ?? null, [list, editingId])
 
   function openEdit(w: WaitlistLike) {
     setErr(null)
     setEditingId(w.id)
 
-    const startISO =
-      (w as any)?.preferredStart ?? (w as any)?.availability?.preferredStart ?? null
-    const endISO =
-      (w as any)?.preferredEnd ?? (w as any)?.availability?.preferredEnd ?? null
+    const startISO = (w as any)?.preferredStart ?? (w as any)?.availability?.preferredStart ?? null
+    const endISO = (w as any)?.preferredEnd ?? (w as any)?.availability?.preferredEnd ?? null
 
-    const seed = (() => {
-      if (startISO) {
-        const d = new Date(String(startISO))
-        if (!Number.isNaN(d.getTime())) return d
-      }
-      return new Date(Date.now() + 2 * 60 * 60_000)
+    const seedIso = (() => {
+      const d = startISO ? toDate(startISO) : null
+      if (d) return d.toISOString()
+      return new Date(Date.now() + 2 * 60 * 60_000).toISOString()
     })()
 
-    setDesiredForLocal(toDatetimeLocalValue(seed))
+    setDesiredForLocal(toDatetimeLocalValueInTimeZone(seedIso, tz))
 
     if (startISO && endISO) {
-      const s = new Date(String(startISO))
-      const e = new Date(String(endISO))
-      const span = e.getTime() - s.getTime()
-      if (Number.isFinite(span) && span > 0) {
-        setFlexMinutes(clampMinutes(Math.round(span / 2 / 60_000)))
+      const s = toDate(startISO)
+      const e = toDate(endISO)
+      if (s && e) {
+        const span = e.getTime() - s.getTime()
+        if (Number.isFinite(span) && span > 0) {
+          setFlexMinutes(clampMinutes(Math.round(span / 2 / 60_000)))
+        } else {
+          setFlexMinutes(60)
+        }
       } else {
         setFlexMinutes(60)
       }
@@ -96,7 +135,7 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
     if (!editingId) return
     setErr(null)
 
-    const desiredForISO = datetimeLocalToISO(desiredForLocal)
+    const desiredForISO = datetimeLocalToIsoInTimeZone(desiredForLocal, tz)
     if (!desiredForISO) {
       setErr('Pick a valid date/time.')
       return
@@ -218,7 +257,8 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
             {isEditing ? (
               <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
                 <div className="text-xs font-medium text-textSecondary">
-                  Set a preferred time and flexibility. We’ll store a window around it.
+                  Set a preferred time and flexibility. We’ll store a window around it.{' '}
+                  <span className="opacity-75">({sanitizeTimeZone(tz, 'UTC')})</span>
                 </div>
 
                 <label className="text-sm font-semibold text-textPrimary">
@@ -237,9 +277,7 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
                   <input
                     type="number"
                     value={flexMinutes}
-                    onChange={(e) =>
-                      setFlexMinutes(clampMinutes(Number(e.target.value) || 60))
-                    }
+                    onChange={(e) => setFlexMinutes(clampMinutes(Number(e.target.value) || 60))}
                     disabled={isBusy}
                     min={15}
                     max={24 * 60}
@@ -297,9 +335,7 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
         )
       })}
 
-      {list.length === 0 ? (
-        <div className="text-sm font-medium text-textSecondary">No waitlist entries.</div>
-      ) : null}
+      {list.length === 0 ? <div className="text-sm font-medium text-textSecondary">No waitlist entries.</div> : null}
     </div>
   )
 }

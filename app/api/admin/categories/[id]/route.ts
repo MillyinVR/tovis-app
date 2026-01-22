@@ -1,44 +1,50 @@
 // app/api/admin/categories/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { pickMethod, pickString } from '@/app/api/_utils/pick'
 import { AdminPermissionRole } from '@prisma/client'
-import { hasAdminPermission } from '@/lib/adminPermissions'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+type Params = { id: string }
+type Ctx = { params: Params | Promise<Params> }
+
+async function getParams(ctx: Ctx): Promise<Params> {
+  return await Promise.resolve(ctx.params)
 }
 
-export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
-    const { id } = await context.params
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    const { id } = await getParams(ctx)
+    const categoryId = typeof id === 'string' ? id.trim() : ''
+    if (!categoryId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const ok = await hasAdminPermission({
+    const perm = await requireAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
-      scope: { categoryId: id },
+      scope: { categoryId },
     })
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!perm.ok) return perm.res
 
     const form = await req.formData()
-    const method = pickString(form.get('_method'))?.toUpperCase()
+    const method = pickMethod(form.get('_method'))
     if (method !== 'PATCH') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
 
     const isActiveRaw = pickString(form.get('isActive'))
     const isActive = isActiveRaw === 'true'
 
     const updated = await prisma.serviceCategory.update({
-      where: { id },
+      where: { id: categoryId },
       data: { isActive },
       select: { id: true, name: true, slug: true },
     })
 
+    // best-effort log (never fail the request because logging failed)
     await prisma.adminActionLog
       .create({
         data: {

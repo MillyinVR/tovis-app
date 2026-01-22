@@ -1,11 +1,14 @@
 // app/client/components/_helpers.tsx
 import React from 'react'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export type BookingStatus =
   | 'PENDING'
   | 'ACCEPTED'
   | 'COMPLETED'
   | 'CANCELLED'
+  | 'WAITLIST'
+  | 'BLOCKED'
   | (string & {})
 
 export type BookingSource =
@@ -14,52 +17,40 @@ export type BookingSource =
   | 'AFTERCARE'
   | (string & {})
 
-// Keep this for compatibility if older code references it
-export type ConsultationApprovalLike = {
-  status?: string | null
+export type Consultation = {
+  consultationNotes?: string | null
+  consultationPrice?: string | null
+  consultationConfirmedAt?: string | null
+
+  approvalStatus?: string | null
+  approvalNotes?: string | null
+  proposedTotal?: string | null
+  proposedServicesJson?: unknown
+
+  approvedAt?: string | null
+  rejectedAt?: string | null
 } | null
-
-// ✅ Canonical consult payload coming from API
-export type ConsultationLike =
-  | {
-      consultationNotes?: string | null
-      consultationPrice?: string | null
-      consultationConfirmedAt?: string | null
-
-      approvalStatus?: string | null
-      approvalNotes?: string | null
-      proposedTotal?: string | null
-      proposedServicesJson?: unknown
-
-      approvedAt?: string | null
-      rejectedAt?: string | null
-    }
-  | null
 
 export type BookingLike = {
   id: string
+
   status?: BookingStatus | null
   source?: BookingSource | null
-
-  // ✅ session + consult approval visibility
-  sessionStep?: string | null
-
-  // ✅ old shape (don’t break imports/components)
-  consultationApproval?: ConsultationApprovalLike
-
-  // ✅ new: full consult payload (preferred)
-  consultation?: ConsultationLike
-
-  // ✅ Policy A/B: badge support for “NEW aftercare”
-  hasUnreadAftercare?: boolean
-
-  // ✅ computed in API response for easy UI use
-  hasPendingConsultationApproval?: boolean
 
   scheduledFor?: string | Date | null
   durationMinutesSnapshot?: number | null
   priceSnapshot?: unknown
 
+  // ✅ canonical consult payload (if you show consult in client UI)
+  consultation?: Consultation
+
+  // ✅ badge support (if you show “NEW aftercare”)
+  hasUnreadAftercare?: boolean
+
+  // ✅ computed by API for UI convenience (optional)
+  hasPendingConsultationApproval?: boolean
+
+  // ✅ service + pro display
   service?: { id?: string; name?: string | null } | null
   professional?: {
     id?: string
@@ -67,7 +58,11 @@ export type BookingLike = {
     location?: string | null
     city?: string | null
     state?: string | null
+    timeZone?: string | null
   } | null
+
+  // ✅ strongest source of truth for display timezone in client UI
+  timeZone?: string | null
 }
 
 export type WaitlistLike = {
@@ -75,6 +70,7 @@ export type WaitlistLike = {
   createdAt?: string | Date | null
   notes?: string | null
   availability?: unknown
+
   service?: { id?: string; name?: string | null } | null
   professional?: {
     id?: string
@@ -82,6 +78,7 @@ export type WaitlistLike = {
     location?: string | null
     city?: string | null
     state?: string | null
+    timeZone?: string | null
   } | null
 }
 
@@ -94,10 +91,18 @@ export function toDate(v: unknown): Date | null {
   return null
 }
 
-export function prettyWhen(v: unknown) {
+/**
+ * Format a timestamp in a specific timezone (IANA).
+ * IMPORTANT: pass booking/pro timezone so client UI isn't viewer-timezone-dependent.
+ */
+export function prettyWhen(v: unknown, timeZone?: string | null) {
   const d = toDate(v)
   if (!d) return 'Unknown time'
+
+  const tz = timeZone ? sanitizeTimeZone(timeZone, 'America/Los_Angeles') : undefined
+
   return d.toLocaleString(undefined, {
+    timeZone: tz,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -120,20 +125,28 @@ export function sourceUpper(v: unknown): string {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-export function Badge({ label, bg, color }: { label: string; bg: string; color: string }) {
+export function Badge({
+  label,
+  variant = 'default',
+}: {
+  label: string
+  variant?: 'default' | 'accent' | 'danger' | 'success'
+}) {
+  const cls =
+    variant === 'accent'
+      ? 'bg-accentPrimary text-bgPrimary'
+      : variant === 'danger'
+        ? 'bg-microAccent text-bgPrimary'
+        : variant === 'success'
+          ? 'bg-emerald-400 text-bgPrimary'
+          : 'bg-bgSecondary text-textPrimary border border-white/10'
+
   return (
     <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '2px 8px',
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 900,
-        background: bg,
-        color,
-        whiteSpace: 'nowrap',
-      }}
+      className={[
+        'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-black whitespace-nowrap',
+        cls,
+      ].join(' ')}
     >
       {label}
     </span>

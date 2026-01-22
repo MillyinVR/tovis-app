@@ -1,24 +1,15 @@
 // app/api/pro/services/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-function isProRole(role: unknown) {
-  const r = typeof role === 'string' ? role.toUpperCase() : ''
-  return r === 'PROFESSIONAL' || r === 'PRO'
-}
-
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
+    const auth = await requirePro()
+    if (auth.res) return auth.res
 
-    if (!user || !isProRole((user as any).role) || !(user as any).professionalProfile?.id) {
-      return NextResponse.json({ error: 'Only professionals can access this.' }, { status: 401 })
-    }
-
-    const professionalId = (user as any).professionalProfile.id as string
+    const professionalId = auth.professionalId
 
     const offerings = await prisma.professionalServiceOffering.findMany({
       where: {
@@ -37,18 +28,16 @@ export async function GET() {
       take: 500,
     })
 
-    // Your UI types currently expect { id, name, durationMinutes? }.
-    // Keep "id" == serviceId so it matches booking.serviceId.
     const services = offerings.map((o) => ({
-      id: o.serviceId,
+      id: String(o.serviceId), // IMPORTANT: matches booking.serviceId expectations
       name: o.service.name,
       durationMinutes: o.salonDurationMinutes ?? o.mobileDurationMinutes ?? o.service.defaultDurationMinutes ?? null,
-      offeringId: o.id, // extra, useful later
+      offeringId: String(o.id),
     }))
 
-    return NextResponse.json({ ok: true, services }, { status: 200 })
+    return jsonOk({ ok: true, services }, 200)
   } catch (e) {
     console.error('GET /api/pro/services error:', e)
-    return NextResponse.json({ error: 'Failed to load services.' }, { status: 500 })
+    return jsonFail(500, 'Failed to load services.')
   }
 }

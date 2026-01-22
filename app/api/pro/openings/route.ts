@@ -1,27 +1,9 @@
 // app/api/pro/openings/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import { OpeningStatus, type ServiceLocationType } from '@prisma/client'
+import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
-
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function isValidDate(d: Date) {
-  return d instanceof Date && !Number.isNaN(d.getTime())
-}
-
-function normalizeLocationType(v: unknown): ServiceLocationType {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
-  return s === 'MOBILE' ? 'MOBILE' : 'SALON'
-}
-
-function addMinutes(date: Date, minutes: number) {
-  return new Date(date.getTime() + minutes * 60_000)
-}
 
 type CreateOpeningBody = {
   offeringId?: unknown
@@ -31,15 +13,46 @@ type CreateOpeningBody = {
   note?: unknown
 }
 
+type PatchOpeningBody = {
+  openingId?: unknown
+  status?: unknown
+  note?: unknown
+  discountPct?: unknown
+}
+
+function parseIsoDate(v: unknown): Date | null {
+  const s = pickString(v)
+  if (!s) return null
+  const d = new Date(s)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60_000)
+}
+
+function normalizeLocationType(v: unknown): ServiceLocationType {
+  const s = upper(v)
+  return s === 'MOBILE' ? 'MOBILE' : 'SALON'
+}
+
+function clampInt(n: unknown, fallback: number, min: number, max: number) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return fallback
+  return Math.min(Math.max(Math.trunc(x), min), max)
+}
+
 function parseDiscountPct(v: unknown): number | null {
-  const n = typeof v === 'number' ? v : Number(v ?? NaN)
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
   if (!Number.isFinite(n)) return null
-  if (n < 0 || n > 90) return null
-  return Math.round(n)
+  const rounded = Math.round(n)
+  if (rounded < 0 || rounded > 90) return null
+  return rounded
 }
 
 function parseOpeningStatus(v: unknown): OpeningStatus | null {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  const s = upper(v)
   if (!s) return null
   const allowed: OpeningStatus[] = ['ACTIVE', 'BOOKED', 'EXPIRED', 'CANCELLED']
   return allowed.includes(s as OpeningStatus) ? (s as OpeningStatus) : null
@@ -47,14 +60,11 @@ function parseOpeningStatus(v: unknown): OpeningStatus | null {
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Only professionals can access openings.' }, { status: 401 })
-    }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-    const professionalId = user.professionalProfile.id
     const { searchParams } = new URL(req.url)
-
     const status = parseOpeningStatus(searchParams.get('status'))
 
     const openings = await prisma.lastMinuteOpening.findMany({
@@ -73,18 +83,16 @@ export async function GET(req: Request) {
         note: true,
         createdAt: true,
         updatedAt: true,
+
         offering: {
           select: {
             id: true,
-            title: true,
-
             offersInSalon: true,
             offersMobile: true,
             salonPriceStartingAt: true,
             salonDurationMinutes: true,
             mobilePriceStartingAt: true,
             mobileDurationMinutes: true,
-
             service: { select: { id: true, name: true } },
           },
         },
@@ -92,42 +100,43 @@ export async function GET(req: Request) {
       },
     })
 
-    return NextResponse.json({ ok: true, openings })
+    const dto = openings.map((o) => ({
+      ...o,
+      startAt: o.startAt.toISOString(),
+      endAt: o.endAt ? o.endAt.toISOString() : null,
+      createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
+    }))
+
+    return jsonOk({ ok: true, openings: dto }, 200)
   } catch (e) {
     console.error('GET /api/pro/openings error', e)
-    return NextResponse.json({ error: 'Failed to load openings.' }, { status: 500 })
+    return jsonFail(500, 'Failed to load openings.')
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Only professionals can create openings.' }, { status: 401 })
-    }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-    const professionalId = user.professionalProfile.id
     const body = (await req.json().catch(() => ({}))) as CreateOpeningBody
 
     const offeringId = pickString(body.offeringId)
-    const startAtRaw = body.startAt
+    const startAt = parseIsoDate(body.startAt)
     const locationType = normalizeLocationType(body.locationType)
     const note = pickString(body.note)
     const discountPct = parseDiscountPct(body.discountPct)
 
-    if (!offeringId || !startAtRaw) {
-      return NextResponse.json({ error: 'Missing offeringId or startAt.' }, { status: 400 })
+    if (!offeringId || !startAt) {
+      return jsonFail(400, 'Missing offeringId or startAt.')
     }
 
-    const startAt = new Date(String(startAtRaw))
-    if (!isValidDate(startAt)) {
-      return NextResponse.json({ error: 'Invalid startAt.' }, { status: 400 })
-    }
-
-    // buffer: don't allow openings in the past / immediate-now
+    // buffer: don’t allow openings "right now" or in the past
     const BUFFER_MINUTES = 5
     if (startAt.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
-      return NextResponse.json({ error: 'Please choose a future time.' }, { status: 400 })
+      return jsonFail(400, 'Please choose a future time.')
     }
 
     const offering = await prisma.professionalServiceOffering.findFirst({
@@ -136,42 +145,38 @@ export async function POST(req: Request) {
         id: true,
         professionalId: true,
         serviceId: true,
-        title: true,
 
         offersInSalon: true,
         offersMobile: true,
-        salonPriceStartingAt: true,
         salonDurationMinutes: true,
-        mobilePriceStartingAt: true,
         mobileDurationMinutes: true,
 
-        service: { select: { id: true, name: true, minPrice: true, defaultDurationMinutes: true } },
+        service: { select: { id: true, name: true, defaultDurationMinutes: true } },
       },
     })
 
-    if (!offering) {
-      return NextResponse.json({ error: 'Offering not found or inactive.' }, { status: 404 })
-    }
+    if (!offering) return jsonFail(404, 'Offering not found or inactive.')
 
-    // validate mode offered
     if (locationType === 'SALON' && !offering.offersInSalon) {
-      return NextResponse.json({ error: 'This offering is not available in-salon.' }, { status: 400 })
+      return jsonFail(400, 'This offering is not available in-salon.')
     }
     if (locationType === 'MOBILE' && !offering.offersMobile) {
-      return NextResponse.json({ error: 'This offering is not available as mobile.' }, { status: 400 })
+      return jsonFail(400, 'This offering is not available as mobile.')
     }
 
-    const durationForMode =
-      locationType === 'MOBILE'
-        ? Number(offering.mobileDurationMinutes ?? 0)
-        : Number(offering.salonDurationMinutes ?? 0)
+    const durationMinutes = (() => {
+      const modeDur =
+        locationType === 'MOBILE'
+          ? offering.mobileDurationMinutes
+          : offering.salonDurationMinutes
 
-    const fallbackDuration = Number(offering.service.defaultDurationMinutes ?? 60)
-    const durationMinutes = Number.isFinite(durationForMode) && durationForMode > 0 ? durationForMode : fallbackDuration
+      const fallback = offering.service.defaultDurationMinutes ?? 60
+      return clampInt(modeDur ?? fallback, 60, 15, 12 * 60)
+    })()
 
     const endAt = addMinutes(startAt, durationMinutes)
 
-    // reject overlaps with existing ACTIVE openings (same pro)
+    // reject overlaps with existing ACTIVE openings
     const overlapOpening = await prisma.lastMinuteOpening.findFirst({
       where: {
         professionalId,
@@ -183,33 +188,39 @@ export async function POST(req: Request) {
     })
 
     if (overlapOpening) {
-      return NextResponse.json({ error: 'You already have an active opening overlapping that time.' }, { status: 409 })
+      return jsonFail(409, 'You already have an active opening overlapping that time.')
     }
 
-    // reject overlaps with bookings (PENDING/ACCEPTED) using a window scan
+    // reject overlaps with bookings (PENDING/ACCEPTED) using a tighter window
     const windowStart = addMinutes(startAt, -durationMinutes * 2)
     const windowEnd = addMinutes(startAt, durationMinutes * 2)
 
     const nearbyBookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        status: { in: ['PENDING', 'ACCEPTED'] },
+        status: { in: ['PENDING', 'ACCEPTED'] as any },
         scheduledFor: { gte: windowStart, lte: windowEnd },
       },
-      select: { id: true, scheduledFor: true, durationMinutesSnapshot: true },
+      select: {
+        id: true,
+        scheduledFor: true,
+        totalDurationMinutes: true,
+        bufferMinutes: true,
+      },
       take: 50,
       orderBy: { scheduledFor: 'asc' },
     })
 
     const overlapsBooking = nearbyBookings.some((b) => {
       const bStart = new Date(b.scheduledFor)
-      const bDur = Number(b.durationMinutesSnapshot ?? 0)
-      const bEnd = addMinutes(bStart, Number.isFinite(bDur) && bDur > 0 ? bDur : durationMinutes)
+      const bDur = clampInt(b.totalDurationMinutes, durationMinutes, 15, 12 * 60)
+      const bBuf = clampInt(b.bufferMinutes, 0, 0, 180)
+      const bEnd = addMinutes(bStart, bDur + bBuf)
       return startAt < bEnd && bStart < endAt
     })
 
     if (overlapsBooking) {
-      return NextResponse.json({ error: 'That time overlaps an existing booking.' }, { status: 409 })
+      return jsonFail(409, 'That time overlaps an existing booking.')
     }
 
     const created = await prisma.lastMinuteOpening.create({
@@ -220,7 +231,7 @@ export async function POST(req: Request) {
         startAt,
         endAt,
         status: OpeningStatus.ACTIVE,
-        discountPct, // null allowed by schema (Int?)
+        discountPct, // Int? ok to be null
         note,
       },
       select: {
@@ -235,54 +246,61 @@ export async function POST(req: Request) {
       },
     })
 
-    return NextResponse.json({ ok: true, opening: created }, { status: 201 })
+    return jsonOk(
+      {
+        ok: true,
+        opening: {
+          ...created,
+          startAt: created.startAt.toISOString(),
+          endAt: created.endAt ? created.endAt.toISOString() : null,
+        },
+      },
+      201,
+    )
   } catch (e) {
     console.error('POST /api/pro/openings error', e)
-    return NextResponse.json({ error: 'Failed to create opening.' }, { status: 500 })
+    return jsonFail(500, 'Failed to create opening.')
   }
 }
 
 export async function PATCH(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Only professionals can update openings.' }, { status: 401 })
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
+
+    const body = (await req.json().catch(() => ({}))) as PatchOpeningBody
+
+    const openingId = pickString(body.openingId)
+    if (!openingId) return jsonFail(400, 'Missing openingId.')
+
+    const status = parseOpeningStatus(body.status)
+    const note = body.note === undefined ? undefined : pickString(body.note) // allow clear to null by sending ""
+    const discountPct = body.discountPct === undefined ? undefined : parseDiscountPct(body.discountPct)
+
+    // If they provided a status but it's invalid -> reject.
+    if (body.status != null && pickString(body.status) && !status) {
+      return jsonFail(400, 'Invalid status.')
     }
-
-    const professionalId = user.professionalProfile.id
-    const body = (await req.json().catch(() => ({}))) as any
-
-    const openingId = pickString(body?.openingId)
-    const status = parseOpeningStatus(body?.status)
-    const note = pickString(body?.note)
-    const discountPct = (() => {
-      const n = typeof body.discountPct === 'number' ? body.discountPct : Number(body.discountPct ?? NaN)
-      return Number.isFinite(n) && n >= 0 && n <= 90 ? Math.round(n) : undefined
-    })()
-
-    if (!openingId) return NextResponse.json({ error: 'Missing openingId.' }, { status: 400 })
-
-    // If they provided status but it was invalid, reject (instead of silently ignoring)
-    if (body?.status != null && pickString(body?.status) && !status) {
-      return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
+    // If provided discountPct but invalid -> reject.
+    if (body.discountPct !== undefined && body.discountPct !== null && discountPct === null) {
+      return jsonFail(400, 'Invalid discountPct. Must be 0–90 (or null).')
     }
 
     const updated = await prisma.lastMinuteOpening.updateMany({
       where: { id: openingId, professionalId },
       data: {
         ...(status ? { status } : {}),
-        ...(note !== null ? { note } : {}),
+        ...(note !== undefined ? { note } : {}),
         ...(discountPct !== undefined ? { discountPct } : {}),
       },
     })
 
-    if (updated.count !== 1) {
-      return NextResponse.json({ error: 'Opening not found.' }, { status: 404 })
-    }
+    if (updated.count !== 1) return jsonFail(404, 'Opening not found.')
 
-    return NextResponse.json({ ok: true })
+    return jsonOk({ ok: true }, 200)
   } catch (e) {
     console.error('PATCH /api/pro/openings error', e)
-    return NextResponse.json({ error: 'Failed to update opening.' }, { status: 500 })
+    return jsonFail(500, 'Failed to update opening.')
   }
 }

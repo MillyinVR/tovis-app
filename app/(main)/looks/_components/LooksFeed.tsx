@@ -10,42 +10,8 @@ import LookSlide from './LookSlide'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
 
-type FeedItem = {
-  id: string
-  url: string
-  mediaType: 'IMAGE' | 'VIDEO'
-  caption: string | null
-  professional: {
-    id: string
-    businessName: string | null
-    handle?: string | null
-    professionType?: string | null
-    avatarUrl?: string | null
-  } | null
-  _count: { likes: number; comments: number }
-  viewerLiked: boolean
-  serviceId?: string | null
-  serviceName?: string | null
-  category?: string | null
-}
-
-type UiComment = {
-  id: string
-  body: string
-  createdAt: string
-  user: { id: string; displayName: string; avatarUrl: string | null }
-}
-
-type DrawerContext = {
-  mediaId: string
-  professionalId: string
-  serviceId?: string | null
-} | null
-
-type UiCategory = {
-  name: string
-  slug: string
-}
+import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
+import type { FeedItem, UiCategory, UiComment } from './lookTypes'
 
 type LooksCategoriesResponse = {
   categories?: Array<Partial<UiCategory> | null>
@@ -129,7 +95,7 @@ export default function LooksFeed() {
 
   // availability drawer
   const [availabilityOpen, setAvailabilityOpen] = useState(false)
-  const [drawerCtx, setDrawerCtx] = useState<DrawerContext>(null)
+  const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(null)
 
   // active slide index (for future autoplay)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -192,6 +158,7 @@ export default function LooksFeed() {
       const qs = new URLSearchParams()
       qs.set('limit', '24')
 
+      // ✅ IMPORTANT: send category SLUG (API will filter by slug)
       if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) qs.set('category', activeCategorySlug)
       if (query.trim()) qs.set('q', query.trim())
 
@@ -199,7 +166,9 @@ export default function LooksFeed() {
       const data = await safeJson(res)
 
       if (!res.ok) throw new Error(data?.error || 'Failed to load looks')
-      setItems(Array.isArray(data.items) ? (data.items as FeedItem[]) : [])
+
+      const next = Array.isArray(data.items) ? (data.items as FeedItem[]) : []
+      setItems(next)
     } catch (e: any) {
       setFeedError(e?.message || 'Failed to load looks')
       setItems([])
@@ -273,7 +242,9 @@ export default function LooksFeed() {
 
         if (isGuestBlocked(res.status)) {
           setItems((prev) =>
-            prev.map((m) => (m.id === mediaId ? { ...m, viewerLiked: beforeLiked, _count: { ...m._count, likes: beforeCount } } : m)),
+            prev.map((m) =>
+              m.id === mediaId ? { ...m, viewerLiked: beforeLiked, _count: { ...m._count, likes: beforeCount } } : m,
+            ),
           )
           redirectToLogin('like')
           return
@@ -281,7 +252,9 @@ export default function LooksFeed() {
 
         if (!res.ok) {
           setItems((prev) =>
-            prev.map((m) => (m.id === mediaId ? { ...m, viewerLiked: beforeLiked, _count: { ...m._count, likes: beforeCount } } : m)),
+            prev.map((m) =>
+              m.id === mediaId ? { ...m, viewerLiked: beforeLiked, _count: { ...m._count, likes: beforeCount } } : m,
+            ),
           )
           return
         }
@@ -381,7 +354,9 @@ export default function LooksFeed() {
 
     setComments((prev) => [optimistic, ...prev])
     setCommentText('')
-    setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: m._count.comments + 1 } } : m)))
+    setItems((prev) =>
+      prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: m._count.comments + 1 } } : m)),
+    )
 
     try {
       const res = await fetch(`/api/looks/${mediaId}/comments`, {
@@ -395,7 +370,11 @@ export default function LooksFeed() {
       if (isGuestBlocked(res.status)) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
         setItems((prev) =>
-          prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+          prev.map((m) =>
+            m.id === mediaId
+              ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } }
+              : m,
+          ),
         )
         redirectToLogin('comment')
         return
@@ -404,7 +383,11 @@ export default function LooksFeed() {
       if (!res.ok) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
         setItems((prev) =>
-          prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+          prev.map((m) =>
+            m.id === mediaId
+              ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } }
+              : m,
+          ),
         )
         setCommentError(data?.error || 'Failed to post comment')
         return
@@ -414,7 +397,11 @@ export default function LooksFeed() {
     } catch (e: any) {
       setComments((prev) => prev.filter((c) => c.id !== tempId))
       setItems((prev) =>
-        prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+        prev.map((m) =>
+          m.id === mediaId
+            ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } }
+            : m,
+        ),
       )
       setCommentError(e?.message || 'Failed to post comment')
     } finally {
@@ -424,7 +411,15 @@ export default function LooksFeed() {
 
   function openAvailabilityFor(item: FeedItem) {
     if (!item.professional?.id) return
-    setDrawerCtx({ mediaId: item.id, professionalId: item.professional.id, serviceId: item.serviceId ?? null })
+
+    const ctx: AvailabilityDrawerContext = {
+      mediaId: item.id,
+      professionalId: item.professional.id,
+      serviceId: item.serviceId ?? null,
+      source: 'DISCOVERY',
+    }
+
+    setDrawerCtx(ctx)
     setAvailabilityOpen(true)
   }
 
@@ -454,9 +449,10 @@ export default function LooksFeed() {
     }
   }, [])
 
-  if (loading) return <div className="p-3 text-textSecondary">Loading…</div>
+  // ✅ Branding copy
+  if (loading) return <div className="p-3 text-textSecondary">Loading Looks…</div>
   if (feedError) return <div className="p-3 text-toneDanger">{feedError}</div>
-  if (!items.length) return <div className="p-3 text-textSecondary">No looks yet.</div>
+  if (!items.length) return <div className="p-3 text-textSecondary">No Looks yet. This is where the glow-ups will live.</div>
 
   const FEED_VIEWPORT_HEIGHT = `calc(100dvh - ${FOOTER_HEIGHT}px)`
 
@@ -471,7 +467,11 @@ export default function LooksFeed() {
           setQuery={setQuery}
         />
 
-        <div ref={feedScrollRef} className="looksNoScrollbar h-full overflow-y-auto overscroll-contain" style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}>
+        <div
+          ref={feedScrollRef}
+          className="looksNoScrollbar h-full overflow-y-auto overscroll-contain"
+          style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}
+        >
           {items.map((m, idx) => {
             const signal = BOOKING_SIGNALS[hashStringToIndex(m.id, BOOKING_SIGNALS.length)]
             const futureSelf = FUTURE_SELF_LINES[hashStringToIndex(m.id + '_future', FUTURE_SELF_LINES.length)]
@@ -479,7 +479,7 @@ export default function LooksFeed() {
 
             const rightRail = (
               <RightActionRail
-                pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName } : null}
+                pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null } : null}
                 viewerLiked={m.viewerLiked}
                 likeCount={m._count.likes}
                 commentCount={m._count.comments}
@@ -512,7 +512,7 @@ export default function LooksFeed() {
         </div>
       </div>
 
-      <AvailabilityDrawer open={availabilityOpen} onClose={() => setAvailabilityOpen(false)} context={drawerCtx} />
+      {drawerCtx ? <AvailabilityDrawer open={availabilityOpen} onClose={() => setAvailabilityOpen(false)} context={drawerCtx} /> : null}
 
       <CommentsDrawer
         open={Boolean(openCommentsFor)}
@@ -525,18 +525,6 @@ export default function LooksFeed() {
         posting={posting}
         onPost={postComment}
       />
-
-      <style jsx global>{`
-        .looksNoScrollbar {
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
-        .looksNoScrollbar::-webkit-scrollbar {
-          display: none;
-          width: 0;
-          height: 0;
-        }
-      `}</style>
     </>
   )
 }

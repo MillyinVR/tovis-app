@@ -9,14 +9,7 @@ function NavLink({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
-      className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
-      style={{
-        textDecoration: 'none',
-        fontWeight: 900,
-        fontSize: 13,
-        padding: '8px 10px',
-        borderRadius: 999,
-      }}
+      className="inline-flex items-center rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/6"
     >
       {label}
     </Link>
@@ -30,51 +23,30 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <AdminGuard>
-      <div style={{ fontFamily: 'system-ui' }}>
-        <header
-          className="border-b border-surfaceGlass/10 bg-bgSecondary"
-          style={{
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-          }}
-        >
-          <div
-            style={{
-              maxWidth: 1100,
-              margin: '0 auto',
-              padding: '14px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 12,
-            }}
-          >
-            <div style={{ display: 'grid' }}>
-              <div style={{ fontWeight: 1000, fontSize: 15 }}>Admin</div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>{email ?? ''}</div>
+      <div className="min-h-screen text-textPrimary">
+        <header className="sticky top-0 z-10 border-b border-surfaceGlass/10 bg-bgPrimary/80 backdrop-blur-app">
+          <div className="mx-auto flex max-w-1100px items-center justify-between gap-3 px-4 py-3">
+            <div className="grid">
+              <div className="text-sm font-extrabold">Admin</div>
+              <div className="text-xs text-textSecondary">{email ?? ''}</div>
             </div>
 
-            <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <nav className="flex flex-wrap gap-2">
               <NavLink href="/admin" label="Dashboard" />
-
               {perms?.canReviewPros ? <NavLink href="/admin/professionals" label="Professionals" /> : null}
-
               {perms?.canManageCatalog ? (
                 <>
                   <NavLink href="/admin/services" label="Services" />
                   <NavLink href="/admin/categories" label="Categories" />
                 </>
               ) : null}
-
               {perms?.canManagePermissions ? <NavLink href="/admin/permissions" label="Permissions" /> : null}
-
               {perms?.canViewLogs ? <NavLink href="/admin/logs" label="Logs" /> : null}
             </nav>
           </div>
         </header>
 
-        <main style={{ maxWidth: 1100, margin: '0 auto', padding: '18px 16px' }}>{children}</main>
+        <main className="mx-auto max-w-1100px px-4 py-5">{children}</main>
       </div>
     </AdminGuard>
   )

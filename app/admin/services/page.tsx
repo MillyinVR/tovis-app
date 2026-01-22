@@ -16,6 +16,80 @@ function money(v: any) {
   }
 }
 
+function CardShell({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="grid gap-1">
+          <div className="text-sm font-extrabold text-textPrimary">{title}</div>
+          {subtitle ? <div className="text-xs text-textSecondary">{subtitle}</div> : null}
+        </div>
+      </div>
+      <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <div className="text-xs font-extrabold text-textSecondary">{children}</div>
+}
+
+function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={[
+        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
+        'placeholder:text-textSecondary/70 outline-none',
+        'focus:border-surfaceGlass/30',
+        props.className ?? '',
+      ].join(' ')}
+    />
+  )
+}
+
+function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      {...props}
+      className={[
+        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
+        'outline-none focus:border-surfaceGlass/30',
+        props.className ?? '',
+      ].join(' ')}
+    />
+  )
+}
+
+function Button({
+  children,
+  variant = 'primary',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' }) {
+  const base =
+    'inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-extrabold transition-colors'
+  const styles =
+    variant === 'primary'
+      ? 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
+      : variant === 'danger'
+        ? 'border border-toneDanger/40 text-toneDanger hover:bg-toneDanger/10'
+        : 'border border-surfaceGlass/15 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/25'
+
+  return (
+    <button {...props} className={[base, styles, props.className ?? ''].join(' ')}>
+      {children}
+    </button>
+  )
+}
+
 export default async function AdminServicesPage() {
   const info = await getAdminUiPerms()
   if (!info) redirect('/login?from=/admin/services')
@@ -52,164 +126,175 @@ export default async function AdminServicesPage() {
   }
 
   return (
-    <main style={{ display: 'grid', gap: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Services & Categories</h1>
-          <div style={{ color: '#6b7280', fontSize: 13 }}>Manage the catalog. This is where the app stops being a toy.</div>
+    <main className="grid gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div className="grid gap-1">
+          <h1 className="text-2xl font-extrabold text-textPrimary">Services & Categories</h1>
+          <p className="text-sm text-textSecondary">
+            Manage the catalog. This is where the app stops being a toy.
+          </p>
         </div>
-        <Link href="/admin" className="text-textPrimary" style={{ fontSize: 12, fontWeight: 900, textDecoration: 'none' }}>
+
+        <Link
+          href="/admin"
+          className="text-xs font-extrabold text-textPrimary no-underline hover:text-textPrimary/90"
+        >
           ← Admin Home
         </Link>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 14 }}>
+      <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         {/* Categories */}
-        <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-            <div style={{ fontWeight: 900 }}>Categories</div>
-            <span style={{ fontSize: 12, color: '#6b7280' }}>{categories.length} total</span>
-          </div>
-
+        <CardShell
+          title="Categories"
+          subtitle={`${categories.length} total`}
+        >
           <form
             action="/api/admin/categories"
             method="post"
-            style={{ display: 'grid', gap: 10, marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}
+            className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/30 p-3"
           >
-            <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Create category</div>
+            <FieldLabel>Create category</FieldLabel>
 
-            <input name="name" placeholder="Name (ex: Hair)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
-            <input name="slug" placeholder="Slug (ex: hair)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input name="name" placeholder="Name (ex: Hair)" required />
+              <Input name="slug" placeholder="Slug (ex: hair)" required />
+            </div>
 
-            <select name="parentId" defaultValue="" className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }}>
+            <Select name="parentId" defaultValue="">
               <option value="">No parent (top-level)</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.slug})
                 </option>
               ))}
-            </select>
+            </Select>
 
-            <button
-              type="submit"
-              className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover" style={{ borderRadius: 12, padding: '10px 12px', fontWeight: 900 }}
-            >
-              Create
-            </button>
+            <div className="flex justify-end">
+              <Button type="submit">Create</Button>
+            </div>
           </form>
 
-          <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+          <div className="mt-4 grid gap-3">
             {topCats.map((c) => {
               const kids = childrenByParent.get(c.id) ?? []
               return (
-                <div key={c.id} className="border border-surfaceGlass/10" style={{ borderRadius: 12, padding: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                    <div style={{ fontWeight: 900 }}>
-                      {c.name} <span style={{ color: '#6b7280', fontSize: 12 }}>({c.slug})</span>
+                <div key={c.id} className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-extrabold text-textPrimary">
+                      {c.name}{' '}
+                      <span className="text-xs font-bold text-textSecondary">
+                        ({c.slug})
+                      </span>
                     </div>
+
                     <form action={`/api/admin/categories/${encodeURIComponent(c.id)}`} method="post">
                       <input type="hidden" name="_method" value="PATCH" />
                       <input type="hidden" name="isActive" value={String(!c.isActive)} />
-                      <button
-                        type="submit"
-                        className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary" style={{
-                          borderRadius: 999,
-                          padding: '6px 10px',
-                          fontSize: 12,
-                          fontWeight: 900,
-                          cursor: 'pointer',
-                        }}
-                      >
+                      <Button type="submit" variant="ghost" className="rounded-full px-3 py-1.5">
                         {c.isActive ? 'Disable' : 'Enable'}
-                      </button>
+                      </Button>
                     </form>
                   </div>
 
                   {kids.length ? (
-                    <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                    <div className="mt-3 grid gap-2">
                       {kids.map((k) => (
-                        <div key={k.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, borderTop: '1px solid #f3f4f6', paddingTop: 8 }}>
-                          <div style={{ fontSize: 13 }}>
-                            <span style={{ fontWeight: 900 }}>{k.name}</span> <span style={{ color: '#6b7280' }}>({k.slug})</span>
+                        <div
+                          key={k.id}
+                          className="flex flex-wrap items-center justify-between gap-3 border-t border-surfaceGlass/10 pt-2"
+                        >
+                          <div className="text-sm text-textPrimary">
+                            <span className="font-extrabold">{k.name}</span>{' '}
+                            <span className="text-xs text-textSecondary">({k.slug})</span>
                           </div>
+
                           <form action={`/api/admin/categories/${encodeURIComponent(k.id)}`} method="post">
                             <input type="hidden" name="_method" value="PATCH" />
                             <input type="hidden" name="isActive" value={String(!k.isActive)} />
-                            <button
-                              type="submit"
-                              className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary"
-                              style={{
-                                borderRadius: 999,
-                                padding: '6px 10px',
-                                fontSize: 12,
-                                fontWeight: 900,
-                                cursor: 'pointer',
-                              }}
-                            >
+                            <Button type="submit" variant="ghost" className="rounded-full px-3 py-1.5">
                               {k.isActive ? 'Disable' : 'Enable'}
-                            </button>
+                            </Button>
                           </form>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div style={{ marginTop: 8, color: '#6b7280', fontSize: 12 }}>No subcategories yet.</div>
+                    <div className="mt-2 text-xs text-textSecondary">No subcategories yet.</div>
                   )}
                 </div>
               )
             })}
           </div>
-        </section>
+        </CardShell>
 
         {/* Services */}
-        <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-            <div style={{ fontWeight: 900 }}>Services</div>
-            <span style={{ fontSize: 12, color: '#6b7280' }}>{services.length} total</span>
-          </div>
-
+        <CardShell
+          title="Services"
+          subtitle={`${services.length} total`}
+        >
           <form
             action="/api/admin/services"
             method="post"
-            style={{ display: 'grid', gap: 10, marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}
+            className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/30 p-3"
           >
-            <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 900 }}>Create service</div>
+            <FieldLabel>Create service</FieldLabel>
 
-            <input name="name" placeholder="Service name (ex: Haircut)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
+            <Input name="name" placeholder="Service name (ex: Haircut)" required />
 
-            <select name="categoryId" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }}>
-              <option value="">Select category</option>
+            <Select name="categoryId" required defaultValue="">
+              <option value="" disabled>
+                Select category
+              </option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.parentId ? '  ↳ ' : ''}
+                  {c.parentId ? '↳ ' : ''}
                   {c.name}
                 </option>
               ))}
-            </select>
+            </Select>
 
-            <input name="defaultDurationMinutes" type="number" min={5} step={5} placeholder="Default duration (minutes)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
-            <input name="minPrice" type="number" min={0} step="0.01" placeholder="Min price (ex: 45.00)" required className="border border-surfaceGlass/20" style={{ borderRadius: 12, padding: 10 }} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                name="defaultDurationMinutes"
+                type="number"
+                min={5}
+                step={5}
+                placeholder="Default duration (minutes)"
+                required
+              />
+              <Input
+                name="minPrice"
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="Min price (ex: 45.00)"
+                required
+              />
+            </div>
 
-            <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
-              <input name="allowMobile" type="checkbox" value="true" />
-              Allow mobile
+            <label className="flex items-center gap-2 text-sm text-textPrimary">
+              <input
+                name="allowMobile"
+                type="checkbox"
+                value="true"
+                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+              />
+              <span className="font-bold text-textSecondary">Allow mobile</span>
             </label>
 
-            <button
-              type="submit"
-              className="bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover" style={{ borderRadius: 12, padding: '10px 12px', fontWeight: 900 }}
-            >
-              Create
-            </button>
+            <div className="flex justify-end">
+              <Button type="submit">Create</Button>
+            </div>
           </form>
 
-          <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+          <div className="mt-4 grid gap-3">
             {services.map((s) => (
-              <div key={s.id} className="border border-surfaceGlass/10" style={{ borderRadius: 12, padding: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                  <div style={{ fontWeight: 900 }}>
+              <div key={s.id} className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <div className="text-sm font-extrabold text-textPrimary">
                     {s.name}{' '}
-                    <span style={{ fontSize: 12, color: '#6b7280' }}>
+                    <span className="text-xs font-bold text-textSecondary">
                       · {s.category?.name || 'Uncategorized'} · {s.defaultDurationMinutes}m · {money(s.minPrice)}
                       {s.allowMobile ? ' · Mobile' : ''}
                     </span>
@@ -218,32 +303,16 @@ export default async function AdminServicesPage() {
                   <form action={`/api/admin/services/${encodeURIComponent(s.id)}`} method="post">
                     <input type="hidden" name="_method" value="PATCH" />
                     <input type="hidden" name="isActive" value={String(!s.isActive)} />
-                    <button
-                      type="submit"
-                      className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary"
-                      style={{
-                        borderRadius: 999,
-                        padding: '6px 10px',
-                        fontSize: 12,
-                        fontWeight: 900,
-                        cursor: 'pointer',
-                      }}
-                    >
+                    <Button type="submit" variant="ghost" className="rounded-full px-3 py-1.5">
                       {s.isActive ? 'Disable' : 'Enable'}
-                    </button>
+                    </Button>
                   </form>
                 </div>
 
-                <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="mt-3 flex justify-end">
                   <Link
                     href={`/admin/services/${encodeURIComponent(s.id)}`}
-                    className="border border-surfaceGlass/20 bg-bgSecondary text-textPrimary" style={{
-                      textDecoration: 'none',
-                      borderRadius: 999,
-                      padding: '8px 12px',
-                      fontSize: 12,
-                      fontWeight: 900,
-                    }}
+                    className="inline-flex items-center rounded-full border border-surfaceGlass/15 bg-bgSecondary px-4 py-2 text-xs font-extrabold text-textPrimary no-underline hover:border-surfaceGlass/25"
                   >
                     Edit + permissions
                   </Link>
@@ -251,9 +320,11 @@ export default async function AdminServicesPage() {
               </div>
             ))}
 
-            {services.length === 0 ? <div style={{ color: '#6b7280', fontSize: 13 }}>No services yet.</div> : null}
+            {services.length === 0 ? (
+              <div className="text-sm text-textSecondary">No services yet.</div>
+            ) : null}
           </div>
-        </section>
+        </CardShell>
       </div>
     </main>
   )

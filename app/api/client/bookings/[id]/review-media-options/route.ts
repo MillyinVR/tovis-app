@@ -1,37 +1,27 @@
 // app/api/client/bookings/[id]/review-media-options/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: Promise<{ id: string }> }
-
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
+
     const { id } = await ctx.params
     const bookingId = pickString(id)
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
-
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: { id: true, clientId: true, professionalId: true },
     })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.clientId !== user.clientProfile.id) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    // Only pro-uploaded booking media that isn't already attached to a review
-    // Default: AFTER only (safest for reviews).
     const items = await prisma.mediaAsset.findMany({
       where: {
         bookingId: booking.id,
@@ -52,9 +42,9 @@ export async function GET(_req: Request, ctx: Ctx) {
       take: 20,
     })
 
-    return NextResponse.json({ ok: true, items }, { status: 200 })
+    return jsonOk({ items })
   } catch (e) {
     console.error('GET /api/client/bookings/[id]/review-media-options error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

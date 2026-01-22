@@ -36,8 +36,7 @@ type Props = {
 
 // ---------- money helpers ----------
 function isValidMoneyString(v: string) {
-  const s = v.trim()
-  return /^\d+(\.\d{1,2})?$/.test(s)
+  return /^\d+(\.\d{1,2})?$/.test(v.trim())
 }
 
 function normalizeMoney2(v: string) {
@@ -81,7 +80,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
   const [mobilePrice, setMobilePrice] = useState('')
   const [mobileDuration, setMobileDuration] = useState('')
 
-  // ✅ service image upload (for new offering creation)
   const [serviceImageUrl, setServiceImageUrl] = useState<string | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
 
@@ -140,12 +138,15 @@ export default function ServicePicker({ categories, offerings }: Props) {
     setOffersMobile(false)
 
     const p = normalizeMoney2(service.minPrice) ?? service.minPrice
-    const d = String(service.defaultDurationMinutes)
+    const d = String(service.defaultDurationMinutes || 60)
 
     setSalonPrice(p)
     setSalonDuration(d)
     setMobilePrice(p)
     setMobileDuration(d)
+
+    setSuccess(null)
+    setError(null)
   }
 
   function handleCategoryChange(id: string) {
@@ -186,7 +187,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
     setUploadingImage(true)
 
     try {
-      // 1) Ask API for bucket/path/token + publicUrl
       const initRes = await fetch('/api/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,7 +219,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
         return
       }
 
-      // 2) Upload using the correct Supabase client flow
       const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
         contentType: file.type,
         upsert: true,
@@ -230,7 +229,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
         return
       }
 
-      // 3) Store URL in local state to be saved with offering creation
       const finalUrl = cacheBuster ? `${publicUrl}?v=${cacheBuster}` : publicUrl
       setServiceImageUrl(finalUrl)
       setSuccess('Image uploaded. It will be used once you add the service.')
@@ -253,7 +251,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
     if (alreadyAdded) return setError('You already added this service.')
     if (!offersInSalon && !offersMobile) return setError('Enable at least Salon or Mobile.')
 
-    // SALON validate if enabled
     let salonPriceNorm: string | null = null
     let salonDurationInt: number | null = null
     if (offersInSalon) {
@@ -269,7 +266,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
       if (minErr) return setError(minErr)
     }
 
-    // MOBILE validate if enabled
     let mobilePriceNorm: string | null = null
     let mobileDurationInt: number | null = null
     if (offersMobile) {
@@ -292,20 +288,13 @@ export default function ServicePicker({ categories, offerings }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serviceId: selectedService.id,
-
-          // canonical name only
           title: null,
           description: description.trim() || null,
-
-          // ✅ service image override for THIS pro's offering only
           customImageUrl: serviceImageUrl,
-
           offersInSalon,
           offersMobile,
-
           salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
           salonDurationMinutes: offersInSalon ? salonDurationInt : null,
-
           mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
           mobileDurationMinutes: offersMobile ? mobileDurationInt : null,
         }),
@@ -320,7 +309,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
       setSuccess('Service added to your menu.')
       router.refresh()
 
-      // keep selection, but prevent accidental reuse
+      // prevent accidental reuse
       setServiceImageUrl(null)
     } catch (err) {
       console.error(err)
@@ -341,7 +330,11 @@ export default function ServicePicker({ categories, offerings }: Props) {
         <div className="grid gap-3 md:grid-cols-3">
           <label className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Main category</div>
-            <select value={selectedCategoryId} onChange={(e) => handleCategoryChange(e.target.value)} className={selectClass}>
+            <select
+              value={selectedCategoryId}
+              onChange={(e) => handleCategoryChange(e.target.value)}
+              className={selectClass}
+            >
               <option value="">Select category</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -357,7 +350,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
               value={selectedSubcategoryId}
               onChange={(e) => handleSubcategoryChange(e.target.value)}
               disabled={!selectedCategory}
-              className={[selectClass, !selectedCategory ? 'opacity-60 cursor-not-allowed' : ''].join(' ')}
+              className={[selectClass, !selectedCategory ? 'cursor-not-allowed opacity-60' : ''].join(' ')}
             >
               <option value="">All under this category</option>
               {selectedCategory?.children.map((child) => (
@@ -374,7 +367,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
               value={selectedServiceId}
               onChange={(e) => handleServiceChange(e.target.value)}
               disabled={!selectedCategory}
-              className={[selectClass, !selectedCategory ? 'opacity-60 cursor-not-allowed' : ''].join(' ')}
+              className={[selectClass, !selectedCategory ? 'cursor-not-allowed opacity-60' : ''].join(' ')}
             >
               <option value="">Select service</option>
               {servicesForSelection.map((s) => (
@@ -388,7 +381,6 @@ export default function ServicePicker({ categories, offerings }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="grid gap-4 border-t border-white/10 pt-4">
-          {/* ✅ Service image upload */}
           <div className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Service image (optional)</div>
 
@@ -406,7 +398,8 @@ export default function ServicePicker({ categories, offerings }: Props) {
               />
 
               <div className="mt-2 text-[12px] text-textSecondary">
-                This image only overrides how this service displays on <span className="font-black text-textPrimary">your</span> menu.
+                This image only overrides how this service displays on{' '}
+                <span className="font-black text-textPrimary">your</span> menu.
               </div>
 
               {uploadingImage ? <div className="mt-2 text-[12px] text-textSecondary">Uploading…</div> : null}
@@ -470,13 +463,20 @@ export default function ServicePicker({ categories, offerings }: Props) {
             {selectedService ? (
               <div className="text-[12px] text-textSecondary">
                 Min price:{' '}
-                <span className="font-black text-textPrimary">${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}</span>
+                <span className="font-black text-textPrimary">
+                  ${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}
+                </span>
               </div>
             ) : null}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersInSalon ? '' : 'opacity-70'].join(' ')}>
+            <div
+              className={[
+                'rounded-card border border-white/10 bg-bgSecondary p-3',
+                offersInSalon ? '' : 'opacity-70',
+              ].join(' ')}
+            >
               <div className="mb-2 text-[12px] font-black text-textPrimary">Salon pricing</div>
 
               <div className="grid gap-2">
@@ -507,7 +507,12 @@ export default function ServicePicker({ categories, offerings }: Props) {
               </div>
             </div>
 
-            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersMobile ? '' : 'opacity-70'].join(' ')}>
+            <div
+              className={[
+                'rounded-card border border-white/10 bg-bgSecondary p-3',
+                offersMobile ? '' : 'opacity-70',
+              ].join(' ')}
+            >
               <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile pricing</div>
 
               <div className="grid gap-2">

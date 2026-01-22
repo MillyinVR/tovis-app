@@ -1,49 +1,63 @@
 // app/api/admin/permissions/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { pickMethod } from '@/app/api/_utils/pick'
 import { AdminPermissionRole } from '@prisma/client'
-import { hasAdminPermission } from '@/lib/adminPermissions'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: FormDataEntryValue | null) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+type Params = { id: string }
+type Ctx = { params: Params | Promise<Params> }
+
+async function getParams(ctx: Ctx): Promise<Params> {
+  return await Promise.resolve(ctx.params)
 }
 
-export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+function trimId(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
 
-    // SUPER_ADMIN only
-    const ok = await hasAdminPermission({
+export async function POST(req: NextRequest, ctx: Ctx) {
+  try {
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
+
+    const perm = await requireAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN],
     })
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!perm.ok) return perm.res
 
-    const { id } = await context.params
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    const { id } = await getParams(ctx)
+    const permissionId = trimId(id)
+    if (!permissionId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
     const form = await req.formData()
-    const method = pickString(form.get('_method'))?.toUpperCase()
+    const method = pickMethod(form.get('_method'))
     if (method !== 'DELETE') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
 
-    // Grab it first so we can log what was deleted (and return 404 gracefully)
     const existing = await prisma.adminPermission.findUnique({
-      where: { id },
-      select: { id: true, adminUserId: true, role: true, professionalId: true, serviceId: true, categoryId: true },
+      where: { id: permissionId },
+      select: {
+        id: true,
+        adminUserId: true,
+        role: true,
+        professionalId: true,
+        serviceId: true,
+        categoryId: true,
+      },
     })
+
+    // Idempotent UX: deleting something that’s already gone still “works”
     if (!existing) {
-      // nothing to delete, but don’t crash and burn
       return NextResponse.redirect(new URL('/admin/permissions', req.url))
     }
 
-    await prisma.adminPermission.delete({ where: { id } })
+    await prisma.adminPermission.delete({ where: { id: permissionId } })
 
+    // best-effort log (never fail request)
     await prisma.adminActionLog
       .create({
         data: {

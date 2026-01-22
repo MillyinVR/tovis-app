@@ -1,5 +1,6 @@
 // lib/lastMinutePricing.ts
 import { prisma } from '@/lib/prisma'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export type LastMinuteWindow = 'SAME_DAY' | 'WITHIN_24H' | null
 
@@ -15,14 +16,6 @@ function roundMoney(n: number) {
   return Math.round(n * 100) / 100
 }
 
-function sameLocalDay(a: Date, b: Date) {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  )
-}
-
 function clampPct(n: number) {
   if (!Number.isFinite(n)) return 0
   return Math.min(50, Math.max(0, Math.trunc(n)))
@@ -31,6 +24,50 @@ function clampPct(n: number) {
 function isWithinBlockedRange(scheduledFor: Date, startAt: Date, endAt: Date) {
   // block is [startAt, endAt)
   return scheduledFor >= startAt && scheduledFor < endAt
+}
+
+function weekdayIndexInTimeZone(d: Date, timeZone: string): number {
+  // Returns 0..6 where 0=Sun ... 6=Sat
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(d)
+  switch (wd) {
+    case 'Sun':
+      return 0
+    case 'Mon':
+      return 1
+    case 'Tue':
+      return 2
+    case 'Wed':
+      return 3
+    case 'Thu':
+      return 4
+    case 'Fri':
+      return 5
+    case 'Sat':
+      return 6
+    default:
+      return 0
+  }
+}
+
+function sameDayInTimeZone(a: Date, b: Date, timeZone: string): boolean {
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+
+  const partsA = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(a)
+
+  const partsB = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(b)
+
+  return partsA === partsB
 }
 
 export async function computeLastMinuteDiscount(args: {
@@ -46,17 +83,26 @@ export async function computeLastMinuteDiscount(args: {
     return { discountAmount: 0, discountedPrice: 0, appliedPct: 0, window: null, reason: 'Invalid base price' }
   }
 
-  const settings = await prisma.lastMinuteSettings.findUnique({
-    where: { professionalId },
-    include: { serviceRules: true, blocks: true },
-  })
+  const [settings, pro] = await Promise.all([
+    prisma.lastMinuteSettings.findUnique({
+      where: { professionalId },
+      include: { serviceRules: true, blocks: true },
+    }),
+    prisma.professionalProfile.findUnique({
+      where: { id: professionalId },
+      select: { timeZone: true },
+    }),
+  ])
 
-  // Last-minute feature off entirely
+  // If you ever allow last-minute for multi-location, replace this with the service/location tz.
+  const timeZone = sanitizeTimeZone(pro?.timeZone ?? 'UTC', 'UTC')
+
+  // Last-minute off entirely
   if (!settings?.enabled) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: null }
   }
 
-  // Feature can be on, discounts can be off (your new toggle)
+  // On, but discounts off
   if (!settings.discountsEnabled) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: null }
   }
@@ -67,8 +113,8 @@ export async function computeLastMinuteDiscount(args: {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Past time' }
   }
 
-  // Day disables
-  const day = scheduledFor.getDay() // 0 Sun ... 6 Sat
+  // Day disables (in PRO timezone)
+  const day = weekdayIndexInTimeZone(scheduledFor, timeZone) // 0 Sun ... 6 Sat
   const dayDisabled =
     (day === 1 && settings.disableMon) ||
     (day === 2 && settings.disableTue) ||
@@ -82,7 +128,7 @@ export async function computeLastMinuteDiscount(args: {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Day disabled' }
   }
 
-  // Blocked time ranges
+  // Blocked ranges (instants, UTC-safe)
   const isBlocked = settings.blocks.some((b) => {
     const startAt = b.startAt instanceof Date ? b.startAt : new Date(b.startAt as any)
     const endAt = b.endAt instanceof Date ? b.endAt : new Date(b.endAt as any)
@@ -117,7 +163,8 @@ export async function computeLastMinuteDiscount(args: {
   let pct = 0
   let window: LastMinuteWindow = null
 
-  if (sameLocalDay(scheduledFor, now)) {
+  // SAME_DAY must be based on PRO timezone day boundary
+  if (sameDayInTimeZone(scheduledFor, now, timeZone)) {
     pct = sameDayPct
     window = pct > 0 ? 'SAME_DAY' : null
   } else if (hours <= 24) {

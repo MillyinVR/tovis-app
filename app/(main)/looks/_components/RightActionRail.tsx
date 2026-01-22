@@ -23,7 +23,7 @@ type ProMini = {
 } | null
 
 const GAP = 18
-const AVATAR_SIZE = 56 // TikTok-ish anchor size
+const AVATAR_SIZE = 56
 const ICON_SIZE = 24
 
 export default function RightActionRail({
@@ -91,7 +91,7 @@ export default function RightActionRail({
             {formatCount(count!)}
           </div>
         ) : (
-          <div className="h-[14px]" />
+          <div className="h-14px" />
         )}
       </button>
     )
@@ -99,16 +99,9 @@ export default function RightActionRail({
 
   return (
     <div
-      className="absolute z-[80] select-none"
-      style={{
-        right,
-        bottom,
-        display: 'grid',
-        gap: GAP,
-        justifyItems: 'center',
-      }}
+      className="absolute z-80 select-none"
+      style={{ right, bottom, display: 'grid', gap: GAP, justifyItems: 'center' }}
     >
-      {/* Pro avatar (ONLY thing with a circle) */}
       {pro?.id ? (
         <Link
           href={`/professionals/${encodeURIComponent(pro.id)}`}
@@ -123,8 +116,7 @@ export default function RightActionRail({
                 width: AVATAR_SIZE,
                 height: AVATAR_SIZE,
                 border: '2px solid rgba(255,255,255,0.35)',
-                boxShadow:
-                  '0 10px 30px rgba(0,0,0,0.65), 0 0 18px rgba(255,255,255,0.18)',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.65), 0 0 18px rgba(255,255,255,0.18)',
                 backdropFilter: 'blur(18px)',
                 WebkitBackdropFilter: 'blur(18px)',
               }}
@@ -135,6 +127,8 @@ export default function RightActionRail({
                   src={pro.avatarUrl}
                   alt={pro.businessName || 'Professional'}
                   className="h-full w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[18px] font-black text-white">
@@ -143,7 +137,6 @@ export default function RightActionRail({
               )}
             </div>
 
-            {/* Plus badge */}
             <div
               className="absolute left-1/2 grid place-items-center rounded-full font-black"
               style={{
@@ -174,14 +167,8 @@ export default function RightActionRail({
         />
       )}
 
-      {/* Availability */}
-      <IconButton
-        ariaLabel="Check availability"
-        onClick={onOpenAvailability}
-        icon={<CalendarDays size={ICON_SIZE} className="text-white" />}
-      />
+      <IconButton ariaLabel="Check availability" onClick={onOpenAvailability} icon={<CalendarDays size={ICON_SIZE} className="text-white" />} />
 
-      {/* Like */}
       <IconButton
         ariaLabel={viewerLiked ? 'Unlike' : 'Like'}
         onClick={onToggleLike}
@@ -190,11 +177,7 @@ export default function RightActionRail({
         icon={
           <Heart
             size={ICON_SIZE}
-            className={
-              viewerLiked
-                ? 'fill-[rgb(var(--micro-accent))] text-[rgb(var(--micro-accent))]'
-                : 'text-white'
-            }
+            className={viewerLiked ? 'fill-[rgb(var(--micro-accent))] text-[rgb(var(--micro-accent))]' : 'text-white'}
             style={{
               filter: viewerLiked
                 ? 'brightness(1.9) drop-shadow(0 0 14px rgba(255,90,120,0.95)) drop-shadow(0 10px 22px rgba(0,0,0,0.95))'
@@ -204,21 +187,9 @@ export default function RightActionRail({
         }
       />
 
-      {/* Comments */}
-      <IconButton
-        ariaLabel="Open comments"
-        onClick={onOpenComments}
-        count={commentCount}
-        hideZero
-        icon={<MessageCircle size={ICON_SIZE} className="text-white" />}
-      />
+      <IconButton ariaLabel="Open comments" onClick={onOpenComments} count={commentCount} hideZero icon={<MessageCircle size={ICON_SIZE} className="text-white" />} />
 
-      {/* Share */}
-      <IconButton
-        ariaLabel="Share"
-        onClick={onShare}
-        icon={<Share2 size={ICON_SIZE} className="text-white" />}
-      />
+      <IconButton ariaLabel="Share" onClick={onShare} icon={<Share2 size={ICON_SIZE} className="text-white" />} />
     </div>
   )
 }

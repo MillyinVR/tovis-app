@@ -1,15 +1,12 @@
 // app/api/admin/permissions/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
+import { pickString, pickMethod } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
-
-function pickString(v: FormDataEntryValue | null) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
 
 function normalizeRole(v: string | null): AdminPermissionRole | null {
   const s = (v ?? '').toUpperCase()
@@ -21,10 +18,9 @@ function normalizeRole(v: string | null): AdminPermissionRole | null {
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
-    // Only SUPER_ADMIN can view/manage permissions
     const ok = await hasAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN],
@@ -51,7 +47,7 @@ export async function GET() {
         take: 5000,
       }),
       prisma.professionalProfile.findMany({
-        select: { id: true, businessName: true, city: true, state: true },
+        select: { id: true, businessName: true, location: true },
         orderBy: { id: 'asc' },
         take: 2000,
       }),
@@ -74,7 +70,7 @@ export async function GET() {
         permissions: permissions.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() })),
         professionals: professionals.map((p) => ({
           id: p.id,
-          label: `${p.businessName ?? 'Unnamed pro'}${p.city || p.state ? ` • ${[p.city, p.state].filter(Boolean).join(', ')}` : ''}`,
+          label: `${p.businessName ?? 'Unnamed pro'}${p.location?.trim() ? ` • ${p.location.trim()}` : ''}`,
         })),
         services: services.map((s) => ({ id: s.id, label: s.name })),
         categories: categories.map((c) => ({ id: c.id, label: `${c.name} (${c.slug})` })),
@@ -89,10 +85,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
-    // Only SUPER_ADMIN can assign permissions
     const ok = await hasAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN],
@@ -100,6 +95,9 @@ export async function POST(req: NextRequest) {
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const form = await req.formData()
+    const method = pickMethod(form.get('_method')) ?? 'POST'
+    if (method !== 'POST') return NextResponse.json({ error: 'Unsupported operation.' }, { status: 400 })
+
     const adminUserId = pickString(form.get('adminUserId'))
     const role = normalizeRole(pickString(form.get('role')))
     const professionalId = pickString(form.get('professionalId'))
@@ -131,7 +129,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.redirect(new URL('/admin/permissions', req.url))
   } catch (e: any) {
-    // unique constraint throws sometimes: keep it user-friendly
     const msg = typeof e?.message === 'string' ? e.message : 'Internal server error'
     console.error('POST /api/admin/permissions error', e)
     return NextResponse.json({ error: msg }, { status: 500 })

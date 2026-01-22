@@ -51,27 +51,36 @@ function normalizeBuckets(input: unknown): Buckets {
   const waitlist = asArray<WaitlistLike>(b.waitlist)
   const past = asArray<BookingLike>(b.past)
 
-  // Backward compat: some older code used buckets.confirmed
-  const prebooked = asArray<BookingLike>(b.prebooked).length
-    ? asArray<BookingLike>(b.prebooked)
-    : asArray<BookingLike>(b.confirmed)
+  // Backward compat: older code used buckets.confirmed
+  const prebooked = asArray<BookingLike>(b.prebooked).length ? asArray<BookingLike>(b.prebooked) : asArray<BookingLike>(b.confirmed)
 
   return { upcoming, pending, waitlist, prebooked, past }
-}
-
-function nextStatusBadge(b: BookingLike) {
-  const s = statusUpper(b.status)
-  if (s === 'ACCEPTED') return <Badge label="Confirmed" bg="rgb(var(--surface-glass) / 0.10)" color="rgb(var(--text-primary))" />
-  if (s === 'PENDING') return <Badge label="Requested" bg="rgb(var(--accent-primary) / 0.14)" color="rgb(var(--accent-primary))" />
-  if (s === 'COMPLETED') return <Badge label="Completed" bg="rgb(16 185 129 / 0.14)" color="rgb(16 185 129)" />
-  if (s === 'CANCELLED') return <Badge label="Cancelled" bg="rgb(239 68 68 / 0.14)" color="rgb(239 68 68)" />
-  return <Badge label={s || 'Unknown'} bg="rgb(var(--surface-glass) / 0.10)" color="rgb(var(--text-primary))" />
 }
 
 function normalizeTabKey(raw: string): TabKey | null {
   const t = raw.toLowerCase().trim()
   if (t === 'upcoming' || t === 'pending' || t === 'waitlist' || t === 'prebooked' || t === 'past') return t
   return null
+}
+
+type BadgeVariant = 'default' | 'danger' | 'accent' | 'success'
+
+function badgeForStatus(b: BookingLike): { label: string; variant: BadgeVariant } {
+  const s = statusUpper(b.status)
+
+  if (s === 'ACCEPTED') return { label: 'Confirmed', variant: 'success' }
+  if (s === 'PENDING') return { label: 'Requested', variant: 'accent' }
+  if (s === 'COMPLETED') return { label: 'Completed', variant: 'default' }
+  if (s === 'CANCELLED') return { label: 'Cancelled', variant: 'danger' }
+
+  return { label: s || 'Unknown', variant: 'default' }
+}
+
+function isPrebookedSource(source: unknown) {
+  // You mentioned Option 2 / no legacy users, so this can be strict.
+  // Keeping AFTERCARE because your code already uses it.
+  const s = sourceUpper(source)
+  return s === 'AFTERCARE' || s === 'PREBOOKED'
 }
 
 export default function ClientBookingsDashboard() {
@@ -93,7 +102,6 @@ export default function ClientBookingsDashboard() {
 
       const res = await fetch('/api/client/bookings', { cache: 'no-store' })
       const data: any = await res.json().catch(() => ({}))
-
       if (!res.ok) throw new Error(data?.error || 'Failed to load bookings.')
 
       setBuckets(normalizeBuckets(data?.buckets))
@@ -190,15 +198,18 @@ export default function ClientBookingsDashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
-              {sourceUpper(nextAppt.source) === 'AFTERCARE' ? (
-                <Badge label="Prebooked" bg="rgb(var(--surface-glass) / 0.10)" color="rgb(var(--text-primary))" />
+              {isPrebookedSource(nextAppt.source) ? (
+                <Badge label="Prebooked" variant="default" />
               ) : null}
 
               {nextNeedsConsultApproval ? (
-                <Badge label="Action required" bg="rgb(var(--accent-primary) / 0.14)" color="rgb(var(--accent-primary))" />
+                <Badge label="Action required" variant="accent" />
               ) : null}
 
-              {nextStatusBadge(nextAppt)}
+              {(() => {
+                const s = badgeForStatus(nextAppt)
+                return <Badge label={s.label} variant={s.variant} />
+              })()}
 
               {nextNeedsConsultApproval ? (
                 <a
@@ -272,7 +283,7 @@ export default function ClientBookingsDashboard() {
       <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 14 }}>
         {tab === 'upcoming' ? <UpcomingBookings items={buckets.upcoming} /> : null}
 
-        {/* ✅ important: pending needs reload after approve/reject */}
+        {/* pending needs reload after approve/reject */}
         {tab === 'pending' ? <PendingBookings items={buckets.pending} onChanged={reload} /> : null}
 
         {tab === 'waitlist' ? <WaitlistBookings items={buckets.waitlist} onChanged={reload} /> : null}

@@ -2,8 +2,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { moneyToFixed2String } from '@/lib/money/serializeMoney'
-
+import { moneyToFixed2String } from '@/lib/money'
+import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +11,11 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function safeNumber(v: unknown): number | null {
+  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN
+  return Number.isFinite(n) ? n : null
 }
 
 function normalizeToMinute(d: Date) {
@@ -28,27 +33,72 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function snap15(n: number) {
+  const x = Math.round(n / 15) * 15
+  return x < 0 ? 0 : x
+}
+
+async function safeJsonReq(req: Request) {
+  return req.json().catch(() => ({})) as Promise<any>
+}
+
+/** Working-hours enforcement (LOCATION truth) */
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
 type WorkingHours = Record<string, WorkingHoursDay>
 
-function isValidIanaTimeZone(tz: string | null | undefined) {
-  if (!tz || typeof tz !== 'string') return false
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return true
-  } catch {
-    return false
+function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
+  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
+}
+
+function getZonedParts(dateUtc: Date, timeZoneRaw: string) {
+  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
+
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  } as any)
+
+  const parts = dtf.formatToParts(dateUtc)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+
+  let year = Number(map.year)
+  let month = Number(map.month)
+  let day = Number(map.day)
+  let hour = Number(map.hour)
+  const minute = Number(map.minute)
+  const second = Number(map.second)
+
+  // Safari-ish edge case: hour can be "24"
+  if (hour === 24) {
+    hour = 0
+    const next = addDaysToYMD(year, month, day, 1)
+    year = next.year
+    month = next.month
+    day = next.day
   }
+
+  return { year, month, day, hour, minute, second }
 }
 
 function getWeekdayKeyInTimeZone(
   dateUtc: Date,
-  timeZone: string,
+  timeZoneRaw: string,
 ): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-  })
+  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
     .format(dateUtc)
     .toLowerCase()
 
@@ -61,30 +111,6 @@ function getWeekdayKeyInTimeZone(
   return 'sun'
 }
 
-function getZonedParts(dateUtc: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
-}
-
 function parseHHMM(v?: string) {
   if (!v || typeof v !== 'string') return null
   const m = /^(\d{2}):(\d{2})$/.exec(v.trim())
@@ -92,13 +118,12 @@ function parseHHMM(v?: string) {
   const hh = Number(m[1])
   const mm = Number(m[2])
   if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23) return null
-  if (mm < 0 || mm > 59) return null
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
   return { hh, mm }
 }
 
-function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) {
-  const z = getZonedParts(dateUtc, timeZone)
+function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZoneRaw: string) {
+  const z = getZonedParts(dateUtc, timeZoneRaw)
   return z.hour * 60 + z.minute
 }
 
@@ -111,7 +136,7 @@ function ensureWithinWorkingHours(args: {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
 
   if (!workingHours || typeof workingHours !== 'object') {
-    return { ok: false, error: 'This professional has not set working hours yet.' }
+    return { ok: false, error: 'Working hours are not set yet.' }
   }
 
   const wh = workingHours as WorkingHours
@@ -149,29 +174,27 @@ function ensureWithinWorkingHours(args: {
   return { ok: true }
 }
 
-async function safeJsonReq(req: Request) {
-  return req.json().catch(() => ({})) as Promise<any>
+function normalizeTimeZone(tz: unknown, fallback: string) {
+  const raw = typeof tz === 'string' ? tz.trim() : ''
+  const cleaned = sanitizeTimeZone(raw, fallback) || fallback
+  return isValidIanaTimeZone(cleaned) ? cleaned : fallback
 }
 
-function snap15(n: number) {
-  const x = Math.round(n / 15) * 15
-  return x < 0 ? 0 : x
-}
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
+function fail(status: number, error: string, details?: any) {
+  const dev = process.env.NODE_ENV !== 'production'
+  return NextResponse.json(dev && details != null ? { ok: false, error, details } : { ok: false, error }, { status })
 }
 
 export async function GET(_req: Request, { params }: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
+      return fail(401, 'Not authorized.')
     }
 
     const { id } = await Promise.resolve(params)
     const bookingId = (id || '').trim()
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id' }, { status: 400 })
+    if (!bookingId) return fail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -180,6 +203,7 @@ export async function GET(_req: Request, { params }: Ctx) {
         status: true,
         scheduledFor: true,
         locationType: true,
+
         bufferMinutes: true,
         totalDurationMinutes: true,
         subtotalSnapshot: true,
@@ -187,11 +211,8 @@ export async function GET(_req: Request, { params }: Ctx) {
         professionalId: true,
         clientId: true,
 
-        // Legacy (kept for transition)
-        serviceId: true,
-        offeringId: true,
-        durationMinutesSnapshot: true,
-        priceSnapshot: true,
+        locationId: true,
+        locationTimeZone: true,
 
         serviceItems: {
           orderBy: { sortOrder: 'asc' },
@@ -214,33 +235,52 @@ export async function GET(_req: Request, { params }: Ctx) {
             user: { select: { email: true } },
           },
         },
+
         professional: { select: { timeZone: true } },
       },
     })
 
     if (!booking || booking.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+      return fail(404, 'Booking not found.')
     }
 
-    const start = new Date(booking.scheduledFor)
+    const start = normalizeToMinute(new Date(booking.scheduledFor))
+    if (!Number.isFinite(start.getTime())) return fail(500, 'Booking has an invalid scheduled time.')
 
-    // If totals are 0 (not backfilled yet), fall back to legacy snapshot
-    const totalDur =
+    const items = booking.serviceItems || []
+    const computedDuration = items.reduce((sum, i) => sum + Number(i.durationMinutesSnapshot ?? 0), 0)
+    const computedSubtotal = items.reduce((sum, i) => sum + Number(i.priceSnapshot ?? 0), 0)
+
+    const durationMinutes =
       Number(booking.totalDurationMinutes ?? 0) > 0
         ? Number(booking.totalDurationMinutes)
-        : Number(booking.durationMinutesSnapshot ?? 0)
+        : computedDuration > 0
+          ? computedDuration
+          : 60
 
-    const buffer = Number(booking.bufferMinutes ?? 0)
-    const endsAt = addMinutes(start, totalDur + buffer)
+    const bufferMinutes = Number(booking.bufferMinutes ?? 0)
+    const endsAt = addMinutes(start, durationMinutes + Math.max(0, bufferMinutes))
 
     const fn = booking.client?.firstName?.trim() || ''
     const ln = booking.client?.lastName?.trim() || ''
     const fullName = fn || ln ? `${fn} ${ln}`.trim() : booking.client?.user?.email || 'Client'
 
-    const tz = isValidIanaTimeZone(booking.professional?.timeZone)
-      ? booking.professional!.timeZone!
-      : 'America/Los_Angeles'
+    // timezone truth order: booking.locationTimeZone > location.timeZone > pro.timeZone > fallback
+    let tz = normalizeTimeZone(booking.locationTimeZone, 'America/Los_Angeles')
 
+    if (!booking.locationTimeZone && booking.locationId) {
+      const loc = await prisma.professionalLocation.findFirst({
+        where: { id: booking.locationId, professionalId: booking.professionalId },
+        select: { timeZone: true },
+      })
+      if (loc?.timeZone) tz = normalizeTimeZone(loc.timeZone, tz)
+    }
+
+    if (!booking.locationTimeZone && !booking.locationId) {
+      tz = normalizeTimeZone(booking.professional?.timeZone, tz)
+    }
+
+    // For the pro booking editor UI: list services from active offerings
     const offerings = await prisma.professionalServiceOffering.findMany({
       where: { professionalId: user.professionalProfile.id, isActive: true },
       select: {
@@ -261,10 +301,10 @@ export async function GET(_req: Request, { params }: Ctx) {
           : o.salonDurationMinutes ?? o.service.defaultDurationMinutes
 
       return {
-        id: o.service.id,
+        id: String(o.service.id),
         name: o.service.name,
-        offeringId: o.id,
-        durationMinutes: dur ?? null,
+        offeringId: String(o.id),
+        durationMinutes: typeof dur === 'number' ? dur : null,
       }
     })
 
@@ -277,25 +317,32 @@ export async function GET(_req: Request, { params }: Ctx) {
           scheduledFor: start.toISOString(),
           endsAt: endsAt.toISOString(),
           locationType: booking.locationType,
-          bufferMinutes: buffer,
-          durationMinutes: totalDur, // 🔥 UI expects durationMinutes
-          totalDurationMinutes: totalDur,
-          subtotalSnapshot: moneyToFixed2String(booking.subtotalSnapshot ?? booking.priceSnapshot),
+          bufferMinutes: Math.max(0, bufferMinutes),
+
+          // UI expects durationMinutes
+          durationMinutes,
+          totalDurationMinutes: durationMinutes,
+
+          subtotalSnapshot: moneyToFixed2String(
+            // prefer stored if present, else computed from items
+            booking.subtotalSnapshot ?? (computedSubtotal as any),
+          ),
 
           client: {
             fullName,
             email: booking.client?.user?.email ?? null,
             phone: booking.client?.phone ?? null,
           },
+
           timeZone: tz,
 
-          serviceItems: booking.serviceItems.map((i) => ({
+          serviceItems: items.map((i) => ({
             id: i.id,
             serviceId: i.serviceId,
             offeringId: i.offeringId ?? null,
             serviceName: i.service?.name ?? 'Service',
             priceSnapshot: moneyToFixed2String(i.priceSnapshot),
-            durationMinutesSnapshot: i.durationMinutesSnapshot ?? 0,
+            durationMinutesSnapshot: Number(i.durationMinutesSnapshot ?? 0),
             sortOrder: i.sortOrder,
           })),
         },
@@ -305,7 +352,7 @@ export async function GET(_req: Request, { params }: Ctx) {
     )
   } catch (e) {
     console.error('GET /api/pro/bookings/[id] error:', e)
-    return NextResponse.json({ error: 'Failed to load booking.' }, { status: 500 })
+    return fail(500, 'Failed to load booking.')
   }
 }
 
@@ -313,72 +360,52 @@ export async function PATCH(req: Request, { params }: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
+      return fail(401, 'Not authorized.')
     }
 
     const { id } = await Promise.resolve(params)
     const bookingId = (id || '').trim()
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id' }, { status: 400 })
+    if (!bookingId) return fail(400, 'Missing booking id.')
 
     const body = await safeJsonReq(req)
 
-    // What the UI sends
+    // What UI can send
     const scheduledForRaw = pickString(body?.scheduledFor)
     const notifyClient = Boolean(body?.notifyClient)
-    const serviceIdRaw = pickString(body?.serviceId)
 
-    // Duration: calendar sends durationMinutes, schema stores totalDurationMinutes
-    const durationMinutesRaw = body?.durationMinutes
-    const totalDurationRaw = body?.totalDurationMinutes // allow legacy callers
-
-    // Buffer optional
     const bufferRaw = body?.bufferMinutes
+    const durationMinutesRaw = body?.durationMinutes
+    const allowOutside = Boolean(body?.allowOutsideWorkingHours)
 
-    // Service item operations (optional advanced usage)
+    // Service items: replace-all model (simple + safe)
     const serviceItemsRaw = Array.isArray(body?.serviceItems) ? body.serviceItems : null
-    const addServiceItem = body?.addServiceItem ?? null
-    const updateServiceItem = body?.updateServiceItem ?? null
-    const removeServiceItemId = pickString(body?.removeServiceItemId)
 
     const wantsSomething =
       !!scheduledForRaw ||
-      !!serviceIdRaw ||
       bufferRaw != null ||
       durationMinutesRaw != null ||
-      totalDurationRaw != null ||
-      serviceItemsRaw != null ||
-      addServiceItem != null ||
-      updateServiceItem != null ||
-      !!removeServiceItemId
+      serviceItemsRaw != null
 
-    if (!wantsSomething) {
-      return NextResponse.json({ error: 'No changes provided.' }, { status: 400 })
-    }
+    if (!wantsSomething) return fail(400, 'No changes provided.')
 
     let nextStart: Date | null = null
     if (scheduledForRaw) {
       nextStart = normalizeToMinute(new Date(scheduledForRaw))
-      if (!Number.isFinite(nextStart.getTime())) {
-        return NextResponse.json({ error: 'Invalid scheduledFor.' }, { status: 400 })
-      }
+      if (!Number.isFinite(nextStart.getTime())) return fail(400, 'Invalid scheduledFor.')
     }
 
     let nextBuffer: number | null = null
     if (bufferRaw != null) {
-      const n = Number(bufferRaw)
-      if (!Number.isFinite(n) || n < 0 || n > 180) {
-        return NextResponse.json({ error: 'Invalid bufferMinutes.' }, { status: 400 })
-      }
+      const n = safeNumber(bufferRaw)
+      if (n == null || n < 0 || n > 180) return fail(400, 'Invalid bufferMinutes.')
       nextBuffer = snap15(n)
     }
 
-    // durationMinutes takes precedence over totalDurationMinutes if provided
     let nextTotalDuration: number | null = null
-    if (durationMinutesRaw != null || totalDurationRaw != null) {
-      const n = Number(durationMinutesRaw != null ? durationMinutesRaw : totalDurationRaw)
-      if (!Number.isFinite(n)) return NextResponse.json({ error: 'Invalid durationMinutes.' }, { status: 400 })
-      const snapped = snap15(n)
-      nextTotalDuration = clamp(snapped, 15, 12 * 60)
+    if (durationMinutesRaw != null) {
+      const n = safeNumber(durationMinutesRaw)
+      if (n == null) return fail(400, 'Invalid durationMinutes.')
+      nextTotalDuration = clamp(snap15(n), 15, 12 * 60)
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -389,27 +416,22 @@ export async function PATCH(req: Request, { params }: Ctx) {
           status: true,
           scheduledFor: true,
           locationType: true,
+
           bufferMinutes: true,
           totalDurationMinutes: true,
-          durationMinutesSnapshot: true, // legacy fallback
-          priceSnapshot: true,
           subtotalSnapshot: true,
 
           professionalId: true,
           clientId: true,
 
-          professional: { select: { timeZone: true, workingHours: true } },
+          locationId: true,
+          locationTimeZone: true,
+
+          professional: { select: { timeZone: true } },
 
           serviceItems: {
             orderBy: { sortOrder: 'asc' },
-            select: {
-              id: true,
-              serviceId: true,
-              offeringId: true,
-              priceSnapshot: true,
-              durationMinutesSnapshot: true,
-              sortOrder: true,
-            },
+            select: { id: true, sortOrder: true },
           },
         },
       })
@@ -421,95 +443,50 @@ export async function PATCH(req: Request, { params }: Ctx) {
         throw new Error('CANNOT_EDIT_CANCELLED')
       }
 
-      const proId = existing.professionalId
+      // Determine appointment timezone from location first
+      let apptTz = normalizeTimeZone(existing.locationTimeZone, 'America/Los_Angeles')
 
-      const proTz = isValidIanaTimeZone(existing.professional?.timeZone)
-        ? existing.professional!.timeZone!
-        : 'America/Los_Angeles'
+      const loc = existing.locationId
+        ? await tx.professionalLocation.findFirst({
+            where: { id: existing.locationId, professionalId: existing.professionalId, isBookable: true },
+            select: { timeZone: true, workingHours: true },
+          })
+        : null
 
-      // Helper: validate offering belongs to pro for a serviceId (and return offeringId)
-      async function mustHaveOffering(serviceId: string): Promise<string> {
-        const off = await tx.professionalServiceOffering.findFirst({
-          where: { professionalId: proId, serviceId, isActive: true },
-          select: { id: true },
-        })
-        if (!off) throw new Error('BAD_SERVICE')
-        return off.id
+      if (loc?.timeZone) apptTz = normalizeTimeZone(loc.timeZone, apptTz)
+      if (!existing.locationTimeZone && !loc?.timeZone) {
+        apptTz = normalizeTimeZone(existing.professional?.timeZone, apptTz)
       }
 
-      // If modal sent serviceId, treat that as "single service booking" update:
-// replace items with that one service, and reset totals to that service defaults
-// (price + duration snapshot) based on current booking locationType.
-if (serviceIdRaw) {
-  const offeringId = await mustHaveOffering(serviceIdRaw)
-
-  const offering = await tx.professionalServiceOffering.findUnique({
-    where: { id: offeringId },
-    select: {
-      id: true,
-      serviceId: true,
-      salonPriceStartingAt: true,
-      mobilePriceStartingAt: true,
-      salonDurationMinutes: true,
-      mobileDurationMinutes: true,
-    },
-  })
-  if (!offering) throw new Error('BAD_SERVICE')
-
-  const dur =
-    existing.locationType === 'MOBILE'
-      ? Number(offering.mobileDurationMinutes ?? 0)
-      : Number(offering.salonDurationMinutes ?? 0)
-
-  const price =
-    existing.locationType === 'MOBILE'
-      ? offering.mobilePriceStartingAt
-      : offering.salonPriceStartingAt
-
-  if (!Number.isFinite(dur) || dur <= 0) throw new Error('BAD_SERVICE')
-  if (price == null) throw new Error('BAD_SERVICE')
-
-  const snappedDur = clamp(snap15(dur), 15, 12 * 60)
-  const priceNum = Number(price)
-
-  await tx.bookingServiceItem.deleteMany({ where: { bookingId: existing.id } })
-  await tx.bookingServiceItem.create({
-    data: {
-      bookingId: existing.id,
-      serviceId: serviceIdRaw,
-      offeringId: offeringId,
-      priceSnapshot: priceNum as any,
-      durationMinutesSnapshot: snappedDur,
-      sortOrder: 0,
-    },
-  })
-
-  // If user didn’t explicitly set durationMinutes, default to service duration
-  if (nextTotalDuration == null) nextTotalDuration = snappedDur
-}
-
-
-      // Apply service item changes (advanced)
+      // Replace-all serviceItems if provided (no legacy "serviceId" shortcut)
       if (serviceItemsRaw) {
         await tx.bookingServiceItem.deleteMany({ where: { bookingId: existing.id } })
 
         let idx = 0
         for (const raw of serviceItemsRaw) {
-          const sid = pickString(raw?.serviceId)
-          if (!sid) throw new Error('BAD_ITEMS')
+          const serviceId = pickString(raw?.serviceId)
+          if (!serviceId) throw new Error('BAD_ITEMS')
 
-          const offeringId = pickString(raw?.offeringId) ?? (await mustHaveOffering(sid))
-          const price = Number(raw?.priceSnapshot)
-          const dur = Number(raw?.durationMinutesSnapshot)
+          const offeringId = pickString(raw?.offeringId)
+          const price = safeNumber(raw?.priceSnapshot)
+          const dur = safeNumber(raw?.durationMinutesSnapshot)
 
-          if (!Number.isFinite(price) || price < 0) throw new Error('BAD_ITEMS')
-          if (!Number.isFinite(dur) || dur < 15 || dur > 12 * 60) throw new Error('BAD_ITEMS')
+          if (!offeringId) throw new Error('BAD_ITEMS')
+          if (price == null || price < 0) throw new Error('BAD_ITEMS')
+          if (dur == null || dur < 15 || dur > 12 * 60) throw new Error('BAD_ITEMS')
+
+          // ensure offering belongs to this pro and matches serviceId
+          const off = await tx.professionalServiceOffering.findFirst({
+            where: { id: offeringId, professionalId: existing.professionalId, serviceId, isActive: true },
+            select: { id: true },
+          })
+          if (!off) throw new Error('BAD_ITEMS')
 
           await tx.bookingServiceItem.create({
             data: {
               bookingId: existing.id,
-              serviceId: sid,
-              offeringId: offeringId ?? undefined,
+              serviceId,
+              offeringId,
               priceSnapshot: price as any,
               durationMinutesSnapshot: clamp(snap15(dur), 15, 12 * 60),
               sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Number(raw.sortOrder) : idx,
@@ -520,72 +497,7 @@ if (serviceIdRaw) {
         }
       }
 
-      if (addServiceItem) {
-        const sid = pickString(addServiceItem?.serviceId)
-        if (!sid) throw new Error('BAD_ITEMS')
-
-        const offeringId = pickString(addServiceItem?.offeringId) ?? (await mustHaveOffering(sid))
-        const price = Number(addServiceItem?.priceSnapshot)
-        const dur = Number(addServiceItem?.durationMinutesSnapshot)
-
-        if (!Number.isFinite(price) || price < 0) throw new Error('BAD_ITEMS')
-        if (!Number.isFinite(dur) || dur < 15 || dur > 12 * 60) throw new Error('BAD_ITEMS')
-
-        const lastSort = existing.serviceItems.reduce((m, i) => Math.max(m, i.sortOrder), -1)
-        await tx.bookingServiceItem.create({
-          data: {
-            bookingId: existing.id,
-            serviceId: sid,
-            offeringId: offeringId ?? undefined,
-            priceSnapshot: price as any,
-            durationMinutesSnapshot: clamp(snap15(dur), 15, 12 * 60),
-            sortOrder: lastSort + 1,
-          },
-        })
-      }
-
-      if (updateServiceItem) {
-        const itemId = pickString(updateServiceItem?.id)
-        if (!itemId) throw new Error('BAD_ITEMS')
-
-        const sid = pickString(updateServiceItem?.serviceId)
-        const offeringIdRaw = pickString(updateServiceItem?.offeringId)
-        const price = updateServiceItem?.priceSnapshot
-        const dur = updateServiceItem?.durationMinutesSnapshot
-
-        const data: any = {}
-
-        if (sid) {
-          data.serviceId = sid
-          data.offeringId = offeringIdRaw ?? (await mustHaveOffering(sid))
-        }
-
-        if (price != null) {
-          const p = Number(price)
-          if (!Number.isFinite(p) || p < 0) throw new Error('BAD_ITEMS')
-          data.priceSnapshot = p
-        }
-
-        if (dur != null) {
-          const d = Number(dur)
-          if (!Number.isFinite(d) || d < 15 || d > 12 * 60) throw new Error('BAD_ITEMS')
-          data.durationMinutesSnapshot = clamp(snap15(d), 15, 12 * 60)
-        }
-
-        if (updateServiceItem?.sortOrder != null) {
-          const so = Number(updateServiceItem.sortOrder)
-          if (!Number.isFinite(so) || so < 0 || so > 10_000) throw new Error('BAD_ITEMS')
-          data.sortOrder = so
-        }
-
-        await tx.bookingServiceItem.update({ where: { id: itemId }, data })
-      }
-
-      if (removeServiceItemId) {
-        await tx.bookingServiceItem.delete({ where: { id: removeServiceItemId } }).catch(() => null)
-      }
-
-      // Reload items to compute subtotal + computed duration
+      // Reload items to compute subtotal + duration unless duration explicitly set
       const itemsNow = await tx.bookingServiceItem.findMany({
         where: { bookingId: existing.id },
         orderBy: { sortOrder: 'asc' },
@@ -596,30 +508,25 @@ if (serviceIdRaw) {
       const computedDuration = itemsNow.reduce((sum, i) => sum + Number(i.durationMinutesSnapshot ?? 0), 0)
 
       const finalStart = nextStart ?? normalizeToMinute(new Date(existing.scheduledFor))
-      const finalBuffer = nextBuffer ?? Number(existing.bufferMinutes ?? 0)
+      const finalBuffer = nextBuffer ?? Math.max(0, Number(existing.bufferMinutes ?? 0))
 
-      // If caller set duration, use it; else use computed; else fallback to legacy
-      const legacyDur =
-        Number(existing.totalDurationMinutes ?? 0) > 0
-          ? Number(existing.totalDurationMinutes)
-          : Number(existing.durationMinutesSnapshot ?? 60)
+      const durationFallback =
+        Number(existing.totalDurationMinutes ?? 0) > 0 ? Number(existing.totalDurationMinutes) : 60
 
       const finalDuration =
         nextTotalDuration ??
-        (computedDuration > 0 ? computedDuration : legacyDur)
+        (computedDuration > 0 ? computedDuration : durationFallback)
 
       const finalEnd = addMinutes(finalStart, finalDuration + finalBuffer)
 
-      const allowOutside = Boolean(body?.allowOutsideWorkingHours)
-
+      // Working hours check (location truth)
       const whCheck = ensureWithinWorkingHours({
         scheduledStartUtc: finalStart,
         scheduledEndUtc: finalEnd,
-        workingHours: existing.professional?.workingHours,
-        timeZone: proTz,
+        workingHours: loc?.workingHours,
+        timeZone: apptTz,
       })
 
-      // Pros can override outside hours (clients cannot, because clients don’t hit this endpoint)
       if (!whCheck.ok && !allowOutside) throw new Error(`WH:${whCheck.error}`)
 
       // Conflict check with other bookings
@@ -637,23 +544,21 @@ if (serviceIdRaw) {
           id: true,
           scheduledFor: true,
           totalDurationMinutes: true,
-          durationMinutesSnapshot: true,
           bufferMinutes: true,
         },
-        take: 120,
+        take: 200,
       })
 
       const hasConflict = others.some((b: any) => {
-        const bDur =
-          Number(b.totalDurationMinutes ?? 0) > 0
-            ? Number(b.totalDurationMinutes)
-            : Number(b.durationMinutesSnapshot ?? 0)
-        const bBuf = Number(b.bufferMinutes ?? 0)
+        const bDur = Number(b.totalDurationMinutes ?? 0) > 0 ? Number(b.totalDurationMinutes) : 60
+        const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
         if (!Number.isFinite(bDur) || bDur <= 0) return false
+
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
         const bEnd = addMinutes(bStart, bDur + bBuf)
         return overlaps(bStart, bEnd, finalStart, finalEnd)
       })
+
       if (hasConflict) throw new Error('CONFLICT')
 
       const updated = await tx.booking.update({
@@ -663,25 +568,32 @@ if (serviceIdRaw) {
           bufferMinutes: finalBuffer,
           totalDurationMinutes: finalDuration,
           subtotalSnapshot: computedSubtotal as any,
-          // keep legacy fields untouched unless you explicitly want them mirrored
         } as any,
-        select: { id: true, scheduledFor: true, bufferMinutes: true, totalDurationMinutes: true, status: true },
+        select: {
+          id: true,
+          scheduledFor: true,
+          bufferMinutes: true,
+          totalDurationMinutes: true,
+          status: true,
+        },
       })
 
       if (notifyClient) {
+        // You can replace this later with your real notification system.
+        // Keeping this minimal so it doesn't become another "legacy" trap.
         try {
           await tx.clientNotification.create({
             data: {
               clientId: existing.clientId,
-              type: 'AFTERCARE' as any, // adjust if you add BOOKING_UPDATE type later
+              type: 'BOOKING_UPDATE' as any,
               title: 'Appointment updated',
-              body: `Your appointment details were updated.`,
+              body: 'Your appointment details were updated.',
               bookingId: updated.id,
               dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}`,
             } as any,
           })
         } catch (e) {
-          console.error('Client notification failed (update):', e)
+          console.error('Client notification failed (booking update):', e)
         }
       }
 
@@ -690,13 +602,14 @@ if (serviceIdRaw) {
         scheduledFor: new Date(updated.scheduledFor).toISOString(),
         endsAt: addMinutes(
           new Date(updated.scheduledFor),
-          Number(updated.totalDurationMinutes) + Number(updated.bufferMinutes),
+          Number(updated.totalDurationMinutes) + Math.max(0, Number(updated.bufferMinutes)),
         ).toISOString(),
         bufferMinutes: updated.bufferMinutes,
         durationMinutes: updated.totalDurationMinutes,
         totalDurationMinutes: updated.totalDurationMinutes,
         status: updated.status,
         subtotalSnapshot: computedSubtotal,
+        timeZone: apptTz,
       }
     })
 
@@ -704,14 +617,13 @@ if (serviceIdRaw) {
   } catch (e: any) {
     const msg = String(e?.message || '')
 
-    if (msg === 'NOT_FOUND') return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (msg === 'CANNOT_EDIT_CANCELLED') return NextResponse.json({ error: 'Cancelled bookings cannot be edited.' }, { status: 409 })
-    if (msg === 'CONFLICT') return NextResponse.json({ error: 'That time is not available.' }, { status: 409 })
-    if (msg === 'BAD_SERVICE') return NextResponse.json({ error: 'That service is not available for this professional.' }, { status: 400 })
-    if (msg === 'BAD_ITEMS') return NextResponse.json({ error: 'Invalid service items.' }, { status: 400 })
-    if (msg.startsWith('WH:')) return NextResponse.json({ error: msg.slice(3) || 'That time is outside working hours.' }, { status: 400 })
+    if (msg === 'NOT_FOUND') return fail(404, 'Booking not found.')
+    if (msg === 'CANNOT_EDIT_CANCELLED') return fail(409, 'Cancelled bookings cannot be edited.')
+    if (msg === 'CONFLICT') return fail(409, 'That time is not available.')
+    if (msg === 'BAD_ITEMS') return fail(400, 'Invalid service items.')
+    if (msg.startsWith('WH:')) return fail(400, msg.slice(3) || 'That time is outside working hours.')
 
     console.error('PATCH /api/pro/bookings/[id] error:', e)
-    return NextResponse.json({ error: 'Failed to update booking.' }, { status: 500 })
+    return fail(500, 'Failed to update booking.')
   }
 }

@@ -1,5 +1,4 @@
 // app/(main)/booking/AvailabilityDrawer/utils/hold.ts
-
 import type { HoldParsed, ServiceLocationType } from '../types'
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
@@ -11,19 +10,23 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
 
 export function parseHoldResponse(data: any): HoldParsed {
   const hold = data?.hold
-  const holdId = typeof hold?.id === 'string' ? hold.id : ''
-  const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt : ''
-  const scheduledForISO = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor : ''
+  const holdId = typeof hold?.id === 'string' ? hold.id.trim() : ''
+  const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt.trim() : ''
+  const scheduledForISO = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor.trim() : ''
   const loc = normalizeLocationType(hold?.locationType)
 
   const holdUntilMs = expiresAtIso ? new Date(expiresAtIso).getTime() : NaN
-  if (!holdId || !scheduledForISO || !Number.isFinite(holdUntilMs)) {
+  const scheduledMs = scheduledForISO ? new Date(scheduledForISO).getTime() : NaN
+
+  if (!holdId || !expiresAtIso || !scheduledForISO || !Number.isFinite(holdUntilMs) || !Number.isFinite(scheduledMs)) {
     throw new Error('Hold response missing fields.')
   }
+
   return { holdId, holdUntilMs, scheduledForISO, locationType: loc }
 }
 
 export async function deleteHoldById(holdId: string) {
-  if (!holdId) return
-  await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { method: 'DELETE' }).catch(() => {})
+  const id = String(holdId || '').trim()
+  if (!id) return
+  await fetch(`/api/holds/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
 }

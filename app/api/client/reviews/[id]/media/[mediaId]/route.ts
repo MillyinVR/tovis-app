@@ -1,7 +1,7 @@
 // app/api/client/reviews/[id]/media/[mediaId]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,34 +9,25 @@ type RouteContext = {
   params: Promise<{ id: string; mediaId: string }>
 }
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 export async function DELETE(_req: NextRequest, { params }: RouteContext) {
   try {
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { user, clientId } = auth
+
     const raw = await params
     const reviewId = pickString(raw?.id)
     const mediaId = pickString(raw?.mediaId)
 
-    if (!reviewId || !mediaId) {
-      return NextResponse.json({ error: 'Missing id or mediaId.' }, { status: 400 })
-    }
-
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!reviewId || !mediaId) return jsonFail(400, 'Missing id or mediaId.')
 
     const review = await prisma.review.findUnique({
       where: { id: reviewId },
       select: { id: true, clientId: true },
     })
 
-    if (!review) return NextResponse.json({ error: 'Review not found.' }, { status: 404 })
-    if (review.clientId !== user.clientProfile.id) {
-      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
-    }
+    if (!review) return jsonFail(404, 'Review not found.')
+    if (review.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
     const media = await prisma.mediaAsset.findUnique({
       where: { id: mediaId },
@@ -50,31 +41,22 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
       },
     })
 
-    if (!media) return NextResponse.json({ error: 'Media not found.' }, { status: 404 })
+    // 404 to avoid leaking existence
+    if (!media) return jsonFail(404, 'Media not found.')
 
-    // Must belong to this review + must be uploaded by this user as CLIENT
-    if (
-      media.reviewId !== reviewId ||
-      media.uploadedByUserId !== user.id ||
-      media.uploadedByRole !== 'CLIENT'
-    ) {
-      // 404 to avoid leaking existence
-      return NextResponse.json({ error: 'Media not found.' }, { status: 404 })
+    if (media.reviewId !== reviewId || media.uploadedByUserId !== user.id || media.uploadedByRole !== 'CLIENT') {
+      return jsonFail(404, 'Media not found.')
     }
 
-    // 🔒 Business rule: can't delete if pro has promoted it
     if (media.isFeaturedInPortfolio || media.isEligibleForLooks) {
-      return NextResponse.json(
-        { error: 'This media is in the professional’s portfolio/Looks and cannot be removed.' },
-        { status: 409 },
-      )
+      return jsonFail(409, 'This media is in the professional’s portfolio/Looks and cannot be removed.')
     }
 
     await prisma.mediaAsset.delete({ where: { id: mediaId } })
 
-    return NextResponse.json({ ok: true }, { status: 200 })
+    return jsonOk({})
   } catch (e) {
     console.error('DELETE /api/client/reviews/[id]/media/[mediaId] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

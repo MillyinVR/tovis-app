@@ -1,15 +1,9 @@
 // app/pro/_components/ProSessionFooter/useProSession.ts
-
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import type {
-  ProSessionPayload,
-  SessionBooking,
-  UiSessionCenterAction,
-  UiSessionMode,
-} from '@/lib/proSession/types'
+import type { ProSessionPayload, SessionBooking, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
 
 type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
 
@@ -68,110 +62,161 @@ function normalizeAction(v: unknown): UiSessionCenterAction {
   return 'NONE'
 }
 
+const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
+
 export function useProSession() {
   const router = useRouter()
   const pathname = usePathname()
 
   const [mode, setMode] = useState<UiSessionMode>('IDLE')
   const [booking, setBooking] = useState<SessionBooking | null>(null)
-  const [center, setCenter] = useState<CenterState>({ label: 'Start', action: 'NONE', href: null })
+  const [center, setCenter] = useState<CenterState>(DEFAULT_CENTER)
 
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<'start' | 'finish' | 'nav' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Request control
   const inFlightRef = useRef<AbortController | null>(null)
+  const inFlightPromiseRef = useRef<Promise<void> | null>(null)
   const redirectedRef = useRef(false)
+  const lastLoadAtRef = useRef<number>(0)
+
+  // Monotonic request id so only the latest request updates/cleans up.
+  const reqIdRef = useRef(0)
 
   const isReadyOrActive = mode === 'UPCOMING' || mode === 'ACTIVE'
+
   const centerDisabled = useMemo(() => {
     return !booking || loading || !!actionLoading || !isReadyOrActive || center.action === 'NONE'
   }, [booking, loading, actionLoading, isReadyOrActive, center.action])
 
-  async function loadSession(opts?: { silent?: boolean }) {
-    inFlightRef.current?.abort()
+  async function loadSession(opts?: { silent?: boolean; force?: boolean }) {
+    // Dedupe: if a load is already running and we aren't forcing, reuse it.
+    if (inFlightPromiseRef.current && !opts?.force) return inFlightPromiseRef.current
+
+    if (opts?.force) {
+      inFlightRef.current?.abort()
+      inFlightRef.current = null
+      inFlightPromiseRef.current = null
+    }
+
     const controller = new AbortController()
     inFlightRef.current = controller
+
+    const myReqId = ++reqIdRef.current
 
     if (!opts?.silent) {
       setLoading(true)
       setError(null)
     }
 
-    try {
-      const res = await fetch('/api/pro/session', {
-        method: 'GET',
-        cache: 'no-store',
-        signal: controller.signal,
-      })
+    const promise = (async () => {
+      try {
+        const res = await fetch('/api/pro/session', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal,
+        })
 
-      if (res.status === 401) {
-        if (!redirectedRef.current) {
-          redirectedRef.current = true
-          redirectToLogin(router, 'pro-session')
+        if (res.status === 401) {
+          if (!redirectedRef.current) {
+            redirectedRef.current = true
+            redirectToLogin(router, 'pro-session')
+          }
+          return
         }
-        return
+
+        redirectedRef.current = false
+        const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean }
+
+        if (!res.ok || data?.ok !== true) {
+          setMode('IDLE')
+          setBooking(null)
+          setCenter(DEFAULT_CENTER)
+          if (!opts?.silent) setError(errorFromResponse(res, data))
+          return
+        }
+
+        setMode(normalizeMode(data.mode))
+        setBooking((data.booking as SessionBooking) ?? null)
+
+        const c = data.center as any
+        const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
+        const action = normalizeAction(c?.action)
+        const href = isSafeInternalHref(c?.href) ? c.href : null
+
+        setCenter({ label, action, href })
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return
+        if (!opts?.silent) setError('Network error loading session.')
+      } finally {
+        // Only the latest request cleans up. Older ones should not stomp state.
+        if (reqIdRef.current === myReqId) {
+          if (inFlightRef.current === controller) inFlightRef.current = null
+          inFlightPromiseRef.current = null
+          if (!opts?.silent) setLoading(false)
+        }
       }
+    })()
 
-      redirectedRef.current = false
-      const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean; error?: string }
-
-      if (!res.ok || data?.ok !== true) {
-        setMode('IDLE')
-        setBooking(null)
-        setCenter({ label: 'Start', action: 'NONE', href: null })
-        setError(errorFromResponse(res, data))
-        return
-      }
-
-      setMode(normalizeMode(data.mode))
-      setBooking((data.booking as SessionBooking) ?? null)
-
-      const c = data.center as any
-      const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
-      const action = normalizeAction(c?.action)
-      const href = isSafeInternalHref(c?.href) ? (c.href as string) : null
-      setCenter({ label, action, href })
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
-      if (!opts?.silent) setError('Network error loading session.')
-    } finally {
-      if (inFlightRef.current === controller) inFlightRef.current = null
-      if (!opts?.silent) setLoading(false)
-    }
+    inFlightPromiseRef.current = promise
+    lastLoadAtRef.current = Date.now()
+    return promise
   }
 
+  // Initial load + polling (only when visible)
   useEffect(() => {
-    loadSession()
-    const id = setInterval(() => loadSession({ silent: true }), 15_000)
+    let pollId: number | null = null
+
+    const startPolling = () => {
+      if (pollId != null) return
+      pollId = window.setInterval(() => {
+        if (document.visibilityState !== 'visible') return
+        void loadSession({ silent: true })
+      }, 30_000)
+    }
+
+    const stopPolling = () => {
+      if (pollId == null) return
+      window.clearInterval(pollId)
+      pollId = null
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void loadSession({ silent: true })
+        startPolling()
+      } else {
+        stopPolling()
+      }
+    }
+
+    void loadSession({ silent: false })
+    onVisibility()
+
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+
     return () => {
-      clearInterval(id)
+      stopPolling()
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
       inFlightRef.current?.abort()
       inFlightRef.current = null
+      inFlightPromiseRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Route change refresh, throttled
   useEffect(() => {
-    loadSession({ silent: true })
+    const now = Date.now()
+    const elapsed = now - (lastLoadAtRef.current || 0)
+    if (elapsed < 800) return
+    void loadSession({ silent: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname])
-
-  useEffect(() => {
-    function onFocus() {
-      loadSession({ silent: true })
-    }
-    function onVisibility() {
-      if (document.visibilityState === 'visible') loadSession({ silent: true })
-    }
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   async function handleCenterClick() {
     if (!booking || centerDisabled) return
@@ -183,36 +228,39 @@ export function useProSession() {
     try {
       if (center.action === 'START') {
         setActionLoading('start')
+
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
+
         const data = await safeJson(res)
         if (!res.ok) throw new Error(errorFromResponse(res, data))
 
-        await loadSession({ silent: true })
+        await loadSession({ silent: true, force: true })
+
         const target = center.href ?? `${fallbackBookingRoot}?step=consult`
         if (target === currentPathWithQuery()) router.refresh()
         else router.push(target)
+
         return
       }
 
       if (center.action === 'FINISH') {
         setActionLoading('finish')
+
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/finish`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-finish')
+
         const data = await safeJson(res)
         if (!res.ok) throw new Error(errorFromResponse(res, data))
 
         const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
-        await loadSession({ silent: true })
+        await loadSession({ silent: true, force: true })
 
         const target = nextHref ?? `${fallbackBookingRoot}/session/after-photos`
+
         if (target === currentPathWithQuery()) {
           const afterCount = typeof data?.afterCount === 'number' ? data.afterCount : null
-          setError(
-            afterCount === 0
-              ? 'Add at least one after photo to continue to aftercare.'
-              : 'Nothing to advance right now.'
-          )
+          setError(afterCount === 0 ? 'Add at least one after photo to continue to aftercare.' : 'Nothing to advance right now.')
           router.refresh()
           return
         }

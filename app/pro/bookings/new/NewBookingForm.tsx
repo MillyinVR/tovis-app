@@ -1,9 +1,10 @@
 // app/pro/bookings/new/NewBookingForm.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { moneyToString } from '@/lib/money'
+import { isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 
 type Client = {
   id: string
@@ -61,19 +62,46 @@ function errorFromResponse(res: Response, data: any) {
   return `Request failed (${res.status}).`
 }
 
-function toISOFromDatetimeLocal(value: string): string | null {
-  if (!value) return null
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
 }
 
 function defaultDatetimeLocal(): string {
   const d = new Date()
   d.setMinutes(0, 0, 0)
   d.setHours(d.getHours() + 1)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * Parse "YYYY-MM-DDTHH:mm" (from <input type="datetime-local">)
+ * into numeric parts. Returns null on invalid.
+ */
+function parseDatetimeLocal(value: string): { year: number; month: number; day: number; hour: number; minute: number } | null {
+  if (!value || typeof value !== 'string') return null
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!m) return null
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const hour = Number(m[4])
+  const minute = Number(m[5])
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return { year, month, day, hour, minute }
+}
+
+/**
+ * Convert a datetime-local value (wall clock) to UTC ISO,
+ * interpreting the wall clock in the PRO's timezone.
+ */
+function toUtcIsoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
+  const parts = parseDatetimeLocal(value)
+  if (!parts) return null
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const dUtc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
+  if (!dUtc || Number.isNaN(dUtc.getTime())) return null
+  return dUtc.toISOString()
 }
 
 export default function NewBookingForm({ clients, offerings, defaultClientId }: Props) {
@@ -84,6 +112,38 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
   const [scheduledAt, setScheduledAt] = useState(() => defaultDatetimeLocal())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Pro timezone (server truth). Fallback to browser tz, then UTC.
+  const [proTimeZone, setProTimeZone] = useState<string>(() => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      return isValidIanaTimeZone(tz) ? tz : 'UTC'
+    } catch {
+      return 'UTC'
+    }
+  })
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadProTz() {
+      try {
+        // Uses an existing endpoint in your project that already returns timeZone.
+        // If your /api/pro/calendar is heavy, we can swap to /api/pro/settings later.
+        const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
+        const data = await safeJson(res)
+        const tz = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
+        if (!cancelled && tz && isValidIanaTimeZone(tz)) setProTimeZone(tz)
+      } catch {
+        // ignore, keep fallback
+      }
+    }
+
+    void loadProTz()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const clientOptions = useMemo(() => clients ?? [], [clients])
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
@@ -104,7 +164,6 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-
     if (loading) return
 
     if (!clientId || !offeringId || !scheduledAt) {
@@ -112,7 +171,8 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
       return
     }
 
-    const scheduledForISO = toISOFromDatetimeLocal(scheduledAt)
+    // Interpret the chosen wall-clock time in PRO timezone -> store as UTC ISO.
+    const scheduledForISO = toUtcIsoFromDatetimeLocalInTimeZone(scheduledAt, proTimeZone)
     if (!scheduledForISO) {
       setError('Please choose a valid date/time.')
       return
@@ -155,6 +215,8 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
   const label = 'text-[12px] font-black text-textPrimary'
   const helper = 'mt-2 text-[12px] text-textSecondary'
 
+  const tzLabel = sanitizeTimeZone(proTimeZone, 'UTC')
+
   return (
     <form onSubmit={handleSubmit} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4">
       <div className="grid gap-2">
@@ -177,9 +239,7 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
           ))}
         </select>
 
-        {defaultClientId ? (
-          <div className={helper}>Client preselected from chart. You can change it if needed.</div>
-        ) : null}
+        {defaultClientId ? <div className={helper}>Client preselected from chart. You can change it if needed.</div> : null}
       </div>
 
       <div className="grid gap-2">
@@ -217,7 +277,9 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
           className={field}
         />
 
-        <div className={helper}>Uses your browser&apos;s local timezone, stored as ISO.</div>
+        <div className={helper}>
+          Shown in your device time, but saved using <span className="font-black">{tzLabel}</span> (pro timezone) as UTC ISO.
+        </div>
       </div>
 
       {error ? <div className="text-[12px] font-black text-toneDanger">{error}</div> : null}

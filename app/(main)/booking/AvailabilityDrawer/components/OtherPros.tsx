@@ -4,7 +4,7 @@
 
 import Link from 'next/link'
 import type { ProCard, SelectedHold } from '../types'
-import { fmtFullInTimeZone, fmtSlotInTimeZone } from '../utils/timezones'
+import { formatSlotLabel, formatSlotFullLabel } from '@/lib/bookingTime'
 
 export default function OtherPros({
   others,
@@ -30,11 +30,13 @@ export default function OtherPros({
   return (
     <div ref={setRef} className="tovis-glass-soft rounded-card p-4">
       <div className="text-[13px] font-black text-textPrimary">Other pros near you</div>
+
       {others.length ? (
         <div className="mt-3 grid gap-3">
           {others.map((p) => {
             const pTz = p.timeZone || appointmentTz
             const showPtzHint = Boolean(viewerTz && viewerTz !== pTz)
+
             return (
               <div key={p.id} className="rounded-card border border-white/10 bg-bgPrimary/25 p-3">
                 <div className="flex items-center gap-3">
@@ -46,11 +48,16 @@ export default function OtherPros({
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <Link href={`/professionals/${p.id}`} className="block truncate text-[13px] font-black text-textPrimary">
+                    <Link
+                      href={`/professionals/${p.id}`}
+                      className="block truncate text-[13px] font-black text-textPrimary"
+                    >
                       {p.businessName || 'Professional'}
                     </Link>
 
-                    {p.location ? <div className="truncate text-[12px] font-semibold text-textSecondary">{p.location}</div> : null}
+                    {p.location ? (
+                      <div className="truncate text-[12px] font-semibold text-textSecondary">{p.location}</div>
+                    ) : null}
 
                     <div className="mt-1 text-[12px] font-semibold text-textSecondary">
                       Times in <span className="font-black text-textPrimary">{pTz}</span>
@@ -71,12 +78,14 @@ export default function OtherPros({
                         className={[
                           'h-10 rounded-full border px-3 text-[13px] font-black transition',
                           'border-white/10',
-                          isSelected ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+                          isSelected
+                            ? 'bg-accentPrimary text-bgPrimary'
+                            : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
                           !p.offeringId || holding ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
                         ].join(' ')}
-                        title={fmtFullInTimeZone(iso, pTz)}
+                        title={formatSlotFullLabel(iso, pTz)}
                       >
-                        {fmtSlotInTimeZone(iso, pTz)}
+                        {formatSlotLabel(iso, pTz)}
                       </button>
                     )
                   })}

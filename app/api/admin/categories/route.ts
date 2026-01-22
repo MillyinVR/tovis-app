@@ -1,15 +1,12 @@
 // app/api/admin/categories/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
+import { pickString } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
-
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
 
 async function requireSupport(userId: string) {
   return hasAdminPermission({
@@ -20,8 +17,8 @@ async function requireSupport(userId: string) {
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
     const ok = await requireSupport(user.id)
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -41,8 +38,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
     const ok = await requireSupport(user.id)
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

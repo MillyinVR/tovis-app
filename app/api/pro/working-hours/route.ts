@@ -1,58 +1,272 @@
 // app/api/pro/working-hours/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import type { ProfessionalLocationType, Prisma } from '@prisma/client'
 
-export async function GET() {
-  const user = await getCurrentUser()
+export const dynamic = 'force-dynamic'
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+type LocationMode = 'SALON' | 'MOBILE'
+type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+type WorkingHoursDay = { enabled: boolean; start: string; end: string }
+type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
+
+const DAYS: WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
+function isObject(x: unknown): x is Record<string, unknown> {
+  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+}
+
+function normalizeMode(v: unknown): LocationMode {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  return s === 'MOBILE' ? 'MOBILE' : 'SALON'
+}
+
+function preferredTypesForMode(mode: LocationMode): ProfessionalLocationType[] {
+  return mode === 'MOBILE' ? (['MOBILE_BASE'] as const) : (['SALON', 'SUITE'] as const)
+}
+
+function defaultWorkingHours(): WorkingHoursObj {
+  const make = (enabled: boolean): WorkingHoursDay => ({ enabled, start: '09:00', end: '17:00' })
+  return {
+    mon: make(true),
+    tue: make(true),
+    wed: make(true),
+    thu: make(true),
+    fri: make(true),
+    sat: make(false),
+    sun: make(false),
   }
+}
 
-  const db: any = prisma
+/** Accepts "9:00" and "09:00" and returns "HH:MM" */
+function normalizeHHMM(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : ''
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s)
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
 
-  const pro = await db.professionalProfile.findUnique({
-    where: { id: user.professionalProfile.id },
-    select: { workingHours: true },
+function looksLikeWorkingHours(v: unknown): v is WorkingHoursObj {
+  if (!isObject(v)) return false
+  for (const d of DAYS) {
+    const day = (v as any)[d]
+    if (!isObject(day)) return false
+    if (typeof day.enabled !== 'boolean') return false
+    if (typeof day.start !== 'string' || typeof day.end !== 'string') return false
+  }
+  return true
+}
+
+function normalizeWorkingHours(raw: WorkingHoursObj): WorkingHoursObj {
+  const out = defaultWorkingHours()
+  for (const d of DAYS) {
+    const src = raw[d]
+    const start = normalizeHHMM(src?.start) ?? out[d].start
+    const end = normalizeHHMM(src?.end) ?? out[d].end
+    out[d] = { enabled: Boolean(src?.enabled), start, end }
+  }
+  return out
+}
+
+function safeHoursFromDb(raw: unknown): { hours: WorkingHoursObj; usedDefault: boolean } {
+  if (looksLikeWorkingHours(raw)) return { hours: normalizeWorkingHours(raw), usedDefault: false }
+  return { hours: defaultWorkingHours(), usedDefault: true }
+}
+
+async function ensureAtLeastOneBookableLocationForModeTx(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  mode: LocationMode
+}) {
+  const { tx, professionalId, mode } = args
+  const types = preferredTypesForMode(mode)
+
+  const existing = await tx.professionalLocation.findFirst({
+    where: { professionalId, isBookable: true, type: { in: types as any } },
+    select: { id: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+  })
+  if (existing) return existing.id
+
+  const totalCount = await tx.professionalLocation.count({ where: { professionalId } })
+  const shouldBePrimary = totalCount === 0
+
+  const createType: ProfessionalLocationType = mode === 'MOBILE' ? 'MOBILE_BASE' : 'SALON'
+  const name = mode === 'MOBILE' ? 'Mobile' : 'Salon'
+
+  const created = await tx.professionalLocation.create({
+    data: {
+      professionalId,
+      type: createType,
+      name,
+      isPrimary: shouldBePrimary,
+      isBookable: true,
+      timeZone: null,
+      workingHours: defaultWorkingHours() as unknown as Prisma.InputJsonValue,
+    },
+    select: { id: true },
   })
 
-  return NextResponse.json({
-    workingHours: pro?.workingHours ?? null,
+  return created.id
+}
+
+async function pickRepresentativeLocation(args: { professionalId: string; mode: LocationMode }) {
+  const { professionalId, mode } = args
+  const types = preferredTypesForMode(mode)
+
+  const loc = await prisma.professionalLocation.findFirst({
+    where: { professionalId, isBookable: true, type: { in: types as any } },
+    select: { id: true, type: true, isPrimary: true, workingHours: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+  })
+
+  if (loc) return loc
+
+  return prisma.professionalLocation.findFirst({
+    where: { professionalId, isBookable: true },
+    select: { id: true, type: true, isPrimary: true, workingHours: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
   })
 }
 
-export async function POST(request: Request) {
-  const user = await getCurrentUser()
+export async function GET(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+    const { searchParams } = new URL(req.url)
+    const mode = normalizeMode(searchParams.get('locationType'))
 
-  const body = await request.json().catch(() => null)
+    const loc = await pickRepresentativeLocation({ professionalId, mode })
 
-  if (!body || typeof body !== 'object') {
-    return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
-  }
+    if (!loc) {
+      return jsonOk(
+        {
+          ok: true,
+          locationType: mode,
+          locationId: null,
+          location: null,
+          workingHours: defaultWorkingHours(),
+          usedDefault: true,
+          missingLocation: true,
+        },
+        200,
+      )
+    }
 
-  const { workingHours } = body as { workingHours?: unknown }
+    const { hours, usedDefault } = safeHoursFromDb(loc.workingHours)
 
-  if (!workingHours || typeof workingHours !== 'object') {
-    return NextResponse.json(
-      { error: 'workingHours must be an object' },
-      { status: 400 },
+    return jsonOk(
+      {
+        ok: true,
+        locationType: mode,
+        locationId: loc.id,
+        location: { id: loc.id, type: loc.type, isPrimary: loc.isPrimary },
+        workingHours: hours,
+        usedDefault,
+        missingLocation: false,
+      },
+      200,
     )
+  } catch (e: any) {
+    console.error('GET /api/pro/working-hours error:', e)
+    return jsonFail(500, 'Failed to load working hours.')
   }
+}
 
-  const db: any = prisma
+export async function POST(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-  await db.professionalProfile.update({
-    where: { id: user.professionalProfile.id },
-    data: {
-      // store as raw JSON
-      workingHours,
-    },
-  })
+    const { searchParams } = new URL(req.url)
+    const mode = normalizeMode(searchParams.get('locationType'))
+    const types = preferredTypesForMode(mode)
 
-  return NextResponse.json({ ok: true })
+    const body = await req.json().catch(() => null)
+    if (!isObject(body)) return jsonFail(400, 'Invalid body')
+
+    const workingHoursRaw = (body as any).workingHours
+    if (!looksLikeWorkingHours(workingHoursRaw)) {
+      return jsonFail(400, 'workingHours must be an object with mon..sun: { enabled, start, end }')
+    }
+
+    const normalized = normalizeWorkingHours(workingHoursRaw)
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Ensure we have at least one *bookable* location for this mode (so updateMany can’t hit zero)
+      await ensureAtLeastOneBookableLocationForModeTx({ tx, professionalId, mode })
+
+      const updated = await tx.professionalLocation.updateMany({
+        where: { professionalId, isBookable: true, type: { in: types as any } },
+        data: { workingHours: normalized as unknown as Prisma.InputJsonValue },
+      })
+
+      // If we updated nothing, something is misconfigured (wrong enum types, isBookable false, etc.)
+      if (updated.count === 0) {
+        const all = await tx.professionalLocation.findMany({
+          where: { professionalId },
+          select: { id: true, type: true, isBookable: true, isPrimary: true },
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+          take: 50,
+        })
+
+        return {
+          ok: false as const,
+          updatedCount: 0,
+          debug: {
+            mode,
+            expectedTypes: types,
+            locations: all,
+          },
+        }
+      }
+
+      const updatedLocations = await tx.professionalLocation.findMany({
+        where: { professionalId, isBookable: true, type: { in: types as any } },
+        select: { id: true, type: true, isPrimary: true },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+        take: 50,
+      })
+
+      return {
+        ok: true as const,
+        updatedCount: updated.count,
+        updatedLocations,
+      }
+    })
+
+    if (!result.ok) {
+      console.error('POST /api/pro/working-hours updated 0 rows', result.debug)
+      return jsonFail(
+        409,
+        'No bookable locations were updated. Check your location types / isBookable flags. (Server logged debug.)',
+      )
+    }
+
+    const rep = result.updatedLocations[0] ?? null
+
+    return jsonOk(
+      {
+        ok: true,
+        locationType: mode,
+        locationId: rep?.id ?? null,
+        location: rep ? { id: rep.id, type: rep.type, isPrimary: rep.isPrimary } : null,
+        workingHours: normalized,
+        updatedCount: result.updatedCount,
+        updatedLocationIds: result.updatedLocations.map((l) => l.id),
+      },
+      200,
+    )
+  } catch (e: any) {
+    console.error('POST /api/pro/working-hours error:', e)
+    return jsonFail(500, 'Failed to save working hours.')
+  }
 }

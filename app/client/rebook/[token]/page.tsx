@@ -2,6 +2,7 @@
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,17 +20,6 @@ function toDate(v: unknown): Date | null {
   if (!v) return null
   const d = v instanceof Date ? v : new Date(String(v))
   return Number.isNaN(d.getTime()) ? null : d
-}
-
-function sanitizeTimeZone(tz: string | null | undefined) {
-  if (!tz) return null
-  if (!/^[A-Za-z_]+\/[A-Za-z0-9_\-+]+$/.test(tz)) return null
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return tz
-  } catch {
-    return null
-  }
 }
 
 function formatWhenInTimeZone(d: Date, timeZone: string) {
@@ -167,7 +157,8 @@ export default async function ClientRebookFromAftercarePage(props: {
   }
   if (!offeringId) notFound()
 
-  const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
+  // Appointment timezone (currently using professional tz as the display tz)
+  const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone, 'America/Los_Angeles')
 
   const proName = booking.professional?.businessName || booking.professional?.user?.email || 'your professional'
   const serviceName = booking.service?.name || 'Service'
@@ -184,7 +175,6 @@ export default async function ClientRebookFromAftercarePage(props: {
   )
 
   // If mode = BOOKED_NEXT_APPOINTMENT, try to find the actual “next booking”
-  // Rule: Booking.source=AFTERCARE and Booking.rebookOfBookingId=original booking id
   let nextBooking: { id: string; scheduledFor: Date; status: string } | null = null
 
   if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
@@ -195,7 +185,6 @@ export default async function ClientRebookFromAftercarePage(props: {
           source: 'AFTERCARE',
           status: { not: 'CANCELLED' },
         } as any,
-        // closest upcoming booking is usually what you want
         orderBy: { scheduledFor: 'asc' },
         select: { id: true, scheduledFor: true, status: true },
       })

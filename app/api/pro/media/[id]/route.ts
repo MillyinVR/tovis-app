@@ -1,34 +1,30 @@
 // app/api/pro/media/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 type Props = { params: Promise<{ id: string }> }
+type StorageBucket = 'media-public' | 'media-private'
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function isValidBucket(b: string) {
-  return b === 'media-public' || b === 'media-private'
+function isStorageBucket(v: unknown): v is StorageBucket {
+  return v === 'media-public' || v === 'media-private'
 }
 
 export async function DELETE(_req: NextRequest, props: Props) {
   try {
-    const { id: rawId } = await props.params
-    const id = pickString(rawId)
-    if (!id) return NextResponse.json({ error: 'Missing media id' }, { status: 400 })
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const { id: rawId } = await props.params
+    const mediaId = pickString(rawId)
+    if (!mediaId) return jsonFail(400, 'Missing media id.')
 
     const media = await prisma.mediaAsset.findUnique({
-      where: { id },
+      where: { id: mediaId },
       select: {
         id: true,
         professionalId: true,
@@ -39,32 +35,28 @@ export async function DELETE(_req: NextRequest, props: Props) {
       },
     })
 
-    if (!media) return NextResponse.json({ error: 'Media not found' }, { status: 404 })
-    if (media.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    if (!media) return jsonFail(404, 'Media not found.')
+    if (media.professionalId !== professionalId) return jsonFail(403, 'Forbidden.')
 
-    // Delete files from storage (best effort)
-    const mainBucket = typeof media.storageBucket === 'string' ? media.storageBucket.trim() : ''
-    const mainPath = typeof media.storagePath === 'string' ? media.storagePath.trim() : ''
+    const mainBucket = isStorageBucket(media.storageBucket) ? media.storageBucket : null
+    const mainPath = pickString(media.storagePath)
 
-    if (mainBucket && mainPath && isValidBucket(mainBucket)) {
+    if (mainBucket && mainPath) {
       await supabaseAdmin.storage.from(mainBucket).remove([mainPath]).catch(() => null)
     }
 
-    const tBucket = typeof media.thumbBucket === 'string' ? media.thumbBucket.trim() : ''
-    const tPath = typeof media.thumbPath === 'string' ? media.thumbPath.trim() : ''
+    const tBucket = isStorageBucket(media.thumbBucket) ? media.thumbBucket : null
+    const tPath = pickString(media.thumbPath)
 
-    if (tBucket && tPath && isValidBucket(tBucket)) {
+    if (tBucket && tPath) {
       await supabaseAdmin.storage.from(tBucket).remove([tPath]).catch(() => null)
     }
 
-    // Delete DB record last
-    await prisma.mediaAsset.delete({ where: { id } })
+    await prisma.mediaAsset.delete({ where: { id: mediaId } })
 
-    return NextResponse.json({ ok: true }, { status: 200 })
+    return jsonOk({ ok: true }, 200)
   } catch (e) {
     console.error('DELETE /api/pro/media/[id] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

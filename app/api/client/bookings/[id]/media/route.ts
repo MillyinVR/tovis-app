@@ -16,18 +16,12 @@ function gone(id: string) {
   )
 }
 
-export async function POST(
-  _req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
+export async function POST(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params
   return gone(id)
 }
 
-export async function DELETE(
-  _req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
+export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params
   return gone(id)
 }

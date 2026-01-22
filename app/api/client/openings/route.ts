@@ -1,17 +1,12 @@
 // app/api/client/openings/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import type { ServiceLocationType } from '@prisma/client'
+import { requireClient, pickString, upper, jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  const s = upper(v)
   if (s === 'SALON') return 'SALON'
   if (s === 'MOBILE') return 'MOBILE'
   return null
@@ -62,12 +57,10 @@ function pickConservativeDuration(offering: {
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Only clients can view openings.' }, { status: 401 })
-    }
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
 
-    const clientId = user.clientProfile.id
     const { searchParams } = new URL(req.url)
 
     const serviceId = pickString(searchParams.get('serviceId'))
@@ -86,13 +79,7 @@ export async function GET(req: Request) {
       },
       orderBy: { sentAt: 'desc' },
       take: 50,
-      select: {
-        id: true,
-        tier: true,
-        sentAt: true,
-        openedAt: true,
-        clickedAt: true,
-        bookedAt: true,
+      include: {
         opening: {
           select: {
             id: true,
@@ -107,7 +94,6 @@ export async function GET(req: Request) {
                 businessName: true,
                 avatarUrl: true,
                 location: true,
-                city: true,
                 timeZone: true,
               },
             },
@@ -137,10 +123,6 @@ export async function GET(req: Request) {
         const off = o.offering
         const pro = o.professional
 
-        // Pick a mode to display for this opening card.
-        // Note: Opening itself doesn’t store locationType (yet), so we pick:
-        // - requestedLocationType if it’s supported
-        // - else default to SALON if available, else MOBILE
         let effectiveLocationType: ServiceLocationType | null = null
         if (off) {
           effectiveLocationType = pickEffectiveLocationType({
@@ -168,6 +150,7 @@ export async function GET(req: Request) {
           id: n.id,
           tier: n.tier,
           sentAt: n.sentAt,
+          deliveredAt: n.deliveredAt,
           openedAt: n.openedAt,
           clickedAt: n.clickedAt,
           bookedAt: n.bookedAt,
@@ -187,7 +170,7 @@ export async function GET(req: Request) {
                   id: pro.id,
                   businessName: pro.businessName ?? null,
                   avatarUrl: pro.avatarUrl ?? null,
-                  location: pro.location ?? pro.city ?? null,
+                  location: pro.location ?? null,
                   timeZone: pro.timeZone ?? null,
                 }
               : null,
@@ -199,7 +182,6 @@ export async function GET(req: Request) {
                   offersInSalon: Boolean(off.offersInSalon),
                   offersMobile: Boolean(off.offersMobile),
 
-                  // UI-friendly fields
                   locationType: effectiveLocationType ?? null,
                   priceStartingAt,
                   durationMinutes,
@@ -210,9 +192,9 @@ export async function GET(req: Request) {
       })
       .filter(Boolean)
 
-    return NextResponse.json({ ok: true, notifications: normalized })
+    return jsonOk({ ok: true, notifications: normalized })
   } catch (e) {
     console.error('GET /api/client/openings error', e)
-    return NextResponse.json({ error: 'Failed to load openings.' }, { status: 500 })
+    return jsonFail(500, 'Failed to load openings.')
   }
 }

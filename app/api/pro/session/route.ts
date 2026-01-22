@@ -1,70 +1,50 @@
 // app/api/pro/session/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import type { ProSessionPayload, StepKey, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
+import { BookingStatus, MediaPhase, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type SessionStep =
-  | 'NONE'
-  | 'CONSULTATION'
-  | 'CONSULTATION_PENDING_CLIENT'
-  | 'BEFORE_PHOTOS'
-  | 'SERVICE_IN_PROGRESS'
-  | 'FINISH_REVIEW'
-  | 'AFTER_PHOTOS'
-  | 'DONE'
-  | string
-
-function toUpper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
 
 function fullName(first?: string | null, last?: string | null) {
   return `${first ?? ''} ${last ?? ''}`.trim()
 }
 
-/**
- * Target step is what the footer uses to decide the "main place"
- * (consult/session/aftercare) when you're active.
- *
- * NOTE: We keep this based on sessionStep only.
- * The "center button" can override based on inferred readiness (media existence).
- */
 function stepFromSessionStep(step: SessionStep | null): StepKey {
-  const s = toUpper(step || 'NONE')
-  if (s === 'DONE') return 'aftercare'
-  if (s === 'CONSULTATION' || s === 'CONSULTATION_PENDING_CLIENT' || s === 'NONE') return 'consult'
+  if (step === SessionStep.DONE) return 'aftercare'
+  if (
+    step === SessionStep.CONSULTATION ||
+    step === SessionStep.CONSULTATION_PENDING_CLIENT ||
+    step === SessionStep.NONE ||
+    !step
+  ) {
+    return 'consult'
+  }
   return 'session'
 }
 
 function hrefForStep(bookingId: string, sessionStep: SessionStep | null) {
-  const s = toUpper(sessionStep || 'NONE')
   const base = `/pro/bookings/${encodeURIComponent(bookingId)}`
 
-  if (s === 'DONE') return `${base}/aftercare`
+  if (sessionStep === SessionStep.DONE) return `${base}/aftercare`
 
-  // Consultation
-  if (s === 'CONSULTATION' || s === 'CONSULTATION_PENDING_CLIENT' || s === 'NONE') {
+  if (
+    sessionStep === SessionStep.CONSULTATION ||
+    sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT ||
+    sessionStep === SessionStep.NONE ||
+    !sessionStep
+  ) {
     return `${base}?step=consult`
   }
 
-  // Photos
-  if (s === 'BEFORE_PHOTOS') return `${base}/session/before-photos`
-  if (s === 'AFTER_PHOTOS') return `${base}/session/after-photos`
+  if (sessionStep === SessionStep.BEFORE_PHOTOS) return `${base}/session/before-photos`
+  if (sessionStep === SessionStep.AFTER_PHOTOS) return `${base}/session/after-photos`
 
-  // Everything else is inside session
   return `${base}?step=session`
 }
 
 type Center = { label: string; action: UiSessionCenterAction; href: string | null }
 
-/**
- * Long-term rule:
- * SessionStep alone is not enough for "Camera" steps.
- * If required media exists, center button must advance to the next step.
- */
 function centerFrom(args: {
   mode: UiSessionMode
   bookingId: string | null
@@ -74,140 +54,155 @@ function centerFrom(args: {
 }): Center {
   const { mode, bookingId, sessionStep, hasBeforeMedia, hasAfterMedia } = args
 
-  if (mode === 'IDLE' || !bookingId) {
-    return { label: 'Start', action: 'NONE' as UiSessionCenterAction, href: null }
-  }
+  if (mode === 'IDLE' || !bookingId) return { label: 'Start', action: 'NONE', href: null }
 
-  if (mode === 'UPCOMING') {
-    return {
-      label: 'Start',
-      action: 'START' as UiSessionCenterAction,
-      href: `/pro/bookings/${encodeURIComponent(bookingId)}?step=consult`,
-    }
-  }
-
-  // ACTIVE behavior depends on inferred readiness + sessionStep
-  const s = toUpper(sessionStep || 'NONE')
   const base = `/pro/bookings/${encodeURIComponent(bookingId)}`
 
-  // BEFORE PHOTOS:
-  // If you've already added at least one BEFORE media, advance into session flow.
-  if (s === 'BEFORE_PHOTOS') {
-    if (hasBeforeMedia) {
-      return { label: 'Session', action: 'NAVIGATE' as UiSessionCenterAction, href: `${base}?step=session` }
-    }
-    return {
-      label: 'Camera',
-      action: 'CAPTURE_BEFORE' as UiSessionCenterAction,
-      href: `${base}/session/before-photos`,
-    }
+  if (mode === 'UPCOMING') {
+    return { label: 'Start', action: 'START', href: `${base}?step=consult` }
   }
 
-  // AFTER PHOTOS:
-  // If you've added at least one AFTER media, advance to Aftercare immediately.
-  if (s === 'AFTER_PHOTOS') {
-    if (hasAfterMedia) {
-      return { label: 'Aftercare', action: 'NAVIGATE' as UiSessionCenterAction, href: `${base}/aftercare` }
-    }
-    return {
-      label: 'Camera',
-      action: 'CAPTURE_AFTER' as UiSessionCenterAction,
-      href: `${base}/session/after-photos`,
-    }
+  // ACTIVE
+  if (sessionStep === SessionStep.BEFORE_PHOTOS) {
+    if (hasBeforeMedia) return { label: 'Session', action: 'NAVIGATE', href: `${base}?step=session` }
+    return { label: 'Camera', action: 'CAPTURE_BEFORE', href: `${base}/session/before-photos` }
   }
 
-  // Finish means POST /finish (server decides nextHref)
-  if (s === 'SERVICE_IN_PROGRESS' || s === 'FINISH_REVIEW') {
-    return { label: 'Finish', action: 'FINISH' as UiSessionCenterAction, href: null }
+  if (sessionStep === SessionStep.AFTER_PHOTOS) {
+    if (hasAfterMedia) return { label: 'Aftercare', action: 'NAVIGATE', href: `${base}/aftercare` }
+    return { label: 'Camera', action: 'CAPTURE_AFTER', href: `${base}/session/after-photos` }
   }
 
-  if (s === 'DONE') {
-    return { label: 'Aftercare', action: 'NAVIGATE' as UiSessionCenterAction, href: `${base}/aftercare` }
+  if (sessionStep === SessionStep.SERVICE_IN_PROGRESS || sessionStep === SessionStep.FINISH_REVIEW) {
+    return { label: 'Finish', action: 'FINISH', href: null }
   }
 
-  // Consultation-ish
-  if (s === 'CONSULTATION' || s === 'CONSULTATION_PENDING_CLIENT' || s === 'NONE') {
-    return { label: 'Consult', action: 'NAVIGATE' as UiSessionCenterAction, href: `${base}?step=consult` }
+  if (sessionStep === SessionStep.DONE) {
+    return { label: 'Aftercare', action: 'NAVIGATE', href: `${base}/aftercare` }
   }
 
-  // Fallback
-  return { label: 'Session', action: 'NAVIGATE' as UiSessionCenterAction, href: hrefForStep(bookingId, sessionStep) }
+  if (
+    sessionStep === SessionStep.CONSULTATION ||
+    sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT ||
+    sessionStep === SessionStep.NONE ||
+    !sessionStep
+  ) {
+    return { label: 'Consult', action: 'NAVIGATE', href: `${base}?step=consult` }
+  }
+
+  return { label: 'Session', action: 'NAVIGATE', href: hrefForStep(bookingId, sessionStep) }
 }
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proId = auth.professionalId
 
-    const proId = user.professionalProfile.id
     const now = new Date()
 
     // 1) ACTIVE session wins
     const active = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
+        status: BookingStatus.ACCEPTED,
         startedAt: { not: null },
         finishedAt: null,
-        status: 'ACCEPTED',
       },
-      include: { client: true, service: true },
       orderBy: { startedAt: 'desc' },
+      select: {
+        id: true,
+        scheduledFor: true,
+        sessionStep: true,
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            user: { select: { email: true } },
+          },
+        },
+        service: { select: { name: true } },
+        serviceItems: {
+          select: { sortOrder: true, service: { select: { name: true } } },
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
+        },
+      },
     })
 
     if (active) {
-      const step = (active.sessionStep as unknown as SessionStep) ?? null
-
-      // Infer readiness from actual media state (long-term: reality > string enums)
       const [beforeCount, afterCount] = await Promise.all([
-        prisma.mediaAsset.count({ where: { bookingId: active.id, phase: 'BEFORE' } }),
-        prisma.mediaAsset.count({ where: { bookingId: active.id, phase: 'AFTER' } }),
+        prisma.mediaAsset.count({ where: { bookingId: active.id, phase: MediaPhase.BEFORE } }),
+        prisma.mediaAsset.count({ where: { bookingId: active.id, phase: MediaPhase.AFTER } }),
       ])
+
+      const firstItemName = active.serviceItems?.[0]?.service?.name ?? null
+      const serviceName = firstItemName ?? active.service?.name ?? ''
 
       const payload: ProSessionPayload = {
         ok: true,
         mode: 'ACTIVE',
-        targetStep: stepFromSessionStep(step),
+        targetStep: stepFromSessionStep(active.sessionStep ?? null),
         booking: {
           id: active.id,
-          sessionStep: step,
-          serviceName: active.service?.name ?? '',
-          clientName: fullName(active.client?.firstName, active.client?.lastName),
-          scheduledFor: active.scheduledFor instanceof Date ? active.scheduledFor.toISOString() : null,
+          sessionStep: active.sessionStep ?? null,
+          serviceName,
+          clientName:
+            fullName(active.client?.firstName, active.client?.lastName) ||
+            active.client?.user?.email ||
+            '',
+          scheduledFor: active.scheduledFor ? active.scheduledFor.toISOString() : null,
         },
         center: centerFrom({
           mode: 'ACTIVE',
           bookingId: active.id,
-          sessionStep: step,
+          sessionStep: active.sessionStep ?? null,
           hasBeforeMedia: beforeCount > 0,
           hasAfterMedia: afterCount > 0,
         }),
       }
 
-      return NextResponse.json(payload, { status: 200 })
+      return jsonOk(payload, 200)
     }
 
-    // 2) UPCOMING within start window (15 min before -> 15 min after)
+    // 2) UPCOMING in window (15 min before -> 15 min after)
     const WINDOW_BEFORE_MIN = 15
     const WINDOW_AFTER_MIN = 15
-    const windowStart = new Date(now.getTime() - WINDOW_BEFORE_MIN * 60 * 1000)
-    const windowEnd = new Date(now.getTime() + WINDOW_AFTER_MIN * 60 * 1000)
+    const windowStart = new Date(now.getTime() - WINDOW_BEFORE_MIN * 60_000)
+    const windowEnd = new Date(now.getTime() + WINDOW_AFTER_MIN * 60_000)
 
     const next = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
-        status: 'ACCEPTED',
+        status: BookingStatus.ACCEPTED,
         startedAt: null,
         finishedAt: null,
         scheduledFor: { gte: windowStart, lte: windowEnd },
       },
-      include: { client: true, service: true },
       orderBy: { scheduledFor: 'asc' },
+      select: {
+        id: true,
+        scheduledFor: true,
+        sessionStep: true,
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            user: { select: { email: true } },
+          },
+        },
+        service: { select: { name: true } },
+        serviceItems: {
+          select: { sortOrder: true, service: { select: { name: true } } },
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
+        },
+      },
     })
 
     if (next) {
-      const step = (next.sessionStep as unknown as SessionStep) ?? null
+      const firstItemName = next.serviceItems?.[0]?.service?.name ?? null
+      const serviceName = firstItemName ?? next.service?.name ?? ''
 
       const payload: ProSessionPayload = {
         ok: true,
@@ -215,22 +210,24 @@ export async function GET() {
         targetStep: 'consult',
         booking: {
           id: next.id,
-          sessionStep: step,
-          serviceName: next.service?.name ?? '',
-          clientName: fullName(next.client?.firstName, next.client?.lastName),
-          scheduledFor: next.scheduledFor instanceof Date ? next.scheduledFor.toISOString() : null,
+          sessionStep: next.sessionStep ?? null,
+          serviceName,
+          clientName:
+            fullName(next.client?.firstName, next.client?.lastName) ||
+            next.client?.user?.email ||
+            '',
+          scheduledFor: next.scheduledFor ? next.scheduledFor.toISOString() : null,
         },
-        // In UPCOMING we don't care about media existence yet.
         center: centerFrom({
           mode: 'UPCOMING',
           bookingId: next.id,
-          sessionStep: step,
+          sessionStep: next.sessionStep ?? null,
           hasBeforeMedia: false,
           hasAfterMedia: false,
         }),
       }
 
-      return NextResponse.json(payload, { status: 200 })
+      return jsonOk(payload, 200)
     }
 
     const payload: ProSessionPayload = {
@@ -241,9 +238,9 @@ export async function GET() {
       center: { label: 'Start', action: 'NONE', href: null },
     }
 
-    return NextResponse.json(payload, { status: 200 })
+    return jsonOk(payload, 200)
   } catch (e) {
     console.error('GET /api/pro/session error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

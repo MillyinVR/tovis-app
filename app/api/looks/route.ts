@@ -1,37 +1,30 @@
 // app/api/looks/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { jsonFail, jsonOk, pickInt, pickString } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
-
-function toInt(value: string | null, fallback: number) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : fallback
-}
 
 function pickPrimaryService(
   services:
-    | Array<{ service: { id: string; name: string; category?: { name: string } | null } | null }>
+    | Array<{ service: { id: string; name: string; category?: { name: string; slug: string } | null } | null }>
     | null
     | undefined,
 ) {
   const first = services?.find((s) => s?.service)?.service
   if (!first) return null
-  return { id: first.id, name: first.name, category: first.category?.name ?? null }
+  return { id: first.id, name: first.name, category: first.category?.name ?? null, categorySlug: first.category?.slug ?? null }
 }
 
-function pickString(v: string | null) {
-  const s = (v ?? '').trim()
-  return s.length ? s : null
-}
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
 
     const { searchParams } = new URL(req.url)
-    const limit = Math.min(toInt(searchParams.get('limit'), 12) || 12, 50)
+    const limit = Math.min(pickInt(searchParams.get('limit')) ?? 12, 50)
 
-    const category = pickString(searchParams.get('category'))
+    // ✅ category is a SLUG from the UI
+    const categorySlug = pickString(searchParams.get('category'))
     const q = pickString(searchParams.get('q'))
 
     const items = await prisma.mediaAsset.findMany({
@@ -49,10 +42,10 @@ export async function GET(req: Request) {
             }
           : {}),
 
-        ...(category
+        ...(categorySlug
           ? {
               services: {
-                some: { service: { category: { is: { name: category } } } },
+                some: { service: { category: { is: { slug: categorySlug } } } },
               },
             }
           : {}),
@@ -82,7 +75,7 @@ export async function GET(req: Request) {
         services: {
           select: {
             service: {
-              select: { id: true, name: true, category: { select: { name: true } } },
+              select: { id: true, name: true, category: { select: { name: true, slug: true } } },
             },
           },
         },
@@ -109,7 +102,7 @@ export async function GET(req: Request) {
         thumbUrl: m.thumbUrl ?? null,
         mediaType: m.mediaType,
         caption: m.caption ?? null,
-        createdAt: m.createdAt,
+        createdAt: m.createdAt.toISOString(),
 
         professional: m.professional
           ? {
@@ -127,7 +120,9 @@ export async function GET(req: Request) {
         category: primaryService?.category ?? null,
         serviceIds,
 
+        // ✅ client expects _count
         _count: m._count,
+
         viewerLiked: user ? likedSet.has(m.id) : false,
 
         uploadedByRole: m.uploadedByRole ?? null,
@@ -135,9 +130,9 @@ export async function GET(req: Request) {
       }
     })
 
-    return NextResponse.json({ items: payload })
+    return jsonOk({ ok: true, items: payload })
   } catch (e) {
     console.error('GET /api/looks error', e)
-    return NextResponse.json({ error: 'Failed to load looks' }, { status: 500 })
+    return jsonFail(500, 'Failed to load looks.')
   }
 }

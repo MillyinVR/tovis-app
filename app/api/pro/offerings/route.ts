@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { parseMoney, moneyToString } from '@/lib/money'
 import { Prisma } from '@prisma/client'
+import type { ProfessionalLocationType } from '@prisma/client'
 
 type CreateOfferingBody = {
   serviceId: string
@@ -26,6 +27,23 @@ type CreateOfferingBody = {
   // MOBILE
   mobilePriceStartingAt?: string | null
   mobileDurationMinutes?: number | null
+}
+
+type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+type WorkingHoursDay = { enabled: boolean; start: string; end: string }
+type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
+
+function defaultWorkingHours(): WorkingHoursObj {
+  const make = (enabled: boolean): WorkingHoursDay => ({ enabled, start: '09:00', end: '17:00' })
+  return {
+    mon: make(true),
+    tue: make(true),
+    wed: make(true),
+    thu: make(true),
+    fri: make(true),
+    sat: make(false),
+    sun: make(false),
+  }
 }
 
 function isPositiveInt(n: unknown) {
@@ -84,6 +102,51 @@ function toDto(off: any) {
 
     // admin floor
     minPrice: moneyToString(off.service.minPrice) ?? '0.00',
+  }
+}
+
+async function ensureBookableLocationsForOffering(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+}) {
+  const { tx, professionalId, offersInSalon, offersMobile } = args
+
+  const neededTypes: ProfessionalLocationType[] = []
+  if (offersInSalon) neededTypes.push('SALON') // SALON is our seed; booking supports SALON + SUITE.
+  if (offersMobile) neededTypes.push('MOBILE_BASE')
+
+  if (!neededTypes.length) return
+
+  const existing = await tx.professionalLocation.findMany({
+    where: { professionalId, type: { in: neededTypes as any } },
+    select: { id: true, type: true },
+    take: 50,
+  })
+
+  const existingTypes = new Set(existing.map((l) => l.type))
+
+  for (const type of neededTypes) {
+    if (existingTypes.has(type)) continue
+
+    const totalCount = await tx.professionalLocation.count({ where: { professionalId } })
+    const shouldBePrimary = totalCount === 0
+
+    const name = type === 'MOBILE_BASE' ? 'Mobile' : 'Salon'
+
+    await tx.professionalLocation.create({
+      data: {
+        professionalId,
+        type,
+        name,
+        isPrimary: shouldBePrimary,
+        isBookable: true,
+        timeZone: null,
+        workingHours: defaultWorkingHours() as unknown as Prisma.InputJsonValue,
+      },
+      select: { id: true },
+    })
   }
 }
 
@@ -199,9 +262,19 @@ export async function POST(request: Request) {
       data.mobileDurationMinutes = null
     }
 
-    const offering = await prisma.professionalServiceOffering.create({
-      data,
-      include: { service: { include: { category: true } } },
+    const offering = await prisma.$transaction(async (tx) => {
+      // ✅ NEW: ensure pro has matching location rows for the modes they enabled
+      await ensureBookableLocationsForOffering({
+        tx,
+        professionalId: profId,
+        offersInSalon,
+        offersMobile,
+      })
+
+      return tx.professionalServiceOffering.create({
+        data,
+        include: { service: { include: { category: true } } },
+      })
     })
 
     return NextResponse.json(toDto(offering), { status: 201 })

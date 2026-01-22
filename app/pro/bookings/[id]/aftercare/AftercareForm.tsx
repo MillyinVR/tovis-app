@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRIVATE'
@@ -32,6 +33,13 @@ type RecommendedProduct = {
 
 type Props = {
   bookingId: string
+
+  /**
+   * IANA timezone that governs meaning of datetime-local fields.
+   * This should come from booking/location/pro settings, NOT the browser.
+   */
+  timeZone: string
+
   existingNotes: string
 
   existingRebookedFor: string | null
@@ -48,21 +56,6 @@ const MAX_PRODUCTS = 10
 const PRODUCT_NAME_MAX = 80
 const PRODUCT_NOTE_MAX = 140
 const NOTES_MAX = 4000
-
-function isoToLocalInput(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-  return local.toISOString().slice(0, 16)
-}
-
-function toISOFromDatetimeLocal(value: string): string | null {
-  if (!value) return null
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
-}
 
 function isDeletedByClient(media: MediaItem) {
   return media.uploadedByRole === 'CLIENT' && media.reviewId === null && media.visibility === 'PRIVATE'
@@ -123,6 +116,56 @@ function isValidHttpUrl(url: string) {
   }
 }
 
+/**
+ * Convert ISO (UTC instant) -> datetime-local string in a given IANA timezone.
+ * Output format: "YYYY-MM-DDTHH:MM"
+ */
+function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+
+  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const p = getZonedParts(d, tz)
+
+  const yyyy = String(p.year).padStart(4, '0')
+  const mm = String(p.month).padStart(2, '0')
+  const dd = String(p.day).padStart(2, '0')
+  const hh = String(p.hour).padStart(2, '0')
+  const mi = String(p.minute).padStart(2, '0')
+
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
+}
+
+/**
+ * Convert datetime-local string (interpreted in IANA timezone) -> ISO (UTC instant).
+ * Input format expected: "YYYY-MM-DDTHH:MM"
+ */
+function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
+  const v = (value || '').trim()
+  if (!v) return null
+
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(v)
+  if (!m) return null
+
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const hour = Number(m[4])
+  const minute = Number(m[5])
+
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null
+  if (month < 1 || month > 12) return null
+  if (day < 1 || day > 31) return null
+  if (hour < 0 || hour > 23) return null
+  if (minute < 0 || minute > 59) return null
+
+  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
+  if (Number.isNaN(utc.getTime())) return null
+  return utc.toISOString()
+}
+
 function cardClass() {
   return 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
 }
@@ -174,6 +217,7 @@ function labelClass() {
 
 export default function AftercareForm({
   bookingId,
+  timeZone,
   existingNotes,
   existingRebookedFor,
   existingRebookMode,
@@ -184,15 +228,17 @@ export default function AftercareForm({
 }: Props) {
   const router = useRouter()
 
+  const tz = useMemo(() => sanitizeTimeZone(timeZone, 'America/Los_Angeles'), [timeZone])
+
   const [notes, setNotes] = useState((existingNotes || '').slice(0, NOTES_MAX))
 
   const [products, setProducts] = useState<RecommendedProduct[]>([])
   const [productsError, setProductsError] = useState<string | null>(null)
 
   const [rebookMode, setRebookMode] = useState<RebookMode>('NONE')
-  const [rebookAt, setRebookAt] = useState<string>('') // datetime-local
-  const [windowStart, setWindowStart] = useState<string>('') // datetime-local
-  const [windowEnd, setWindowEnd] = useState<string>('') // datetime-local
+  const [rebookAt, setRebookAt] = useState<string>('') // datetime-local (in tz)
+  const [windowStart, setWindowStart] = useState<string>('') // datetime-local (in tz)
+  const [windowEnd, setWindowEnd] = useState<string>('') // datetime-local (in tz)
 
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
   const [rebookDaysBefore, setRebookDaysBefore] = useState('2')
@@ -220,9 +266,9 @@ export default function AftercareForm({
 
     setRebookMode(inferred)
 
-    if (existingRebookedFor) setRebookAt(isoToLocalInput(existingRebookedFor))
-    if (existingRebookWindowStart) setWindowStart(isoToLocalInput(existingRebookWindowStart))
-    if (existingRebookWindowEnd) setWindowEnd(isoToLocalInput(existingRebookWindowEnd))
+    if (existingRebookedFor) setRebookAt(isoToDatetimeLocalInTimeZone(existingRebookedFor, tz))
+    if (existingRebookWindowStart) setWindowStart(isoToDatetimeLocalInTimeZone(existingRebookWindowStart, tz))
+    if (existingRebookWindowEnd) setWindowEnd(isoToDatetimeLocalInTimeZone(existingRebookWindowEnd, tz))
 
     if (existingRebookedFor) setCreateRebookReminder(true)
 
@@ -234,7 +280,7 @@ export default function AftercareForm({
         note: p.note || '',
       })),
     )
-  }, [existingRebookMode, existingRebookedFor, existingRebookWindowStart, existingRebookWindowEnd, existingRecommendedProducts])
+  }, [existingRebookMode, existingRebookedFor, existingRebookWindowStart, existingRebookWindowEnd, existingRecommendedProducts, tz])
 
   useEffect(() => {
     return () => {
@@ -258,8 +304,8 @@ export default function AftercareForm({
   const windowError =
     rebookMode === 'RECOMMENDED_WINDOW' && (hasWindowStart || hasWindowEnd)
       ? (() => {
-          const startISO = toISOFromDatetimeLocal(windowStart)
-          const endISO = toISOFromDatetimeLocal(windowEnd)
+          const startISO = isoFromDatetimeLocalInTimeZone(windowStart, tz)
+          const endISO = isoFromDatetimeLocalInTimeZone(windowEnd, tz)
           if (!startISO || !endISO) return 'Pick both a window start and end.'
           const a = new Date(startISO)
           const b = new Date(endISO)
@@ -345,9 +391,9 @@ export default function AftercareForm({
     }
     if (loading) return
 
-    const rebookISO = toISOFromDatetimeLocal(rebookAt)
-    const windowStartISO = toISOFromDatetimeLocal(windowStart)
-    const windowEndISO = toISOFromDatetimeLocal(windowEnd)
+    const rebookISO = isoFromDatetimeLocalInTimeZone(rebookAt, tz)
+    const windowStartISO = isoFromDatetimeLocalInTimeZone(windowStart, tz)
+    const windowEndISO = isoFromDatetimeLocalInTimeZone(windowEnd, tz)
 
     if (rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !rebookISO) {
       setError('Pick a recommended next visit date, or change rebook mode to “None”.')
@@ -404,6 +450,9 @@ export default function AftercareForm({
 
         createProductReminder,
         productReminderDaysAfter: clampInt(daysAfterRaw, 1, 180, 7),
+
+        // optional but useful for server-side validation/debugging
+        timeZone: tz,
       }
 
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`, {
@@ -506,7 +555,9 @@ export default function AftercareForm({
       {/* Products */}
       <div className={cardClass()}>
         <div className={sectionTitleClass()}>Recommended products</div>
-        <div className={subtleTextClass()}>Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.</div>
+        <div className={subtleTextClass()}>
+          Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.
+        </div>
 
         <div className="mt-3 grid gap-3">
           {products.length === 0 ? (
@@ -615,7 +666,12 @@ export default function AftercareForm({
           <div className="text-sm font-black text-textPrimary">Rebook guidance</div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={() => onChangeMode('NONE')} disabled={loading || completed} className={pillClass(rebookMode === 'NONE')}>
+            <button
+              type="button"
+              onClick={() => onChangeMode('NONE')}
+              disabled={loading || completed}
+              className={pillClass(rebookMode === 'NONE')}
+            >
               None
             </button>
 
@@ -656,6 +712,9 @@ export default function AftercareForm({
               <div className="mt-1 text-xs font-semibold text-textSecondary">
                 This shows on the client’s summary and can power a reminder.
               </div>
+              <div className="mt-1 text-[11px] font-semibold text-textSecondary">
+                Timezone: <span className="text-textPrimary">{tz}</span>
+              </div>
             </div>
           ) : null}
 
@@ -689,7 +748,7 @@ export default function AftercareForm({
                 <div className="text-sm font-semibold text-microAccent">{windowError}</div>
               ) : (
                 <div className="text-xs font-semibold text-textSecondary">
-                  Client will be prompted to book within this range.
+                  Client will be prompted to book within this range. Timezone: <span className="text-textPrimary">{tz}</span>
                 </div>
               )}
             </div>
@@ -703,7 +762,9 @@ export default function AftercareForm({
           <label
             className={[
               'mt-3 flex items-center gap-2 text-sm font-semibold',
-              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate ? 'text-textPrimary' : 'text-textSecondary opacity-60',
+              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
+                ? 'text-textPrimary'
+                : 'text-textSecondary opacity-60',
             ].join(' ')}
             title={
               rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
@@ -725,7 +786,9 @@ export default function AftercareForm({
                 onChange={(e) => setRebookDaysBefore(e.target.value)}
                 className={[
                   'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
-                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || loading || completed ? 'opacity-60 cursor-not-allowed' : '',
+                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || loading || completed
+                    ? 'opacity-60 cursor-not-allowed'
+                    : '',
                 ].join(' ')}
               >
                 <option value="1">1 day</option>
@@ -772,7 +835,11 @@ export default function AftercareForm({
         {error ? <div className="mt-3 text-sm font-semibold text-microAccent">{error}</div> : null}
 
         <div className="mt-4 flex justify-end">
-          <button type="submit" disabled={loading || !!windowError || completed} className={primaryBtn(Boolean(loading || !!windowError || completed))}>
+          <button
+            type="submit"
+            disabled={loading || !!windowError || completed}
+            className={primaryBtn(Boolean(loading || !!windowError || completed))}
+          >
             {loading ? 'Sending…' : completed ? 'Sent' : 'Send aftercare'}
           </button>
         </div>
@@ -822,10 +889,7 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
             <img
               src={thumb}
               alt="Booking media"
-              className={[
-                'h-full w-full object-cover',
-                m.visibility === 'PRIVATE' ? 'blur-md opacity-80' : '',
-              ].join(' ')}
+              className={['h-full w-full object-cover', m.visibility === 'PRIVATE' ? 'blur-md opacity-80' : ''].join(' ')}
             />
 
             {isVideo ? (

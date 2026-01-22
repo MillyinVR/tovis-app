@@ -177,7 +177,6 @@ enum ProfessionalLocationType {
   SALON
   SUITE
   MOBILE_BASE
-  OTHER
 }
 
 // =======================
@@ -294,80 +293,73 @@ model ClientProfile {
 }
 
 model ProfessionalProfile {
-  id       String @id @default(cuid())
-  userId   String @unique
+  id     String @id @default(cuid())
+  userId String @unique
 
-  firstName String @default("")
-  lastName  String @default("")
-  phone     String?
+  firstName       String    @default("")
+  lastName        String    @default("")
+  phone           String?
   phoneVerifiedAt DateTime?
 
-  businessName String?
+  businessName     String?
   handle           String?
   handleNormalized String? @unique
-  
 
   bio       String?
   avatarUrl String?
-  favorites          ProfessionalFavorite[] @relation("ProFavorites")
-  autoAcceptBookings Boolean                @default(false)
-  timeZone           String? // IANA tz like "America/New_York"
-    // ✅ New: multi-location + correct timezone source
-  locations ProfessionalLocation[]
-  intentEvents       ClientIntentEvent[]
-  adminPermissions   AdminPermission[]
-  messageThreads     MessageThread[]        @relation("ProThreads")
-  calendarBlocks     CalendarBlock[]
 
-  location String @default("")
+  // Display-only (public profile)
+  location String @default("") // e.g. "San Diego, CA"
 
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  state        String?
-  postalCode   String?
+  // Optional fallback timezone used for new locations or display,
+  // but booking math should prefer location.timeZone
+  timeZone String? @db.VarChar(64)
 
-  latitude       Float?
-  longitude      Float?
-  mobileRadiusKm Int?
+  // Mobile travel settings (NOT calendar math)
+  mobileRadiusKm       Int?
+  mobileBasePostalCode String?
 
+  // Relationships
+  user           User                          @relation(fields: [userId], references: [id])
+  locations      ProfessionalLocation[]
+  offerings      ProfessionalServiceOffering[]
+  bookings       Booking[]
+  calendarBlocks CalendarBlock[]
+
+  // Licensing / verification (unchanged)
   professionType     ProfessionType?
   licenseNumber      String?
   licenseState       String?
   licenseExpiry      DateTime?
-  licenseVerified    Boolean             @default(false)
-  verificationStatus VerificationStatus  @default(PENDING)
-  lastMinuteOpenings LastMinuteOpening[] @relation("ProOpenings")
+  licenseVerified    Boolean                @default(false)
+  verificationStatus VerificationStatus     @default(PENDING)
+  verificationDocs   VerificationDocument[]
 
-  isMobile  Boolean @default(false)
-  isInSalon Boolean @default(false)
-  isSuite   Boolean @default(false)
-
-  user             User                          @relation(fields: [userId], references: [id])
-  offerings        ProfessionalServiceOffering[]
-  bookings         Booking[]
-  verificationDocs VerificationDocument[]
-
-  clientNotes       ClientProfessionalNote[]
-  recordedAllergies ClientAllergy[]
-  reviews           Review[]
-  reminders         Reminder[]
-
-  /// Weekly schedule JSON:
-  /// { "mon": { "enabled": true, "start": "09:00", "end": "17:00" }, ... }
-  workingHours Json?
-
-  // ✅ Last-minute
-  lastMinuteSettings LastMinuteSettings? @relation("ProLastMinuteSettings")
-
+  // Social/engagement (unchanged)
+  favorites       ProfessionalFavorite[] @relation("ProFavorites")
+  intentEvents    ClientIntentEvent[]
+  messageThreads  MessageThread[]        @relation("ProThreads")
   mediaAssets     MediaAsset[]
   waitlistEntries WaitlistEntry[]
 
-  // ✅ Store tracking (you added this)
-  productSales    ProductSale[]
-  adminActionLogs AdminActionLog[] @relation("ProfessionalLogs")
-  nfcCards        NfcCard[]
-  
+  autoAcceptBookings Boolean @default(false)
+
+  // Admin / internal
+  adminPermissions AdminPermission[]
+  adminActionLogs  AdminActionLog[]  @relation("ProfessionalLogs")
+  productSales     ProductSale[]
+  nfcCards         NfcCard[]
+
+  lastMinuteSettings LastMinuteSettings? @relation("ProLastMinuteSettings")
+  lastMinuteOpenings LastMinuteOpening[] @relation("ProOpenings")
+
+  holds BookingHold[] @relation("ProHolds") // name optional but makes it clear
+
+  clientNotes       ClientProfessionalNote[]
+  recordedAllergies ClientAllergy[] // for recordedBy relation
+  reviews           Review[]
+  reminders         Reminder[]
+
   @@index([handleNormalized])
 }
 
@@ -375,46 +367,43 @@ model ProfessionalLocation {
   id             String @id @default(cuid())
   professionalId String
 
-  type       ProfessionalLocationType @default(SALON)
+  type       ProfessionalLocationType
   name       String?
-  isPrimary  Boolean @default(false)
-  isBookable Boolean @default(true)
+  isPrimary  Boolean                  @default(false)
+  isBookable Boolean                  @default(true)
 
-  // Address (canonical display is formattedAddress; keep the parts for editing/search)
+  // Address (SALON/SUITE required; MOBILE_BASE optional)
   formattedAddress String?
-  addressLine1      String?
-  addressLine2      String?
-  city              String?
-  state             String?
-  postalCode        String?
-  countryCode       String?
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  state            String?
+  postalCode       String?
+  countryCode      String?
+  placeId          String?
 
-  // Places provider reference (Google Places / Mapbox)
-  placeId String?
-
-  // Geo (for timezone + radius search)
+  // Geo
   lat Float?
   lng Float?
 
-  // ✅ IANA timezone (source of truth for booking math)
-  timeZone String?
+  // ✅ Source of truth for booking timezone
+  timeZone String? @db.VarChar(64)
 
-  /// Weekly schedule JSON (location-scoped):
-  /// { "mon": { "enabled": true, "start": "09:00", "end": "17:00" }, ... }
-  workingHours Json?
+  // ✅ Source of truth for calendar hours
+  // { "mon": { "enabled": true, "start": "09:00", "end": "17:00" }, ... }
+  workingHours Json
 
-  // Optional location-level defaults (nice long-term)
-  bufferMinutes        Int?
-  stepMinutes          Int?
-  advanceNoticeMinutes Int?
-  maxDaysAhead         Int?
+  // Location-level booking defaults
+  bufferMinutes        Int @default(10)
+  stepMinutes          Int @default(5)
+  advanceNoticeMinutes Int @default(10)
+  maxDaysAhead         Int @default(365)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
 
-  // Relations (for snapshot + multi-location calendar)
   bookings Booking[]
   holds    BookingHold[]
   blocks   CalendarBlock[]
@@ -526,24 +515,17 @@ model ProfessionalServiceOffering {
   title       String?
   description String?
 
-  // Keep these for backwards compatibility OR migrate cleanly (your choice):
-  // price           Decimal @db.Decimal(10, 2)
-  // durationMinutes Int
-
-  // ✅ New: separate “starting at” + duration per location type
-  salonPriceStartingAt  Decimal?        @db.Decimal(10, 2)
+  // Prices/durations per booking mode
+  salonPriceStartingAt  Decimal? @db.Decimal(10, 2)
   salonDurationMinutes  Int?
-  mobilePriceStartingAt Decimal?        @db.Decimal(10, 2)
+  mobilePriceStartingAt Decimal? @db.Decimal(10, 2)
   mobileDurationMinutes Int?
-  messageThreads        MessageThread[] @relation("OfferingThreads")
-  quotes                Quote[]         @relation("OfferingQuotes")
 
-  // ✅ Pro-only image override shown on their profile/services tab
-  customImageUrl String?
-
-  // ✅ Pro can offer salon and/or mobile per service
+  // Mode flags per service
   offersInSalon Boolean @default(true)
   offersMobile  Boolean @default(false)
+
+  customImageUrl String?
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -551,11 +533,16 @@ model ProfessionalServiceOffering {
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
   service      Service             @relation(fields: [serviceId], references: [id])
-  bookings     Booking[]
 
+  bookings Booking[]
+
+  // (keep your other relations if you use them)
+  messageThreads      MessageThread[]      @relation("OfferingThreads")
+  quotes              Quote[]              @relation("OfferingQuotes")
   intentEvents        ClientIntentEvent[]
   lastMinuteOpenings  LastMinuteOpening[]  @relation("OfferingOpenings")
   bookingServiceItems BookingServiceItem[]
+  holds               BookingHold[]
 
   @@unique([professionalId, serviceId])
 }
@@ -715,62 +702,72 @@ model ClientNotificationSettings {
 }
 
 model Booking {
-  id             String               @id @default(cuid())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   clientId       String
   professionalId String
   serviceId      String
   offeringId     String?
-  scheduledFor   DateTime
-  status         BookingStatus        @default(PENDING)
-  locationType   ServiceLocationType  @default(SALON)
-  serviceItems   BookingServiceItem[]
+
+  scheduledFor DateTime
+  status       BookingStatus @default(PENDING)
+
+  // Booking mode: SALON or MOBILE
+  locationType ServiceLocationType
+
+  // ✅ REQUIRED: lock booking to a specific ProfessionalLocation
+  locationId String
+  location   ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  // ✅ Snapshots that make bookings immutable + timezone safe
+  locationTimeZone        String? @db.VarChar(64)
+  locationAddressSnapshot Json?
+  locationLatSnapshot     Float?
+  locationLngSnapshot     Float?
+
+  // Client-friendly display (optional)
+  clientTimeZoneAtBooking String? @db.VarChar(64)
+
+  // Pricing + duration (new truth)
+  subtotalSnapshot Decimal  @db.Decimal(10, 2)
+  totalAmount      Decimal? @db.Decimal(10, 2)
+  depositAmount    Decimal? @db.Decimal(10, 2)
+  tipAmount        Decimal? @db.Decimal(10, 2)
+  taxAmount        Decimal? @db.Decimal(10, 2)
+  discountAmount   Decimal? @db.Decimal(10, 2)
+
+  totalDurationMinutes Int
+  bufferMinutes        Int @default(0)
+
+  // Source tracking (keep)
+  source            BookingSource @default(DISCOVERY)
+  rebookOfBookingId String?
 
   internalNotes String?
   clientNotes   String?
 
-  // (Legacy snapshots - keep for now, but stop using)
-  priceSnapshot           Decimal @db.Decimal(10, 2)
-  durationMinutesSnapshot Int
+  client       ClientProfile                @relation(fields: [clientId], references: [id])
+  professional ProfessionalProfile          @relation(fields: [professionalId], references: [id])
+  service      Service                      @relation(fields: [serviceId], references: [id])
+  offering     ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
 
-  depositAmount  Decimal? @db.Decimal(10, 2)
-  tipAmount      Decimal? @db.Decimal(10, 2)
-  taxAmount      Decimal? @db.Decimal(10, 2)
-  discountAmount Decimal? @db.Decimal(10, 2)
-  totalAmount    Decimal? @db.Decimal(10, 2)
+  rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
+  rebooks  Booking[] @relation("RebookChain")
 
-  // Consultation approval object (1:1)
+  // Keep the rest if you use them
   consultation            BookingConsultation?
   consultationNotes       String?
   consultationPrice       Decimal?              @db.Decimal(10, 2)
   consultationConfirmedAt DateTime?
   consultationApproval    ConsultationApproval?
 
-  // ✅ Option B fields (new source of truth)
-  subtotalSnapshot     Decimal @db.Decimal(10, 2)
-  totalDurationMinutes Int
-  bufferMinutes        Int     @default(0)
-
-  // ✅ Source tracking
-  source            BookingSource @default(DISCOVERY)
-  rebookOfBookingId String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  client              ClientProfile                @relation(fields: [clientId], references: [id])
-  professional        ProfessionalProfile          @relation(fields: [professionalId], references: [id])
-  service             Service                      @relation(fields: [serviceId], references: [id])
-  serviceNotes        String?
-  offering            ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id])
   aftercareSummary    AftercareSummary?
   clientNotifications ClientNotification[]
+  reviews             Review[]
+  reminders           Reminder[]
 
-  // Optional: link bookings together for rebooks
-  rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
-  rebooks  Booking[] @relation("RebookChain")
-
-  reviews               Review[]
-  reminders             Reminder[]
   sessionStep           SessionStep      @default(NONE)
   reminderMinutesBefore Int?             @default(1440)
   reminderSentAt        DateTime?
@@ -781,53 +778,48 @@ model Booking {
 
   mediaAssets  MediaAsset[]
   productSales ProductSale[]
+  serviceItems BookingServiceItem[]
 
-    // ✅ Location reference (recommended for correct timezone + multi-location)
-  locationId String?
-  location   ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-
-  // ✅ Snapshot timezone/address used at booking time (immutable truth)
-  locationTimeZone        String?
-  locationAddressSnapshot Json?
-  locationLatSnapshot     Float?
-  locationLngSnapshot     Float?
-
-  // Optional: useful for messaging/UI (“Times shown in your timezone”)
-  clientTimeZoneAtBooking String?
-
-  @@index([locationId])
-  @@index([locationTimeZone])
   @@index([professionalId, scheduledFor])
-  @@index([professionalId, clientId])
+  @@index([clientId, scheduledFor])
+  @@index([locationId, scheduledFor])
   @@index([professionalId, source])
 }
 
 model BookingHold {
-  id             String              @id @default(cuid())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
   offeringId     String
   professionalId String
-  scheduledFor   DateTime
-  expiresAt      DateTime
-  createdAt      DateTime            @default(now())
-  locationType   ServiceLocationType
+  clientId       String?
 
-  clientId String?
-  client   ClientProfile? @relation(fields: [clientId], references: [id])
-  // ✅ Location reference + timezone snapshot for holds (prevents tz drift)
-  locationId String?
-  location   ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  scheduledFor DateTime
+  expiresAt    DateTime
 
-  locationTimeZone        String?
+  locationType ServiceLocationType
+
+  // ✅ REQUIRED: hold must be tied to a specific location
+  locationId String
+  location   ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  // snapshot timezone (prevents drift)
+  locationTimeZone        String? @db.VarChar(64)
   locationAddressSnapshot Json?
   locationLatSnapshot     Float?
   locationLngSnapshot     Float?
 
-  @@index([locationId])
-  @@index([locationTimeZone])
-  @@unique([professionalId, scheduledFor])
+  client       ClientProfile?              @relation(fields: [clientId], references: [id])
+  offering     ProfessionalServiceOffering @relation(fields: [offeringId], references: [id])
+  professional ProfessionalProfile         @relation("ProHolds", fields: [professionalId], references: [id])
+
+  // Unique per location calendar, not global across pro
+  @@unique([locationId, scheduledFor])
+  @@index([professionalId, expiresAt])
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
 }
+
 
 model AftercareSummary {
   id           String    @id @default(cuid())
@@ -1223,18 +1215,19 @@ model BookingServiceItem {
 }
 
 model CalendarBlock {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   professionalId String
-  startsAt       DateTime
-  endsAt         DateTime
-  note           String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  locationId     String? // null = blocks all locations (rare, but useful)
 
-  professionalProfile ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  // ✅ Optional: tie blocks to a specific location calendar
-  locationId String?
-  location   ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  startsAt DateTime
+  endsAt   DateTime
+  note     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professionalProfile ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  location            ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   @@index([locationId])
   @@index([professionalId, startsAt])

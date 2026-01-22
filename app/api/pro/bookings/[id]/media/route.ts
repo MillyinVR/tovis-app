@@ -1,7 +1,6 @@
 // app/api/pro/bookings/[id]/media/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { MediaPhase, MediaType, MediaVisibility } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -10,10 +9,6 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 const CAPTION_MAX = 300
 const URL_MAX = 2048
-
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
 
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -79,38 +74,29 @@ function canUploadPhase(sessionStepRaw: unknown, phase: MediaPhase): boolean {
   return true
 }
 
-function upperStatus(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
 export async function GET(req: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proId = auth.professionalId
 
     const { id } = await Promise.resolve(ctx.params)
     const bookingId = pickString(id)
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: { id: true, professionalId: true },
     })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden')
 
     const urlObj = new URL(req.url)
     const phaseParam = urlObj.searchParams.get('phase')
 
     const phase = phaseParam == null ? null : parsePhase(phaseParam)
-    if (phaseParam != null && !phase) {
-      return NextResponse.json({ error: 'Invalid phase query param.' }, { status: 400 })
-    }
+    if (phaseParam != null && !phase) return jsonFail(400, 'Invalid phase query param.')
 
     const where: { bookingId: string; phase?: MediaPhase } = { bookingId }
     if (phase) where.phase = phase
@@ -131,23 +117,27 @@ export async function GET(req: Request, ctx: Ctx) {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ ok: true, items }, { status: 200 })
-  } catch (e) {
+    return jsonOk({ items }, 200)
+  } catch (e: any) {
     console.error('GET /api/pro/bookings/[id]/media error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(
+      500,
+      'Internal server error',
+      process.env.NODE_ENV !== 'production' ? { name: e?.name, code: e?.code } : undefined,
+    )
   }
 }
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proId = auth.professionalId
+    const user = auth.user
 
     const { id } = await Promise.resolve(ctx.params)
     const bookingId = pickString(id)
-    if (!bookingId) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as {
       url?: unknown
@@ -158,18 +148,16 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     const url = safeUrl(body.url)
-    if (!url) return NextResponse.json({ error: 'Invalid or missing url.' }, { status: 400 })
+    if (!url) return jsonFail(400, 'Invalid or missing url.')
 
     const thumbUrl = body.thumbUrl == null || body.thumbUrl === '' ? null : safeUrl(body.thumbUrl)
-    if (body.thumbUrl && !thumbUrl) {
-      return NextResponse.json({ error: 'thumbUrl must be a valid http/https URL.' }, { status: 400 })
-    }
+    if (body.thumbUrl && !thumbUrl) return jsonFail(400, 'thumbUrl must be a valid http/https URL.')
 
     const phase = parsePhase(body.phase)
-    if (!phase) return NextResponse.json({ error: 'Invalid phase.' }, { status: 400 })
+    if (!phase) return jsonFail(400, 'Invalid phase.')
 
     const mediaType = parseMediaType(body.mediaType)
-    if (!mediaType) return NextResponse.json({ error: 'Invalid mediaType.' }, { status: 400 })
+    if (!mediaType) return jsonFail(400, 'Invalid mediaType.')
 
     const captionRaw = pickString(body.caption)
     const caption = captionRaw ? captionRaw.slice(0, CAPTION_MAX) : null
@@ -187,12 +175,14 @@ export async function POST(req: Request, ctx: Ctx) {
       })
 
       if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
-      if (booking.professionalId !== user.professionalProfile!.id) return { ok: false as const, status: 403, error: 'Forbidden' }
+      if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden' }
 
-      const status = upperStatus(booking.status)
+      const status = upper(booking.status)
       if (status === 'CANCELLED') return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
       if (status === 'PENDING') return { ok: false as const, status: 409, error: 'Media uploads require an accepted booking.' }
-      if (status === 'COMPLETED' || booking.finishedAt) return { ok: false as const, status: 409, error: 'This booking is completed. Media uploads are locked.' }
+      if (status === 'COMPLETED' || booking.finishedAt) {
+        return { ok: false as const, status: 409, error: 'This booking is completed. Media uploads are locked.' }
+      }
 
       if (!canUploadPhase(booking.sessionStep as SessionStep, phase)) {
         return {
@@ -247,13 +237,15 @@ export async function POST(req: Request, ctx: Ctx) {
       return { ok: true as const, created, advancedTo }
     })
 
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status })
-    }
+    if (!result.ok) return jsonFail(result.status, result.error)
 
-    return NextResponse.json({ ok: true, item: result.created, advancedTo: result.advancedTo }, { status: 200 })
-  } catch (e) {
+    return jsonOk({ item: result.created, advancedTo: result.advancedTo }, 200)
+  } catch (e: any) {
     console.error('POST /api/pro/bookings/[id]/media error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(
+      500,
+      'Internal server error',
+      process.env.NODE_ENV !== 'production' ? { name: e?.name, code: e?.code } : undefined,
+    )
   }
 }

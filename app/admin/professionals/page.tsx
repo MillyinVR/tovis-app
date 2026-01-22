@@ -4,21 +4,14 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
+import { ProfessionalLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function Pill({ label }: { label: string }) {
+function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span
-      className="border border-surfaceGlass/10 bg-bgSecondary"
-      style={{
-        fontSize: 12,
-        fontWeight: 900,
-        padding: '4px 10px',
-        borderRadius: 999,
-      }}
-    >
-      {label}
+    <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textPrimary">
+      {children}
     </span>
   )
 }
@@ -27,22 +20,45 @@ function Tab({ href, label, active }: { href: string; label: string; active: boo
   return (
     <Link
       href={href}
-      className={
+      className={[
+        'inline-flex items-center rounded-full border px-3 py-2 text-xs font-extrabold',
+        'transition-colors',
         active
-          ? 'border border-surfaceGlass/25 bg-bgPrimary text-textPrimary'
-          : 'border border-surfaceGlass/10 bg-bgSecondary text-textPrimary'
-      }
-      style={{
-        textDecoration: 'none',
-        fontSize: 13,
-        fontWeight: 1000,
-        padding: '8px 10px',
-        borderRadius: 999,
-      }}
+          ? 'border-surfaceGlass/25 bg-bgPrimary text-textPrimary'
+          : 'border-surfaceGlass/10 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/20',
+      ].join(' ')}
     >
       {label}
     </Link>
   )
+}
+
+function formatLocationLabel(loc: {
+  type: ProfessionalLocationType
+  formattedAddress: string | null
+  city: string | null
+  state: string | null
+} | null) {
+  if (!loc) return 'No location yet'
+
+  const where =
+    loc.formattedAddress?.trim() ||
+    [loc.city?.trim(), loc.state?.trim()].filter(Boolean).join(', ') ||
+    ''
+
+  const mode =
+  loc?.type === ProfessionalLocationType.SALON
+    ? 'Salon'
+    : loc?.type === ProfessionalLocationType.SUITE
+      ? 'Suite'
+      : loc?.type === ProfessionalLocationType.MOBILE_BASE
+        ? 'Mobile'
+        : loc?.type
+          ? String(loc.type)
+          : null
+
+  if (where) return `${where} · ${mode}`
+  return mode || 'Location set'
 }
 
 export default async function AdminProfessionalsPage({
@@ -67,7 +83,6 @@ export default async function AdminProfessionalsPage({
       id: true,
       businessName: true,
       avatarUrl: true,
-      location: true,
       professionType: true,
       licenseState: true,
       licenseNumber: true,
@@ -75,6 +90,19 @@ export default async function AdminProfessionalsPage({
       licenseVerified: true,
       verificationStatus: true,
       user: { select: { email: true } },
+
+      // ✅ New location system (primary ProfessionalLocation)
+      locations: {
+        where: { isPrimary: true },
+        take: 1,
+        select: {
+          type: true,
+          formattedAddress: true,
+          city: true,
+          state: true,
+        },
+      },
+
       verificationDocs: {
         select: { id: true, type: true, status: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
@@ -86,68 +114,81 @@ export default async function AdminProfessionalsPage({
 
   return (
     <AdminGuard>
-      <div style={{ display: 'grid', gap: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-end' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 1000 }}>Professionals</h1>
-            <div style={{ marginTop: 6, fontSize: 13, color: '#6b7280' }}>
+      <div className="grid gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="grid gap-1">
+            <h1 className="text-xl font-extrabold text-textPrimary">Professionals</h1>
+            <p className="text-sm text-textSecondary">
               Review applications, approve/decline, and keep the marketplace from becoming Craigslist.
-            </div>
+            </p>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div className="flex flex-wrap justify-end gap-2">
             <Tab href="/admin/professionals?status=PENDING" label="Pending" active={verificationStatus === 'PENDING'} />
-            <Tab href="/admin/professionals?status=APPROVED" label="Approved" active={verificationStatus === 'APPROVED'} />
-            <Tab href="/admin/professionals?status=REJECTED" label="Rejected" active={verificationStatus === 'REJECTED'} />
+            <Tab
+              href="/admin/professionals?status=APPROVED"
+              label="Approved"
+              active={verificationStatus === 'APPROVED'}
+            />
+            <Tab
+              href="/admin/professionals?status=REJECTED"
+              label="Rejected"
+              active={verificationStatus === 'REJECTED'}
+            />
           </div>
         </div>
 
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div className="grid gap-3">
           {pros.length === 0 ? (
-            <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 16, padding: 16 }}>
-              Nothing here. Humans are either behaving or you haven’t seeded pros.
+            <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-sm text-textSecondary">
+              Nothing here. Humans are either behaving, or you haven’t seeded pros.
             </div>
           ) : (
-            pros.map((p) => (
-              <Link
-                key={p.id}
-                href={`/admin/professionals/${encodeURIComponent(p.id)}`}
-                className="text-textPrimary" style={{ textDecoration: 'none' }}
-              >
-                <div
-                  className="border border-surfaceGlass/10 bg-bgSecondary" style={{
-                    borderRadius: 16,
-                    padding: 14,
-                    display: 'grid',
-                    gap: 10,
-                  }}
+            pros.map((p) => {
+              const primaryLoc = p.locations?.[0] ?? null
+              const locationLabel = formatLocationLabel(primaryLoc)
+
+              return (
+                <Link
+                  key={p.id}
+                  href={`/admin/professionals/${encodeURIComponent(p.id)}`}
+                  className="text-textPrimary no-underline"
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                    <div style={{ display: 'grid', gap: 4 }}>
-                      <div style={{ fontWeight: 1000 }}>
-                        {p.businessName || 'Unnamed business'}{' '}
-                        <span style={{ fontWeight: 700, color: '#6b7280', fontSize: 12 }}>({p.user.email})</span>
+                  <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 transition-colors hover:border-surfaceGlass/20">
+                    <div className="flex flex-wrap justify-between gap-3">
+                      <div className="grid gap-1">
+                        <div className="text-sm font-extrabold">
+                          {p.businessName || 'Unnamed business'}{' '}
+                          <span className="text-xs font-bold text-textSecondary">({p.user.email})</span>
+                        </div>
+
+                        <div className="text-sm text-textSecondary">
+                          {p.professionType || 'Unknown profession'} · {locationLabel}
+                        </div>
+
+                        <div className="text-xs text-textSecondary">
+                          License: {p.licenseState || '??'} {p.licenseNumber || '—'}
+                          {p.licenseExpiry ? (
+                            <span>
+                              {' '}
+                              · Exp {new Date(p.licenseExpiry).toLocaleDateString()}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 13, color: '#6b7280' }}>
-                        {p.professionType || 'Unknown profession'} · {p.location || 'No location'}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>
-                        License: {p.licenseState || '??'} {p.licenseNumber || '—'}{' '}
-                        {p.licenseExpiry ? `· Exp ${new Date(p.licenseExpiry).toLocaleDateString()}` : ''}
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Pill>Status: {String(p.verificationStatus)}</Pill>
+                        <Pill>{p.licenseVerified ? 'License Verified' : 'License NOT Verified'}</Pill>
+                        <Pill>Docs: {p.verificationDocs.length}</Pill>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <Pill label={`Status: ${p.verificationStatus}`} />
-                      <Pill label={p.licenseVerified ? 'License Verified' : 'License NOT Verified'} />
-                      <Pill label={`Docs: ${p.verificationDocs.length}`} />
-                    </div>
+                    <div className="mt-3 text-xs font-bold text-textSecondary">Open to review →</div>
                   </div>
-
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>Open to review →</div>
-                </div>
-              </Link>
-            ))
+                </Link>
+              )
+            })
           )}
         </div>
       </div>

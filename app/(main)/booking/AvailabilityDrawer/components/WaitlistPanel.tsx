@@ -6,7 +6,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 
 import type { DrawerContext } from '../types'
-import { toISOFromDatetimeLocalInTimeZone } from '../utils/timezones'
+import { toISOFromDatetimeLocalInTimeZone } from '@/lib/bookingTime'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 

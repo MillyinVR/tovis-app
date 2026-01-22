@@ -2,8 +2,8 @@
 'use client'
 
 import type { ProCard, SelectedHold } from '../types'
-import { fmtFullInTimeZone, fmtSlotInTimeZone } from '../utils/timezones'
-import { getHourInTimeZone } from '../utils/timezones'
+import { getHourInTimeZone, formatSlotLabel, formatSlotFullLabel } from '@/lib/bookingTime'
+import { formatInTimeZone } from '@/lib/FormatInTimeZone'
 
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
@@ -14,14 +14,14 @@ function periodOfHour(h: number): Period {
 }
 
 function fmtDayChipLabel(ymd: string, timeZone: string) {
-  // ymd is YYYY-MM-DD, make a stable UTC date then format in tz
+  // stable "noon UTC" anchor avoids DST edge weirdness
   const d = new Date(`${ymd}T12:00:00.000Z`)
-  return new Intl.DateTimeFormat(undefined, { timeZone, weekday: 'short' }).format(d)
+  return formatInTimeZone(d, timeZone, { weekday: 'short' })
 }
 
 function fmtDayChipNumber(ymd: string, timeZone: string) {
   const d = new Date(`${ymd}T12:00:00.000Z`)
-  return new Intl.DateTimeFormat(undefined, { timeZone, day: '2-digit' }).format(d)
+  return formatInTimeZone(d, timeZone, { day: '2-digit' })
 }
 
 export default function SlotChips({
@@ -82,9 +82,7 @@ export default function SlotChips({
       <div className="flex items-end justify-between">
         <div>
           <div className="text-[13px] font-black text-textPrimary">Available times</div>
-          <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-            Pick a day, then a time. We’ll hold it.
-          </div>
+          <div className="mt-1 text-[12px] font-semibold text-textSecondary">Pick a day, then a time. We’ll hold it.</div>
         </div>
 
         {holding ? <div className="text-[12px] font-semibold text-textSecondary">Holding…</div> : null}
@@ -101,7 +99,7 @@ export default function SlotChips({
                 type="button"
                 onClick={() => onSelectDay(d.date)}
                 className={[
-                  'min-w-[70px] rounded-2xl border px-3 py-2 text-left transition',
+                  'min-w-70px rounded-2xl border px-3 py-2 text-left transition',
                   'border-white/10',
                   active ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
                 ].join(' ')}
@@ -110,7 +108,12 @@ export default function SlotChips({
                   {fmtDayChipLabel(d.date, appointmentTz)}
                 </div>
                 <div className="text-[18px] font-black leading-none">{fmtDayChipNumber(d.date, appointmentTz)}</div>
-                <div className={['mt-1 text-[11px] font-semibold', active ? 'text-bgPrimary/90' : 'text-textSecondary'].join(' ')}>
+                <div
+                  className={[
+                    'mt-1 text-[11px] font-semibold',
+                    active ? 'text-bgPrimary/90' : 'text-textSecondary',
+                  ].join(' ')}
+                >
                   {d.slotCount} slots
                 </div>
               </button>
@@ -167,9 +170,9 @@ export default function SlotChips({
                   isSelected ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
                   !pro.offeringId || holding ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
                 ].join(' ')}
-                title={fmtFullInTimeZone(iso, appointmentTz)}
+                title={formatSlotFullLabel(iso, appointmentTz)}
               >
-                {fmtSlotInTimeZone(iso, appointmentTz)}
+                {formatSlotLabel(iso, appointmentTz)}
               </button>
             )
           })

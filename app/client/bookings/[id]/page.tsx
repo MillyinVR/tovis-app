@@ -2,6 +2,7 @@
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
 import ReviewSection from './ReviewSection'
 import BookingActions from './BookingActions'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
@@ -28,15 +29,10 @@ function toDate(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-function sanitizeTimeZone(tz: string | null | undefined) {
-  if (!tz) return null
-  if (!/^[A-Za-z_]+\/[A-Za-z0-9_\-+]+$/.test(tz)) return null
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return tz
-  } catch {
-    return null
-  }
+function normalizeTimeZone(raw: unknown, fallback: string) {
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  const cleaned = sanitizeTimeZone(s, fallback) || fallback
+  return isValidIanaTimeZone(cleaned) ? cleaned : fallback
 }
 
 function formatWhenInTimeZone(d: Date, timeZone: string) {
@@ -126,12 +122,6 @@ function statusMessage(statusRaw: unknown): { title: string; body: string; varia
   }
 }
 
-function locationLine(pro?: { location?: string | null; city?: string | null; state?: string | null } | null) {
-  if (!pro) return ''
-  const parts = [pro.location, pro.city, pro.state].filter(Boolean)
-  return parts.join(', ')
-}
-
 function formatMoneyLoose(v: unknown): string | null {
   if (v == null) return null
   if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(2)}`
@@ -141,13 +131,6 @@ function formatMoneyLoose(v: unknown): string | null {
     const n = Number(s)
     if (Number.isFinite(n)) return `$${n.toFixed(2)}`
     return s
-  }
-  const anyV: any = v
-  if (typeof anyV?.toString === 'function') {
-    const s = String(anyV.toString())
-    const n = Number(s)
-    if (Number.isFinite(n)) return `$${n.toFixed(2)}`
-    if (s.trim()) return s.trim()
   }
   return null
 }
@@ -171,15 +154,12 @@ function getAftercareRebookInfo(aftercare: any, timeZone: string): AftercareRebo
   if (modeRaw === 'RECOMMENDED_WINDOW') {
     const s = toDate(aftercare?.rebookWindowStart)
     const e = toDate(aftercare?.rebookWindowEnd)
-    if (s && e) {
-      return { mode: 'RECOMMENDED_WINDOW', label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}` }
-    }
+    if (s && e) return { mode: 'RECOMMENDED_WINDOW', label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}` }
     return { mode: 'RECOMMENDED_WINDOW', label: 'Recommended rebook window.' }
   }
 
   if (modeRaw === 'NONE') return { mode: 'NONE', label: null }
 
-  // legacy single date set without mode
   const legacy = toDate(aftercare?.rebookedFor)
   if (legacy) return { mode: 'RECOMMENDED_DATE', label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}` }
 
@@ -214,6 +194,21 @@ function tabDisabledClass() {
   ].join(' ')
 }
 
+function formatPrimaryLocationLine(loc: {
+  formattedAddress: string | null
+  name: string | null
+  city: string | null
+  state: string | null
+} | null) {
+  if (!loc) return ''
+  return (
+    loc.formattedAddress?.trim() ||
+    loc.name?.trim() ||
+    [loc.city, loc.state].filter(Boolean).join(', ') ||
+    ''
+  )
+}
+
 export default async function ClientBookingPage(props: {
   params: Promise<{ id: string }> | { id: string }
   searchParams?:
@@ -234,9 +229,44 @@ export default async function ClientBookingPage(props: {
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: {
-      service: true,
-      professional: { include: { user: true } },
+    select: {
+      id: true,
+      clientId: true,
+      status: true,
+      source: true,
+      locationType: true,
+
+      scheduledFor: true,
+      locationId: true,
+      locationTimeZone: true,
+
+      totalDurationMinutes: true,
+      subtotalSnapshot: true,
+
+      service: { select: { id: true, name: true } },
+
+      professional: {
+        select: {
+          id: true,
+          businessName: true,
+          timeZone: true,
+          user: { select: { email: true } },
+          locations: {
+            where: { isPrimary: true },
+            take: 1,
+            select: {
+              name: true,
+              formattedAddress: true,
+              city: true,
+              state: true,
+              timeZone: true,
+            },
+          },
+        },
+      },
+
+      // Keep these only if they really exist in your schema (they did in your paste).
+      // If Prisma types complain here, comment them out.
       aftercareSummary: true,
       consultationApproval: true,
     },
@@ -245,6 +275,7 @@ export default async function ClientBookingPage(props: {
   if (!booking) notFound()
   if (booking.clientId !== user.clientProfile.id) redirect('/client/bookings')
 
+  // Reviews (unchanged)
   const existingReview = await prisma.review.findFirst({
     where: { bookingId: booking.id, clientId: user.clientProfile.id },
     include: {
@@ -266,37 +297,37 @@ export default async function ClientBookingPage(props: {
 
   const scheduled = toDate(booking.scheduledFor)
 
-  // ✅ Rule: always display in PRO’s timezone (prefer snapshot if present)
-  const appointmentTz =
-    sanitizeTimeZone((booking as any).locationTimeZone) ??
-    sanitizeTimeZone((booking.professional as any)?.timeZone) ??
-    'America/Los_Angeles'
+  // ✅ Timezone truth order: booking.locationTimeZone -> location.timeZone -> pro.timeZone -> fallback
+  let appointmentTz = normalizeTimeZone(booking.locationTimeZone, 'America/Los_Angeles')
+
+  const primaryLoc = booking.professional?.locations?.[0] ?? null
+  if (!booking.locationTimeZone && primaryLoc?.timeZone) {
+    appointmentTz = normalizeTimeZone(primaryLoc.timeZone, appointmentTz)
+  }
+
+  if (!booking.locationTimeZone && !primaryLoc?.timeZone) {
+    appointmentTz = normalizeTimeZone(booking.professional?.timeZone, appointmentTz)
+  }
 
   const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : 'Unknown time'
-  const loc = locationLine(booking.professional as any)
+  const locLine = formatPrimaryLocationLine(primaryLoc)
 
   const pillVariant = statusPillVariant(booking.status)
   const msg = statusMessage(booking.status)
 
-  // Prefer Option B snapshots, fallback to legacy
-  const duration =
-    (typeof (booking as any).totalDurationMinutes === 'number' ? (booking as any).totalDurationMinutes : null) ??
-    (typeof (booking as any).durationMinutesSnapshot === 'number' ? (booking as any).durationMinutesSnapshot : null)
+  const durationMinutes =
+    typeof booking.totalDurationMinutes === 'number' && booking.totalDurationMinutes > 0
+      ? booking.totalDurationMinutes
+      : null
 
-  const basePriceLabel =
-    formatMoneyLoose((booking as any).subtotalSnapshot) ??
-    formatMoneyLoose((booking as any).priceSnapshot) ??
-    formatMoneyLoose((booking as any).totalAmount) ??
-    null
+  const basePriceLabel = formatMoneyLoose(booking.subtotalSnapshot) ?? null
+  const modeLabel = friendlyLocationType(booking.locationType)
+  const sourceLabel = friendlySource(booking.source)
 
-  const modeLabel = friendlyLocationType((booking as any).locationType)
-  const sourceLabel = friendlySource((booking as any).source)
+  const aftercare = (booking as any).aftercareSummary ?? null
+  const consultationApproval = (booking as any).consultationApproval ?? null
 
-  const aftercare = booking.aftercareSummary
-  const rebookInfo = aftercare
-    ? getAftercareRebookInfo(aftercare, appointmentTz)
-    : { mode: 'NONE' as const, label: null }
-
+  const rebookInfo = aftercare ? getAftercareRebookInfo(aftercare, appointmentTz) : { mode: 'NONE' as const, label: null }
   const aftercareToken = aftercare ? pickToken(aftercare) : null
   const showRebookCTA = upper(booking.status) === 'COMPLETED' && Boolean(aftercareToken)
 
@@ -304,12 +335,11 @@ export default async function ClientBookingPage(props: {
   const sessionStepUpper = upper((booking as any).sessionStep || 'NONE')
 
   const showConsultationApproval =
-    upper(booking.consultationApproval?.status) === 'PENDING' &&
+    upper(consultationApproval?.status) === 'PENDING' &&
     sessionStepUpper === 'CONSULTATION_PENDING_CLIENT' &&
     statusUpper !== 'CANCELLED' &&
     statusUpper !== 'COMPLETED'
 
-  // Tabs should only be clickable when meaningful
   const canShowConsultTab =
     statusUpper !== 'CANCELLED' &&
     statusUpper !== 'COMPLETED' &&
@@ -323,7 +353,7 @@ export default async function ClientBookingPage(props: {
   if (step === 'consult' && !canShowConsultTab) redirect(`${baseHref}?step=overview`)
   if (step === 'aftercare' && !canShowAftercareTab) redirect(`${baseHref}?step=overview`)
 
-  // ✅ Only mark AFTERCARE notifications read when they are actually viewing aftercare
+  // ✅ Only mark AFTERCARE notifications read when viewing aftercare
   let showUnreadAftercareBadge = false
   if (step === 'aftercare' && aftercare?.id) {
     const unread = await prisma.clientNotification.findFirst({
@@ -350,13 +380,12 @@ export default async function ClientBookingPage(props: {
         } as any,
         data: { readAt: new Date() } as any,
       })
-      // After marking read, don’t keep showing NEW on the page they’re literally reading.
       showUnreadAftercareBadge = false
     }
   }
 
-  const consultNotes = (booking.consultationApproval as any)?.notes || (booking as any).consultationNotes || ''
-  const proposedTotalLabel = formatMoneyLoose((booking.consultationApproval as any)?.proposedTotal) || null
+  const consultNotes = String(consultationApproval?.notes || '')
+  const proposedTotalLabel = formatMoneyLoose(consultationApproval?.proposedTotal) || null
   const proposedFallback = basePriceLabel || null
 
   return (
@@ -371,29 +400,24 @@ export default async function ClientBookingPage(props: {
           ← Back to bookings
         </a>
 
-        <span
-          className={[
-            'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
-            pillClassByVariant(pillVariant),
-          ].join(' ')}
-        >
+        <span className={['inline-flex items-center rounded-full px-3 py-1 text-xs font-black', pillClassByVariant(pillVariant)].join(' ')}>
           {String(booking.status || 'UNKNOWN').toUpperCase()}
         </span>
       </div>
 
       <div className="mb-2 text-sm font-semibold text-textSecondary">
-        With {(booking.professional as any)?.businessName || (booking.professional as any)?.user?.email || 'your professional'}
+        With {booking.professional?.businessName || booking.professional?.user?.email || 'your professional'}
       </div>
 
       <div className="mb-3 text-sm text-textPrimary">
         <span className="font-black">{whenLabel}</span>
         <span className="text-textSecondary"> · {appointmentTz}</span>
-        {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
+        {locLine ? <span className="text-textSecondary"> · {locLine}</span> : null}
       </div>
 
-      {duration || basePriceLabel || modeLabel || sourceLabel ? (
+      {durationMinutes || basePriceLabel || modeLabel || sourceLabel ? (
         <div className="mb-5 flex flex-wrap gap-3 text-xs font-semibold text-textSecondary">
-          {duration ? <span className="font-black text-textPrimary">{duration} min</span> : null}
+          {durationMinutes ? <span className="font-black text-textPrimary">{durationMinutes} min</span> : null}
           {basePriceLabel ? <span className="font-black text-textPrimary">{basePriceLabel}</span> : null}
           {modeLabel ? (
             <span>
@@ -420,10 +444,7 @@ export default async function ClientBookingPage(props: {
             Consultation
           </a>
         ) : (
-          <span
-            className={tabDisabledClass()}
-            title="Consultation becomes available after your booking is confirmed and started by your pro."
-          >
+          <span className={tabDisabledClass()} title="Consultation becomes available after your booking is confirmed and started by your pro.">
             Consultation
           </span>
         )}
@@ -468,13 +489,12 @@ export default async function ClientBookingPage(props: {
           <div className="mt-3 grid gap-3">
             <div className="text-xs font-black text-textSecondary">Notes</div>
             <div className="whitespace-pre-wrap text-sm text-textPrimary">
-              {String(consultNotes || '').trim() ? String(consultNotes) : 'No consultation notes provided.'}
+              {consultNotes.trim() ? consultNotes : 'No consultation notes provided.'}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-xs font-semibold text-textSecondary">
-                <span className="font-black text-textPrimary">Proposed total:</span>{' '}
-                {proposedTotalLabel || proposedFallback || 'Not provided'}
+                <span className="font-black text-textPrimary">Proposed total:</span> {proposedTotalLabel || proposedFallback || 'Not provided'}
               </div>
 
               <div className="text-xs font-semibold text-textSecondary">
@@ -486,9 +506,9 @@ export default async function ClientBookingPage(props: {
               <ConsultationDecisionCard
                 bookingId={booking.id}
                 appointmentTz={appointmentTz}
-                notes={String(consultNotes || '')}
+                notes={consultNotes}
                 proposedTotalLabel={proposedTotalLabel || proposedFallback}
-                proposedServicesJson={(booking.consultationApproval as any)?.proposedServicesJson ?? null}
+                proposedServicesJson={consultationApproval?.proposedServicesJson ?? null}
               />
             ) : (
               <div className="text-xs font-semibold text-textSecondary">No consultation approval needed right now.</div>
@@ -525,7 +545,7 @@ export default async function ClientBookingPage(props: {
             bookingId={booking.id}
             status={booking.status as any}
             scheduledFor={scheduled ? scheduled.toISOString() : new Date().toISOString()}
-            durationMinutesSnapshot={duration}
+            durationMinutesSnapshot={durationMinutes ?? null}
           />
         </>
       ) : null}

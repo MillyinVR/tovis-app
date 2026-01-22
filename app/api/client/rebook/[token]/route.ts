@@ -1,60 +1,45 @@
 // app/api/client/rebook/[token]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient, pickString, upper, jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
 function isValidDate(d: Date) {
   return d instanceof Date && !Number.isNaN(d.getTime())
 }
 
-function jsonError(message: string, status = 400) {
-  return NextResponse.json({ error: message }, { status })
-}
-
 export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return jsonError('Unauthorized', 401)
-    }
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
 
     const { token: rawToken } = await Promise.resolve(ctx.params as any)
     const token = pickString(rawToken)
-    if (!token) return jsonError('Missing token.')
+    if (!token) return jsonFail(400, 'Missing token.')
 
     const aftercare = await prisma.aftercareSummary.findUnique({
       where: { publicToken: token },
-      select: {
-        id: true,
-        bookingId: true,
-        notes: true,
-        rebookMode: true,
-        rebookedFor: true,
-        rebookWindowStart: true,
-        rebookWindowEnd: true,
-        publicToken: true,
+      include: {
         booking: {
           select: {
             id: true,
             clientId: true,
             professionalId: true,
             serviceId: true,
+            offeringId: true,
             scheduledFor: true,
-            durationMinutesSnapshot: true,
-            priceSnapshot: true,
             status: true,
+
+            locationType: true,
+            locationId: true,
+
+            subtotalSnapshot: true,
+            totalDurationMinutes: true,
+
             service: { select: { id: true, name: true } },
             professional: {
               select: {
@@ -62,8 +47,6 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
                 businessName: true,
                 timeZone: true,
                 location: true,
-                city: true,
-                state: true,
               },
             },
           },
@@ -71,97 +54,97 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       },
     })
 
-    if (!aftercare) return jsonError('Invalid rebook link.', 404)
-    if (!aftercare.booking) return jsonError('Rebook link is missing booking context.', 409)
+    if (!aftercare) return jsonFail(404, 'Invalid rebook link.')
+    if (!aftercare.booking) return jsonFail(409, 'Rebook link is missing booking context.')
+    if (aftercare.booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    // Security: token must map to *this* client
-    if (aftercare.booking.clientId !== user.clientProfile.id) {
-      return jsonError('Forbidden', 403)
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        aftercare: {
-          id: aftercare.id,
-          bookingId: aftercare.bookingId,
-          notes: aftercare.notes,
-          rebookMode: aftercare.rebookMode,
-          rebookedFor: aftercare.rebookedFor ? aftercare.rebookedFor.toISOString() : null,
-          rebookWindowStart: aftercare.rebookWindowStart ? aftercare.rebookWindowStart.toISOString() : null,
-          rebookWindowEnd: aftercare.rebookWindowEnd ? aftercare.rebookWindowEnd.toISOString() : null,
-          publicToken: aftercare.publicToken,
-        },
-        booking: {
-          id: aftercare.booking.id,
-          status: aftercare.booking.status,
-          scheduledFor: aftercare.booking.scheduledFor.toISOString(),
-          durationMinutesSnapshot: aftercare.booking.durationMinutesSnapshot,
-          priceSnapshot: aftercare.booking.priceSnapshot,
-          service: aftercare.booking.service,
-          professional: aftercare.booking.professional,
-        },
+    return jsonOk({
+      ok: true,
+      aftercare: {
+        id: aftercare.id,
+        bookingId: aftercare.bookingId,
+        notes: aftercare.notes,
+        serviceNotes: aftercare.serviceNotes,
+        rebookMode: aftercare.rebookMode,
+        rebookedFor: aftercare.rebookedFor ? aftercare.rebookedFor.toISOString() : null,
+        rebookWindowStart: aftercare.rebookWindowStart ? aftercare.rebookWindowStart.toISOString() : null,
+        rebookWindowEnd: aftercare.rebookWindowEnd ? aftercare.rebookWindowEnd.toISOString() : null,
+        publicToken: aftercare.publicToken,
       },
-      { status: 200 },
-    )
+      booking: {
+        id: aftercare.booking.id,
+        status: aftercare.booking.status,
+        scheduledFor: aftercare.booking.scheduledFor.toISOString(),
+        totalDurationMinutes: aftercare.booking.totalDurationMinutes,
+        subtotalSnapshot: aftercare.booking.subtotalSnapshot,
+        service: aftercare.booking.service,
+        professional: aftercare.booking.professional,
+      },
+    })
   } catch (e) {
     console.error('GET /api/client/rebook/[token] error:', e)
-    return jsonError('Internal server error', 500)
+    return jsonFail(500, 'Internal server error')
   }
 }
 
-type PostBody = {
-  scheduledFor: string
-}
+type PostBody = { scheduledFor: string }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return jsonError('Unauthorized', 401)
-    }
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
 
     const { token: rawToken } = await Promise.resolve(ctx.params as any)
     const token = pickString(rawToken)
-    if (!token) return jsonError('Missing token.')
+    if (!token) return jsonFail(400, 'Missing token.')
 
     const body = (await req.json().catch(() => ({}))) as Partial<PostBody> & Record<string, unknown>
     const scheduledForRaw = pickString(body.scheduledFor)
-    if (!scheduledForRaw) return jsonError('Missing scheduledFor.')
+    if (!scheduledForRaw) return jsonFail(400, 'Missing scheduledFor.')
 
     const scheduledFor = new Date(scheduledForRaw)
-    if (!isValidDate(scheduledFor)) return jsonError('Invalid scheduledFor.')
-    if (scheduledFor.getTime() < Date.now()) return jsonError('Pick a future time.', 400)
-
-    const clientId = user.clientProfile.id
+    if (!isValidDate(scheduledFor)) return jsonFail(400, 'Invalid scheduledFor.')
+    if (scheduledFor.getTime() < Date.now()) return jsonFail(400, 'Pick a future time.')
 
     const aftercare = await prisma.aftercareSummary.findUnique({
       where: { publicToken: token },
-      select: {
-        id: true,
-        bookingId: true,
-        rebookMode: true,
-        rebookWindowStart: true,
-        rebookWindowEnd: true,
+      include: {
         booking: {
           select: {
             id: true,
             clientId: true,
             professionalId: true,
             serviceId: true,
-            durationMinutesSnapshot: true,
-            priceSnapshot: true,
-            status: true,
+            offeringId: true,
+
+            locationType: true,
+            locationId: true,
+            locationTimeZone: true,
+            locationAddressSnapshot: true,
+            locationLatSnapshot: true,
+            locationLngSnapshot: true,
+            clientTimeZoneAtBooking: true,
+
+            subtotalSnapshot: true,
+            totalAmount: true,
+            depositAmount: true,
+            tipAmount: true,
+            taxAmount: true,
+            discountAmount: true,
+
+            totalDurationMinutes: true,
+            bufferMinutes: true,
           },
         },
       },
     })
 
-    if (!aftercare) return jsonError('Invalid rebook link.', 404)
-    if (!aftercare.booking) return jsonError('Rebook link is missing booking context.', 409)
-    if (aftercare.booking.clientId !== clientId) return jsonError('Forbidden', 403)
+    if (!aftercare) return jsonFail(404, 'Invalid rebook link.')
+    if (!aftercare.booking) return jsonFail(409, 'Rebook link is missing booking context.')
+    if (aftercare.booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    // Optional guardrail: enforce recommended window if that mode is set
+    // enforce recommended window if enabled
     const mode = upper(aftercare.rebookMode)
     if (mode === 'RECOMMENDED_WINDOW') {
       const s = aftercare.rebookWindowStart
@@ -169,13 +152,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (s && e) {
         const t = scheduledFor.getTime()
         if (t < s.getTime() || t > e.getTime()) {
-          return jsonError('Selected time is outside the recommended rebook window.', 409)
+          return jsonFail(409, 'Selected time is outside the recommended rebook window.')
         }
       }
     }
 
-    // Create the new booking sourced from AFTERCARE
-    // Status should be PENDING so the pro can accept (keeps your workflow consistent).
     const created = await prisma.$transaction(async (tx) => {
       const b = aftercare.booking!
 
@@ -184,45 +165,54 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           clientId,
           professionalId: b.professionalId,
           serviceId: b.serviceId,
+          offeringId: b.offeringId ?? null,
+
           scheduledFor,
-          status: 'PENDING' as any,
-          source: 'AFTERCARE' as any,
+          status: 'PENDING',
+          source: 'AFTERCARE',
 
-          // carry forward snapshots when available (safe MVP behavior)
-          durationMinutesSnapshot: b.durationMinutesSnapshot ?? 60,
-          priceSnapshot: b.priceSnapshot ?? null,
+          locationType: b.locationType,
+          locationId: b.locationId,
 
-          // sessionStep should start at the beginning of the lifecycle
-          sessionStep: null as any,
-        } as any,
+          locationTimeZone: b.locationTimeZone ?? null,
+          locationAddressSnapshot: (b.locationAddressSnapshot ?? null) as any,
+          locationLatSnapshot: b.locationLatSnapshot ?? null,
+          locationLngSnapshot: b.locationLngSnapshot ?? null,
+
+          clientTimeZoneAtBooking: b.clientTimeZoneAtBooking ?? null,
+
+          subtotalSnapshot: b.subtotalSnapshot,
+          totalAmount: b.totalAmount ?? null,
+          depositAmount: b.depositAmount ?? null,
+          tipAmount: b.tipAmount ?? null,
+          taxAmount: b.taxAmount ?? null,
+          discountAmount: b.discountAmount ?? null,
+
+          totalDurationMinutes: b.totalDurationMinutes,
+          bufferMinutes: b.bufferMinutes ?? 0,
+
+          sessionStep: 'NONE',
+        },
         select: { id: true, status: true, scheduledFor: true },
       })
 
-      // Update aftercare to reflect that a rebook happened (helps UI + analytics)
       await tx.aftercareSummary.update({
         where: { id: aftercare.id },
         data: {
-          rebookMode: 'BOOKED_NEXT_APPOINTMENT' as any,
+          rebookMode: 'BOOKED_NEXT_APPOINTMENT',
           rebookedFor: scheduledFor,
-        } as any,
+        },
       })
 
       return newBooking
     })
 
     return NextResponse.json(
-      {
-        ok: true,
-        booking: {
-          id: created.id,
-          status: created.status,
-          scheduledFor: created.scheduledFor.toISOString(),
-        },
-      },
+      { ok: true, booking: { id: created.id, status: created.status, scheduledFor: created.scheduledFor.toISOString() } },
       { status: 201 },
     )
   } catch (e) {
     console.error('POST /api/client/rebook/[token] error:', e)
-    return jsonError('Internal server error', 500)
+    return jsonFail(500, 'Internal server error')
   }
 }

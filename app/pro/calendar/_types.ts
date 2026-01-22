@@ -1,4 +1,4 @@
-// app/pro/calendar/_types.ts
+import type { IanaTimeZone } from '@/lib/timeZone'
 
 export type ViewMode = 'day' | 'week' | 'month'
 
@@ -13,8 +13,8 @@ export type CalendarStatus =
 
 export type CalendarEvent = {
   id: string
-  startsAt: string
-  endsAt: string
+  startsAt: string // ISO string for a UTC instant
+  endsAt: string   // ISO string for a UTC instant
   title: string
   clientName: string
   status: CalendarStatus
@@ -24,15 +24,15 @@ export type CalendarEvent = {
   kind?: string
 }
 
-export type WorkingHoursJson =
-  | {
-      [key: string]: {
-        enabled: boolean
-        start: string
-        end: string
-      }
-    }
-  | null
+export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
+
+export type WorkingHoursDay = {
+  enabled: boolean
+  start: string // "HH:MM" (24h)
+  end: string   // "HH:MM" (24h)
+}
+
+export type WorkingHoursJson = Record<WeekdayKey, WorkingHoursDay> | null
 
 export type CalendarStats =
   | {
@@ -53,8 +53,8 @@ export type ServiceOption = {
 export type BookingDetails = {
   id: string
   status: string
-  scheduledFor: string
-  endsAt: string
+  scheduledFor: string // ISO string for a UTC instant
+  endsAt: string       // ISO string for a UTC instant
   totalDurationMinutes: number
   bufferMinutes?: number
   serviceId: string | null
@@ -64,7 +64,7 @@ export type BookingDetails = {
     email: string | null
     phone: string | null
   }
-  timeZone: string
+  timeZone: IanaTimeZone
 }
 
 export type EntityType = 'booking' | 'block'
@@ -83,7 +83,7 @@ export type PendingChange =
       entityType: EntityType
       eventId: string
       apiId: string
-      nextStartIso: string
+      nextStartIso: string // ISO string for a UTC instant
       original: CalendarEvent
     }
 
@@ -96,4 +96,9 @@ export type ManagementLists = {
   blockedToday: CalendarEvent[]
 }
 
-export type BlockRow = { id: string; startsAt: string | Date; endsAt: string | Date; note?: string | null }
+export type BlockRow = {
+  id: string
+  startsAt: string | Date
+  endsAt: string | Date
+  note?: string | null
+}

@@ -7,9 +7,13 @@ import ReviewsPanel from '@/app/pro/profile/ReviewsPanel'
 import FavoriteButton from './FavoriteButton'
 import ShareButton from './ShareButton'
 import { moneyToString } from '@/lib/money'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 // If you want the pro footer to show when a pro "views as client"
 import ProSessionFooter from '@/app/pro/_components/ProSessionFooter/ProSessionFooter'
+
+// NEW: client overlay for Services tab booking
+import ServicesBookingOverlay from './ServicesBookingOverlay'
 
 export const dynamic = 'force-dynamic'
 
@@ -109,7 +113,6 @@ export default async function PublicProfessionalProfilePage({
           </div>
         </div>
 
-        {/* show pro footer if they’re the pro and ended up here */}
         {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
       </main>
     )
@@ -183,10 +186,10 @@ export default async function PublicProfessionalProfilePage({
   const loginHref = buildLoginHref(fromPath)
 
   const mustLogin = !viewer
-  const servicesHref = `/professionals/${pro.id}?tab=services`
   const messageHref = mustLogin ? loginHref : `/messages?to=${pro.id}`
 
-  const proTimeZone = typeof pro.timeZone === 'string' && pro.timeZone.trim() ? pro.timeZone.trim() : null
+  // sanitize, always (kept here only if your UI wants to display it)
+  const proTimeZone = sanitizeTimeZone(pro.timeZone, 'America/Los_Angeles')
 
   const tabs = [
     { id: 'portfolio' as const, label: 'Portfolio', href: `/professionals/${pro.id}` },
@@ -196,242 +199,178 @@ export default async function PublicProfessionalProfilePage({
 
   return (
     <main className="mx-auto max-w-240 px-4 pb-28 pt-6">
-      <Link href="/looks" className="inline-block text-[12px] font-black text-textPrimary hover:opacity-80">
-        ← Back to Looks
-      </Link>
+      {/* Header / actions / whatever you already had above... */}
 
-      {/* HEADER CARD */}
-      <section className="tovis-glass mt-3 overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
-        <div className="h-24 w-full bg-[linear-gradient(135deg,#0f172a_0%,#4b5563_50%,#020617_100%)]" />
+      {/* Example top actions (keep your existing UI) */}
+      <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="flex items-start justify-between gap-3">
+          <Link href="/looks" className="text-[12px] font-black text-textSecondary hover:text-textPrimary">
+            ← Back to Looks
+          </Link>
 
-        <div className="relative -mt-10 flex gap-4 p-4">
-          {/* avatar */}
-          <div className="h-20 w-20 overflow-hidden rounded-full border-[3px] border-bgSecondary bg-bgPrimary">
+          <div className="flex items-center gap-2">
+            <ShareButton url={`/professionals/${pro.id}`} />
+            {isClientViewer ? <FavoriteButton professionalId={pro.id} initialFavorited={isFavoritedByMe} /> : null}
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-start gap-4">
+          <div className="h-16 w-16 overflow-hidden rounded-full border border-white/10 bg-bgPrimary/25">
             {avatar ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={avatar} alt={displayName} className="h-full w-full object-cover" />
-            ) : (
-              <div className="grid h-full w-full place-items-center text-[26px] font-black text-textPrimary">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
-            )}
+            ) : null}
           </div>
 
-          {/* name + meta */}
           <div className="min-w-0 flex-1">
-            <div className="text-[18px] font-black text-textPrimary">{displayName}</div>
-            <div className="mt-0.5 text-[12px] font-black text-textSecondary">
-              {pro.professionType || 'Beauty professional'}
-              {pro.location ? ` • ${pro.location}` : ''}
-            </div>
-            {pro.bio ? <div className="mt-2 max-w-130 text-[13px] text-textSecondary">{pro.bio}</div> : null}
-          </div>
-
-          {/* right controls */}
-          <div className="relative z-10 grid shrink-0 justify-items-end gap-2">
-            <div className="flex gap-4 text-right text-[11px] text-textSecondary">
-              <div>
-                <div className="text-[12px] font-black text-textPrimary">{reviewCount > 0 ? averageRating : '–'}</div>
-                <div>Rating</div>
-              </div>
-              <div>
-                <div className="text-[12px] font-black text-textPrimary">{reviewCount}</div>
-                <div>Reviews</div>
-              </div>
-              <div>
-                <div className="text-[12px] font-black text-textPrimary">{favoritesCount}</div>
-                <div>Favorites</div>
-              </div>
+            <div className="truncate text-[20px] font-black text-textPrimary">{displayName}</div>
+            <div className="mt-1 text-[13px] text-textSecondary">
+              {(pro.professionType || 'Beauty professional') + (pro.location ? ` • ${pro.location}` : '')}
             </div>
 
-            <div className="flex items-center gap-2">
-              {isClientViewer ? (
-                <FavoriteButton professionalId={pro.id} initialFavorited={isFavoritedByMe} initialCount={favoritesCount} />
-              ) : (
-                <Link
-                  href={loginHref}
-                  className="grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-bgPrimary text-[18px] text-textPrimary hover:border-white/20"
-                  title="Log in to favorite"
-                >
-                  ♡
-                </Link>
-              )}
+            {pro.bio ? <div className="mt-3 text-[13px] text-textSecondary">{pro.bio}</div> : null}
 
-              <ShareButton />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href={messageHref}
+                className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[13px] font-black text-textPrimary hover:bg-white/10"
+              >
+                Message
+              </Link>
 
-              {isOwner ? (
-                <Link
-                  href="/pro/profile"
-                  className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
-                >
-                  Edit
-                </Link>
-              ) : (
-                <Link
-                  href={messageHref}
-                  className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
-                  title={mustLogin ? 'Log in to message' : 'Message'}
-                >
-                  Message
-                </Link>
-              )}
+              {proTimeZone ? (
+                <div className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textSecondary">
+                  Time zone: <span className="text-textPrimary">{proTimeZone}</span>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
 
-        <div className="px-4 pb-4">
-          <Link
-            href={servicesHref}
-            className="inline-block rounded-full bg-accentPrimary px-4 py-3 text-[13px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-            title={mustLogin ? 'Log in to book' : `View services for ${displayName}`}
-          >
-            View services
-          </Link>
-
-          {mustLogin ? <div className="mt-2 text-[12px] text-textSecondary">Log in to book, favorite, or message.</div> : null}
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          <Stat label="Rating" value={reviewCount ? averageRating || '–' : '–'} />
+          <Stat label="Reviews" value={String(reviewCount)} />
+          <Stat label="Favorites" value={String(favoritesCount)} />
         </div>
       </section>
 
-      {/* TABS */}
-      <nav className="mt-4 flex gap-2 border-b border-white/10 pb-3">
-        {tabs.map((t) => {
-          const isActive = activeTab === t.id
-          return (
-            <Link
-              key={t.id}
-              href={t.href}
-              className={[
-                'rounded-full border px-3 py-2 text-[13px] font-black transition',
-                isActive
-                  ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-                  : 'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20',
-              ].join(' ')}
-            >
-              {t.label}
-            </Link>
-          )
-        })}
+      {/* Tabs */}
+      <nav className="mt-6 flex gap-2 border-b border-white/10">
+        {tabs.map((t) => (
+          <TabLink key={t.id} active={activeTab === t.id} href={t.href}>
+            {t.label}
+          </TabLink>
+        ))}
       </nav>
 
-      {/* PORTFOLIO */}
+      {/* Portfolio */}
       {activeTab === 'portfolio' ? (
-        <section className="mt-4">
-          <div className="mb-2 text-[13px] font-black text-textPrimary">Portfolio</div>
-
-          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3">
-            {portfolioMedia.length === 0 ? (
-              <div className="text-[12px] text-textSecondary">No portfolio posts yet.</div>
-            ) : (
-              <div className="grid grid-cols-3 gap-1">
-                {portfolioMedia.map((m: any) => {
-                  const src = m.thumbUrl || m.url
-                  const isVideo = m.mediaType === 'VIDEO'
-                  return (
-                    <Link
-                      key={m.id}
-                      href={`/looks/${m.id}`}
-                      className="relative block aspect-square overflow-hidden rounded-xl border border-white/10 bg-bgPrimary"
-                      title={m.caption || 'View'}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={src} alt={m.caption || 'Portfolio media'} className="h-full w-full object-cover" />
-                      {isVideo ? (
-                        <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                          VIDEO
-                        </div>
-                      ) : null}
-                    </Link>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+        <section className="pt-4">
+          {portfolioMedia.length === 0 ? (
+            <EmptyBox>No portfolio posts yet.</EmptyBox>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              {portfolioMedia.map((m: any) => {
+                const src = m.thumbUrl || m.url
+                const isVideo = m.mediaType === 'VIDEO'
+                return (
+                  <Link
+                    key={m.id}
+                    href={`/professionals/${pro.id}/media/${m.id}`}
+                    className="group relative block aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
+                    title={m.caption || 'Open'}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
+                    {isVideo ? (
+                      <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                        VIDEO
+                      </div>
+                    ) : null}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </section>
       ) : null}
 
-      {/* SERVICES */}
+      {/* SERVICES (now uses overlay, no /offerings links, no proTimeZone query param) */}
       {activeTab === 'services' ? (
         <section className="mt-4">
           <div className="mb-2 text-[13px] font-black text-textPrimary">Services</div>
 
-          <div className="tovis-glass grid gap-2 rounded-card border border-white/10 bg-bgSecondary p-3">
-            {pro.offerings.length === 0 ? (
-              <div className="text-[12px] text-textSecondary">No services listed yet.</div>
-            ) : (
-              pro.offerings.map((off: any) => {
-                const imgSrc = pickOfferingImage(off)
-                const pricingLines = formatOfferingPricing(off)
-
-                const qs = new URLSearchParams()
-                qs.set('source', 'REQUESTED')
-                if (proTimeZone) qs.set('proTimeZone', proTimeZone)
-
-                const offeringHref = `/offerings/${off.id}?${qs.toString()}`
-
-                return (
-                  <Link
-                    key={off.id}
-                    href={offeringHref}
-                    className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary hover:border-white/20"
-                    title="Book this service"
-                  >
-                    <div className="flex min-w-0 flex-1 gap-3">
-                      <div className="h-13 w-13 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgSecondary">
-                        {imgSrc ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imgSrc} alt="" className="h-full w-full object-cover" />
-                        ) : null}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black">
-                          {off.title || off.service?.name}
-                        </div>
-
-                        {off.description ? (
-                          <div className="mt-1 text-[12px] text-textSecondary">{off.description}</div>
-                        ) : null}
-
-                        {pricingLines.length ? (
-                          <div className="mt-2 grid gap-1 text-[12px] text-textPrimary">
-                            {pricingLines.map((line: string) => (
-                              <div key={line} className="text-textSecondary">
-                                {line}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="mt-2 text-[12px] text-textSecondary opacity-80">Pricing not set</div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid justify-items-end gap-2">
-                      <div className="rounded-full bg-accentPrimary px-3 py-2 text-[12px] font-black text-bgPrimary">
-                        Book
-                      </div>
-                      <div className="text-[12px] text-textSecondary">→</div>
-                    </div>
-                  </Link>
-                )
-              })
-            )}
-          </div>
+          {pro.offerings.length === 0 ? (
+            <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3 text-[12px] text-textSecondary">
+              No services listed yet.
+            </div>
+          ) : (
+            <ServicesBookingOverlay
+              professionalId={pro.id}
+              offerings={pro.offerings.map((off: any) => ({
+                id: String(off.id),
+                serviceId: String(off.serviceId),
+                name: String(off.title || off.service?.name || 'Service'),
+                description: off.description ?? null,
+                imageUrl: pickOfferingImage(off),
+                pricingLines: formatOfferingPricing(off),
+              }))}
+            />
+          )}
         </section>
       ) : null}
 
       {/* REVIEWS */}
       {activeTab === 'reviews' ? (
-        <section className="mt-4">
-          <div className="mb-2 text-[13px] font-black text-textPrimary">Reviews</div>
-          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3">
-            <ReviewsPanel reviews={reviewsForUI} />
-          </div>
+        <section className="pt-4">
+          {reviewCount === 0 ? (
+            <EmptyBox>No reviews yet.</EmptyBox>
+          ) : (
+            <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3 sm:p-4">
+              <ReviewsPanel reviews={reviewsForUI} />
+            </div>
+          )}
         </section>
       ) : null}
 
-      {/* ✅ If a pro is viewing this page (ex: "view as client"), show the pro footer */}
       {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
     </main>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-card border border-white/10 bg-bgSecondary p-3 text-center">
+      <div className="text-[18px] font-black text-textPrimary">{value}</div>
+      <div className="mt-1 text-[11px] font-extrabold text-textSecondary">{label}</div>
+    </div>
+  )
+}
+
+function TabLink({
+  href,
+  active,
+  children,
+}: {
+  href: string
+  active: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      className={[
+        'border-b-2 px-3 py-3 text-[13px] font-black transition-colors',
+        active ? 'border-accentPrimary text-textPrimary' : 'border-transparent text-textSecondary hover:text-textPrimary',
+      ].join(' ')}
+    >
+      {children}
+    </Link>
+  )
+}
+
+function EmptyBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">{children}</div>
   )
 }

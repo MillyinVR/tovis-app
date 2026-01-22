@@ -1,3 +1,5 @@
+// app/api/debug/me/route.ts
+
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/currentUser'
 

@@ -13,15 +13,21 @@ module.exports = {
         textPrimary: 'rgb(var(--text-primary) / <alpha-value>)',
         textSecondary: 'rgb(var(--text-secondary) / <alpha-value>)',
         surfaceGlass: 'rgb(var(--surface-glass) / <alpha-value>)',
+
         accentPrimary: 'rgb(var(--accent-primary) / <alpha-value>)',
+        accentPrimaryHover: 'rgb(var(--accent-primary-hover) / <alpha-value>)',
         microAccent: 'rgb(var(--micro-accent) / <alpha-value>)',
+
+        toneDanger: 'rgb(var(--tone-danger) / <alpha-value>)',
+        toneWarn: 'rgb(var(--tone-warn) / <alpha-value>)',
+        toneSuccess: 'rgb(var(--tone-success) / <alpha-value>)',
+        toneInfo: 'rgb(var(--tone-info) / <alpha-value>)',
+
+        overlay: 'rgb(var(--overlay) / <alpha-value>)',
       },
       borderRadius: {
         appIcon: 'var(--radius-app-icon)',
-        appCard: 'var(--radius-app-card)',
-      },
-      boxShadow: {
-        appCard: 'var(--shadow-card)',
+        card: 'var(--radius-card)',
       },
       backdropBlur: {
         app: 'var(--glass-blur)',

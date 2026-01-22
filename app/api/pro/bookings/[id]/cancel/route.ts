@@ -1,9 +1,8 @@
 // app/api/pro/bookings/[id]/cancel/route.ts
-
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import { getProOwnedBooking, ensureNotTerminal, upper } from '@/lib/booking/guards'
+import { requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,11 +25,21 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart
 }
 
+/**
+ * Duration truth:
+ * - Use totalDurationMinutes (canonical)
+ * - Fallback to 60 if missing (safe)
+ */
+function durationOrDefault(totalDurationMinutes: unknown) {
+  const n = Number(totalDurationMinutes ?? 0)
+  return Number.isFinite(n) && n > 0 ? n : 60
+}
+
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!proId) return jsonError('Not authorized', 401)
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proId = auth.professionalId
 
     const { id } = await Promise.resolve(ctx.params)
     const bookingId = asTrimmedString(id)
@@ -50,16 +59,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
         status: true,
         finishedAt: true,
 
-        // for slot math + notifications
+        // slot math + notifications
         scheduledFor: true,
         totalDurationMinutes: true,
-        durationMinutesSnapshot: true, // legacy fallback
         bufferMinutes: true,
         clientId: true,
       },
     } as any)
-    if (!found.ok) return jsonError(found.error, found.status)
 
+    if (!found.ok) return jsonError(found.error, found.status)
     const booking = found.booking as any
 
     const nt = ensureNotTerminal(booking)
@@ -89,7 +97,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         await tx.clientNotification.create({
           data: {
             clientId: booking.clientId,
-            type: 'BOOKING' as any, // keep flexible; your schema may use an enum
+            type: 'BOOKING' as any,
             title: 'Appointment cancelled',
             body: `Your appointment was cancelled by the professional. ${reason ? `Reason: ${reason}` : ''}`.trim(),
             bookingId: booking.id,
@@ -100,28 +108,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
         console.error('Client notification failed (cancel):', e)
       }
 
-      // If it was ACCEPTED, optionally free the slot for waitlist
+      // If requested, promote a WAITLIST booking that overlaps the cancelled slot
       let promoted: { id: string; status: string } | null = null
 
       if (promoteWaitlist && (status === 'ACCEPTED' || status === 'PENDING')) {
         const start = new Date(booking.scheduledFor)
-
-        const dur =
-          Number(booking.totalDurationMinutes ?? 0) > 0
-            ? Number(booking.totalDurationMinutes)
-            : Number(booking.durationMinutesSnapshot ?? 0)
-
-        const buffer = Number(booking.bufferMinutes ?? 0)
+        const dur = durationOrDefault(booking.totalDurationMinutes)
+        const buffer = Math.max(0, Number(booking.bufferMinutes ?? 0))
         const end = addMinutes(start, dur + buffer)
 
-        // auto-accept setting (if you want it to jump straight to ACCEPTED)
+        // auto-accept setting
         const pro = await tx.professionalProfile.findUnique({
           where: { id: proId },
           select: { autoAcceptBookings: true },
         })
 
-        // Candidate waitlist bookings around that window
-        // We keep the query broad-ish and filter overlaps in JS to avoid schema surprises.
         const candidates = await tx.booking.findMany({
           where: {
             professionalId: proId,
@@ -130,6 +131,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
               gte: addMinutes(start, -(dur + buffer) * 2),
               lte: addMinutes(start, (dur + buffer) * 2),
             },
+            NOT: { status: 'CANCELLED' as any },
           },
           select: {
             id: true,
@@ -137,7 +139,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
             status: true,
             scheduledFor: true,
             totalDurationMinutes: true,
-            durationMinutesSnapshot: true,
             bufferMinutes: true,
           },
           orderBy: { scheduledFor: 'asc' },
@@ -146,11 +147,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
         const match = candidates.find((w: any) => {
           const wStart = new Date(w.scheduledFor)
-          const wDur =
-            Number(w.totalDurationMinutes ?? 0) > 0
-              ? Number(w.totalDurationMinutes)
-              : Number(w.durationMinutesSnapshot ?? 0)
-          const wBuf = Number(w.bufferMinutes ?? 0)
+          const wDur = durationOrDefault(w.totalDurationMinutes)
+          const wBuf = Math.max(0, Number(w.bufferMinutes ?? 0))
           const wEnd = addMinutes(wStart, wDur + wBuf)
           return overlaps(wStart, wEnd, start, end)
         })
@@ -166,7 +164,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
           promoted = promotedBooking
 
-          // Notify the waitlisted client
+          // Notify the promoted client
           try {
             await tx.clientNotification.create({
               data: {
@@ -191,11 +189,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     })
 
     return NextResponse.json(
-      {
-        ok: true,
-        booking: result.updated,
-        promotedWaitlist: result.promoted, // null if none matched
-      },
+      { ok: true, booking: result.updated, promotedWaitlist: result.promoted },
       { status: 200 },
     )
   } catch (e) {

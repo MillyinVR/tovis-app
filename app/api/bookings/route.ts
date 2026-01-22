@@ -1,12 +1,12 @@
 // app/api/bookings/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
-import type { ServiceLocationType } from '@prisma/client'
+import type { BookingSource, ServiceLocationType } from '@prisma/client'
+import { sanitizeTimeZone, getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { pickString } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
-
-type BookingSourceNormalized = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 
 type CreateBookingBody = {
   offeringId?: unknown
@@ -18,36 +18,34 @@ type CreateBookingBody = {
   openingId?: unknown
   aftercareToken?: unknown
   rebookOfBookingId?: unknown
-
-  scheduledFor?: unknown // ignored; hold is truth
 }
 
 type ExistingBookingForConflict = {
   id: string
   scheduledFor: Date
-  totalDurationMinutes: number | null
-  durationMinutesSnapshot: number | null
-  bufferMinutes: number | null
+  totalDurationMinutes: number
+  bufferMinutes: number
+  status: string
 }
 
 type HoldRow = {
   id: string
   offeringId: string
   professionalId: string
-  clientId: string
+  clientId: string | null
   scheduledFor: Date
   expiresAt: Date
   locationType: ServiceLocationType
-  locationId: string | null
+
+  locationId: string
   locationTimeZone: string | null
   locationAddressSnapshot: any | null
   locationLatSnapshot: number | null
   locationLngSnapshot: number | null
 }
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
+type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
+type WorkingHours = Record<string, WorkingHoursDay>
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
@@ -63,12 +61,23 @@ function normalizeToMinute(d: Date) {
   return x
 }
 
-function normalizeSourceStrict(v: unknown): BookingSourceNormalized | null {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+/**
+ * Prisma BookingSource enum does NOT include "PROFILE".
+ * Accept it anyway from UI and store as REQUESTED.
+ */
+function normalizeSourceLoose(args: { sourceRaw: unknown; mediaId: string | null; aftercareToken: string | null }): BookingSource {
+  const s = typeof args.sourceRaw === 'string' ? args.sourceRaw.trim().toUpperCase() : ''
+
   if (s === 'AFTERCARE') return 'AFTERCARE'
   if (s === 'DISCOVERY') return 'DISCOVERY'
   if (s === 'REQUESTED') return 'REQUESTED'
-  return null
+
+  if (s === 'PROFILE') return 'REQUESTED'
+  if (s === 'UNKNOWN') return 'REQUESTED'
+
+  if (args.aftercareToken) return 'AFTERCARE'
+  if (args.mediaId) return 'DISCOVERY'
+  return 'REQUESTED'
 }
 
 function normalizeLocationTypeStrict(v: unknown): ServiceLocationType | null {
@@ -78,53 +87,21 @@ function normalizeLocationTypeStrict(v: unknown): ServiceLocationType | null {
   return null
 }
 
-/** Working-hours enforcement (LOCATION truth) */
-type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
-type WorkingHours = Record<string, WorkingHoursDay>
-
-function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
-  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
+function parseHHMM(v?: string) {
+  if (!v || typeof v !== 'string') return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return { hh, mm }
 }
 
-function getZonedParts(dateUtc: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    hourCycle: 'h23',
-  } as any)
-
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-
-  let year = Number(map.year)
-  let month = Number(map.month)
-  let day = Number(map.day)
-  let hour = Number(map.hour)
-  const minute = Number(map.minute)
-  const second = Number(map.second)
-
-  // Safari-ish edge case
-  if (hour === 24) {
-    hour = 0
-    const next = addDaysToYMD(year, month, day, 1)
-    year = next.year
-    month = next.month
-    day = next.day
-  }
-
-  return { year, month, day, hour, minute, second }
-}
-
-function getWeekdayKeyInTimeZone(dateUtc: Date, timeZone: string): keyof WorkingHours {
+function weekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof WorkingHours {
+  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(dateUtc).toLowerCase()
+
   if (weekday.startsWith('mon')) return 'mon'
   if (weekday.startsWith('tue')) return 'tue'
   if (weekday.startsWith('wed')) return 'wed'
@@ -134,22 +111,9 @@ function getWeekdayKeyInTimeZone(dateUtc: Date, timeZone: string): keyof Working
   return 'sun'
 }
 
-function parseHHMM(v?: string) {
-  if (!v || typeof v !== 'string') return null
-  const m = /^(\d{2}):(\d{2})$/.exec(v.trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return { hh, mm }
-}
-
-function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) {
-  const z = getZonedParts(dateUtc, timeZone)
-  return z.hour * 60 + z.minute
-}
-
+/**
+ * Enforce working-hours against LOCATION timezone and LOCATION workingHours JSON.
+ */
 function ensureWithinWorkingHours(args: {
   scheduledStartUtc: Date
   scheduledEndUtc: Date
@@ -157,13 +121,14 @@ function ensureWithinWorkingHours(args: {
   timeZone: string
 }): { ok: true } | { ok: false; error: string } {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
+  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
 
   if (!workingHours || typeof workingHours !== 'object') {
     return { ok: false, error: 'This professional has not set working hours yet.' }
   }
 
   const wh = workingHours as WorkingHours
-  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, timeZone)
+  const dayKey = weekdayKeyInTimeZone(scheduledStartUtc, tz)
   const rule = wh?.[dayKey]
 
   if (!rule || rule.enabled === false) {
@@ -178,13 +143,18 @@ function ensureWithinWorkingHours(args: {
 
   const windowStartMin = startHHMM.hh * 60 + startHHMM.mm
   const windowEndMin = endHHMM.hh * 60 + endHHMM.mm
-  if (windowEndMin <= windowStartMin) return { ok: false, error: 'This professional’s working hours are misconfigured.' }
+  if (windowEndMin <= windowStartMin) {
+    return { ok: false, error: 'This professional’s working hours are misconfigured.' }
+  }
 
-  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
-  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
+  // Must start & end on the same local day in tz
+  const sParts = getZonedParts(scheduledStartUtc, tz)
+  const eParts = getZonedParts(scheduledEndUtc, tz)
+  const sameLocalDay = sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+  if (!sameLocalDay) return { ok: false, error: 'That time is outside this professional’s working hours.' }
 
-  const endDayKey = getWeekdayKeyInTimeZone(scheduledEndUtc, timeZone)
-  if (endDayKey !== dayKey) return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
 
   if (startMin < windowStartMin || endMin > windowEndMin) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
@@ -199,18 +169,16 @@ function normalizeErr(e: any): string {
 
 function fail(status: number, code: string, error: string, details?: any) {
   const dev = process.env.NODE_ENV !== 'production'
-  return NextResponse.json(
-    dev && details != null ? { ok: false, code, error, details } : { ok: false, code, error },
-    { status },
-  )
+  return NextResponse.json(dev && details != null ? { ok: false, code, error, details } : { ok: false, code, error }, {
+    status,
+  })
 }
 
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return fail(401, 'NOT_AUTHORIZED', 'Only clients can create bookings.')
-    }
+    const { user, res } = await requireUser({ roles: ['CLIENT'] })
+    if (res) return res
+    if (!user?.clientProfile?.id) return fail(401, 'NOT_AUTHORIZED', 'Only clients can create bookings.')
 
     const clientId = user.clientProfile.id
     const body = (await request.json().catch(() => ({}))) as CreateBookingBody
@@ -218,8 +186,16 @@ export async function POST(request: Request) {
     const offeringId = pickString(body.offeringId)
     const holdId = pickString(body.holdId)
 
-    const source = normalizeSourceStrict(body.source)
-    if (!source) return fail(400, 'MISSING_SOURCE', 'Missing booking source.')
+    const mediaId = pickString(body.mediaId)
+    const openingId = pickString(body.openingId)
+    const aftercareToken = pickString(body.aftercareToken)
+    const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
+
+    const source: BookingSource = normalizeSourceLoose({
+      sourceRaw: body.source,
+      mediaId,
+      aftercareToken,
+    })
 
     const locationType = normalizeLocationTypeStrict(body.locationType)
     if (!locationType) return fail(400, 'MISSING_LOCATION_TYPE', 'Missing locationType.')
@@ -227,10 +203,9 @@ export async function POST(request: Request) {
     if (!offeringId) return fail(400, 'MISSING_OFFERING', 'Missing offeringId.')
     if (!holdId) return fail(409, 'HOLD_MISSING', 'Missing hold. Please pick a slot again.')
 
-    const mediaId = pickString(body.mediaId)
-    const openingId = pickString(body.openingId)
-    const aftercareToken = pickString(body.aftercareToken)
-    const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
+    if (source === 'DISCOVERY' && !mediaId) {
+      return fail(400, 'MISSING_MEDIA_ID', 'Discovery bookings require a mediaId.')
+    }
 
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
@@ -280,7 +255,7 @@ export async function POST(request: Request) {
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
-    // Aftercare validation (only if AFTERCARE)
+    // Aftercare validation
     let rebookOfBookingIdForCreate: string | null = null
     if (source === 'AFTERCARE') {
       if (!aftercareToken) return fail(400, 'AFTERCARE_TOKEN_MISSING', 'Missing aftercare token.')
@@ -305,8 +280,10 @@ export async function POST(request: Request) {
 
       const original = aftercare.booking
 
-      if (original.status !== 'COMPLETED') return fail(409, 'AFTERCARE_NOT_COMPLETED', 'Only COMPLETED bookings can be rebooked.')
-      if (original.clientId !== clientId) return fail(403, 'AFTERCARE_CLIENT_MISMATCH', 'Aftercare link does not match this client.')
+      if (original.status !== 'COMPLETED')
+        return fail(409, 'AFTERCARE_NOT_COMPLETED', 'Only COMPLETED bookings can be rebooked.')
+      if (original.clientId !== clientId)
+        return fail(403, 'AFTERCARE_CLIENT_MISMATCH', 'Aftercare link does not match this client.')
 
       const matchesOffering =
         (original.offeringId && original.offeringId === offering.id) ||
@@ -362,12 +339,17 @@ export async function POST(request: Request) {
       })
       if (!loc) throw new Error('LOCATION_NOT_FOUND')
 
-      const apptTz = loc.timeZone || hold.locationTimeZone || 'America/Los_Angeles'
+      // ✅ Location timezone is truth; fallback hold tz; fallback LA
+      const apptTz =
+        sanitizeTimeZone(loc.timeZone || hold.locationTimeZone || 'America/Los_Angeles', 'America/Los_Angeles') ||
+        'America/Los_Angeles'
+
       const bufferMinutes = Math.max(0, Math.min(120, Number(loc.bufferMinutes ?? 0) || 0))
 
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
       const requestedEnd = addMinutes(requestedStart, durationMinutes)
 
+      // small safety: prevent booking in the past
       if (requestedStart.getTime() < addMinutes(new Date(), 5).getTime()) {
         throw new Error('TIME_IN_PAST')
       }
@@ -380,6 +362,7 @@ export async function POST(request: Request) {
       })
       if (!whCheck.ok) throw new Error(`WH:${whCheck.error}`)
 
+      // Conflict check in a sane window
       const windowStart = addMinutes(requestedStart, -24 * 60)
       const windowEnd = addMinutes(requestedStart, 24 * 60)
 
@@ -393,17 +376,16 @@ export async function POST(request: Request) {
           id: true,
           scheduledFor: true,
           totalDurationMinutes: true,
-          durationMinutesSnapshot: true,
           bufferMinutes: true,
+          status: true,
         },
         take: 2000,
       })) as ExistingBookingForConflict[]
 
       const hasConflict = existing.some((b) => {
-        const bDur =
-          Number(b.totalDurationMinutes ?? 0) > 0 ? Number(b.totalDurationMinutes) : Number(b.durationMinutesSnapshot ?? 0)
+        if (String(b.status ?? '').toUpperCase() === 'CANCELLED') return false
+        const bDur = Number(b.totalDurationMinutes ?? 0)
         const bBuf = Number(b.bufferMinutes ?? 0)
-
         if (!Number.isFinite(bDur) || bDur <= 0) return false
 
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
@@ -439,7 +421,6 @@ export async function POST(request: Request) {
         data: {
           clientId,
           professionalId: offering.professionalId,
-
           serviceId: offering.serviceId,
           offeringId: offering.id,
 
@@ -450,12 +431,8 @@ export async function POST(request: Request) {
           locationType,
           rebookOfBookingId: rebookOfBookingIdForCreate,
 
-          priceSnapshot: priceStartingAt,
-          durationMinutesSnapshot: durationMinutes,
-
           subtotalSnapshot: priceStartingAt,
           totalDurationMinutes: durationMinutes,
-
           bufferMinutes,
 
           locationId: loc.id,
@@ -477,7 +454,7 @@ export async function POST(request: Request) {
               },
             ],
           },
-        } as any,
+        },
         select: {
           id: true,
           status: true,
@@ -489,6 +466,7 @@ export async function POST(request: Request) {
           locationType: true,
           subtotalSnapshot: true,
           totalDurationMinutes: true,
+          locationId: true,
         },
       })
 
@@ -500,7 +478,6 @@ export async function POST(request: Request) {
       }
 
       await tx.bookingHold.delete({ where: { id: hold.id } })
-
       void mediaId
       return created
     })
@@ -509,15 +486,20 @@ export async function POST(request: Request) {
   } catch (e: any) {
     const msg = normalizeErr(e)
 
-    if (msg === 'OPENING_NOT_AVAILABLE') return fail(409, 'OPENING_NOT_AVAILABLE', 'That opening was just taken. Please pick another slot.')
-    if (msg === 'TIME_NOT_AVAILABLE') return fail(409, 'TIME_NOT_AVAILABLE', 'That time is no longer available. Please select a different slot.')
+    if (msg === 'OPENING_NOT_AVAILABLE')
+      return fail(409, 'OPENING_NOT_AVAILABLE', 'That opening was just taken. Please pick another slot.')
+    if (msg === 'TIME_NOT_AVAILABLE')
+      return fail(409, 'TIME_NOT_AVAILABLE', 'That time is no longer available. Please select a different slot.')
     if (msg === 'HOLD_NOT_FOUND') return fail(409, 'HOLD_NOT_FOUND', 'Hold not found. Please pick a slot again.')
     if (msg === 'HOLD_EXPIRED') return fail(409, 'HOLD_EXPIRED', 'Hold expired. Please pick a slot again.')
     if (msg === 'HOLD_MISMATCH') return fail(409, 'HOLD_MISMATCH', 'Hold mismatch. Please pick a slot again.')
-    if (msg === 'HOLD_MISSING_LOCATION') return fail(409, 'HOLD_MISSING_LOCATION', 'Hold is missing location info. Please pick a slot again.')
-    if (msg === 'LOCATION_NOT_FOUND') return fail(409, 'LOCATION_NOT_FOUND', 'This location is no longer available. Please pick another slot.')
+    if (msg === 'HOLD_MISSING_LOCATION')
+      return fail(409, 'HOLD_MISSING_LOCATION', 'Hold is missing location info. Please pick a slot again.')
+    if (msg === 'LOCATION_NOT_FOUND')
+      return fail(409, 'LOCATION_NOT_FOUND', 'This location is no longer available. Please pick another slot.')
     if (msg === 'TIME_IN_PAST') return fail(400, 'TIME_IN_PAST', 'Please select a future time.')
-    if (msg.startsWith('WH:')) return fail(400, 'OUTSIDE_WORKING_HOURS', msg.slice(3) || 'That time is outside working hours.')
+    if (msg.startsWith('WH:'))
+      return fail(400, 'OUTSIDE_WORKING_HOURS', msg.slice(3) || 'That time is outside working hours.')
 
     console.error('POST /api/bookings error:', e)
     return fail(500, 'INTERNAL', 'Internal server error')

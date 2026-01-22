@@ -1,3 +1,4 @@
+// app/(main)/looks/_components/LooksTopBar.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -14,10 +15,7 @@ export default function LooksTopBar(props: {
   const [searchOpen, setSearchOpen] = useState(false)
 
   const tabs = useMemo(() => {
-    // Dynamic/admin-friendly:
-    // - remove empty strings
-    // - remove "For You"
-    // - ensure "The Looks" exists and is first
+
     const cleaned = (categories || [])
       .map((c) => (typeof c === 'string' ? c.trim() : ''))
       .filter(Boolean)

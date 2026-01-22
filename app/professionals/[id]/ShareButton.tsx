@@ -1,12 +1,33 @@
 // app/professionals/[id]/ShareButton.tsx
-
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 type SharePayload = { url?: string; title?: string; text?: string }
 
-export default function ShareButton() {
+export default function ShareButton({
+  url,
+  title = 'TOVIS',
+  text,
+  className = '',
+  variant = 'pill',
+}: {
+  /**
+   * Can be:
+   * - full URL: "https://tovis.com/professionals/abc"
+   * - relative: "/professionals/abc"  (we will resolve against window.location.origin)
+   * - omitted: uses window.location.href
+   */
+  url?: string
+  title?: string
+  text?: string
+  className?: string
+  /**
+   * "pill" = matches your other CTA buttons
+   * "icon" = compact, if you want it in a tight header
+   */
+  variant?: 'pill' | 'icon'
+}) {
   const [status, setStatus] = useState<string | null>(null)
   const timerRef = useRef<number | null>(null)
 
@@ -16,14 +37,30 @@ export default function ShareButton() {
     }
   }, [])
 
-  function flash(msg: string) {
+  const shareUrl = useMemo(() => {
+    if (typeof window === 'undefined') return ''
+
+    const raw = (url || '').trim()
+    if (!raw) return window.location.href
+
+    // If it's already absolute, keep it
+    if (/^https?:\/\//i.test(raw)) return raw
+
+    // If it's a relative path, resolve it
+    if (raw.startsWith('/')) return `${window.location.origin}${raw}`
+
+    // Otherwise, treat as a path-ish thing and still resolve
+    return `${window.location.origin}/${raw}`
+  }, [url])
+
+  const flash = useCallback((msg: string) => {
     setStatus(msg)
     if (timerRef.current) window.clearTimeout(timerRef.current)
-    timerRef.current = window.setTimeout(() => setStatus(null), 2000)
-  }
+    timerRef.current = window.setTimeout(() => setStatus(null), 1600)
+  }, [])
 
-  async function onShare() {
-    const url = window.location.href
+  const onShare = useCallback(async () => {
+    if (!shareUrl) return
 
     try {
       const nav = window.navigator as Navigator & {
@@ -31,56 +68,51 @@ export default function ShareButton() {
         clipboard?: { writeText: (text: string) => Promise<void> }
       }
 
-      // Best UX (mobile etc.)
+      // Best UX (mostly mobile)
       if (typeof nav.share === 'function') {
-        await nav.share({ url })
+        await nav.share({ url: shareUrl, title, text })
         flash('Shared')
         return
       }
 
-      // Clipboard fallback
+      // Clipboard fallback (desktop)
       if (nav.clipboard?.writeText) {
-        await nav.clipboard.writeText(url)
+        await nav.clipboard.writeText(shareUrl)
         flash('Copied')
         return
       }
 
       // Last resort
-      window.prompt('Copy this link:', url)
+      window.prompt('Copy this link:', shareUrl)
       flash('Link ready')
     } catch {
-      flash('Could not share.')
+      flash('Could not share')
     }
-  }
+  }, [flash, shareUrl, text, title])
+
+  const base =
+    variant === 'icon'
+      ? [
+          'inline-flex h-10 w-10 items-center justify-center rounded-full border transition',
+          'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20 hover:bg-white/10',
+        ].join(' ')
+      : [
+          'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[12px] font-black transition',
+          'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20 hover:bg-white/10',
+        ].join(' ')
 
   return (
-    <div style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
-      <button
-        type="button"
-        title="Share"
-        onClick={onShare}
-        style={{
-          width: 44,
-          height: 36,
-          borderRadius: 999,
-          border: '1px solid #e5e7eb',
-          background: '#fff',
-          cursor: 'pointer',
-          fontSize: 16,
-          lineHeight: 1,
-        }}
-      >
-        ↗
+    <div className="grid justify-items-center gap-1">
+      <button type="button" title="Share" onClick={onShare} className={[base, className].join(' ')}>
+        <span aria-hidden="true">↗</span>
+        {variant === 'pill' ? <span>Share</span> : null}
       </button>
 
-      {status && (
-        <div
-          aria-live="polite"
-          style={{ fontSize: 11, color: '#6b7280', textAlign: 'center' }}
-        >
+      {status ? (
+        <div aria-live="polite" className="text-[11px] font-semibold text-textSecondary">
           {status}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

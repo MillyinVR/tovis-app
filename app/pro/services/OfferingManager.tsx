@@ -38,13 +38,14 @@ type Props = {
 }
 
 async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+  return (await res.json().catch(() => ({}))) as any
 }
 
 function pickString(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
 
+// ---------- money helpers ----------
 function isValidMoneyString(v: string) {
   return /^\d+(\.\d{1,2})?$/.test(v.trim())
 }
@@ -95,25 +96,38 @@ export default function OfferingManager({
     setSuccessById((m) => ({ ...m, [id]: null }))
   }
 
+  function setError(id: string, msg: string) {
+    setErrorById((m) => ({ ...m, [id]: msg }))
+    setSuccessById((m) => ({ ...m, [id]: null }))
+  }
+
+  function setSuccess(id: string, msg: string) {
+    setSuccessById((m) => ({ ...m, [id]: msg }))
+    setErrorById((m) => ({ ...m, [id]: null }))
+  }
+
   async function saveOffering(offeringId: string, patch: any) {
     setBusyId(offeringId)
     clearMessages(offeringId)
+
     try {
-      const res = await fetch(`/api/pro/offerings/${offeringId}`, {
+      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
+
       const data = await safeJson(res)
       if (!res.ok) {
-        setErrorById((m) => ({ ...m, [offeringId]: data?.error || `Save failed (${res.status})` }))
+        setError(offeringId, data?.error || `Save failed (${res.status}).`)
         return
       }
-      setSuccessById((m) => ({ ...m, [offeringId]: 'Saved.' }))
+
+      setSuccess(offeringId, 'Saved.')
       router.refresh()
       setOpenId(null)
     } catch {
-      setErrorById((m) => ({ ...m, [offeringId]: 'Network error while saving.' }))
+      setError(offeringId, 'Network error while saving.')
     } finally {
       setBusyId(null)
     }
@@ -122,17 +136,22 @@ export default function OfferingManager({
   async function removeOffering(offeringId: string) {
     setBusyId(offeringId)
     clearMessages(offeringId)
+
     try {
-      const res = await fetch(`/api/pro/offerings/${offeringId}`, { method: 'DELETE' })
+      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, {
+        method: 'DELETE',
+      })
+
       const data = await safeJson(res)
       if (!res.ok) {
-        setErrorById((m) => ({ ...m, [offeringId]: data?.error || `Remove failed (${res.status})` }))
+        setError(offeringId, data?.error || `Remove failed (${res.status}).`)
         return
       }
+
       router.refresh()
       if (openId === offeringId) setOpenId(null)
     } catch {
-      setErrorById((m) => ({ ...m, [offeringId]: 'Network error while removing.' }))
+      setError(offeringId, 'Network error while removing.')
     } finally {
       setBusyId(null)
     }
@@ -155,26 +174,30 @@ export default function OfferingManager({
       })
 
       const init = await safeJson(initRes)
-      if (!initRes.ok) throw new Error(init?.error || `Upload init failed (${initRes.status})`)
+      if (!initRes.ok) throw new Error(init?.error || `Upload init failed (${initRes.status}).`)
 
       const bucket = pickString(init?.bucket)
       const path = pickString(init?.path)
       const token = pickString(init?.token)
       const publicUrl = pickString(init?.publicUrl)
+      const cacheBuster = typeof init?.cacheBuster === 'number' ? init.cacheBuster : null
 
       if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
-      if (!publicUrl) throw new Error('Service image must be public but no publicUrl was returned.')
+      if (!publicUrl) throw new Error('Upload init missing publicUrl (this should be public).')
 
       const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
         contentType: file.type,
         upsert: true,
       })
-      if (upErr) throw new Error(upErr.message || 'Upload failed')
 
-      await saveOffering(o.id, { customImageUrl: publicUrl })
-      setSuccessById((m) => ({ ...m, [o.id]: 'Image updated.' }))
+      if (upErr) throw new Error(upErr.message || 'Upload failed.')
+
+      const finalUrl = cacheBuster ? `${publicUrl}?v=${cacheBuster}` : publicUrl
+
+      await saveOffering(o.id, { customImageUrl: finalUrl })
+      setSuccess(o.id, 'Image updated.')
     } catch (e: any) {
-      setErrorById((m) => ({ ...m, [o.id]: e?.message || 'Failed to upload image.' }))
+      setError(o.id, e?.message || 'Failed to upload image.')
     } finally {
       setUploadBusyId(null)
     }
@@ -200,6 +223,7 @@ export default function OfferingManager({
           onSave={(patch) => saveOffering(o.id, patch)}
           onRemove={() => removeOffering(o.id)}
           onUpload={(file) => uploadServiceImage(o, file)}
+          setError={(msg) => setError(o.id, msg)}
         />
       ))}
     </div>
@@ -228,6 +252,7 @@ function OfferingCard(props: {
   }) => void
   onRemove: () => void
   onUpload: (file: File) => void
+  setError: (msg: string) => void
 }) {
   const {
     offering: o,
@@ -242,6 +267,7 @@ function OfferingCard(props: {
     onSave,
     onRemove,
     onUpload,
+    setError,
   } = props
 
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -282,6 +308,76 @@ function OfferingCard(props: {
   const inputBase =
     'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
 
+  const disabled = busy || uploadBusy
+
+  function validateAndBuildPatch():
+    | {
+        ok: true
+        patch: {
+          description?: string | null
+          offersInSalon?: boolean
+          offersMobile?: boolean
+          salonPriceStartingAt?: string | null
+          salonDurationMinutes?: number | null
+          mobilePriceStartingAt?: string | null
+          mobileDurationMinutes?: number | null
+        }
+      }
+    | { ok: false; error: string } {
+    if (!offersInSalon && !offersMobile) {
+      return { ok: false, error: 'Enable at least Salon or Mobile.' }
+    }
+
+    const minCents = moneyToCents(o.minPrice) ?? 0
+
+    let salonPriceNorm: string | null = null
+    let salonDurInt: number | null = null
+    if (offersInSalon) {
+      salonPriceNorm = normalizeMoney2(salonPrice)
+      if (!salonPriceNorm) return { ok: false, error: 'Salon price must be like 50 or 49.99.' }
+
+      const salonCents = moneyToCents(salonPriceNorm)
+      if (salonCents == null || salonCents < minCents) {
+        return { ok: false, error: `Salon price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.` }
+      }
+
+      salonDurInt = Math.trunc(Number(salonDuration))
+      if (!Number.isFinite(salonDurInt) || salonDurInt <= 0) {
+        return { ok: false, error: 'Salon duration must be a positive number of minutes.' }
+      }
+    }
+
+    let mobilePriceNorm: string | null = null
+    let mobileDurInt: number | null = null
+    if (offersMobile) {
+      mobilePriceNorm = normalizeMoney2(mobilePrice)
+      if (!mobilePriceNorm) return { ok: false, error: 'Mobile price must be like 50 or 49.99.' }
+
+      const mobileCents = moneyToCents(mobilePriceNorm)
+      if (mobileCents == null || mobileCents < minCents) {
+        return { ok: false, error: `Mobile price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.` }
+      }
+
+      mobileDurInt = Math.trunc(Number(mobileDuration))
+      if (!Number.isFinite(mobileDurInt) || mobileDurInt <= 0) {
+        return { ok: false, error: 'Mobile duration must be a positive number of minutes.' }
+      }
+    }
+
+    return {
+      ok: true,
+      patch: {
+        description: description.trim() || null,
+        offersInSalon,
+        offersMobile,
+        salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
+        salonDurationMinutes: offersInSalon ? salonDurInt : null,
+        mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
+        mobileDurationMinutes: offersMobile ? mobileDurInt : null,
+      },
+    }
+  }
+
   return (
     <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="flex items-start justify-between gap-3">
@@ -291,7 +387,9 @@ function OfferingCard(props: {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={imgSrc} alt="" className="h-full w-full object-cover" />
             ) : (
-              <div className="grid h-full w-full place-items-center text-[10px] font-black text-textSecondary">NO IMAGE</div>
+              <div className="grid h-full w-full place-items-center text-[10px] font-black text-textSecondary">
+                No image
+              </div>
             )}
           </div>
 
@@ -299,8 +397,10 @@ function OfferingCard(props: {
             <div className="truncate text-[13px] font-black text-textPrimary">{displayName}</div>
             {o.categoryName ? <div className="mt-0.5 text-[12px] font-black text-textSecondary">{o.categoryName}</div> : null}
             <div className="mt-2 text-[12px] text-textSecondary">{summaryLine()}</div>
+
             <div className="mt-1 text-[12px] text-textSecondary">
-              Min price: <span className="font-black text-textPrimary">${normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
+              Min price:{' '}
+              <span className="font-black text-textPrimary">${normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
               <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
                 Image: {imageLabel(o)}
               </span>
@@ -313,10 +413,10 @@ function OfferingCard(props: {
             <button
               type="button"
               onClick={onToggle}
-              disabled={busy || uploadBusy}
+              disabled={disabled}
               className={[
                 'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                busy || uploadBusy
+                disabled
                   ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                   : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
               ].join(' ')}
@@ -327,10 +427,10 @@ function OfferingCard(props: {
             <button
               type="button"
               onClick={onRemove}
-              disabled={busy || uploadBusy}
+              disabled={disabled}
               className={[
                 'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                busy || uploadBusy
+                disabled
                   ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                   : 'border-toneDanger/40 bg-bgPrimary text-toneDanger hover:border-toneDanger/60',
               ].join(' ')}
@@ -357,10 +457,10 @@ function OfferingCard(props: {
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                disabled={busy || uploadBusy}
+                disabled={disabled}
                 className={[
                   'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                  busy || uploadBusy
+                  disabled
                     ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                     : 'border-accentPrimary/40 bg-bgPrimary text-textPrimary hover:border-accentPrimary/70',
                 ].join(' ')}
@@ -377,45 +477,15 @@ function OfferingCard(props: {
           className="mt-4 grid gap-3 border-t border-white/10 pt-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (!offersInSalon && !offersMobile) return alert('Enable at least Salon or Mobile.')
+            if (disabled) return
 
-            const minCents = moneyToCents(o.minPrice) ?? 0
-
-            let salonPriceNorm: string | null = null
-            let salonDurInt: number | null = null
-            if (offersInSalon) {
-              salonPriceNorm = normalizeMoney2(salonPrice)
-              if (!salonPriceNorm) return alert('Salon price must be like 50 or 49.99')
-              const salonCents = moneyToCents(salonPriceNorm)
-              if (salonCents == null || salonCents < minCents) {
-                return alert(`Salon price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}`)
-              }
-              salonDurInt = Math.trunc(Number(salonDuration))
-              if (!Number.isFinite(salonDurInt) || salonDurInt <= 0) return alert('Salon duration must be a positive number.')
+            const result = validateAndBuildPatch()
+            if (!result.ok) {
+              setError(result.error)
+              return
             }
 
-            let mobilePriceNorm: string | null = null
-            let mobileDurInt: number | null = null
-            if (offersMobile) {
-              mobilePriceNorm = normalizeMoney2(mobilePrice)
-              if (!mobilePriceNorm) return alert('Mobile price must be like 50 or 49.99')
-              const mobileCents = moneyToCents(mobilePriceNorm)
-              if (mobileCents == null || mobileCents < minCents) {
-                return alert(`Mobile price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}`)
-              }
-              mobileDurInt = Math.trunc(Number(mobileDuration))
-              if (!Number.isFinite(mobileDurInt) || mobileDurInt <= 0) return alert('Mobile duration must be a positive number.')
-            }
-
-            onSave({
-              description: description.trim() || null,
-              offersInSalon,
-              offersMobile,
-              salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
-              salonDurationMinutes: offersInSalon ? salonDurInt : null,
-              mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
-              mobileDurationMinutes: offersMobile ? mobileDurInt : null,
-            })
+            onSave(result.patch)
           }}
         >
           <label className="grid gap-2">
@@ -423,7 +493,7 @@ function OfferingCard(props: {
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              disabled={busy || uploadBusy}
+              disabled={disabled}
               rows={3}
               className={inputBase}
               placeholder="Short, clear, client-friendly."
@@ -436,7 +506,7 @@ function OfferingCard(props: {
                 type="checkbox"
                 checked={offersInSalon}
                 onChange={(e) => setOffersInSalon(e.target.checked)}
-                disabled={busy || uploadBusy}
+                disabled={disabled}
                 className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
               />
               Offer in Salon
@@ -447,7 +517,7 @@ function OfferingCard(props: {
                 type="checkbox"
                 checked={offersMobile}
                 onChange={(e) => setOffersMobile(e.target.checked)}
-                disabled={busy || uploadBusy}
+                disabled={disabled}
                 className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
               />
               Offer Mobile
@@ -463,9 +533,10 @@ function OfferingCard(props: {
                   <input
                     value={salonPrice}
                     onChange={(e) => setSalonPrice(e.target.value)}
-                    disabled={busy || uploadBusy || !offersInSalon}
+                    disabled={disabled || !offersInSalon}
                     inputMode="decimal"
                     className={inputBase}
+                    placeholder="e.g. 120 or 120.00"
                   />
                 </label>
 
@@ -474,10 +545,11 @@ function OfferingCard(props: {
                   <input
                     value={salonDuration}
                     onChange={(e) => setSalonDuration(e.target.value)}
-                    disabled={busy || uploadBusy || !offersInSalon}
+                    disabled={disabled || !offersInSalon}
                     type="number"
                     min={1}
                     className={inputBase}
+                    placeholder="e.g. 90"
                   />
                 </label>
               </div>
@@ -491,9 +563,10 @@ function OfferingCard(props: {
                   <input
                     value={mobilePrice}
                     onChange={(e) => setMobilePrice(e.target.value)}
-                    disabled={busy || uploadBusy || !offersMobile}
+                    disabled={disabled || !offersMobile}
                     inputMode="decimal"
                     className={inputBase}
+                    placeholder="e.g. 150 or 150.00"
                   />
                 </label>
 
@@ -502,10 +575,11 @@ function OfferingCard(props: {
                   <input
                     value={mobileDuration}
                     onChange={(e) => setMobileDuration(e.target.value)}
-                    disabled={busy || uploadBusy || !offersMobile}
+                    disabled={disabled || !offersMobile}
                     type="number"
                     min={1}
                     className={inputBase}
+                    placeholder="e.g. 90"
                   />
                 </label>
               </div>
@@ -518,10 +592,10 @@ function OfferingCard(props: {
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={busy || uploadBusy}
+              disabled={disabled}
               className={[
                 'rounded-card border px-4 py-3 text-[13px] font-black transition',
-                busy || uploadBusy
+                disabled
                   ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                   : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
               ].join(' ')}

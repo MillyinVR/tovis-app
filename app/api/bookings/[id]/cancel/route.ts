@@ -1,15 +1,12 @@
 // app/api/bookings/[id]/cancel/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { pickString } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
 
 function canBypassOwnership(user: any) {
   return user?.role === 'ADMIN'
@@ -17,8 +14,8 @@ function canBypassOwnership(user: any) {
 
 export async function POST(_req: Request, { params }: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser()
+    if (res) return res
 
     const { id } = await Promise.resolve(params)
     const bookingId = pickString(id)

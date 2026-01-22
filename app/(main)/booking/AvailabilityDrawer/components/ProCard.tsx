@@ -3,7 +3,7 @@
 'use client'
 
 import Link from 'next/link'
-import type { AvailabilityReason, ProCard as Pro } from '../types'
+import type { ProCard as Pro } from '../types'
 
 export default function ProCard({
   pro,

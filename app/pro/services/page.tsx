@@ -47,7 +47,7 @@ export default async function ProServicesPage() {
     services: cat.services.map((s) => ({
       id: String(s.id),
       name: s.name,
-      minPrice: moneyToString(s.minPrice) ?? '0.00',
+      minPrice: moneyToString((s as any).minPrice) ?? '0.00',
       defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
       defaultImageUrl: (s as any).defaultImageUrl ?? null,
     })),
@@ -57,7 +57,7 @@ export default async function ProServicesPage() {
       services: child.services.map((s) => ({
         id: String(s.id),
         name: s.name,
-        minPrice: moneyToString(s.minPrice) ?? '0.00',
+        minPrice: moneyToString((s as any).minPrice) ?? '0.00',
         defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
         defaultImageUrl: (s as any).defaultImageUrl ?? null,
       })),
@@ -68,9 +68,7 @@ export default async function ProServicesPage() {
     id: String(o.id),
     serviceId: String(o.serviceId),
 
-    // legacy typing support only
-    title: null as string | null,
-
+    title: null as string | null, // legacy typing support only
     description: o.description ?? null,
     customImageUrl: o.customImageUrl ?? null,
 
@@ -86,17 +84,19 @@ export default async function ProServicesPage() {
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,
     serviceDefaultImageUrl: (o.service as any).defaultImageUrl ?? null,
+    defaultImageUrl: (o.service as any).defaultImageUrl ?? null,
 
     minPrice: moneyToString((o.service as any).minPrice) ?? '0.00',
   }))
 
   return (
-    <main className="mx-auto max-w-[960px] px-4 pb-28 pt-6">
+    <main className="mx-auto max-w-960px px-4 pb-28 pt-6">
       <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-[22px] font-black text-textPrimary">My services</h1>
-          <p className="mt-1 max-w-[680px] text-[13px] text-textSecondary">
-            Pick from the TOVIS service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.
+          <p className="mt-1 max-w-680px text-[13px] text-textSecondary">
+            Pick from the TOVIS service library. Set pricing for Salon and/or Mobile. Service names stay consistent across
+            the platform.
           </p>
         </div>
 
@@ -108,7 +108,6 @@ export default async function ProServicesPage() {
         </Link>
       </header>
 
-      {/* Add service */}
       <section className="tovis-glass mb-5 rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="mb-3">
           <div className="text-[14px] font-black text-textPrimary">Add a service</div>
@@ -120,7 +119,6 @@ export default async function ProServicesPage() {
         <ServicePicker categories={categoryPayload} offerings={offeringsPayload} />
       </section>
 
-      {/* Current offerings */}
       <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="mb-3">
           <div className="text-[14px] font-black text-textPrimary">Your current offerings</div>

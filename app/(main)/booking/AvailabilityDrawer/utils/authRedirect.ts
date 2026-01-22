@@ -1,5 +1,4 @@
 // app/(main)/booking/AvailabilityDrawer/utils/authRedirect.ts
-
 import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime'
 
 function currentPathWithQuery() {
@@ -8,7 +7,7 @@ function currentPathWithQuery() {
 }
 
 function sanitizeFrom(from: string) {
-  const trimmed = from.trim()
+  const trimmed = String(from || '').trim()
   if (!trimmed) return '/looks'
   if (!trimmed.startsWith('/')) return '/looks'
   if (trimmed.startsWith('//')) return '/looks'
@@ -17,6 +16,6 @@ function sanitizeFrom(from: string) {
 
 export function redirectToLogin(router: AppRouterInstance, reason: string) {
   const from = sanitizeFrom(currentPathWithQuery())
-  const qs = new URLSearchParams({ from, reason })
+  const qs = new URLSearchParams({ from, reason: String(reason || 'auth') })
   router.push(`/login?${qs.toString()}`)
 }

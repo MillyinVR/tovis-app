@@ -3,64 +3,62 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
+import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
+import { pickString } from '@/app/api/_utils/pick'
 
 type RegisterBody = {
-  email: string
-  password: string
-  role: 'CLIENT' | 'PRO'
-  firstName?: string
-  lastName?: string
-  phone?: string
-  tapIntentId?: string
-  timeZone?: string // ✅ add
-}
+  email?: unknown
+  password?: unknown
+  role?: unknown
 
-function cleanString(v: unknown): string | null {
-  if (typeof v !== 'string') return null
-  const s = v.trim()
-  return s ? s : null
+  firstName?: unknown
+  lastName?: unknown
+  phone?: unknown
+  tapIntentId?: unknown
+
+  timeZone?: unknown
 }
 
 function cleanPhone(v: unknown): string | null {
-  const raw = cleanString(v)
+  const raw = pickString(v)
   if (!raw) return null
+  // keep digits and leading +
   const cleaned = raw.replace(/[^\d+]/g, '')
   return cleaned ? cleaned : null
 }
 
-function isValidIanaTimeZone(tz: string | null | undefined) {
-  if (!tz || typeof tz !== 'string') return false
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return true
-  } catch {
-    return false
-  }
+function normalizeRole(v: unknown): 'CLIENT' | 'PRO' | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'CLIENT') return 'CLIENT'
+  if (s === 'PRO') return 'PRO'
+  return null
+}
+
+function normalizeTimeZone(v: unknown): string | null {
+  const raw = pickString(v)
+  if (!raw) return null
+  const tz = sanitizeTimeZone(raw, 'UTC')
+  if (!tz) return null
+  return isValidIanaTimeZone(tz) ? tz : null
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as RegisterBody
+    const body = (await request.json().catch(() => ({}))) as RegisterBody
 
-    const email = cleanString(body.email)
-    const password = cleanString(body.password)
-    const role = body.role
+    const email = pickString(body.email)
+    const password = pickString(body.password)
+    const role = normalizeRole(body.role)
 
-    const firstName = cleanString(body.firstName)
-    const lastName = cleanString(body.lastName)
+    const firstName = pickString(body.firstName)
+    const lastName = pickString(body.lastName)
     const phone = cleanPhone(body.phone)
-    const tapIntentId = cleanString(body.tapIntentId)
+    const tapIntentId = pickString(body.tapIntentId)
 
-    // ✅ timezone capture (client-provided)
-    const tzRaw = cleanString(body.timeZone)
-    const timeZone = isValidIanaTimeZone(tzRaw) ? (tzRaw as string) : null
+    const timeZone = normalizeTimeZone(body.timeZone)
 
     if (!email || !password || !role) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
-    }
-
-    if (role !== 'CLIENT' && role !== 'PRO') {
-      return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
     }
 
     if (!firstName || !lastName) {
@@ -103,8 +101,8 @@ export async function POST(request: Request) {
                   lastName,
                   phone: phone ?? null,
 
-                  // ✅ store timezone if provided/valid, else null (UI will prompt)
-                  timeZone,
+                  // ✅ store timezone if valid, else null
+                  timeZone: timeZone ?? null,
 
                   bio: '',
                   location: '',

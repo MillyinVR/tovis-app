@@ -8,10 +8,6 @@ function safeJson(res: Response) {
   return res.json().catch(() => ({})) as Promise<any>
 }
 
-/**
- * Only allow internal redirects.
- * Prevents open-redirect abuse like /login?from=https://evil.com
- */
 function sanitizeFrom(from: string | null): string | null {
   if (!from) return null
   const trimmed = from.trim()
@@ -21,7 +17,6 @@ function sanitizeFrom(from: string | null): string | null {
   return trimmed
 }
 
-/** internal-only URL */
 function sanitizeNextUrl(nextUrl: unknown): string | null {
   if (typeof nextUrl !== 'string') return null
   const s = nextUrl.trim()
@@ -31,6 +26,24 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <span className="text-xs font-black text-textSecondary">{children}</span>
+}
+
+function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={[
+        'w-full rounded-card border border-surfaceGlass/12 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
+        'placeholder:text-textSecondary/70',
+        'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20',
+        props.className ?? '',
+      ].join(' ')}
+    />
+  )
+}
+
 export default function LoginClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -38,7 +51,6 @@ export default function LoginClient() {
   const fromRaw = searchParams.get('from')
   const from = useMemo(() => sanitizeFrom(fromRaw), [fromRaw])
 
-  // ✅ NFC tap intent (if user came from /t/[cardId] -> login)
   const ti = searchParams.get('ti')
 
   const [email, setEmail] = useState('')
@@ -57,11 +69,7 @@ export default function LoginClient() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          tapIntentId: ti ?? undefined,
-        }),
+        body: JSON.stringify({ email, password, tapIntentId: ti ?? undefined }),
       })
 
       const data = await safeJson(res)
@@ -71,23 +79,12 @@ export default function LoginClient() {
         return
       }
 
-      // Make server components reflect the new auth state immediately
       router.refresh()
 
-      // ✅ If NFC flow (or any server-driven redirect) provided a nextUrl, use it first
       const nextUrl = sanitizeNextUrl(data?.nextUrl)
-      if (nextUrl) {
-        router.replace(nextUrl)
-        return
-      }
+      if (nextUrl) return router.replace(nextUrl)
+      if (from) return router.replace(from)
 
-      // If we were redirected here from a protected route, go back there
-      if (from) {
-        router.replace(from)
-        return
-      }
-
-      // Otherwise redirect by role (your "dashboard" behavior)
       const role = data?.user?.role
       if (role === 'CLIENT') router.replace('/client')
       else if (role === 'PRO') router.replace('/pro/dashboard')
@@ -101,51 +98,45 @@ export default function LoginClient() {
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: '40px auto', padding: 16, fontFamily: 'system-ui' }}>
-      <h1 style={{ marginBottom: 12 }}>Login</h1>
+    <div className="mx-auto mt-10 w-full max-w-420px px-4 text-textPrimary">
+      <div className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
+        <div className="grid gap-1">
+          <h1 className="text-xl font-extrabold">Login</h1>
+          <p className="text-sm text-textSecondary">Enter your credentials. Try not to be dramatic about it.</p>
+        </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, color: '#374151' }}>Email</span>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            required
-            autoComplete="email"
-            style={{ padding: 10, borderRadius: 10, border: '1px solid #e5e7eb' }}
-          />
-        </label>
+        <form onSubmit={handleSubmit} className="mt-2 grid gap-3">
+          <label className="grid gap-1.5">
+            <FieldLabel>Email</FieldLabel>
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" />
+          </label>
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, color: '#374151' }}>Password</span>
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            required
-            autoComplete="current-password"
-            style={{ padding: 10, borderRadius: 10, border: '1px solid #e5e7eb' }}
-          />
-        </label>
+          <label className="grid gap-1.5">
+            <FieldLabel>Password</FieldLabel>
+            <Input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              required
+              autoComplete="current-password"
+            />
+          </label>
 
-        {error ? <div style={{ color: '#b91c1c', fontSize: 13 }}>{error}</div> : null}
+          {error ? <div className="text-sm font-bold text-toneDanger">{error}</div> : null}
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: 10,
-            borderRadius: 999,
-            border: '1px solid #111',
-            background: '#111',
-            color: '#fff',
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {loading ? 'Logging in…' : 'Login'}
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={loading}
+            className={[
+              'mt-1 inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-black',
+              'border-accentPrimary/45 bg-accentPrimary/15 text-accentPrimary hover:bg-accentPrimary/20',
+              loading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
+            ].join(' ')}
+          >
+            {loading ? 'Logging in…' : 'Login'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

@@ -7,7 +7,7 @@ import type { AvailabilitySummaryResponse, DrawerContext, ServiceLocationType } 
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 
-export function useAvailability(open: boolean, context: DrawerContext) {
+export function useAvailability(open: boolean, context: DrawerContext, locationType: ServiceLocationType) {
   const router = useRouter()
   const abortRef = useRef<AbortController | null>(null)
 
@@ -23,7 +23,25 @@ export function useAvailability(open: boolean, context: DrawerContext) {
   }, [])
 
   useEffect(() => {
-    if (!open || !context?.professionalId || !context?.serviceId) return
+    if (!open) return
+
+    const proId = String(context?.professionalId || '').trim()
+    const serviceId = String(context?.serviceId || '').trim()
+
+    if (!proId) {
+      setLoading(false)
+      setData(null)
+      setError('Missing professional. Please try again.')
+      return
+    }
+
+    // This is the #1 reason the drawer “shows nothing” from Looks.
+    if (!serviceId) {
+      setLoading(false)
+      setData(null)
+      setError('No service is linked yet. Ask the pro to attach a service to this look.')
+      return
+    }
 
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -33,14 +51,11 @@ export function useAvailability(open: boolean, context: DrawerContext) {
     setError(null)
     setData(null)
 
-    const qs = new URLSearchParams({
-      professionalId: context.professionalId,
-      serviceId: context.serviceId,
-      mediaId: context.mediaId,
-    })
-
-    // optional (future): if you want to pass preferred location type in the URL
-    // qs.set('locationType', 'SALON')
+    const qs = new URLSearchParams()
+    qs.set('professionalId', proId)
+    qs.set('serviceId', serviceId)
+    qs.set('locationType', locationType)
+    if (context.mediaId) qs.set('mediaId', String(context.mediaId))
 
     fetch(`/api/availability/day?${qs.toString()}`, {
       method: 'GET',
@@ -68,7 +83,7 @@ export function useAvailability(open: boolean, context: DrawerContext) {
         if (abortRef.current === controller) abortRef.current = null
         setLoading(false)
       })
-  }, [open, context?.professionalId, context?.serviceId, context?.mediaId, router])
+  }, [open, context?.professionalId, context?.serviceId, context?.mediaId, locationType, router])
 
   return { loading, error, data, setError, setData }
 }

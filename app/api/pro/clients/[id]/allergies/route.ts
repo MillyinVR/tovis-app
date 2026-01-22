@@ -1,38 +1,43 @@
-import { NextResponse } from 'next/server'
+// app/api/pro/clients/[id]/allergies/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 
-export async function POST(
-  req: Request,
-  context: { params: Promise<{ id: string }> },
-) {
-  const { id: clientId } = await context.params
-  const user = await getCurrentUser()
+export const dynamic = 'force-dynamic'
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+const ALLOWED_SEVERITY = new Set(['MILD', 'MODERATE', 'SEVERE'])
+
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
+
+    const { id } = await context.params
+    const clientId = pickString(id)
+    if (!clientId) return jsonFail(400, 'Missing client id.')
+
+    const body = (await req.json().catch(() => ({}))) as any
+    const label = pickString(body?.label)
+    const description = pickString(body?.description)
+    const severityRaw = upper(body?.severity || 'MODERATE')
+    const severity = ALLOWED_SEVERITY.has(severityRaw) ? severityRaw : 'MODERATE'
+
+    if (!label) return jsonFail(400, 'Label is required.')
+
+    await prisma.clientAllergy.create({
+      data: {
+        clientId,
+        label,
+        description: description ?? null,
+        severity: severity as any,
+        recordedByProfessionalId: professionalId,
+      } as any,
+      select: { id: true },
+    })
+
+    return jsonOk({ ok: true }, 200)
+  } catch (e) {
+    console.error('POST /api/pro/clients/[id]/allergies error', e)
+    return jsonFail(500, 'Failed to add allergy.')
   }
-
-  const { label, description, severity } = await req.json()
-
-  if (!label || !label.trim()) {
-    return NextResponse.json(
-      { error: 'Label is required.' },
-      { status: 400 },
-    )
-  }
-
-  const db: any = prisma
-
-  await db.clientAllergy.create({
-    data: {
-      clientId,
-      label: label.trim(),
-      description: description?.trim() || null,
-      severity: severity || 'MODERATE',
-      recordedByProfessionalId: user.professionalProfile.id,
-    },
-  })
-
-  return NextResponse.json({ ok: true })
 }

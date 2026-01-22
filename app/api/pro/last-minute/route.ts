@@ -1,101 +1,74 @@
 // app/api/pro/last-minute/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import type { ServiceLocationType } from '@prisma/client'
+import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 
-// If this lives elsewhere in your codebase, keep your import instead.
+// If you already have this, use your real import and delete the fallback below.
 // import { computeLastMinuteDiscount } from '@/lib/lastMinute/computeLastMinuteDiscount'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 function normalizeLocationType(v: unknown): ServiceLocationType {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  const s = upper(v)
   return s === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
-function toNumberFromDecimalish(v: any): number | null {
+function toNumberFromDecimalish(v: unknown): number | null {
   if (v == null) return null
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
   if (typeof v === 'string') {
     const n = Number(v)
     return Number.isFinite(n) ? n : null
   }
-  // Prisma Decimal has .toNumber()
-  if (typeof v?.toNumber === 'function') {
-    const n = v.toNumber()
+  // Prisma Decimal: toNumber()
+  const maybe: any = v
+  if (typeof maybe?.toNumber === 'function') {
+    const n = maybe.toNumber()
     return Number.isFinite(n) ? n : null
   }
-  try {
-    const n = Number(String(v))
-    return Number.isFinite(n) ? n : null
-  } catch {
-    return null
-  }
+  const n = Number(String(v))
+  return Number.isFinite(n) ? n : null
 }
 
 function pickBasePrice(args: {
   locationType: ServiceLocationType
-  offering: {
-    salonPriceStartingAt: any | null
-    mobilePriceStartingAt: any | null
-  }
-  service: {
-    minPrice: any
-  }
+  offering: { salonPriceStartingAt: unknown | null; mobilePriceStartingAt: unknown | null }
+  serviceMinPrice: unknown
 }) {
-  const { locationType, offering, service } = args
-
   const offeringPrice =
-    locationType === 'MOBILE'
-      ? toNumberFromDecimalish(offering.mobilePriceStartingAt)
-      : toNumberFromDecimalish(offering.salonPriceStartingAt)
+    args.locationType === 'MOBILE'
+      ? toNumberFromDecimalish(args.offering.mobilePriceStartingAt)
+      : toNumberFromDecimalish(args.offering.salonPriceStartingAt)
 
   if (offeringPrice != null) return offeringPrice
 
-  // fallback: service-wide minimum price
-  const serviceMin = toNumberFromDecimalish(service.minPrice)
+  const serviceMin = toNumberFromDecimalish(args.serviceMinPrice)
   return serviceMin != null ? serviceMin : 0
 }
 
-// NOTE: Replace this with your real discount function or keep your existing import.
-// This stub keeps TypeScript happy if you paste the file as-is.
-async function computeLastMinuteDiscount(args: {
+// Fallback if you haven’t wired the real one yet.
+async function computeLastMinuteDiscount(_args: {
   professionalId: string
   serviceId: string
   startAt: Date
   basePrice: number
 }) {
-  // return { discountPct: number, discountAmount: number }
-  // You likely already have logic elsewhere; this is just a safe default.
   return { discountPct: 0, discountAmount: 0 }
 }
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Only professionals can access this.' }, { status: 401 })
-    }
-
-    const professionalId = user.professionalProfile.id
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
     const body = (await req.json().catch(() => ({}))) as any
     const bookingId = pickString(body?.bookingId)
-    const offeringId = pickString(body?.offeringId) // optional: depends on how your UI calls this
-    const locationType = normalizeLocationType(body?.locationType)
+    const offeringIdOverride = pickString(body?.offeringId)
+    const locationTypeFallback = normalizeLocationType(body?.locationType)
 
-    // If your route creates last-minute openings or applies discount on acceptance,
-    // you likely need bookingId. Keep this strict.
-    if (!bookingId) {
-      return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 })
-    }
+    if (!bookingId) return jsonFail(400, 'Missing bookingId.')
 
-    // Load booking (must belong to this pro)
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
@@ -104,98 +77,72 @@ export async function POST(req: Request) {
         serviceId: true,
         offeringId: true,
         scheduledFor: true,
-        status: true,
         locationType: true,
+        status: true,
       },
     })
 
     if (!booking || booking.professionalId !== professionalId) {
-      return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
+      return jsonFail(404, 'Booking not found.')
     }
 
-    // Prefer the booking’s locationType if set (it is in your schema)
-    const effectiveLocationType: ServiceLocationType = booking.locationType ?? locationType
+    const effectiveLocationType: ServiceLocationType = (booking.locationType as any) ?? locationTypeFallback
 
-    // Load offering + service for pricing
+    const offeringId = booking.offeringId ?? offeringIdOverride
+    if (!offeringId) return jsonFail(400, 'Missing offeringId (booking has no offeringId).')
+
     const offering = await prisma.professionalServiceOffering.findFirst({
-      where: {
-        id: booking.offeringId ?? offeringId ?? undefined,
-        professionalId,
-        isActive: true,
-      },
+      where: { id: offeringId, professionalId, isActive: true },
       select: {
         id: true,
         professionalId: true,
         serviceId: true,
-
         offersInSalon: true,
         offersMobile: true,
         salonPriceStartingAt: true,
-        salonDurationMinutes: true,
         mobilePriceStartingAt: true,
-        mobileDurationMinutes: true,
-
-        service: {
-          select: {
-            id: true,
-            name: true,
-            categoryId: true,
-            description: true,
-            isActive: true,
-            minPrice: true,
-            defaultDurationMinutes: true,
-            defaultImageUrl: true,
-            allowMobile: true,
-          },
-        },
+        service: { select: { minPrice: true } },
       },
     })
 
-    if (!offering) {
-      return NextResponse.json({ error: 'Offering not found or inactive.' }, { status: 404 })
-    }
+    if (!offering) return jsonFail(404, 'Offering not found or inactive.')
 
-    // Validate the mode is actually offered (don’t discount a mode they don’t offer)
     if (effectiveLocationType === 'SALON' && !offering.offersInSalon) {
-      return NextResponse.json({ error: 'This offering is not available in-salon.' }, { status: 400 })
+      return jsonFail(400, 'This offering is not available in-salon.')
     }
     if (effectiveLocationType === 'MOBILE' && !offering.offersMobile) {
-      return NextResponse.json({ error: 'This offering is not available as mobile.' }, { status: 400 })
+      return jsonFail(400, 'This offering is not available as mobile.')
     }
 
-    // ✅ Replace old offering.price usage
-    const basePriceNum = pickBasePrice({
+    const basePrice = pickBasePrice({
       locationType: effectiveLocationType,
       offering: {
         salonPriceStartingAt: offering.salonPriceStartingAt,
         mobilePriceStartingAt: offering.mobilePriceStartingAt,
       },
-      service: offering.service,
+      serviceMinPrice: offering.service.minPrice,
     })
 
     const discount = await computeLastMinuteDiscount({
       professionalId: offering.professionalId,
       serviceId: offering.serviceId,
       startAt: booking.scheduledFor,
-      basePrice: basePriceNum,
+      basePrice,
     })
 
-    // Example: store discount fields (adjust to your real intent)
-    // If you’re accepting bookings, do that here instead.
     const updated = await prisma.booking.update({
       where: { id: booking.id },
       data: {
-        // these fields exist on Booking in your schema
+        // if your schema expects Decimal, you can store as number if field is Float,
+        // or convert to Decimal string if field is Decimal.
         discountAmount: discount.discountAmount ? discount.discountAmount : undefined,
-        // You might also calculate totalAmount elsewhere
-        // status: 'ACCEPTED',
-      },
+      } as any,
       select: { id: true },
     })
 
-    return NextResponse.json({ ok: true, bookingId: updated.id, basePrice: basePriceNum, discount })
+    return jsonOk({ bookingId: updated.id, basePrice, discount }, 200)
   } catch (e) {
-    console.error('POST /api/pro/bookings error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('POST /api/pro/last-minute error', e)
+    return jsonFail(500, 'Internal server error')
   }
 }

@@ -4,32 +4,17 @@ import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 
 export const dynamic = 'force-dynamic'
 
-function Card({
-  title,
-  desc,
-  href,
-  cta,
-}: {
-  title: string
-  desc: string
-  href: string
-  cta: string
-}) {
+function Card({ title, desc, href, cta }: { title: string; desc: string; href: string; cta: string }) {
   return (
     <Link
       href={href}
-      className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
-      style={{
-        textDecoration: 'none',
-        borderRadius: 16,
-        padding: 16,
-        display: 'grid',
-        gap: 8,
-      }}
+      className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-textPrimary hover:bg-surfaceGlass/6"
     >
-      <div style={{ fontWeight: 1000 }}>{title}</div>
-      <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.4 }}>{desc}</div>
-      <div style={{ fontSize: 12, fontWeight: 1000, marginTop: 6 }}>{cta} →</div>
+      <div className="text-sm font-extrabold">{title}</div>
+      <div className="text-sm text-textSecondary">{desc}</div>
+      <div className="mt-1 text-xs font-black text-accentPrimary">
+        {cta} <span aria-hidden>→</span>
+      </div>
     </Link>
   )
 }
@@ -39,15 +24,16 @@ export default async function AdminHomePage() {
   const perms = info?.perms
 
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 1000 }}>Admin Dashboard</h1>
-        <p style={{ margin: '6px 0 0', color: '#6b7280', fontSize: 13 }}>
-          Approve pros, manage services/categories, and keep the platform from turning into a thrift-store clearance bin.
+    <div className="grid gap-4">
+      <div className="grid gap-1">
+        <h1 className="text-xl font-extrabold">Admin Dashboard</h1>
+        <p className="text-sm text-textSecondary">
+          Approve pros, manage services/categories, and keep the platform from turning into a dumpster fire with push
+          notifications.
         </p>
       </div>
 
-      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {perms?.canReviewPros ? (
           <Card
             title="Professionals queue"
@@ -59,45 +45,29 @@ export default async function AdminHomePage() {
 
         {perms?.canManageCatalog ? (
           <>
-            <Card
-              title="Services"
-              desc="Curate service definitions, guardrails, and allowed service list."
-              href="/admin/services"
-              cta="Manage services"
-            />
-            <Card
-              title="Categories"
-              desc="Control taxonomy so discovery and trending don’t become chaos."
-              href="/admin/categories"
-              cta="Manage categories"
-            />
+            <Card title="Services" desc="Curate service definitions and guardrails." href="/admin/services" cta="Manage services" />
+            <Card title="Categories" desc="Control taxonomy so discovery stays sane." href="/admin/categories" cta="Manage categories" />
           </>
         ) : null}
 
         {perms?.canManagePermissions ? (
-          <Card
-            title="Permissions"
-            desc="Scope what admins can do (support/reviewer/super admin)."
-            href="/admin/permissions"
-            cta="Manage permissions"
-          />
+          <Card title="Permissions" desc="Scope what admins can do." href="/admin/permissions" cta="Manage permissions" />
         ) : null}
 
-        {perms?.canViewLogs ? (
-          <Card
-            title="Logs"
-            desc="Audit trail for admin actions. Trust issues, but make them productive."
-            href="/admin/logs"
-            cta="View logs"
-          />
-        ) : null}
+        {perms?.canViewLogs ? <Card title="Logs" desc="Audit trail for admin actions." href="/admin/logs" cta="View logs" /> : null}
       </div>
 
-      <div className="bg-bgSecondary" style={{ border: '1px dashed #e5e7eb', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 1000, marginBottom: 6 }}>Next we’re building</div>
-        <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
-          1) Pro approval workflow (status + notes + audit trail), 2) Services/categories CRUD, 3) License expiry dashboard + reminders.
+      <div className="rounded-card border border-surfaceGlass/12 bg-bgSecondary p-4">
+        <div className="text-sm font-extrabold">Next we’re building</div>
+        <div className="mt-1 text-sm text-textSecondary">
+          1) Pro approval workflow, 2) Services/categories CRUD, 3) License expiry dashboard + reminders.
         </div>
+      </div>
+
+      <div className="text-xs text-textSecondary">
+        <Link href="/" className="font-black text-textPrimary/90 hover:text-textPrimary">
+          Back to app
+        </Link>
       </div>
     </div>
   )

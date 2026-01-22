@@ -1,114 +1,108 @@
-import { NextResponse } from 'next/server'
+// app/api/pro/last-minute/settings/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 function toDecimalString(v: unknown): string | null {
-  if (v === null || v === undefined) return null
+  if (v === null) return null
+  if (v === undefined) return null
+
   if (typeof v === 'number') {
-    if (!Number.isFinite(v)) return null
+    if (!Number.isFinite(v) || v < 0) return null
     return v.toFixed(2)
   }
+
   if (typeof v === 'string') {
     const s = v.trim()
     if (!s) return null
-    // allow "80" or "79.99"
     if (!/^\d+(\.\d{1,2})?$/.test(s)) return null
-    // normalize to 2 decimals for consistency
     const n = Number(s)
-    if (!Number.isFinite(n)) return null
+    if (!Number.isFinite(n) || n < 0) return null
     return n.toFixed(2)
   }
+
+  const s = (v as any)?.toString?.()
+  if (typeof s === 'string') return toDecimalString(s)
   return null
 }
 
+function clampPct(v: unknown) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return null
+  const x = Math.trunc(n)
+  return Math.min(50, Math.max(0, x))
+}
+
 export async function GET() {
-  const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
+
+    const settings = await prisma.lastMinuteSettings.upsert({
+      where: { professionalId },
+      create: { professionalId },
+      update: {},
+      include: {
+        serviceRules: true,
+        blocks: { orderBy: { startAt: 'asc' } },
+      },
+    })
+
+    return jsonOk({ settings }, 200)
+  } catch (e) {
+    console.error('GET /api/pro/last-minute/settings error', e)
+    return jsonFail(500, 'Failed to load settings.')
   }
-
-  const proId = user.professionalProfile.id
-
-  const settings = await prisma.lastMinuteSettings.upsert({
-    where: { professionalId: proId },
-    create: {
-      professionalId: proId,
-      // enabled/discountsEnabled already default false in schema
-      // windowSameDayPct/window24hPct already default in schema
-    },
-    update: {},
-    include: {
-      serviceRules: true,
-      blocks: { orderBy: { startAt: 'asc' } },
-    },
-  })
-
-  return NextResponse.json({ settings })
 }
 
 export async function PATCH(req: Request) {
-  const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-  const proId = user.professionalProfile.id
-  const body = await req.json().catch(() => ({}))
+    const body = (await req.json().catch(() => ({}))) as any
+    const patch: Record<string, any> = {}
 
-  const patch: Record<string, any> = {}
+    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
+    if (typeof body.discountsEnabled === 'boolean') patch.discountsEnabled = body.discountsEnabled
 
-  // Core toggles
-  if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
-  if (typeof body.discountsEnabled === 'boolean') patch.discountsEnabled = body.discountsEnabled
+    const sameDay = clampPct(body.windowSameDayPct)
+    if (sameDay != null) patch.windowSameDayPct = sameDay
 
-  // Discount windows (hard clamp 0–50)
-  if (Number.isInteger(body.windowSameDayPct)) {
-    patch.windowSameDayPct = Math.min(50, Math.max(0, body.windowSameDayPct))
-  }
-  if (Number.isInteger(body.window24hPct)) {
-    patch.window24hPct = Math.min(50, Math.max(0, body.window24hPct))
-  }
+    const h24 = clampPct(body.window24hPct)
+    if (h24 != null) patch.window24hPct = h24
 
-  // Global minimum price (Decimal? expects string/Decimal)
-  if (body.minPrice === null) {
-    patch.minPrice = null
-  } else if (body.minPrice !== undefined) {
-    const dec = toDecimalString(body.minPrice)
-    if (dec === null) {
-      return NextResponse.json(
-        { error: 'minPrice must be like 80 or 79.99 (or null)' },
-        { status: 400 },
-      )
+    if (Object.prototype.hasOwnProperty.call(body, 'minPrice')) {
+      if (body.minPrice === null) {
+        patch.minPrice = null
+      } else {
+        const dec = toDecimalString(body.minPrice)
+        if (dec == null) return jsonFail(400, 'minPrice must be like 80 or 79.99 (or null).')
+        patch.minPrice = dec
+      }
     }
-    patch.minPrice = dec
+
+    const dayFlags = ['disableMon', 'disableTue', 'disableWed', 'disableThu', 'disableFri', 'disableSat', 'disableSun'] as const
+    for (const k of dayFlags) {
+      if (typeof body[k] === 'boolean') patch[k] = body[k]
+    }
+
+    const settings = await prisma.lastMinuteSettings.upsert({
+      where: { professionalId },
+      create: { professionalId, ...patch },
+      update: patch,
+      include: {
+        serviceRules: true,
+        blocks: { orderBy: { startAt: 'asc' } },
+      },
+    })
+
+    return jsonOk({ settings }, 200)
+  } catch (e) {
+    console.error('PATCH /api/pro/last-minute/settings error', e)
+    return jsonFail(500, 'Failed to update settings.')
   }
-
-  // Day disables
-  const dayFlags = [
-    'disableMon',
-    'disableTue',
-    'disableWed',
-    'disableThu',
-    'disableFri',
-    'disableSat',
-    'disableSun',
-  ] as const
-
-  for (const key of dayFlags) {
-    if (typeof body[key] === 'boolean') patch[key] = body[key]
-  }
-
-  const settings = await prisma.lastMinuteSettings.upsert({
-    where: { professionalId: proId },
-    create: { professionalId: proId, ...patch },
-    update: patch,
-    include: {
-      serviceRules: true,
-      blocks: { orderBy: { startAt: 'asc' } },
-    },
-  })
-
-  return NextResponse.json({ settings })
 }

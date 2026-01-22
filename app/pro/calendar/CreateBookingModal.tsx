@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
 
 type WorkingHoursJson =
   | {
@@ -13,51 +14,55 @@ type ClientLite = { id: string; fullName: string; email: string | null; phone: s
 type ServiceLite = { id: string; name: string; durationMinutes?: number | null }
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-
-function toDateInputValue(d: Date) {
-  const yyyy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-function toTimeInputValue(d: Date) {
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mm = String(d.getMinutes()).padStart(2, '0')
-  return `${hh}:${mm}`
-}
-
-function setDateTimeParts(baseDate: Date, hhmm: string) {
-  const [hhStr, mmStr] = (hhmm || '').split(':')
-  const hh = Number(hhStr)
-  const mm = Number(mmStr)
-  const out = new Date(baseDate)
-  out.setHours(Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0, 0)
-  return out
-}
+const SNAP_MINUTES = 15
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-function roundTo15(mins: number) {
-  const snapped = Math.round(mins / 15) * 15
-  return clamp(snapped, 15, 12 * 60)
+function snapMinutes(mins: number) {
+  return Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES
+}
+
+function roundToSnapMinutes(mins: number) {
+  return clamp(snapMinutes(mins), SNAP_MINUTES, 12 * 60)
 }
 
 function parseHHMM(hhmm: string) {
-  const [h, m] = (hhmm || '').split(':').map((x) => parseInt(x, 10) || 0)
-  return h * 60 + m
+  const [hhStr, mmStr] = (hhmm || '').split(':')
+  const hh = Number(hhStr)
+  const mm = Number(mmStr)
+  return {
+    hour: Number.isFinite(hh) ? clamp(hh, 0, 23) : 0,
+    minute: Number.isFinite(mm) ? clamp(mm, 0, 59) : 0,
+  }
 }
 
-function getWorkingWindowForDate(date: Date, workingHours: WorkingHoursJson) {
+function toDateInputValueFromParts(parts: { year: number; month: number; day: number }) {
+  const yyyy = String(parts.year)
+  const mm = String(parts.month).padStart(2, '0')
+  const dd = String(parts.day).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function toTimeInputValueFromParts(parts: { hour: number; minute: number }) {
+  const hh = String(parts.hour).padStart(2, '0')
+  const mm = String(parts.minute).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+function getWorkingWindowForDayKey(dayKey: typeof DAY_KEYS[number], workingHours: WorkingHoursJson) {
   if (!workingHours) return null
-  const key = DAY_KEYS[date.getDay()]
-  const cfg = (workingHours as any)[key]
+  const cfg = (workingHours as any)[dayKey]
   if (!cfg || !cfg.enabled || !cfg.start || !cfg.end) return null
-  const startMinutes = parseHHMM(String(cfg.start))
-  const endMinutes = parseHHMM(String(cfg.end))
+
+  const start = parseHHMM(String(cfg.start))
+  const end = parseHHMM(String(cfg.end))
+
+  const startMinutes = start.hour * 60 + start.minute
+  const endMinutes = end.hour * 60 + end.minute
   if (endMinutes <= startMinutes) return null
+
   return { startMinutes, endMinutes }
 }
 
@@ -75,8 +80,8 @@ export default function CreateBookingModal(props: {
   open: boolean
   onClose: () => void
   workingHours: WorkingHoursJson
-  initialStart: Date
-  snapMinutes?: number
+  initialStart: Date // UTC instant you clicked (or “now”)
+  timeZone: string // ✅ pro timezone (IANA)
   services?: ServiceLite[]
   onCreated: (ev: {
     id: string
@@ -89,6 +94,21 @@ export default function CreateBookingModal(props: {
   }) => void
 }) {
   const { open, onClose, workingHours, initialStart, onCreated, services: servicesProp } = props
+
+  const tz = useMemo(() => sanitizeTimeZone(props.timeZone, 'America/Los_Angeles'), [props.timeZone])
+
+  const init = useMemo(() => {
+    // Convert UTC instant -> wall clock in tz, then snap minutes
+    const p = getZonedParts(initialStart, tz)
+    const snapped = snapMinutes(p.hour * 60 + p.minute)
+    const hour = Math.floor(snapped / 60)
+    const minute = snapped % 60
+
+    return {
+      date: toDateInputValueFromParts({ year: p.year, month: p.month, day: p.day }),
+      time: toTimeInputValueFromParts({ hour, minute }),
+    }
+  }, [initialStart, tz])
 
   const [clientQuery, setClientQuery] = useState('')
   const [recentClients, setRecentClients] = useState<ClientLite[]>([])
@@ -125,10 +145,9 @@ export default function CreateBookingModal(props: {
     setInternalNotes('')
     setBufferMinutes(0)
 
-    setDateStr(toDateInputValue(initialStart))
-    setTimeStr(toTimeInputValue(initialStart))
+    setDateStr(init.date)
+    setTimeStr(init.time)
 
-    // load services (prefer prop from calendar page)
     if (servicesProp && servicesProp.length) {
       setServices(servicesProp)
     } else {
@@ -150,7 +169,7 @@ export default function CreateBookingModal(props: {
     }
 
     window.setTimeout(() => inputRef.current?.focus(), 50)
-  }, [open, initialStart, servicesProp])
+  }, [open, init.date, init.time, servicesProp])
 
   useEffect(() => {
     if (!open) return
@@ -172,7 +191,6 @@ export default function CreateBookingModal(props: {
         const res = await fetch(`/api/pro/clients/search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
         const data = await safeJson(res)
 
-        // if a newer search started, ignore this result
         if (mySearchId !== lastSearchIdRef.current) return
 
         if (!res.ok) {
@@ -206,24 +224,49 @@ export default function CreateBookingModal(props: {
   const computedDuration = useMemo(() => {
     const sum = selectedServices.reduce((acc, s) => acc + (Number(s.durationMinutes ?? 0) || 0), 0)
     const base = sum > 0 ? sum : 60
-    return roundTo15(base)
+    return roundToSnapMinutes(base)
   }, [selectedServices])
 
-  const startDate = useMemo(() => {
+  const wallClock = useMemo(() => {
     const [yyyy, mm, dd] = (dateStr || '').split('-').map((x) => Number(x))
     if (!yyyy || !mm || !dd) return null
-    const base = new Date(yyyy, mm - 1, dd, 0, 0, 0, 0)
-    return setDateTimeParts(base, timeStr)
+    const t = parseHHMM(timeStr)
+    return { year: yyyy, month: mm, day: dd, hour: t.hour, minute: t.minute }
   }, [dateStr, timeStr])
 
   const outsideHours = useMemo(() => {
-    if (!startDate) return false
-    const window = getWorkingWindowForDate(startDate, workingHours)
+    if (!wallClock) return false
+
+    const startUtc = zonedTimeToUtc({
+      year: wallClock.year,
+      month: wallClock.month,
+      day: wallClock.day,
+      hour: wallClock.hour,
+      minute: wallClock.minute,
+      second: 0,
+      timeZone: tz,
+    })
+
+    if (!Number.isFinite(startUtc.getTime())) return true
+
+    const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
+      .format(startUtc)
+      .slice(0, 3)
+      .toLowerCase()
+
+    const dayKey = (DAY_KEYS as readonly string[]).includes(weekdayShort)
+      ? (weekdayShort as (typeof DAY_KEYS)[number])
+      : null
+    if (!dayKey) return true
+
+    const window = getWorkingWindowForDayKey(dayKey, workingHours)
     if (!window) return true
-    const startM = startDate.getHours() * 60 + startDate.getMinutes()
+
+    const startM = wallClock.hour * 60 + wallClock.minute
     const endM = startM + computedDuration + (Number(bufferMinutes) || 0)
+
     return startM < window.startMinutes || endM > window.endMinutes
-  }, [startDate, workingHours, computedDuration, bufferMinutes])
+  }, [wallClock, workingHours, computedDuration, bufferMinutes, tz])
 
   if (!open) return null
 
@@ -232,7 +275,7 @@ export default function CreateBookingModal(props: {
       setErr('Select a client.')
       return
     }
-    if (!startDate || Number.isNaN(startDate.getTime())) {
+    if (!wallClock) {
       setErr('Pick a valid date/time.')
       return
     }
@@ -245,13 +288,25 @@ export default function CreateBookingModal(props: {
     setSaving(true)
 
     try {
+      const startUtc = zonedTimeToUtc({
+        year: wallClock.year,
+        month: wallClock.month,
+        day: wallClock.day,
+        hour: wallClock.hour,
+        minute: wallClock.minute,
+        second: 0,
+        timeZone: tz,
+      })
+
+      if (!Number.isFinite(startUtc.getTime())) throw new Error('Invalid start time.')
+
       const payload = {
         clientId: selectedClient.id,
-        scheduledFor: startDate.toISOString(),
+        scheduledFor: startUtc.toISOString(), // ✅ correct instant
         serviceIds: selectedServiceIds,
         totalDurationMinutes: computedDuration,
         bufferMinutes: Number(bufferMinutes) || 0,
-        internalNotes: internalNotes || null,
+        internalNotes: internalNotes.trim() ? internalNotes.trim() : null,
       }
 
       const res = await fetch('/api/pro/bookings', {
@@ -293,114 +348,62 @@ export default function CreateBookingModal(props: {
   }
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.45)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        zIndex: 1300,
-      }}
-    >
+    <div className="fixed inset-0 z-1300 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
+        className="w-full max-w-720px overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          maxWidth: 720,
-          background: '#fff',
-          borderRadius: 14,
-          border: '1px solid #eee',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-          overflow: 'hidden',
-        }}
       >
-        <div
-          style={{
-            padding: 14,
-            borderBottom: '1px solid #eee',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <div style={{ fontWeight: 900 }}>Schedule appointment</div>
+        <div className="flex items-center justify-between border-b border-white/10 p-4">
+          <div className="font-extrabold">Schedule appointment</div>
           <button
             type="button"
             onClick={onClose}
-            style={{
-              border: '1px solid #ddd',
-              background: '#fff',
-              borderRadius: 999,
-              padding: '4px 10px',
-              cursor: 'pointer',
-              fontSize: 12,
-            }}
+            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-xs font-semibold hover:bg-bgSecondary/70"
           >
             Close
           </button>
         </div>
 
-        <div style={{ padding: 14 }}>
+        <div className="p-4">
           {outsideHours && (
-            <div
-              style={{
-                border: '1px solid #f59e0b',
-                background: '#fffbeb',
-                color: '#92400e',
-                padding: 10,
-                borderRadius: 10,
-                fontSize: 12,
-                marginBottom: 10,
-              }}
-            >
-              This appointment is <b>outside your working hours</b>. You can still schedule it, but clients can’t book
-              this time.
+            <div className="mb-3 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
+              <div className="font-extrabold">Outside working hours</div>
+              <div className="mt-1 text-textSecondary">
+                You can still schedule this manually, but clients can’t book this time slot.
+              </div>
+              <div className="mt-2 text-xs text-textSecondary">
+                Timezone: <span className="font-semibold text-textPrimary">{tz}</span>
+              </div>
             </div>
           )}
 
-          {err && (
-            <div style={{ fontSize: 12, color: 'red', marginBottom: 8 }}>
-              {err}
-            </div>
-          )}
+          {err && <div className="mb-2 text-sm text-red-400">{err}</div>}
 
           {/* Client search */}
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Find client</div>
+          <div className="mb-4">
+            <div className="mb-1 text-xs text-textSecondary">Find client</div>
             <input
               ref={inputRef}
               value={clientQuery}
               onChange={(e) => setClientQuery(e.target.value)}
               placeholder="Search by phone, name, or email"
-              style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+              className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
             />
 
-            {/* tiny state hint so you can debug without guessing */}
             {!!clientQuery.trim() && (
-              <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
-                Results: {recentClients.length} your clients, {otherClients.length} other{searching ? ' (searching...)' : ''}
+              <div className="mt-2 text-xs text-textSecondary">
+                Results: {recentClients.length} your clients, {otherClients.length} other
+                {searching ? ' (searching...)' : ''}
               </div>
             )}
 
             {selectedClient && (
-              <div style={{ marginTop: 8, fontSize: 12 }}>
-                Selected: <b>{selectedClient.fullName}</b>
+              <div className="mt-2 text-sm text-textSecondary">
+                Selected: <span className="font-semibold text-textPrimary">{selectedClient.fullName}</span>
                 <button
                   type="button"
                   onClick={() => setSelectedClient(null)}
-                  style={{
-                    marginLeft: 10,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    borderRadius: 999,
-                    padding: '2px 8px',
-                    cursor: 'pointer',
-                    fontSize: 11,
-                  }}
+                  className="ml-2 rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-semibold hover:bg-bgSecondary/70"
                 >
                   Clear
                 </button>
@@ -408,29 +411,22 @@ export default function CreateBookingModal(props: {
             )}
 
             {!selectedClient && (recentClients.length > 0 || otherClients.length > 0 || searching) && (
-              <div style={{ marginTop: 8, border: '1px solid #eee', borderRadius: 10, overflow: 'hidden' }}>
-                {searching && <div style={{ padding: 10, fontSize: 12, color: '#666' }}>Searching…</div>}
+              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-bgSecondary/30">
+                {searching && <div className="p-3 text-sm text-textSecondary">Searching…</div>}
 
                 {recentClients.length > 0 && (
-                  <div style={{ padding: 10, borderTop: '1px solid #eee' }}>
-                    <div style={{ fontSize: 11, color: '#666', fontWeight: 800, marginBottom: 6 }}>Your clients</div>
-                    <div style={{ display: 'grid', gap: 6 }}>
+                  <div className="p-3">
+                    <div className="mb-2 text-xs font-extrabold text-textSecondary">Your clients</div>
+                    <div className="grid gap-2">
                       {recentClients.map((c) => (
                         <button
                           key={c.id}
                           type="button"
                           onClick={() => setSelectedClient(c)}
-                          style={{
-                            textAlign: 'left',
-                            border: '1px solid #eee',
-                            background: '#fff',
-                            borderRadius: 10,
-                            padding: 10,
-                            cursor: 'pointer',
-                          }}
+                          className="rounded-2xl border border-white/10 bg-bgPrimary p-3 text-left hover:bg-bgSecondary/30"
                         >
-                          <div style={{ fontSize: 12, fontWeight: 900 }}>{c.fullName}</div>
-                          <div style={{ fontSize: 11, color: '#666' }}>{c.email || c.phone || ''}</div>
+                          <div className="text-sm font-extrabold text-textPrimary">{c.fullName}</div>
+                          <div className="text-xs text-textSecondary">{c.email || c.phone || ''}</div>
                         </button>
                       ))}
                     </div>
@@ -438,25 +434,18 @@ export default function CreateBookingModal(props: {
                 )}
 
                 {otherClients.length > 0 && (
-                  <div style={{ padding: 10, borderTop: recentClients.length ? '1px solid #eee' : 'none' }}>
-                    <div style={{ fontSize: 11, color: '#666', fontWeight: 800, marginBottom: 6 }}>Other clients</div>
-                    <div style={{ display: 'grid', gap: 6 }}>
+                  <div className={`p-3 ${recentClients.length ? 'border-t border-white/10' : ''}`}>
+                    <div className="mb-2 text-xs font-extrabold text-textSecondary">Other clients</div>
+                    <div className="grid gap-2">
                       {otherClients.map((c) => (
                         <button
                           key={c.id}
                           type="button"
                           onClick={() => setSelectedClient(c)}
-                          style={{
-                            textAlign: 'left',
-                            border: '1px solid #eee',
-                            background: '#fff',
-                            borderRadius: 10,
-                            padding: 10,
-                            cursor: 'pointer',
-                          }}
+                          className="rounded-2xl border border-white/10 bg-bgPrimary p-3 text-left hover:bg-bgSecondary/30"
                         >
-                          <div style={{ fontSize: 12, fontWeight: 900 }}>{c.fullName}</div>
-                          <div style={{ fontSize: 11, color: '#666' }}>{c.email || c.phone || ''}</div>
+                          <div className="text-sm font-extrabold text-textPrimary">{c.fullName}</div>
+                          <div className="text-xs text-textSecondary">{c.email || c.phone || ''}</div>
                         </button>
                       ))}
                     </div>
@@ -467,75 +456,76 @@ export default function CreateBookingModal(props: {
           </div>
 
           {/* Date / time */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+          <div className="mb-4 grid grid-cols-2 gap-2">
             <div>
-              <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Date</div>
+              <div className="mb-1 text-xs text-textSecondary">Date</div>
               <input
                 type="date"
                 value={dateStr}
                 onChange={(e) => setDateStr(e.target.value)}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Time</div>
+              <div className="mb-1 text-xs text-textSecondary">Time</div>
               <input
                 type="time"
-                step={15 * 60}
+                step={SNAP_MINUTES * 60}
                 value={timeStr}
                 onChange={(e) => setTimeStr(e.target.value)}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
               />
             </div>
           </div>
 
           {/* Services */}
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Services</div>
-            <div style={{ display: 'grid', gap: 6 }}>
-              {services.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#666' }}>No services found. Add services first.</div>
-              ) : (
-                services.map((s) => {
-                  const checked = selectedServiceIds.includes(String(s.id))
+          <div className="mb-4">
+            <div className="mb-2 text-xs text-textSecondary">Services</div>
+
+            {services.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-bgSecondary/30 p-3 text-sm text-textSecondary">
+                No services found. Add services first.
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {services.map((s) => {
+                  const id = String(s.id)
+                  const checked = selectedServiceIds.includes(id)
+                  const dur = Number(s.durationMinutes ?? 0) || 0
+
                   return (
                     <label
                       key={s.id}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid #eee', borderRadius: 10, padding: 10 }}
+                      className="flex items-center gap-3 rounded-2xl border border-white/10 bg-bgSecondary/30 p-3"
                     >
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={(e) => {
-                          const id = String(s.id)
                           setSelectedServiceIds((prev) =>
                             e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id),
                           )
                         }}
                       />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {s.name}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#666' }}>
-                          {(Number(s.durationMinutes ?? 0) || 0) ? `${Number(s.durationMinutes)} min` : 'Duration not set'}
-                        </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-extrabold text-textPrimary">{s.name}</div>
+                        <div className="text-xs text-textSecondary">{dur ? `${dur} min` : 'Duration not set'}</div>
                       </div>
                     </label>
                   )
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
 
-            <div style={{ marginTop: 8, fontSize: 12, color: '#111' }}>
-              Total duration: <b>{computedDuration} min</b>
+            <div className="mt-2 text-sm text-textSecondary">
+              Total duration: <span className="font-extrabold text-textPrimary">{computedDuration} min</span>
             </div>
           </div>
 
           {/* Buffer + Notes */}
-          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 8, marginBottom: 12 }}>
+          <div className="mb-4 grid grid-cols-[140px_1fr] gap-2">
             <div>
-              <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Buffer (min)</div>
+              <div className="mb-1 text-xs text-textSecondary">Buffer (min)</div>
               <input
                 type="number"
                 min={0}
@@ -543,26 +533,26 @@ export default function CreateBookingModal(props: {
                 step={5}
                 value={bufferMinutes}
                 onChange={(e) => setBufferMinutes(Number(e.target.value))}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Internal notes (pro-only)</div>
+              <div className="mb-1 text-xs text-textSecondary">Internal notes (pro-only)</div>
               <input
                 value={internalNotes}
                 onChange={(e) => setInternalNotes(e.target.value)}
                 placeholder="Notes the client never sees…"
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ddd', fontSize: 12 }}
+                className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
               />
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
               disabled={saving}
-              style={{ border: '1px solid #ddd', background: '#fff', borderRadius: 999, padding: '10px 12px', cursor: saving ? 'default' : 'pointer', fontSize: 12 }}
+              className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold hover:bg-bgSecondary/40 disabled:opacity-70"
             >
               Cancel
             </button>
@@ -570,16 +560,7 @@ export default function CreateBookingModal(props: {
               type="button"
               onClick={() => void createBooking()}
               disabled={saving}
-              style={{
-                border: 'none',
-                background: '#111',
-                color: '#fff',
-                borderRadius: 999,
-                padding: '10px 12px',
-                cursor: saving ? 'default' : 'pointer',
-                fontSize: 12,
-                opacity: saving ? 0.7 : 1,
-              }}
+              className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold hover:bg-bgSecondary/70 disabled:opacity-70"
             >
               {saving ? 'Saving…' : 'Create booking'}
             </button>

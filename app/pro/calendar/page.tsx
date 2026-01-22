@@ -2,11 +2,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import WorkingHoursForm from './WorkingHoursForm'
 import CreateBookingModal from './CreateBookingModal'
 import BlockTimeModal from './BlockTimeModal'
 import EditBlockModal from './EditBlockModal'
-
+import WorkingHoursTabs from './WorkingHoursTabs'
 import { useCalendarData } from './_hooks/useCalendarData'
 import { CalendarHeader, CalendarHeaderControls } from './_components/CalendarHeader'
 import { ManagementStrip } from './_components/ManagementStrip'
@@ -19,26 +18,26 @@ import { BookingModal } from './_components/BookingModal'
 import type { ViewMode } from './_types'
 import { addDays, formatMonthRange, formatWeekRange, startOfDay } from './_utils/date'
 
+function pickTimeZone(v: unknown) {
+  return typeof v === 'string' && v.trim() ? v.trim() : 'America/Los_Angeles'
+}
+
 export default function ProCalendarPage() {
   const [view, setView] = useState<ViewMode>('week')
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
 
   const cal = useCalendarData({ view, currentDate })
 
-  const blockedMinutesToday =
-    typeof (cal as any)?.blockedMinutesToday === 'number' ? ((cal as any).blockedMinutesToday as number) : 0
-
-  const timeZone =
-    typeof (cal as any)?.timeZone === 'string' && (cal as any).timeZone.trim()
-      ? ((cal as any).timeZone as string)
-      : 'America/Los_Angeles'
+  const timeZone = pickTimeZone(cal.timeZone)
 
   const visibleDays = useMemo(() => {
     if (view === 'day') return [startOfDay(currentDate)]
+
     if (view === 'week') {
       const start = cal.utils.startOfWeek(currentDate)
       return Array.from({ length: 7 }, (_, i) => addDays(start, i))
     }
+
     const first = cal.utils.startOfMonth(currentDate)
     const firstWeekStart = cal.utils.startOfWeek(first)
     return Array.from({ length: 42 }, (_, i) => addDays(firstWeekStart, i))
@@ -74,7 +73,16 @@ export default function ProCalendarPage() {
 
       {cal.showHoursForm && (
         <div className="mb-4 rounded-2xl border border-white/10 bg-bgSecondary p-4">
-          <WorkingHoursForm initialHours={cal.workingHours} onSaved={cal.setWorkingHours} />
+          <WorkingHoursTabs
+            canSalon={Boolean(cal.canSalon)}
+            canMobile={Boolean(cal.canMobile)}
+            activeLocationType={cal.activeLocationType}
+            onChangeLocationType={(next) => cal.setActiveLocationType(next)}
+            onSavedAny={() => {
+              // ensure grid refreshes if it uses workingHours
+              cal.reload()
+            }}
+          />
         </div>
       )}
 
@@ -104,7 +112,7 @@ export default function ProCalendarPage() {
           visibleDays={visibleDays}
           events={cal.events}
           workingHours={cal.workingHours}
-          timeZone={cal.timeZone}  // ✅ THIS is what TS is yelling about
+          timeZone={timeZone}
           onClickEvent={cal.openBookingOrBlock}
           onCreateForClick={cal.openCreateForClick}
           onDragStart={cal.drag.onDragStart}
@@ -113,7 +121,6 @@ export default function ProCalendarPage() {
           suppressClickRef={cal.ui.suppressClickRef}
           isBusy={cal.ui.isOverlayOpen}
         />
-
       )}
 
       {view === 'month' && (
@@ -133,6 +140,7 @@ export default function ProCalendarPage() {
         onClose={() => cal.setCreateOpen(false)}
         workingHours={cal.workingHours}
         initialStart={cal.createInitialStart}
+        timeZone={timeZone}
         services={cal.services}
         onCreated={() => cal.reload()}
       />
@@ -141,6 +149,7 @@ export default function ProCalendarPage() {
         open={cal.blockCreateOpen}
         onClose={() => cal.setBlockCreateOpen(false)}
         initialStart={cal.blockCreateInitialStart}
+        timeZone={timeZone}
         onCreated={() => cal.reload()}
       />
 
@@ -189,6 +198,7 @@ export default function ProCalendarPage() {
         error={cal.bookingError}
         booking={cal.booking}
         services={cal.services}
+        timeZone={timeZone}
         reschedDate={cal.reschedDate}
         reschedTime={cal.reschedTime}
         durationMinutes={cal.durationMinutes}

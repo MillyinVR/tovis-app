@@ -8,7 +8,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Let the BRAND system define bg + text via CSS vars */
+/* BrandProvider + lib/brand/brand.css are the single source of truth */
 body {
   background: rgb(var(--bg-primary));
   color: rgb(var(--text-primary));
@@ -22,73 +22,34 @@ a {
   text-decoration: none;
 }
 
-/* Prefer explicit theme mode via BrandProvider. */
+/* Explicit scheme; BrandProvider controls mode */
 html {
   color-scheme: dark;
 }
 
-:root {
-  /* Brand tokens (RGB triplets, no commas) */
-  --bg-primary: 10 10 12;
-  --bg-secondary: 18 18 22;
-
-  --text-primary: 245 245 247;
-  --text-secondary: 170 170 180;
-
-  /* “Glass” surface layers */
-  --surface-glass: 255 255 255;
-
-  /* Accents */
-  --accent-primary: 212 175 55;
-  --accent-primary-hover: 230 195 85;
-
-  /* Micro accent */
-  --micro-accent: 255 90 120;
-
-  /* Semantic tones */
-  --tone-danger: 255 90 120;
-  --tone-warn: 245 158 11;
-  --tone-success: 34 197 94;
-  --tone-info: 56 189 248;
-
-  /* Overlay token (scrims/modals) */
-  --overlay: 10 10 12; /* slightly lifted black reads better */
-  --radius-card: 18px;
-}
-/* “TikTok-ish” glass surface helpers */
+/* Reusable “glass” surface helpers */
 .tovis-glass {
-  background: rgba(18, 18, 22, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: rgb(var(--surface-glass) / var(--glass-opacity));
+  border: 1px solid rgb(var(--surface-glass) / 0.12);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: var(--radius-card);
 }
 
 .tovis-glass-soft {
-  background: rgba(18, 18, 22, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgb(var(--surface-glass) / calc(var(--glass-opacity) * 0.75));
+  border: 1px solid rgb(var(--surface-glass) / 0.12);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.75));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.75));
+  border-radius: var(--radius-card);
 }
 
-/* Optional: light mode */
-[data-theme='light'] {
-  --bg-primary: 255 255 255;
-  --bg-secondary: 245 245 247;
-
-  --text-primary: 17 24 39;
-  --text-secondary: 107 114 128;
-
-  --surface-glass: 0 0 0;
-
-  --accent-primary: 212 175 55;
-  --accent-primary-hover: 200 160 40;
-
-  --micro-accent: 220 38 38;
-
-  --tone-danger: 220 38 38;
-  --tone-warn: 217 119 6;
-  --tone-success: 22 163 74;
-  --tone-info: 2 132 199;
-
-  --overlay: 0 0 0;
+.looksNoScrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.looksNoScrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }

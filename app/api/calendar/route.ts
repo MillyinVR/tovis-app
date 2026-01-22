@@ -1,36 +1,24 @@
 // app/api/calendar/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
+
+import { pickString } from '@/app/api/_utils/pick'
+import { normalizeEmail } from '@/app/api/_utils/email'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { jsonFail } from '@/app/api/_utils/responses'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function sanitizeTimeZone(tz: string | null | undefined) {
-  if (!tz) return null
-  if (!/^[A-Za-z_]+\/[A-Za-z0-9_\-+]+$/.test(tz)) return null
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return tz
-  } catch {
-    return null
-  }
-}
-
 function icsEscape(s: string) {
-  return s
+  return String(s)
+    .replace(/\r/g, '')
     .replace(/\\/g, '\\\\')
     .replace(/\n/g, '\\n')
     .replace(/,/g, '\\,')
     .replace(/;/g, '\\;')
 }
 
-/**
- * UTC in ICS format: YYYYMMDDTHHMMSSZ
- */
 function toICSDateUtc(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0')
   return (
@@ -45,86 +33,92 @@ function toICSDateUtc(d: Date) {
   )
 }
 
-/**
- * Get "wall clock" parts for a UTC Date as rendered in a given timezone.
- */
-function getZonedParts(dateUtc: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
-}
-
-/**
- * Local (TZID) ICS datetime: YYYYMMDDTHHMMSS (no trailing Z)
- * Represents the time in the provided timezone.
- */
 function toICSDateInTimeZone(dUtc: Date, timeZone: string) {
   const pad = (n: number) => String(n).padStart(2, '0')
   const z = getZonedParts(dUtc, timeZone)
-  return (
-    z.year +
-    pad(z.month) +
-    pad(z.day) +
-    'T' +
-    pad(z.hour) +
-    pad(z.minute) +
-    pad(z.second)
-  )
+  return z.year + pad(z.month) + pad(z.day) + 'T' + pad(z.hour) + pad(z.minute) + pad(z.second)
+}
+
+function clientDisplayName(client: { firstName?: string | null; lastName?: string | null } | null) {
+  const first = typeof client?.firstName === 'string' ? client.firstName.trim() : ''
+  const last = typeof client?.lastName === 'string' ? client.lastName.trim() : ''
+  const name = `${first} ${last}`.trim()
+  return name || 'Client'
+}
+
+function pickFormattedAddress(snapshot: unknown): string | null {
+  if (!snapshot || typeof snapshot !== 'object') return null
+  const v = (snapshot as any)?.formattedAddress
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser()
+    if (res) return res
 
     const { searchParams } = new URL(req.url)
     const bookingId = pickString(searchParams.get('bookingId'))
-    if (!bookingId) return NextResponse.json({ error: 'Missing bookingId' }, { status: 400 })
+    if (!bookingId) return jsonFail(400, 'Missing bookingId')
 
+    // ✅ Option A: one query, include ownership ids
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        professional: { include: { user: true } },
-        service: { include: { category: true } },
-        client: { include: { user: true } },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+
+        scheduledFor: true,
+        totalDurationMinutes: true,
+
+        // location truth
+        locationTimeZone: true,
+        locationAddressSnapshot: true,
+
+        professional: {
+          select: {
+            id: true,
+            businessName: true,
+            location: true,
+            timeZone: true,
+            user: { select: { email: true } },
+          },
+        },
+        service: { select: { name: true } },
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            user: { select: { email: true } },
+          },
+        },
       },
     })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    if (!booking) return jsonFail(404, 'Booking not found')
 
-    // Only the client or the pro can download this calendar file
     const isClient = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
     const isPro = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
-    if (!isClient && !isPro) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!isClient && !isPro) return jsonFail(403, 'Forbidden')
 
     const startUtc = new Date(booking.scheduledFor)
-    const minutes = Number(booking.durationMinutesSnapshot || 60)
+
+    // ✅ Option A duration truth
+    const minutesRaw = Number(booking.totalDurationMinutes ?? 60)
+    const minutes = Number.isFinite(minutesRaw) ? Math.max(1, Math.min(12 * 60, minutesRaw)) : 60
+
     const endUtc = new Date(startUtc.getTime() + minutes * 60_000)
 
     const serviceName = booking.service?.name || 'Appointment'
     const proName = booking.professional?.businessName || booking.professional?.user?.email || 'Professional'
     const title = `${serviceName} with ${proName}`
 
-    const location = booking.professional?.location || booking.professional?.city || ''
+    const location =
+      pickFormattedAddress(booking.locationAddressSnapshot) ||
+      (typeof booking.professional?.location === 'string' && booking.professional.location.trim()
+        ? booking.professional.location.trim()
+        : '')
 
     const description = [
       `Service: ${serviceName}`,
@@ -135,22 +129,36 @@ export async function GET(req: Request) {
       .filter(Boolean)
       .join('\n')
 
-    // ✅ Appointment timezone (professional)
-    const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone) ?? 'America/Los_Angeles'
+    // ✅ Location timezone is truth; fallback: pro tz; fallback: LA
+    const appointmentTz =
+      sanitizeTimeZone(
+        booking.locationTimeZone || booking.professional?.timeZone || 'America/Los_Angeles',
+        'America/Los_Angeles',
+      ) || 'America/Los_Angeles'
 
     const uid = `${booking.id}@tovis`
     const dtstamp = toICSDateUtc(new Date())
 
-    // DTSTART/DTEND in TZID (no Z)
     const dtStartLocal = toICSDateInTimeZone(startUtc, appointmentTz)
     const dtEndLocal = toICSDateInTimeZone(endUtc, appointmentTz)
+
+    const proEmail = normalizeEmail(booking.professional?.user?.email)
+    const clientEmail = normalizeEmail(booking.client?.user?.email)
+
+    const organizerLine = proEmail ? `ORGANIZER;CN=${icsEscape(proName)}:mailto:${icsEscape(proEmail)}` : null
+    const attendeeLine = clientEmail
+      ? `ATTENDEE;CN=${icsEscape(clientDisplayName(booking.client))};ROLE=REQ-PARTICIPANT;RSVP=FALSE:mailto:${icsEscape(
+          clientEmail,
+        )}`
+      : null
 
     const ics = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//TOVIS//EN',
       'CALSCALE:GREGORIAN',
-      'METHOD:PUBLISH',
+      'METHOD:REQUEST',
+      `X-WR-TIMEZONE:${icsEscape(appointmentTz)}`,
       'BEGIN:VEVENT',
       `UID:${icsEscape(uid)}`,
       `DTSTAMP:${dtstamp}`,
@@ -159,6 +167,10 @@ export async function GET(req: Request) {
       `SUMMARY:${icsEscape(title)}`,
       location ? `LOCATION:${icsEscape(location)}` : null,
       `DESCRIPTION:${icsEscape(description)}`,
+      organizerLine,
+      attendeeLine,
+      'STATUS:CONFIRMED',
+      'SEQUENCE:0',
       'END:VEVENT',
       'END:VCALENDAR',
       '',
@@ -171,12 +183,11 @@ export async function GET(req: Request) {
       headers: {
         'Content-Type': 'text/calendar; charset=utf-8',
         'Content-Disposition': `attachment; filename="tovis-booking-${booking.id}.ics"`,
-        // nice-to-have so browsers don’t “help” by sniffing
         'X-Content-Type-Options': 'nosniff',
       },
     })
   } catch (e) {
     console.error('GET /api/calendar error', e)
-    return NextResponse.json({ error: 'Failed to generate calendar invite.' }, { status: 500 })
+    return jsonFail(500, 'Failed to generate calendar invite.')
   }
 }

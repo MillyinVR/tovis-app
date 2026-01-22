@@ -1,49 +1,52 @@
-import { NextResponse } from 'next/server'
+// app/api/pro/reminders/run/[id]/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 
-type Params = {
-  params: Promise<{ id: string }>
-}
+export const dynamic = 'force-dynamic'
+
+type Params = { params: Promise<{ id: string }> }
 
 export async function PATCH(req: Request, props: Params) {
-  const { id } = await props.params
-  const user = await getCurrentUser()
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+    const { id } = await props.params
+    const reminderId = String(id || '').trim()
+    if (!reminderId) return jsonFail(400, 'Missing reminder id.')
 
-  const db: any = prisma
-  const body = await req.json().catch(() => ({}))
-  const { completed } = body as { completed?: boolean }
+    const body = await req.json().catch(() => ({} as any))
+    const completed = body?.completed
 
-  if (typeof completed !== 'boolean') {
-    return NextResponse.json(
-      { error: 'completed:boolean is required' },
-      { status: 400 },
+    if (typeof completed !== 'boolean') {
+      return jsonFail(400, 'completed:boolean is required')
+    }
+
+    const existing = await prisma.reminder.findUnique({
+      where: { id: reminderId },
+      select: { id: true, professionalId: true },
+    })
+
+    if (!existing || existing.professionalId !== professionalId) {
+      return jsonFail(404, 'Not found')
+    }
+
+    const updated = await prisma.reminder.update({
+      where: { id: reminderId },
+      data: { completedAt: completed ? new Date() : null },
+      select: { id: true, completedAt: true },
+    })
+
+    return jsonOk(
+      {
+        id: updated.id,
+        completedAt: updated.completedAt?.toISOString() ?? null,
+      },
+      200,
     )
+  } catch (e) {
+    console.error('PATCH /api/pro/reminders/run/[id] error', e)
+    return jsonFail(500, 'Internal server error')
   }
-
-  // ensure reminder belongs to this pro
-  const existing = await db.reminder.findUnique({
-    where: { id },
-    select: { professionalId: true },
-  })
-
-  if (!existing || existing.professionalId !== user.professionalProfile.id) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  }
-
-  const updated = await db.reminder.update({
-    where: { id },
-    data: {
-      completedAt: completed ? new Date() : null,
-    },
-  })
-
-  return NextResponse.json({
-    id: updated.id,
-    completedAt: updated.completedAt?.toISOString() ?? null,
-  })
 }

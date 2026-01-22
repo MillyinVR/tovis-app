@@ -1,4 +1,4 @@
-// app/pro/calendar/_components/ManagementModal.tsx
+// app/pro/calendar/_components/ManagementStrip.tsx
 
 'use client'
 

@@ -1,18 +1,11 @@
 // app/api/pro/calendar/blocked/[id]/route.ts
-import { NextResponse } from 'next/server'
+// app/api/pro/calendar/blocked/[id]/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-function isProRole(role: unknown) {
-  const r = typeof role === 'string' ? role.toUpperCase() : ''
-  return r === 'PROFESSIONAL' || r === 'PRO'
-}
-
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
+type Ctx = { params: Promise<{ id: string }> }
 
 function toDateOrNull(v: unknown) {
   const s = pickString(v)
@@ -21,100 +14,131 @@ function toDateOrNull(v: unknown) {
   return Number.isFinite(d.getTime()) ? d : null
 }
 
-type Ctx = { params: Promise<{ id: string }> }
+function minutesBetween(a: Date, b: Date) {
+  return Math.round((b.getTime() - a.getTime()) / 60_000)
+}
 
 export async function GET(_req: Request, ctx: Ctx) {
   try {
-    const { id } = await ctx.params
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || !isProRole((user as any).role) || !(user as any).professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
-    const professionalId = (user as any).professionalProfile.id as string
+    const { id } = await ctx.params
+    const blockId = pickString(id)
+    if (!blockId) return jsonFail(400, 'Missing block id.')
 
     const block = await prisma.calendarBlock.findFirst({
-      where: { id, professionalId },
-      select: { id: true, startsAt: true, endsAt: true, note: true },
+      where: { id: blockId, professionalId },
+      select: { id: true, startsAt: true, endsAt: true, note: true, locationId: true },
     })
 
-    if (!block) return NextResponse.json({ error: 'Block not found.' }, { status: 404 })
-    return NextResponse.json({ ok: true, block }, { status: 200 })
+    if (!block) return jsonFail(404, 'Block not found.')
+
+    return jsonOk(
+      {
+        block: {
+          id: String(block.id),
+          startsAt: block.startsAt.toISOString(),
+          endsAt: block.endsAt.toISOString(),
+          note: block.note ?? null,
+          locationId: block.locationId ?? null,
+        },
+      },
+      200,
+    )
   } catch (e) {
     console.error('GET /api/pro/calendar/blocked/[id] error:', e)
-    return NextResponse.json({ error: 'Failed to load block.' }, { status: 500 })
+    return jsonFail(500, 'Failed to load block.')
   }
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
+
     const { id } = await ctx.params
+    const blockId = pickString(id)
+    if (!blockId) return jsonFail(400, 'Missing block id.')
 
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || !isProRole((user as any).role) || !(user as any).professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
-    const professionalId = (user as any).professionalProfile.id as string
+    const body = (await req.json().catch(() => ({}))) as any
 
-    const existing = await prisma.calendarBlock.findFirst({
-      where: { id, professionalId },
-      select: { id: true },
-    })
-    if (!existing) return NextResponse.json({ error: 'Not found.' }, { status: 404 })
-
-    const body = await req.json().catch(() => ({} as any))
     const startsAt = toDateOrNull(body?.startsAt)
     const endsAt = toDateOrNull(body?.endsAt)
     const note = pickString(body?.note)
 
-    if (!startsAt || !endsAt) return NextResponse.json({ error: 'Missing startsAt/endsAt.' }, { status: 400 })
-    if (endsAt <= startsAt) return NextResponse.json({ error: 'End must be after start.' }, { status: 400 })
+    if (!startsAt || !endsAt) return jsonFail(400, 'Missing startsAt/endsAt.')
+    if (endsAt <= startsAt) return jsonFail(400, 'End must be after start.')
 
-    const mins = Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000)
+    const mins = minutesBetween(startsAt, endsAt)
     if (mins < 15 || mins > 24 * 60) {
-        return NextResponse.json({ error: 'Block must be between 15 minutes and 24 hours.' }, { status: 400 })
+      return jsonFail(400, 'Block must be between 15 minutes and 24 hours.')
     }
 
-    // prevent overlap with other blocks
-    const conflict = await prisma.calendarBlock.findFirst({
-      where: { professionalId, id: { not: id }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } },
+    const existing = await prisma.calendarBlock.findFirst({
+      where: { id: blockId, professionalId },
       select: { id: true },
     })
-    if (conflict) return NextResponse.json({ error: 'That time overlaps an existing block.' }, { status: 409 })
+    if (!existing) return jsonFail(404, 'Not found.')
+
+    const conflict = await prisma.calendarBlock.findFirst({
+      where: {
+        professionalId,
+        id: { not: blockId },
+        startsAt: { lt: endsAt },
+        endsAt: { gt: startsAt },
+      },
+      select: { id: true },
+    })
+    if (conflict) return jsonFail(409, 'That time overlaps an existing block.')
 
     const updated = await prisma.calendarBlock.update({
-      where: { id },
+      where: { id: blockId },
       data: { startsAt, endsAt, note: note ?? null },
-      select: { id: true, startsAt: true, endsAt: true, note: true },
+      select: { id: true, startsAt: true, endsAt: true, note: true, locationId: true },
     })
 
-    return NextResponse.json({ ok: true, block: updated }, { status: 200 })
+    return jsonOk(
+      {
+        block: {
+          id: String(updated.id),
+          startsAt: updated.startsAt.toISOString(),
+          endsAt: updated.endsAt.toISOString(),
+          note: updated.note ?? null,
+          locationId: updated.locationId ?? null,
+        },
+      },
+      200,
+    )
   } catch (e) {
     console.error('PATCH /api/pro/calendar/blocked/[id] error:', e)
-    return NextResponse.json({ error: 'Failed to update block.' }, { status: 500 })
+    return jsonFail(500, 'Failed to update block.')
   }
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
-    const { id } = await ctx.params
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || !isProRole((user as any).role) || !(user as any).professionalProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
-    const professionalId = (user as any).professionalProfile.id as string
+    const { id } = await ctx.params
+    const blockId = pickString(id)
+    if (!blockId) return jsonFail(400, 'Missing block id.')
 
     const existing = await prisma.calendarBlock.findFirst({
-      where: { id, professionalId },
+      where: { id: blockId, professionalId },
       select: { id: true },
     })
-    if (!existing) return NextResponse.json({ error: 'Not found.' }, { status: 404 })
+    if (!existing) return jsonFail(404, 'Not found.')
 
-    await prisma.calendarBlock.delete({ where: { id } })
-    return NextResponse.json({ ok: true }, { status: 200 })
+    await prisma.calendarBlock.delete({ where: { id: blockId } })
+
+    return jsonOk({ ok: true }, 200)
   } catch (e) {
     console.error('DELETE /api/pro/calendar/blocked/[id] error:', e)
-    return NextResponse.json({ error: 'Failed to delete block.' }, { status: 500 })
+    return jsonFail(500, 'Failed to delete block.')
   }
 }

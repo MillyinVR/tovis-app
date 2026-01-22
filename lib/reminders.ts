@@ -1,14 +1,14 @@
 // lib/reminders.ts
 import twilio from 'twilio'
 import { prisma } from './prisma'
+import { formatAppointmentWhen } from '@/lib/FormatInTimeZone'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const fromNumber = process.env.TWILIO_FROM_NUMBER
 
-const twilioClient = accountSid && authToken
-  ? twilio(accountSid, authToken)
-  : null
+const twilioClient = accountSid && authToken ? twilio(accountSid, authToken) : null
 
 export async function sendSmsReminder(to: string, body: string) {
   if (!twilioClient || !fromNumber) {
@@ -28,23 +28,20 @@ export function formatReminderMessage(args: {
   serviceName: string
   scheduledFor: Date
   businessName?: string | null
+  timeZone: string // REQUIRED: IANA tz (pro/business)
 }) {
-  const { clientFirstName, serviceName, scheduledFor, businessName } = args
+  const tz = sanitizeTimeZone(args.timeZone, 'UTC')
 
-  const when = scheduledFor.toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  const clientFirstName = (args.clientFirstName || '').trim() || 'there'
+  const serviceName = (args.serviceName || '').trim() || 'appointment'
+  const businessName = (args.businessName || '').trim() || 'your pro'
 
-  const biz = businessName || 'your appointment'
+  const when = formatAppointmentWhen(args.scheduledFor, tz)
 
-  return `Hi ${clientFirstName}, this is a reminder for your ${serviceName} at ${when} with ${biz}. Reply to confirm or contact us to reschedule.`
+  return `Hi ${clientFirstName}! Reminder: ${serviceName} on ${when} with ${businessName}. Reply to confirm or message to reschedule.`
 }
 
-// tiny helper: mark bookings as reminded
+// mark bookings as reminded
 export async function markRemindersSent(bookingIds: string[]) {
   if (!bookingIds.length) return
 

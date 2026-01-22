@@ -51,7 +51,7 @@ export default async function ProMediaDetailPage({ params }: PageProps) {
       <div className="tovis-glass overflow-hidden rounded-card border border-white/10">
         <div className="bg-black/40">
           {isVideo ? (
-            <video src={src} controls className="block w-full max-h-[520px]" />
+            <video src={src} controls className="block w-full max-h-520px" />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img

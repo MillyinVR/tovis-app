@@ -3,19 +3,84 @@
 
 import type { DragEvent } from 'react'
 import type { CalendarEvent, ViewMode, WorkingHoursJson, EntityType } from '../_types'
-import { formatDayLabel, ymdInTimeZone, minutesSinceMidnightInTimeZone } from '../_utils/date'
+import { ymdInTimeZone, minutesSinceMidnightInTimeZone } from '../_utils/date'
 import {
   PX_PER_MINUTE,
   snapMinutes,
   isBlockedEvent,
   extractBlockId,
-  getWorkingWindowForDate,
   computeDurationMinutesFromIso,
 } from '../_utils/calendarMath'
 import { eventChipClassName } from '../_utils/statusStyles'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
+}
+
+type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
+type WorkingHours = Record<string, WorkingHoursDay>
+
+function parseHHMM(v?: string) {
+  if (!v || typeof v !== 'string') return null
+  const m = /^(\d{2}):(\d{2})$/.exec(v.trim())
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  if (hh < 0 || hh > 23) return null
+  if (mm < 0 || mm > 59) return null
+  return { hh, mm }
+}
+
+function formatDayLabelInTimeZone(date: Date, timeZone: string) {
+  // Example: "Mon, Feb 7"
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
+/**
+ * Hour label should represent wall-clock hours for the calendar day.
+ * Using timeZone: 'UTC' prevents the browser timezone from shifting the label.
+ */
+function formatHourLabel(hour24: number) {
+  const d = new Date(Date.UTC(2000, 0, 1, hour24, 0, 0))
+  return new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', hour: 'numeric' })
+    .format(d)
+    .replace(':00', '')
+}
+
+function weekdayKeyInTimeZone(date: Date, timeZone: string): keyof WorkingHours {
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(date).toLowerCase()
+  if (wd.startsWith('mon')) return 'mon'
+  if (wd.startsWith('tue')) return 'tue'
+  if (wd.startsWith('wed')) return 'wed'
+  if (wd.startsWith('thu')) return 'thu'
+  if (wd.startsWith('fri')) return 'fri'
+  if (wd.startsWith('sat')) return 'sat'
+  return 'sun'
+}
+
+function getWorkingWindowForDateInTimeZone(day: Date, workingHours: WorkingHoursJson, timeZone: string) {
+  if (!workingHours || typeof workingHours !== 'object') return null
+  const wh = workingHours as unknown as WorkingHours
+  const key = weekdayKeyInTimeZone(day, timeZone)
+  const rule = wh?.[key]
+  if (!rule || rule.enabled === false) return null
+
+  const s = parseHHMM(rule.start)
+  const e = parseHHMM(rule.end)
+  if (!s || !e) return null
+
+  const startMinutes = s.hh * 60 + s.mm
+  const endMinutes = e.hh * 60 + e.mm
+  if (endMinutes <= startMinutes) return null
+
+  return { startMinutes, endMinutes }
 }
 
 export function DayWeekGrid(props: {
@@ -44,7 +109,7 @@ export function DayWeekGrid(props: {
     visibleDays,
     events,
     workingHours,
-    timeZone,
+    timeZone: timeZoneRaw,
     onClickEvent,
     onCreateForClick,
     onDragStart,
@@ -53,6 +118,9 @@ export function DayWeekGrid(props: {
     suppressClickRef,
     isBusy,
   } = props
+
+  // ✅ Single source of truth for TZ in this component
+  const timeZone = sanitizeTimeZone(timeZoneRaw, 'America/Los_Angeles') || 'America/Los_Angeles'
 
   const hours = Array.from({ length: 24 }, (_, h) => h)
   const totalMinutes = 24 * 60
@@ -95,6 +163,8 @@ export function DayWeekGrid(props: {
     return svc || 'Appointment'
   }
 
+  const todayYmd = ymdInTimeZone(new Date(), timeZone)
+
   return (
     <section className="overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary">
       {/* header row */}
@@ -108,8 +178,10 @@ export function DayWeekGrid(props: {
             key={idx}
             className="px-2 py-2 text-xs font-semibold text-textPrimary"
             style={{ borderLeft: idx === 0 ? undefined : '1px solid rgba(255,255,255,0.08)' }}
+            title={timeZone}
           >
-            {formatDayLabel(d)}
+            {/* ✅ render header label in the passed TZ */}
+            {formatDayLabelInTimeZone(d, timeZone)}
           </div>
         ))}
       </div>
@@ -127,9 +199,8 @@ export function DayWeekGrid(props: {
                 className="absolute left-2 text-xs text-textSecondary"
                 style={{ top: h * 60 * PX_PER_MINUTE, height: 60 * PX_PER_MINUTE, paddingTop: 2 }}
               >
-                {new Date(0, 0, 0, h)
-                  .toLocaleTimeString(undefined, { hour: 'numeric', minute: undefined })
-                  .replace(':00', '')}
+                {/* ✅ browser-proof label */}
+                {formatHourLabel(h)}
               </div>
             ))}
           </div>
@@ -139,22 +210,16 @@ export function DayWeekGrid(props: {
         {visibleDays.map((day, dayIdx) => {
           const dayEvents = eventsForDay(day)
 
-          const todayYmd = ymdInTimeZone(new Date(), timeZone)
           const dayYmd = ymdInTimeZone(day, timeZone)
           const isToday = dayYmd === todayYmd
 
-          const key = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][day.getDay()]
-          const dayConfig = workingHours && (workingHours as any)[key] ? (workingHours as any)[key] : null
-          const dayEnabled = !!dayConfig?.enabled
-          const workingWindow = dayEnabled ? getWorkingWindowForDate(day, workingHours) : null
+          const workingWindow = getWorkingWindowForDateInTimeZone(day, workingHours, timeZone)
+          const dayEnabled = Boolean(workingWindow)
 
           return (
             <div
               key={dayIdx}
-              className={[
-                'relative border-l border-white/10',
-                isToday ? 'bg-bgPrimary' : 'bg-bgPrimary',
-              ].join(' ')}
+              className={['relative border-l border-white/10', isToday ? 'bg-bgPrimary' : 'bg-bgPrimary'].join(' ')}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault()
@@ -175,19 +240,19 @@ export function DayWeekGrid(props: {
             >
               <div className="relative" style={{ height: totalMinutes * PX_PER_MINUTE }}>
                 {/* working-hours shading */}
-                {!dayEnabled && dayConfig && <div className="absolute inset-0 bg-black/20 pointer-events-none" />}
+                {!dayEnabled && <div className="absolute inset-0 pointer-events-none bg-black/20" />}
 
                 {dayEnabled && workingWindow && (
                   <>
                     {workingWindow.startMinutes > 0 && (
                       <div
-                        className="absolute left-0 right-0 bg-black/20 pointer-events-none"
+                        className="absolute left-0 right-0 pointer-events-none bg-black/20"
                         style={{ top: 0, height: workingWindow.startMinutes * PX_PER_MINUTE }}
                       />
                     )}
                     {workingWindow.endMinutes < totalMinutes && (
                       <div
-                        className="absolute left-0 right-0 bg-black/20 pointer-events-none"
+                        className="absolute left-0 right-0 pointer-events-none bg-black/20"
                         style={{
                           top: workingWindow.endMinutes * PX_PER_MINUTE,
                           height: (totalMinutes - workingWindow.endMinutes) * PX_PER_MINUTE,
@@ -263,17 +328,17 @@ export function DayWeekGrid(props: {
                         eventChipClassName(ev),
                       ].join(' ')}
                       style={{ top: top * PX_PER_MINUTE, height: heightMinutes * PX_PER_MINUTE }}
-                      title={isBlock ? 'Drag to move, drag bottom to resize. Click to edit.' : 'Drag to move, drag bottom to resize.'}
+                      title={
+                        isBlock
+                          ? 'Drag to move, drag bottom to resize. Click to edit.'
+                          : 'Drag to move, drag bottom to resize.'
+                      }
                     >
                       {/* client */}
-                      <div className="truncate text-xs font-extrabold leading-4">
-                        {chipPrimary(ev)}
-                      </div>
+                      <div className="truncate text-xs font-extrabold leading-4">{chipPrimary(ev)}</div>
 
                       {/* service */}
-                      <div className="truncate text-[11px] leading-4 text-textSecondary">
-                        {chipSecondary(ev)}
-                      </div>
+                      <div className="truncate text-[11px] leading-4 text-textSecondary">{chipSecondary(ev)}</div>
 
                       {/* resize handle */}
                       <div
@@ -281,13 +346,15 @@ export function DayWeekGrid(props: {
                           e.stopPropagation()
                           e.preventDefault()
                           if (!apiId) return
-                          const rect = (e.currentTarget.parentElement as HTMLDivElement).parentElement!.getBoundingClientRect()
+                          const rect = (e.currentTarget.parentElement as HTMLDivElement)
+                            .parentElement!.getBoundingClientRect()
+
                           onBeginResize({
                             entityType,
                             eventId: ev.id,
                             apiId,
                             day,
-                            startMinutes: top, // use snapped top so resize math matches visuals
+                            startMinutes: top, // snapped top so resize math matches visuals
                             originalDuration: dur,
                             columnTop: rect.top,
                           })

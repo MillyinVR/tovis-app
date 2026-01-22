@@ -17,10 +17,26 @@ export async function getCurrentUser() {
       id: true,
       email: true,
       role: true,
-      createdAt: true,
-      updatedAt: true,
-      clientProfile: true,
-      professionalProfile: true,
+
+      clientProfile: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+        },
+      },
+
+      professionalProfile: {
+        select: {
+          id: true,
+          businessName: true,
+          handle: true,
+          avatarUrl: true,
+          timeZone: true,
+          location: true,
+        },
+      },
     },
   })
 

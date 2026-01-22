@@ -4,8 +4,12 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from '../BookingActions'
 import { moneyToString } from '@/lib/money'
+import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
+
+type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+type SearchParams = Record<string, string | string[] | undefined>
 
 type BookingRow = {
   id: string
@@ -13,11 +17,21 @@ type BookingRow = {
   scheduledFor: Date
   startedAt: Date | null
   finishedAt: Date | null
-  durationMinutesSnapshot: number
-  priceSnapshot: any
-  discountAmount: any | null
-  totalAmount: any | null
-  service: { name: string }
+
+  // Option B truth
+  totalDurationMinutes: number
+  subtotalSnapshot: any
+
+  // For display
+  locationTimeZone: string | null
+
+  // Option B: service items
+  serviceItems: Array<{
+    id: string
+    sortOrder: number
+    service: { id: string; name: string } | null
+  }>
+
   client: {
     id: string
     firstName: string
@@ -26,9 +40,6 @@ type BookingRow = {
     user: { email: string } | null
   }
 }
-
-type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
-type SearchParams = Record<string, string | string[] | undefined>
 
 function firstParam(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
@@ -40,17 +51,17 @@ function normalizeStatusFilter(raw: unknown): StatusFilter {
   return 'ALL'
 }
 
-function isValidIanaTimeZone(tz: string | null | undefined) {
-  if (!tz || typeof tz !== 'string') return false
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return true
-  } catch {
-    return false
-  }
+function normalizeTz(raw: unknown, fallback: string) {
+  const candidate = typeof raw === 'string' ? raw.trim() : ''
+  const cleaned = sanitizeTimeZone(candidate, fallback) || fallback
+  return isValidIanaTimeZone(cleaned) ? cleaned : fallback
 }
 
-/** TZ wall-clock parts for a UTC instant rendered in timeZone */
+/**
+ * Get wall-clock parts for a UTC instant rendered in `timeZone`.
+ * (We keep this logic here because your `lib/timeZone` is for validation/sanitizing,
+ * and we still need day-boundaries without dragging in a whole date library.)
+ */
 function getZonedParts(dateUtc: Date, timeZone: string) {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -61,20 +72,24 @@ function getZonedParts(dateUtc: Date, timeZone: string) {
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
-  })
+    hourCycle: 'h23',
+  } as any)
 
   const parts = dtf.formatToParts(dateUtc)
   const map: Record<string, string> = {}
   for (const p of parts) map[p.type] = p.value
 
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
+  // Some engines can return "24" for hour at midnight edges.
+  let year = Number(map.year)
+  let month = Number(map.month)
+  let day = Number(map.day)
+  let hour = Number(map.hour)
+  const minute = Number(map.minute)
+  const second = Number(map.second)
+
+  if (hour === 24) hour = 0
+
+  return { year, month, day, hour, minute, second }
 }
 
 /** offset minutes between UTC and tz at a given UTC instant */
@@ -130,46 +145,16 @@ function formatStatus(status: string) {
   }
 }
 
-function moneyNumber(maybeMoney: any) {
-  if (maybeMoney == null) return 0
-  if (typeof maybeMoney === 'number') return Number.isFinite(maybeMoney) ? maybeMoney : 0
-  if (typeof maybeMoney === 'string') {
-    const n = Number(maybeMoney)
-    return Number.isFinite(n) ? n : 0
-  }
-  if (typeof maybeMoney?.toNumber === 'function') {
-    const n = maybeMoney.toNumber()
-    return Number.isFinite(n) ? n : 0
-  }
-  try {
-    const n = Number(String(maybeMoney))
-    return Number.isFinite(n) ? n : 0
-  } catch {
-    return 0
-  }
-}
+function bookingTitle(items: BookingRow['serviceItems']) {
+  const names = items
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((i) => i.service?.name)
+    .filter(Boolean) as string[]
 
-function PriceBlock({ b }: { b: BookingRow }) {
-  const baseStr = moneyToString(b.priceSnapshot) ?? '0.00'
-  const discountStr = b.discountAmount != null ? moneyToString(b.discountAmount) ?? '0.00' : null
-  const totalStr = b.totalAmount != null ? moneyToString(b.totalAmount) ?? baseStr : baseStr
-
-  const discountNum = moneyNumber(b.discountAmount)
-
-  if (discountNum > 0) {
-    return (
-      <div className="grid gap-1 text-[12px] text-textSecondary">
-        <div>
-          Base:{' '}
-          <span className="line-through text-textSecondary">${baseStr}</span>
-        </div>
-        <div>Last-minute discount: -${discountStr ?? '0.00'}</div>
-        <div className="font-black text-textPrimary">Total: ${totalStr ?? '0.00'}</div>
-      </div>
-    )
-  }
-
-  return <div className="text-[12px] text-textSecondary">Total: ${totalStr ?? baseStr}</div>
+  if (names.length === 0) return 'Service'
+  if (names.length === 1) return names[0]
+  return `${names[0]} + ${names.length - 1} more`
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -225,7 +210,20 @@ function FilterPills({ active }: { active: StatusFilter }) {
   )
 }
 
-function Section({ title, items, timeZone }: { title: string; items: BookingRow[]; timeZone: string }) {
+function PriceBlock({ subtotalSnapshot }: { subtotalSnapshot: any }) {
+  const subtotalStr = moneyToString(subtotalSnapshot) ?? '0.00'
+  return <div className="text-[12px] text-textSecondary">Total: ${subtotalStr}</div>
+}
+
+function Section({
+  title,
+  items,
+  proTimeZone,
+}: {
+  title: string
+  items: BookingRow[]
+  proTimeZone: string
+}) {
   return (
     <section className="grid gap-3">
       <div className="flex items-end justify-between gap-3">
@@ -239,53 +237,58 @@ function Section({ title, items, timeZone }: { title: string; items: BookingRow[
         </div>
       ) : (
         <div className="grid gap-3">
-          {items.map((b) => (
-            <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className="truncate text-[13px] font-black text-textPrimary">{b.service.name}</div>
-                    <StatusPill status={b.status} />
-                  </div>
+          {items.map((b) => {
+            const apptTz = normalizeTz(b.locationTimeZone, proTimeZone)
 
-                  <div className="mt-1 text-[12px] text-textSecondary">
+            return (
+              <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-[13px] font-black text-textPrimary">{bookingTitle(b.serviceItems)}</div>
+                      <StatusPill status={b.status} />
+                    </div>
+
+                    <div className="mt-1 text-[12px] text-textSecondary">
+                      <a
+                        href={`/pro/clients/${b.client.id}`}
+                        className="font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                      >
+                        {b.client.firstName} {b.client.lastName}
+                      </a>
+                      {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
+                      {b.client.phone ? ` • ${b.client.phone}` : ''}
+                    </div>
+
+                    <div className="mt-2 text-[12px] text-textSecondary">
+                      {formatDate(b.scheduledFor, apptTz)} • {Math.round(b.totalDurationMinutes)} min
+                      {apptTz !== proTimeZone ? <span className="text-textSecondary/70"> · {apptTz}</span> : null}
+                    </div>
+
+                    <div className="mt-2">
+                      <PriceBlock subtotalSnapshot={b.subtotalSnapshot} />
+                    </div>
+
                     <a
-                      href={`/pro/clients/${b.client.id}`}
-                      className="font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                      href={`/pro/bookings/${b.id}`}
+                      className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
                     >
-                      {b.client.firstName} {b.client.lastName}
+                      Details &amp; aftercare
                     </a>
-                    {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
-                    {b.client.phone ? ` • ${b.client.phone}` : ''}
                   </div>
 
-                  <div className="mt-2 text-[12px] text-textSecondary">
-                    {formatDate(b.scheduledFor, timeZone)} • {Math.round(b.durationMinutesSnapshot)} min
+                  <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
+                    <BookingActions
+                      bookingId={b.id}
+                      currentStatus={b.status}
+                      startedAt={b.startedAt ? b.startedAt.toISOString() : null}
+                      finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
+                    />
                   </div>
-
-                  <div className="mt-2">
-                    <PriceBlock b={b} />
-                  </div>
-
-                  <a
-                    href={`/pro/bookings/${b.id}`}
-                    className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
-                  >
-                    Details &amp; aftercare
-                  </a>
-                </div>
-
-                <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
-                  <BookingActions
-                    bookingId={b.id}
-                    currentStatus={b.status}
-                    startedAt={b.startedAt ? b.startedAt.toISOString() : null}
-                    finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
-                  />
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </section>
@@ -293,7 +296,7 @@ function Section({ title, items, timeZone }: { title: string; items: BookingRow[
 }
 
 export default async function ProBookingsPage(props: { searchParams?: Promise<SearchParams> }) {
-  const user = await getCurrentUser()
+  const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/bookings')
   }
@@ -302,12 +305,11 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
   const statusFilter = normalizeStatusFilter(firstParam(sp.status))
 
   const proId = user.professionalProfile.id
-  const timeZone = isValidIanaTimeZone(user.professionalProfile.timeZone)
-    ? user.professionalProfile.timeZone!
-    : 'America/Los_Angeles'
+  const proTimeZone = normalizeTz(user.professionalProfile.timeZone, 'America/Los_Angeles')
 
+  // Grouping boundaries based on the PRO’s timezone
   const nowUtc = new Date()
-  const nowParts = getZonedParts(nowUtc, timeZone)
+  const nowParts = getZonedParts(nowUtc, proTimeZone)
 
   const startOfTodayUtc = zonedTimeToUtc({
     year: nowParts.year,
@@ -315,7 +317,7 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     day: nowParts.day,
     hour: 0,
     minute: 0,
-    timeZone,
+    timeZone: proTimeZone,
   })
 
   const startOfTomorrowUtc = zonedTimeToUtc({
@@ -324,8 +326,10 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     day: nowParts.day + 1,
     hour: 0,
     minute: 0,
-    timeZone,
+    timeZone: proTimeZone,
   })
+
+  const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
 
   const select = {
     id: true,
@@ -333,11 +337,21 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     scheduledFor: true,
     startedAt: true,
     finishedAt: true,
-    durationMinutesSnapshot: true,
-    priceSnapshot: true,
-    discountAmount: true,
-    totalAmount: true,
-    service: { select: { name: true } },
+
+    totalDurationMinutes: true,
+    subtotalSnapshot: true,
+
+    locationTimeZone: true,
+
+    serviceItems: {
+      orderBy: { sortOrder: 'asc' as const },
+      select: {
+        id: true,
+        sortOrder: true,
+        service: { select: { id: true, name: true } },
+      },
+    },
+
     client: {
       select: {
         id: true,
@@ -349,8 +363,6 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     },
   } as const
 
-  const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
-
   const [todayBookings, upcomingBookings, pastBookings] = await Promise.all([
     prisma.booking.findMany({
       where: {
@@ -360,6 +372,7 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       },
       orderBy: { scheduledFor: 'asc' },
       select,
+      take: 500,
     }),
     prisma.booking.findMany({
       where: {
@@ -369,6 +382,7 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       },
       orderBy: { scheduledFor: 'asc' },
       select,
+      take: 500,
     }),
     prisma.booking.findMany({
       where: {
@@ -378,8 +392,16 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       },
       orderBy: { scheduledFor: 'desc' },
       select,
+      take: 500,
     }),
   ])
+
+  // Normalize duration in-case nulls sneak in (they shouldn’t, but humans exist)
+  const coerce = (rows: any[]) =>
+    rows.map((b) => ({
+      ...b,
+      totalDurationMinutes: Number(b.totalDurationMinutes ?? 0) || 0,
+    })) as BookingRow[]
 
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
@@ -388,7 +410,7 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
           <div>
             <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
             <div className="mt-1 text-[12px] text-textSecondary">
-              Today, upcoming, and past. <span className="text-textSecondary/70">({timeZone})</span>
+              Today, upcoming, and past. <span className="text-textSecondary/70">({proTimeZone})</span>
             </div>
           </div>
 
@@ -401,15 +423,15 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
         </div>
 
         <div className="mt-4">
-          <div className="text-[12px] font-black text-textPrimary mb-2">Filter</div>
+          <div className="mb-2 text-[12px] font-black text-textPrimary">Filter</div>
           <FilterPills active={statusFilter} />
         </div>
       </header>
 
       <div className="grid gap-6">
-        <Section title="Today" items={todayBookings as BookingRow[]} timeZone={timeZone} />
-        <Section title="Upcoming" items={upcomingBookings as BookingRow[]} timeZone={timeZone} />
-        <Section title="Past" items={pastBookings as BookingRow[]} timeZone={timeZone} />
+        <Section title="Today" items={coerce(todayBookings)} proTimeZone={proTimeZone} />
+        <Section title="Upcoming" items={coerce(upcomingBookings)} proTimeZone={proTimeZone} />
+        <Section title="Past" items={coerce(pastBookings)} proTimeZone={proTimeZone} />
       </div>
     </main>
   )

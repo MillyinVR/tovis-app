@@ -1,22 +1,29 @@
+// app/api/pro/reminders/[id]/complete/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, pickString, requirePro } from '@/app/api/_utils'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest, { params }: Ctx) {
   try {
-    const { id } = await Promise.resolve(params)
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-    const user = await getCurrentUser()
-    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const { id: rawId } = await Promise.resolve(params)
+    const id = pickString(rawId)
+    if (!id) return jsonFail(400, 'Missing reminder id.')
 
-    const reminder = await prisma.reminder.findUnique({ where: { id } })
+    const reminder = await prisma.reminder.findUnique({
+      where: { id },
+      select: { id: true, professionalId: true },
+    })
 
-    if (!reminder || reminder.professionalId !== user.professionalProfile.id) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!reminder || reminder.professionalId !== professionalId) {
+      return jsonFail(404, 'Not found')
     }
 
     await prisma.reminder.update({
@@ -27,6 +34,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return NextResponse.redirect(new URL('/pro/reminders', req.url))
   } catch (e) {
     console.error('POST /api/pro/reminders/[id]/complete error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

@@ -1,45 +1,29 @@
 // app/api/pro/notifications/summary/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonOk, requirePro } from '@/app/api/_utils'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const user = await getCurrentUser()
+  const auth = await requirePro().catch(() => null)
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ hasUnread: false, count: 0 }, { status: 200 })
+  // If not pro, do NOT error—UI wants quiet summary.
+  if (!auth || auth.res) {
+    return jsonOk({ hasUnread: false, count: 0 }, 200)
   }
 
-  const db: any = prisma
-  const proId = user.professionalProfile.id
+  const professionalId = auth.professionalId
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  // Simple "something needs your attention":
-  // - pending booking requests
-  // - reviews from the last 7 days
   const [pendingCount, recentReviewCount] = await Promise.all([
-    db.booking.count({
-      where: {
-        professionalId: proId,
-        status: 'PENDING',
-      },
+    prisma.booking.count({
+      where: { professionalId, status: 'PENDING' as any },
     }),
-    db.review.count({
-      where: {
-        professionalId: proId,
-        createdAt: {
-          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-        },
-      },
+    prisma.review.count({
+      where: { professionalId, createdAt: { gte: since } },
     }),
   ])
 
   const count = pendingCount + recentReviewCount
-
-  return NextResponse.json(
-    {
-      hasUnread: count > 0,
-      count,
-    },
-    { status: 200 },
-  )
+  return jsonOk({ hasUnread: count > 0, count }, 200)
 }

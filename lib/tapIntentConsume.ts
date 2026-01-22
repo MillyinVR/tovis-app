@@ -15,11 +15,9 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
   const { tapIntentId, userId } = args
 
   // Not from NFC flow, nothing to do
-  if (!tapIntentId) {
-    return { ok: true as const, nextUrl: null as string | null }
-  }
+  if (!tapIntentId) return { ok: true as const, nextUrl: null as string | null }
 
-  const now = new Date()
+  const nowUtc = new Date()
 
   return await prisma.$transaction(async (tx) => {
     const ti = await tx.tapIntent.findUnique({
@@ -38,7 +36,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     if (!ti) return { ok: true as const, nextUrl: null as string | null }
 
     // expired -> ignore gracefully
-    if (ti.expiresAt.getTime() <= now.getTime()) {
+    if (ti.expiresAt.getTime() <= nowUtc.getTime()) {
       return { ok: true as const, nextUrl: null as string | null }
     }
 
@@ -80,9 +78,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
       },
     })
 
-    if (!card || !card.isActive) {
-      return { ok: true as const, nextUrl }
-    }
+    if (!card || !card.isActive) return { ok: true as const, nextUrl }
 
     // Already claimed? Do not re-assign. Just log + move on.
     if (card.claimedAt) {
@@ -113,7 +109,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     const claimed = await tx.nfcCard.updateMany({
       where: { id: card.id, claimedAt: null },
       data: {
-        claimedAt: now,
+        claimedAt: nowUtc,
         claimedByUserId: user.id,
         type: newType,
         professionalId: proId, // only set for PRO

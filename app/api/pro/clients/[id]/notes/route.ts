@@ -1,38 +1,52 @@
-import { NextResponse } from 'next/server'
+// app/api/pro/clients/[id]/notes/route.ts 
+
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
-export async function POST(
-  req: Request,
-  context: { params: Promise<{ id: string }> },
-) {
-  const { id: clientId } = await context.params
-  const user = await getCurrentUser()
+export const dynamic = 'force-dynamic'
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+type Ctx = { params: Promise<{ id: string }> | { id: string } }
+
+const TITLE_MAX = 80
+const BODY_MAX = 4000
+
+export async function POST(req: Request, context: Ctx) {
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
+
+    const { id } = await Promise.resolve((context as any).params)
+    const clientId = pickString(id)
+    if (!clientId) return jsonFail(400, 'Missing client id.')
+
+    const relationship = await prisma.booking.findFirst({
+      where: { professionalId, clientId },
+      select: { id: true },
+    })
+    if (!relationship) return jsonFail(403, 'Forbidden.')
+
+    const body = (await req.json().catch(() => ({}))) as any
+
+    const title = pickString(body?.title)
+    const noteBody = pickString(body?.body)
+
+    if (!noteBody) return jsonFail(400, 'Note body is required.')
+
+    await prisma.clientProfessionalNote.create({
+      data: {
+        clientId,
+        professionalId,
+        title: title ? title.slice(0, TITLE_MAX) : null,
+        body: noteBody.slice(0, BODY_MAX),
+        visibility: 'PROFESSIONALS_ONLY' as any,
+      } as any,
+      select: { id: true },
+    })
+
+    return jsonOk({ ok: true }, 201)
+  } catch (e) {
+    console.error('POST /api/pro/clients/[id]/notes error', e)
+    return jsonFail(500, 'Failed to create note.')
   }
-
-  const { title, body } = await req.json()
-
-  if (!body || !body.trim()) {
-    return NextResponse.json(
-      { error: 'Note body is required.' },
-      { status: 400 },
-    )
-  }
-
-  const db: any = prisma
-
-  await db.clientProfessionalNote.create({
-    data: {
-      clientId,
-      professionalId: user.professionalProfile.id,
-      title: title?.trim() || null,
-      body: body.trim(),
-      visibility: 'PROFESSIONALS_ONLY',
-    },
-  })
-
-  return NextResponse.json({ ok: true })
 }

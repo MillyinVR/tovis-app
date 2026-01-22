@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { moneyToFixed2String } from '@/lib/money/serializeMoney'
+import { moneyToFixed2String } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 

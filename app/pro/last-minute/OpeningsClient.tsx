@@ -1,7 +1,9 @@
+// app/pro/last-minute/OpeningsClient.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 
 type OfferingLite = {
   id: string
@@ -32,15 +34,56 @@ async function safeJson(res: Response) {
   return res.json().catch(() => ({})) as Promise<any>
 }
 
-function toLocalInputValue(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+function getBrowserTimeZone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (tz && isValidIanaTimeZone(tz)) return tz
+  } catch {
+    // ignore
+  }
+  return 'UTC'
 }
 
-function prettyWhen(iso: string) {
-  const d = new Date(iso)
+function clampInt(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.trunc(n)))
+}
+
+function parseDatetimeLocal(value: string) {
+  const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!m) return null
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const hour = Number(m[4])
+  const minute = Number(m[5])
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return { year, month, day, hour, minute }
+}
+
+function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
+  const d = new Date(isoUtc)
+  if (Number.isNaN(d.getTime())) return ''
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const p = getZonedParts(d, tz)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
+}
+
+function datetimeLocalToIso(value: string, timeZone: string) {
+  const parts = parseDatetimeLocal(value)
+  if (!parts) return null
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const utc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
+  return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
+}
+
+function prettyWhenInTimeZone(isoUtc: string, timeZone: string) {
+  const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return 'Invalid date'
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: tz,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -49,12 +92,11 @@ function prettyWhen(iso: string) {
   }).format(d)
 }
 
-function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.trunc(n)))
-}
-
 export default function OpeningsClient({ offerings }: Props) {
   const router = useRouter()
+
+  // Standard: datetime-local is a wall-clock input in browser TZ.
+  const timeZone = useMemo(() => getBrowserTimeZone(), [])
 
   const [items, setItems] = useState<OpeningRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,20 +107,21 @@ export default function OpeningsClient({ offerings }: Props) {
   const defaultOfferingId = offerings[0]?.id ?? ''
   const [offeringId, setOfferingId] = useState(defaultOfferingId)
 
-  const [startAt, setStartAt] = useState(() => {
-    const d = new Date()
-    d.setSeconds(0, 0)
-    d.setMinutes(0)
-    d.setHours(d.getHours() + 1)
-    return toLocalInputValue(d)
+  const [startAtLocal, setStartAtLocal] = useState(() => {
+    // seed: next top-of-hour in browser TZ, but store as datetime-local string
+    const now = new Date()
+    now.setSeconds(0, 0)
+    now.setMinutes(0)
+    now.setHours(now.getHours() + 1)
+    return toDatetimeLocalFromIso(now.toISOString(), timeZone)
   })
 
-  const [endAt, setEndAt] = useState(() => {
-    const d = new Date()
-    d.setSeconds(0, 0)
-    d.setMinutes(0)
-    d.setHours(d.getHours() + 2)
-    return toLocalInputValue(d)
+  const [endAtLocal, setEndAtLocal] = useState(() => {
+    const now = new Date()
+    now.setSeconds(0, 0)
+    now.setMinutes(0)
+    now.setHours(now.getHours() + 2)
+    return toDatetimeLocalFromIso(now.toISOString(), timeZone)
   })
 
   const [useEndAt, setUseEndAt] = useState(true)
@@ -99,7 +142,6 @@ export default function OpeningsClient({ offerings }: Props) {
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Failed to load openings.')
       const list = Array.isArray(data?.openings) ? (data.openings as OpeningRow[]) : []
-      // Keep it stable + sorted
       list.sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt))
       setItems(list)
     } catch (e: any) {
@@ -111,7 +153,7 @@ export default function OpeningsClient({ offerings }: Props) {
   }
 
   useEffect(() => {
-    loadOpenings()
+    void loadOpenings()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -123,14 +165,14 @@ export default function OpeningsClient({ offerings }: Props) {
     try {
       if (!offeringId) throw new Error('Pick an offering first.')
 
-      const s = new Date(startAt)
-      if (Number.isNaN(s.getTime())) throw new Error('Start time is invalid.')
+      const startIso = datetimeLocalToIso(startAtLocal, timeZone)
+      if (!startIso) throw new Error('Start time is invalid.')
 
-      let e: Date | null = null
+      let endIso: string | null = null
       if (useEndAt) {
-        e = new Date(endAt)
-        if (Number.isNaN(e.getTime())) throw new Error('End time is invalid.')
-        if (+e <= +s) throw new Error('End must be after start.')
+        endIso = datetimeLocalToIso(endAtLocal, timeZone)
+        if (!endIso) throw new Error('End time is invalid.')
+        if (+new Date(endIso) <= +new Date(startIso)) throw new Error('End must be after start.')
       }
 
       let dPct: number | null = null
@@ -145,8 +187,8 @@ export default function OpeningsClient({ offerings }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offeringId,
-          startAt: s.toISOString(),
-          endAt: e ? e.toISOString() : null,
+          startAt: startIso,
+          endAt: endIso,
           discountPct: dPct,
           note: note.trim() || null,
         }),
@@ -155,10 +197,8 @@ export default function OpeningsClient({ offerings }: Props) {
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Failed to create opening.')
 
-      // Reset lightweight inputs
       setNote('')
       setDiscountPct('')
-      // Reload so the list includes service/offering joins + counts
       await loadOpenings()
       router.refresh()
     } catch (e: any) {
@@ -193,7 +233,6 @@ export default function OpeningsClient({ offerings }: Props) {
       const res = await fetch(`/api/pro/openings?id=${encodeURIComponent(openingId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Remove failed.')
-      // optimistic remove is fine here
       setItems((prev) => prev.filter((x) => x.id !== openingId))
       router.refresh()
     } catch (e: any) {
@@ -203,23 +242,36 @@ export default function OpeningsClient({ offerings }: Props) {
     }
   }
 
+  // Branding tokens (matches the rest of your pro UI)
+  const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
+  const label = 'text-[12px] font-black text-textPrimary'
+  const hint = 'text-[12px] font-semibold text-textSecondary'
+  const field =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+  const btnPrimary =
+    'rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60'
+  const btnGhost =
+    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass disabled:opacity-60'
+  const btnDanger =
+    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-60'
+
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <div className="grid gap-3">
       {/* Create */}
-      <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, background: '#fff' }}>
-        <div style={{ fontWeight: 900, marginBottom: 6 }}>Create a last-minute opening</div>
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-          Add a slot in the next 48 hours. If you notify, we queue eligible clients. Humans love being “selected.”
+      <section className={card}>
+        <div className="text-[14px] font-black text-textPrimary">Create a last-minute opening</div>
+        <div className={`${hint} mt-1`}>
+          Add a slot in the next 48 hours. Notify queues eligible clients. Humans love feeling chosen.
         </div>
 
-        <div style={{ display: 'grid', gap: 10 }}>
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 12, color: '#6b7280' }}>Offering</span>
+        <div className="mt-4 grid gap-4">
+          <label className="grid gap-2">
+            <span className={label}>Offering</span>
             <select
               value={offeringId}
               disabled={busy || offerings.length === 0}
               onChange={(e) => setOfferingId(e.target.value)}
-              style={{ border: '1px solid #ddd', borderRadius: 10, padding: 10, background: '#fff' }}
+              className={field}
             >
               {offerings.length === 0 ? <option value="">No active offerings</option> : null}
               {offerings.map((o) => (
@@ -230,122 +282,99 @@ export default function OpeningsClient({ offerings }: Props) {
             </select>
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>Start</span>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="grid gap-2">
+              <span className={label}>Start</span>
               <input
                 type="datetime-local"
-                value={startAt}
+                value={startAtLocal}
                 disabled={busy}
-                onChange={(e) => setStartAt(e.target.value)}
-                style={{ border: '1px solid #ddd', borderRadius: 10, padding: 10 }}
+                onChange={(e) => setStartAtLocal(e.target.value)}
+                className={field}
               />
             </label>
 
-            <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>End {useEndAt ? '' : '(optional)'}</span>
+            <label className="grid gap-2">
+              <span className={label}>End {useEndAt ? '' : '(optional)'}</span>
               <input
                 type="datetime-local"
-                value={endAt}
+                value={endAtLocal}
                 disabled={busy || !useEndAt}
-                onChange={(e) => setEndAt(e.target.value)}
-                style={{ border: '1px solid #ddd', borderRadius: 10, padding: 10, opacity: useEndAt ? 1 : 0.6 }}
+                onChange={(e) => setEndAtLocal(e.target.value)}
+                className={[field, !useEndAt ? 'opacity-60' : ''].join(' ')}
               />
             </label>
           </div>
 
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label className="flex items-center gap-2">
             <input
               type="checkbox"
               checked={useEndAt}
               disabled={busy}
               onChange={() => setUseEndAt((v) => !v)}
+              className="accent-accentPrimary"
             />
-            <span style={{ fontSize: 12, color: '#111' }}>Include an end time</span>
+            <span className="text-[12px] font-semibold text-textPrimary">Include an end time</span>
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
-            <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>Discount % (optional)</span>
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="grid gap-2 md:col-span-1">
+              <span className={label}>Discount % (optional)</span>
               <input
                 value={discountPct}
                 disabled={busy}
                 inputMode="numeric"
                 placeholder="e.g. 10"
                 onChange={(e) => setDiscountPct(e.target.value)}
-                style={{ border: '1px solid #ddd', borderRadius: 10, padding: 10 }}
+                className={field}
               />
             </label>
 
-            <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>Note (optional)</span>
+            <label className="grid gap-2 md:col-span-2">
+              <span className={label}>Note (optional)</span>
               <input
                 value={note}
                 disabled={busy}
-                placeholder="e.g. ‘Perfect for trims’"
+                placeholder="e.g. Perfect for trims"
                 onChange={(e) => setNote(e.target.value)}
-                style={{ border: '1px solid #ddd', borderRadius: 10, padding: 10 }}
+                className={field}
               />
             </label>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <button
-              type="button"
-              disabled={busy || offerings.length === 0}
-              onClick={createOpening}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 12,
-                border: '1px solid #111',
-                background: '#111',
-                color: '#fff',
-                fontWeight: 900,
-                cursor: busy || offerings.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: busy || offerings.length === 0 ? 0.6 : 1,
-              }}
-            >
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[12px] font-semibold text-textSecondary">
+              Times shown in <span className="font-black">{sanitizeTimeZone(timeZone, 'UTC')}</span>
+            </div>
+
+            <button type="button" disabled={busy || offerings.length === 0} onClick={createOpening} className={btnPrimary}>
               {busy ? 'Working…' : 'Create opening'}
             </button>
           </div>
 
-          {err ? <div style={{ fontSize: 12, color: '#b91c1c' }}>{err}</div> : null}
+          {err ? <div className="text-[12px] font-black text-toneDanger">{err}</div> : null}
         </div>
-      </div>
+      </section>
 
       {/* List */}
-      <div style={{ border: '1px solid #eee', borderRadius: 14, padding: 12, background: '#fff' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-          <div style={{ fontWeight: 900 }}>Your openings</div>
-          <button
-            type="button"
-            disabled={loading || busy}
-            onClick={loadOpenings}
-            style={{
-              all: 'unset',
-              cursor: loading || busy ? 'default' : 'pointer',
-              fontSize: 12,
-              fontWeight: 900,
-              color: '#111',
-              opacity: loading || busy ? 0.6 : 1,
-            }}
-          >
+      <section className={card}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="text-[14px] font-black text-textPrimary">Your openings</div>
+          <button type="button" disabled={loading || busy} onClick={loadOpenings} className={btnGhost}>
             Refresh
           </button>
         </div>
 
-        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, marginBottom: 10 }}>
-          Next 48 hours. Use “Notify clients” to queue eligible recipients.
-        </div>
+        <div className={`${hint} mt-1`}>Next 48 hours. Use “Notify clients” to queue eligible recipients.</div>
 
-        {loading ? (
-          <div style={{ fontSize: 12, color: '#6b7280' }}>Loading…</div>
-        ) : items.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#6b7280' }}>No openings yet.</div>
-        ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {items.map((o) => {
-              const when = prettyWhen(o.startAt)
+        <div className="mt-4 grid gap-3">
+          {loading ? (
+            <div className={hint}>Loading…</div>
+          ) : items.length === 0 ? (
+            <div className={hint}>No openings yet.</div>
+          ) : (
+            items.map((o) => {
+              const when = prettyWhenInTimeZone(o.startAt, timeZone)
               const svc =
                 o.service?.name ||
                 (o.offeringId ? offeringLabelById.get(o.offeringId)?.split(' · ')[0] : null) ||
@@ -353,87 +382,55 @@ export default function OpeningsClient({ offerings }: Props) {
                 'Service'
 
               const disc = o.discountPct != null ? `${o.discountPct}% off` : null
-              const status = String(o.status || 'UNKNOWN')
+              const status = String(o.status || 'UNKNOWN').toUpperCase()
               const notifCount = o._count?.notifications ?? 0
 
               return (
-                <div
-                  key={o.id}
-                  style={{
-                    border: '1px solid #eee',
-                    borderRadius: 12,
-                    padding: 10,
-                    display: 'grid',
-                    gap: 8,
-                    background: '#fff',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-                    <div style={{ fontWeight: 900, fontSize: 13, minWidth: 0 }}>
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{svc}</span>
-                      <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>{when}</span>
+                <div key={o.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-black text-textPrimary truncate">{svc}</div>
+                      <div className="text-[12px] font-semibold text-textSecondary">
+                        {when} · {sanitizeTimeZone(timeZone, 'UTC')}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: '#6b7280' }}>
+
+                    <div className="text-[12px] font-semibold text-textSecondary">
                       {status}
                       {notifCount ? ` · ${notifCount} notified` : ''}
                     </div>
                   </div>
 
                   {disc || o.note ? (
-                    <div style={{ fontSize: 12, color: '#6b7280' }}>
+                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">
                       {disc ? <span>{disc}</span> : null}
                       {disc && o.note ? <span> · </span> : null}
                       {o.note ? <span>{o.note}</span> : null}
                     </div>
                   ) : null}
 
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
                       disabled={busy || status !== 'ACTIVE'}
                       onClick={() => notifyOpening(o.id)}
-                      style={{
-                        padding: '8px 10px',
-                        borderRadius: 999,
-                        border: '1px solid #111',
-                        background: '#111',
-                        color: '#fff',
-                        fontWeight: 900,
-                        fontSize: 12,
-                        cursor: busy || status !== 'ACTIVE' ? 'not-allowed' : 'pointer',
-                        opacity: busy || status !== 'ACTIVE' ? 0.5 : 1,
-                      }}
+                      className={btnPrimary}
                     >
                       Notify clients
                     </button>
 
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => cancelOpening(o.id)}
-                      style={{
-                        padding: '8px 10px',
-                        borderRadius: 999,
-                        border: '1px solid #b91c1c',
-                        background: '#fff',
-                        color: '#b91c1c',
-                        fontWeight: 900,
-                        fontSize: 12,
-                        cursor: busy ? 'not-allowed' : 'pointer',
-                        opacity: busy ? 0.6 : 1,
-                      }}
-                    >
+                    <button type="button" disabled={busy} onClick={() => cancelOpening(o.id)} className={btnDanger}>
                       Remove
                     </button>
                   </div>
                 </div>
               )
-            })}
-          </div>
-        )}
+            })
+          )}
 
-        {err ? <div style={{ marginTop: 10, fontSize: 12, color: '#b91c1c' }}>{err}</div> : null}
-      </div>
+          {err ? <div className="text-[12px] font-black text-toneDanger">{err}</div> : null}
+        </div>
+      </section>
     </div>
   )
 }

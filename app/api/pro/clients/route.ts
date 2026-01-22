@@ -1,98 +1,99 @@
+// app/api/pro/clients/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro, pickString, lower } from '@/app/api/_utils'
 import crypto from 'crypto'
+
+export const dynamic = 'force-dynamic'
+
+function normalizeEmail(v: unknown) {
+  const s = pickString(v)
+  if (!s) return null
+  return lower(s)
+}
 
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser()
+    const auth = await requirePro()
+    if (auth.res) return auth.res
 
-    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
+    const body = (await request.json().catch(() => ({}))) as any
 
-    const db: any = prisma
-    const body = await request.json()
-
-    const { firstName, lastName, email, phone } = body as {
-      firstName?: string
-      lastName?: string
-      email?: string
-      phone?: string | null
-    }
+    const firstName = pickString(body?.firstName)
+    const lastName = pickString(body?.lastName)
+    const email = normalizeEmail(body?.email)
+    const phone = pickString(body?.phone)
 
     if (!firstName || !lastName || !email) {
-      return NextResponse.json(
-        { error: 'First name, last name, and email are required.' },
-        { status: 400 },
-      )
+      return jsonFail(400, 'First name, last name, and email are required.')
     }
 
-    const normalizedEmail = String(email).toLowerCase().trim()
-
-    // Check if user already exists
-    let clientUser = await db.user.findUnique({
-      where: { email: normalizedEmail },
-    })
-
-    if (clientUser && clientUser.role !== 'CLIENT') {
-      return NextResponse.json(
-        { error: 'This email is already used by a non-client account.' },
-        { status: 400 },
-      )
-    }
-
-    if (!clientUser) {
-      // Create a "shadow" client user with random password
-      const randomPassword = crypto.randomBytes(16).toString('hex')
-
-      clientUser = await db.user.create({
-        data: {
-          email: normalizedEmail,
-          password: randomPassword, // later we can migrate them to real login / reset
-          role: 'CLIENT',
-        },
+    const result = await prisma.$transaction(async (tx) => {
+      const existingUser = await tx.user.findUnique({
+        where: { email },
+        select: { id: true, role: true, email: true },
       })
-    }
 
-    // Check if they already have a client profile
-    let clientProfile = await db.clientProfile.findUnique({
-      where: { userId: clientUser.id },
-    })
+      if (existingUser && existingUser.role !== 'CLIENT') {
+        return { ok: false as const, status: 400, error: 'This email is already used by a non-client account.' }
+      }
 
-    if (!clientProfile) {
-      clientProfile = await db.clientProfile.create({
-  data: {
-    userId: clientUser.id,
-    firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    phone: phone ? String(phone).trim() : null,
-  },
-})
+      const clientUser =
+        existingUser ??
+        (await tx.user.create({
+          data: {
+            email,
+            password: crypto.randomBytes(16).toString('hex'),
+            role: 'CLIENT',
+          } as any,
+          select: { id: true, email: true, role: true },
+        }))
 
-    } else {
-      // Update profile + ensure it's linked to this pro
-      clientProfile = await db.clientProfile.update({
-  where: { id: clientProfile.id },
-  data: {
-    firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    phone: phone ? String(phone).trim() : null,
-  },
-})
+      const existingProfile = await tx.clientProfile.findUnique({
+        where: { userId: clientUser.id },
+        select: { id: true },
+      })
 
-    }
+      const clientProfile = existingProfile
+        ? await tx.clientProfile.update({
+            where: { id: existingProfile.id },
+            data: {
+              firstName,
+              lastName,
+              phone: phone ?? null,
+            },
+            select: { id: true, userId: true },
+          })
+        : await tx.clientProfile.create({
+            data: {
+              userId: clientUser.id,
+              firstName,
+              lastName,
+              phone: phone ?? null,
+            },
+            select: { id: true, userId: true },
+          })
 
-    return NextResponse.json(
-      {
-        id: clientProfile.id,
+      return {
+        ok: true as const,
+        clientProfileId: clientProfile.id,
         userId: clientUser.id,
         email: clientUser.email,
+      }
+    })
+
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+
+    return jsonOk(
+      {
+        id: result.clientProfileId,
+        userId: result.userId,
+        email: result.email,
       },
-      { status: 201 },
+      201,
     )
   } catch (error) {
-    console.error('Create client error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('POST /api/pro/clients error', error)
+    return jsonFail(500, 'Internal server error')
   }
 }

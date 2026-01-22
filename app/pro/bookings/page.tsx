@@ -5,6 +5,8 @@ import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
 
+import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+
 export const dynamic = 'force-dynamic'
 
 type BookingRow = {
@@ -27,69 +29,17 @@ type BookingRow = {
   }
 }
 
-function isValidIanaTimeZone(tz: string | null | undefined) {
-  if (!tz || typeof tz !== 'string') return false
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return true
-  } catch {
-    return false
-  }
+type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+type SearchParams = Record<string, string | string[] | undefined>
+
+function firstParam(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
 }
 
-/** TZ wall-clock parts for a UTC instant rendered in timeZone */
-function getZonedParts(dateUtc: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
-}
-
-/** offset minutes between UTC and tz at a given UTC instant */
-function getTimeZoneOffsetMinutes(dateUtc: Date, timeZone: string) {
-  const z = getZonedParts(dateUtc, timeZone)
-  const asIfUtc = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, z.second)
-  return Math.round((asIfUtc - dateUtc.getTime()) / 60_000)
-}
-
-/** Convert a wall-clock time in timeZone into UTC Date (two-pass for DST) */
-function zonedTimeToUtc(args: {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  timeZone: string
-}) {
-  const { year, month, day, hour, minute, timeZone } = args
-
-  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
-  const offset1 = getTimeZoneOffsetMinutes(guess, timeZone)
-  guess = new Date(guess.getTime() - offset1 * 60_000)
-
-  const offset2 = getTimeZoneOffsetMinutes(guess, timeZone)
-  if (offset2 !== offset1) guess = new Date(guess.getTime() - (offset2 - offset1) * 60_000)
-
-  return guess
+function normalizeStatusFilter(raw: unknown): StatusFilter {
+  const s = String(raw || '').toUpperCase().trim()
+  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') return s
+  return 'ALL'
 }
 
 function formatDate(d: Date, timeZone: string) {
@@ -147,8 +97,7 @@ function PriceBlock({ b }: { b: BookingRow }) {
     return (
       <div className="grid gap-1 text-[12px] text-textSecondary">
         <div>
-          Base:{' '}
-          <span className="line-through text-textSecondary">${baseStr}</span>
+          Base: <span className="line-through text-textSecondary">${baseStr}</span>
         </div>
         <div>Last-minute discount: -${discountStr ?? '0.00'}</div>
         <div className="font-black text-textPrimary">Total: ${totalStr ?? '0.00'}</div>
@@ -176,6 +125,39 @@ function StatusPill({ status }: { status: string }) {
     <span className={['inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black', tone].join(' ')}>
       {formatStatus(s)}
     </span>
+  )
+}
+
+function FilterPills({ active }: { active: StatusFilter }) {
+  const pills: Array<{ key: StatusFilter; label: string }> = [
+    { key: 'ALL', label: 'All' },
+    { key: 'PENDING', label: 'Pending' },
+    { key: 'ACCEPTED', label: 'Accepted' },
+    { key: 'COMPLETED', label: 'Completed' },
+    { key: 'CANCELLED', label: 'Cancelled' },
+  ]
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {pills.map((p) => {
+        const isActive = active === p.key
+        const href = p.key === 'ALL' ? '/pro/bookings' : `/pro/bookings?status=${encodeURIComponent(p.key)}`
+        return (
+          <a
+            key={p.key}
+            href={href}
+            className={[
+              'rounded-full border px-4 py-2 text-[12px] font-black transition',
+              isActive
+                ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
+                : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+            ].join(' ')}
+          >
+            {p.label}
+          </a>
+        )
+      })}
+    </div>
   )
 }
 
@@ -246,18 +228,18 @@ function Section({ title, items, timeZone }: { title: string; items: BookingRow[
   )
 }
 
-export default async function ProBookingsPage() {
+export default async function ProBookingsPage(props: { searchParams?: Promise<SearchParams> }) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/bookings')
   }
 
-  const proId = user.professionalProfile.id
-  const timeZone = isValidIanaTimeZone(user.professionalProfile.timeZone)
-    ? user.professionalProfile.timeZone!
-    : 'America/Los_Angeles'
+  const sp = (await props.searchParams?.catch(() => ({} as SearchParams))) ?? ({} as SearchParams)
+  const statusFilter = normalizeStatusFilter(firstParam(sp.status))
 
-  // ---- Pro-timezone day bucketing (fixes "already January" + wrong "today") ----
+  const proId = user.professionalProfile.id
+  const timeZone = sanitizeTimeZone(user.professionalProfile.timeZone, 'America/Los_Angeles')
+
   const nowUtc = new Date()
   const nowParts = getZonedParts(nowUtc, timeZone)
 
@@ -267,6 +249,7 @@ export default async function ProBookingsPage() {
     day: nowParts.day,
     hour: 0,
     minute: 0,
+    second: 0,
     timeZone,
   })
 
@@ -276,6 +259,7 @@ export default async function ProBookingsPage() {
     day: nowParts.day + 1,
     hour: 0,
     minute: 0,
+    second: 0,
     timeZone,
   })
 
@@ -301,10 +285,13 @@ export default async function ProBookingsPage() {
     },
   } as const
 
+  const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
+
   const [todayBookings, upcomingBookings, pastBookings] = await Promise.all([
     prisma.booking.findMany({
       where: {
         professionalId: proId,
+        ...statusWhere,
         scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc },
       },
       orderBy: { scheduledFor: 'asc' },
@@ -313,6 +300,7 @@ export default async function ProBookingsPage() {
     prisma.booking.findMany({
       where: {
         professionalId: proId,
+        ...statusWhere,
         scheduledFor: { gte: startOfTomorrowUtc },
       },
       orderBy: { scheduledFor: 'asc' },
@@ -321,6 +309,7 @@ export default async function ProBookingsPage() {
     prisma.booking.findMany({
       where: {
         professionalId: proId,
+        ...statusWhere,
         scheduledFor: { lt: startOfTodayUtc },
       },
       orderBy: { scheduledFor: 'desc' },
@@ -345,6 +334,11 @@ export default async function ProBookingsPage() {
           >
             + New booking
           </a>
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-2 text-[12px] font-black text-textPrimary">Filter</div>
+          <FilterPills active={statusFilter} />
         </div>
       </header>
 

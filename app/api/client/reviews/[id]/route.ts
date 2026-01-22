@@ -1,7 +1,7 @@
 // app/api/client/reviews/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,10 +13,6 @@ type UpdateReviewBody = {
 
 const HEADLINE_MAX = 120
 const BODY_MAX = 4000
-
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
 
 function parseRating(x: unknown): number | undefined | 'invalid' {
   if (x === undefined) return undefined
@@ -47,41 +43,32 @@ function normalizeText(
 
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
+
     const { id } = await context.params
     const reviewId = pickString(id)
-    if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
-
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!reviewId) return jsonFail(400, 'Missing review id.')
 
     const existing = await prisma.review.findUnique({
       where: { id: reviewId },
       select: { id: true, clientId: true },
     })
 
-    if (!existing) return NextResponse.json({ error: 'Review not found.' }, { status: 404 })
-    if (existing.clientId !== user.clientProfile.id) {
-      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
-    }
+    if (!existing) return jsonFail(404, 'Review not found.')
+    if (existing.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
     const body = (await req.json().catch(() => ({}))) as UpdateReviewBody
 
     const ratingParsed = parseRating(body.rating)
-    if (ratingParsed === 'invalid') {
-      return NextResponse.json({ error: 'Rating must be an integer 1–5.' }, { status: 400 })
-    }
+    if (ratingParsed === 'invalid') return jsonFail(400, 'Rating must be an integer 1–5.')
 
     const headlineNorm = normalizeText(body.headline, HEADLINE_MAX)
-    if ('invalid' in headlineNorm) {
-      return NextResponse.json({ error: `Headline: ${headlineNorm.invalid}` }, { status: 400 })
-    }
+    if ('invalid' in headlineNorm) return jsonFail(400, `Headline: ${headlineNorm.invalid}`)
 
     const bodyNorm = normalizeText(body.body, BODY_MAX)
-    if ('invalid' in bodyNorm) {
-      return NextResponse.json({ error: `Body: ${bodyNorm.invalid}` }, { status: 400 })
-    }
+    if ('invalid' in bodyNorm) return jsonFail(400, `Body: ${bodyNorm.invalid}`)
 
     const hasAnyChange =
       ratingParsed !== undefined || !('unset' in headlineNorm) || !('unset' in bodyNorm)
@@ -91,7 +78,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
         where: { id: reviewId },
         include: { mediaAssets: true },
       })
-      return NextResponse.json({ ok: true, review: current }, { status: 200 })
+      return jsonOk({ review: current })
     }
 
     const updated = await prisma.review.update({
@@ -104,35 +91,31 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       include: { mediaAssets: true },
     })
 
-    return NextResponse.json({ ok: true, review: updated }, { status: 200 })
+    return jsonOk({ review: updated })
   } catch (e) {
     console.error('PATCH /api/client/reviews/[id] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }
 
 export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
+
     const { id } = await context.params
     const reviewId = pickString(id)
-    if (!reviewId) return NextResponse.json({ error: 'Missing review id.' }, { status: 400 })
-
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!reviewId) return jsonFail(400, 'Missing review id.')
 
     const review = await prisma.review.findUnique({
       where: { id: reviewId },
       select: { id: true, clientId: true },
     })
 
-    if (!review) return NextResponse.json({ error: 'Review not found.' }, { status: 404 })
-    if (review.clientId !== user.clientProfile.id) {
-      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 })
-    }
+    if (!review) return jsonFail(404, 'Review not found.')
+    if (review.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    // 🔒 Server-side lock enforcement (don’t trust the UI)
     const lockedCount = await prisma.mediaAsset.count({
       where: {
         reviewId: review.id,
@@ -141,24 +124,20 @@ export async function DELETE(_req: NextRequest, context: { params: Promise<{ id:
     })
 
     if (lockedCount > 0) {
-      return NextResponse.json(
-        { error: `You can’t delete this review because ${lockedCount} media item(s) are used in portfolio/Looks.` },
-        { status: 409 },
+      return jsonFail(
+        409,
+        `You can’t delete this review because ${lockedCount} media item(s) are used in portfolio/Looks.`,
       )
     }
 
     await prisma.$transaction(async (tx) => {
-      // If the review owns media, delete it. Don’t “orphan” junk records.
-      await tx.mediaAsset.deleteMany({
-        where: { reviewId: review.id },
-      })
-
+      await tx.mediaAsset.deleteMany({ where: { reviewId: review.id } })
       await tx.review.delete({ where: { id: review.id } })
     })
 
-    return NextResponse.json({ ok: true }, { status: 200 })
+    return jsonOk({})
   } catch (e) {
     console.error('DELETE /api/client/reviews/[id] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

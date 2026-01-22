@@ -1,10 +1,15 @@
 // app/api/pro/profile/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { Prisma } from '@prisma/client'
 
-function pickString(v: unknown) {
-  return typeof v === 'string' ? v.trim() : null
+export const dynamic = 'force-dynamic'
+
+function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
+  if (v === undefined) return undefined
+  if (typeof v !== 'string') return undefined
+  const t = v.trim()
+  return t ? t : undefined
 }
 
 function normalizeHandle(raw: string) {
@@ -20,23 +25,25 @@ function isValidHandleNormalized(h: string) {
 
 export async function PATCH(req: Request) {
   try {
-    const user = await getCurrentUser()
-    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proProfileId = auth.professionalId
 
-    const body = await req.json().catch(() => ({}))
+    const body = await req.json().catch(() => ({} as any))
 
-    const businessName = pickString(body.businessName)
-    const bio = pickString(body.bio)
-    const location = pickString(body.location)
-    const avatarUrl = pickString(body.avatarUrl)
+    // IMPORTANT:
+    // - For required string fields in Prisma, NEVER pass null.
+    // - If UI sends empty string, we treat as "no update".
+    const businessName = pickNonEmptyStringOrUndefined(body.businessName)
+    const bio = pickNonEmptyStringOrUndefined(body.bio)
+    const location = pickNonEmptyStringOrUndefined(body.location)
+    const avatarUrl = pickNonEmptyStringOrUndefined(body.avatarUrl)
 
     const professionType = typeof body.professionType === 'string' ? body.professionType : undefined
 
     // Handle (optional)
     // - send handle: "my_name" to set
-    // - send handle: "" to clear
+    // - send handle: "" to clear (null)
     const handleRaw = typeof body.handle === 'string' ? body.handle : undefined
     const wantsHandleUpdate = handleRaw !== undefined
 
@@ -53,41 +60,36 @@ export async function PATCH(req: Request) {
       } else {
         const normalized = normalizeHandle(trimmed)
         if (!isValidHandleNormalized(normalized)) {
-          return NextResponse.json(
-            { error: 'Handle must be 3-20 chars and use only letters, numbers, ., _, or -' },
-            { status: 400 },
-          )
+          return jsonFail(400, 'Handle must be 3-20 chars and use only letters, numbers, ., _, or -')
         }
 
-        // Collision check (case-insensitive via normalized)
         const existing = await prisma.professionalProfile.findFirst({
           where: {
             handleNormalized: normalized,
-            id: { not: user.professionalProfile.id },
+            id: { not: proProfileId },
           },
           select: { id: true },
         })
 
-        if (existing) {
-          return NextResponse.json({ error: 'That handle is taken.' }, { status: 409 })
-        }
+        if (existing) return jsonFail(409, 'That handle is taken.')
 
-        // store display handle however you want (you can keep original casing later if you want)
         handle = normalized
         handleNormalized = normalized
       }
     }
 
+    const data: Prisma.ProfessionalProfileUpdateInput = {
+      ...(businessName !== undefined ? { businessName } : {}),
+      ...(bio !== undefined ? { bio } : {}),
+      ...(location !== undefined ? { location } : {}),
+      ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+      ...(professionType !== undefined ? { professionType: professionType as any } : {}),
+      ...(wantsHandleUpdate ? { handle, handleNormalized } : {}),
+    }
+
     const updated = await prisma.professionalProfile.update({
-      where: { id: user.professionalProfile.id },
-      data: {
-        ...(businessName !== null ? { businessName } : {}),
-        ...(bio !== null ? { bio } : {}),
-        ...(location !== null ? { location } : {}),
-        ...(avatarUrl !== null ? { avatarUrl } : {}),
-        ...(professionType !== undefined ? { professionType: professionType as any } : {}),
-        ...(wantsHandleUpdate ? { handle, handleNormalized } : {}),
-      },
+      where: { id: proProfileId },
+      data,
       select: {
         id: true,
         businessName: true,
@@ -99,9 +101,9 @@ export async function PATCH(req: Request) {
       },
     })
 
-    return NextResponse.json({ ok: true, profile: updated }, { status: 200 })
+    return jsonOk({ ok: true, profile: updated }, 200)
   } catch (e) {
     console.error('PATCH /api/pro/profile error', e)
-    return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 })
+    return jsonFail(500, 'Failed to update profile')
   }
 }

@@ -1,5 +1,4 @@
 // app/professionals/[id]/FavoriteButton.tsx
-
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
@@ -12,11 +11,11 @@ export default function FavoriteButton({
 }: {
   professionalId: string
   initialFavorited: boolean
-  initialCount: number
+  initialCount?: number | null
   disabledReason?: string // e.g. "Log in to favorite"
 }) {
-  const [favorited, setFavorited] = useState<boolean>(initialFavorited)
-  const [count, setCount] = useState<number>(Math.max(0, initialCount || 0))
+  const [favorited, setFavorited] = useState<boolean>(Boolean(initialFavorited))
+  const [count, setCount] = useState<number>(Math.max(0, Number(initialCount ?? 0) || 0))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -51,23 +50,20 @@ export default function FavoriteButton({
     setCount((c) => Math.max(0, c + (next ? 1 : -1)))
 
     try {
-      const res = await fetch(`/api/professionals/${professionalId}/favorite`, {
+      const res = await fetch(`/api/professionals/${encodeURIComponent(professionalId)}/favorite`, {
         method: next ? 'POST' : 'DELETE',
       })
 
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        const msg =
-          typeof data?.error === 'string'
-            ? data.error
-            : `Failed to update favorite (${res.status})`
+        const msg = typeof data?.error === 'string' ? data.error : `Failed to update favorite (${res.status})`
         throw new Error(msg)
       }
 
       // server truth
-      setFavorited(!!data.favorited)
-      if (typeof data.count === 'number') setCount(Math.max(0, data.count))
+      setFavorited(Boolean(data?.favorited))
+      if (typeof data?.count === 'number') setCount(Math.max(0, data.count))
     } catch (e: any) {
       // rollback
       setFavorited(!next)
@@ -78,49 +74,45 @@ export default function FavoriteButton({
     }
   }
 
+  const title = disabledReason ? disabledReason : favorited ? 'Unfavorite' : 'Favorite'
+
   return (
-    <div style={{ display: 'grid', justifyItems: 'center', gap: 4 }}>
+    <div className="grid justify-items-center gap-1">
       <button
         type="button"
         onClick={toggle}
         disabled={loading}
         aria-pressed={favorited}
-        title={
-          disabledReason
-            ? disabledReason
-            : favorited
-              ? 'Unfavorite'
-              : 'Favorite'
-        }
-        style={{
-          border: 'none',
-          background: 'transparent',
-          display: 'grid',
-          justifyItems: 'center',
-          gap: 4,
-          cursor: loading ? 'not-allowed' : 'pointer',
-          opacity: loading ? 0.75 : 1,
-        }}
+        title={title}
+        className={[
+          'tovis-glass grid justify-items-center gap-1 rounded-full border px-3 py-2 transition',
+          'border-white/10 bg-bgPrimary/25 hover:border-white/20 hover:bg-white/5',
+          loading ? 'opacity-75 cursor-not-allowed' : 'cursor-pointer',
+        ].join(' ')}
       >
-        <div style={{ fontSize: 22, lineHeight: 1 }}>
+        <div
+          className={[
+            'grid h-9 w-9 place-items-center rounded-full border text-[18px] font-black transition',
+            favorited
+              ? 'border-accentPrimary/40 bg-accentPrimary/15 text-accentPrimary'
+              : 'border-white/10 bg-bgSecondary text-textPrimary',
+          ].join(' ')}
+          aria-hidden="true"
+        >
           {favorited ? '♥' : '♡'}
         </div>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>{count}</div>
+
+        <div className="text-[11px] font-extrabold text-textSecondary">{count}</div>
       </button>
 
-      {error && (
+      {error ? (
         <div
           aria-live="polite"
-          style={{
-            fontSize: 11,
-            color: '#b91c1c',
-            maxWidth: 120,
-            textAlign: 'center',
-          }}
+          className="tovis-glass-soft max-w-160px rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-center text-[11px] font-semibold text-toneDanger"
         >
           {error}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

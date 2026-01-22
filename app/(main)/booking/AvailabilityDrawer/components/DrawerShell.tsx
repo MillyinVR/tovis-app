@@ -56,7 +56,13 @@ export default function DrawerShell({
   const ui = (
     <div style={overlayRootStyle}>
       <button type="button" aria-label="Close availability" onClick={onClose} style={scrimStyle} />
-      <div className="tovis-glass" style={sheetWrapStyle} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="tovis-glass"
+        style={sheetWrapStyle}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         {header}
         {children}
         {footer}

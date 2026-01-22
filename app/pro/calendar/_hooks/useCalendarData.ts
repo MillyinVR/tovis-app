@@ -16,19 +16,7 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 import { safeJson } from '../_utils/http'
-import {
-  startOfDay,
-  startOfMonth,
-  startOfWeek,
-  toDateInputValue,
-  toIso,
-  toTimeInputValue,
-  roundUpToNext15,
-  clamp,
-  isValidIanaTimeZone,
-  startOfDayUtcInTimeZone,
-  zonedToUtc,
-} from '../_utils/date'
+import { startOfDay, startOfMonth, startOfWeek, toDateInputValue, toIso, toTimeInputValue, roundUpToNext15, clamp } from '../_utils/date'
 import {
   PX_PER_MINUTE,
   SNAP_MINUTES,
@@ -40,8 +28,16 @@ import {
   blockToEvent,
   isOutsideWorkingHours,
 } from '../_utils/calendarMath'
+import {
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  startOfDayUtcInTimeZone,
+  zonedTimeToUtc,
+  utcFromDayAndMinutesInTimeZone,
+} from '@/lib/timeZone'
 
 type Args = { view: ViewMode; currentDate: Date }
+type LocationType = 'SALON' | 'MOBILE'
 
 function getBrowserTimeZone(): string {
   try {
@@ -53,41 +49,16 @@ function getBrowserTimeZone(): string {
   return 'UTC'
 }
 
-function dtfPartsInTimeZone(date: Date, timeZone: string) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = dtf.formatToParts(date)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  }
+// Anchor a "day" to local noon to avoid DST edges for weekday math.
+function anchorDayLocalNoon(year: number, month1: number, day: number) {
+  return new Date(year, month1 - 1, day, 12, 0, 0, 0)
 }
 
-/**
- * ✅ IMPORTANT:
- * The `day` we get from the grid is a browser-local Date. We must not treat its
- * calendar day as "the pro's day". Instead, derive the pro-local Y/M/D from it
- * using Intl in the pro timezone, then convert minutes to UTC via zonedToUtc.
- */
-function utcFromProDayAndMinutes(dayFromGrid: Date, minutes: number, timeZone: string) {
-  const p = dtfPartsInTimeZone(dayFromGrid, timeZone)
-  const hh = Math.floor(minutes / 60)
-  const mm = minutes % 60
-  return zonedToUtc({ year: p.year, month: p.month, day: p.day, hour: hh, minute: mm }, timeZone)
+function pickLocationType(canSalon: boolean, canMobile: boolean, preferred?: LocationType): LocationType {
+  if (preferred && ((preferred === 'SALON' && canSalon) || (preferred === 'MOBILE' && canMobile))) return preferred
+  if (canSalon) return 'SALON'
+  if (canMobile) return 'MOBILE'
+  return 'SALON'
 }
 
 export function useCalendarData({ view, currentDate }: Args) {
@@ -97,12 +68,17 @@ export function useCalendarData({ view, currentDate }: Args) {
     eventsRef.current = events
   }, [events])
 
-  // default: browser TZ (good). later replaced by API pro TZ if present.
+  // default: browser TZ, later replaced by API TZ
   const [timeZone, setTimeZone] = useState<string>(getBrowserTimeZone())
   const [needsTimeZoneSetup, setNeedsTimeZoneSetup] = useState(false)
   const tzSetupSavedRef = useRef(false)
 
-  const [workingHours, setWorkingHours] = useState<WorkingHoursJson>(null)
+  // Working hours are now per-locationType (SALON vs MOBILE)
+  const [canSalon, setCanSalon] = useState(true)
+  const [canMobile, setCanMobile] = useState(false)
+  const [activeLocationType, setActiveLocationType] = useState<LocationType>('SALON')
+
+  const [workingHours, setWorkingHours] = useState<WorkingHoursJson>(null) // hours for ACTIVE locationType
   const [stats, setStats] = useState<CalendarStats>(null)
 
   const [loading, setLoading] = useState(true)
@@ -181,6 +157,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     }, 250)
   }
 
+  // Prevent race conditions (stale responses overwriting fresh state)
+  const loadSeqRef = useRef(0)
+
   useEffect(() => {
     return () => {
       if (suppressClickTimerRef.current) window.clearTimeout(suppressClickTimerRef.current)
@@ -204,20 +183,22 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   function rangeForViewUtcInProTz(v: ViewMode, d: Date, tz: string) {
+    const safeTz = sanitizeTimeZone(tz, 'UTC')
+
     if (v === 'day') {
       const fromLocal = startOfDay(d)
-      const from = startOfDayUtcInTimeZone(fromLocal, tz)
+      const from = startOfDayUtcInTimeZone(fromLocal, safeTz)
       const to = new Date(from.getTime() + 24 * 60 * 60_000)
       return { from, to }
     }
     if (v === 'week') {
       const fromLocal = startOfWeek(d)
-      const from = startOfDayUtcInTimeZone(fromLocal, tz)
+      const from = startOfDayUtcInTimeZone(fromLocal, safeTz)
       const to = new Date(from.getTime() + 7 * 24 * 60 * 60_000)
       return { from, to }
     }
     const fromLocal = startOfWeek(startOfMonth(d))
-    const from = startOfDayUtcInTimeZone(fromLocal, tz)
+    const from = startOfDayUtcInTimeZone(fromLocal, safeTz)
     const to = new Date(from.getTime() + 42 * 24 * 60 * 60_000)
     return { from, to }
   }
@@ -256,71 +237,74 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   async function saveTimeZoneIfMissing(tz: string) {
-    // only once per mount to avoid spam
     if (tzSetupSavedRef.current) return
     tzSetupSavedRef.current = true
     try {
-      // ⚠️ This requires your /api/pro/settings route to accept timeZone.
       const res = await fetch('/api/pro/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ timeZone: tz }),
       })
-      if (!res.ok) {
-        // allow future retry if server didn’t accept it
-        tzSetupSavedRef.current = false
-      }
+      if (!res.ok) tzSetupSavedRef.current = false
     } catch {
       tzSetupSavedRef.current = false
     }
   }
 
+  async function loadWorkingHoursFor(locationType: LocationType) {
+    const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`, {
+      method: 'GET',
+      cache: 'no-store',
+    })
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error(data?.error || `Failed to load ${locationType} hours.`)
+    return (data?.workingHours ?? null) as WorkingHoursJson
+  }
+
   async function loadCalendar() {
+    const seq = ++loadSeqRef.current
+
     try {
       setLoading(true)
       setError(null)
 
+      // 1) Load calendar core (events, tz, canSalon/canMobile, stats, autoAccept, management)
       const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
       const data = await safeJson(res)
+
+      if (seq !== loadSeqRef.current) return
+
       if (!res.ok) {
         setError(data?.error || `Failed to load calendar (${res.status}).`)
         return
       }
 
       const browserTz = getBrowserTimeZone()
-      const apiTz = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
-      const apiTzValid = isValidIanaTimeZone(apiTz)
+      const apiTzRaw = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
+      const apiTzValid = isValidIanaTimeZone(apiTzRaw)
+      const nextTz = apiTzValid ? apiTzRaw : browserTz || 'UTC'
 
-      const nextTz = apiTzValid ? apiTz : browserTz || 'UTC'
       setTimeZone(nextTz)
 
       const needsSetup = Boolean(data?.needsTimeZoneSetup) || !apiTzValid
       setNeedsTimeZoneSetup(needsSetup)
 
-      // If server says timezone missing/invalid, persist browser tz so future loads are consistent.
       if (needsSetup && isValidIanaTimeZone(browserTz)) {
         void saveTimeZoneIfMissing(browserTz)
       }
 
-      const bookingEvents = (data.events || []) as CalendarEvent[]
+      const nextCanSalon = Boolean(data?.canSalon ?? true)
+      const nextCanMobile = Boolean(data?.canMobile ?? false)
+      setCanSalon(nextCanSalon)
+      setCanMobile(nextCanMobile)
 
-      const { from, to } = rangeForViewUtcInProTz(view, currentDate, nextTz)
-      const blocksRes = await fetch(
-        `/api/pro/calendar/blocked?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`,
-        { cache: 'no-store' },
-      )
-      const blocksData = await safeJson(blocksRes)
-      const blocks = (blocksRes.ok && Array.isArray(blocksData?.blocks) ? blocksData.blocks : []) as BlockRow[]
-      const blockEvents = blocks.map(blockToEvent)
+      // Keep active tab valid as permissions change
+      setActiveLocationType((prev) => pickLocationType(nextCanSalon, nextCanMobile, prev))
 
-      const nextEvents = [...blockEvents, ...bookingEvents].sort(
-        (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
-      )
+      const bookingEvents = (Array.isArray(data?.events) ? data.events : []) as CalendarEvent[]
 
-      setEvents(nextEvents)
-      setWorkingHours(data.workingHours || null)
-      setStats(data.stats || null)
-      setAutoAccept(Boolean(data.autoAcceptBookings))
+      setStats((data?.stats ?? null) as CalendarStats)
+      setAutoAccept(Boolean(data?.autoAcceptBookings))
 
       const m = data?.management
       if (m && typeof m === 'object') {
@@ -333,27 +317,74 @@ export function useCalendarData({ view, currentDate }: Args) {
       } else {
         setManagement({ todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
       }
+
+      // 2) Range-based blocked events
+      const { from, to } = rangeForViewUtcInProTz(view, currentDate, nextTz)
+
+      const blocksRes = await fetch(
+        `/api/pro/calendar/blocked?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`,
+        { cache: 'no-store' },
+      )
+      const blocksData = await safeJson(blocksRes)
+      if (seq !== loadSeqRef.current) return
+
+      const blocks = (blocksRes.ok && Array.isArray(blocksData?.blocks) ? blocksData.blocks : []) as BlockRow[]
+      const blockEvents = blocks.map(blockToEvent)
+
+      // 3) Working hours for ACTIVE location type (SALON/MOBILE)
+      const effectiveLocationType = pickLocationType(nextCanSalon, nextCanMobile, activeLocationType)
+      const nextHours = await loadWorkingHoursFor(effectiveLocationType)
+
+      if (seq !== loadSeqRef.current) return
+
+      setWorkingHours(nextHours)
+
+      // 4) Merge + sort
+      const nextEvents = [...blockEvents, ...bookingEvents].sort(
+        (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+      )
+      setEvents(nextEvents)
     } catch (e) {
       console.error(e)
-      setError('Network error loading calendar.')
+      if (seq === loadSeqRef.current) setError('Network error loading calendar.')
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
   }
 
+  // Load services once
   useEffect(() => {
     void loadServicesOnce()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Reload calendar when view/currentDate changes
   useEffect(() => {
     void loadCalendar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentDate])
 
-  // ✅ blocked minutes today computed locally from events (timezone-aware)
+  // Reload workingHours when the user switches SALON/MOBILE
+  useEffect(() => {
+    let cancelled = false
+    async function loadHoursOnly() {
+      try {
+        const next = await loadWorkingHoursFor(activeLocationType)
+        if (!cancelled) setWorkingHours(next)
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Failed to load working hours.')
+      }
+    }
+    void loadHoursOnly()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLocationType])
+
+  // blocked minutes today computed locally (timezone-aware)
   const blockedMinutesToday = useMemo(() => {
-    const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
+    const tz = sanitizeTimeZone(timeZone, 'UTC')
     const dayStartUtc = startOfDayUtcInTimeZone(new Date(), tz)
     const dayEndUtc = new Date(dayStartUtc.getTime() + 24 * 60 * 60_000)
 
@@ -396,7 +427,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     try {
       setLoading(true)
       setError(null)
-      const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
+      const tz = sanitizeTimeZone(timeZone, 'UTC')
       const startUtc = startOfDayUtcInTimeZone(day, tz)
       const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
       await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
@@ -487,8 +518,15 @@ export function useCalendarData({ view, currentDate }: Args) {
     const dur = roundTo15(Number(durationMinutes || booking.totalDurationMinutes || 60))
     const endMinutes = startMinutes + dur
 
-    const dayLocal = new Date(yyyy, mm - 1, dd, 12, 0, 0, 0)
-    return isOutsideWorkingHours({ day: dayLocal, startMinutes, endMinutes, workingHours })
+    const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
+
+    return isOutsideWorkingHours({
+      day: dayAnchor,
+      startMinutes,
+      endMinutes,
+      workingHours,
+      timeZone: sanitizeTimeZone(timeZone, 'UTC'),
+    })
   }
 
   const editOutside = booking ? editWouldBeOutsideHours() : false
@@ -505,17 +543,27 @@ export function useCalendarData({ view, currentDate }: Args) {
       const [hh, mi] = (reschedTime || '').split(':').map((x) => Number(x))
       if (!Number.isFinite(hh) || !Number.isFinite(mi)) throw new Error('Pick a valid time.')
 
-      const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
-      const nextStart = zonedToUtc({ year: yyyy, month: mm, day: dd, hour: hh, minute: mi }, tz)
+      const tz = sanitizeTimeZone(timeZone, 'UTC')
 
-      const snappedDur = roundTo15(Number(durationMinutes))
+      const nextStart = zonedTimeToUtc({
+        year: yyyy,
+        month: mm,
+        day: dd,
+        hour: hh,
+        minute: mi,
+        second: 0,
+        timeZone: tz,
+      })
 
-      const dayLocal = new Date(yyyy, mm - 1, dd, 12, 0, 0, 0)
+      const snappedDur = roundTo15(Number(durationMinutes || 60))
+
+      const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
       const outside = isOutsideWorkingHours({
-        day: dayLocal,
+        day: dayAnchor,
         startMinutes: hh * 60 + mi,
         endMinutes: hh * 60 + mi + snappedDur,
         workingHours,
+        timeZone: tz,
       })
 
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(booking.id)}`, {
@@ -632,9 +680,15 @@ export function useCalendarData({ view, currentDate }: Args) {
       } else {
         const current = eventsRef.current.find((x) => x.id === pendingChange.eventId)
         const startIso =
-          pendingChange.kind === 'move' ? pendingChange.nextStartIso : current?.startsAt ?? pendingChange.original.startsAt
+          pendingChange.kind === 'move'
+            ? pendingChange.nextStartIso
+            : current?.startsAt ?? pendingChange.original.startsAt
+
         const dur =
-          pendingChange.kind === 'resize' ? pendingChange.nextTotalDurationMinutes : eventDurationMinutes(pendingChange.original)
+          pendingChange.kind === 'resize'
+            ? pendingChange.nextTotalDurationMinutes
+            : eventDurationMinutes(pendingChange.original)
+
         const endIso = new Date(new Date(startIso).getTime() + dur * 60_000).toISOString()
 
         const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(pendingChange.apiId)}`, {
@@ -707,8 +761,8 @@ export function useCalendarData({ view, currentDate }: Args) {
     const rawMinutes = y / PX_PER_MINUTE
     const topMinutes = snapMinutes(rawMinutes - dragGrabOffsetMinutesRef.current)
 
-    const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
-    const nextStart = utcFromProDayAndMinutes(day, topMinutes, tz)
+    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const nextStart = utcFromDayAndMinutesInTimeZone(day, topMinutes, tz)
 
     if (nextStart.toISOString() === original.startsAt) return
 
@@ -717,7 +771,9 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     setEvents((prev) =>
       prev.map((e) =>
-        e.id === eventId ? { ...e, startsAt: nextStart.toISOString(), endsAt: nextEnd.toISOString(), durationMinutes: dur } : e,
+        e.id === eventId
+          ? { ...e, startsAt: nextStart.toISOString(), endsAt: nextEnd.toISOString(), durationMinutes: dur }
+          : e,
       ),
     )
 
@@ -754,13 +810,17 @@ export function useCalendarData({ view, currentDate }: Args) {
     const y = e.clientY - s.columnTop
     const endMinutes = snapMinutes(y / PX_PER_MINUTE)
     const rawDur = endMinutes - s.startMinutes
-    const dur = roundTo15(rawDur)
 
-    const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
-    const start = utcFromProDayAndMinutes(s.day, s.startMinutes, tz)
+    // ✅ Never allow 0/negative durations while resizing
+    const dur = Math.max(SNAP_MINUTES, roundTo15(rawDur))
+
+    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const start = utcFromDayAndMinutesInTimeZone(s.day, s.startMinutes, tz)
     const end = new Date(start.getTime() + dur * 60_000)
 
-    setEvents((prev) => prev.map((ev) => (ev.id === s.eventId ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur } : ev)))
+    setEvents((prev) =>
+      prev.map((ev) => (ev.id === s.eventId ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur } : ev)),
+    )
   }
 
   function onResizeEnd() {
@@ -778,12 +838,14 @@ export function useCalendarData({ view, currentDate }: Args) {
     const start = new Date(ev.startsAt)
     const end = new Date(ev.endsAt)
     const raw = Math.round((end.getTime() - start.getTime()) / 60_000)
-    const dur = roundTo15(raw)
+    const dur = Math.max(SNAP_MINUTES, roundTo15(raw))
 
     if (dur === s.originalDuration) {
       const rollbackEnd = new Date(start.getTime() + s.originalDuration * 60_000)
       setEvents((prev) =>
-        prev.map((x) => (x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x)),
+        prev.map((x) =>
+          x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x,
+        ),
       )
       return
     }
@@ -813,8 +875,8 @@ export function useCalendarData({ view, currentDate }: Args) {
     const y = clientY - columnTop
     const mins = snapMinutes(y / PX_PER_MINUTE)
 
-    const tz = isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
-    const startUtc = utcFromProDayAndMinutes(day, mins, tz)
+    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const startUtc = utcFromDayAndMinutesInTimeZone(day, mins, tz)
 
     setCreateInitialStart(startUtc)
     setCreateOpen(true)
@@ -833,7 +895,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     void loadCalendar()
   }
 
-  const isOverlayOpen = Boolean(confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen)
+  const isOverlayOpen = Boolean(
+    confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen,
+  )
 
   return {
     view,
@@ -845,8 +909,16 @@ export function useCalendarData({ view, currentDate }: Args) {
     needsTimeZoneSetup,
     blockedMinutesToday,
 
+    // ✅ New: location mode awareness
+    canSalon,
+    canMobile,
+    activeLocationType,
+    setActiveLocationType,
+
+    // Working hours for the ACTIVE location type
     workingHours,
     setWorkingHours,
+
     stats,
 
     loading,

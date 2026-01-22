@@ -1,44 +1,80 @@
-import { NextResponse } from 'next/server'
+// app/api/pro/last-minute/rules/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-export async function PATCH(req: Request) {
-  const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+function toDecimalString(v: unknown): string | null {
+  if (v === null) return null
+  if (v === undefined) return null
+
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v) || v < 0) return null
+    return v.toFixed(2)
   }
 
-  const proId = user.professionalProfile.id
-  const body = await req.json().catch(() => ({}))
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (!s) return null
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) return null
+    const n = Number(s)
+    if (!Number.isFinite(n) || n < 0) return null
+    return n.toFixed(2)
+  }
 
-  const serviceId = typeof body.serviceId === 'string' ? body.serviceId : null
-  if (!serviceId) return NextResponse.json({ error: 'Missing serviceId' }, { status: 400 })
+  const s = (v as any)?.toString?.()
+  if (typeof s === 'string') return toDecimalString(s)
+  return null
+}
 
-  const settings = await prisma.lastMinuteSettings.upsert({
-    where: { professionalId: proId },
-    create: { professionalId: proId },
-    update: {},
-    select: { id: true },
-  })
+export async function PATCH(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const professionalId = auth.professionalId
 
-  const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined
-  const minPrice = body.minPrice === null ? null : body.minPrice
+    const body = (await req.json().catch(() => ({}))) as any
 
-  const rule = await prisma.lastMinuteServiceRule.upsert({
-    where: { settingsId_serviceId: { settingsId: settings.id, serviceId } },
-    create: {
-      settingsId: settings.id,
-      serviceId,
-      enabled: enabled ?? true,
-      minPrice: minPrice ?? null,
-    },
-    update: {
-      ...(enabled === undefined ? {} : { enabled }),
-      ...(body.hasOwnProperty('minPrice') ? { minPrice } : {}),
-    },
-  })
+    const serviceId = pickString(body?.serviceId)
+    if (!serviceId) return jsonFail(400, 'Missing serviceId.')
 
-  return NextResponse.json({ rule })
+    const settings = await prisma.lastMinuteSettings.upsert({
+      where: { professionalId },
+      create: { professionalId },
+      update: {},
+      select: { id: true },
+    })
+
+    const enabled = typeof body?.enabled === 'boolean' ? body.enabled : undefined
+
+    let minPrice: string | null | undefined = undefined
+    if (Object.prototype.hasOwnProperty.call(body, 'minPrice')) {
+      if (body.minPrice === null) {
+        minPrice = null
+      } else {
+        const dec = toDecimalString(body.minPrice)
+        if (dec == null) return jsonFail(400, 'minPrice must be like 80 or 79.99 (or null).')
+        minPrice = dec
+      }
+    }
+
+    const rule = await prisma.lastMinuteServiceRule.upsert({
+      where: { settingsId_serviceId: { settingsId: settings.id, serviceId } },
+      create: {
+        settingsId: settings.id,
+        serviceId,
+        enabled: enabled ?? true,
+        minPrice: minPrice ?? null,
+      } as any,
+      update: {
+        ...(enabled === undefined ? {} : { enabled }),
+        ...(minPrice === undefined ? {} : { minPrice }),
+      } as any,
+    })
+
+    return jsonOk({ rule }, 200)
+  } catch (e) {
+    console.error('PATCH /api/pro/last-minute/rules error', e)
+    return jsonFail(500, 'Failed to update rule.')
+  }
 }

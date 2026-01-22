@@ -1,28 +1,12 @@
 // app/api/admin/services/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
+import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
-
-function pickString(v: FormDataEntryValue | null) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function pickInt(v: FormDataEntryValue | null) {
-  const s = pickString(v)
-  if (!s) return null
-  const n = Number(s)
-  return Number.isFinite(n) ? Math.trunc(n) : null
-}
-
-function pickBool(v: FormDataEntryValue | null) {
-  const s = pickString(v)
-  if (!s) return null
-  return s === 'true' || s === '1' || s.toLowerCase() === 'on'
-}
 
 async function requireSupport(userId: string) {
   return hasAdminPermission({
@@ -33,8 +17,8 @@ async function requireSupport(userId: string) {
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
     const ok = await requireSupport(user.id)
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -62,14 +46,14 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
+    if (res) return res
 
     const ok = await requireSupport(user.id)
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const form = await req.formData()
-    const method = pickString(form.get('_method'))?.toUpperCase() ?? 'POST'
+    const method = pickMethod(form.get('_method')) ?? 'POST'
     if (method !== 'POST') return NextResponse.json({ error: 'Unsupported operation.' }, { status: 400 })
 
     const name = pickString(form.get('name'))
@@ -85,7 +69,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing name or categoryId.' }, { status: 400 })
     }
 
-    // Optional: category-scoped enforcement (nice for future)
     const okCategory = await hasAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],

@@ -1,7 +1,12 @@
 ﻿// app/api/client/bookings/[id]/consultation/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import {
+  jsonFail,
+  jsonOk,
+  pickString,
+  upper,
+  requireClient,
+} from '@/app/api/_utils'
 import {
   handleConsultationDecision,
   type ConsultationDecisionAction,
@@ -10,25 +15,19 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-// ✅ Folder is [id], so params must be { id: string }
 type Ctx = ConsultationDecisionCtx & {
   params: Promise<{ id: string }> | { id: string }
 }
 
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 export async function GET(_req: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 401 })
-    }
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
 
     const { id: rawId } = await Promise.resolve(ctx.params as any)
     const id = pickString(rawId)
-    if (!id) return NextResponse.json({ error: 'Missing booking id.' }, { status: 400 })
+    if (!id) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -43,10 +42,8 @@ export async function GET(_req: Request, ctx: Ctx) {
       },
     })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.clientId !== user.clientProfile.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
     const approval = await prisma.consultationApproval.findUnique({
       where: { bookingId: booking.id },
@@ -62,32 +59,28 @@ export async function GET(_req: Request, ctx: Ctx) {
       },
     })
 
-    if (!approval) {
-      return NextResponse.json({ error: 'No consultation proposal found.' }, { status: 404 })
-    }
+    if (!approval) return jsonFail(404, 'No consultation proposal found.')
 
-    return NextResponse.json({ ok: true, booking, approval }, { status: 200 })
+    return jsonOk({ booking, approval })
   } catch (e) {
     console.error('GET /api/client/bookings/[id]/consultation error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const body = (await req.json().catch(() => ({}))) as { action?: unknown }
-    const actionRaw = typeof body.action === 'string' ? body.action.toUpperCase().trim() : ''
+    const actionRaw = upper(body?.action)
 
     if (actionRaw !== 'APPROVE' && actionRaw !== 'REJECT') {
-      return NextResponse.json({ error: 'Invalid action.' }, { status: 400 })
+      return jsonFail(400, 'Invalid action.')
     }
 
     const action: ConsultationDecisionAction = actionRaw === 'APPROVE' ? 'APPROVE' : 'REJECT'
-
-    // ✅ Let _decision.ts read ctx.params.id (not bookingId)
     return handleConsultationDecision(action, ctx as ConsultationDecisionCtx)
   } catch (e) {
     console.error('POST /api/client/bookings/[id]/consultation error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

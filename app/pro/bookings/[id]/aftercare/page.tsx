@@ -1,7 +1,9 @@
 // app/pro/bookings/[id]/aftercare/page.tsx
+import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 import AftercareForm from './AftercareForm'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +28,16 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
     redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`)
   }
+
+  const proId = user.professionalProfile.id
+
+  // Fetch pro timezone explicitly (avoids relying on getCurrentUser shape)
+  const proProfile = await prisma.professionalProfile.findUnique({
+    where: { id: proId },
+    select: { timeZone: true },
+  })
+
+  const proTimeZone = sanitizeTimeZone(proProfile?.timeZone, 'America/Los_Angeles')
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -58,12 +70,12 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   })
 
   if (!booking) notFound()
-  if (booking.professionalId !== user.professionalProfile.id) redirect('/pro')
+  if (booking.professionalId !== proId) redirect('/pro')
 
   const aftercare = booking.aftercareSummary
 
   const existingRebookModeRaw = (aftercare as any)?.rebookMode
-  const existingRebookMode = isRebookMode(existingRebookModeRaw) ? (existingRebookModeRaw as RebookMode) : null
+  const existingRebookMode = isRebookMode(existingRebookModeRaw) ? existingRebookModeRaw : null
 
   const existingRebookedFor = aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
   const existingRebookWindowStart =
@@ -71,7 +83,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const existingRebookWindowEnd =
     (aftercare as any)?.rebookWindowEnd instanceof Date ? (aftercare as any).rebookWindowEnd.toISOString() : null
 
-  const mediaForUI = (booking.mediaAssets || []).map((m) => ({
+  const existingMedia = (booking.mediaAssets || []).map((m) => ({
     id: m.id,
     url: m.url,
     thumbUrl: m.thumbUrl ?? null,
@@ -94,14 +106,17 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const serviceName = booking.service?.name ?? 'Service'
   const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
 
+  const backHref = `/pro/bookings/${encodeURIComponent(bookingId)}/session`
+
   return (
     <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
-      <a
-        href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
+      <Link
+        href={backHref}
+        prefetch
         className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
       >
         ← Back to session
-      </a>
+      </Link>
 
       <h1 className="mt-4 text-xl font-black">Aftercare: {serviceName}</h1>
       <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
@@ -115,12 +130,13 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
       <div className="mt-4">
         <AftercareForm
           bookingId={bookingId}
+          timeZone={proTimeZone}
           existingNotes={aftercare?.notes ?? ''}
           existingRebookMode={existingRebookMode}
           existingRebookedFor={existingRebookedFor}
           existingRebookWindowStart={existingRebookWindowStart}
           existingRebookWindowEnd={existingRebookWindowEnd}
-          existingMedia={mediaForUI}
+          existingMedia={existingMedia}
           existingRecommendedProducts={existingRecommendedProducts}
         />
       </div>
