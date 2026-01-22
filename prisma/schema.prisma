@@ -394,9 +394,9 @@ model ProfessionalLocation {
   workingHours Json
 
   // Location-level booking defaults
-  bufferMinutes        Int @default(10)
-  stepMinutes          Int @default(5)
-  advanceNoticeMinutes Int @default(10)
+  bufferMinutes        Int @default(15)
+  stepMinutes          Int @default(30)
+  advanceNoticeMinutes Int @default(15)
   maxDaysAhead         Int @default(365)
 
   createdAt DateTime @default(now())

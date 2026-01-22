@@ -137,13 +137,13 @@ export default function AvailabilityDrawer({
   const otherProsRef = useRef<HTMLDivElement | null>(null)
 
   /**
-   * IMPORTANT:
-   * Keep this non-nullable. We’ll sync it to summary.locationType once summary loads.
+   * Keep non-nullable. We’ll sync it to the server response *after* the new fetch completes.
    */
   const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
 
   // ✅ Summary refetches whenever locationType changes
-  const { loading, error, data, setError } = useAvailability(open, context, locationType)
+  // IMPORTANT: we need setData so we can clear stale summary when user toggles.
+  const { loading, error, data, setError, setData } = useAvailability(open, context, locationType)
   const summary = isSummary(data) ? data : null
 
   const primary = summary?.primaryPro
@@ -215,23 +215,31 @@ export default function AvailabilityDrawer({
   }, [open, context?.mediaId, context?.professionalId, context?.serviceId, context?.source])
 
   /**
-   * ✅ Sync locationType with server when summary arrives.
+   * ✅ Sync locationType with server ONLY after the fetch completes.
+   *
+   * This fixes the “Mobile toggles back to Salon” bug:
+   * - user changes locationType -> new fetch starts (loading=true)
+   * - old summary still in state briefly
+   * - WITHOUT this guard, we would snap back to old summary.locationType
    */
   useEffect(() => {
     if (!open) return
     if (!summary) return
+    if (loading) return // ✅ critical guard (prevents stale-summary snapback)
     if (holding) return
     if (selected?.holdId) return
 
     const serverType = summary.locationType
     if (serverType && serverType !== locationType) {
       void hardResetUi({ deleteHold: true })
-      setLocationType(serverType)
+      // clear stale UI state
       setSelectedDayYMD(null)
       setPrimarySlots([])
       setOtherSlots({})
+      // reflect server truth
+      setLocationType(serverType)
     }
-  }, [open, summary, holding, selected?.holdId, locationType, hardResetUi])
+  }, [open, summary, loading, holding, selected?.holdId, locationType, hardResetUi])
 
   // ✅ if only one mode is allowed, force it
   useEffect(() => {
@@ -242,17 +250,19 @@ export default function AvailabilityDrawer({
 
     if (allowed.salon && !allowed.mobile && locationType !== 'SALON') {
       void hardResetUi({ deleteHold: true })
+      setData(null) // ✅ clear stale summary immediately
       setLocationType('SALON')
       setSelectedDayYMD(null)
       return
     }
     if (!allowed.salon && allowed.mobile && locationType !== 'MOBILE') {
       void hardResetUi({ deleteHold: true })
+      setData(null) // ✅ clear stale summary immediately
       setLocationType('MOBILE')
       setSelectedDayYMD(null)
       return
     }
-  }, [open, summary, allowed.salon, allowed.mobile, locationType, hardResetUi])
+  }, [open, summary, allowed.salon, allowed.mobile, locationType, hardResetUi, setData])
 
   // ✅ default day: pick first available day; also fix if current selection no longer exists
   useEffect(() => {
@@ -490,7 +500,6 @@ export default function AvailabilityDrawer({
 
   if (!open || !context) return null
 
-  // ✅ This is the key TS fix: we compute a non-null primaryPro only inside render.
   const canRenderSummary = Boolean(summary && primary)
 
   return (
@@ -557,7 +566,6 @@ export default function AvailabilityDrawer({
           </div>
         ) : (
           (() => {
-            // ✅ TS-safe: inside this closure, primary is definitely defined
             const primaryPro: ProCardType = primary as ProCardType
 
             return (
@@ -578,6 +586,10 @@ export default function AvailabilityDrawer({
                   allowed={allowed}
                   onChange={(t) => {
                     void hardResetUi({ deleteHold: true })
+
+                    // ✅ clear stale summary immediately so we don’t “snap back” while refetching
+                    setData(null)
+
                     setLocationType(t)
                     setSelectedDayYMD(null)
                     setPrimarySlots([])

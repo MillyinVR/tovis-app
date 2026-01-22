@@ -67,6 +67,27 @@ function parseHHMM(s: unknown) {
   return { hh, mm }
 }
 
+/**
+ * Future-proof stepMinutes:
+ * - allow only sensible grids (5/10/15/20/30/60)
+ * - if DB contains weird values, snap upward to the next sensible grid
+ * - default to 30 when missing
+ */
+function normalizeStepMinutes(input: unknown, fallback: number) {
+  const n = typeof input === 'number' ? input : Number(input)
+  const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
+
+  const allowed = new Set([5, 10, 15, 20, 30, 60])
+  if (allowed.has(raw)) return raw
+
+  if (raw <= 5) return 5
+  if (raw <= 10) return 10
+  if (raw <= 15) return 15
+  if (raw <= 20) return 20
+  if (raw <= 30) return 30
+  return 60
+}
+
 /** ---------- date helpers ---------- */
 
 function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
@@ -322,7 +343,9 @@ async function computeDaySlots(args: {
   ]
 
   const cutoffUtc = addMinutes(nowUtc, clampInt(Number(leadTimeMinutes ?? 0) || 0, 0, 240))
-  const step = clampInt(Number(stepMinutes || 0), 5, 60)
+
+  // Extra guard: even if callers pass something odd, keep it sane.
+  const step = normalizeStepMinutes(stepMinutes, 30)
 
   const slots: string[] = []
 
@@ -434,6 +457,7 @@ export async function GET(req: Request) {
 
     const debug = pickString(searchParams.get('debug')) === '1'
 
+    // optional overrides (debug-only for step)
     const stepRaw = pickString(searchParams.get('stepMinutes')) || pickString(searchParams.get('step'))
     const leadRaw =
       pickString(searchParams.get('leadMinutes')) ||
@@ -498,8 +522,9 @@ export async function GET(req: Request) {
     // timezone: location first, then pro, then LA
     const timeZone = pickTimeZone((locAny.timeZone ?? null) as string | null, (pro.timeZone ?? null) as string | null)
 
-    const defaultStepMinutes = clampInt(Number(locAny.stepMinutes ?? 5), 5, 60)
-    const stepMinutes = stepRaw ? clampInt(toInt(stepRaw, defaultStepMinutes), 5, 60) : defaultStepMinutes
+    // ✅ stepMinutes: source of truth is location.stepMinutes; fallback 30; debug-only override allowed.
+    const defaultStepMinutes = normalizeStepMinutes(locAny.stepMinutes, 30)
+    const stepMinutes = debug && stepRaw ? normalizeStepMinutes(stepRaw, defaultStepMinutes) : defaultStepMinutes
 
     const defaultLead = clampInt(Number(locAny.advanceNoticeMinutes ?? 10), 0, 240)
     const leadTimeMinutes = leadRaw ? clampInt(toInt(leadRaw, defaultLead), 0, 240) : defaultLead
@@ -606,7 +631,10 @@ export async function GET(req: Request) {
     const dayDiff = ymdSerial(ymd) - ymdSerial(todayYMD)
     if (dayDiff < 0) return NextResponse.json({ ok: false, error: 'Date is in the past.' }, { status: 400 })
     if (dayDiff > maxAdvanceDays) {
-      return NextResponse.json({ ok: false, error: `You can book up to ${maxAdvanceDays} days in advance.` }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: `You can book up to ${maxAdvanceDays} days in advance.` },
+        { status: 400 },
+      )
     }
 
     const result = await computeDaySlots({
