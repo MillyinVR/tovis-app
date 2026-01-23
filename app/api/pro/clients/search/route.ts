@@ -1,6 +1,7 @@
 // app/api/pro/clients/search/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,26 +25,15 @@ export async function GET(req: Request) {
 
     if (!q) return jsonOk({ recentClients: [], otherClients: [], query: '' }, 200)
 
+    // ✅ Single policy: visible client ids for this pro
+    const visibleClientIdSet = await getVisibleClientIdSetForPro(professionalId)
+    const visibleClientIds = Array.from(visibleClientIdSet)
+    if (!visibleClientIds.length) {
+      return jsonOk({ query: q, recentClients: [], otherClients: [] }, 200)
+    }
+
     const qDigits = digitsOnly(q)
     const looksLikePhone = qDigits.length >= 3
-
-    const recentBookings = await prisma.booking.findMany({
-      where: { professionalId },
-      select: { clientId: true, scheduledFor: true },
-      orderBy: { scheduledFor: 'desc' },
-      take: 200,
-    })
-
-    const seen = new Set<string>()
-    const recentClientIds: string[] = []
-    for (const b of recentBookings) {
-      const cid = String(b.clientId)
-      if (!seen.has(cid)) {
-        seen.add(cid)
-        recentClientIds.push(cid)
-      }
-      if (recentClientIds.length >= 75) break
-    }
 
     const phoneOr: any[] = []
     if (looksLikePhone) {
@@ -52,11 +42,17 @@ export async function GET(req: Request) {
     }
 
     const whereMatch = {
-      OR: [
-        { firstName: { contains: q, mode: 'insensitive' as const } },
-        { lastName: { contains: q, mode: 'insensitive' as const } },
-        ...phoneOr,
-        { user: { email: { contains: q, mode: 'insensitive' as const } } },
+      AND: [
+        // ✅ Scope FIRST (no enumeration)
+        { id: { in: visibleClientIds } },
+        {
+          OR: [
+            { firstName: { contains: q, mode: 'insensitive' as const } },
+            { lastName: { contains: q, mode: 'insensitive' as const } },
+            ...phoneOr,
+            { user: { email: { contains: q, mode: 'insensitive' as const } } },
+          ],
+        },
       ],
     }
 
@@ -68,6 +64,29 @@ export async function GET(req: Request) {
       user: { select: { email: true } },
     } as const
 
+    // ✅ Recent clients for THIS pro (still useful for sorting)
+    const recentBookings = await prisma.booking.findMany({
+      where: { professionalId },
+      select: { clientId: true, scheduledFor: true },
+      orderBy: { scheduledFor: 'desc' },
+      take: 200,
+    })
+
+    const seen = new Set<string>()
+    const recentClientIds: string[] = []
+    for (const b of recentBookings) {
+      const cid = String(b.clientId)
+      // ✅ only include if visible
+      if (!visibleClientIdSet.has(cid)) continue
+
+      if (!seen.has(cid)) {
+        seen.add(cid)
+        recentClientIds.push(cid)
+      }
+      if (recentClientIds.length >= 75) break
+    }
+
+    // ✅ Query only within visible set
     const recentClients = recentClientIds.length
       ? await prisma.clientProfile.findMany({
           where: { id: { in: recentClientIds }, ...whereMatch },
@@ -77,17 +96,27 @@ export async function GET(req: Request) {
       : []
 
     const otherClients = await prisma.clientProfile.findMany({
-      where: { ...(recentClientIds.length ? { id: { notIn: recentClientIds } } : {}), ...whereMatch },
+      where: {
+        ...whereMatch,
+        ...(recentClientIds.length ? { id: { notIn: recentClientIds } } : {}),
+      },
       select: selectClient,
       take: 12,
     })
 
-    const mapOut = (c: any) => ({
-      id: String(c.id),
-      fullName: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.user?.email || 'Client',
-      email: c.user?.email ?? null,
-      phone: c.phone ?? null,
-    })
+    const mapOut = (c: any) => {
+      const id = String(c.id)
+      // Since queries are scoped, this should always be true
+      const canViewClient = true
+
+      return {
+        id,
+        fullName: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.user?.email || 'Client',
+        canViewClient,
+        email: c.user?.email ?? null,
+        phone: c.phone ?? null,
+      }
+    }
 
     return jsonOk(
       {

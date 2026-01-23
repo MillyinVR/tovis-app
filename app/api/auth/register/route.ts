@@ -1,28 +1,26 @@
 // app/api/auth/register/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
-import { pickString } from '@/app/api/_utils/pick'
+import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
+
+export const dynamic = 'force-dynamic'
 
 type RegisterBody = {
   email?: unknown
   password?: unknown
   role?: unknown
-
   firstName?: unknown
   lastName?: unknown
   phone?: unknown
   tapIntentId?: unknown
-
   timeZone?: unknown
 }
 
 function cleanPhone(v: unknown): string | null {
   const raw = pickString(v)
   if (!raw) return null
-  // keep digits and leading +
   const cleaned = raw.replace(/[^\d+]/g, '')
   return cleaned ? cleaned : null
 }
@@ -46,7 +44,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as RegisterBody
 
-    const email = pickString(body.email)
+    const email = normalizeEmail(body.email)
     const password = pickString(body.password)
     const role = normalizeRole(body.role)
 
@@ -58,20 +56,20 @@ export async function POST(request: Request) {
     const timeZone = normalizeTimeZone(body.timeZone)
 
     if (!email || !password || !role) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+      return jsonFail(400, 'Missing required fields.', { code: 'MISSING_FIELDS' })
     }
 
     if (!firstName || !lastName) {
-      return NextResponse.json({ error: 'First and last name are required' }, { status: 400 })
+      return jsonFail(400, 'First and last name are required.', { code: 'MISSING_NAME' })
     }
 
     if (role === 'PRO' && !phone) {
-      return NextResponse.json({ error: 'Phone number is required for professionals' }, { status: 400 })
+      return jsonFail(400, 'Phone number is required for professionals.', { code: 'PHONE_REQUIRED' })
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } })
+    const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } })
     if (existing) {
-      return NextResponse.json({ error: 'Email already in use' }, { status: 400 })
+      return jsonFail(400, 'Email already in use.', { code: 'EMAIL_IN_USE' })
     }
 
     const passwordHash = await hashPassword(password)
@@ -84,13 +82,7 @@ export async function POST(request: Request) {
 
         clientProfile:
           role === 'CLIENT'
-            ? {
-                create: {
-                  firstName,
-                  lastName,
-                  phone: phone ?? null,
-                },
-              }
+            ? { create: { firstName, lastName, phone: phone ?? null } }
             : undefined,
 
         professionalProfile:
@@ -100,8 +92,6 @@ export async function POST(request: Request) {
                   firstName,
                   lastName,
                   phone: phone ?? null,
-
-                  // ✅ store timezone if valid, else null
                   timeZone: timeZone ?? null,
 
                   bio: '',
@@ -114,25 +104,22 @@ export async function POST(request: Request) {
               }
             : undefined,
       },
-      include: { clientProfile: true, professionalProfile: true },
+      select: { id: true, email: true, role: true },
     })
 
     const token = createToken({ userId: user.id, role: user.role })
 
-    const consumed = await consumeTapIntent({
-      tapIntentId,
-      userId: user.id,
-    })
+    const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
 
-    const response = NextResponse.json(
+    const res = jsonOk(
       {
         user: { id: user.id, email: user.email, role: user.role },
-        nextUrl: consumed.nextUrl,
+        nextUrl: consumed?.nextUrl ?? null,
       },
-      { status: 201 },
+      201,
     )
 
-    response.cookies.set('tovis_token', token, {
+    res.cookies.set('tovis_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
@@ -140,9 +127,9 @@ export async function POST(request: Request) {
       maxAge: 60 * 60 * 24 * 7,
     })
 
-    return response
+    return res
   } catch (error) {
     console.error('Register error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

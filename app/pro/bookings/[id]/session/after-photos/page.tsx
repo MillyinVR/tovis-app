@@ -38,8 +38,6 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
   if (!booking) notFound()
   if (booking.professionalId !== user.professionalProfile.id) redirect('/pro')
 
-  // Long-term flow gate:
-  // Only allow this page if the session is at AFTER_PHOTOS or DONE.
   const step = upper((booking as any).sessionStep || 'NONE')
   if (step !== 'AFTER_PHOTOS' && step !== 'DONE') {
     redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
@@ -63,102 +61,82 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
 
   const serviceName = booking.service?.name ?? 'Service'
   const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
-
   const canContinue = items.length > 0
 
   return (
-    <main style={{ maxWidth: 960, margin: '24px auto 90px', padding: '0 16px', fontFamily: 'system-ui' }}>
+    <main className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 text-textPrimary">
       <Link
         href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
-        style={{ fontSize: 12, color: '#555', textDecoration: 'none' }}
+        className="text-xs font-black text-textSecondary hover:opacity-80"
       >
         ← Back to session
       </Link>
 
-      <h1 style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>After photos: {serviceName}</h1>
-      <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>Client: {clientName}</div>
+      <h1 className="mt-3 text-lg font-black">After photos: {serviceName}</h1>
+      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
 
-      <div style={{ marginTop: 12, border: '1px solid #eee', background: '#fff', borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 13, color: '#374151' }}>
+      <div className="tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="text-sm text-textSecondary">
           Add at least one after photo to unlock aftercare. Your footer button should advance you once you’ve added one.
         </div>
 
-        <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <Link
             href={canContinue ? `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare` : '#'}
             aria-disabled={!canContinue}
-            style={{
-              textDecoration: 'none',
-              border: '1px solid #111',
-              borderRadius: 999,
-              padding: '10px 14px',
-              fontSize: 12,
-              fontWeight: 900,
-              background: canContinue ? '#111' : '#374151',
-              color: '#fff',
-              pointerEvents: canContinue ? 'auto' : 'none',
-              opacity: canContinue ? 1 : 0.8,
-            }}
+            className={[
+              'rounded-full px-4 py-2 text-xs font-black transition',
+              canContinue
+                ? 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
+                : 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-70 pointer-events-none',
+            ].join(' ')}
           >
             Continue to aftercare
           </Link>
 
           {!canContinue ? (
-            <span style={{ fontSize: 12, color: '#6b7280' }}>
-              No after media yet. Add one to continue.
-            </span>
+            <span className="text-xs font-semibold text-textSecondary">No after media yet. Add one to continue.</span>
           ) : (
-            <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 900 }}>
-              Unlocked.
-            </span>
+            <span className="text-xs font-black text-textPrimary">Unlocked.</span>
           )}
         </div>
       </div>
 
-      <section style={{ marginTop: 16 }}>
+      <section className="mt-4">
         <MediaUploader bookingId={bookingId} phase="AFTER" />
       </section>
 
-      <section style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 900 }}>Uploaded after media</div>
+      <section className="mt-5">
+        <div className="text-sm font-black">Uploaded after media</div>
 
         {items.length === 0 ? (
-          <div style={{ marginTop: 10, fontSize: 13, color: '#6b7280' }}>None yet.</div>
+          <div className="mt-2 text-sm text-textSecondary">None yet.</div>
         ) : (
-          <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+          <div className="mt-3 grid gap-3">
             {items.map((m) => (
-              <div
-                key={m.id}
-                style={{
-                  border: '1px solid #eee',
-                  borderRadius: 12,
-                  background: '#fff',
-                  padding: 12,
-                  display: 'grid',
-                  gap: 6,
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 900 }}>
+              <div key={m.id} className="rounded-card border border-white/10 bg-bgSecondary p-3">
+                <div className="text-xs font-black text-textPrimary">
                   {m.mediaType} · {m.visibility}
-                  <span style={{ color: '#6b7280', fontWeight: 700 }}> · {fmtDate(m.createdAt)}</span>
+                  <span className="ml-2 font-semibold text-textSecondary">· {fmtDate(m.createdAt)}</span>
                 </div>
 
-                {m.caption ? <div style={{ fontSize: 12, color: '#374151' }}>{m.caption}</div> : null}
+                {m.caption ? <div className="mt-1 text-sm text-textSecondary">{m.caption}</div> : null}
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: '#6b7280' }}>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs font-semibold text-textSecondary">
                   {m.isEligibleForLooks ? <span>Eligible for Looks</span> : null}
                   {m.isFeaturedInPortfolio ? <span>Featured</span> : null}
                 </div>
 
-                <a href={m.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#2563eb' }}>
-                  Open media
-                </a>
-
-                {m.thumbUrl ? (
-                  <a href={m.thumbUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#2563eb' }}>
-                    Open thumb
+                <div className="mt-2 flex flex-wrap gap-3 text-xs font-black">
+                  <a href={m.url} target="_blank" rel="noreferrer" className="text-accentPrimary hover:opacity-80">
+                    Open media
                   </a>
-                ) : null}
+                  {m.thumbUrl ? (
+                    <a href={m.thumbUrl} target="_blank" rel="noreferrer" className="text-accentPrimary hover:opacity-80">
+                      Open thumb
+                    </a>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

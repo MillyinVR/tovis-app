@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function canBypassOwnership(user: any) {
+function isAdmin(user: any) {
   return user?.role === 'ADMIN'
 }
 
@@ -21,6 +21,11 @@ export async function POST(_req: Request, { params }: Ctx) {
     const bookingId = pickString(id)
     if (!bookingId) return NextResponse.json({ ok: false, error: 'Missing booking id' }, { status: 400 })
 
+    // only allow CLIENT/PRO/ADMIN to proceed
+    const role = String(user?.role || '').toUpperCase()
+    const allowedRole = role === 'CLIENT' || role === 'PRO' || role === 'ADMIN'
+    if (!allowedRole) return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
@@ -32,20 +37,13 @@ export async function POST(_req: Request, { params }: Ctx) {
     })
     if (!booking) return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 })
 
-    const isClient = user.role === 'CLIENT' && !!user.clientProfile?.id
-    const isPro = user.role === 'PRO' && !!user.professionalProfile?.id
-
     const clientId = user.clientProfile?.id ?? null
     const proId = user.professionalProfile?.id ?? null
 
     const isOwnerClient = Boolean(clientId && booking.clientId === clientId)
     const isOwnerPro = Boolean(proId && booking.professionalId === proId)
 
-    if (!canBypassOwnership(user) && !isOwnerClient && !isOwnerPro) {
-      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
-    }
-
-    if (!isClient && !isPro && !canBypassOwnership(user)) {
+    if (!isAdmin(user) && !isOwnerClient && !isOwnerPro) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
     }
 

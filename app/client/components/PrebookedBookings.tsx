@@ -4,6 +4,7 @@
 import Link from 'next/link'
 import type { BookingLike } from './_helpers'
 import { prettyWhen, locationLabel, sourceUpper } from './_helpers'
+import ProProfileLink from './ProProfileLink'
 
 function Pill({ label, tone }: { label: string; tone: 'info' | 'warning' | 'accent' }) {
   const base = 'inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black whitespace-nowrap'
@@ -25,7 +26,8 @@ export default function PrebookedBookings({ items }: { items: BookingLike[] }) {
 
       {list.map((b) => {
         const svc = b?.service?.name || 'Appointment'
-        const pro = b?.professional?.businessName || 'Professional'
+        const proLabel = b?.professional?.businessName || 'Professional'
+        const proId = b?.professional?.id || null
         const when = prettyWhen(b?.scheduledFor)
         const loc = locationLabel(b?.professional)
 
@@ -45,7 +47,12 @@ export default function PrebookedBookings({ items }: { items: BookingLike[] }) {
               </div>
 
               <div className="mt-1 text-sm">
-                <span className="font-black">{pro}</span>
+                <span
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <ProProfileLink proId={proId} label={proLabel} className="font-black" />
+                </span>
                 {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
               </div>
 

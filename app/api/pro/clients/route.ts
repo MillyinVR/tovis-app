@@ -1,8 +1,7 @@
 // app/api/pro/clients/route.ts
-import { NextResponse } from 'next/server'
+import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro, pickString, lower } from '@/app/api/_utils'
-import crypto from 'crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +81,7 @@ export async function POST(request: Request) {
       }
     })
 
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+    if (!result.ok) return jsonFail(result.status, result.error)
 
     return jsonOk(
       {

@@ -57,11 +57,14 @@ export async function GET(req: Request) {
     const { user, res } = await requireUser()
     if (res) return res
 
+    const role = String(user?.role || '').toUpperCase()
+    const allowed = role === 'CLIENT' || role === 'PRO' || role === 'ADMIN'
+    if (!allowed) return jsonFail(403, 'Forbidden')
+
     const { searchParams } = new URL(req.url)
     const bookingId = pickString(searchParams.get('bookingId'))
     if (!bookingId) return jsonFail(400, 'Missing bookingId')
 
-    // ✅ Option A: one query, include ownership ids
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
@@ -72,7 +75,6 @@ export async function GET(req: Request) {
         scheduledFor: true,
         totalDurationMinutes: true,
 
-        // location truth
         locationTimeZone: true,
         locationAddressSnapshot: true,
 
@@ -100,14 +102,14 @@ export async function GET(req: Request) {
 
     const isClient = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
     const isPro = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
-    if (!isClient && !isPro) return jsonFail(403, 'Forbidden')
+    const isAdmin = role === 'ADMIN'
+
+    if (!isAdmin && !isClient && !isPro) return jsonFail(403, 'Forbidden')
 
     const startUtc = new Date(booking.scheduledFor)
 
-    // ✅ Option A duration truth
     const minutesRaw = Number(booking.totalDurationMinutes ?? 60)
     const minutes = Number.isFinite(minutesRaw) ? Math.max(1, Math.min(12 * 60, minutesRaw)) : 60
-
     const endUtc = new Date(startUtc.getTime() + minutes * 60_000)
 
     const serviceName = booking.service?.name || 'Appointment'
@@ -129,7 +131,6 @@ export async function GET(req: Request) {
       .filter(Boolean)
       .join('\n')
 
-    // ✅ Location timezone is truth; fallback: pro tz; fallback: LA
     const appointmentTz =
       sanitizeTimeZone(
         booking.locationTimeZone || booking.professional?.timeZone || 'America/Los_Angeles',
@@ -146,6 +147,18 @@ export async function GET(req: Request) {
     const clientEmail = normalizeEmail(booking.client?.user?.email)
 
     const organizerLine = proEmail ? `ORGANIZER;CN=${icsEscape(proName)}:mailto:${icsEscape(proEmail)}` : null
+
+    /**
+     * PRIVACY NOTE:
+     * Right now this includes the client's email when generating an ICS for the pro.
+     * If you want "don't reveal contact info until access" more strictly,
+     * you can conditionally include attendee only for the requester, e.g.
+     *
+     * - if (isClient) include proEmail
+     * - if (isPro) include clientEmail only when booking.status is ACCEPTED/COMPLETED (etc)
+     *
+     * Keeping existing behavior for now.
+     */
     const attendeeLine = clientEmail
       ? `ATTENDEE;CN=${icsEscape(clientDisplayName(booking.client))};ROLE=REQ-PARTICIPANT;RSVP=FALSE:mailto:${icsEscape(
           clientEmail,

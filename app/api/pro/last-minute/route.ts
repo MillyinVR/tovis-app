@@ -2,31 +2,27 @@
 import { prisma } from '@/lib/prisma'
 import type { ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
-
-// If you already have this, use your real import and delete the fallback below.
-// import { computeLastMinuteDiscount } from '@/lib/lastMinute/computeLastMinuteDiscount'
+import { moneyToFixed2String } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
+
+function normalizeProId(auth: any): string | null {
+  const id =
+    (typeof auth?.professionalId === 'string' && auth.professionalId.trim()) ||
+    (typeof auth?.proId === 'string' && auth.proId.trim()) ||
+    null
+  return id ? id.trim() : null
+}
 
 function normalizeLocationType(v: unknown): ServiceLocationType {
   const s = upper(v)
   return s === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
-function toNumberFromDecimalish(v: unknown): number | null {
-  if (v == null) return null
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-  }
-  // Prisma Decimal: toNumber()
-  const maybe: any = v
-  if (typeof maybe?.toNumber === 'function') {
-    const n = maybe.toNumber()
-    return Number.isFinite(n) ? n : null
-  }
-  const n = Number(String(v))
+function decimalishToNumber(v: unknown): number | null {
+  const fixed = moneyToFixed2String(v as any)
+  if (!fixed) return null
+  const n = Number(fixed)
   return Number.isFinite(n) ? n : null
 }
 
@@ -37,12 +33,12 @@ function pickBasePrice(args: {
 }) {
   const offeringPrice =
     args.locationType === 'MOBILE'
-      ? toNumberFromDecimalish(args.offering.mobilePriceStartingAt)
-      : toNumberFromDecimalish(args.offering.salonPriceStartingAt)
+      ? decimalishToNumber(args.offering.mobilePriceStartingAt)
+      : decimalishToNumber(args.offering.salonPriceStartingAt)
 
   if (offeringPrice != null) return offeringPrice
 
-  const serviceMin = toNumberFromDecimalish(args.serviceMinPrice)
+  const serviceMin = decimalishToNumber(args.serviceMinPrice)
   return serviceMin != null ? serviceMin : 0
 }
 
@@ -60,7 +56,9 @@ export async function POST(req: Request) {
   try {
     const auth = await requirePro()
     if (auth.res) return auth.res
-    const professionalId = auth.professionalId
+
+    const professionalId = normalizeProId(auth)
+    if (!professionalId) return jsonFail(401, 'Unauthorized.')
 
     const body = (await req.json().catch(() => ({}))) as any
     const bookingId = pickString(body?.bookingId)
@@ -130,17 +128,16 @@ export async function POST(req: Request) {
       basePrice,
     })
 
-    const updated = await prisma.booking.update({
+    await prisma.booking.update({
       where: { id: booking.id },
       data: {
-        // if your schema expects Decimal, you can store as number if field is Float,
-        // or convert to Decimal string if field is Decimal.
+        // Keep as-is; your schema may be Float or Decimal. If Decimal, prisma can usually coerce numeric.
         discountAmount: discount.discountAmount ? discount.discountAmount : undefined,
       } as any,
       select: { id: true },
     })
 
-    return jsonOk({ bookingId: updated.id, basePrice, discount }, 200)
+    return jsonOk({ bookingId: booking.id, basePrice, discount }, 200)
   } catch (e) {
     console.error('POST /api/pro/last-minute error', e)
     return jsonFail(500, 'Internal server error')

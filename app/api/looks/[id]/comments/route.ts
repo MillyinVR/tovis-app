@@ -1,6 +1,6 @@
 // app/api/looks/[id]/comments/route.ts
 import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, pickString, requireUser, pickInt } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickInt, pickString, requireUser } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,17 +26,17 @@ function normalizeUser(u: {
   const pp = u.professionalProfile
   const displayName = (`${cp?.firstName ?? ''} ${cp?.lastName ?? ''}`.trim() || pp?.businessName || 'User').trim()
   const avatarUrl = cp?.avatarUrl ?? pp?.avatarUrl ?? null
-  return { id: u.id, displayName, avatarUrl }
+  return { id: String(u.id), displayName, avatarUrl }
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const raw = await params
     const id = pickString(raw?.id)
-    if (!id) return jsonFail(400, 'Missing media id.')
+    if (!id) return jsonFail(400, 'Missing media id.', { code: 'MISSING_MEDIA_ID' })
 
     const ok = await requirePublicEligibleLook(id)
-    if (!ok) return jsonFail(404, 'Not found.')
+    if (!ok) return jsonFail(404, 'Not found.', { code: 'NOT_FOUND' })
 
     const { searchParams } = new URL(req.url)
     const limit = Math.min(pickInt(searchParams.get('limit')) ?? 30, 100)
@@ -59,19 +59,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       prisma.mediaComment.count({ where: { mediaId: id } }),
     ])
 
-    return jsonOk({
-      ok: true,
-      comments: rows.map((c) => ({
-        id: c.id,
-        body: c.body,
-        createdAt: c.createdAt.toISOString(),
-        user: normalizeUser(c.user),
-      })),
-      commentsCount,
-    })
+    return jsonOk(
+      {
+        comments: rows.map((c) => ({
+          id: c.id,
+          body: c.body,
+          createdAt: c.createdAt.toISOString(),
+          user: normalizeUser(c.user),
+        })),
+        commentsCount,
+      },
+      200,
+    )
   } catch (e) {
     console.error('GET /api/looks/[id]/comments error', e)
-    return jsonFail(500, 'Couldn’t load comments. Try again.')
+    return jsonFail(500, 'Couldn’t load comments. Try again.', { code: 'INTERNAL' })
   }
 }
 
@@ -83,16 +85,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const raw = await params
     const id = pickString(raw?.id)
-    if (!id) return jsonFail(400, 'Missing media id.')
+    if (!id) return jsonFail(400, 'Missing media id.', { code: 'MISSING_MEDIA_ID' })
 
     const ok = await requirePublicEligibleLook(id)
-    if (!ok) return jsonFail(404, 'Not found.')
+    if (!ok) return jsonFail(404, 'Not found.', { code: 'NOT_FOUND' })
 
     const body = (await req.json().catch(() => ({}))) as { body?: unknown }
     const text = typeof body.body === 'string' ? body.body.trim() : ''
 
-    if (!text) return jsonFail(400, 'Comment cannot be empty.')
-    if (text.length > 500) return jsonFail(400, 'Comment too long (max 500).')
+    if (!text) return jsonFail(400, 'Comment cannot be empty.', { code: 'EMPTY_COMMENT' })
+    if (text.length > 500) return jsonFail(400, 'Comment too long (max 500).', { code: 'COMMENT_TOO_LONG' })
 
     const created = await prisma.mediaComment.create({
       data: { mediaId: id, userId: user.id, body: text },
@@ -111,7 +113,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     return jsonOk(
       {
-        ok: true,
         comment: {
           id: created.id,
           body: created.body,
@@ -124,6 +125,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     )
   } catch (e) {
     console.error('POST /api/looks/[id]/comments error', e)
-    return jsonFail(500, 'Couldn’t post that. Try again.')
+    return jsonFail(500, 'Couldn’t post that. Try again.', { code: 'INTERNAL' })
   }
 }

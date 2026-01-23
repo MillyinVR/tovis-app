@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import type { BookingSource, ServiceLocationType } from '@prisma/client'
 import { sanitizeTimeZone, getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
-import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
@@ -176,11 +176,11 @@ function fail(status: number, code: string, error: string, details?: any) {
 
 export async function POST(request: Request) {
   try {
-    const { user, res } = await requireUser({ roles: ['CLIENT'] })
-    if (res) return res
-    if (!user?.clientProfile?.id) return fail(401, 'NOT_AUTHORIZED', 'Only clients can create bookings.')
+    // ✅ single source of truth auth for client-only routes
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const { clientId } = auth
 
-    const clientId = user.clientProfile.id
     const body = (await request.json().catch(() => ({}))) as CreateBookingBody
 
     const offeringId = pickString(body.offeringId)

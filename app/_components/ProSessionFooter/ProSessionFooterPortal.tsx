@@ -1,4 +1,4 @@
-// app/pro/_components/ProSessionFooter/ProSessionFooterPortal.tsx
+// app/_components/ProSessionFooter/ProSessionFooterPortal.tsx
 'use client'
 
 import { createPortal } from 'react-dom'

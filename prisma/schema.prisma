@@ -115,6 +115,7 @@ enum OpeningStatus {
 enum ClientNoteVisibility {
   PROFESSIONALS_ONLY
   ADMIN_ONLY
+  PRIVATE_TO_AUTHOR
 }
 
 enum AdminPermissionRole {
@@ -776,9 +777,10 @@ model Booking {
   startedAt  DateTime?
   finishedAt DateTime?
 
-  mediaAssets  MediaAsset[]
-  productSales ProductSale[]
-  serviceItems BookingServiceItem[]
+  mediaAssets             MediaAsset[]
+  productSales            ProductSale[]
+  serviceItems            BookingServiceItem[]
+  clientProfessionalNotes ClientProfessionalNote[]
 
   @@index([professionalId, scheduledFor])
   @@index([clientId, scheduledFor])
@@ -819,7 +821,6 @@ model BookingHold {
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
 }
-
 
 model AftercareSummary {
   id           String    @id @default(cuid())
@@ -907,21 +908,42 @@ model VerificationDocument {
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
 }
 
+// ✅ Pro-to-pro shared feedback about a client.
+// Use this for: “notes/reviews for the client from pros who serviced them in the past”.
 model ClientProfessionalNote {
-  id             String               @id @default(cuid())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Who this is about + who wrote it
   clientId       String
   professionalId String
-  title          String?
-  body           String
-  visibility     ClientNoteVisibility @default(PROFESSIONALS_ONLY)
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
 
-  client       ClientProfile       @relation(fields: [clientId], references: [id])
-  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  // Optional: tie feedback to the appointment it came from (strongly recommended)
+  // If the booking is deleted, we still want the feedback to remain, so SetNull.
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
-  @@index([clientId])
+  // Content
+  title String?
+  body  String
+
+  // Optional “review-like” rating (1–5). Keep optional so it can stay a note.
+  rating Int?
+
+  // Who can see it
+  visibility ClientNoteVisibility @default(PROFESSIONALS_ONLY)
+
+  // Relations
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  // Prevent duplicates for the same booking+author (optional but helpful).
+  // Allows multiple notes not tied to a booking.
+  @@unique([professionalId, bookingId])
+  @@index([clientId, createdAt])
   @@index([professionalId, createdAt])
+  @@index([bookingId])
 }
 
 model Review {

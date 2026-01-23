@@ -2,13 +2,14 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import ProProfileLink from '@/app/client/components/ProProfileLink'
 
 type BookingLike = {
   id: string
   scheduledFor?: string | null
   hasPendingConsultationApproval?: boolean | null
   service?: { name?: string | null } | null
-  professional?: { businessName?: string | null } | null
+  professional?: { id?: string | null; businessName?: string | null } | null
 }
 
 type Buckets = {
@@ -85,15 +86,20 @@ export default function PendingConsultApprovalBanner() {
   if (loading) return null
   if (!item || !href) return null
 
+  const svc = item.service?.name ? item.service.name : 'A booking'
+  const proLabel = item.professional?.businessName || 'Your pro'
+
   return (
     <section className="rounded-card border border-white/10 bg-surfaceGlass p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="grid gap-1">
           <div className="text-xs font-black text-microAccent">Action required</div>
           <div className="text-sm font-black text-textPrimary">Consultation approval needed</div>
+
           <div className="text-xs font-medium text-textSecondary">
-            {item.service?.name ? item.service.name : 'A booking'}
-            {item.professional?.businessName ? ` · ${item.professional.businessName}` : ''}
+            {svc}
+            {' · '}
+            <ProProfileLink proId={item.professional?.id ?? null} label={proLabel} className="text-textSecondary" />
             {item.scheduledFor ? ` · ${prettyWhen(item.scheduledFor)}` : ''}
           </div>
         </div>

@@ -5,6 +5,8 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import type { BookingLike } from './_helpers'
 import { prettyWhen, locationLabel, statusUpper } from './_helpers'
+import ProProfileLink from './ProProfileLink'
+
 
 async function safeJson(res: Response) {
   return (await res.json().catch(() => ({}))) as any
@@ -110,7 +112,17 @@ export default function PendingBookings({
                 </div>
 
                 <div className="mt-1 text-sm text-textPrimary">
-                  <span className="font-black">{pro}</span>
+                  <span
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <ProProfileLink
+                      proId={b?.professional?.id || null}
+                      label={b?.professional?.businessName || 'Professional'}
+                      className="font-black"
+                    />
+                  </span>
+
                   {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
                 </div>
 
@@ -181,7 +193,17 @@ export default function PendingBookings({
               </div>
 
               <div className="mt-1 text-sm">
-                <span className="font-black">{pro}</span>
+                <span
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <ProProfileLink
+                    proId={b?.professional?.id || null}
+                    label={b?.professional?.businessName || 'Professional'}
+                    className="font-black"
+                  />
+                </span>
+
                 {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
               </div>
 

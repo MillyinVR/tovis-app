@@ -34,10 +34,7 @@ function pickTab(resolved: SearchParams | undefined): TabKey {
   return raw === 'services' || raw === 'reviews' ? raw : 'portfolio'
 }
 
-function pickOfferingImage(off: {
-  customImageUrl?: string | null
-  service?: { defaultImageUrl?: string | null } | null
-}) {
+function pickOfferingImage(off: { customImageUrl?: string | null; service?: { defaultImageUrl?: string | null } | null }) {
   const src = (off.customImageUrl || off.service?.defaultImageUrl || '').trim()
   return src || null
 }
@@ -90,11 +87,7 @@ function formatClientName(input: { userEmail?: string | null; firstName?: string
   return full || 'Client'
 }
 
-export default async function ProPublicProfilePage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>
-}) {
+export default async function ProPublicProfilePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect(`/login?from=${encodeURIComponent(ROUTES.proPublicProfile)}`)
@@ -104,17 +97,58 @@ export default async function ProPublicProfilePage({
   const tab = pickTab(resolved)
   const proId = user.professionalProfile.id
 
+  // ✅ Tight select: only what the page renders
   const pro = await prisma.professionalProfile.findUnique({
     where: { id: proId },
-    include: {
+    select: {
+      id: true,
+      businessName: true,
+      bio: true,
+      location: true,
+      avatarUrl: true,
+      professionType: true,
       offerings: {
         where: { isActive: true },
-        include: { service: true },
         orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          customImageUrl: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+          service: {
+            select: {
+              name: true,
+              defaultImageUrl: true,
+              minPrice: true,
+              defaultDurationMinutes: true,
+            },
+          },
+        },
       },
       reviews: {
         orderBy: { createdAt: 'desc' },
-        include: { mediaAssets: true, client: { include: { user: true } } },
+        take: 200, // keep reasonable cap
+        select: {
+          id: true,
+          rating: true,
+          headline: true,
+          body: true,
+          createdAt: true,
+          mediaAssets: {
+            select: { id: true, url: true, thumbUrl: true, mediaType: true, isFeaturedInPortfolio: true },
+          },
+          client: {
+            select: {
+              firstName: true,
+              lastName: true,
+              user: { select: { email: true } },
+            },
+          },
+        },
       },
     },
   })
@@ -137,9 +171,7 @@ export default async function ProPublicProfilePage({
 
   const reviewCount = pro.reviews.length
   const averageRating =
-    reviewCount > 0
-      ? (pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount).toFixed(1)
-      : null
+    reviewCount > 0 ? (pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount).toFixed(1) : null
 
   const reviewsForUI = pro.reviews.map((rev) => {
     const clientName = formatClientName({
@@ -172,7 +204,6 @@ export default async function ProPublicProfilePage({
 
   return (
     <main className="mx-auto max-w-5xl pb-6 font-sans">
-      {/* Header Card */}
       <section className="tovis-glass rounded-[18px] border border-white/10 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <Link href={ROUTES.proHome} className="text-[12px] font-black text-textSecondary hover:text-textPrimary">
@@ -233,14 +264,12 @@ export default async function ProPublicProfilePage({
           </div>
         </div>
 
-        {/* Stats */}
         <div className="mt-5 grid grid-cols-3 gap-3">
           <Stat label="Rating" value={reviewCount ? averageRating || '–' : '–'} />
           <Stat label="Reviews" value={String(reviewCount)} />
           <Stat label="Favorites" value={String(favoritesCount)} />
         </div>
 
-        {/* CTAs */}
         <div className="mt-5 flex flex-wrap gap-2">
           <Link
             href={ROUTES.proServices}
@@ -268,7 +297,6 @@ export default async function ProPublicProfilePage({
         </div>
       </section>
 
-      {/* Tabs */}
       <nav className="mt-6 flex gap-2 border-b border-white/10">
         <TabLink active={tab === 'portfolio'} href={ROUTES.proPublicProfile}>
           Portfolio
@@ -281,7 +309,6 @@ export default async function ProPublicProfilePage({
         </TabLink>
       </nav>
 
-      {/* Content */}
       {tab === 'portfolio' ? (
         <section className="pt-4">
           {portfolioMedia.length === 0 ? (
@@ -356,18 +383,12 @@ export default async function ProPublicProfilePage({
                         <div className="truncate text-[13px] font-black text-textPrimary">
                           {off.title || off.service?.name || 'Service'}
                         </div>
-                        {off.description ? (
-                          <div className="mt-1 line-clamp-2 text-[12px] text-textSecondary">{off.description}</div>
-                        ) : null}
+                        {off.description ? <div className="mt-1 line-clamp-2 text-[12px] text-textSecondary">{off.description}</div> : null}
                       </div>
                     </div>
 
                     <div className="text-right text-[12px] text-textSecondary">
-                      {price != null ? (
-                        <div className="font-black text-textPrimary">${moneyToString(price)}</div>
-                      ) : (
-                        <div className="font-black text-textPrimary">–</div>
-                      )}
+                      {price != null ? <div className="font-black text-textPrimary">${moneyToString(price)}</div> : <div className="font-black text-textPrimary">–</div>}
                       {duration != null ? <div>{duration} min</div> : <div>–</div>}
                     </div>
                   </div>
@@ -402,15 +423,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-function TabLink({
-  href,
-  active,
-  children,
-}: {
-  href: string
-  active: boolean
-  children: React.ReactNode
-}) {
+function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
     <Link
       href={href}
@@ -425,9 +438,5 @@ function TabLink({
 }
 
 function EmptyBox({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-[18px] border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
-      {children}
-    </div>
-  )
+  return <div className="rounded-[18px] border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">{children}</div>
 }

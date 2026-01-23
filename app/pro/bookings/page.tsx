@@ -4,30 +4,11 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
-
-import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { Prisma } from '@prisma/client'
+import ClientNameLink from '@/app/_components/ClientNameLink'
 
 export const dynamic = 'force-dynamic'
-
-type BookingRow = {
-  id: string
-  status: string
-  scheduledFor: Date
-  startedAt: Date | null
-  finishedAt: Date | null
-  durationMinutesSnapshot: number
-  priceSnapshot: any
-  discountAmount: any | null
-  totalAmount: any | null
-  service: { name: string }
-  client: {
-    id: string
-    firstName: string
-    lastName: string
-    phone: string | null
-    user: { email: string } | null
-  }
-}
 
 type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SearchParams = Record<string, string | string[] | undefined>
@@ -67,45 +48,9 @@ function formatStatus(status: string) {
   }
 }
 
-function moneyNumber(maybeMoney: any) {
-  if (maybeMoney == null) return 0
-  if (typeof maybeMoney === 'number') return Number.isFinite(maybeMoney) ? maybeMoney : 0
-  if (typeof maybeMoney === 'string') {
-    const n = Number(maybeMoney)
-    return Number.isFinite(n) ? n : 0
-  }
-  if (typeof maybeMoney?.toNumber === 'function') {
-    const n = maybeMoney.toNumber()
-    return Number.isFinite(n) ? n : 0
-  }
-  try {
-    const n = Number(String(maybeMoney))
-    return Number.isFinite(n) ? n : 0
-  } catch {
-    return 0
-  }
-}
-
-function PriceBlock({ b }: { b: BookingRow }) {
-  const baseStr = moneyToString(b.priceSnapshot) ?? '0.00'
-  const discountStr = b.discountAmount != null ? moneyToString(b.discountAmount) ?? '0.00' : null
-  const totalStr = b.totalAmount != null ? moneyToString(b.totalAmount) ?? baseStr : baseStr
-
-  const discountNum = moneyNumber(b.discountAmount)
-
-  if (discountNum > 0) {
-    return (
-      <div className="grid gap-1 text-[12px] text-textSecondary">
-        <div>
-          Base: <span className="line-through text-textSecondary">${baseStr}</span>
-        </div>
-        <div>Last-minute discount: -${discountStr ?? '0.00'}</div>
-        <div className="font-black text-textPrimary">Total: ${totalStr ?? '0.00'}</div>
-      </div>
-    )
-  }
-
-  return <div className="text-[12px] text-textSecondary">Total: ${totalStr ?? baseStr}</div>
+function durationLabel(totalDurationMinutes: unknown): number {
+  const n = Number(totalDurationMinutes ?? 0)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -161,7 +106,82 @@ function FilterPills({ active }: { active: StatusFilter }) {
   )
 }
 
-function Section({ title, items, timeZone }: { title: string; items: BookingRow[]; timeZone: string }) {
+// ✅ Strongly-typed select (prevents “unknown” leaks into moneyToString)
+const bookingSelect = {
+  id: true,
+  status: true,
+  scheduledFor: true,
+  startedAt: true,
+  finishedAt: true,
+
+  totalDurationMinutes: true,
+  subtotalSnapshot: true,
+  totalAmount: true,
+  discountAmount: true,
+  taxAmount: true,
+  tipAmount: true,
+
+  service: { select: { name: true } },
+  client: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      user: { select: { email: true } },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+
+function PriceBlock({ b }: { b: BookingRow }) {
+  const explicitTotal = b.totalAmount ?? null
+
+  const subtotal = b.subtotalSnapshot
+  const discount = b.discountAmount ?? null
+  const tax = b.taxAmount ?? null
+  const tip = b.tipAmount ?? null
+
+  if (explicitTotal) {
+    return <div className="text-[12px] text-textSecondary">Total: ${moneyToString(explicitTotal) ?? '0.00'}</div>
+  }
+
+  const z = new Prisma.Decimal(0)
+  const computed = subtotal.minus(discount ?? z).plus(tax ?? z).plus(tip ?? z)
+
+  const subtotalStr = moneyToString(subtotal) ?? '0.00'
+  const totalStr = moneyToString(computed) ?? subtotalStr
+
+  const discountStr = discount ? moneyToString(discount) : null
+  const taxStr = tax ? moneyToString(tax) : null
+  const tipStr = tip ? moneyToString(tip) : null
+
+  const hasModifiers = Boolean(discountStr || taxStr || tipStr)
+  if (!hasModifiers) return <div className="text-[12px] text-textSecondary">Total: ${subtotalStr}</div>
+
+  return (
+    <div className="grid gap-1 text-[12px] text-textSecondary">
+      <div>Subtotal: ${subtotalStr}</div>
+      {discountStr ? <div>Discount: -${discountStr}</div> : null}
+      {taxStr ? <div>Tax: +${taxStr}</div> : null}
+      {tipStr ? <div>Tip: +${tipStr}</div> : null}
+      <div className="font-black text-textPrimary">Total: ${totalStr}</div>
+    </div>
+  )
+}
+
+function Section({
+  title,
+  items,
+  timeZone,
+  visibleClientIdSet,
+}: {
+  title: string
+  items: BookingRow[]
+  timeZone: string
+  visibleClientIdSet: Set<string>
+}) {
   return (
     <section className="grid gap-3">
       <div className="flex items-end justify-between gap-3">
@@ -175,53 +195,56 @@ function Section({ title, items, timeZone }: { title: string; items: BookingRow[
         </div>
       ) : (
         <div className="grid gap-3">
-          {items.map((b) => (
-            <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className="truncate text-[13px] font-black text-textPrimary">{b.service.name}</div>
-                    <StatusPill status={b.status} />
-                  </div>
+          {items.map((b) => {
+            const dur = durationLabel(b.totalDurationMinutes)
+            const canLinkClient = visibleClientIdSet.has(String(b.client.id))
 
-                  <div className="mt-1 text-[12px] text-textSecondary">
+            return (
+              <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-[13px] font-black text-textPrimary">{b.service?.name ?? 'Service'}</div>
+                      <StatusPill status={b.status} />
+                    </div>
+
+                    <div className="mt-1 text-[12px] text-textSecondary">
+                      <ClientNameLink canLink={canLinkClient} clientId={b.client.id}>
+                        {b.client.firstName} {b.client.lastName}
+                      </ClientNameLink>
+                      {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
+                      {b.client.phone ? ` • ${b.client.phone}` : ''}
+                    </div>
+
+                    <div className="mt-2 text-[12px] text-textSecondary">
+                      {formatDate(b.scheduledFor, timeZone)}
+                      {dur ? ` • ${dur} min` : ''}
+                    </div>
+
+                    <div className="mt-2">
+                      <PriceBlock b={b} />
+                    </div>
+
                     <a
-                      href={`/pro/clients/${b.client.id}`}
-                      className="font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                      href={`/pro/bookings/${encodeURIComponent(b.id)}`}
+                      className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
                     >
-                      {b.client.firstName} {b.client.lastName}
+                      Details &amp; aftercare
                     </a>
-                    {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
-                    {b.client.phone ? ` • ${b.client.phone}` : ''}
                   </div>
 
-                  <div className="mt-2 text-[12px] text-textSecondary">
-                    {formatDate(b.scheduledFor, timeZone)} • {Math.round(b.durationMinutesSnapshot)} min
+                  <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
+                    <BookingActions
+                      bookingId={b.id}
+                      currentStatus={b.status}
+                      startedAt={b.startedAt ? b.startedAt.toISOString() : null}
+                      finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
+                    />
                   </div>
-
-                  <div className="mt-2">
-                    <PriceBlock b={b} />
-                  </div>
-
-                  <a
-                    href={`/pro/bookings/${b.id}`}
-                    className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
-                  >
-                    Details &amp; aftercare
-                  </a>
-                </div>
-
-                <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
-                  <BookingActions
-                    bookingId={b.id}
-                    currentStatus={b.status}
-                    startedAt={b.startedAt ? b.startedAt.toISOString() : null}
-                    finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
-                  />
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </section>
@@ -263,57 +286,45 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     timeZone,
   })
 
-  const select = {
-    id: true,
-    status: true,
-    scheduledFor: true,
-    startedAt: true,
-    finishedAt: true,
-    durationMinutesSnapshot: true,
-    priceSnapshot: true,
-    discountAmount: true,
-    totalAmount: true,
-    service: { select: { name: true } },
-    client: {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        user: { select: { email: true } },
-      },
-    },
-  } as const
-
   const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
+
+  /**
+   * ✅ Build visibility Set once:
+   * Pro can link to client chart only if they have:
+   * - PENDING booking, OR
+   * - booking in progress, OR
+   * - ACCEPTED upcoming booking
+   */
+  const now = new Date()
+  const visibleClientRows = await prisma.booking.findMany({
+    where: {
+      professionalId: proId,
+      OR: [
+        { status: 'PENDING' },
+        { startedAt: { not: null }, finishedAt: null },
+        { status: 'ACCEPTED', scheduledFor: { gte: now } },
+      ],
+    },
+    select: { clientId: true },
+    take: 2000,
+  })
+  const visibleClientIdSet = new Set<string>(visibleClientRows.map((r) => String(r.clientId)))
 
   const [todayBookings, upcomingBookings, pastBookings] = await Promise.all([
     prisma.booking.findMany({
-      where: {
-        professionalId: proId,
-        ...statusWhere,
-        scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc },
-      },
+      where: { professionalId: proId, ...statusWhere, scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc } },
       orderBy: { scheduledFor: 'asc' },
-      select,
+      select: bookingSelect,
     }),
     prisma.booking.findMany({
-      where: {
-        professionalId: proId,
-        ...statusWhere,
-        scheduledFor: { gte: startOfTomorrowUtc },
-      },
+      where: { professionalId: proId, ...statusWhere, scheduledFor: { gte: startOfTomorrowUtc } },
       orderBy: { scheduledFor: 'asc' },
-      select,
+      select: bookingSelect,
     }),
     prisma.booking.findMany({
-      where: {
-        professionalId: proId,
-        ...statusWhere,
-        scheduledFor: { lt: startOfTodayUtc },
-      },
+      where: { professionalId: proId, ...statusWhere, scheduledFor: { lt: startOfTodayUtc } },
       orderBy: { scheduledFor: 'desc' },
-      select,
+      select: bookingSelect,
     }),
   ])
 
@@ -343,9 +354,9 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       </header>
 
       <div className="grid gap-6">
-        <Section title="Today" items={todayBookings as BookingRow[]} timeZone={timeZone} />
-        <Section title="Upcoming" items={upcomingBookings as BookingRow[]} timeZone={timeZone} />
-        <Section title="Past" items={pastBookings as BookingRow[]} timeZone={timeZone} />
+        <Section title="Today" items={todayBookings} timeZone={timeZone} visibleClientIdSet={visibleClientIdSet} />
+        <Section title="Upcoming" items={upcomingBookings} timeZone={timeZone} visibleClientIdSet={visibleClientIdSet} />
+        <Section title="Past" items={pastBookings} timeZone={timeZone} visibleClientIdSet={visibleClientIdSet} />
       </div>
     </main>
   )

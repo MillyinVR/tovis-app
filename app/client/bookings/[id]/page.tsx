@@ -6,11 +6,16 @@ import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
 import ReviewSection from './ReviewSection'
 import BookingActions from './BookingActions'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
+import ProProfileLink from '@/app/client/components/ProProfileLink'
+import { COPY } from '@/lib/copy'
 
 export const dynamic = 'force-dynamic'
 
 type StepKey = 'overview' | 'consult' | 'aftercare'
 type StatusVariant = 'danger' | 'success' | 'warn' | 'info' | 'neutral'
+
+// Neutral fallback (no business assumption)
+const FALLBACK_TZ = 'UTC'
 
 function normalizeStep(raw: unknown): StepKey {
   const s = String(raw || '').toLowerCase().trim()
@@ -82,56 +87,30 @@ function statusPillVariant(statusRaw: unknown): Exclude<StatusVariant, 'neutral'
 
 function statusMessage(statusRaw: unknown): { title: string; body: string; variant: StatusVariant } {
   const s = upper(statusRaw)
+  const M = COPY.bookings.status.messages
 
-  if (s === 'PENDING') {
-    return {
-      title: 'Request sent',
-      body: 'Your professional hasn’t approved this yet. You’ll see it move to Confirmed once accepted.',
-      variant: 'warn',
-    }
-  }
+  if (s === 'PENDING') return { title: M.pending.title, body: M.pending.body, variant: 'warn' }
+  if (s === 'ACCEPTED') return { title: M.accepted.title, body: M.accepted.body, variant: 'info' }
+  if (s === 'COMPLETED') return { title: M.completed.title, body: M.completed.body, variant: 'success' }
+  if (s === 'CANCELLED') return { title: M.cancelled.title, body: M.cancelled.body, variant: 'danger' }
 
-  if (s === 'ACCEPTED') {
-    return {
-      title: 'Confirmed',
-      body: 'You’re booked. Show up cute and on time. Future-you will thank you.',
-      variant: 'info',
-    }
-  }
-
-  if (s === 'COMPLETED') {
-    return {
-      title: 'Completed',
-      body: 'All done. Leave a review if you haven’t already (professionals live for that).',
-      variant: 'success',
-    }
-  }
-
-  if (s === 'CANCELLED') {
-    return {
-      title: 'Cancelled',
-      body: 'This booking is cancelled. If you still want the service, book a new time.',
-      variant: 'danger',
-    }
-  }
-
-  return {
-    title: 'Booking status',
-    body: 'We’re tracking this booking. Status updates will show here.',
-    variant: 'neutral',
-  }
+  return { title: M.fallback.title, body: M.fallback.body, variant: 'neutral' }
 }
 
 function formatMoneyLoose(v: unknown): string | null {
   if (v == null) return null
+
   if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(2)}`
-  if (typeof v === 'string' && v.trim()) {
+
+  if (typeof v === 'string') {
     const s = v.trim()
+    if (!s) return null
     if (s.startsWith('$')) return s
     const n = Number(s)
     if (Number.isFinite(n)) return `$${n.toFixed(2)}`
     return s
   }
+
   return null
 }
 
@@ -211,9 +190,7 @@ function formatPrimaryLocationLine(loc: {
 
 export default async function ClientBookingPage(props: {
   params: Promise<{ id: string }> | { id: string }
-  searchParams?:
-    | Promise<Record<string, string | string[] | undefined>>
-    | Record<string, string | string[] | undefined>
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>
 }) {
   const resolvedParams = await Promise.resolve(props.params as any)
   const bookingId = String(resolvedParams?.id || '').trim()
@@ -265,8 +242,6 @@ export default async function ClientBookingPage(props: {
         },
       },
 
-      // Keep these only if they really exist in your schema (they did in your paste).
-      // If Prisma types complain here, comment them out.
       aftercareSummary: true,
       consultationApproval: true,
     },
@@ -275,7 +250,6 @@ export default async function ClientBookingPage(props: {
   if (!booking) notFound()
   if (booking.clientId !== user.clientProfile.id) redirect('/client/bookings')
 
-  // Reviews (unchanged)
   const existingReview = await prisma.review.findFirst({
     where: { bookingId: booking.id, clientId: user.clientProfile.id },
     include: {
@@ -297,28 +271,25 @@ export default async function ClientBookingPage(props: {
 
   const scheduled = toDate(booking.scheduledFor)
 
-  // ✅ Timezone truth order: booking.locationTimeZone -> location.timeZone -> pro.timeZone -> fallback
-  let appointmentTz = normalizeTimeZone(booking.locationTimeZone, 'America/Los_Angeles')
+  // ✅ Timezone truth order: booking.locationTimeZone -> primary location tz -> pro tz -> UTC
+  let appointmentTz = normalizeTimeZone(booking.locationTimeZone, FALLBACK_TZ)
 
   const primaryLoc = booking.professional?.locations?.[0] ?? null
   if (!booking.locationTimeZone && primaryLoc?.timeZone) {
     appointmentTz = normalizeTimeZone(primaryLoc.timeZone, appointmentTz)
   }
-
   if (!booking.locationTimeZone && !primaryLoc?.timeZone) {
     appointmentTz = normalizeTimeZone(booking.professional?.timeZone, appointmentTz)
   }
 
-  const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : 'Unknown time'
+  const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : COPY.common.unknownTime
   const locLine = formatPrimaryLocationLine(primaryLoc)
 
   const pillVariant = statusPillVariant(booking.status)
   const msg = statusMessage(booking.status)
 
   const durationMinutes =
-    typeof booking.totalDurationMinutes === 'number' && booking.totalDurationMinutes > 0
-      ? booking.totalDurationMinutes
-      : null
+    typeof booking.totalDurationMinutes === 'number' && booking.totalDurationMinutes > 0 ? booking.totalDurationMinutes : null
 
   const basePriceLabel = formatMoneyLoose(booking.subtotalSnapshot) ?? null
   const modeLabel = friendlyLocationType(booking.locationType)
@@ -353,7 +324,6 @@ export default async function ClientBookingPage(props: {
   if (step === 'consult' && !canShowConsultTab) redirect(`${baseHref}?step=overview`)
   if (step === 'aftercare' && !canShowAftercareTab) redirect(`${baseHref}?step=overview`)
 
-  // ✅ Only mark AFTERCARE notifications read when viewing aftercare
   let showUnreadAftercareBadge = false
   if (step === 'aftercare' && aftercare?.id) {
     const unread = await prisma.clientNotification.findFirst({
@@ -388,25 +358,35 @@ export default async function ClientBookingPage(props: {
   const proposedTotalLabel = formatMoneyLoose(consultationApproval?.proposedTotal) || null
   const proposedFallback = basePriceLabel || null
 
+  const proLabel =
+    booking.professional?.businessName ||
+    booking.professional?.user?.email ||
+    COPY.common.professionalFallback
+
   return (
     <main className="mx-auto mt-20 w-full max-w-2xl px-4 pb-10 text-textPrimary">
-      <h1 className="mb-3 text-lg font-black">{booking.service?.name || 'Booking'}</h1>
+      <h1 className="mb-3 text-lg font-black">{booking.service?.name || COPY.bookings.titleFallback}</h1>
 
       <div className="mb-4 flex items-center justify-between gap-3">
         <a
           href="/client/bookings"
           className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
         >
-          ← Back to bookings
+          {COPY.bookings.backToBookings}
         </a>
 
         <span className={['inline-flex items-center rounded-full px-3 py-1 text-xs font-black', pillClassByVariant(pillVariant)].join(' ')}>
-          {String(booking.status || 'UNKNOWN').toUpperCase()}
+          {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
         </span>
       </div>
 
       <div className="mb-2 text-sm font-semibold text-textSecondary">
-        With {booking.professional?.businessName || booking.professional?.user?.email || 'your professional'}
+        {COPY.bookings.withLabel}{' '}
+        <ProProfileLink
+          proId={booking.professional?.id ?? null}
+          label={proLabel}
+          className="hover:underline underline-offset-4"
+        />
       </div>
 
       <div className="mb-3 text-sm text-textPrimary">
@@ -436,35 +416,35 @@ export default async function ClientBookingPage(props: {
 
       <nav className="mb-5 flex flex-wrap items-center gap-2">
         <a href={`${baseHref}?step=overview`} className={tabClass(step === 'overview')}>
-          Overview
+          {COPY.bookings.tabs.overview}
         </a>
 
         {canShowConsultTab ? (
           <a href={`${baseHref}?step=consult`} className={tabClass(step === 'consult')}>
-            Consultation
+            {COPY.bookings.tabs.consultation}
           </a>
         ) : (
           <span className={tabDisabledClass()} title="Consultation becomes available after your booking is confirmed and started by your pro.">
-            Consultation
+            {COPY.bookings.tabs.consultation}
           </span>
         )}
 
         {canShowAftercareTab ? (
           <a href={`${baseHref}?step=aftercare`} className={tabClass(step === 'aftercare')}>
-            Aftercare
+            {COPY.bookings.tabs.aftercare}
           </a>
         ) : (
           <span className={tabDisabledClass()} title="Aftercare becomes available after your appointment is completed.">
-            Aftercare
+            {COPY.bookings.tabs.aftercare}
           </span>
         )}
 
         {showConsultationApproval ? (
           <span
             className="ml-auto inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary"
-            title="Consultation approval needed"
+            title={COPY.bookings.badges.actionRequired}
           >
-            Action required
+            {COPY.bookings.badges.actionRequired}
           </span>
         ) : null}
       </nav>
@@ -477,28 +457,30 @@ export default async function ClientBookingPage(props: {
       {step === 'consult' ? (
         <section className="mb-5 rounded-card border border-white/10 bg-bgSecondary p-3">
           <div className="flex items-baseline justify-between gap-3">
-            <div className="text-sm font-black">Consultation</div>
+            <div className="text-sm font-black">{COPY.bookings.consultation.header}</div>
 
             {showConsultationApproval ? (
               <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
-                Approval needed
+                {COPY.bookings.consultation.approvalNeeded}
               </span>
             ) : null}
           </div>
 
           <div className="mt-3 grid gap-3">
-            <div className="text-xs font-black text-textSecondary">Notes</div>
+            <div className="text-xs font-black text-textSecondary">{COPY.bookings.consultation.notesLabel}</div>
             <div className="whitespace-pre-wrap text-sm text-textPrimary">
-              {consultNotes.trim() ? consultNotes : 'No consultation notes provided.'}
+              {consultNotes.trim() ? consultNotes : COPY.bookings.consultation.noNotes}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-xs font-semibold text-textSecondary">
-                <span className="font-black text-textPrimary">Proposed total:</span> {proposedTotalLabel || proposedFallback || 'Not provided'}
+                <span className="font-black text-textPrimary">{COPY.bookings.consultation.proposedTotalLabel}</span>{' '}
+                {proposedTotalLabel || proposedFallback || COPY.common.notProvided}
               </div>
 
               <div className="text-xs font-semibold text-textSecondary">
-                Times shown in <span className="font-black text-textPrimary">{appointmentTz}</span>
+                {COPY.bookings.consultation.timesShownIn}{' '}
+                <span className="font-black text-textPrimary">{appointmentTz}</span>
               </div>
             </div>
 
@@ -511,7 +493,7 @@ export default async function ClientBookingPage(props: {
                 proposedServicesJson={consultationApproval?.proposedServicesJson ?? null}
               />
             ) : (
-              <div className="text-xs font-semibold text-textSecondary">No consultation approval needed right now.</div>
+              <div className="text-xs font-semibold text-textSecondary">{COPY.bookings.consultation.noApprovalNeeded}</div>
             )}
           </div>
         </section>
@@ -521,15 +503,13 @@ export default async function ClientBookingPage(props: {
         <>
           {showConsultationApproval ? (
             <section className="mb-5 rounded-card border border-white/10 bg-bgSecondary p-3">
-              <div className="mb-1 text-sm font-black text-textPrimary">Action needed: approve consultation</div>
-              <div className="mb-3 text-sm text-textSecondary">
-                Your pro updated services and pricing. Review it so they can proceed.
-              </div>
+              <div className="mb-1 text-sm font-black text-textPrimary">{COPY.bookings.consultation.actionNeededTitle}</div>
+              <div className="mb-3 text-sm text-textSecondary">{COPY.bookings.consultation.actionNeededBody}</div>
               <a
                 href={`${baseHref}?step=consult`}
                 className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
               >
-                Review &amp; approve
+                {COPY.bookings.consultation.actionNeededCta}
               </a>
             </section>
           ) : null}
@@ -538,7 +518,7 @@ export default async function ClientBookingPage(props: {
             href={`/api/calendar?bookingId=${encodeURIComponent(booking.id)}`}
             className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
           >
-            Add to calendar
+            {COPY.bookings.addToCalendar}
           </a>
 
           <BookingActions
@@ -553,11 +533,11 @@ export default async function ClientBookingPage(props: {
       {step === 'aftercare' ? (
         <section id="aftercare" className="mt-5 rounded-card border border-white/10 bg-bgSecondary p-3">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="text-sm font-black">Aftercare summary</div>
+            <div className="text-sm font-black">{COPY.bookings.aftercare.header}</div>
 
             {showUnreadAftercareBadge ? (
               <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[10px] font-black text-textPrimary">
-                NEW
+                {COPY.bookings.badges.new}
               </span>
             ) : null}
           </div>
@@ -567,14 +547,14 @@ export default async function ClientBookingPage(props: {
           ) : (
             <div className="text-xs font-semibold text-textSecondary">
               {upper(booking.status) === 'COMPLETED'
-                ? 'No aftercare notes provided.'
-                : 'Aftercare will appear here once the service is completed.'}
+                ? COPY.bookings.aftercare.noAftercareNotesCompleted
+                : COPY.bookings.aftercare.noAftercareNotesPending}
             </div>
           )}
 
           {aftercare && (rebookInfo.label || showRebookCTA) ? (
             <div className="mt-4 border-t border-white/10 pt-4">
-              <div className="mb-2 text-xs font-black">Rebook</div>
+              <div className="mb-2 text-xs font-black">{COPY.bookings.aftercare.rebookHeader}</div>
 
               {rebookInfo.label ? (
                 <div className="mb-3 text-sm text-textPrimary">
@@ -582,7 +562,7 @@ export default async function ClientBookingPage(props: {
                   <span className="text-textSecondary"> · {appointmentTz}</span>
                 </div>
               ) : (
-                <div className="mb-3 text-xs font-semibold text-textSecondary">No rebook recommendation yet.</div>
+                <div className="mb-3 text-xs font-semibold text-textSecondary">{COPY.bookings.aftercare.noRebookRecommendation}</div>
               )}
 
               {showRebookCTA ? (
@@ -590,14 +570,14 @@ export default async function ClientBookingPage(props: {
                   href={`/client/rebook/${encodeURIComponent(aftercareToken as string)}`}
                   className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
                 >
-                  {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT' ? 'View rebook details' : 'Rebook now'}
+                  {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                    ? COPY.bookings.aftercare.rebookCtaViewDetails
+                    : COPY.bookings.aftercare.rebookCtaNow}
                 </a>
               ) : null}
 
               {!aftercareToken && upper(booking.status) === 'COMPLETED' ? (
-                <div className="mt-2 text-xs font-semibold text-textSecondary">
-                  Rebook link not available yet (missing aftercare token).
-                </div>
+                <div className="mt-2 text-xs font-semibold text-textSecondary">{COPY.bookings.aftercare.rebookLinkNotAvailable}</div>
               ) : null}
             </div>
           ) : null}
@@ -607,7 +587,7 @@ export default async function ClientBookingPage(props: {
               href="/client/aftercare"
               className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
             >
-              View all aftercare
+              {COPY.bookings.aftercare.viewAllAftercare}
             </a>
           </div>
         </section>

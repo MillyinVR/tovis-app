@@ -3,6 +3,8 @@
 
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
+import { moneyToString } from '@/lib/money'
+import { COPY } from '@/lib/copy'
 
 async function safeJson(res: Response) {
   return res.json().catch(() => ({}))
@@ -16,9 +18,29 @@ function errorFrom(res: Response, data: any) {
   return `Request failed (${res.status}).`
 }
 
-function asItems(proposedServicesJson: unknown): Array<{ label?: string; categoryName?: string | null; price?: any }> {
+type ProposedItem = {
+  label?: string
+  categoryName?: string | null
+  price?: unknown
+}
+
+function asItems(proposedServicesJson: unknown): ProposedItem[] {
   const j: any = proposedServicesJson
-  return Array.isArray(j?.items) ? j.items : []
+  return Array.isArray(j?.items) ? (j.items as ProposedItem[]) : []
+}
+
+function formatMoneyLike(v: unknown): string | null {
+  // narrow before moneyToString
+  if (v === null || v === undefined) return null
+  if (typeof v === 'number' || typeof v === 'string') return moneyToString(v)
+  return null
+}
+
+function moneyLabel(v: unknown): string {
+  const normalized = formatMoneyLike(v)
+  const s = typeof normalized === 'string' ? normalized.trim() : ''
+  if (!s) return COPY.common.emDash
+  return s.startsWith('$') ? s : `$${s}`
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -46,6 +68,14 @@ export default function ConsultationDecisionCard(props: {
 
   const items = useMemo(() => asItems(proposedServicesJson), [proposedServicesJson])
 
+  const totalLabel = useMemo(() => {
+    if (typeof proposedTotalLabel === 'string') {
+      const t = proposedTotalLabel.trim()
+      if (t) return t.startsWith('$') ? t : `$${t}`
+    }
+    return COPY.common.notProvided
+  }, [proposedTotalLabel])
+
   async function decide(action: 'approve' | 'reject') {
     if (disabled || loading) return
     setErr(null)
@@ -71,45 +101,50 @@ export default function ConsultationDecisionCard(props: {
   return (
     <section className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div className="text-sm font-black text-accentPrimary">Approve this consultation?</div>
+        <div className="text-sm font-black text-accentPrimary">{COPY.consultationDecisionCard.title}</div>
         <Pill>{appointmentTz}</Pill>
       </div>
 
-      <div className="mt-3 text-xs font-black text-textSecondary">Proposed services</div>
+      <div className="mt-3 text-xs font-black text-textSecondary">{COPY.consultationDecisionCard.proposedServices}</div>
 
       {items.length ? (
         <div className="mt-2 grid gap-2">
-          {items.map((it, idx) => (
-            <div key={idx} className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3">
-              <div className="min-w-0">
-                <div className="text-sm font-black text-textPrimary">{it?.label || 'Service'}</div>
-                {it?.categoryName ? (
-                  <div className="text-xs font-semibold text-textSecondary">{it.categoryName}</div>
-                ) : null}
-              </div>
-              <div className="text-sm font-black text-textPrimary">
-                {it?.price != null ? (
-                  <span>{String(it.price).trim().startsWith('$') ? String(it.price).trim() : `$${String(it.price).trim()}`}</span>
-                ) : (
-                  '—'
-                )}
+          {items.map((it, idx) => {
+            const label =
+              typeof it?.label === 'string' && it.label.trim()
+                ? it.label.trim()
+                : COPY.consultationDecisionCard.serviceFallback
 
+            const category =
+              typeof it?.categoryName === 'string' && it.categoryName.trim() ? it.categoryName.trim() : null
+
+            const key = `${label}:${category ?? ''}:${idx}`
+
+            return (
+              <div
+                key={key}
+                className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-black text-textPrimary">{label}</div>
+                  {category ? <div className="text-xs font-semibold text-textSecondary">{category}</div> : null}
+                </div>
+
+                <div className="text-sm font-black text-textPrimary">{moneyLabel(it?.price)}</div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       ) : (
-        <div className="mt-2 text-sm font-medium text-textSecondary">No line items provided.</div>
+        <div className="mt-2 text-sm font-medium text-textSecondary">{COPY.consultationDecisionCard.noLineItems}</div>
       )}
 
-      <div className="mt-3 text-xs font-black text-textSecondary">Proposed total</div>
-      <div className="mt-1 text-base font-black text-textPrimary">
-        {proposedTotalLabel || 'Not provided'}
-      </div>
+      <div className="mt-3 text-xs font-black text-textSecondary">{COPY.consultationDecisionCard.proposedTotal}</div>
+      <div className="mt-1 text-base font-black text-textPrimary">{totalLabel}</div>
 
-      <div className="mt-3 text-xs font-black text-textSecondary">Notes</div>
+      <div className="mt-3 text-xs font-black text-textSecondary">{COPY.consultationDecisionCard.notes}</div>
       <div className="mt-1 whitespace-pre-wrap text-sm text-textPrimary">
-        {notes?.trim() ? notes : 'No consultation notes provided.'}
+        {notes?.trim() ? notes : COPY.consultationDecisionCard.noNotes}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -124,7 +159,7 @@ export default function ConsultationDecisionCard(props: {
               : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
           ].join(' ')}
         >
-          {loading === 'approve' ? 'Approving…' : 'Approve'}
+          {loading === 'approve' ? COPY.consultationDecisionCard.approving : COPY.consultationDecisionCard.approve}
         </button>
 
         <button
@@ -138,23 +173,19 @@ export default function ConsultationDecisionCard(props: {
               : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
           ].join(' ')}
         >
-          {loading === 'reject' ? 'Rejecting…' : 'Reject'}
+          {loading === 'reject' ? COPY.consultationDecisionCard.rejecting : COPY.consultationDecisionCard.reject}
         </button>
       </div>
 
       {done ? (
         <div className="mt-3 text-sm font-semibold text-textSecondary">
-          {done === 'approve'
-            ? 'Approved. Your pro can proceed.'
-            : 'Rejected. Your pro will revise and resend.'}
+          {done === 'approve' ? COPY.consultationDecisionCard.approvedDone : COPY.consultationDecisionCard.rejectedDone}
         </div>
       ) : null}
 
       {err ? <div className="mt-3 text-sm font-semibold text-microAccent">{err}</div> : null}
 
-      <div className="mt-3 text-xs font-medium text-textSecondary">
-        If you reject, the pro gets kicked back to consultation to revise.
-      </div>
+      <div className="mt-3 text-xs font-medium text-textSecondary">{COPY.consultationDecisionCard.rejectHelp}</div>
     </section>
   )
 }

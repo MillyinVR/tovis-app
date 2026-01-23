@@ -1,110 +1,140 @@
-import Link from 'next/link'
+// app/pro/clients/page.tsx
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import NewClientForm from './NewClientForm'
+import ClientNameLink from '@/app/_components/ClientNameLink'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
+
+export const dynamic = 'force-dynamic'
+
+function formatLastSeen(booking: { scheduledFor: Date } | null) {
+  if (!booking) return 'No visits yet'
+  const d = new Date(booking.scheduledFor)
+  return `Last visit: ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
+}
 
 export default async function ProClientsPage() {
   const user = await getCurrentUser()
-
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/clients')
   }
 
-  const db: any = prisma
+  const proId = user.professionalProfile.id
 
-  const clients = await db.clientProfile.findMany({
-    include: {
-      user: true,
-      bookings: {
-        orderBy: { scheduledFor: 'desc' },
-        take: 1,
+  const [clients, visibleClientIdSet] = await Promise.all([
+    prisma.clientProfile.findMany({
+      orderBy: { firstName: 'asc' },
+      take: 2000,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        user: { select: { email: true } },
+        bookings: {
+          orderBy: { scheduledFor: 'desc' },
+          take: 1,
+          select: { scheduledFor: true },
+        },
       },
-    },
-    orderBy: {
-      firstName: 'asc',
-    },
-  })
-
-  function formatLastSeen(c: any) {
-    if (!c.bookings || c.bookings.length === 0) return 'No visits yet'
-    const last = c.bookings[0]
-    return `Last visit: ${new Date(last.scheduledFor).toLocaleDateString()}`
-  }
+    }),
+    getVisibleClientIdSetForPro(proId),
+  ])
 
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto', fontFamily: 'system-ui' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 4 }}>My clients</h1>
-          <p style={{ fontSize: 14, color: '#555' }}>
-            These are the clients you manage inside TOVIS. They can start as “shadow” clients
-            before you ever give them app access.
-          </p>
+    <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
+      <header className="mb-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-[22px] font-black text-textPrimary">Clients</h1>
+            <div className="mt-1 text-[12px] font-semibold text-textSecondary">Your client list inside TOVIS.</div>
+          </div>
         </div>
       </header>
 
-      <section style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>Add a client</h2>
-        <NewClientForm />
+      <section className="mb-6">
+        <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+          <div className="mb-3">
+            <div className="text-[15px] font-black text-textPrimary">Add a client</div>
+            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+              Add “shadow clients” and attach bookings + aftercare.
+            </div>
+          </div>
+          <NewClientForm />
+        </div>
       </section>
 
-      <section>
-        <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>Client list</h2>
+      <section className="grid gap-3">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-[15px] font-black text-textPrimary">Client list</h2>
+            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+              Names are clickable only when you currently have visibility.
+            </div>
+          </div>
+          <div className="text-[12px] font-semibold text-textSecondary">{clients.length ? `${clients.length} total` : ''}</div>
+        </div>
+
         {clients.length === 0 ? (
-          <p style={{ fontSize: 14, color: '#666' }}>
-            No clients yet. Add your regulars so you can start attaching bookings and aftercare.
-          </p>
+          <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] font-semibold text-textSecondary">
+            No clients yet.
+          </div>
         ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {clients.map((c: any) => (
-              <div
-                key={c.id}
-                style={{
-                  border: '1px solid #eee',
-                  borderRadius: 10,
-                  padding: 12,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                }}
-              >
-                <div>
-                  {/* Name links into the full client chart */}
-                  <Link
-                    href={`/pro/clients/${c.id}`}
-                    style={{ fontWeight: 600, textDecoration: 'underline', color: '#111' }}
-                  >
-                    {c.firstName} {c.lastName}
-                  </Link>
-                  <div style={{ fontSize: 13, color: '#555' }}>{c.user?.email}</div>
-                  {c.phone && (
-                    <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-                      {c.phone}
+          <div className="grid gap-3">
+            {clients.map((c) => {
+              const canLink = visibleClientIdSet.has(String(c.id))
+              const lastBooking = c.bookings?.[0] ?? null
+
+              return (
+                <div key={c.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <ClientNameLink canLink={canLink} clientId={c.id}>
+                          {c.firstName} {c.lastName}
+                        </ClientNameLink>
+
+                        {!canLink ? (
+                          <span className="rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                            No active access
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* ✅ Don’t leak contact info when no access */}
+                      <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                        {canLink ? (
+                          <>
+                            {c.user?.email ? c.user.email : 'No email'}
+                            {c.phone ? ` • ${c.phone}` : ''}
+                          </>
+                        ) : (
+                          <span className="text-textSecondary/80">Contact info hidden until active access</span>
+                        )}
+                      </div>
+
+                      <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">{formatLastSeen(lastBooking)}</div>
                     </div>
-                  )}
-                  <div style={{ fontSize: 12, color: '#777', marginTop: 4 }}>
-                    {formatLastSeen(c)}
+
+                    <div className="shrink-0">
+                      {canLink ? (
+                        <a
+                          href={`/pro/clients/${encodeURIComponent(c.id)}`}
+                          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                        >
+                          View chart
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/50 px-4 py-2 text-[12px] font-black text-textSecondary">
+                          View chart
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right', fontSize: 12 }}>
-                  <Link
-                    href={`/pro/clients/${c.id}`}
-                    style={{
-                      fontSize: 12,
-                      padding: '4px 10px',
-                      borderRadius: 999,
-                      border: '1px solid #ddd',
-                      textDecoration: 'none',
-                      color: '#111',
-                      background: '#fafafa',
-                    }}
-                  >
-                    View chart
-                  </Link>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>

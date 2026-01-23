@@ -12,6 +12,7 @@ import PastBookings from './components/PastBookings'
 
 import type { BookingLike, WaitlistLike } from './components/_helpers'
 import { Badge, prettyWhen, locationLabel, sourceUpper, statusUpper } from './components/_helpers'
+import ProProfileLink from './components/ProProfileLink'
 
 type Buckets = {
   upcoming: BookingLike[]
@@ -191,7 +192,14 @@ export default function ClientBookingsDashboard() {
             </div>
 
             <div className="text-textPrimary" style={{ fontSize: 13 }}>
-              <span style={{ fontWeight: 900 }}>{nextAppt.professional?.businessName || 'Professional'}</span>
+              <span style={{ fontWeight: 900 }}>
+                <ProProfileLink
+                  proId={nextAppt.professional?.id || null}
+                  label={nextAppt.professional?.businessName || 'Professional'}
+                  className="text-textPrimary"
+                />
+              </span>
+
               {locationLabel(nextAppt.professional) ? (
                 <span className="text-textSecondary"> · {locationLabel(nextAppt.professional)}</span>
               ) : null}

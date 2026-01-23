@@ -3,7 +3,7 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from '../ConsultationForm'
-
+import { moneyToFixed2String } from '@/lib/money'
 export const dynamic = 'force-dynamic'
 
 type SessionStep =
@@ -132,13 +132,12 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
   const approval = (booking as any).consultationApproval ?? null
   const approvalStatus = upper(approval?.status || 'NONE')
 
-  // ✅ initialPrice now aligned with the new flow:
-  // pending proposal total > booking snapshot > subtotal snapshot
   const initialPrice =
-    moneyString(approval?.proposedTotal) ||
-    moneyString((booking as any).priceSnapshot) ||
-    moneyString((booking as any).subtotalSnapshot) ||
-    ''
+  moneyString(approval?.proposedTotal) ||
+  (moneyToFixed2String((booking as any).totalAmount ?? null) ?? '') ||
+  (moneyToFixed2String((booking as any).subtotalSnapshot ?? null) ?? '') ||
+  ''
+
 
   const isCancelled = bookingStatus === 'CANCELLED'
   const isCompleted = bookingStatus === 'COMPLETED'

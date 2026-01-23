@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import type { WaitlistLike } from './_helpers'
 import { prettyWhen, locationLabel } from './_helpers'
 import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
+import ProProfileLink from './ProProfileLink'
 
 type Props = {
   items: WaitlistLike[]
@@ -214,7 +215,17 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
             </div>
 
             <div className="mt-1 text-sm text-textPrimary">
-              <span className="font-black">{pro}</span>
+              <span
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <ProProfileLink
+                  proId={w?.professional?.id || null}
+                  label={w?.professional?.businessName || 'Any professional'}
+                  className="font-black"
+                />
+              </span>
+
               {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
             </div>
 

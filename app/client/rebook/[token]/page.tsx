@@ -131,8 +131,15 @@ export default async function ClientRebookFromAftercarePage(props: {
           professionalId: true,
           serviceId: true,
           offeringId: true,
-          service: true,
-          professional: { include: { user: true } },
+          service: { select: { name: true } },
+          professional: {
+            select: {
+              id: true,
+              businessName: true,
+              timeZone: true,
+              user: { select: { email: true } },
+            },
+          },
         },
       },
     },
@@ -158,9 +165,9 @@ export default async function ClientRebookFromAftercarePage(props: {
   if (!offeringId) notFound()
 
   // Appointment timezone (currently using professional tz as the display tz)
-  const appointmentTz = sanitizeTimeZone((booking.professional as any)?.timeZone, 'America/Los_Angeles')
+  const appointmentTz = sanitizeTimeZone(booking.professional?.timeZone, 'America/Los_Angeles')
 
-  const proName = booking.professional?.businessName || booking.professional?.user?.email || 'your professional'
+  const proLabel = booking.professional?.businessName || booking.professional?.user?.email || 'your professional'
   const serviceName = booking.service?.name || 'Service'
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
 
@@ -217,6 +224,8 @@ export default async function ClientRebookFromAftercarePage(props: {
 
   const bookHref = `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
 
+  const proId = booking.professional?.id || booking.professionalId
+
   return (
     <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <a
@@ -240,7 +249,14 @@ export default async function ClientRebookFromAftercarePage(props: {
       </h1>
 
       <div className="text-textSecondary" style={{ fontSize: 13, marginTop: 6 }}>
-        With {proName}
+        With{' '}
+        {proId ? (
+          <a href={`/professionals/${encodeURIComponent(proId)}`} className="hover:underline underline-offset-4">
+            {proLabel}
+          </a>
+        ) : (
+          proLabel
+        )}
       </div>
 
       <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 12, padding: 12, marginTop: 16 }}>

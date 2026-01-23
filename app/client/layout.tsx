@@ -1,16 +1,8 @@
 // app/client/layout.tsx
 import { redirect } from 'next/navigation'
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import ClientSessionFooterPortal from '@/app/_components/ClientSessionFooter/ClientSessionFooterPortal'
-
 
 export const dynamic = 'force-dynamic'
-
-function clampSmallCount(n: number) {
-  if (!Number.isFinite(n) || n <= 0) return null
-  return n > 99 ? '99+' : String(n)
-}
 
 export default async function ClientLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser().catch(() => null)
@@ -18,17 +10,6 @@ export default async function ClientLayout({ children }: { children: React.React
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
     redirect('/login?from=/client')
   }
-
-  // Policy A: badge = unread notifications (we only clear them when user visits the booking page)
-  const unreadAftercareCount = await prisma.clientNotification.count({
-    where: {
-      clientId: user.clientProfile.id,
-      type: 'AFTERCARE',
-      readAt: null,
-    } as any,
-  })
-
-  const aftercareBadge = clampSmallCount(unreadAftercareCount)
 
   const displayName = user.clientProfile?.firstName || user.email || 'there'
 
@@ -57,15 +38,10 @@ export default async function ClientLayout({ children }: { children: React.React
               </div>
             </div>
 
-            {/* Nav */}
             <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
               <NavLink href="/client">Dashboard</NavLink>
               <NavLink href="/client/bookings">Bookings</NavLink>
-
-              <NavLink href="/client/aftercare" rightSlot={aftercareBadge ? <BadgeDot label={aftercareBadge} /> : null}>
-                Aftercare
-              </NavLink>
-
+              <NavLink href="/client/aftercare">Aftercare</NavLink>
               <NavLink href="/client/settings">Settings</NavLink>
             </nav>
           </div>
@@ -73,24 +49,12 @@ export default async function ClientLayout({ children }: { children: React.React
       </header>
 
       {/* Page content */}
-      <div style={{ maxWidth: 980, margin: '0 auto', padding: '18px 16px 90px' }}>{children}</div>
-
-      {/* ✅ Bottom footer (client only) */}
-      <ClientSessionFooterPortal inboxBadge={aftercareBadge} />
-
+      <div style={{ maxWidth: 980, margin: '0 auto', padding: '18px 16px' }}>{children}</div>
     </div>
   )
 }
 
-function NavLink({
-  href,
-  children,
-  rightSlot,
-}: {
-  href: string
-  children: React.ReactNode
-  rightSlot?: React.ReactNode
-}) {
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <a
       href={href}
@@ -106,31 +70,7 @@ function NavLink({
         gap: 8,
       }}
     >
-      <span>{children}</span>
-      {rightSlot}
+      {children}
     </a>
-  )
-}
-
-function BadgeDot({ label }: { label: string }) {
-  return (
-    <span
-      className="border border-accentPrimary/35 bg-accentPrimary/12 text-accentPrimary"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: 20,
-        height: 18,
-        padding: '0 6px',
-        borderRadius: 999,
-        fontSize: 10,
-        fontWeight: 900,
-        lineHeight: 1,
-      }}
-      title="Unread aftercare"
-    >
-      {label}
-    </span>
   )
 }

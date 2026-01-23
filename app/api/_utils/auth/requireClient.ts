@@ -17,8 +17,13 @@ type RequireClientFail = {
 
 export async function requireClient(): Promise<RequireClientOk | RequireClientFail> {
   const { user, res } = await requireUser({ roles: ['CLIENT'] as Role[] })
+
   if (res || !user) {
-    return { user: null, clientId: null, res: res ?? NextResponse.json({ ok: false, error: 'Unauthorized.' }, { status: 401 }) }
+    return {
+      user: null,
+      clientId: null,
+      res: res ?? NextResponse.json({ ok: false, error: 'Unauthorized.' }, { status: 401 }),
+    }
   }
 
   const clientId = user.clientProfile?.id ?? null

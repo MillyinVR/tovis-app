@@ -1,4 +1,4 @@
-// app/pro/_components/ProSessionFooter/useProSession.ts
+// app/_components/ProSessionFooter/useProSession.ts
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'

@@ -2,7 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { sendSmsReminder, formatReminderMessage, markRemindersSent } from '@/lib/reminders'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,21 +20,42 @@ export async function POST() {
     const proTimeZone = sanitizeTimeZone(pro?.timeZone, 'America/Los_Angeles')
     const businessName = pro?.businessName ?? null
 
-    const now = new Date()
-    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-    const dayAfter = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2)
+    // ✅ Compute "tomorrow" window in the PRO's timezone
+    const nowUtc = new Date()
+    const parts = getZonedParts(nowUtc, proTimeZone)
+
+    const startOfTomorrowUtc = zonedTimeToUtc({
+      year: parts.year,
+      month: parts.month,
+      day: parts.day + 1,
+      hour: 0,
+      minute: 0,
+      second: 0,
+      timeZone: proTimeZone,
+    })
+
+    const startOfDayAfterUtc = zonedTimeToUtc({
+      year: parts.year,
+      month: parts.month,
+      day: parts.day + 2,
+      hour: 0,
+      minute: 0,
+      second: 0,
+      timeZone: proTimeZone,
+    })
 
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
         status: { in: ['PENDING', 'ACCEPTED'] as any },
-        scheduledFor: { gte: tomorrow, lt: dayAfter },
+        scheduledFor: { gte: startOfTomorrowUtc, lt: startOfDayAfterUtc },
         reminderSentAt: null,
       },
       include: {
         client: { include: { user: true } },
         service: true,
       },
+      take: 2000,
     })
 
     const sentIds: string[] = []
@@ -77,6 +98,10 @@ export async function POST() {
         sent: sentIds.length,
         skipped,
         timeZoneUsed: proTimeZone,
+        windowUtc: {
+          start: startOfTomorrowUtc.toISOString(),
+          end: startOfDayAfterUtc.toISOString(),
+        },
       },
       200,
     )

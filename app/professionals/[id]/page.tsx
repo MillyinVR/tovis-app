@@ -10,7 +10,7 @@ import { moneyToString } from '@/lib/money'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
 // If you want the pro footer to show when a pro "views as client"
-import ProSessionFooter from '@/app/pro/_components/ProSessionFooter/ProSessionFooter'
+import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
 
 // NEW: client overlay for Services tab booking
 import ServicesBookingOverlay from './ServicesBookingOverlay'

@@ -5,6 +5,14 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
+function normalizeProId(auth: any): string | null {
+  const id =
+    (typeof auth?.professionalId === 'string' && auth.professionalId.trim()) ||
+    (typeof auth?.proId === 'string' && auth.proId.trim()) ||
+    null
+  return id ? id.trim() : null
+}
+
 function daysAgo(n: number) {
   return new Date(Date.now() - n * 24 * 60 * 60_000)
 }
@@ -13,7 +21,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ openingId: st
   try {
     const auth = await requirePro()
     if (auth.res) return auth.res
-    const proId = auth.proId
+
+    const proId = normalizeProId(auth)
+    if (!proId) return jsonFail(401, 'Unauthorized.')
 
     const { openingId: raw } = await Promise.resolve(ctx.params as any)
     const openingId = pickString(raw)

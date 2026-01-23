@@ -1,7 +1,7 @@
-// app/api/pro/clients/[id]/notes/route.ts 
-
+// app/api/pro/clients/[id]/notes/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { assertProCanViewClient } from '@/lib/clientVisibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,14 +20,11 @@ export async function POST(req: Request, context: Ctx) {
     const clientId = pickString(id)
     if (!clientId) return jsonFail(400, 'Missing client id.')
 
-    const relationship = await prisma.booking.findFirst({
-      where: { professionalId, clientId },
-      select: { id: true },
-    })
-    if (!relationship) return jsonFail(403, 'Forbidden.')
+    // ✅ single source of truth visibility gate
+    const gate = await assertProCanViewClient(professionalId, clientId)
+    if (!gate.ok) return jsonFail(403, 'Forbidden.')
 
     const body = (await req.json().catch(() => ({}))) as any
-
     const title = pickString(body?.title)
     const noteBody = pickString(body?.body)
 

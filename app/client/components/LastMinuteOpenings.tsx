@@ -3,13 +3,16 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import ProProfileLink from '@/app/client/components/ProProfileLink'
 
 type Pro = {
+  id?: string | null
   businessName: string | null
   city: string | null
   location: string | null
   timeZone: string | null
 }
+
 type Svc = { name: string } | null
 
 type OpeningRow = {
@@ -92,7 +95,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
 
 function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
   const when = prettyWhen(o.startAt, o.professional?.timeZone)
-  const proName = o.professional?.businessName || 'Professional'
+  const proLabel = o.professional?.businessName || 'Professional'
   const loc = o.professional?.city || o.professional?.location || null
   const svc = o.service?.name || 'Service'
   const discount = o.discountPct ? `${o.discountPct}% off` : null
@@ -109,7 +112,14 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
       </div>
 
       <div className="mt-1 text-sm text-textPrimary">
-        <span className="font-black">{proName}</span>
+        <span className="font-black">
+          <ProProfileLink
+            proId={o.professional?.id ?? null}
+            label={proLabel}
+            className="text-textPrimary"
+          />
+        </span>
+
         {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
         {discount ? <span className="text-textSecondary"> · {discount}</span> : null}
       </div>

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import type { ServiceLocationType } from '@prisma/client'
 import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
-import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 
 export const dynamic = 'force-dynamic'
@@ -55,10 +55,6 @@ function addDaysToYMD(year: number, month: number, day: number, daysToAdd: numbe
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
 
-/**
- * Get tz wall-clock parts for a UTC instant rendered in `timeZone`.
- * Handles the annoying "24:xx" edge some engines produce.
- */
 function getZonedParts(dateUtc: Date, timeZoneRaw: string) {
   const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
 
@@ -174,11 +170,9 @@ function fail(status: number, code: string, error: string, details?: any) {
 
 export async function POST(req: Request, { params }: Ctx) {
   try {
-    const { user, res } = await requireUser({ roles: ['CLIENT'] })
-    if (res) return res
-    if (!user?.clientProfile?.id) return fail(401, 'NOT_AUTHORIZED', 'Only clients can reschedule bookings.')
-
-    const clientId = user.clientProfile.id
+    const auth = await requireClient()
+    if (auth.res) return auth.res
+    const clientId = auth.clientId
 
     const { id } = await Promise.resolve(params)
     const bookingId = pickString(id)

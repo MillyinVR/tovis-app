@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requirePro } from '@/app/api/_utils'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,13 +36,21 @@ function badRequest(msg: string) {
   return NextResponse.json({ error: msg }, { status: 400 })
 }
 
-// ✅ Strongly type the payload so booking.id is always string
 const bookingSelect = {
   id: true,
   status: true,
   clientId: true,
   professionalId: true,
+
   locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+  locationLatSnapshot: true,
+  locationLngSnapshot: true,
+
+  bufferMinutes: true,
+
   serviceItems: {
     orderBy: { sortOrder: 'asc' },
     select: {
@@ -50,6 +58,7 @@ const bookingSelect = {
       offeringId: true,
       priceSnapshot: true,
       durationMinutesSnapshot: true,
+      sortOrder: true,
     },
   },
 } satisfies Prisma.BookingSelect
@@ -77,10 +86,8 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
     if (booking.professionalId !== proId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    // ✅ Make the ID explicit & stable for Prisma typings
     const bookingId: string = booking.id
 
-    // Policy: only completed bookings can produce aftercare-driven rebooks
     if (String(booking.status) !== 'COMPLETED') {
       return NextResponse.json({ error: 'Only COMPLETED bookings can be rebooked.' }, { status: 409 })
     }
@@ -113,9 +120,7 @@ export async function POST(req: Request, ctx: Ctx) {
       const windowStart = parseISODate(body.windowStart)
       const windowEnd = parseISODate(body.windowEnd)
 
-      if (!windowStart || !windowEnd) {
-        return badRequest('windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.')
-      }
+      if (!windowStart || !windowEnd) return badRequest('windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.')
       if (windowEnd <= windowStart) return badRequest('windowEnd must be after windowStart.')
 
       const aftercare = await prisma.aftercareSummary.upsert({
@@ -150,14 +155,17 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!scheduledFor) return badRequest('scheduledFor is required (ISO string) for BOOK mode.')
 
     const now = new Date()
-    if (scheduledFor.getTime() < now.getTime() - 60_000) {
-      return badRequest('scheduledFor must be in the future.')
-    }
+    if (scheduledFor.getTime() < now.getTime() - 60_000) return badRequest('scheduledFor must be in the future.')
 
-    const primary = booking.serviceItems?.[0] ?? null
+    const items = booking.serviceItems ?? []
+    const primary = items[0] ?? null
     if (!primary?.serviceId || !primary?.offeringId) {
       return NextResponse.json({ error: 'This booking has no service items to rebook.' }, { status: 409 })
     }
+
+    const z = new Prisma.Decimal(0)
+    const subtotal = items.reduce((sum, i) => sum.plus(i.priceSnapshot ?? z), new Prisma.Decimal(0))
+    const duration = items.reduce((sum, i) => sum + Number(i.durationMinutesSnapshot ?? 0), 0)
 
     const created = await prisma.$transaction(async (tx) => {
       const nextBooking = await tx.booking.create({
@@ -165,6 +173,7 @@ export async function POST(req: Request, ctx: Ctx) {
           clientId: booking.clientId,
           professionalId: booking.professionalId,
 
+          // ✅ required
           serviceId: primary.serviceId,
           offeringId: primary.offeringId,
 
@@ -172,13 +181,31 @@ export async function POST(req: Request, ctx: Ctx) {
           status: 'ACCEPTED' as any,
           locationType: booking.locationType as any,
 
-          // Keep legacy mirrors ONLY if your schema actually has them.
-          // If TS complains here next, we’ll remove them.
-          priceSnapshot: primary.priceSnapshot as any,
-          durationMinutesSnapshot: primary.durationMinutesSnapshot as any,
+          // ✅ required by schema
+          locationId: booking.locationId,
+          locationTimeZone: booking.locationTimeZone ?? null,
+          locationAddressSnapshot: booking.locationAddressSnapshot ?? undefined,
+          locationLatSnapshot: booking.locationLatSnapshot ?? undefined,
+          locationLngSnapshot: booking.locationLngSnapshot ?? undefined,
+
+          // ✅ pricing + duration truth
+          subtotalSnapshot: subtotal,
+          totalDurationMinutes: Math.max(15, Math.round(duration || 60)),
+          bufferMinutes: Math.max(0, Number(booking.bufferMinutes ?? 0)),
 
           source: 'AFTERCARE' as any,
           rebookOfBookingId: bookingId,
+
+          // ✅ copy items (no legacy)
+          serviceItems: {
+            create: items.map((i) => ({
+              serviceId: i.serviceId,
+              offeringId: i.offeringId,
+              priceSnapshot: i.priceSnapshot ?? z,
+              durationMinutesSnapshot: Math.max(15, Math.round(Number(i.durationMinutesSnapshot ?? 60))),
+              sortOrder: Number.isFinite(Number(i.sortOrder)) ? Number(i.sortOrder) : 0,
+            })),
+          },
         } as any,
         select: { id: true, scheduledFor: true, status: true },
       })

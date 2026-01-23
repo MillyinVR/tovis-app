@@ -1,4 +1,4 @@
-// app/pro/_components/ProSessionFooter/ProSessionFooter.tsx
+// app/_components/ProSessionFooter/ProSessionFooter.tsx
 'use client'
 
 import { usePathname } from 'next/navigation'

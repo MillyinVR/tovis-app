@@ -1,3 +1,5 @@
+// app/admin/logs/page.tsx
+
 import AdminGuard from '../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
 import { AdminPermissionRole } from '@prisma/client'

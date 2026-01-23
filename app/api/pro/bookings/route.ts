@@ -1,6 +1,6 @@
 // app/api/pro/bookings/route.ts
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType } from '@prisma/client'
+import { Prisma, type ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
@@ -43,7 +43,7 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
 }
 
 /**
- * Money helpers (route-local)
+ * Money helpers (route-local; cents-based)
  */
 function moneyStringToCents(raw: string): number {
   const cleaned = raw.replace(/\$/g, '').replace(/,/g, '').trim()
@@ -89,15 +89,18 @@ export async function POST(req: Request) {
     const scheduledForRaw = pickString(body?.scheduledFor)
     const internalNotes = pickString(body?.internalNotes)
 
+    const locationId = pickString(body?.locationId)
+    const locationType = normalizeLocationType(body?.locationType)
+
     const serviceIds = toStringArray(body?.serviceIds)
     const uniqueServiceIds = Array.from(new Set(serviceIds)).slice(0, 10)
 
     const bufferMinutesRaw = body?.bufferMinutes
     const totalDurationMinutesRaw = body?.totalDurationMinutes
-    const locationType = normalizeLocationType(body?.locationType)
 
     if (!clientId) return jsonFail(400, 'Missing clientId.')
     if (!scheduledForRaw) return jsonFail(400, 'Missing scheduledFor.')
+    if (!locationId) return jsonFail(400, 'Missing locationId.')
     if (!uniqueServiceIds.length) return jsonFail(400, 'Select at least one service.')
 
     const scheduledStart = normalizeToMinute(new Date(scheduledForRaw))
@@ -109,13 +112,18 @@ export async function POST(req: Request) {
       return snap15(n)
     })()
 
-    // ✅ NOTE: ProfessionalProfile.workingHours does not exist in your current Prisma types.
-    // We only fetch what exists and keep creation permissive.
-    const pro = await prisma.professionalProfile.findUnique({
-      where: { id: professionalId },
-      select: { id: true, timeZone: true },
+    // ✅ Location is REQUIRED by schema; also gives timezone + snapshots
+    const loc = await prisma.professionalLocation.findFirst({
+      where: { id: locationId, professionalId, isBookable: true },
+      select: {
+        id: true,
+        timeZone: true,
+        formattedAddress: true,
+        lat: true,
+        lng: true,
+      },
     })
-    if (!pro) return jsonFail(404, 'Professional profile not found.')
+    if (!loc) return jsonFail(404, 'Location not found or not bookable.')
 
     // Offerings for selected services
     const offerings = await prisma.professionalServiceOffering.findMany({
@@ -192,16 +200,12 @@ export async function POST(req: Request) {
         scheduledFor: { gte: windowStart, lte: windowEnd },
         NOT: { status: 'CANCELLED' as any },
       },
-      select: {
-        id: true,
-        scheduledFor: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-      },
-      take: 120,
+      select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+      take: 200,
     })
 
-    const hasConflict = others.some((b: any) => {
+    const hasConflict = others.some((b) => {
+      if (String(b.status ?? '').toUpperCase() === 'CANCELLED') return false
       const bDur = durationOrDefault(b.totalDurationMinutes)
       const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
       const bStart = normalizeToMinute(new Date(b.scheduledFor))
@@ -211,53 +215,52 @@ export async function POST(req: Request) {
     if (hasConflict) return jsonFail(409, 'That time is not available.')
 
     const subtotalMoney = centsToMoneyString(computedSubtotalCents)
-    const primaryItem = items[0]
+    const primaryItem = items[0] // guaranteed (we required >=1)
 
     const created = await prisma.booking.create({
       data: {
         professionalId,
         clientId,
+
+        // ✅ schema requires serviceId
+        serviceId: primaryItem.serviceId,
+        offeringId: primaryItem.offeringId,
+
         scheduledFor: scheduledStart,
-        locationType,
         status: 'ACCEPTED' as any,
+        locationType,
+
+        // ✅ schema requires locationId
+        locationId: loc.id,
+        locationTimeZone: loc.timeZone ?? null,
+        locationAddressSnapshot: loc.formattedAddress ? ({ formattedAddress: loc.formattedAddress } as any) : undefined,
+        locationLatSnapshot: typeof loc.lat === 'number' ? loc.lat : undefined,
+        locationLngSnapshot: typeof loc.lng === 'number' ? loc.lng : undefined,
 
         internalNotes: internalNotes ?? null,
         bufferMinutes,
         totalDurationMinutes,
 
-        // Decimal-ish string
-        subtotalSnapshot: subtotalMoney as any,
-
-        // legacy mirrors (keep only if your schema still has them)
-        serviceId: primaryItem?.serviceId ?? null,
-        offeringId: primaryItem?.offeringId ?? null,
-        durationMinutesSnapshot: primaryItem?.durationMinutesSnapshot ?? null,
-        priceSnapshot: centsToMoneyString(primaryItem?.priceCents ?? 0) as any,
+        // ✅ Booking-level truth
+        subtotalSnapshot: new Prisma.Decimal(subtotalMoney),
 
         serviceItems: {
           create: items.map((i) => ({
             serviceId: i.serviceId,
             offeringId: i.offeringId,
-            priceSnapshot: centsToMoneyString(i.priceCents) as any,
+            priceSnapshot: new Prisma.Decimal(centsToMoneyString(i.priceCents)),
             durationMinutesSnapshot: i.durationMinutesSnapshot,
             sortOrder: i.sortOrder,
           })),
         },
-      } as any,
+      },
       select: {
         id: true,
         scheduledFor: true,
         totalDurationMinutes: true,
         bufferMinutes: true,
         status: true,
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            phone: true,
-            user: { select: { email: true } },
-          },
-        },
+        client: { select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } } },
       },
     })
 

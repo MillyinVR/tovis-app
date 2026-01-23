@@ -4,6 +4,7 @@
 import Link from 'next/link'
 import type { BookingLike } from './_helpers'
 import { prettyWhen } from './_helpers'
+import ProProfileLink from './ProProfileLink'
 
 function prettyWhere(b: BookingLike) {
   const p = b.professional
@@ -30,7 +31,8 @@ export default function UpcomingBookings({ items }: { items: BookingLike[] }) {
         {items.map((b) => {
           const when = prettyWhen(b.scheduledFor)
           const serviceName = b.service?.name || 'Appointment'
-          const proName = b.professional?.businessName || 'Professional'
+          const proLabel = b.professional?.businessName || 'Professional'
+          const proId = b.professional?.id || null
           const where = prettyWhere(b)
 
           return (
@@ -47,7 +49,20 @@ export default function UpcomingBookings({ items }: { items: BookingLike[] }) {
 
                 <div className="mt-2 text-sm">
                   <span className="font-black">{when}</span>
-                  <span className="text-textSecondary"> · {proName}</span>
+                  <span className="text-textSecondary"> · </span>
+
+                  {/* ✅ Pro name links to profile (stopPropagation so card click still works) */}
+                  <span
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <ProProfileLink
+                      proId={proId}
+                      label={proLabel}
+                      className="text-textSecondary font-semibold"
+                    />
+                  </span>
+
                   {where ? <span className="text-textSecondary"> · {where}</span> : null}
                 </div>
 
