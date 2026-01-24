@@ -11,6 +11,10 @@ type ServiceDTO = {
   minPrice: string // dollars "49.99"
   defaultDurationMinutes: number
   defaultImageUrl?: string | null
+
+  // ✅ add-on flags (read-only in pro UI)
+  isAddOnEligible: boolean
+  addOnGroup?: string | null
 }
 
 type CategoryDTO = {
@@ -373,6 +377,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
               {servicesForSelection.map((s) => (
                 <option key={s.id} value={s.id} disabled={existingServiceIds.has(s.id)}>
                   {s.name}
+                  {s.isAddOnEligible ? (s.addOnGroup ? ` (Add-on: ${s.addOnGroup})` : ' (Add-on)') : ''}
                   {existingServiceIds.has(s.id) ? ' (added)' : ''}
                 </option>
               ))}
@@ -466,6 +471,12 @@ export default function ServicePicker({ categories, offerings }: Props) {
                 <span className="font-black text-textPrimary">
                   ${normalizeMoney2(selectedService.minPrice) ?? selectedService.minPrice}
                 </span>
+
+                {selectedService.isAddOnEligible ? (
+                  <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                    Add-on{selectedService.addOnGroup ? ` • ${selectedService.addOnGroup}` : ''}
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>

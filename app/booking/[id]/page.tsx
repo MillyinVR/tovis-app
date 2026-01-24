@@ -4,6 +4,8 @@ import { notFound, redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { moneyToString } from '@/lib/money'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,12 +24,6 @@ function fmtInTimeZone(dateUtc: Date, timeZone: string) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(dateUtc)
-}
-
-function formatMoneyMaybe(v: unknown) {
-  if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(2)}`
-  if (typeof v === 'string' && v.trim()) return v.trim()
-  return null
 }
 
 function upper(v: unknown) {
@@ -51,11 +47,32 @@ function friendlySource(v: unknown) {
 
 function friendlyStatus(v: unknown) {
   const s = upper(v)
-  if (s === 'PENDING') return 'Pending approval'
+  if (s === 'PENDING') return 'Requested (waiting for confirmation)'
   if (s === 'ACCEPTED') return 'Confirmed'
   if (s === 'CANCELLED') return 'Cancelled'
   if (s === 'COMPLETED') return 'Completed'
   return s || 'Unknown'
+}
+
+type ServiceItemRow = {
+  id: string
+  serviceId: string
+  offeringId: string | null
+  priceSnapshot: Prisma.Decimal
+  durationMinutesSnapshot: number
+  sortOrder: number
+  notes: string | null
+  service: { name: string }
+}
+
+function isAddOnItem(x: Pick<ServiceItemRow, 'notes' | 'sortOrder'>) {
+  const n = (x.notes || '').trim().toUpperCase()
+  if (n.startsWith('ADDON:')) return true
+  return (x.sortOrder ?? 0) >= 100
+}
+
+function sumDecimal(values: Prisma.Decimal[]) {
+  return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
 }
 
 export default async function BookingReceiptPage(props: PageProps) {
@@ -78,8 +95,9 @@ export default async function BookingReceiptPage(props: PageProps) {
       source: true,
       locationType: true,
 
-      // ✅ SAFE: select only fields that definitely exist in your Prisma types right now.
-      // If you later re-add snapshot fields in Prisma, you can add them back here.
+      // ✅ these now matter with add-ons
+      subtotalSnapshot: true,
+      totalDurationMinutes: true,
 
       service: {
         select: {
@@ -87,6 +105,21 @@ export default async function BookingReceiptPage(props: PageProps) {
           name: true,
           defaultDurationMinutes: true,
           category: { select: { name: true } },
+        },
+      },
+
+      // ✅ NEW: fetch booking line items (base + add-ons)
+      serviceItems: {
+        orderBy: { sortOrder: 'asc' },
+        select: {
+          id: true,
+          serviceId: true,
+          offeringId: true,
+          priceSnapshot: true,
+          durationMinutesSnapshot: true,
+          sortOrder: true,
+          notes: true,
+          service: { select: { name: true } },
         },
       },
 
@@ -141,15 +174,29 @@ export default async function BookingReceiptPage(props: PageProps) {
       ? `/professionals/${prof.id}`
       : '/looks'
 
-  // ✅ Long-term-safe fallbacks:
-  const duration = svc?.defaultDurationMinutes ?? null
+  // ✅ Use booking total duration (includes add-ons)
+  const duration =
+  (Number(booking.totalDurationMinutes ?? 0) > 0
+    ? Number(booking.totalDurationMinutes)
+    : svc?.defaultDurationMinutes) ?? null
 
-  // If you have a real price field later, plug it in here.
-  const price = null as string | null
 
   const locationTypeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
   const statusLabel = friendlyStatus(booking.status)
+
+  const isWaiting = upper(booking.status) === 'PENDING'
+
+  // ---- line items breakdown ----
+  const items = (booking.serviceItems ?? []) as ServiceItemRow[]
+  const baseItems = items.filter((x) => !isAddOnItem(x))
+  const addOnItems = items.filter((x) => isAddOnItem(x))
+
+  const addOnPrice = sumDecimal(addOnItems.map((x) => x.priceSnapshot))
+  const addOnMinutes = addOnItems.reduce((sum, x) => sum + (Number(x.durationMinutesSnapshot) || 0), 0)
+
+  // subtotalSnapshot should already include add-ons (from finalize)
+  const subtotalLabel = booking.subtotalSnapshot ? moneyToString(booking.subtotalSnapshot) : null
 
   return (
     <main className="mx-auto max-w-180 px-4 pb-24 pt-10 text-textPrimary">
@@ -184,9 +231,9 @@ export default async function BookingReceiptPage(props: PageProps) {
               </span>
             ) : null}
 
-            {price ? (
+            {subtotalLabel ? (
               <span>
-                <span className="font-black text-textPrimary">Price:</span> {price}
+                <span className="font-black text-textPrimary">Est. subtotal:</span> ${subtotalLabel}
               </span>
             ) : null}
 
@@ -196,6 +243,12 @@ export default async function BookingReceiptPage(props: PageProps) {
               </span>
             ) : null}
           </div>
+
+          {isWaiting ? (
+            <div className="tovis-glass-soft mt-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
+              No charge yet. Once the pro confirms, your booking updates automatically in your dashboard.
+            </div>
+          ) : null}
         </div>
 
         <Link href="/looks" className="text-[12px] font-black text-textPrimary hover:opacity-80">
@@ -203,8 +256,71 @@ export default async function BookingReceiptPage(props: PageProps) {
         </Link>
       </div>
 
+      {/* ✅ NEW: booking breakdown (base + add-ons) */}
+      {items.length ? (
+        <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
+          <div className="text-[12px] font-black text-textSecondary">Service breakdown</div>
+
+          <div className="mt-3 grid gap-2">
+            {baseItems.map((x) => {
+              const price = moneyToString(x.priceSnapshot) ?? '0.00'
+              const mins = Number(x.durationMinutesSnapshot) || 0
+              return (
+                <div
+                  key={x.id}
+                  className="flex items-center justify-between rounded-card border border-white/10 bg-bgPrimary/35 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-black text-textPrimary">{x.service.name}</div>
+                    <div className="mt-1 text-[11px] font-semibold text-textSecondary">{mins} min</div>
+                  </div>
+                  <div className="shrink-0 text-[12px] font-black text-textPrimary">${price}</div>
+                </div>
+              )
+            })}
+          </div>
+
+          {addOnItems.length ? (
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <div className="text-[12px] font-black text-textSecondary">Add-ons</div>
+
+              <div className="mt-3 grid gap-2">
+                {addOnItems.map((x) => {
+                  const price = moneyToString(x.priceSnapshot) ?? '0.00'
+                  const mins = Number(x.durationMinutesSnapshot) || 0
+                  return (
+                    <div
+                      key={x.id}
+                      className="flex items-center justify-between rounded-card border border-white/10 bg-bgPrimary/35 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] font-black text-textPrimary">{x.service.name}</div>
+                        <div className="mt-1 text-[11px] font-semibold text-textSecondary">+{mins} min</div>
+                      </div>
+                      <div className="shrink-0 text-[12px] font-black text-textPrimary">${price}</div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="tovis-glass-soft mt-3 rounded-card border border-white/10 px-4 py-3 text-[12px] font-semibold text-textSecondary">
+                Add-ons total:{' '}
+                <span className="font-black text-textPrimary">${moneyToString(addOnPrice) ?? '0.00'}</span> · Time:{' '}
+                <span className="font-black text-textPrimary">{addOnMinutes} min</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="text-[12px] font-black text-textSecondary">Next moves</div>
+
+        <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+          {isWaiting
+            ? 'Most pros confirm quickly. You’ll see it update automatically.'
+            : 'You’re all set. Keep this handy for day-of details.'}
+        </div>
 
         <div className="mt-3 grid gap-2">
           <a

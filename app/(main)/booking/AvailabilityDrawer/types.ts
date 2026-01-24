@@ -73,6 +73,10 @@ export type AvailabilitySummaryResponse = {
   serviceId: string
   professionalId: string
 
+  // ✅ these are values returned by the API
+  serviceName: string
+  serviceCategoryName: string | null
+
   locationType: ServiceLocationType
   locationId: string
   timeZone: string
@@ -88,9 +92,9 @@ export type AvailabilitySummaryResponse = {
   otherPros: Array<ProCard & { offeringId: string }>
   waitlistSupported: boolean
 
-  // ✅ server adds this (safe extra field)
   offering: AvailabilityOffering
 }
+
 
 export type AvailabilityDayResponse =
   | {

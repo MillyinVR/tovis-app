@@ -180,6 +180,11 @@ enum ProfessionalLocationType {
   MOBILE_BASE
 }
 
+enum BookingServiceItemType {
+  BASE
+  ADD_ON
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -471,18 +476,22 @@ model ProfessionalFavorite {
 }
 
 model Service {
-  id                     String              @id @default(cuid())
-  name                   String              @unique
+  id                     String  @id @default(cuid())
+  name                   String  @unique
   categoryId             String
   description            String?
   defaultDurationMinutes Int
-  minPrice               Decimal             @db.Decimal(10, 2)
+  minPrice               Decimal @db.Decimal(10, 2)
   defaultImageUrl        String?
-  allowMobile            Boolean             @default(false)
-  isActive               Boolean             @default(true)
-  intentEvents           ClientIntentEvent[]
-  lastMinuteOpenings     LastMinuteOpening[] @relation("ServiceOpenings")
-  adminPermissions       AdminPermission[]
+  allowMobile            Boolean @default(false)
+  isActive               Boolean @default(true)
+  // ✅ NEW
+  isAddOnEligible        Boolean @default(false)
+  addOnGroup             String? // optional: "Finish", "Treatment", etc.
+
+  intentEvents       ClientIntentEvent[]
+  lastMinuteOpenings LastMinuteOpening[] @relation("ServiceOpenings")
+  adminPermissions   AdminPermission[]
 
   category            ServiceCategory               @relation(fields: [categoryId], references: [id])
   offerings           ProfessionalServiceOffering[]
@@ -495,6 +504,36 @@ model Service {
   messageThreads      MessageThread[]               @relation("ServiceThreads")
   quotes              Quote[]                       @relation("ServiceQuotes")
   bookingServiceItems BookingServiceItem[]
+
+  offeringAddOnLinks OfferingAddOn[] @relation("AddOnService")
+}
+
+model OfferingAddOn {
+  id String @id @default(cuid())
+
+  offeringId     String
+  addOnServiceId String
+
+  isActive      Boolean @default(true)
+  sortOrder     Int     @default(0)
+  isRecommended Boolean @default(false)
+
+  priceOverride           Decimal? @db.Decimal(10, 2)
+  durationOverrideMinutes Int?
+
+  locationType ServiceLocationType?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offering ProfessionalServiceOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+
+  // ✅ add relation name to match Service.offeringAddOnLinks
+  addOnService Service @relation("AddOnService", fields: [addOnServiceId], references: [id], onDelete: Restrict)
+
+  @@unique([offeringId, addOnServiceId])
+  @@index([offeringId, isActive, sortOrder])
+  @@index([addOnServiceId])
 }
 
 model ServicePermission {
@@ -544,6 +583,8 @@ model ProfessionalServiceOffering {
   lastMinuteOpenings  LastMinuteOpening[]  @relation("OfferingOpenings")
   bookingServiceItems BookingServiceItem[]
   holds               BookingHold[]
+
+  addOns OfferingAddOn[]
 
   @@unique([professionalId, serviceId])
 }
@@ -1216,7 +1257,15 @@ model BookingServiceItem {
   id         String  @id @default(cuid())
   bookingId  String
   serviceId  String
-  offeringId String? // optional but useful if pricing/duration comes from offering
+  offeringId String? // base offering or add-on offering (optional)
+
+  // ✅ NEW: classify item
+  itemType BookingServiceItemType @default(BASE)
+
+  // ✅ NEW: if this item was chosen as an add-on of a base item
+  parentItemId String?
+  parentItem   BookingServiceItem?  @relation("BookingServiceItemParent", fields: [parentItemId], references: [id], onDelete: SetNull)
+  children     BookingServiceItem[] @relation("BookingServiceItemParent")
 
   // Snapshots at the time of booking
   priceSnapshot           Decimal @db.Decimal(10, 2)
@@ -1234,6 +1283,8 @@ model BookingServiceItem {
   @@index([bookingId])
   @@index([serviceId])
   @@index([bookingId, sortOrder])
+  @@index([bookingId, itemType])
+  @@index([parentItemId])
 }
 
 model CalendarBlock {

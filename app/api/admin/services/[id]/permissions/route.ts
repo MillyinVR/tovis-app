@@ -1,4 +1,3 @@
-// app/api/admin/services/[id]/permissions/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -28,7 +27,6 @@ function normalizeProfessionTypes(values: FormDataEntryValue[]): ProfessionType[
     if (allowed.has(s as any)) out.push(s as ProfessionType)
   }
 
-  // de-dupe while preserving order
   return Array.from(new Set(out))
 }
 
@@ -56,12 +54,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const form = await req.formData()
 
-    const stateCode = pickStateCode(form.get('stateCode'))
+    const stateCode = pickStateCode(form.get('stateCode')) // should return null or 'CA'
     const professionTypes = normalizeProfessionTypes(form.getAll('professionType'))
 
     await prisma.$transaction(async (tx) => {
       await tx.servicePermission.deleteMany({ where: { serviceId: svc.id } })
 
+      // If none checked, this clears permissions (valid)
       if (professionTypes.length) {
         await tx.servicePermission.createMany({
           data: professionTypes.map((pt) => ({
@@ -74,7 +73,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
     })
 
-    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(svc.id)}`, req.url))
+    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(svc.id)}`, req.url), { status: 303 })
   } catch (e) {
     console.error('POST /api/admin/services/[id]/permissions error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -67,12 +67,6 @@ function parseHHMM(s: unknown) {
   return { hh, mm }
 }
 
-/**
- * Future-proof stepMinutes:
- * - allow only sensible grids (5/10/15/20/30/60)
- * - if DB contains weird values, snap upward to the next sensible grid
- * - default to 30 when missing
- */
 function normalizeStepMinutes(input: unknown, fallback: number) {
   const n = typeof input === 'number' ? input : Number(input)
   const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
@@ -88,10 +82,7 @@ function normalizeStepMinutes(input: unknown, fallback: number) {
   return 60
 }
 
-/** ---------- date helpers ---------- */
-
 function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
-  // Anchor at noon UTC to avoid DST weirdness while rolling dates.
   const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
@@ -106,18 +97,19 @@ function ymdToString(ymd: { year: number; month: number; day: number }) {
   return `${ymd.year}-${mm}-${dd}`
 }
 
-function pickTimeZone(locTz: string | null, proTz: string | null) {
-  if (isValidIanaTimeZone(locTz)) return String(locTz).trim()
-  if (isValidIanaTimeZone(proTz)) return String(proTz).trim()
-  return 'America/Los_Angeles'
+/**
+ * ✅ STRICT timezone selection
+ * We require a valid IANA timezone on the LOCATION.
+ * If not present, booking/availability must fail (too dangerous otherwise).
+ */
+function requireLocationTimeZone(locTz: unknown) {
+  const s = typeof locTz === 'string' ? locTz.trim() : ''
+  if (!s || !isValidIanaTimeZone(s)) return null
+  return s
 }
 
-/**
- * Day key (sun/mon/...) for a given YMD interpreted as a LOCAL date in `timeZone`.
- * We compute local-noon -> UTC, then format weekday in the tz. This is DST-stable.
- */
 function getDayKeyFromYMD(args: { year: number; month: number; day: number; timeZone: string }) {
-  const timeZone = sanitizeTimeZone(args.timeZone, 'America/Los_Angeles')
+  const timeZone = sanitizeTimeZone(args.timeZone, 'UTC')
 
   const noonUtc = zonedTimeToUtc({
     year: args.year,
@@ -163,12 +155,8 @@ function pickEffectiveLocationType(args: {
   return null
 }
 
-/**
- * ✅ Correct day bounds:
- * Interpret YYYY-MM-DD as a LOCAL day in `timeZone`, then compute local midnight -> UTC.
- */
 function computeDayBoundsUtc(dateYMD: { year: number; month: number; day: number }, timeZoneRaw: string) {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'America/Los_Angeles')
+  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC')
 
   const dayStartUtc = zonedTimeToUtc({
     year: dateYMD.year,
@@ -194,7 +182,6 @@ function computeDayBoundsUtc(dateYMD: { year: number; month: number; day: number
   return { timeZone, dayStartUtc, dayEndExclusiveUtc }
 }
 
-/** ---------- slot computation ---------- */
 async function computeDaySlots(args: {
   professionalId: string
   locationId: string
@@ -284,7 +271,6 @@ async function computeDaySlots(args: {
     }
   }
 
-  // Wider scan catches cross-midnight spillover (shared calendar across modes)
   const scanStartUtc = addMinutes(dayStartUtc, -24 * 60)
   const scanEndUtc = addMinutes(dayEndExclusiveUtc, 24 * 60)
 
@@ -305,7 +291,7 @@ async function computeDaySlots(args: {
         scheduledFor: { gte: scanStartUtc, lt: scanEndUtc },
         expiresAt: { gt: nowUtc },
       },
-      select: { scheduledFor: true },
+      select: { scheduledFor: true, expiresAt: true },
       take: 3000,
     }),
 
@@ -334,27 +320,20 @@ async function computeDaySlots(args: {
         return { start, end: addMinutes(start, baseDur + effectiveBuf) }
       }),
 
-    ...holds.map((h) => {
-      const start = normalizeToMinute(new Date(h.scheduledFor))
-      return { start, end: addMinutes(start, durationMinutes + adjBuf) }
-    }),
+    ...holds
+      .filter((h) => new Date(h.expiresAt).getTime() > nowUtc.getTime())
+      .map((h) => {
+        const start = normalizeToMinute(new Date(h.scheduledFor))
+        return { start, end: addMinutes(start, durationMinutes + adjBuf) }
+      }),
 
     ...blocks.map((bl) => ({ start: new Date(bl.startsAt), end: new Date(bl.endsAt) })),
   ]
 
   const cutoffUtc = addMinutes(nowUtc, clampInt(Number(leadTimeMinutes ?? 0) || 0, 0, 240))
-
-  // Extra guard: even if callers pass something odd, keep it sane.
   const step = normalizeStepMinutes(stepMinutes, 30)
 
   const slots: string[] = []
-
-  // debug counters
-  let skipBeforeDay = 0
-  let skipAfterDay = 0
-  let skipLead = 0
-  let skipOverEnd = 0
-  let skipBusy = 0
 
   for (let minute = startMinute; minute + durationMinutes <= endMinute; minute += step) {
     const hh = Math.floor(minute / 60)
@@ -372,92 +351,36 @@ async function computeDaySlots(args: {
       }),
     )
 
-    if (slotStartUtc < dayStartUtc) {
-      skipBeforeDay++
-      continue
-    }
-    if (slotStartUtc >= dayEndExclusiveUtc) {
-      skipAfterDay++
-      continue
-    }
-    if (slotStartUtc.getTime() < cutoffUtc.getTime()) {
-      skipLead++
-      continue
-    }
+    if (slotStartUtc < dayStartUtc) continue
+    if (slotStartUtc >= dayEndExclusiveUtc) continue
+    if (slotStartUtc.getTime() < cutoffUtc.getTime()) continue
 
     const slotEndWorkUtc = addMinutes(slotStartUtc, durationMinutes)
-    if (slotEndWorkUtc > dayEndExclusiveUtc) {
-      skipOverEnd++
-      continue
-    }
+    if (slotEndWorkUtc > dayEndExclusiveUtc) continue
 
     const slotEndWithBufferUtc = addMinutes(slotStartUtc, durationMinutes + adjBuf)
-    if (busy.some((bi) => overlaps(slotStartUtc, slotEndWithBufferUtc, bi.start, bi.end))) {
-      skipBusy++
-      continue
-    }
+    if (busy.some((bi) => overlaps(slotStartUtc, slotEndWithBufferUtc, bi.start, bi.end))) continue
 
     slots.push(slotStartUtc.toISOString())
   }
 
-  const startLocal = getZonedParts(dayStartUtc, timeZone)
-  const endLocal = getZonedParts(addMinutes(dayEndExclusiveUtc, -1), timeZone) // last ms in day
-
-  const localDateMismatch =
-    startLocal.year !== dateYMD.year || startLocal.month !== dateYMD.month || startLocal.day !== dateYMD.day
-
-  return {
-    ok: true,
-    slots,
-    dayStartUtc,
-    dayEndExclusiveUtc,
-    debug: debug
-      ? {
-          requestedYMD: dateYMD,
-          timeZone,
-          dayKey,
-          workingHoursRule: rule,
-
-          startMinute,
-          endMinute,
-          durationMinutes,
-          stepMinutes: step,
-          leadTimeMinutes,
-          cutoffUtc: cutoffUtc.toISOString(),
-          dayStartUtc: dayStartUtc.toISOString(),
-          dayEndExclusiveUtc: dayEndExclusiveUtc.toISOString(),
-
-          dayStartLocalParts: startLocal,
-          dayEndLocalParts: endLocal,
-          localDateMismatch,
-
-          busyCount: busy.length,
-          blocksCount: blocks.length,
-          bookingsCount: bookings.length,
-          holdsCount: holds.length,
-
-          skip: { skipBeforeDay, skipAfterDay, skipLead, skipOverEnd, skipBusy },
-        }
-      : undefined,
-  }
+  return { ok: true, slots, dayStartUtc, dayEndExclusiveUtc, debug: debug ? { timeZone, dayKey } : undefined }
 }
 
-/** ---------- handler ---------- */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
 
     const professionalId = pickString(searchParams.get('professionalId'))
     const serviceId = pickString(searchParams.get('serviceId'))
-    const mediaId = pickString(searchParams.get('mediaId')) // optional
+    const mediaId = pickString(searchParams.get('mediaId'))
 
     const requestedLocationType = normalizeLocationType(searchParams.get('locationType'))
     const requestedLocationId = pickString(searchParams.get('locationId'))
-    const dateStr = pickString(searchParams.get('date')) // missing => SUMMARY
+    const dateStr = pickString(searchParams.get('date'))
 
     const debug = pickString(searchParams.get('debug')) === '1'
 
-    // optional overrides (debug-only for step)
     const stepRaw = pickString(searchParams.get('stepMinutes')) || pickString(searchParams.get('step'))
     const leadRaw =
       pickString(searchParams.get('leadMinutes')) ||
@@ -469,31 +392,32 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: 'Missing professionalId or serviceId.' }, { status: 400 })
     }
 
-    // ✅ Drawer needs businessName/avatar/location for ProCard
-    const pro = await prisma.professionalProfile.findUnique({
-      where: { id: professionalId },
-      select: {
-        id: true,
-        businessName: true,
-        avatarUrl: true,
-        location: true,
-        timeZone: true,
-      },
-    })
-    if (!pro) return NextResponse.json({ ok: false, error: 'Professional not found' }, { status: 404 })
+    // ✅ Pull service name/category from admin-created Services
+    const [pro, service, offering] = await Promise.all([
+      prisma.professionalProfile.findUnique({
+        where: { id: professionalId },
+        select: { id: true, businessName: true, avatarUrl: true, location: true, timeZone: true },
+      }),
+      prisma.service.findUnique({
+        where: { id: serviceId },
+        select: { id: true, name: true, category: { select: { name: true } } },
+      }),
+      prisma.professionalServiceOffering.findFirst({
+        where: { professionalId, serviceId, isActive: true },
+        select: {
+          id: true,
+          offersInSalon: true,
+          offersMobile: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
+        },
+      }),
+    ])
 
-    const offering = await prisma.professionalServiceOffering.findFirst({
-      where: { professionalId, serviceId, isActive: true },
-      select: {
-        id: true,
-        offersInSalon: true,
-        offersMobile: true,
-        salonDurationMinutes: true,
-        mobileDurationMinutes: true,
-        salonPriceStartingAt: true,
-        mobilePriceStartingAt: true,
-      },
-    })
+    if (!pro) return NextResponse.json({ ok: false, error: 'Professional not found' }, { status: 404 })
+    if (!service) return NextResponse.json({ ok: false, error: 'Service not found' }, { status: 404 })
     if (!offering) return NextResponse.json({ ok: false, error: 'Offering not found' }, { status: 404 })
 
     const effectiveLocationType =
@@ -515,14 +439,22 @@ export async function GET(req: Request) {
     if (!loc) return NextResponse.json({ ok: false, error: 'No bookable location found.' }, { status: 400 })
 
     const locAny = loc as any
-
     const locId = String(locAny.id || '').trim()
     if (!locId) return NextResponse.json({ ok: false, error: 'Bookable location is missing id.' }, { status: 500 })
 
-    // timezone: location first, then pro, then LA
-    const timeZone = pickTimeZone((locAny.timeZone ?? null) as string | null, (pro.timeZone ?? null) as string | null)
+    // ✅ Strict: require location tz
+    const timeZone = requireLocationTimeZone(locAny.timeZone)
+    if (!timeZone) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'This professional must set a valid timezone for their bookable location before they can accept appointments.',
+        },
+        { status: 409 },
+      )
+    }
 
-    // ✅ stepMinutes: source of truth is location.stepMinutes; fallback 30; debug-only override allowed.
     const defaultStepMinutes = normalizeStepMinutes(locAny.stepMinutes, 30)
     const stepMinutes = debug && stepRaw ? normalizeStepMinutes(stepRaw, defaultStepMinutes) : defaultStepMinutes
 
@@ -537,7 +469,6 @@ export async function GET(req: Request) {
       effectiveLocationType,
     )
 
-    // "today" in chosen timezone
     const nowUtc = new Date()
     const nowParts = getZonedParts(nowUtc, timeZone)
     const todayYMD = { year: nowParts.year, month: nowParts.month, day: nowParts.day }
@@ -552,7 +483,7 @@ export async function GET(req: Request) {
       mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
     }
 
-    // SUMMARY MODE (next 14 days)
+    // SUMMARY MODE
     if (!dateStr) {
       const daysAhead = Math.min(14, maxAdvanceDays)
       const availableDays: Array<{ date: string; slotCount: number }> = []
@@ -588,13 +519,16 @@ export async function GET(req: Request) {
         )
       }
 
-      // ✅ REQUIRED by AvailabilityDrawer/types.ts
       return NextResponse.json({
         ok: true,
         mode: 'SUMMARY' as const,
         mediaId: mediaId || null,
         serviceId,
         professionalId,
+
+        // ✅ include real service labels
+        serviceName: service.name,
+        serviceCategoryName: service.category?.name ?? null,
 
         locationType: effectiveLocationType,
         locationId: locId,
@@ -613,7 +547,7 @@ export async function GET(req: Request) {
           location: pro.location ?? null,
           offeringId: offering.id,
           isCreator: true as const,
-          timeZone: pro.timeZone ?? timeZone,
+          timeZone, // keep consistent
         },
 
         availableDays,

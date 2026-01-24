@@ -31,7 +31,6 @@ export async function GET(_req: Request, ctx: Ctx) {
         expiresAt: true,
         locationType: true,
 
-        // location lock + snapshots
         locationId: true,
         locationTimeZone: true,
         locationAddressSnapshot: true,
@@ -43,7 +42,6 @@ export async function GET(_req: Request, ctx: Ctx) {
     if (!hold) return jsonFail(404, 'Hold not found.')
     if (hold.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    // If it’s expired, treat as not valid (optionally you could auto-delete here)
     const expired = isExpired(hold.expiresAt)
 
     return jsonOk({
@@ -81,13 +79,11 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     const id = pickString(rawId)
     if (!id) return jsonFail(400, 'Missing hold id.')
 
-    // Idempotent: deleteMany so "already deleted" still returns ok
+    // idempotent delete: do not leak existence
     const result = await prisma.bookingHold.deleteMany({
       where: { id, clientId },
     })
 
-    // If result.count === 0: either not found or not yours
-    // We keep behavior “high-end”: don’t leak existence -> return ok anyway
     return jsonOk({ ok: true, deleted: result.count > 0 }, 200)
   } catch (e) {
     console.error('DELETE /api/holds/[id] error', e)

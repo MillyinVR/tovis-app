@@ -1,4 +1,5 @@
 // app/admin/services/page.tsx
+
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
@@ -90,6 +91,14 @@ function Button({
   )
 }
 
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgSecondary px-2 py-0.5 text-[11px] font-extrabold text-textSecondary">
+      {children}
+    </span>
+  )
+}
+
 export default async function AdminServicesPage() {
   const info = await getAdminUiPerms()
   if (!info) redirect('/login?from=/admin/services')
@@ -110,6 +119,8 @@ export default async function AdminServicesPage() {
         allowMobile: true,
         defaultDurationMinutes: true,
         minPrice: true,
+        isAddOnEligible: true,
+        addOnGroup: true,
         category: { select: { id: true, name: true } },
       },
       take: 500,
@@ -130,9 +141,7 @@ export default async function AdminServicesPage() {
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="grid gap-1">
           <h1 className="text-2xl font-extrabold text-textPrimary">Services & Categories</h1>
-          <p className="text-sm text-textSecondary">
-            Manage the catalog. This is where the app stops being a toy.
-          </p>
+          <p className="text-sm text-textSecondary">Manage the catalog. This is where the app stops being a toy.</p>
         </div>
 
         <Link
@@ -145,10 +154,7 @@ export default async function AdminServicesPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         {/* Categories */}
-        <CardShell
-          title="Categories"
-          subtitle={`${categories.length} total`}
-        >
+        <CardShell title="Categories" subtitle={`${categories.length} total`}>
           <form
             action="/api/admin/categories"
             method="post"
@@ -183,9 +189,7 @@ export default async function AdminServicesPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="text-sm font-extrabold text-textPrimary">
                       {c.name}{' '}
-                      <span className="text-xs font-bold text-textSecondary">
-                        ({c.slug})
-                      </span>
+                      <span className="text-xs font-bold text-textSecondary">({c.slug})</span>
                     </div>
 
                     <form action={`/api/admin/categories/${encodeURIComponent(c.id)}`} method="post">
@@ -229,10 +233,7 @@ export default async function AdminServicesPage() {
         </CardShell>
 
         {/* Services */}
-        <CardShell
-          title="Services"
-          subtitle={`${services.length} total`}
-        >
+        <CardShell title="Services" subtitle={`${services.length} total`}>
           <form
             action="/api/admin/services"
             method="post"
@@ -265,23 +266,39 @@ export default async function AdminServicesPage() {
               />
               <Input
                 name="minPrice"
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="Min price (ex: 45.00)"
+                type="text"
+                inputMode="decimal"
+                placeholder="Min price (ex: 45 or 45.00)"
                 required
               />
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-textPrimary">
-              <input
-                name="allowMobile"
-                type="checkbox"
-                value="true"
-                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-              />
-              <span className="font-bold text-textSecondary">Allow mobile</span>
-            </label>
+            <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
+              <label className="flex items-center gap-2 text-sm text-textPrimary">
+                <input
+                  name="allowMobile"
+                  type="checkbox"
+                  value="true"
+                  className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                />
+                <span className="font-bold text-textSecondary">Allow mobile</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-textPrimary">
+                <input
+                  name="isAddOnEligible"
+                  type="checkbox"
+                  value="true"
+                  className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                />
+                <span className="font-bold text-textSecondary">Add-on eligible</span>
+              </label>
+
+              <div className="grid gap-1">
+                <div className="text-xs font-extrabold text-textSecondary">Add-on group (optional)</div>
+                <Input name="addOnGroup" placeholder="Finish, Treatment, Upgrade, etc." />
+              </div>
+            </div>
 
             <div className="flex justify-end">
               <Button type="submit">Create</Button>
@@ -292,12 +309,20 @@ export default async function AdminServicesPage() {
             {services.map((s) => (
               <div key={s.id} className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <div className="text-sm font-extrabold text-textPrimary">
-                    {s.name}{' '}
-                    <span className="text-xs font-bold text-textSecondary">
-                      · {s.category?.name || 'Uncategorized'} · {s.defaultDurationMinutes}m · {money(s.minPrice)}
-                      {s.allowMobile ? ' · Mobile' : ''}
-                    </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-extrabold text-textPrimary">
+                      {s.name}{' '}
+                      <span className="text-xs font-bold text-textSecondary">
+                        · {s.category?.name || 'Uncategorized'} · {s.defaultDurationMinutes}m · {money(s.minPrice)}
+                        {s.allowMobile ? ' · Mobile' : ''}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {s.isAddOnEligible ? <Pill>Add-on eligible</Pill> : <Pill>Not add-on</Pill>}
+                      {s.addOnGroup ? <Pill>Group: {s.addOnGroup}</Pill> : <Pill>Group: —</Pill>}
+                      <Pill>{s.isActive ? 'Active' : 'Disabled'}</Pill>
+                    </div>
                   </div>
 
                   <form action={`/api/admin/services/${encodeURIComponent(s.id)}`} method="post">
@@ -320,9 +345,7 @@ export default async function AdminServicesPage() {
               </div>
             ))}
 
-            {services.length === 0 ? (
-              <div className="text-sm text-textSecondary">No services yet.</div>
-            ) : null}
+            {services.length === 0 ? <div className="text-sm text-textSecondary">No services yet.</div> : null}
           </div>
         </CardShell>
       </div>

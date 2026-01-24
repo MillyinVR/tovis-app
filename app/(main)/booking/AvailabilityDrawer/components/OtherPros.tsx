@@ -22,7 +22,7 @@ export default function OtherPros({
   appointmentTz: string
   holding: boolean
   selected: SelectedHold | null
-  onPick: (proId: string, offeringId: string | null, slotISO: string, proTimeZone?: string | null) => void
+  onPick: (proId: string, offeringId: string | null, slotISO: string) => void
   setRef: (el: HTMLDivElement | null) => void
 }) {
   if (!effectiveServiceId) return null
@@ -73,7 +73,7 @@ export default function OtherPros({
                       <button
                         key={iso}
                         type="button"
-                        onClick={() => onPick(p.id, p.offeringId, iso, p.timeZone || appointmentTz)}
+                        onClick={() => onPick(p.id, p.offeringId, iso)}
                         disabled={!p.offeringId || holding}
                         className={[
                           'h-10 rounded-full border px-3 text-[13px] font-black transition',

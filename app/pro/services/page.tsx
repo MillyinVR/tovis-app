@@ -50,6 +50,10 @@ export default async function ProServicesPage() {
       minPrice: moneyToString((s as any).minPrice) ?? '0.00',
       defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
       defaultImageUrl: (s as any).defaultImageUrl ?? null,
+
+      // ✅ add-on flags (read-only in pro UI)
+      isAddOnEligible: Boolean((s as any).isAddOnEligible),
+      addOnGroup: (s as any).addOnGroup ?? null,
     })),
     children: cat.children.map((child) => ({
       id: String(child.id),
@@ -60,6 +64,10 @@ export default async function ProServicesPage() {
         minPrice: moneyToString((s as any).minPrice) ?? '0.00',
         defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
         defaultImageUrl: (s as any).defaultImageUrl ?? null,
+
+        // ✅ add-on flags (read-only in pro UI)
+        isAddOnEligible: Boolean((s as any).isAddOnEligible),
+        addOnGroup: (s as any).addOnGroup ?? null,
       })),
     })),
   }))
@@ -87,6 +95,10 @@ export default async function ProServicesPage() {
     defaultImageUrl: (o.service as any).defaultImageUrl ?? null,
 
     minPrice: moneyToString((o.service as any).minPrice) ?? '0.00',
+
+    // ✅ add-on flags from canonical service (read-only in pro UI)
+    serviceIsAddOnEligible: Boolean((o.service as any).isAddOnEligible),
+    serviceAddOnGroup: (o.service as any).addOnGroup ?? null,
   }))
 
   return (

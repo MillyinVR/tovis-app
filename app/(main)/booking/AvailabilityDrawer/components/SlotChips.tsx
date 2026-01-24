@@ -114,7 +114,7 @@ export default function SlotChips({
                     active ? 'text-bgPrimary/90' : 'text-textSecondary',
                   ].join(' ')}
                 >
-                  {d.slotCount} slots
+                  {d.slotCount <= 2 ? `Only ${d.slotCount} left` : d.slotCount <= 6 ? 'Fills fast' : `${d.slotCount} slots`}
                 </div>
               </button>
             )

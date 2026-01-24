@@ -21,6 +21,10 @@ type Offering = {
 
   minPrice: string // "49.99"
 
+  // ✅ add-on flags from canonical service (read-only in pro UI)
+  serviceIsAddOnEligible?: boolean
+  serviceAddOnGroup?: string | null
+
   offersInSalon: boolean
   offersMobile: boolean
 
@@ -401,6 +405,13 @@ function OfferingCard(props: {
             <div className="mt-1 text-[12px] text-textSecondary">
               Min price:{' '}
               <span className="font-black text-textPrimary">${normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
+
+              {o.serviceIsAddOnEligible ? (
+                <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                  Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}
+                </span>
+              ) : null}
+
               <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
                 Image: {imageLabel(o)}
               </span>

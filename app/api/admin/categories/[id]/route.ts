@@ -1,4 +1,3 @@
-// app/api/admin/categories/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -44,7 +43,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       select: { id: true, name: true, slug: true },
     })
 
-    // best-effort log (never fail the request because logging failed)
     await prisma.adminActionLog
       .create({
         data: {
@@ -56,7 +54,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       })
       .catch(() => null)
 
-    return NextResponse.redirect(new URL('/admin/categories', req.url))
+    // ✅ 303 for form navigation
+    return NextResponse.redirect(new URL('/admin/categories', req.url), { status: 303 })
   } catch (e) {
     console.error('POST /api/admin/categories/[id] error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -24,6 +24,7 @@ import WaitlistPanel from './components/WaitlistPanel'
 import OtherPros from './components/OtherPros'
 import StickyCTA from './components/StickyCTA'
 import DebugPanel from './components/DebugPanel'
+import ServiceContextCard from './components/ServiceContextCard'
 
 import { safeJson } from './utils/safeJson'
 import { redirectToLogin } from './utils/authRedirect'
@@ -33,10 +34,6 @@ import { useHoldTimer } from './hooks/useHoldTimer'
 import { useDebugFlag } from './hooks/useDebugFlag'
 
 import { sanitizeTimeZone } from '@/lib/timeZone'
-
-type CreateBookingApiResponse =
-  | { ok: true; booking: { id: string } }
-  | { ok: false; error?: string; code?: string }
 
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
@@ -48,14 +45,14 @@ function periodOfHour(h: number): Period {
 
 function getViewerTimeZoneClient(): string {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles'
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   } catch {
-    return 'America/Los_Angeles'
+    return 'UTC'
   }
 }
 
 function fmtInTz(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
   return new Intl.DateTimeFormat(undefined, {
@@ -69,7 +66,7 @@ function fmtInTz(isoUtc: string, timeZone: string) {
 }
 
 function fmtSelectedLine(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
   return new Intl.DateTimeFormat(undefined, {
@@ -84,7 +81,7 @@ function fmtSelectedLine(isoUtc: string, timeZone: string) {
 }
 
 function hourInTz(isoUtc: string, timeZone: string): number | null {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return null
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -129,7 +126,7 @@ export default function AvailabilityDrawer({
   const router = useRouter()
   const debug = useDebugFlag()
 
-  const [viewerTz, setViewerTz] = useState<string>('America/Los_Angeles')
+  const [viewerTz, setViewerTz] = useState<string>('UTC')
   useEffect(() => {
     setViewerTz(getViewerTimeZoneClient())
   }, [])
@@ -142,14 +139,12 @@ export default function AvailabilityDrawer({
   const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
 
   // ✅ Summary refetches whenever locationType changes
-  // IMPORTANT: we need setData so we can clear stale summary when user toggles.
   const { loading, error, data, setError, setData } = useAvailability(open, context, locationType)
   const summary = isSummary(data) ? data : null
 
   const primary = summary?.primaryPro
   const others = summary?.otherPros ?? []
   const days = summary?.availableDays ?? []
-
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
   const allowed = useMemo(
@@ -172,10 +167,15 @@ export default function AvailabilityDrawer({
 
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } = useHoldTimer(holdUntil)
 
+  /**
+   * ✅ Appointment timezone MUST be the LOCATION timezone from the server summary.
+   * If server ever fails to provide, we fall back to viewer tz, but your APIs below will now fail-fast,
+   * so this should be rare.
+   */
   const appointmentTz = useMemo(() => {
-    const tz = summary?.timeZone || primary?.timeZone || viewerTz || 'America/Los_Angeles'
-    return sanitizeTimeZone(tz, 'America/Los_Angeles')
-  }, [summary?.timeZone, primary?.timeZone, viewerTz])
+    const tz = summary?.timeZone || viewerTz || 'UTC'
+    return sanitizeTimeZone(tz, 'UTC')
+  }, [summary?.timeZone, viewerTz])
 
   const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
 
@@ -189,6 +189,10 @@ export default function AvailabilityDrawer({
     if (!effectiveServiceId) return 'No service linked yet.'
     return 'Matched to this service'
   }, [effectiveServiceId])
+
+  const serviceName = summary?.serviceName ?? null
+  const serviceCategoryName = summary?.serviceCategoryName ?? null
+
 
   const bookingSource = resolveBookingSource(context)
 
@@ -216,27 +220,20 @@ export default function AvailabilityDrawer({
 
   /**
    * ✅ Sync locationType with server ONLY after the fetch completes.
-   *
-   * This fixes the “Mobile toggles back to Salon” bug:
-   * - user changes locationType -> new fetch starts (loading=true)
-   * - old summary still in state briefly
-   * - WITHOUT this guard, we would snap back to old summary.locationType
    */
   useEffect(() => {
     if (!open) return
     if (!summary) return
-    if (loading) return // ✅ critical guard (prevents stale-summary snapback)
+    if (loading) return
     if (holding) return
     if (selected?.holdId) return
 
     const serverType = summary.locationType
     if (serverType && serverType !== locationType) {
       void hardResetUi({ deleteHold: true })
-      // clear stale UI state
       setSelectedDayYMD(null)
       setPrimarySlots([])
       setOtherSlots({})
-      // reflect server truth
       setLocationType(serverType)
     }
   }, [open, summary, loading, holding, selected?.holdId, locationType, hardResetUi])
@@ -250,21 +247,21 @@ export default function AvailabilityDrawer({
 
     if (allowed.salon && !allowed.mobile && locationType !== 'SALON') {
       void hardResetUi({ deleteHold: true })
-      setData(null) // ✅ clear stale summary immediately
+      setData(null)
       setLocationType('SALON')
       setSelectedDayYMD(null)
       return
     }
     if (!allowed.salon && allowed.mobile && locationType !== 'MOBILE') {
       void hardResetUi({ deleteHold: true })
-      setData(null) // ✅ clear stale summary immediately
+      setData(null)
       setLocationType('MOBILE')
       setSelectedDayYMD(null)
       return
     }
   }, [open, summary, allowed.salon, allowed.mobile, locationType, hardResetUi, setData])
 
-  // ✅ default day: pick first available day; also fix if current selection no longer exists
+  // ✅ default day
   useEffect(() => {
     if (!open) return
     if (!days?.length) return
@@ -435,11 +432,12 @@ export default function AvailabilityDrawer({
       if (!res.ok || !body?.ok) throw new Error(body?.error || `Hold failed (${res.status}).`)
 
       const parsed = parseHoldResponse(body)
+
       setSelected({
         proId,
         offeringId,
         slotISO: parsed.scheduledForISO,
-        proTimeZone: appointmentTz,
+        proTimeZone: appointmentTz, // keep for compatibility
         holdId: parsed.holdId,
       })
       setHoldUntil(parsed.holdUntilMs)
@@ -452,48 +450,25 @@ export default function AvailabilityDrawer({
     }
   }
 
-  async function onContinue() {
+  /**
+   * ✅ New flow: go to Add-ons first.
+   * No booking is created here anymore.
+   */
+  function onContinue() {
     if (!selected?.holdId || !selected?.offeringId) return
     if (holding) return
 
-    setHolding(true)
-    setError(null)
+    const qs = new URLSearchParams({
+      holdId: selected.holdId,
+      offeringId: selected.offeringId,
+      locationType,
+      source: bookingSource,
+    })
 
-    try {
-      const res = await fetch('/api/bookings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          offeringId: selected.offeringId,
-          holdId: selected.holdId,
-          source: bookingSource,
-          locationType,
-          mediaId: context?.mediaId ?? null,
-        }),
-      })
+    if (context?.mediaId) qs.set('mediaId', context.mediaId)
 
-      if (res.status === 401) {
-        redirectToLogin(router, 'book')
-        return
-      }
-
-      const body = (await safeJson(res)) as CreateBookingApiResponse
-
-      if (!res.ok || !body?.ok) throw new Error((body as any)?.error || `Booking failed (${res.status}).`)
-
-      const bookingId = body.booking?.id
-      if (!bookingId) throw new Error('Booking succeeded but no booking id was returned.')
-
-      setSelected(null)
-      setHoldUntil(null)
-
-      onClose()
-      router.push(`/booking/${encodeURIComponent(bookingId)}`)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to book. Try again.')
-    } finally {
-      setHolding(false)
-    }
+    onClose()
+    router.push(`/booking/add-ons?${qs.toString()}`)
   }
 
   const selectedLine = selected?.slotISO ? fmtSelectedLine(selected.slotISO, appointmentTz) : null
@@ -580,16 +555,20 @@ export default function AvailabilityDrawer({
                   onScrollToOtherPros={scrollToOtherPros}
                 />
 
+                <ServiceContextCard
+                  serviceName={summary?.serviceName ?? null}
+                  categoryName={summary?.serviceCategoryName ?? null}
+                  offering={offering}
+                  locationType={locationType}
+                />
+
                 <AppointmentTypeToggle
                   value={locationType}
                   disabled={holding}
                   allowed={allowed}
                   onChange={(t) => {
                     void hardResetUi({ deleteHold: true })
-
-                    // ✅ clear stale summary immediately so we don’t “snap back” while refetching
-                    setData(null)
-
+                    setData(null) // clear stale summary immediately
                     setLocationType(t)
                     setSelectedDayYMD(null)
                     setPrimarySlots([])

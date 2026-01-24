@@ -1,10 +1,12 @@
 // app/api/admin/services/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
+import { parseMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +35,9 @@ export async function GET() {
         allowMobile: true,
         defaultDurationMinutes: true,
         minPrice: true,
+        defaultImageUrl: true,
+        isAddOnEligible: true,
+        addOnGroup: true,
       },
       take: 2000,
     })
@@ -53,17 +58,25 @@ export async function POST(req: NextRequest) {
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const form = await req.formData()
-    const method = pickMethod(form.get('_method')) ?? 'POST'
+    const method = (pickMethod(form.get('_method')) ?? 'POST').toUpperCase()
     if (method !== 'POST') return NextResponse.json({ error: 'Unsupported operation.' }, { status: 400 })
 
-    const name = pickString(form.get('name'))
-    const categoryId = pickString(form.get('categoryId'))
+    const name = (pickString(form.get('name')) ?? '').trim()
+    const categoryId = (pickString(form.get('categoryId')) ?? '').trim()
 
     const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes')) ?? 60
-    const minPriceRaw = pickString(form.get('minPrice'))
+    const minPriceRaw = (pickString(form.get('minPrice')) ?? '').trim()
+
     const allowMobile = pickBool(form.get('allowMobile')) ?? false
-    const description = pickString(form.get('description'))
-    const defaultImageUrl = pickString(form.get('defaultImageUrl'))
+    const description = (pickString(form.get('description')) ?? '').trim()
+
+    const defaultImageUrlRaw = (pickString(form.get('defaultImageUrl')) ?? '').trim()
+    const defaultImageUrl = defaultImageUrlRaw || null
+
+    // ✅ NEW add-on fields
+    const isAddOnEligible = pickBool(form.get('isAddOnEligible')) ?? false
+    const addOnGroupRaw = (pickString(form.get('addOnGroup')) ?? '').trim()
+    const addOnGroup = addOnGroupRaw || null
 
     if (!name || !categoryId) {
       return NextResponse.json({ error: 'Missing name or categoryId.' }, { status: 400 })
@@ -76,18 +89,27 @@ export async function POST(req: NextRequest) {
     })
     if (!okCategory) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const minPrice = minPriceRaw ?? '0'
+    let minPrice
+    try {
+      minPrice = parseMoney(minPriceRaw || '0')
+    } catch {
+      return NextResponse.json({ error: 'Invalid minPrice. Use e.g. 45 or 45.00' }, { status: 400 })
+    }
 
     const created = await prisma.service.create({
       data: {
         name,
         categoryId,
-        description,
+        description: description || null,
         defaultDurationMinutes,
         minPrice,
         defaultImageUrl,
         allowMobile,
         isActive: true,
+
+        // ✅ NEW
+        isAddOnEligible,
+        addOnGroup,
       },
       select: { id: true, name: true },
     })

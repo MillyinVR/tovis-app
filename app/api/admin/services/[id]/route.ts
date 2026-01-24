@@ -1,10 +1,12 @@
 // app/api/admin/services/[id]/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
-import { pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
+import { pickInt, pickMethod, pickString, pickBool } from '@/app/api/_utils/pick'
+import { parseMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,11 +51,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const form = await req.formData()
-    const method = pickMethod(form.get('_method'))
+    const method = (pickMethod(form.get('_method')) ?? '').toUpperCase()
     if (method !== 'PATCH') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
 
     // ---- toggle only (fast path) ----
-    const isActive = parseBoolString(pickString(form.get('isActive')))
+    const isActive = parseBoolString((pickString(form.get('isActive')) ?? '').trim())
     if (isActive !== null) {
       await prisma.service.update({
         where: { id: svc.id },
@@ -72,22 +74,35 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         })
         .catch(() => null)
 
-      return NextResponse.redirect(new URL('/admin/services', req.url))
+      return NextResponse.redirect(new URL('/admin/services', req.url), { status: 303 })
     }
 
     // ---- full edit ----
-    const name = pickString(form.get('name'))
-    const categoryId = pickString(form.get('categoryId'))
-    const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes'))
-    const minPrice = pickString(form.get('minPrice'))
-    const description = pickString(form.get('description'))
-    const allowMobile = parseBoolString(pickString(form.get('allowMobile'))) ?? false
+    const name = (pickString(form.get('name')) ?? '').trim()
+    const categoryId = (pickString(form.get('categoryId')) ?? '').trim()
 
-    if (!name || !categoryId || !defaultDurationMinutes || !minPrice) {
+    const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes'))
+    const minPriceRaw = (pickString(form.get('minPrice')) ?? '').trim()
+
+    const description = (pickString(form.get('description')) ?? '').trim()
+    const allowMobile = parseBoolString((pickString(form.get('allowMobile')) ?? '').trim()) ?? false
+
+    // ✅ NEW add-on fields
+    const isAddOnEligible = pickBool(form.get('isAddOnEligible')) ?? false
+    const addOnGroupRaw = (pickString(form.get('addOnGroup')) ?? '').trim()
+    const addOnGroup = addOnGroupRaw || null
+
+    if (!name || !categoryId || !defaultDurationMinutes || !minPriceRaw) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
     }
 
-    // extra guard: if moving categories, must have permission for the *new* category too
+    let minPrice
+    try {
+      minPrice = parseMoney(minPriceRaw)
+    } catch {
+      return NextResponse.json({ error: 'Invalid minPrice. Use e.g. 45 or 45.00' }, { status: 400 })
+    }
+
     const okNewCategory = await hasAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
@@ -102,9 +117,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         categoryId,
         defaultDurationMinutes,
         minPrice,
-        description,
+        description: description || null,
         allowMobile,
-      } as any,
+
+        // ✅ NEW
+        isAddOnEligible,
+        addOnGroup,
+      },
     })
 
     await prisma.adminActionLog
@@ -119,7 +138,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       })
       .catch(() => null)
 
-    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(svc.id)}`, req.url))
+    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(svc.id)}`, req.url), { status: 303 })
   } catch (e) {
     console.error('POST /api/admin/services/[id] error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

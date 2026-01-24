@@ -8,6 +8,7 @@ import {
   minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
   zonedTimeToUtc,
+  isValidIanaTimeZone,
 } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
 
@@ -73,7 +74,7 @@ function getWeekdayKeyInTimeZone(dateUtc: Date, timeZone: string): keyof Working
   return 'sun'
 }
 
-/** ✅ Accepts both "9:00" and "09:00" */
+/** Accepts both "9:00" and "09:00" */
 function parseHHMM(v?: string) {
   if (!v || typeof v !== 'string') return null
   const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
@@ -97,8 +98,10 @@ function ensureWithinWorkingHours(args: {
     return { ok: false, error: 'This professional has not set working hours yet.' }
   }
 
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
   const wh = workingHours as WorkingHours
-  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, timeZone)
+
+  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, tz)
   const rule = wh?.[dayKey]
 
   if (!rule || rule.enabled === false) {
@@ -117,11 +120,14 @@ function ensureWithinWorkingHours(args: {
     return { ok: false, error: 'This professional’s working hours are misconfigured.' }
   }
 
-  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
-  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
+  // Must start & end on the same local day in tz
+  const sParts = getZonedParts(scheduledStartUtc, tz)
+  const eParts = getZonedParts(scheduledEndUtc, tz)
+  const sameLocalDay = sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+  if (!sameLocalDay) return { ok: false, error: 'That time is outside this professional’s working hours.' }
 
-  const endDayKey = getWeekdayKeyInTimeZone(scheduledEndUtc, timeZone)
-  if (endDayKey !== dayKey) return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
 
   if (startMin < windowStartMin || endMin > windowEndMin) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
@@ -179,6 +185,7 @@ export async function POST(req: NextRequest) {
 
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
+    // must be in the near future
     if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
       return jsonFail(400, 'Please select a future time.')
     }
@@ -226,8 +233,18 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 400, error: 'No bookable location found for this professional.' }
       }
 
-      const apptTz = sanitizeTimeZone(loc.timeZone, 'America/Los_Angeles')
+      // ✅ STRICT: location timezone must be valid for booking safety
+      const locTzRaw = typeof loc.timeZone === 'string' ? loc.timeZone.trim() : ''
+      if (!isValidIanaTimeZone(locTzRaw)) {
+        return {
+          ok: false as const,
+          status: 409,
+          error: 'This professional must set a valid timezone for their bookable location before accepting bookings.',
+        }
+      }
+      const apptTz = sanitizeTimeZone(locTzRaw, 'UTC')
 
+      // enforce working-hours in LOCATION timezone
       const whCheck = ensureWithinWorkingHours({
         scheduledStartUtc: requestedStart,
         scheduledEndUtc: requestedEnd,
@@ -238,10 +255,12 @@ export async function POST(req: NextRequest) {
 
       const now = new Date()
 
+      // cleanup expired holds
       await tx.bookingHold.deleteMany({
         where: { professionalId: offering.professionalId, expiresAt: { lte: now } },
       })
 
+      // idempotency: same client already holding same slot/location/mode
       const existingClientHold = await tx.bookingHold.findFirst({
         where: {
           professionalId: offering.professionalId,
@@ -262,6 +281,7 @@ export async function POST(req: NextRequest) {
       })
       if (existingClientHold) return { ok: true as const, status: 200, hold: existingClientHold }
 
+      // someone else holding
       const activeHold = await tx.bookingHold.findFirst({
         where: {
           professionalId: offering.professionalId,
@@ -277,6 +297,7 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
       }
 
+      // booking conflicts (same local day in tz window)
       const { dayStartUtc, dayEndExclusiveUtc } = getDayWindowUtcFromUtcInstant({
         instantUtc: requestedStart,
         timeZone: apptTz,

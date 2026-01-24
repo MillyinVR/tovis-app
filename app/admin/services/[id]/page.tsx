@@ -4,17 +4,19 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { AdminPermissionRole, ProfessionType } from '@prisma/client'
 import AdminGuard from '../../_components/AdminGuard'
+import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
-function money(v: any) {
-  try {
-    const n = Number(v)
-    if (!Number.isFinite(n)) return String(v ?? '—')
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n)
-  } catch {
-    return String(v ?? '—')
-  }
+type Params = { id: string }
+type Props = { params: Params | Promise<Params> }
+
+function formatUsd(v: any) {
+  const s = moneyToString(v)
+  if (!s) return '—'
+  const n = Number(s)
+  if (!Number.isFinite(n)) return `$${s}`
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n)
 }
 
 function Chip({
@@ -24,8 +26,7 @@ function Chip({
   children: React.ReactNode
   tone?: 'neutral' | 'gold' | 'danger' | 'success'
 }) {
-  const base =
-    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-extrabold'
+  const base = 'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-extrabold'
   const tones: Record<typeof tone, string> = {
     neutral: 'border-surfaceGlass/10 bg-bgPrimary/25 text-textPrimary',
     gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
@@ -42,8 +43,7 @@ function Badge({
   children: React.ReactNode
   tone?: 'neutral' | 'gold'
 }) {
-  const base =
-    'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold'
+  const base = 'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold'
   const tones: Record<typeof tone, string> = {
     neutral: 'border-surfaceGlass/10 bg-bgSecondary text-textPrimary',
     gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
@@ -126,8 +126,7 @@ function Button({
   variant = 'primary',
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' }) {
-  const base =
-    'inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-extrabold transition-colors'
+  const base = 'inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-extrabold transition-colors'
   const styles =
     variant === 'primary'
       ? 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
@@ -165,13 +164,7 @@ function ToggleRow({
   )
 }
 
-function EmptyState({
-  title,
-  body,
-}: {
-  title: string
-  body: string
-}) {
+function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
       <div className="text-sm font-extrabold text-textPrimary">{title}</div>
@@ -180,9 +173,13 @@ function EmptyState({
   )
 }
 
-export default async function AdminServiceDetailPage({ params }: { params: { id: string } }) {
+export default async function AdminServiceDetailPage({ params }: Props) {
+  const { id } = await Promise.resolve(params)
+  const serviceId = typeof id === 'string' ? id.trim() : ''
+  if (!serviceId) notFound()
+
   const service = await prisma.service.findUnique({
-    where: { id: params.id },
+    where: { id: serviceId },
     select: {
       id: true,
       name: true,
@@ -193,6 +190,11 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
       allowMobile: true,
       isActive: true,
       categoryId: true,
+
+      // ✅ NEW
+      isAddOnEligible: true,
+      addOnGroup: true,
+
       permissions: { select: { id: true, professionType: true, stateCode: true } },
       category: { select: { name: true } },
     },
@@ -211,13 +213,13 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
 
   const headerChips = (
     <>
-      <Chip tone={service.isActive ? 'success' : 'danger'}>
-        {service.isActive ? 'Active' : 'Disabled'}
-      </Chip>
+      <Chip tone={service.isActive ? 'success' : 'danger'}>{service.isActive ? 'Active' : 'Disabled'}</Chip>
       {service.allowMobile ? <Chip tone="gold">Mobile</Chip> : <Chip>Salon-only</Chip>}
       <Chip>{service.defaultDurationMinutes}m</Chip>
-      <Chip tone="gold">{money(service.minPrice)}</Chip>
+      <Chip tone="gold">{formatUsd(service.minPrice)}</Chip>
       <Chip>{service.category?.name || '— Category'}</Chip>
+      {service.isAddOnEligible ? <Chip tone="gold">Add-on eligible</Chip> : <Chip>Not add-on</Chip>}
+      {service.addOnGroup ? <Chip tone="neutral">Group: {service.addOnGroup}</Chip> : null}
     </>
   )
 
@@ -233,9 +235,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
           <div className="grid gap-2">
             <h1 className="text-2xl font-extrabold text-textPrimary">{service.name}</h1>
             <div className="flex flex-wrap gap-2">{headerChips}</div>
-            {service.description ? (
-              <p className="max-w-3xl text-sm text-textSecondary">{service.description}</p>
-            ) : null}
+            {service.description ? <p className="max-w-3xl text-sm text-textSecondary">{service.description}</p> : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -254,13 +254,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
           <CardShell
             title="Default media"
             subtitle="Used as a fallback image when pros don’t upload one."
-            right={
-              service.defaultImageUrl ? (
-                <Badge tone="gold">Has image</Badge>
-              ) : (
-                <Badge>None</Badge>
-              )
-            }
+            right={service.defaultImageUrl ? <Badge tone="gold">Has image</Badge> : <Badge>None</Badge>}
           >
             {service.defaultImageUrl ? (
               <div className="grid gap-3">
@@ -268,7 +262,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
                 <img
                   src={service.defaultImageUrl}
                   alt={`${service.name} default`}
-                  className="aspect-square w-full rounded-2xl border border-surfaceGlass/10 object-cover bg-bgPrimary/20"
+                  className="aspect-square w-full rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 object-cover"
                 />
                 <div className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                   <div className="text-xs font-extrabold text-textSecondary">URL</div>
@@ -284,12 +278,8 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
           </CardShell>
 
           {/* Edit */}
-          <CardShell title="Edit service" subtitle="Update name, category, pricing, and description.">
-            <form
-              action={`/api/admin/services/${encodeURIComponent(service.id)}`}
-              method="post"
-              className="grid gap-3"
-            >
+          <CardShell title="Edit service" subtitle="Update name, category, pricing, add-on settings, and description.">
+            <form action={`/api/admin/services/${encodeURIComponent(service.id)}`} method="post" className="grid gap-3">
               <input type="hidden" name="_method" value="PATCH" />
 
               <label className="grid gap-2">
@@ -326,13 +316,32 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
                   <FieldLabel>Min price</FieldLabel>
                   <Input
                     name="minPrice"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    defaultValue={String(service.minPrice)}
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={moneyToString(service.minPrice) ?? String(service.minPrice)}
                     required
                   />
                 </label>
+              </div>
+
+              <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
+                <div className="text-xs font-extrabold text-textSecondary">Add-on settings</div>
+
+                <ToggleRow name="isAddOnEligible" checked={service.isAddOnEligible} label="Add-on eligible" />
+
+                <label className="grid gap-2">
+                  <FieldLabel>Add-on group (optional)</FieldLabel>
+                  <Input
+                    name="addOnGroup"
+                    defaultValue={service.addOnGroup ?? ''}
+                    placeholder="Finish, Treatment, Upgrade, etc."
+                  />
+                </label>
+
+                <div className="text-[11px] text-textSecondary">
+                  This controls whether the service can be used as an add-on for other offerings. Group is just UI
+                  grouping.
+                </div>
               </div>
 
               <label className="grid gap-2">
@@ -351,7 +360,8 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
               </div>
 
               <div className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3 text-xs text-textSecondary">
-                Tip: if you ever add “defaultImageUrl” editing, make it a separate guarded input so nobody pastes a cursed URL and blames you.
+                Tip: if you ever add “defaultImageUrl” editing, make it a separate guarded input so nobody pastes a cursed
+                URL and blames you.
               </div>
             </form>
           </CardShell>
@@ -361,9 +371,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
         <CardShell
           title="Permissions"
           subtitle="Choose which professions can offer this service. Optional: limit to a state (2-letter code). Leaving blank = all states."
-          right={
-            <Badge tone="gold">{service.permissions.length ? `${service.permissions.length} rules` : '0 rules'}</Badge>
-          }
+          right={<Badge tone="gold">{service.permissions.length ? `${service.permissions.length} rules` : '0 rules'}</Badge>}
         >
           <form
             action={`/api/admin/services/${encodeURIComponent(service.id)}/permissions`}
@@ -378,9 +386,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
             <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-extrabold text-textSecondary">Allowed professions</div>
-                <div className="text-[11px] text-textSecondary">
-                  Checked = allowed (subject to optional state filter)
-                </div>
+                <div className="text-[11px] text-textSecondary">Checked = allowed (subject to optional state filter)</div>
               </div>
 
               <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -407,9 +413,7 @@ export default async function AdminServiceDetailPage({ params }: { params: { id:
           <div className="mt-4 border-t border-surfaceGlass/10 pt-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs font-extrabold text-textSecondary">Current permissions</div>
-              <div className="text-[11px] text-textSecondary">
-                State blank = all states
-              </div>
+              <div className="text-[11px] text-textSecondary">State blank = all states</div>
             </div>
 
             {service.permissions.length ? (
