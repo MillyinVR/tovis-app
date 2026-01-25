@@ -1,10 +1,10 @@
 // app/client/components/PrebookedBookings.tsx
 'use client'
 
-import Link from 'next/link'
 import type { BookingLike } from './_helpers'
-import { prettyWhen, locationLabel, sourceUpper } from './_helpers'
+import { prettyWhen, bookingLocationLabel, sourceUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
+import CardLink from './CardLink'
 
 function Pill({ label, tone }: { label: string; tone: 'info' | 'warning' | 'accent' }) {
   const base = 'inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black whitespace-nowrap'
@@ -18,39 +18,35 @@ function Pill({ label, tone }: { label: string; tone: 'info' | 'warning' | 'acce
 }
 
 export default function PrebookedBookings({ items }: { items: BookingLike[] }) {
-  const list = items || []
+  const list = items ?? []
 
   return (
     <div className="grid gap-2">
       <div className="text-sm font-black text-textPrimary">Prebooked</div>
 
       {list.map((b) => {
-        const svc = b?.service?.name || 'Appointment'
+        const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
         const proLabel = b?.professional?.businessName || 'Professional'
         const proId = b?.professional?.id || null
-        const when = prettyWhen(b?.scheduledFor)
-        const loc = locationLabel(b?.professional)
 
-        const hasUnreadAftercare = Boolean((b as any)?.hasUnreadAftercare)
+        const when = prettyWhen(b?.scheduledFor, b?.timeZone)
+        const loc = bookingLocationLabel(b)
+
+        const hasUnreadAftercare = Boolean(b?.hasUnreadAftercare)
         const isAftercare = sourceUpper(b?.source) === 'AFTERCARE'
 
+        const href = `/client/bookings/${encodeURIComponent(b.id)}`
+
         return (
-          <Link
-            key={b.id}
-            href={`/client/bookings/${encodeURIComponent(b.id)}`}
-            className="block no-underline"
-          >
-            <div className="cursor-pointer rounded-xl border border-borderSubtle bg-bgPrimary p-3 text-textPrimary">
+          <CardLink key={b.id} href={href} className="block no-underline">
+            <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
               <div className="flex items-baseline justify-between gap-3">
                 <div className="text-sm font-black">{svc}</div>
                 <div className="text-xs font-semibold text-textSecondary">{when}</div>
               </div>
 
               <div className="mt-1 text-sm">
-                <span
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
+                <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                   <ProProfileLink proId={proId} label={proLabel} className="font-black" />
                 </span>
                 {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
@@ -62,7 +58,7 @@ export default function PrebookedBookings({ items }: { items: BookingLike[] }) {
                 {hasUnreadAftercare ? <Pill label="New aftercare" tone="accent" /> : null}
               </div>
             </div>
-          </Link>
+          </CardLink>
         )
       })}
 

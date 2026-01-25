@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import type { WaitlistLike } from './_helpers'
-import { prettyWhen, locationLabel } from './_helpers'
+import { prettyWhen, waitlistLocationLabel } from './_helpers'
 import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
 import ProProfileLink from './ProProfileLink'
 
@@ -96,8 +96,8 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
     setErr(null)
     setEditingId(w.id)
 
-    const startISO = (w as any)?.preferredStart ?? (w as any)?.availability?.preferredStart ?? null
-    const endISO = (w as any)?.preferredEnd ?? (w as any)?.availability?.preferredEnd ?? null
+    const startISO = w?.preferredStart ?? null
+    const endISO = w?.preferredEnd ?? null
 
     const seedIso = (() => {
       const d = startISO ? toDate(startISO) : null
@@ -124,7 +124,7 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
       setFlexMinutes(60)
     }
 
-    setTimeBucket(((w as any)?.preferredTimeBucket ?? '').toString())
+    setTimeBucket((w?.preferredTimeBucket ?? '').toString())
   }
 
   function closeEdit() {
@@ -200,9 +200,8 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
 
       {list.map((w) => {
         const svc = w?.service?.name || 'Service'
-        const pro = w?.professional?.businessName || 'Any professional'
-        const joined = prettyWhen(w?.createdAt)
-        const loc = locationLabel(w?.professional)
+        const joined = prettyWhen(w?.createdAt, tz)
+        const loc = waitlistLocationLabel(w?.professional)
 
         const isEditing = editingId === w.id
         const isBusy = busyId === w.id
@@ -215,10 +214,7 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
             </div>
 
             <div className="mt-1 text-sm text-textPrimary">
-              <span
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
+              <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                 <ProProfileLink
                   proId={w?.professional?.id || null}
                   label={w?.professional?.businessName || 'Any professional'}

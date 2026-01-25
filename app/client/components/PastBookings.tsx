@@ -1,10 +1,10 @@
 // app/client/components/PastBookings.tsx
 'use client'
 
-import Link from 'next/link'
 import type { BookingLike } from './_helpers'
-import { prettyWhen, locationLabel } from './_helpers'
+import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
+import CardLink from './CardLink'
 
 function StatusPill({ label }: { label: string }) {
   return (
@@ -14,36 +14,35 @@ function StatusPill({ label }: { label: string }) {
   )
 }
 
-export default function PastBookings({ items }: { items: BookingLike[] }) {
-  const list = items || []
+function statusLabel(statusRaw: unknown) {
+  const s = statusUpper(statusRaw)
+  if (s === 'COMPLETED') return 'Completed'
+  if (s === 'CANCELLED') return 'Cancelled'
+  if (s === 'ACCEPTED') return 'Confirmed'
+  if (s === 'PENDING') return 'Requested'
+  return s || 'Unknown'
+}
 
-  function statusLabel(statusRaw: any) {
-    const s = String(statusRaw || '').toUpperCase()
-    if (s === 'COMPLETED') return 'Completed'
-    if (s === 'CANCELLED') return 'Cancelled'
-    if (s === 'ACCEPTED') return 'Confirmed'
-    if (s === 'PENDING') return 'Requested'
-    return s || 'Unknown'
-  }
+export default function PastBookings({ items }: { items: BookingLike[] }) {
+  const list = items ?? []
 
   return (
     <div className="grid gap-2">
       <div className="text-sm font-black text-textPrimary">Past</div>
 
       {list.map((b) => {
-        const svc = b?.service?.name || 'Appointment'
+        const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
         const proLabel = b?.professional?.businessName || 'Professional'
         const proId = b?.professional?.id || null
-        const when = prettyWhen(b?.scheduledFor)
-        const loc = locationLabel(b?.professional)
-        const hasUnreadAftercare = Boolean((b as any)?.hasUnreadAftercare)
+
+        const when = prettyWhen(b?.scheduledFor, b?.timeZone)
+        const loc = bookingLocationLabel(b)
+        const hasUnreadAftercare = Boolean(b?.hasUnreadAftercare)
+
+        const href = `/client/bookings/${encodeURIComponent(b.id)}`
 
         return (
-          <Link
-            key={b.id}
-            href={`/client/bookings/${encodeURIComponent(b.id)}`}
-            className="block no-underline"
-          >
+          <CardLink key={b.id} href={href} className="block no-underline">
             <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
               <div className="flex items-baseline justify-between gap-3">
                 <div className="text-sm font-black">{svc}</div>
@@ -51,10 +50,7 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
               </div>
 
               <div className="mt-1 text-sm">
-                <span
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
+                <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                   <ProProfileLink proId={proId} label={proLabel} className="font-black" />
                 </span>
                 {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
@@ -65,7 +61,7 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
                 {hasUnreadAftercare ? <StatusPill label="New aftercare" /> : null}
               </div>
             </div>
-          </Link>
+          </CardLink>
         )
       })}
     </div>

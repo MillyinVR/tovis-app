@@ -30,7 +30,6 @@ function asItems(proposedServicesJson: unknown): ProposedItem[] {
 }
 
 function formatMoneyLike(v: unknown): string | null {
-  // narrow before moneyToString
   if (v === null || v === undefined) return null
   if (typeof v === 'number' || typeof v === 'string') return moneyToString(v)
   return null
@@ -51,6 +50,8 @@ function Pill({ children }: { children: React.ReactNode }) {
   )
 }
 
+type DecisionAction = 'APPROVE' | 'REJECT'
+
 export default function ConsultationDecisionCard(props: {
   bookingId: string
   appointmentTz: string
@@ -62,9 +63,9 @@ export default function ConsultationDecisionCard(props: {
   const { bookingId, appointmentTz, notes, proposedTotalLabel, proposedServicesJson, disabled } = props
   const router = useRouter()
 
-  const [loading, setLoading] = useState<'approve' | 'reject' | null>(null)
+  const [loading, setLoading] = useState<DecisionAction | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [done, setDone] = useState<'approve' | 'reject' | null>(null)
+  const [done, setDone] = useState<DecisionAction | null>(null)
 
   const items = useMemo(() => asItems(proposedServicesJson), [proposedServicesJson])
 
@@ -76,21 +77,30 @@ export default function ConsultationDecisionCard(props: {
     return COPY.common.notProvided
   }, [proposedTotalLabel])
 
-  async function decide(action: 'approve' | 'reject') {
+  async function decide(action: DecisionAction) {
     if (disabled || loading) return
     setErr(null)
     setDone(null)
     setLoading(action)
 
     try {
-      const url = `/api/client/bookings/${encodeURIComponent(bookingId)}/consultation/${action}`
-      const res = await fetch(url, { method: 'POST' })
+      const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/consultation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorFrom(res, data))
 
       setDone(action)
+
+      // Make the page re-fetch server data (status/sessionStep/etc)
       router.refresh()
-      router.push(`/client/bookings/${encodeURIComponent(bookingId)}?step=consult&consultation=${action}`)
+
+      // Keep your existing UX
+      const qp = action === 'APPROVE' ? 'approve' : 'reject'
+      router.push(`/client/bookings/${encodeURIComponent(bookingId)}?step=consult&consultation=${qp}`)
     } catch (e: any) {
       setErr(e?.message || 'Something went wrong.')
     } finally {
@@ -150,7 +160,7 @@ export default function ConsultationDecisionCard(props: {
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => decide('approve')}
+          onClick={() => decide('APPROVE')}
           disabled={disabled || loading !== null}
           className={[
             'rounded-full px-4 py-2 text-sm font-black transition',
@@ -159,12 +169,12 @@ export default function ConsultationDecisionCard(props: {
               : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
           ].join(' ')}
         >
-          {loading === 'approve' ? COPY.consultationDecisionCard.approving : COPY.consultationDecisionCard.approve}
+          {loading === 'APPROVE' ? COPY.consultationDecisionCard.approving : COPY.consultationDecisionCard.approve}
         </button>
 
         <button
           type="button"
-          onClick={() => decide('reject')}
+          onClick={() => decide('REJECT')}
           disabled={disabled || loading !== null}
           className={[
             'rounded-full px-4 py-2 text-sm font-black transition',
@@ -173,13 +183,13 @@ export default function ConsultationDecisionCard(props: {
               : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
           ].join(' ')}
         >
-          {loading === 'reject' ? COPY.consultationDecisionCard.rejecting : COPY.consultationDecisionCard.reject}
+          {loading === 'REJECT' ? COPY.consultationDecisionCard.rejecting : COPY.consultationDecisionCard.reject}
         </button>
       </div>
 
       {done ? (
         <div className="mt-3 text-sm font-semibold text-textSecondary">
-          {done === 'approve' ? COPY.consultationDecisionCard.approvedDone : COPY.consultationDecisionCard.rejectedDone}
+          {done === 'APPROVE' ? COPY.consultationDecisionCard.approvedDone : COPY.consultationDecisionCard.rejectedDone}
         </div>
       ) : null}
 

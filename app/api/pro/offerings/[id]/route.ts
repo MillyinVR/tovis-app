@@ -2,11 +2,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { parseMoney, moneyToString } from '@/lib/money'
 import { Prisma } from '@prisma/client'
 import type { ProfessionalLocationType } from '@prisma/client'
+import { parseMoney, moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
+
+type Ctx = { params: Promise<{ id: string }> }
 
 type PatchBody = {
   description?: string | null
@@ -24,34 +26,12 @@ type PatchBody = {
   isActive?: boolean
 }
 
-type Ctx = { params: Promise<{ id: string }> }
-
-type OfferingDto = {
-  id: string
-  serviceId: string
-
-  description: string | null
-  customImageUrl: string | null
-
-  offersInSalon: boolean
-  offersMobile: boolean
-
-  salonPriceStartingAt: string | null
-  salonDurationMinutes: number | null
-
-  mobilePriceStartingAt: string | null
-  mobileDurationMinutes: number | null
-
-  serviceName: string
-  categoryName: string | null
-  serviceDefaultImageUrl: string | null
-  minPrice: string
-
-  isActive: boolean
-}
-
 function jsonError(message: string, status: number, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, error: message, ...(extra ?? {}) }, { status })
+}
+
+function trimId(v: unknown) {
+  return typeof v === 'string' ? v.trim() : ''
 }
 
 function isPositiveInt(n: unknown): n is number {
@@ -64,6 +44,23 @@ function trimOrNull(v: unknown): string | null | undefined {
   if (typeof v !== 'string') return undefined
   const t = v.trim()
   return t ? t : null
+}
+
+type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+type WorkingHoursDay = { enabled: boolean; start: string; end: string }
+type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
+
+function defaultWorkingHours(): WorkingHoursObj {
+  const make = (enabled: boolean): WorkingHoursDay => ({ enabled, start: '09:00', end: '17:00' })
+  return {
+    mon: make(true),
+    tue: make(true),
+    wed: make(true),
+    thu: make(true),
+    fri: make(true),
+    sat: make(false),
+    sun: make(false),
+  }
 }
 
 function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon' | 'Mobile') {
@@ -82,70 +79,6 @@ function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon'
   }
 
   return dec
-}
-
-type OfferingWithService = {
-  id: string
-  serviceId: string
-  description: string | null
-  customImageUrl: string | null
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonPriceStartingAt: Prisma.Decimal | null
-  salonDurationMinutes: number | null
-  mobilePriceStartingAt: Prisma.Decimal | null
-  mobileDurationMinutes: number | null
-  isActive: boolean
-  service: {
-    name: string
-    minPrice: Prisma.Decimal
-    defaultImageUrl: string | null
-    category: { name: string } | null
-  }
-}
-
-function toDto(off: OfferingWithService): OfferingDto {
-  const minPrice = moneyToString(off.service.minPrice)
-  return {
-    id: off.id,
-    serviceId: off.serviceId,
-
-    description: off.description ?? null,
-    customImageUrl: off.customImageUrl ?? null,
-
-    offersInSalon: Boolean(off.offersInSalon),
-    offersMobile: Boolean(off.offersMobile),
-
-    salonPriceStartingAt: off.salonPriceStartingAt ? moneyToString(off.salonPriceStartingAt) : null,
-    salonDurationMinutes: off.salonDurationMinutes ?? null,
-
-    mobilePriceStartingAt: off.mobilePriceStartingAt ? moneyToString(off.mobilePriceStartingAt) : null,
-    mobileDurationMinutes: off.mobileDurationMinutes ?? null,
-
-    serviceName: off.service.name,
-    categoryName: off.service.category?.name ?? null,
-    serviceDefaultImageUrl: off.service.defaultImageUrl ?? null,
-
-    minPrice: minPrice ?? '0.00',
-    isActive: Boolean(off.isActive),
-  }
-}
-
-type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
-type WorkingHoursDay = { enabled: boolean; start: string; end: string }
-type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
-
-function defaultWorkingHours(): WorkingHoursObj {
-  const make = (enabled: boolean): WorkingHoursDay => ({ enabled, start: '09:00', end: '17:00' })
-  return {
-    mon: make(true),
-    tue: make(true),
-    wed: make(true),
-    thu: make(true),
-    fri: make(true),
-    sat: make(false),
-    sun: make(false),
-  }
 }
 
 async function ensureBookableLocationsForOffering(args: {
@@ -192,6 +125,31 @@ async function ensureBookableLocationsForOffering(args: {
   }
 }
 
+// Optional: GET one offering (not required by your UI right now, but useful)
+export async function GET(_request: Request, ctx: Ctx) {
+  try {
+    const user = await getCurrentUser().catch(() => null)
+    const profId = user?.role === 'PRO' ? user.professionalProfile?.id : null
+    if (!profId) return jsonError('Unauthorized', 401)
+
+    const { id } = await ctx.params
+    const offeringId = trimId(id)
+    if (!offeringId) return jsonError('Missing offering id.', 400)
+
+    const offering = await prisma.professionalServiceOffering.findFirst({
+      where: { id: offeringId, professionalId: profId, isActive: true },
+      include: { service: { include: { category: true } } },
+    })
+
+    if (!offering) return jsonError('Not found.', 404)
+
+    return NextResponse.json({ ok: true, offering }, { status: 200 })
+  } catch (error) {
+    console.error('GET /api/pro/offerings/[id] error', error)
+    return jsonError('Internal server error.', 500)
+  }
+}
+
 export async function PATCH(request: Request, ctx: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -199,17 +157,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
     if (!profId) return jsonError('Unauthorized', 401)
 
     const { id } = await ctx.params
-    const offeringId = String(id || '').trim()
+    const offeringId = trimId(id)
     if (!offeringId) return jsonError('Missing offering id.', 400)
 
     const body = (await request.json().catch(() => null)) as PatchBody | null
     if (!body) return jsonError('Invalid JSON body.', 400)
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const existing = (await tx.professionalServiceOffering.findFirst({
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.professionalServiceOffering.findFirst({
         where: { id: offeringId, professionalId: profId },
-        include: { service: { include: { category: true } } },
-      })) as OfferingWithService | null
+        include: { service: { select: { minPrice: true } } },
+      })
 
       if (!existing) return { kind: 'NOT_FOUND' as const }
 
@@ -222,7 +180,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
         return { kind: 'ERROR' as const, status: 400, msg: 'Enable at least Salon or Mobile.' }
       }
 
-      // ✅ NEW: if toggling a mode ON, ensure the location row exists
+      // if toggling a mode ON, ensure a location row exists
       const ensureSalon = body.offersInSalon === true && existing.offersInSalon === false
       const ensureMobile = body.offersMobile === true && existing.offersMobile === false
 
@@ -340,18 +298,19 @@ export async function PATCH(request: Request, ctx: Ctx) {
         return { kind: 'OK' as const, offering: existing }
       }
 
-      const saved = (await tx.professionalServiceOffering.update({
+      const saved = await tx.professionalServiceOffering.update({
         where: { id: existing.id },
         data,
         include: { service: { include: { category: true } } },
-      })) as OfferingWithService
+      })
 
       return { kind: 'OK' as const, offering: saved }
     })
 
-    if (updated.kind === 'NOT_FOUND') return jsonError('Not found.', 404)
-    if (updated.kind === 'ERROR') return jsonError(updated.msg, updated.status, (updated as any).extra)
-    return NextResponse.json({ ok: true, offering: toDto(updated.offering) }, { status: 200 })
+    if (result.kind === 'NOT_FOUND') return jsonError('Not found.', 404)
+    if (result.kind === 'ERROR') return jsonError(result.msg, result.status, (result as any).extra)
+
+    return NextResponse.json({ ok: true, offering: result.offering }, { status: 200 })
   } catch (error) {
     console.error('PATCH /api/pro/offerings/[id] error', error)
     return jsonError('Internal server error.', 500)
@@ -365,7 +324,7 @@ export async function DELETE(_request: Request, ctx: Ctx) {
     if (!profId) return jsonError('Unauthorized', 401)
 
     const { id } = await ctx.params
-    const offeringId = String(id || '').trim()
+    const offeringId = trimId(id)
     if (!offeringId) return jsonError('Missing offering id.', 400)
 
     const existing = await prisma.professionalServiceOffering.findFirst({

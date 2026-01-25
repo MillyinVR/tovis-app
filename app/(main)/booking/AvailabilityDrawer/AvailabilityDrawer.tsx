@@ -19,12 +19,12 @@ import { STICKY_CTA_H } from './constants'
 import DrawerShell from './components/DrawerShell'
 import ProCard from './components/ProCard'
 import AppointmentTypeToggle from './components/AppointmentTypeToggle'
+import ServiceContextCard from './components/ServiceContextCard'
 import SlotChips from './components/SlotChips'
 import WaitlistPanel from './components/WaitlistPanel'
 import OtherPros from './components/OtherPros'
 import StickyCTA from './components/StickyCTA'
 import DebugPanel from './components/DebugPanel'
-import ServiceContextCard from './components/ServiceContextCard'
 
 import { safeJson } from './utils/safeJson'
 import { redirectToLogin } from './utils/authRedirect'
@@ -45,14 +45,14 @@ function periodOfHour(h: number): Period {
 
 function getViewerTimeZoneClient(): string {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles'
   } catch {
-    return 'UTC'
+    return 'America/Los_Angeles'
   }
 }
 
 function fmtInTz(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
   return new Intl.DateTimeFormat(undefined, {
@@ -66,7 +66,7 @@ function fmtInTz(isoUtc: string, timeZone: string) {
 }
 
 function fmtSelectedLine(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
   return new Intl.DateTimeFormat(undefined, {
@@ -81,7 +81,7 @@ function fmtSelectedLine(isoUtc: string, timeZone: string) {
 }
 
 function hourInTz(isoUtc: string, timeZone: string): number | null {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return null
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -126,7 +126,7 @@ export default function AvailabilityDrawer({
   const router = useRouter()
   const debug = useDebugFlag()
 
-  const [viewerTz, setViewerTz] = useState<string>('UTC')
+  const [viewerTz, setViewerTz] = useState<string>('America/Los_Angeles')
   useEffect(() => {
     setViewerTz(getViewerTimeZoneClient())
   }, [])
@@ -139,6 +139,7 @@ export default function AvailabilityDrawer({
   const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
 
   // ✅ Summary refetches whenever locationType changes
+  // IMPORTANT: we need setData so we can clear stale summary when user toggles.
   const { loading, error, data, setError, setData } = useAvailability(open, context, locationType)
   const summary = isSummary(data) ? data : null
 
@@ -168,14 +169,13 @@ export default function AvailabilityDrawer({
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } = useHoldTimer(holdUntil)
 
   /**
-   * ✅ Appointment timezone MUST be the LOCATION timezone from the server summary.
-   * If server ever fails to provide, we fall back to viewer tz, but your APIs below will now fail-fast,
-   * so this should be rare.
+   * ✅ Appointment timezone MUST be the LOCATION timezone from server summary.
+   * If missing (rare), fall back to pro tz, viewer tz, then LA.
    */
   const appointmentTz = useMemo(() => {
-    const tz = summary?.timeZone || viewerTz || 'UTC'
-    return sanitizeTimeZone(tz, 'UTC')
-  }, [summary?.timeZone, viewerTz])
+    const tz = summary?.timeZone || primary?.timeZone || viewerTz || 'America/Los_Angeles'
+    return sanitizeTimeZone(tz, 'America/Los_Angeles')
+  }, [summary?.timeZone, primary?.timeZone, viewerTz])
 
   const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
 
@@ -189,10 +189,6 @@ export default function AvailabilityDrawer({
     if (!effectiveServiceId) return 'No service linked yet.'
     return 'Matched to this service'
   }, [effectiveServiceId])
-
-  const serviceName = summary?.serviceName ?? null
-  const serviceCategoryName = summary?.serviceCategoryName ?? null
-
 
   const bookingSource = resolveBookingSource(context)
 
@@ -220,11 +216,12 @@ export default function AvailabilityDrawer({
 
   /**
    * ✅ Sync locationType with server ONLY after the fetch completes.
+   * Fixes "snapback" while refetching.
    */
   useEffect(() => {
     if (!open) return
     if (!summary) return
-    if (loading) return
+    if (loading) return // ✅ critical guard
     if (holding) return
     if (selected?.holdId) return
 
@@ -519,26 +516,15 @@ export default function AvailabilityDrawer({
           </div>
         </>
       }
-      footer={
-        <StickyCTA
-          canContinue={Boolean(selected?.holdId && holdUntil)}
-          loading={holding}
-          onContinue={onContinue}
-          selectedLine={selectedLine}
-        />
-      }
+      footer={<StickyCTA canContinue={Boolean(selected?.holdId && holdUntil)} loading={holding} onContinue={onContinue} selectedLine={selectedLine} />}
     >
       <div className="looksNoScrollbar overflow-y-auto px-4 pb-4" style={{ paddingBottom: STICKY_CTA_H + 14 }}>
         {loading ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-            Loading availability…
-          </div>
+          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">Loading availability…</div>
         ) : error ? (
           <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">{error}</div>
         ) : !canRenderSummary ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-            No availability found.
-          </div>
+          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">No availability found.</div>
         ) : (
           (() => {
             const primaryPro: ProCardType = primary as ProCardType
@@ -556,8 +542,8 @@ export default function AvailabilityDrawer({
                 />
 
                 <ServiceContextCard
-                  serviceName={summary?.serviceName ?? null}
-                  categoryName={summary?.serviceCategoryName ?? null}
+                  serviceName={(summary as any)?.serviceName ?? null}
+                  categoryName={(summary as any)?.serviceCategoryName ?? null}
                   offering={offering}
                   locationType={locationType}
                 />
@@ -566,9 +552,10 @@ export default function AvailabilityDrawer({
                   value={locationType}
                   disabled={holding}
                   allowed={allowed}
+                  offering={offering}
                   onChange={(t) => {
                     void hardResetUi({ deleteHold: true })
-                    setData(null) // clear stale summary immediately
+                    setData(null) // ✅ clear stale summary immediately
                     setLocationType(t)
                     setSelectedDayYMD(null)
                     setPrimarySlots([])
@@ -600,19 +587,12 @@ export default function AvailabilityDrawer({
                   <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
                     You’re booking <span className="font-black text-textPrimary">{appointmentTz}</span> time.
                     <span className="ml-2">
-                      Your local time:{' '}
-                      <span className="font-black text-textPrimary">{fmtInTz(selected.slotISO, viewerTz)}</span>
+                      Your local time: <span className="font-black text-textPrimary">{fmtInTz(selected.slotISO, viewerTz)}</span>
                     </span>
                   </div>
                 ) : null}
 
-                <WaitlistPanel
-                  canWaitlist={canWaitlist}
-                  appointmentTz={appointmentTz}
-                  context={context}
-                  effectiveServiceId={effectiveServiceId}
-                  noPrimarySlots={noPrimarySlots}
-                />
+                <WaitlistPanel canWaitlist={canWaitlist} appointmentTz={appointmentTz} context={context} effectiveServiceId={effectiveServiceId} noPrimarySlots={noPrimarySlots} />
 
                 <OtherPros
                   others={(others || []).map((p) => ({ ...p, slots: otherSlots[p.id] || [] }))}

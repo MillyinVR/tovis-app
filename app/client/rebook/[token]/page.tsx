@@ -3,6 +3,8 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatAppointmentWhen, formatRangeInTimeZone } from '@/lib/FormatInTimeZone'
+import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,26 +24,12 @@ function toDate(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-function formatWhenInTimeZone(d: Date, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(d)
+function formatWhen(d: Date, timeZone: string) {
+  return formatAppointmentWhen(d, timeZone)
 }
 
-function formatDateRangeInTimeZone(start: Date, end: Date, timeZone: string) {
-  const fmt = new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-  return `${fmt.format(start)} – ${fmt.format(end)}`
+function formatDateRange(start: Date, end: Date, timeZone: string) {
+  return formatRangeInTimeZone(start, end, timeZone)
 }
 
 type RebookInfo =
@@ -66,7 +54,7 @@ function computeRebookInfo(
     if (!d) return { mode: 'NONE', label: null }
     return {
       mode: 'BOOKED_NEXT_APPOINTMENT',
-      label: `Next appointment booked: ${formatWhenInTimeZone(d, timeZone)}`,
+      label: `Next appointment booked: ${formatWhen(d, timeZone)}`,
       bookedAt: d,
     }
   }
@@ -77,7 +65,7 @@ function computeRebookInfo(
     if (s && e) {
       return {
         mode: 'RECOMMENDED_WINDOW',
-        label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}`,
+        label: `Recommended rebook window: ${formatDateRange(s, e, timeZone)}`,
         windowStart: s,
         windowEnd: e,
       }
@@ -90,7 +78,7 @@ function computeRebookInfo(
   if (legacy) {
     return {
       mode: 'RECOMMENDED_DATE',
-      label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}`,
+      label: `Recommended next visit: ${formatWhen(legacy, timeZone)}`,
       recommendedAt: legacy,
     }
   }
@@ -126,18 +114,78 @@ export default async function ClientRebookFromAftercarePage(props: {
       rebookWindowEnd: true,
       booking: {
         select: {
+          // Required for auth + offering fallback
           id: true,
           clientId: true,
           professionalId: true,
           serviceId: true,
           offeringId: true,
-          service: { select: { name: true } },
+
+          // Minimum set to build ClientBookingDTO (Option 1e)
+          status: true,
+          source: true,
+          sessionStep: true,
+          scheduledFor: true,
+          finishedAt: true,
+
+          subtotalSnapshot: true,
+          totalDurationMinutes: true,
+          bufferMinutes: true,
+
+          locationType: true,
+          locationId: true,
+          locationTimeZone: true,
+          locationAddressSnapshot: true,
+
+          service: { select: { id: true, name: true } },
+
           professional: {
             select: {
               id: true,
               businessName: true,
+              location: true,
               timeZone: true,
               user: { select: { email: true } },
+            },
+          },
+
+          location: {
+            select: {
+              id: true,
+              name: true,
+              formattedAddress: true,
+              city: true,
+              state: true,
+              timeZone: true,
+            },
+          },
+
+          serviceItems: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            take: 80,
+            select: {
+              id: true,
+              itemType: true,
+              parentItemId: true,
+              sortOrder: true,
+              durationMinutesSnapshot: true,
+              priceSnapshot: true,
+              serviceId: true,
+              service: { select: { name: true } },
+            },
+          },
+
+          consultationNotes: true,
+          consultationPrice: true,
+          consultationConfirmedAt: true,
+          consultationApproval: {
+            select: {
+              status: true,
+              proposedServicesJson: true,
+              proposedTotal: true,
+              notes: true,
+              approvedAt: true,
+              rejectedAt: true,
             },
           },
         },
@@ -148,14 +196,55 @@ export default async function ClientRebookFromAftercarePage(props: {
   if (!aftercare?.booking) notFound()
   if (aftercare.booking.clientId !== user.clientProfile.id) notFound()
 
-  const booking = aftercare.booking
+  const rawBooking = aftercare.booking
 
-  let offeringId = pickString(booking.offeringId)
+  // Build booking DTO (single truth)
+  let dto: ClientBookingDTO
+  try {
+    dto = buildClientBookingDTO({
+      booking: rawBooking as any,
+      unreadAftercare: false,
+      hasPendingConsultationApproval: false,
+    })
+  } catch {
+    // Hard fallback (should be rare)
+    dto = {
+      id: String(rawBooking.id),
+      status: String(rawBooking.status ?? ''),
+      source: String(rawBooking.source ?? ''),
+      sessionStep: String(rawBooking.sessionStep ?? ''),
+      scheduledFor: (rawBooking.scheduledFor as any)?.toISOString?.() ?? new Date().toISOString(),
+      totalDurationMinutes: Number(rawBooking.totalDurationMinutes ?? 0),
+      bufferMinutes: Number(rawBooking.bufferMinutes ?? 0),
+      subtotalSnapshot: rawBooking.subtotalSnapshot?.toString?.() ?? null,
+      locationType: (rawBooking.locationType as any) ?? null,
+      locationId: rawBooking.locationId ? String(rawBooking.locationId) : null,
+      timeZone: sanitizeTimeZone(rawBooking.locationTimeZone ?? rawBooking.professional?.timeZone, 'UTC'),
+      locationLabel: null,
+      professional: rawBooking.professional
+        ? {
+            id: String(rawBooking.professional.id),
+            businessName: rawBooking.professional.businessName ?? null,
+            location: rawBooking.professional.location ?? null,
+            timeZone: rawBooking.professional.timeZone ?? null,
+          }
+        : null,
+      bookedLocation: null,
+      display: { title: 'Service', baseName: 'Service', addOnNames: [], addOnCount: 0 },
+      items: [],
+      hasUnreadAftercare: false,
+      hasPendingConsultationApproval: false,
+      consultation: null,
+    }
+  }
+
+  // offeringId fallback (unchanged)
+  let offeringId = pickString(rawBooking.offeringId)
   if (!offeringId) {
     const fallbackOffering = await prisma.professionalServiceOffering.findFirst({
       where: {
-        professionalId: booking.professionalId,
-        serviceId: booking.serviceId,
+        professionalId: rawBooking.professionalId,
+        serviceId: rawBooking.serviceId,
         isActive: true,
       },
       select: { id: true },
@@ -164,11 +253,14 @@ export default async function ClientRebookFromAftercarePage(props: {
   }
   if (!offeringId) notFound()
 
-  // Appointment timezone (currently using professional tz as the display tz)
-  const appointmentTz = sanitizeTimeZone(booking.professional?.timeZone, 'America/Los_Angeles')
+  const appointmentTz = sanitizeTimeZone(dto.timeZone, 'UTC')
 
-  const proLabel = booking.professional?.businessName || booking.professional?.user?.email || 'your professional'
-  const serviceName = booking.service?.name || 'Service'
+  const proLabel =
+    dto.professional?.businessName ||
+    rawBooking.professional?.user?.email ||
+    'your professional'
+
+  const serviceTitle = dto.display?.title || 'Service'
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
 
   const rebookInfo = computeRebookInfo(
@@ -183,12 +275,11 @@ export default async function ClientRebookFromAftercarePage(props: {
 
   // If mode = BOOKED_NEXT_APPOINTMENT, try to find the actual “next booking”
   let nextBooking: { id: string; scheduledFor: Date; status: string } | null = null
-
   if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
     try {
       nextBooking = await prisma.booking.findFirst({
         where: {
-          rebookOfBookingId: booking.id,
+          rebookOfBookingId: rawBooking.id,
           source: 'AFTERCARE',
           status: { not: 'CANCELLED' },
         } as any,
@@ -200,11 +291,11 @@ export default async function ClientRebookFromAftercarePage(props: {
     }
   }
 
-  // Build booking CTA URL into your offering page
+  // Build booking CTA URL into offering page
   const baseParams = new URLSearchParams({
     source: 'AFTERCARE',
     token: publicToken,
-    rebookOfBookingId: booking.id,
+    rebookOfBookingId: rawBooking.id,
   })
 
   const bookParams = new URLSearchParams(baseParams)
@@ -223,13 +314,14 @@ export default async function ClientRebookFromAftercarePage(props: {
   }
 
   const bookHref = `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
+  const proId = dto.professional?.id || rawBooking.professionalId
 
-  const proId = booking.professional?.id || booking.professionalId
+  const locationLabel = dto.locationLabel || null
 
   return (
     <main style={{ maxWidth: 720, margin: '80px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
       <a
-        href={`/client/bookings/${encodeURIComponent(booking.id)}`}
+        href={`/client/bookings/${encodeURIComponent(dto.id)}`}
         className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
         style={{
           textDecoration: 'none',
@@ -245,7 +337,7 @@ export default async function ClientRebookFromAftercarePage(props: {
       </a>
 
       <h1 className="text-textPrimary" style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>
-        Aftercare for {serviceName}
+        Aftercare for {serviceTitle}
       </h1>
 
       <div className="text-textSecondary" style={{ fontSize: 13, marginTop: 6 }}>
@@ -257,6 +349,11 @@ export default async function ClientRebookFromAftercarePage(props: {
         ) : (
           proLabel
         )}
+        {locationLabel ? <span> · {locationLabel}</span> : null}
+      </div>
+
+      <div className="text-textSecondary" style={{ fontSize: 12, marginTop: 6, opacity: 0.85 }}>
+        Times shown in <span style={{ fontWeight: 900 }}>{appointmentTz}</span>
       </div>
 
       <section className="border border-surfaceGlass/10 bg-bgSecondary" style={{ borderRadius: 12, padding: 12, marginTop: 16 }}>

@@ -5,17 +5,10 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 import { COPY } from '@/lib/copy'
+import { formatInTimeZone } from '@/lib/FormatInTimeZone'
+import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 
 export const dynamic = 'force-dynamic'
-
-function formatDate(d: Date) {
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
 
 function toDate(v: unknown): Date | null {
   if (!v) return null
@@ -33,6 +26,15 @@ function safeId(v: unknown): string | null {
   return s ? s : null
 }
 
+function formatDateInTz(d: Date, timeZone: string) {
+  return formatInTimeZone(d, timeZone, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 type InboxRow = {
   id: string
   title: string | null
@@ -41,12 +43,7 @@ type InboxRow = {
   createdAt: Date
   bookingId: string | null
   aftercareId: string | null
-  booking: {
-    id: string
-    scheduledFor: Date
-    service: { name: string | null } | null
-    professional: { id: string; businessName: string | null } | null
-  } | null
+  booking: any | null
   aftercare: {
     rebookMode: string | null
     rebookedFor: Date | null
@@ -94,10 +91,66 @@ export default async function ClientAftercareInboxPage() {
       aftercareId: true,
       booking: {
         select: {
+          // minimum select to build ClientBookingDTO truthfully
           id: true,
+          status: true,
+          source: true,
+          sessionStep: true,
           scheduledFor: true,
-          service: { select: { name: true } },
-          professional: { select: { id: true, businessName: true } },
+          finishedAt: true,
+
+          subtotalSnapshot: true,
+          totalDurationMinutes: true,
+          bufferMinutes: true,
+
+          locationType: true,
+          locationId: true,
+          locationTimeZone: true,
+          locationAddressSnapshot: true,
+
+          service: { select: { id: true, name: true } },
+
+          professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
+
+          location: {
+            select: {
+              id: true,
+              name: true,
+              formattedAddress: true,
+              city: true,
+              state: true,
+              timeZone: true,
+            },
+          },
+
+          serviceItems: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            take: 80,
+            select: {
+              id: true,
+              itemType: true,
+              parentItemId: true,
+              sortOrder: true,
+              durationMinutesSnapshot: true,
+              priceSnapshot: true,
+              serviceId: true,
+              service: { select: { name: true } },
+            },
+          },
+
+          consultationNotes: true,
+          consultationPrice: true,
+          consultationConfirmedAt: true,
+          consultationApproval: {
+            select: {
+              status: true,
+              proposedServicesJson: true,
+              proposedTotal: true,
+              notes: true,
+              approvedAt: true,
+              rejectedAt: true,
+            },
+          },
         },
       },
       aftercare: {
@@ -131,16 +184,33 @@ export default async function ClientAftercareInboxPage() {
       ) : (
         <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
           {items.map((n) => {
-            const b = n.booking
+            const raw = n.booking
 
-            const bookingId = safeId(b?.id ?? n.bookingId)
-            const serviceName = safeText(b?.service?.name ?? n.title, COPY.aftercareInbox.serviceFallback)
-            const date = toDate(b?.scheduledFor)
-
-            const proId = b?.professional?.id ?? null
-            const proName = safeText(b?.professional?.businessName, COPY.aftercareInbox.proFallback)
-
+            const bookingId = safeId(raw?.id ?? n.bookingId)
             const isUnread = !n.readAt
+
+            // Build DTO when booking is present; fall back gracefully when missing
+            let dto: ClientBookingDTO | null = null
+            try {
+              if (raw) {
+                dto = buildClientBookingDTO({
+                  booking: raw as any,
+                  unreadAftercare: false,
+                  hasPendingConsultationApproval: false,
+                })
+              }
+            } catch {
+              dto = null
+            }
+
+            const title = dto?.display?.title || safeText(n.title, COPY.aftercareInbox.serviceFallback)
+
+            const proId = dto?.professional?.id ?? raw?.professional?.id ?? null
+            const proName = safeText(dto?.professional?.businessName ?? raw?.professional?.businessName, COPY.aftercareInbox.proFallback)
+
+            const tz = dto?.timeZone || 'UTC'
+            const date = toDate(dto?.scheduledFor || raw?.scheduledFor)
+            const dateLabel = date ? formatDateInTz(date, tz) : ''
 
             const mode = String(n.aftercare?.rebookMode || '').trim().toUpperCase()
             const hint =
@@ -168,12 +238,12 @@ export default async function ClientAftercareInboxPage() {
                 <div style={{ position: 'relative', zIndex: 1, display: 'grid', gap: 6 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
                     <div style={{ fontWeight: 900 }}>
-                      {serviceName}
+                      {title}
                       {isUnread ? <SmallPill label={COPY.aftercareInbox.newPill} /> : null}
                     </div>
 
                     <div className="text-textSecondary" style={{ fontSize: 12 }}>
-                      {date ? formatDate(date) : ''}
+                      {dateLabel ? `${dateLabel} · ${tz}` : ''}
                     </div>
                   </div>
 
@@ -196,7 +266,7 @@ export default async function ClientAftercareInboxPage() {
                   {href ? (
                     <Link
                       href={href}
-                      aria-label={`Open aftercare: ${serviceName}`}
+                      aria-label={`Open aftercare: ${title}`}
                       className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
                       style={{ justifySelf: 'start', textDecoration: 'none', marginTop: 6 }}
                     >

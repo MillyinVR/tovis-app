@@ -81,6 +81,45 @@ function imageLabel(o: Offering) {
   return 'None'
 }
 
+// ---------- Add-ons types (API payloads) ----------
+type EligibleAddOn = {
+  id: string
+  name: string
+  group: string | null
+  minPrice: string
+  defaultDurationMinutes: number
+}
+
+type AttachedAddOn = {
+  id: string
+  addOnServiceId: string
+  title: string
+  group: string | null
+  isActive: boolean
+  isRecommended: boolean
+  sortOrder: number
+  locationType: 'SALON' | 'MOBILE' | null
+  priceOverride: string | null
+  durationOverrideMinutes: number | null
+  defaults?: {
+    minPrice: string
+    defaultDurationMinutes: number
+  }
+}
+
+function groupKey(v: string | null) {
+  const s = (v || '').trim()
+  return s || 'Add-ons'
+}
+
+function formatMinutes(min: number) {
+  if (!Number.isFinite(min) || min <= 0) return null
+  if (min < 60) return `${min}m`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m ? `${h}h ${m}m` : `${h}h`
+}
+
 export default function OfferingManager({
   initialOfferings,
   enforceCanonicalServiceNames = true,
@@ -228,6 +267,8 @@ export default function OfferingManager({
           onRemove={() => removeOffering(o.id)}
           onUpload={(file) => uploadServiceImage(o, file)}
           setError={(msg) => setError(o.id, msg)}
+          setSuccess={(msg) => setSuccess(o.id, msg)}
+          refresh={() => router.refresh()}
         />
       ))}
     </div>
@@ -257,6 +298,8 @@ function OfferingCard(props: {
   onRemove: () => void
   onUpload: (file: File) => void
   setError: (msg: string) => void
+  setSuccess: (msg: string) => void
+  refresh: () => void
 }) {
   const {
     offering: o,
@@ -272,6 +315,8 @@ function OfferingCard(props: {
     onRemove,
     onUpload,
     setError,
+    setSuccess,
+    refresh,
   } = props
 
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -287,6 +332,9 @@ function OfferingCard(props: {
   const [mobilePrice, setMobilePrice] = useState(o.mobilePriceStartingAt ?? '')
   const [mobileDuration, setMobileDuration] = useState(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
 
+  // ---------- add-ons editor state ----------
+  const [addonsOpen, setAddonsOpen] = useState(false)
+
   useEffect(() => {
     if (!isOpen) return
     setDescription(o.description ?? '')
@@ -296,6 +344,7 @@ function OfferingCard(props: {
     setSalonDuration(o.salonDurationMinutes ? String(o.salonDurationMinutes) : '')
     setMobilePrice(o.mobilePriceStartingAt ?? '')
     setMobileDuration(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
+    setAddonsOpen(false)
   }, [isOpen, o])
 
   function summaryLine() {
@@ -399,19 +448,18 @@ function OfferingCard(props: {
 
           <div className="min-w-0 flex-1">
             <div className="truncate text-[13px] font-black text-textPrimary">{displayName}</div>
-            {o.categoryName ? <div className="mt-0.5 text-[12px] font-black text-textSecondary">{o.categoryName}</div> : null}
+            {o.categoryName ? (
+              <div className="mt-0.5 text-[12px] font-black text-textSecondary">{o.categoryName}</div>
+            ) : null}
             <div className="mt-2 text-[12px] text-textSecondary">{summaryLine()}</div>
 
             <div className="mt-1 text-[12px] text-textSecondary">
-              Min price:{' '}
-              <span className="font-black text-textPrimary">${normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
-
+              Min price: <span className="font-black text-textPrimary">${normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
               {o.serviceIsAddOnEligible ? (
                 <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
                   Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}
                 </span>
               ) : null}
-
               <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
                 Image: {imageLabel(o)}
               </span>
@@ -533,10 +581,40 @@ function OfferingCard(props: {
               />
               Offer Mobile
             </label>
+
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => setAddonsOpen((v) => !v)}
+              className={[
+                'rounded-full border px-3 py-2 text-[12px] font-black transition',
+                disabled
+                  ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                  : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+              ].join(' ')}
+            >
+              {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
+            </button>
           </div>
 
+          {/* ✅ ADD-ONS EDITOR GOES RIGHT HERE */}
+          {addonsOpen ? (
+            <AddOnsManager
+              offeringId={o.id}
+              disabled={disabled}
+              onError={(msg) => setError(msg)}
+              onSuccess={(msg) => setSuccess(msg)}
+              onRefresh={() => refresh()}
+            />
+          ) : null}
+
           <div className="grid gap-3 md:grid-cols-2">
-            <div className={['rounded-card border border-white/10 bg-bgPrimary p-3', offersInSalon ? '' : 'opacity-70'].join(' ')}>
+            <div
+              className={[
+                'rounded-card border border-white/10 bg-bgPrimary p-3',
+                offersInSalon ? '' : 'opacity-70',
+              ].join(' ')}
+            >
               <div className="mb-2 text-[12px] font-black text-textPrimary">Salon</div>
               <div className="grid gap-2">
                 <label className="grid gap-1">
@@ -566,7 +644,12 @@ function OfferingCard(props: {
               </div>
             </div>
 
-            <div className={['rounded-card border border-white/10 bg-bgPrimary p-3', offersMobile ? '' : 'opacity-70'].join(' ')}>
+            <div
+              className={[
+                'rounded-card border border-white/10 bg-bgPrimary p-3',
+                offersMobile ? '' : 'opacity-70',
+              ].join(' ')}
+            >
               <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile</div>
               <div className="grid gap-2">
                 <label className="grid gap-1">
@@ -616,6 +699,214 @@ function OfferingCard(props: {
           </div>
         </form>
       ) : null}
+    </div>
+  )
+}
+
+function AddOnsManager(props: {
+  offeringId: string
+  disabled: boolean
+  onError: (msg: string) => void
+  onSuccess: (msg: string) => void
+  onRefresh: () => void
+}) {
+  const { offeringId, disabled, onError, onSuccess, onRefresh } = props
+
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [eligible, setEligible] = useState<EligibleAddOn[]>([])
+  const [attached, setAttached] = useState<AttachedAddOn[]>([])
+
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
+  const [recommended, setRecommended] = useState<Record<string, boolean>>({})
+
+  async function load() {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, {
+        cache: 'no-store',
+      })
+      const data = await safeJson(res)
+      if (!res.ok || data?.ok !== true) {
+        onError(data?.error || `Failed to load add-ons (${res.status}).`)
+        return
+      }
+
+      const el: EligibleAddOn[] = Array.isArray(data.eligible) ? data.eligible : []
+      const at: AttachedAddOn[] = Array.isArray(data.attached) ? data.attached : []
+
+      setEligible(el)
+      setAttached(at)
+
+      const nextSel: Record<string, boolean> = {}
+      const nextRec: Record<string, boolean> = {}
+
+      for (const a of at) {
+        nextSel[a.addOnServiceId] = true
+        if (a.isRecommended) nextRec[a.addOnServiceId] = true
+      }
+
+      setSelected(nextSel)
+      setRecommended(nextRec)
+    } catch {
+      onError('Network error loading add-ons.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offeringId])
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, EligibleAddOn[]>()
+    for (const s of eligible) {
+      const k = groupKey(s.group)
+      if (!m.has(k)) m.set(k, [])
+      m.get(k)!.push(s)
+    }
+    return Array.from(m.entries()).map(([group, items]) => ({
+      group,
+      items: items.sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+  }, [eligible])
+
+  async function save() {
+    if (saving || disabled) return
+    setSaving(true)
+
+    try {
+      // keep sort order if exists
+      const existingSort = new Map(attached.map((a) => [a.addOnServiceId, a.sortOrder]))
+
+      const ids = Object.keys(selected).filter((id) => selected[id])
+
+      const items = ids.map((addOnServiceId, idx) => ({
+        addOnServiceId,
+        isActive: true,
+        isRecommended: Boolean(recommended[addOnServiceId]),
+        sortOrder: existingSort.get(addOnServiceId) ?? idx * 10,
+        locationType: null as 'SALON' | 'MOBILE' | null,
+        priceOverride: null as string | null,
+        durationOverrideMinutes: null as number | null,
+      }))
+
+      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      })
+
+      const data = await safeJson(res)
+      if (!res.ok || data?.ok !== true) {
+        onError(data?.error || `Failed to save add-ons (${res.status}).`)
+        return
+      }
+
+      onSuccess('Add-ons saved.')
+      await load()
+      onRefresh()
+    } catch {
+      onError('Network error saving add-ons.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[12px] font-black text-textPrimary">Add-ons for this service</div>
+          <div className="mt-1 text-[11px] text-textSecondary">
+            Choose which add-ons clients can pick during booking.
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={save}
+          disabled={disabled || saving || loading}
+          className={[
+            'rounded-full border px-3 py-2 text-[12px] font-black transition',
+            disabled || saving || loading
+              ? 'cursor-not-allowed border-white/10 bg-bgSecondary text-textSecondary opacity-70'
+              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+          ].join(' ')}
+        >
+          {saving ? 'Saving…' : 'Save add-ons'}
+        </button>
+      </div>
+
+      {loading ? <div className="mt-2 text-[12px] text-textSecondary">Loading…</div> : null}
+
+      {!loading && eligible.length === 0 ? (
+        <div className="mt-2 text-[12px] text-textSecondary">
+          No add-on services exist yet. Mark services as “Add-on eligible” in Admin.
+        </div>
+      ) : null}
+
+      <div className="mt-3 grid gap-3">
+        {grouped.map(({ group, items }) => (
+          <div key={group} className="rounded-card border border-white/10 bg-bgSecondary p-3">
+            <div className="text-[11px] font-black text-textSecondary">{group}</div>
+
+            <div className="mt-2 grid gap-2">
+              {items.map((s) => {
+                const isOn = Boolean(selected[s.id])
+                const mins = formatMinutes(s.defaultDurationMinutes)
+
+                return (
+                  <div
+                    key={s.id}
+                    className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary/35 px-3 py-2"
+                  >
+                    <label className="flex min-w-0 flex-1 items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isOn}
+                        disabled={disabled}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          setSelected((prev) => ({ ...prev, [s.id]: checked }))
+                          if (!checked) setRecommended((prev) => ({ ...prev, [s.id]: false }))
+                        }}
+                        className="mt-1 h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                      />
+
+                      <div className="min-w-0">
+                        <div className="truncate text-[12px] font-black text-textPrimary">{s.name}</div>
+                        <div className="mt-1 text-[11px] text-textSecondary">
+                          {mins ? `+${mins} · ` : ''}
+                          From ${normalizeMoney2(s.minPrice) ?? s.minPrice}
+                        </div>
+                      </div>
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={disabled || !isOn}
+                      onClick={() => setRecommended((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
+                      className={[
+                        'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black',
+                        !isOn
+                          ? 'border-white/10 bg-bgSecondary text-textSecondary opacity-60'
+                          : recommended[s.id]
+                            ? 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary'
+                            : 'border-white/10 bg-bgSecondary text-textSecondary hover:border-white/20',
+                      ].join(' ')}
+                    >
+                      {recommended[s.id] ? 'Recommended' : 'Recommend'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

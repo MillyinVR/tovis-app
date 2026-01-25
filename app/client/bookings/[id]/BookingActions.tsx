@@ -3,55 +3,37 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
-
-type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED' | string
+import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
+import { formatAppointmentWhen } from '@/lib/FormatInTimeZone'
 
 type Props = {
   bookingId: string
-  status: BookingStatus | null
+  status: any
   scheduledFor: string // ISO UTC
   durationMinutesSnapshot?: number | null
-}
-
-function toDate(v: unknown): Date | null {
-  if (typeof v !== 'string' || !v.trim()) return null
-  const d = new Date(v)
-  return Number.isNaN(d.getTime()) ? null : d
+  appointmentTz?: string | null // ✅ booking.timeZone (DTO) or server-derived
 }
 
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-function getBrowserTimeZone(): string {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (tz && isValidIanaTimeZone(tz)) return tz
-  } catch {
-    // ignore
-  }
-  return 'UTC'
+function toDateIsoUtc(v: unknown): Date | null {
+  if (typeof v !== 'string' || !v.trim()) return null
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
-function formatWhenInTimeZone(d: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(d)
+function formatWhen(d: Date, timeZone: string) {
+  return formatAppointmentWhen(d, timeZone)
 }
 
 /**
- * ISO (UTC) -> datetime-local string shown in the given timeZone
+ * ISO (UTC) -> datetime-local string shown in the given timeZone,
  * without relying on browser implicit conversions.
  */
 function toDatetimeLocalValueInTimeZone(isoUtc: string, timeZone: string) {
-  const d = toDate(isoUtc)
+  const d = toDateIsoUtc(isoUtc)
   if (!d) return ''
   const tz = sanitizeTimeZone(timeZone, 'UTC')
   const p = getZonedParts(d, tz)
@@ -61,7 +43,6 @@ function toDatetimeLocalValueInTimeZone(isoUtc: string, timeZone: string) {
 
 /**
  * datetime-local value -> UTC Date, interpreting the wall clock in timeZone.
- * (This is the important part.)
  */
 function fromDatetimeLocalValueInTimeZone(v: string, timeZone: string): Date | null {
   if (!v || typeof v !== 'string') return null
@@ -90,17 +71,23 @@ function errorFromResponse(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
-  if (res.status === 409) return 'That time is no longer available.'
+  if (res.status === 409) return data?.error || 'That time is no longer available.'
   return `Request failed (${res.status}).`
 }
 
-function Pill({ on }: { on: boolean }) {
+function pillClass(on: boolean) {
   return on
     ? 'bg-accentPrimary text-bgPrimary border border-white/10'
     : 'bg-bgPrimary text-textSecondary border border-white/10'
 }
 
-export default function BookingActions({ bookingId, status, scheduledFor, durationMinutesSnapshot }: Props) {
+export default function BookingActions({
+  bookingId,
+  status,
+  scheduledFor,
+  durationMinutesSnapshot,
+  appointmentTz,
+}: Props) {
   const router = useRouter()
 
   const statusUpper = upper(status)
@@ -112,21 +99,20 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
   const canCancel = !isCancelled && !isCompleted
   const canReschedule = (isPending || isAccepted) && !isCancelled && !isCompleted
 
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const tz = useMemo(() => sanitizeTimeZone(appointmentTz || 'UTC', 'UTC'), [appointmentTz])
 
-  const [mode, setMode] = useState<'none' | 'reschedule'>('none')
-
-  // Client UX: use browser timezone as the “meaning” of the datetime-local input.
-  const tz = useMemo(() => getBrowserTimeZone(), [])
-  const scheduledDate = useMemo(() => toDate(scheduledFor), [scheduledFor])
+  const scheduledDate = useMemo(() => toDateIsoUtc(scheduledFor), [scheduledFor])
 
   const whenLabel = useMemo(() => {
     const d = scheduledDate
     if (!d) return 'Unknown time'
-    return formatWhenInTimeZone(d, tz)
+    return formatWhen(d, tz)
   }, [scheduledDate, tz])
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [mode, setMode] = useState<'none' | 'reschedule'>('none')
 
   const [localValue, setLocalValue] = useState<string>(() => toDatetimeLocalValueInTimeZone(scheduledFor, tz))
 
@@ -142,7 +128,7 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
     setSuccess(null)
   }
 
-  async function doPatch(body: any) {
+  async function post(url: string, body?: any) {
     resetAlerts()
     setBusy(true)
 
@@ -151,10 +137,10 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
     abortRef.current = controller
 
     try {
-      const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       })
 
@@ -176,7 +162,7 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
     if (!canCancel || busy) return
     resetAlerts()
     if (!window.confirm('Cancel this booking?')) return
-    await doPatch({ action: 'cancel' })
+    await post(`/api/bookings/${encodeURIComponent(bookingId)}/cancel`)
   }
 
   async function rescheduleBooking() {
@@ -188,15 +174,17 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
     if (nextUtc.getTime() < Date.now()) return setError('Pick a future time.')
 
     if (scheduledDate) {
-      const sameMinute =
-        Math.floor(nextUtc.getTime() / 60000) === Math.floor(scheduledDate.getTime() / 60000)
+      const sameMinute = Math.floor(nextUtc.getTime() / 60000) === Math.floor(scheduledDate.getTime() / 60000)
       if (sameMinute) return setError('Choose a different time than the current one.')
     }
 
-    const ok = window.confirm(`Reschedule to:\n\n${formatWhenInTimeZone(nextUtc, tz)}\n\nProceed?`)
+    const ok = window.confirm(`Reschedule to:\n\n${formatWhen(nextUtc, tz)}\n\nProceed?`)
     if (!ok) return
 
-    await doPatch({ action: 'reschedule', scheduledFor: nextUtc.toISOString() })
+    // ✅ API expects UTC ISO
+    await post(`/api/bookings/${encodeURIComponent(bookingId)}/reschedule`, {
+      scheduledFor: nextUtc.toISOString(),
+    })
   }
 
   const timeline = useMemo(() => {
@@ -221,7 +209,7 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-sm font-black">Booking status</div>
         <div className="text-xs font-semibold text-textSecondary">
-          {whenLabel} · {sanitizeTimeZone(tz, 'UTC')}
+          {whenLabel} · {tz}
         </div>
       </div>
 
@@ -229,7 +217,7 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
         {timeline.map((t) => (
           <span
             key={t.key}
-            className={['inline-flex items-center rounded-full px-3 py-1 text-xs font-black', Pill({ on: t.on })].join(' ')}
+            className={['inline-flex items-center rounded-full px-3 py-1 text-xs font-black', pillClass(t.on)].join(' ')}
           >
             {t.label}
           </span>
@@ -280,7 +268,7 @@ export default function BookingActions({ bookingId, status, scheduledFor, durati
       {mode === 'reschedule' && canReschedule ? (
         <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
           <div className="text-xs font-black">
-            Pick a new time <span className="font-semibold text-textSecondary">({sanitizeTimeZone(tz, 'UTC')})</span>
+            Pick a new time <span className="font-semibold text-textSecondary">({tz})</span>
           </div>
 
           <input

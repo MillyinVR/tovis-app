@@ -176,7 +176,7 @@ function pickStringArray(v: unknown): string[] {
   return v
     .map((x) => (typeof x === 'string' ? x.trim() : ''))
     .filter(Boolean)
-    .slice(0, 10)
+    .slice(0, 25)
 }
 
 function requireApptTimeZone(args: { locationTimeZone: unknown; holdTimeZone: unknown }) {
@@ -258,7 +258,6 @@ export async function POST(request: Request) {
     if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return fail(400, 'INVALID_DURATION', 'Offering duration is invalid for this booking type.')
 
     const now = new Date()
-
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
@@ -380,7 +379,7 @@ export async function POST(request: Request) {
 
       if (hasConflict) throw new Error('TIME_NOT_AVAILABLE')
 
-      // Opening claim (optional)
+      // Optional opening claim
       if (openingId) {
         const activeOpening = await tx.lastMinuteOpening.findFirst({
           where: { id: openingId, status: 'ACTIVE' },
@@ -400,7 +399,7 @@ export async function POST(request: Request) {
         if (updated.count !== 1) throw new Error('OPENING_NOT_AVAILABLE')
       }
 
-      // ✅ ADD-ONS: validate + resolve price/duration
+      // ✅ ADD-ONS: validate links + resolve price/duration
       const addOnLinks = addOnIds.length
         ? await tx.offeringAddOn.findMany({
             where: {
@@ -412,11 +411,7 @@ export async function POST(request: Request) {
             },
             include: {
               addOnService: {
-                select: {
-                  id: true,
-                  defaultDurationMinutes: true,
-                  minPrice: true,
-                },
+                select: { id: true, defaultDurationMinutes: true, minPrice: true },
               },
             },
             take: 50,
@@ -465,7 +460,7 @@ export async function POST(request: Request) {
           svc.minPrice
 
         return {
-          addOnId: x.id,
+          addOnId: x.id, // OfferingAddOn.id
           serviceId: svc.id,
           priceSnapshot: price,
           durationMinutesSnapshot: Number(dur) || 0,
@@ -478,11 +473,12 @@ export async function POST(request: Request) {
         if (!a.priceSnapshot) throw new Error('ADDONS_INVALID')
       }
 
-      const addOnsPriceTotal = sumDecimal(
-        resolvedAddOns.map((a) => (a.priceSnapshot as unknown as Prisma.Decimal)),
-      )
+      const addOnsPriceTotal = sumDecimal(resolvedAddOns.map((a) => a.priceSnapshot as unknown as Prisma.Decimal))
       const addOnsDurationTotal = resolvedAddOns.reduce((sum, a) => sum + a.durationMinutesSnapshot, 0)
 
+      const subtotal = new Prisma.Decimal(priceStartingAt as any).add(addOnsPriceTotal)
+
+      // Create booking first
       const created = await tx.booking.create({
         data: {
           clientId,
@@ -497,7 +493,7 @@ export async function POST(request: Request) {
           locationType,
           rebookOfBookingId: rebookOfBookingIdForCreate,
 
-          subtotalSnapshot: (priceStartingAt as any).add(addOnsPriceTotal),
+          subtotalSnapshot: subtotal,
           totalDurationMinutes: durationMinutes + addOnsDurationTotal,
           bufferMinutes,
 
@@ -508,34 +504,48 @@ export async function POST(request: Request) {
             (loc.formattedAddress ? ({ formattedAddress: loc.formattedAddress } as any) : undefined),
           locationLatSnapshot: hold.locationLatSnapshot ?? (typeof loc.lat === 'number' ? loc.lat : undefined),
           locationLngSnapshot: hold.locationLngSnapshot ?? (typeof loc.lng === 'number' ? loc.lng : undefined),
-
-          serviceItems: {
-            create: [
-              // base service
-              {
-                serviceId: offering.serviceId,
-                offeringId: offering.id,
-                priceSnapshot: priceStartingAt,
-                durationMinutesSnapshot: durationMinutes,
-                sortOrder: 0,
-              },
-
-              // add-ons
-              ...resolvedAddOns.map((a) => ({
-                serviceId: a.serviceId,
-                offeringId: null,
-                priceSnapshot: a.priceSnapshot,
-                durationMinutesSnapshot: a.durationMinutesSnapshot,
-                sortOrder: 100 + a.sortOrder,
-                notes: `ADDON:${a.addOnId}`,
-              })),
-            ],
-          },
         },
         select: { id: true, status: true },
       })
 
-      void mediaId // still unused for now
+      // Create base item (explicit)
+      const baseItem = await tx.bookingServiceItem.create({
+        data: {
+          bookingId: created.id,
+          serviceId: offering.serviceId,
+          offeringId: offering.id,
+          itemType: 'BASE' as any,
+          priceSnapshot: priceStartingAt as any,
+          durationMinutesSnapshot: durationMinutes,
+          sortOrder: 0,
+        },
+        select: { id: true },
+      })
+
+      // Create add-on items (child of base item)
+      if (resolvedAddOns.length) {
+        await tx.bookingServiceItem.createMany({
+          data: resolvedAddOns.map((a) => ({
+            bookingId: created.id,
+            serviceId: a.serviceId,
+            offeringId: null,
+            itemType: 'ADD_ON' as any,
+            parentItemId: baseItem.id,
+            priceSnapshot: a.priceSnapshot as any,
+            durationMinutesSnapshot: a.durationMinutesSnapshot,
+            sortOrder: 100 + a.sortOrder,
+            notes: `ADDON:${a.addOnId}`,
+          })),
+        })
+      }
+
+      // mark any opening notification as booked
+      if (openingId) {
+        await tx.openingNotification.updateMany({
+          where: { clientId, openingId, bookedAt: null },
+          data: { bookedAt: new Date() },
+        })
+      }
 
       await tx.bookingHold.delete({ where: { id: hold.id } })
 
@@ -546,22 +556,15 @@ export async function POST(request: Request) {
   } catch (e: any) {
     const msg = normalizeErr(e)
 
-    if (msg === 'ADDONS_INVALID')
-      return fail(400, 'ADDONS_INVALID', 'One or more add-ons are invalid for this booking.')
-
-    if (msg === 'TIMEZONE_REQUIRED')
-      return fail(400, 'TIMEZONE_REQUIRED', 'This professional must set a valid timezone before taking bookings.')
-    if (msg === 'OPENING_NOT_AVAILABLE')
-      return fail(409, 'OPENING_NOT_AVAILABLE', 'That opening was just taken. Please pick another slot.')
-    if (msg === 'TIME_NOT_AVAILABLE')
-      return fail(409, 'TIME_NOT_AVAILABLE', 'That time is no longer available. Please select a different slot.')
+    if (msg === 'ADDONS_INVALID') return fail(400, 'ADDONS_INVALID', 'One or more add-ons are invalid for this booking.')
+    if (msg === 'TIMEZONE_REQUIRED') return fail(400, 'TIMEZONE_REQUIRED', 'This professional must set a valid timezone before taking bookings.')
+    if (msg === 'OPENING_NOT_AVAILABLE') return fail(409, 'OPENING_NOT_AVAILABLE', 'That opening was just taken. Please pick another slot.')
+    if (msg === 'TIME_NOT_AVAILABLE') return fail(409, 'TIME_NOT_AVAILABLE', 'That time is no longer available. Please select a different slot.')
     if (msg === 'HOLD_NOT_FOUND') return fail(409, 'HOLD_NOT_FOUND', 'Hold not found. Please pick a slot again.')
     if (msg === 'HOLD_EXPIRED') return fail(409, 'HOLD_EXPIRED', 'Hold expired. Please pick a slot again.')
     if (msg === 'HOLD_MISMATCH') return fail(409, 'HOLD_MISMATCH', 'Hold mismatch. Please pick a slot again.')
-    if (msg === 'HOLD_MISSING_LOCATION')
-      return fail(409, 'HOLD_MISSING_LOCATION', 'Hold is missing location info. Please pick a slot again.')
-    if (msg === 'LOCATION_NOT_FOUND')
-      return fail(409, 'LOCATION_NOT_FOUND', 'This location is no longer available. Please pick another slot.')
+    if (msg === 'HOLD_MISSING_LOCATION') return fail(409, 'HOLD_MISSING_LOCATION', 'Hold is missing location info. Please pick a slot again.')
+    if (msg === 'LOCATION_NOT_FOUND') return fail(409, 'LOCATION_NOT_FOUND', 'This location is no longer available. Please pick another slot.')
     if (msg === 'TIME_IN_PAST') return fail(400, 'TIME_IN_PAST', 'Please select a future time.')
     if (msg.startsWith('WH:')) return fail(400, 'OUTSIDE_WORKING_HOURS', msg.slice(3) || 'That time is outside working hours.')
 

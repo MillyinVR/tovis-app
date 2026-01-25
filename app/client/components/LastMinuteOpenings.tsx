@@ -4,12 +4,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
+import { prettyWhen } from '@/app/client/components/_helpers'
 
 type Pro = {
   id?: string | null
   businessName: string | null
-  city: string | null
-  location: string | null
+  city?: string | null
+  location?: string | null
   timeZone: string | null
 }
 
@@ -17,7 +18,7 @@ type Svc = { name: string } | null
 
 type OpeningRow = {
   id: string
-  startAt: string
+  startAt: string // ISO UTC
   endAt: string | null
   discountPct: number | null
   note: string | null
@@ -44,26 +45,19 @@ async function safeJson(res: Response) {
   return (await res.json().catch(() => ({}))) as any
 }
 
-function prettyWhen(isoUtc: string, tzRaw: string | null) {
-  const tz = sanitizeTimeZone(tzRaw, 'America/Los_Angeles')
-  const d = new Date(isoUtc)
-  if (Number.isNaN(d.getTime())) return 'Invalid date'
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(d)
+function proTz(o: OpeningRow) {
+  // always valid IANA or fallback
+  return sanitizeTimeZone(o.professional?.timeZone, 'UTC')
 }
 
 function openingHref(o: OpeningRow) {
   if (!o.offeringId) return null
-  const tz = sanitizeTimeZone(o.professional?.timeZone, 'America/Los_Angeles')
-  return `/offerings/${encodeURIComponent(o.offeringId)}?scheduledFor=${encodeURIComponent(o.startAt)}&source=DISCOVERY&openingId=${encodeURIComponent(
-    o.id,
-  )}&proTimeZone=${encodeURIComponent(tz)}`
+  const tz = proTz(o)
+
+  // scheduledFor is the opening start (UTC ISO). We also pass proTimeZone explicitly.
+  return `/offerings/${encodeURIComponent(o.offeringId)}?scheduledFor=${encodeURIComponent(
+    o.startAt,
+  )}&source=DISCOVERY&openingId=${encodeURIComponent(o.id)}&proTimeZone=${encodeURIComponent(tz)}`
 }
 
 function TierPill({ tier }: { tier: string }) {
@@ -81,7 +75,15 @@ function TierPill({ tier }: { tier: string }) {
   )
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string | null; children: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string
+  subtitle?: string | null
+  children: React.ReactNode
+}) {
   return (
     <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-4">
       <div className="flex items-baseline justify-between gap-3">
@@ -94,9 +96,12 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
 }
 
 function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
-  const when = prettyWhen(o.startAt, o.professional?.timeZone)
+  const tz = proTz(o)
+  const when = prettyWhen(o.startAt, tz)
+
   const proLabel = o.professional?.businessName || 'Professional'
-  const loc = o.professional?.city || o.professional?.location || null
+  const loc = (o.professional?.city || o.professional?.location || null)?.trim?.() || null
+
   const svc = o.service?.name || 'Service'
   const discount = o.discountPct ? `${o.discountPct}% off` : null
   const href = openingHref(o)
@@ -108,16 +113,15 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
           <div className="text-sm font-black text-textPrimary">{svc}</div>
           {badge}
         </div>
-        <div className="text-xs font-semibold text-textSecondary">{when}</div>
+        <div className="text-xs font-semibold text-textSecondary">
+          {when}
+          <span className="opacity-75"> · {tz}</span>
+        </div>
       </div>
 
       <div className="mt-1 text-sm text-textPrimary">
         <span className="font-black">
-          <ProProfileLink
-            proId={o.professional?.id ?? null}
-            label={proLabel}
-            className="text-textPrimary"
-          />
+          <ProProfileLink proId={o.professional?.id ?? null} label={proLabel} className="text-textPrimary" />
         </span>
 
         {loc ? <span className="text-textSecondary"> · {loc}</span> : null}

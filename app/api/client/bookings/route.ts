@@ -6,6 +6,8 @@ import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { upper } from '@/app/api/_utils/strings'
 import { jsonFail } from '@/app/api/_utils/responses'
 
+import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+
 export const dynamic = 'force-dynamic'
 
 function addDays(date: Date, days: number) {
@@ -14,20 +16,11 @@ function addDays(date: Date, days: number) {
   return d
 }
 
-function decimalToString(v: unknown): string | null {
-  if (v == null) return null
-  if (typeof v === 'string') return v
-  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
-  if (typeof v === 'object' && v && typeof (v as any).toString === 'function') return (v as any).toString()
-  return null
-}
-
-function pickFormattedAddress(snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== 'object') return null
-  const v = (snapshot as any)?.formattedAddress
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
+/**
+ * Consultation approval gate:
+ * If approval is pending, and booking isn't final, and session step indicates consult phase,
+ * then client needs to approve/reject.
+ */
 function needsConsultationApproval(b: {
   status: unknown
   sessionStep: unknown
@@ -42,7 +35,7 @@ function needsConsultationApproval(b: {
   if (b.finishedAt) return false
 
   const step = upper(b.sessionStep)
-  return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step
+  return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step || step === 'NONE'
 }
 
 export async function GET() {
@@ -53,6 +46,7 @@ export async function GET() {
     const now = new Date()
     const next30 = addDays(now, 30)
 
+    // 1) Load bookings (schema-aligned selects)
     const bookings = await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
@@ -65,19 +59,54 @@ export async function GET() {
         scheduledFor: true,
         finishedAt: true,
 
-        // Option B truth
         subtotalSnapshot: true,
         totalDurationMinutes: true,
         bufferMinutes: true,
 
-        // location truth
         locationType: true,
         locationId: true,
         locationTimeZone: true,
         locationAddressSnapshot: true,
 
         service: { select: { id: true, name: true } },
-        professional: { select: { id: true, businessName: true, location: true } },
+
+        // ✅ ProfessionalProfile DOES NOT have city/state in your schema
+        professional: {
+          select: {
+            id: true,
+            businessName: true,
+            location: true,
+            timeZone: true,
+          },
+        },
+
+        // ✅ Booking is locked to a specific ProfessionalLocation (this is where city/state live)
+        location: {
+          select: {
+            id: true,
+            name: true,
+            formattedAddress: true,
+            city: true,
+            state: true,
+            timeZone: true,
+          },
+        },
+
+        // ✅ Base + add-ons truth
+        serviceItems: {
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+          take: 80,
+          select: {
+            id: true,
+            itemType: true,
+            parentItemId: true,
+            sortOrder: true,
+            durationMinutesSnapshot: true,
+            priceSnapshot: true,
+            serviceId: true,
+            service: { select: { name: true } },
+          },
+        },
 
         consultationNotes: true,
         consultationPrice: true,
@@ -96,6 +125,7 @@ export async function GET() {
       },
     })
 
+    // 2) Unread aftercare notifications (badge support)
     const unread = await prisma.clientNotification.findMany({
       where: {
         clientId,
@@ -113,58 +143,20 @@ export async function GET() {
         .filter((x): x is string => Boolean(x)),
     )
 
-    const out = bookings.map((b) => {
+    // 3) Build DTOs (single source of truth)
+    const dtos = bookings.map((b) => {
       const hasPending = needsConsultationApproval(b)
+      const unreadAftercare = unreadBookingIds.has(b.id)
 
-      const locationLabel =
-        pickFormattedAddress(b.locationAddressSnapshot) ||
-        (typeof b.professional?.location === 'string' && b.professional.location.trim()
-          ? b.professional.location.trim()
-          : null)
-
-      const consultBlobNeeded =
-        Boolean(b.consultationApproval) || Boolean(b.consultationNotes) || b.consultationPrice != null
-
-      return {
-        id: b.id,
-        status: b.status,
-        source: b.source,
-        sessionStep: b.sessionStep,
-
-        scheduledFor: b.scheduledFor.toISOString(),
-        totalDurationMinutes: b.totalDurationMinutes ?? 0,
-        bufferMinutes: b.bufferMinutes ?? 0,
-        subtotalSnapshot: b.subtotalSnapshot ?? null,
-
-        locationType: b.locationType,
-        locationId: b.locationId,
-        locationTimeZone: b.locationTimeZone ?? null,
-        locationLabel,
-
-        service: b.service,
-        professional: b.professional,
-
-        hasUnreadAftercare: unreadBookingIds.has(b.id),
+      return buildClientBookingDTO({
+        booking: b as any,
+        unreadAftercare,
         hasPendingConsultationApproval: hasPending,
-
-        consultation: consultBlobNeeded
-          ? {
-              consultationNotes: b.consultationNotes ?? null,
-              consultationPrice: decimalToString(b.consultationPrice),
-              consultationConfirmedAt: b.consultationConfirmedAt ? b.consultationConfirmedAt.toISOString() : null,
-
-              approvalStatus: b.consultationApproval?.status ?? null,
-              approvalNotes: b.consultationApproval?.notes ?? null,
-              proposedTotal: decimalToString(b.consultationApproval?.proposedTotal),
-              proposedServicesJson: b.consultationApproval?.proposedServicesJson ?? null,
-              approvedAt: b.consultationApproval?.approvedAt ? b.consultationApproval.approvedAt.toISOString() : null,
-              rejectedAt: b.consultationApproval?.rejectedAt ? b.consultationApproval.rejectedAt.toISOString() : null,
-            }
-          : null,
-      }
+      })
     })
 
-    // waitlist (keep minimal pro fields)
+    // 4) Waitlist (schema-aligned selects)
+    // Note: WaitlistEntry.professional is ProfessionalProfile (no city/state).
     let waitlist: any[] = []
     try {
       waitlist = await prisma.waitlistEntry.findMany({
@@ -174,16 +166,21 @@ export async function GET() {
         select: {
           id: true,
           createdAt: true,
-          serviceId: true,
-          professionalId: true,
           notes: true,
           preferredStart: true,
           preferredEnd: true,
           preferredTimeBucket: true,
-          status: true,
           mediaId: true,
+          status: true,
           service: { select: { id: true, name: true } },
-          professional: { select: { id: true, businessName: true, location: true } },
+          professional: {
+            select: {
+              id: true,
+              businessName: true,
+              location: true,
+              timeZone: true,
+            },
+          },
         },
       })
     } catch (e) {
@@ -191,12 +188,13 @@ export async function GET() {
       waitlist = []
     }
 
+    // 5) Bucket bookings
     const upcoming: any[] = []
     const pending: any[] = []
     const prebooked: any[] = []
     const past: any[] = []
 
-    for (const b of out) {
+    for (const b of dtos) {
       const when = new Date(b.scheduledFor)
       const isFuture = when.getTime() >= now.getTime()
       const within30 = when.getTime() < next30.getTime()
@@ -224,6 +222,7 @@ export async function GET() {
         continue
       }
 
+      // default: keep future accepted beyond 30 days as upcoming too
       upcoming.push(b)
     }
 

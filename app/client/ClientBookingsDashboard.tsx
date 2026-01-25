@@ -11,7 +11,13 @@ import PrebookedBookings from './components/PrebookedBookings'
 import PastBookings from './components/PastBookings'
 
 import type { BookingLike, WaitlistLike } from './components/_helpers'
-import { Badge, prettyWhen, locationLabel, sourceUpper, statusUpper } from './components/_helpers'
+import {
+  Badge,
+  prettyWhen,
+  bookingLocationLabel,
+  sourceUpper,
+  statusUpper,
+} from './components/_helpers'
 import ProProfileLink from './components/ProProfileLink'
 
 type Buckets = {
@@ -53,13 +59,15 @@ function normalizeBuckets(input: unknown): Buckets {
   const past = asArray<BookingLike>(b.past)
 
   // Backward compat: older code used buckets.confirmed
-  const prebooked = asArray<BookingLike>(b.prebooked).length ? asArray<BookingLike>(b.prebooked) : asArray<BookingLike>(b.confirmed)
+  const prebooked = asArray<BookingLike>(b.prebooked).length
+    ? asArray<BookingLike>(b.prebooked)
+    : asArray<BookingLike>(b.confirmed)
 
   return { upcoming, pending, waitlist, prebooked, past }
 }
 
 function normalizeTabKey(raw: string): TabKey | null {
-  const t = raw.toLowerCase().trim()
+  const t = (raw || '').toLowerCase().trim()
   if (t === 'upcoming' || t === 'pending' || t === 'waitlist' || t === 'prebooked' || t === 'past') return t
   return null
 }
@@ -68,20 +76,20 @@ type BadgeVariant = 'default' | 'danger' | 'accent' | 'success'
 
 function badgeForStatus(b: BookingLike): { label: string; variant: BadgeVariant } {
   const s = statusUpper(b.status)
-
   if (s === 'ACCEPTED') return { label: 'Confirmed', variant: 'success' }
   if (s === 'PENDING') return { label: 'Requested', variant: 'accent' }
   if (s === 'COMPLETED') return { label: 'Completed', variant: 'default' }
   if (s === 'CANCELLED') return { label: 'Cancelled', variant: 'danger' }
-
   return { label: s || 'Unknown', variant: 'default' }
 }
 
 function isPrebookedSource(source: unknown) {
-  // You mentioned Option 2 / no legacy users, so this can be strict.
-  // Keeping AFTERCARE because your code already uses it.
   const s = sourceUpper(source)
   return s === 'AFTERCARE' || s === 'PREBOOKED'
+}
+
+function bookingTitle(b: BookingLike | null | undefined) {
+  return b?.display?.title || b?.display?.baseName || 'Appointment'
 }
 
 export default function ClientBookingsDashboard() {
@@ -108,6 +116,7 @@ export default function ClientBookingsDashboard() {
       setBuckets(normalizeBuckets(data?.buckets))
     } catch (e: any) {
       setErr(e?.message || 'Failed to load bookings.')
+      setBuckets(EMPTY_BUCKETS)
     } finally {
       setLoading(false)
     }
@@ -138,7 +147,6 @@ export default function ClientBookingsDashboard() {
     return buckets.upcoming.length ? buckets.upcoming[0] : null
   }, [buckets.upcoming])
 
-  // If any booking requires consult approval, we surface a "Action required" CTA in the Next card
   const nextNeedsConsultApproval = Boolean(nextAppt?.hasPendingConsultationApproval)
 
   if (loading) return <div className="text-textSecondary" style={{ fontSize: 13 }}>Loading your bookings…</div>
@@ -184,10 +192,10 @@ export default function ClientBookingsDashboard() {
         {nextAppt ? (
           <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
             <div className="text-textPrimary" style={{ fontSize: 18, fontWeight: 900 }}>
-              {nextAppt.service?.name || 'Appointment'}
+              {bookingTitle(nextAppt)}
               <span className="text-textSecondary" style={{ fontSize: 13, fontWeight: 700 }}>
                 {' '}
-                · {prettyWhen(nextAppt.scheduledFor)}
+                · {prettyWhen(nextAppt.scheduledFor, nextAppt.timeZone)}
               </span>
             </div>
 
@@ -200,19 +208,14 @@ export default function ClientBookingsDashboard() {
                 />
               </span>
 
-              {locationLabel(nextAppt.professional) ? (
-                <span className="text-textSecondary"> · {locationLabel(nextAppt.professional)}</span>
+              {bookingLocationLabel(nextAppt) ? (
+                <span className="text-textSecondary"> · {bookingLocationLabel(nextAppt)}</span>
               ) : null}
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
-              {isPrebookedSource(nextAppt.source) ? (
-                <Badge label="Prebooked" variant="default" />
-              ) : null}
-
-              {nextNeedsConsultApproval ? (
-                <Badge label="Action required" variant="accent" />
-              ) : null}
+              {isPrebookedSource(nextAppt.source) ? <Badge label="Prebooked" variant="default" /> : null}
+              {nextNeedsConsultApproval ? <Badge label="Action required" variant="accent" /> : null}
 
               {(() => {
                 const s = badgeForStatus(nextAppt)

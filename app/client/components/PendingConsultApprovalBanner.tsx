@@ -3,14 +3,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
-
-type BookingLike = {
-  id: string
-  scheduledFor?: string | null
-  hasPendingConsultationApproval?: boolean | null
-  service?: { name?: string | null } | null
-  professional?: { id?: string | null; businessName?: string | null } | null
-}
+import type { BookingLike } from '@/app/client/components/_helpers'
+import { prettyWhen, bookingLocationLabel } from '@/app/client/components/_helpers'
 
 type Buckets = {
   upcoming?: BookingLike[]
@@ -24,21 +18,12 @@ function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
 }
 
-function prettyWhen(iso?: string | null) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
 async function safeJson(res: Response) {
   return (await res.json().catch(() => ({}))) as any
+}
+
+function bookingTitle(b: BookingLike) {
+  return b?.display?.title || b?.display?.baseName || 'A booking'
 }
 
 export default function PendingConsultApprovalBanner() {
@@ -86,8 +71,10 @@ export default function PendingConsultApprovalBanner() {
   if (loading) return null
   if (!item || !href) return null
 
-  const svc = item.service?.name ? item.service.name : 'A booking'
+  const svc = bookingTitle(item)
   const proLabel = item.professional?.businessName || 'Your pro'
+  const when = item.scheduledFor ? prettyWhen(item.scheduledFor, item.timeZone) : ''
+  const loc = bookingLocationLabel(item)
 
   return (
     <section className="rounded-card border border-white/10 bg-surfaceGlass p-4">
@@ -99,8 +86,13 @@ export default function PendingConsultApprovalBanner() {
           <div className="text-xs font-medium text-textSecondary">
             {svc}
             {' · '}
-            <ProProfileLink proId={item.professional?.id ?? null} label={proLabel} className="text-textSecondary" />
-            {item.scheduledFor ? ` · ${prettyWhen(item.scheduledFor)}` : ''}
+            <ProProfileLink
+              proId={item.professional?.id ?? null}
+              label={proLabel}
+              className="text-textSecondary"
+            />
+            {when ? ` · ${when}` : ''}
+            {loc ? ` · ${loc}` : ''}
           </div>
         </div>
 

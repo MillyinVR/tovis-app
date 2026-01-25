@@ -9,6 +9,7 @@ import {
   enforceRateLimit,
   rateLimitIdentity,
 } from '@/app/api/_utils'
+import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
 export type ConsultationDecisionCtx = { params: { id: string } | Promise<{ id: string }> }
@@ -21,6 +22,89 @@ function isFinalBooking(b: { status: unknown; finishedAt: Date | null }) {
 function isAllowedDecisionStep(stepRaw: unknown) {
   const step = upper(stepRaw)
   return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || step === 'NONE' || step === ''
+}
+
+async function loadBookingDTO(args: { bookingId: string; unreadAftercare: boolean; hasPendingConsultationApproval: boolean }) {
+  const b = await prisma.booking.findUnique({
+    where: { id: args.bookingId },
+    select: {
+      id: true,
+      status: true,
+      source: true,
+      sessionStep: true,
+      scheduledFor: true,
+      finishedAt: true,
+
+      subtotalSnapshot: true,
+      totalDurationMinutes: true,
+      bufferMinutes: true,
+
+      locationType: true,
+      locationId: true,
+      locationTimeZone: true,
+      locationAddressSnapshot: true,
+
+      service: { select: { id: true, name: true } },
+
+      professional: {
+        select: {
+          id: true,
+          businessName: true,
+          location: true,
+          timeZone: true,
+        },
+      },
+
+      location: {
+        select: {
+          id: true,
+          name: true,
+          formattedAddress: true,
+          city: true,
+          state: true,
+          timeZone: true,
+        },
+      },
+
+      serviceItems: {
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        take: 80,
+        select: {
+          id: true,
+          itemType: true,
+          parentItemId: true,
+          sortOrder: true,
+          durationMinutesSnapshot: true,
+          priceSnapshot: true,
+          serviceId: true,
+          service: { select: { name: true } },
+        },
+      },
+
+      consultationNotes: true,
+      consultationPrice: true,
+      consultationConfirmedAt: true,
+
+      consultationApproval: {
+        select: {
+          status: true,
+          proposedServicesJson: true,
+          proposedTotal: true,
+          notes: true,
+          approvedAt: true,
+          rejectedAt: true,
+        },
+      },
+    },
+  })
+
+  if (!b) return null
+
+  return buildClientBookingDTO({
+    booking: b as any,
+    unreadAftercare: Boolean(args.unreadAftercare),
+    hasPendingConsultationApproval: Boolean(args.hasPendingConsultationApproval),
+  })
 }
 
 export async function handleConsultationDecision(action: ConsultationDecisionAction, ctx: ConsultationDecisionCtx) {
@@ -70,21 +154,22 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
 
     const approvalStatus = upper(booking.consultationApproval.status)
 
-    // Idempotent responses
+    // Idempotent: still return DTO snapshot so UI can refresh safely.
     if (action === 'APPROVE' && approvalStatus === 'APPROVED') {
+      const dto = await loadBookingDTO({ bookingId: booking.id, unreadAftercare: false, hasPendingConsultationApproval: false })
       return jsonOk({
         alreadyApproved: true,
         bookingId: booking.id,
-        sessionStep: booking.sessionStep,
-        status: booking.status,
+        booking: dto,
       })
     }
+
     if (action === 'REJECT' && approvalStatus === 'REJECTED') {
+      const dto = await loadBookingDTO({ bookingId: booking.id, unreadAftercare: false, hasPendingConsultationApproval: false })
       return jsonOk({
         alreadyRejected: true,
         bookingId: booking.id,
-        sessionStep: booking.sessionStep,
-        status: booking.status,
+        booking: dto,
       })
     }
 
@@ -104,50 +189,60 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
     const now = new Date()
 
     if (action === 'APPROVE') {
-      const updated = await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx) => {
         await tx.consultationApproval.update({
           where: { bookingId },
           data: { status: 'APPROVED', approvedAt: now, rejectedAt: null, clientId },
         })
 
-        return tx.booking.update({
+        await tx.booking.update({
           where: { id: bookingId },
           data: {
             consultationConfirmedAt: now,
             sessionStep: 'BEFORE_PHOTOS',
-            status: upper(booking.status) === 'PENDING' ? 'ACCEPTED' : booking.status,
+            status: upper(booking.status) === 'PENDING' ? 'ACCEPTED' : (booking.status as any),
           },
-          select: { id: true, sessionStep: true, status: true, consultationConfirmedAt: true },
+          select: { id: true },
         })
       })
 
+      const dto = await loadBookingDTO({
+        bookingId,
+        unreadAftercare: false,
+        hasPendingConsultationApproval: false,
+      })
+
       return jsonOk({
-        bookingId: updated.id,
-        sessionStep: updated.sessionStep,
-        status: updated.status,
-        consultationConfirmedAt: updated.consultationConfirmedAt?.toISOString() ?? null,
+        bookingId,
+        action: 'APPROVE',
+        booking: dto,
       })
     }
 
     // REJECT
-    const updated = await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
       await tx.consultationApproval.update({
         where: { bookingId },
         data: { status: 'REJECTED', rejectedAt: now, approvedAt: null, clientId },
       })
 
-      return tx.booking.update({
+      await tx.booking.update({
         where: { id: bookingId },
         data: { sessionStep: 'CONSULTATION', consultationConfirmedAt: null },
-        select: { id: true, sessionStep: true, status: true, consultationConfirmedAt: true },
+        select: { id: true },
       })
     })
 
+    const dto = await loadBookingDTO({
+      bookingId,
+      unreadAftercare: false,
+      hasPendingConsultationApproval: false,
+    })
+
     return jsonOk({
-      bookingId: updated.id,
-      sessionStep: updated.sessionStep,
-      status: updated.status,
-      consultationConfirmedAt: updated.consultationConfirmedAt?.toISOString() ?? null,
+      bookingId,
+      action: 'REJECT',
+      booking: dto,
     })
   } catch (e) {
     console.error('handleConsultationDecision error', e)

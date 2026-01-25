@@ -1,5 +1,4 @@
 // app/api/offerings/add-ons/route.ts
-
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
@@ -19,7 +18,6 @@ function normalizeLocationType(v: string) {
   return null
 }
 
-// Booking uses ServiceLocationType (SALON|MOBILE)
 function toServiceLocationType(v: 'SALON' | 'MOBILE'): ServiceLocationType {
   return v === 'SALON' ? ServiceLocationType.SALON : ServiceLocationType.MOBILE
 }
@@ -30,20 +28,22 @@ export async function GET(req: Request) {
 
     const offeringId = pickOne(url.searchParams.get('offeringId'))
     const locationTypeRaw = pickOne(url.searchParams.get('locationType'))
-
     const locationType = normalizeLocationType(locationTypeRaw)
 
     if (!offeringId || !locationType) {
-      return NextResponse.json(
-        { ok: false, error: 'Missing offeringId or locationType' },
-        { status: 400 },
-      )
+      return NextResponse.json({ ok: false, error: 'Missing offeringId or locationType' }, { status: 400 })
     }
 
-    // 1) Load offering so we know the pro (for price resolution)
+    // Load offering + service + professional so UI can show context
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
-      select: { id: true, isActive: true, professionalId: true },
+      select: {
+        id: true,
+        isActive: true,
+        professionalId: true,
+        professional: { select: { id: true, businessName: true } },
+        service: { select: { id: true, name: true } },
+      },
     })
 
     if (!offering || !offering.isActive) {
@@ -52,7 +52,6 @@ export async function GET(req: Request) {
 
     const locEnum = toServiceLocationType(locationType)
 
-    // 2) Load add-ons configured for this offering (and this location if set)
     const addOnLinks = await prisma.offeringAddOn.findMany({
       where: {
         offeringId,
@@ -76,13 +75,12 @@ export async function GET(req: Request) {
     })
 
     const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
-    const proId = offering.professionalId
 
-    // 3) Resolve price/duration from the pro’s offering for that service (if present)
+    // Resolve per-pro pricing/duration for add-on services if the pro has offerings for them
     const proOfferings = addOnServiceIds.length
       ? await prisma.professionalServiceOffering.findMany({
           where: {
-            professionalId: proId,
+            professionalId: offering.professionalId,
             isActive: true,
             serviceId: { in: addOnServiceIds },
           },
@@ -103,14 +101,12 @@ export async function GET(req: Request) {
       const svc = x.addOnService
       const proOff = byServiceId.get(svc.id) || null
 
-      // duration
       const minutes =
         x.durationOverrideMinutes ??
         (locationType === 'SALON' ? proOff?.salonDurationMinutes : proOff?.mobileDurationMinutes) ??
         svc.defaultDurationMinutes ??
         0
 
-      // price (string for UI)
       const priceDec =
         x.priceOverride ??
         (locationType === 'SALON' ? proOff?.salonPriceStartingAt : proOff?.mobilePriceStartingAt) ??
@@ -119,7 +115,7 @@ export async function GET(req: Request) {
       const price = moneyToString(priceDec) ?? '0.00'
 
       return {
-        id: String(x.id), // ✅ OfferingAddOn.id (THIS is what we should submit)
+        id: String(x.id), // ✅ OfferingAddOn.id (submit this)
         serviceId: String(svc.id),
         title: svc.name,
         group: svc.addOnGroup ?? null,
@@ -131,7 +127,19 @@ export async function GET(req: Request) {
     })
 
     return NextResponse.json(
-      { ok: true, offeringId, locationType, addOns },
+      {
+        ok: true,
+        offeringId: offering.id,
+        locationType,
+        offering: {
+          id: offering.id,
+          service: offering.service ? { id: offering.service.id, name: offering.service.name } : null,
+          professional: offering.professional
+            ? { id: offering.professional.id, businessName: offering.professional.businessName ?? null }
+            : null,
+        },
+        addOns,
+      },
       { status: 200 },
     )
   } catch (e) {

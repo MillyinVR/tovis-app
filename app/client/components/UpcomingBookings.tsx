@@ -1,16 +1,12 @@
 // app/client/components/UpcomingBookings.tsx
 'use client'
 
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useMemo } from 'react'
 import type { BookingLike } from './_helpers'
-import { prettyWhen } from './_helpers'
+import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
-
-function prettyWhere(b: BookingLike) {
-  const p = b.professional
-  const bits = [p?.location, p?.city, p?.state].filter(Boolean)
-  return bits.length ? bits.join(', ') : null
-}
+import CardLink from './CardLink'
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
@@ -20,59 +16,62 @@ function Pill({ children }: { children: React.ReactNode }) {
   )
 }
 
+function statusLabel(statusRaw: unknown) {
+  const s = statusUpper(statusRaw)
+  if (s === 'PENDING') return 'Requested'
+  if (s === 'ACCEPTED') return 'Confirmed'
+  if (s === 'COMPLETED') return 'Completed'
+  if (s === 'CANCELLED') return 'Cancelled'
+  return s || 'Upcoming'
+}
+
+
+
 export default function UpcomingBookings({ items }: { items: BookingLike[] }) {
-  if (!items?.length) return null
+  const list = useMemo(() => items ?? [], [items])
 
   return (
     <section className="mt-5">
-      <h2 className="mb-2 text-base font-black text-textPrimary">Upcoming</h2>
+      <h2 className="text-sm font-black text-textPrimary">Upcoming</h2>
 
-      <div className="grid gap-3">
-        {items.map((b) => {
-          const when = prettyWhen(b.scheduledFor)
-          const serviceName = b.service?.name || 'Appointment'
-          const proLabel = b.professional?.businessName || 'Professional'
-          const proId = b.professional?.id || null
-          const where = prettyWhere(b)
+      <div className="mt-2 grid gap-3">
+        {list.map((b) => {
+          const href = `/client/bookings/${encodeURIComponent(b.id)}`
+          const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
+          const when = prettyWhen(b?.scheduledFor, b?.timeZone)
+          const loc = bookingLocationLabel(b)
+
+          const proId = b?.professional?.id || null
+          const proLabel = b?.professional?.businessName || 'Professional'
 
           return (
-            <Link
+            <CardLink
               key={b.id}
-              href={`/client/bookings/${encodeURIComponent(b.id)}`}
-              className="block no-underline"
+              href={href}
+              className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary"
             >
-              <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-sm font-black">{serviceName}</div>
-                  <Pill>Confirmed</Pill>
-                </div>
-
-                <div className="mt-2 text-sm">
-                  <span className="font-black">{when}</span>
-                  <span className="text-textSecondary"> · </span>
-
-                  {/* ✅ Pro name links to profile (stopPropagation so card click still works) */}
-                  <span
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    <ProProfileLink
-                      proId={proId}
-                      label={proLabel}
-                      className="text-textSecondary font-semibold"
-                    />
-                  </span>
-
-                  {where ? <span className="text-textSecondary"> · {where}</span> : null}
-                </div>
-
-                <div className="mt-2 text-xs font-medium text-textSecondary">
-                  Tap to view details.
-                </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="text-sm font-black">{svc}</div>
+                <div className="text-xs font-semibold text-textSecondary">{when}</div>
               </div>
-            </Link>
+
+              <div className="mt-2 text-sm">
+                {/* ✅ This is now safe: no outer <a> exists */}
+                <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                  <ProProfileLink proId={proId} label={proLabel} className="text-textSecondary font-semibold" />
+                </span>
+
+                {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
+              </div>
+
+              <div className="mt-3">
+                <Pill>{statusLabel(b?.status)}</Pill>
+              </div>
+            </CardLink>
           )
         })}
+
+        {list.length === 0 ? <div className="text-sm font-medium text-textSecondary">No upcoming bookings.</div> : null}
       </div>
     </section>
   )

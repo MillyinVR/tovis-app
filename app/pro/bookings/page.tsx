@@ -106,7 +106,7 @@ function FilterPills({ active }: { active: StatusFilter }) {
   )
 }
 
-// ✅ Strongly-typed select (prevents “unknown” leaks into moneyToString)
+// ✅ Strongly-typed select (includes add-ons)
 const bookingSelect = {
   id: true,
   status: true,
@@ -122,6 +122,24 @@ const bookingSelect = {
   tipAmount: true,
 
   service: { select: { name: true } },
+
+  // ✅ THIS is the missing piece
+  serviceItems: {
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      itemType: true, // "BASE" | "ADD_ON"
+      sortOrder: true,
+      service: { select: { name: true } },
+
+      // optional display helpers if you want them later:
+      priceSnapshot: true,
+      durationMinutesSnapshot: true,
+      parentItemId: true,
+    },
+    take: 50,
+  },
+
   client: {
     select: {
       id: true,
@@ -132,6 +150,7 @@ const bookingSelect = {
     },
   },
 } satisfies Prisma.BookingSelect
+
 
 type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
 
@@ -171,6 +190,23 @@ function PriceBlock({ b }: { b: BookingRow }) {
   )
 }
 
+function getBaseAndAddOnNames(b: BookingRow) {
+  const items = Array.isArray(b.serviceItems) ? b.serviceItems : []
+
+  // Prefer itemType if present, otherwise fallback to "first item is base"
+  const base =
+    items.find((x) => String((x as any).itemType || '').toUpperCase() === 'BASE') ??
+    items.sort((a, c) => (a.sortOrder ?? 0) - (c.sortOrder ?? 0))[0] ??
+    null
+
+  const addOns = items.filter((x) => String((x as any).itemType || '').toUpperCase() === 'ADD_ON')
+
+  const baseName = base?.service?.name ?? b.service?.name ?? 'Service'
+  const addOnNames = addOns.map((x) => x.service?.name ?? '').map((s) => s.trim()).filter(Boolean)
+
+  return { baseName, addOnNames }
+}
+
 function Section({
   title,
   items,
@@ -204,7 +240,22 @@ function Section({
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <div className="truncate text-[13px] font-black text-textPrimary">{b.service?.name ?? 'Service'}</div>
+                      {(() => {
+                        const { baseName, addOnNames } = getBaseAndAddOnNames(b)
+
+                        return (
+                          <div className="min-w-0">
+                            <div className="truncate text-[13px] font-black text-textPrimary">{baseName}</div>
+
+                            {addOnNames.length ? (
+                              <div className="mt-1 truncate text-[12px] text-textSecondary">
+                                + {addOnNames.join(', ')}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })()}
+
                       <StatusPill status={b.status} />
                     </div>
 
