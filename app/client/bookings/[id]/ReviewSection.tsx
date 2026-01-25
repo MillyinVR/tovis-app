@@ -362,7 +362,7 @@ export default function ReviewSection({
           role="dialog"
           aria-modal="true"
           onClick={() => setPreview(null)}
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-bgPrimary/70 p-4"
+          className="fixed inset-0 z-9999 flex items-center justify-center bg-bgPrimary/70 p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}

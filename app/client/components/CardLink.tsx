@@ -1,4 +1,7 @@
 // app/client/components/CardLink.tsx
+// Single source of truth for clickable booking cards
+// Handles nested links + stopPropagation safely
+
 'use client'
 
 import { useRouter } from 'next/navigation'
