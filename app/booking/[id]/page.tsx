@@ -1,11 +1,12 @@
 // app/booking/[id]/page.tsx
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { moneyToString } from '@/lib/money'
-import { Prisma } from '@prisma/client'
+import { mapsHrefFromLocation } from '@/lib/maps'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,7 +96,6 @@ export default async function BookingReceiptPage(props: PageProps) {
       source: true,
       locationType: true,
 
-      // ✅ these now matter with add-ons
       subtotalSnapshot: true,
       totalDurationMinutes: true,
 
@@ -108,7 +108,6 @@ export default async function BookingReceiptPage(props: PageProps) {
         },
       },
 
-      // ✅ NEW: fetch booking line items (base + add-ons)
       serviceItems: {
         orderBy: { sortOrder: 'asc' },
         select: {
@@ -137,6 +136,9 @@ export default async function BookingReceiptPage(props: PageProps) {
               formattedAddress: true,
               city: true,
               state: true,
+              placeId: true,
+              lat: true,
+              lng: true,
             },
           },
         },
@@ -157,29 +159,36 @@ export default async function BookingReceiptPage(props: PageProps) {
   const serviceName = svc?.name || 'Service'
 
   const primaryLoc = prof?.locations?.[0] ?? null
-  const location =
+  const locationLabel =
     primaryLoc?.formattedAddress?.trim() ||
     primaryLoc?.name?.trim() ||
     [primaryLoc?.city, primaryLoc?.state].filter(Boolean).join(', ') ||
     null
 
+  const isSalon = upper(booking.locationType) === 'SALON'
+  const mapsHref = isSalon
+    ? mapsHrefFromLocation({
+        placeId: primaryLoc?.placeId ?? null,
+        lat: primaryLoc?.lat ?? null,
+        lng: primaryLoc?.lng ?? null,
+        formattedAddress: primaryLoc?.formattedAddress ?? null,
+        name: primaryLoc?.name ?? null,
+      })
+    : null
+
   const appointmentTz = sanitizeTimeZone(prof?.timeZone ?? null, 'America/Los_Angeles')
   const when = fmtInTimeZone(new Date(booking.scheduledFor), appointmentTz)
 
   const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
-  const aftercareHref = `/aftercare?bookingId=${encodeURIComponent(booking.id)}`
-  const rebookHref = booking.offeringId
-    ? `/offerings/${booking.offeringId}`
-    : prof?.id
-      ? `/professionals/${prof.id}`
-      : '/looks'
+  const proProfileHref = prof?.id ? `/professionals/${encodeURIComponent(prof.id)}` : null
 
-  // ✅ Use booking total duration (includes add-ons)
+  const proEmail = (prof?.user?.email || '').trim()
+  const messageHref = proEmail ? `mailto:${encodeURIComponent(proEmail)}` : null
+
   const duration =
-  (Number(booking.totalDurationMinutes ?? 0) > 0
-    ? Number(booking.totalDurationMinutes)
-    : svc?.defaultDurationMinutes) ?? null
-
+    (Number(booking.totalDurationMinutes ?? 0) > 0
+      ? Number(booking.totalDurationMinutes)
+      : svc?.defaultDurationMinutes) ?? null
 
   const locationTypeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
@@ -195,7 +204,6 @@ export default async function BookingReceiptPage(props: PageProps) {
   const addOnPrice = sumDecimal(addOnItems.map((x) => x.priceSnapshot))
   const addOnMinutes = addOnItems.reduce((sum, x) => sum + (Number(x.durationMinutesSnapshot) || 0), 0)
 
-  // subtotalSnapshot should already include add-ons (from finalize)
   const subtotalLabel = booking.subtotalSnapshot ? moneyToString(booking.subtotalSnapshot) : null
 
   return (
@@ -211,7 +219,22 @@ export default async function BookingReceiptPage(props: PageProps) {
           <div className="mt-1 text-[13px]">
             <span className="font-black">{when}</span>
             <span className="text-textSecondary"> · {appointmentTz}</span>
-            {location ? <span className="text-textSecondary"> · {location}</span> : null}
+
+            {locationLabel ? (
+              mapsHref ? (
+                <a
+                  href={mapsHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-textSecondary hover:opacity-80"
+                >
+                  {' · '}
+                  {locationLabel}
+                </a>
+              ) : (
+                <span className="text-textSecondary"> · {locationLabel}</span>
+              )
+            ) : null}
           </div>
 
           <div className="mt-3 flex flex-wrap gap-3 text-[12px] text-textSecondary">
@@ -256,7 +279,7 @@ export default async function BookingReceiptPage(props: PageProps) {
         </Link>
       </div>
 
-      {/* ✅ NEW: booking breakdown (base + add-ons) */}
+      {/* Booking breakdown (base + add-ons) */}
       {items.length ? (
         <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
           <div className="text-[12px] font-black text-textSecondary">Service breakdown</div>
@@ -330,22 +353,26 @@ export default async function BookingReceiptPage(props: PageProps) {
             Add to calendar
           </a>
 
-          <Link
-            href={aftercareHref}
-            className="rounded-full bg-accentPrimary px-4 py-3 text-center text-[13px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-          >
-            View aftercare
-          </Link>
+          {messageHref ? (
+            <a
+              href={messageHref}
+              className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
+            >
+              Message {proName}
+            </a>
+          ) : null}
+
+          {proProfileHref ? (
+            <Link
+              href={proProfileHref}
+              className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
+            >
+              View {proName} profile
+            </Link>
+          ) : null}
 
           <Link
-            href={rebookHref}
-            className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
-          >
-            Book this again
-          </Link>
-
-          <Link
-            href={isProViewer ? '/professional/bookings' : '/client/bookings'}
+            href={isProViewer ? '/pro/bookings' : '/client/bookings'}
             className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
           >
             Go to dashboard
