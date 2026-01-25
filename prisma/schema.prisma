@@ -56,6 +56,13 @@ enum ProfessionType {
   MAKEUP_ARTIST
 }
 
+enum MessageThreadContextType {
+  BOOKING
+  SERVICE
+  OFFERING
+  PRO_PROFILE
+}
+
 enum VerificationStatus {
   PENDING
   APPROVED
@@ -245,9 +252,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  adminActionLogs  AdminActionLog[]  @relation("AdminUserLogs")
-  adminPermissions AdminPermission[]
-  sentMessages     Message[]         @relation("UserSentMessages")
+  adminActionLogs    AdminActionLog[]           @relation("AdminUserLogs")
+  adminPermissions   AdminPermission[]
+  sentMessages       Message[]                  @relation("UserSentMessages")
+  threadParticipants MessageThreadParticipant[] @relation("UserThreadParticipants")
 
   // NFC attribution events
   attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
@@ -819,6 +827,7 @@ model Booking {
   finishedAt DateTime?
 
   mediaAssets             MediaAsset[]
+  messageThreads          MessageThread[]          @relation("BookingThreads")
   productSales            ProductSale[]
   serviceItems            BookingServiceItem[]
   clientProfessionalNotes ClientProfessionalNote[]
@@ -1145,25 +1154,60 @@ model WaitlistEntry {
 }
 
 model MessageThread {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   clientId       String
   professionalId String
-  serviceId      String?
-  offeringId     String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 
-  client       ClientProfile                @relation("ClientThreads", fields: [clientId], references: [id])
-  professional ProfessionalProfile          @relation("ProThreads", fields: [professionalId], references: [id])
-  service      Service?                     @relation("ServiceThreads", fields: [serviceId], references: [id])
-  offering     ProfessionalServiceOffering? @relation("OfferingThreads", fields: [offeringId], references: [id])
+  // ✅ context-scoped
+  contextType MessageThreadContextType
+  contextId   String // bookingId OR serviceId OR offeringId OR professionalId
+
+  // Optional pointers for convenience (nice for joins, not required)
+  bookingId  String?  @unique
+  booking    Booking? @relation("BookingThreads", fields: [bookingId], references: [id], onDelete: SetNull)
+  serviceId  String?
+  offeringId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // quick inbox sorting / preview (optional but recommended)
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+
+  client       ClientProfile       @relation("ClientThreads", fields: [clientId], references: [id])
+  professional ProfessionalProfile @relation("ProThreads", fields: [professionalId], references: [id])
+
+  service  Service?                     @relation("ServiceThreads", fields: [serviceId], references: [id])
+  offering ProfessionalServiceOffering? @relation("OfferingThreads", fields: [offeringId], references: [id])
 
   messages Message[]
   quotes   Quote[]
 
-  @@unique([clientId, professionalId, serviceId])
+  participants MessageThreadParticipant[]
+
+  @@unique([clientId, professionalId, contextType, contextId])
   @@index([professionalId, updatedAt])
   @@index([clientId, updatedAt])
+  @@index([contextType, contextId])
+}
+
+model MessageThreadParticipant {
+  id         String    @id @default(cuid())
+  threadId   String
+  userId     String
+  role       Role
+  lastReadAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User          @relation("UserThreadParticipants", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@index([userId, updatedAt])
+  @@index([threadId, updatedAt])
 }
 
 model Message {
@@ -1177,6 +1221,8 @@ model Message {
   sender User          @relation("UserSentMessages", fields: [senderUserId], references: [id])
 
   attachments MessageAttachment[]
+
+  @@index([threadId, createdAt])
 }
 
 model MessageAttachment {

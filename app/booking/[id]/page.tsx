@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
+import { messageStartHref } from '@/lib/messages'
 
 export const dynamic = 'force-dynamic'
 
@@ -182,8 +183,7 @@ export default async function BookingReceiptPage(props: PageProps) {
   const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
   const proProfileHref = prof?.id ? `/professionals/${encodeURIComponent(prof.id)}` : null
 
-  const proEmail = (prof?.user?.email || '').trim()
-  const messageHref = proEmail ? `mailto:${encodeURIComponent(proEmail)}` : null
+  const messageHref = messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
 
   const duration =
     (Number(booking.totalDurationMinutes ?? 0) > 0
