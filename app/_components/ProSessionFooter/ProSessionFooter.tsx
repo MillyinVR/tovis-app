@@ -4,11 +4,12 @@
 import { usePathname } from 'next/navigation'
 import { useProSession } from './useProSession'
 import NavItem from './NavItem'
+import BadgeDot from '../ClientSessionFooter/BadgeDot'
 
 const ROUTES = {
   home: '/pro/dashboard',
   calendar: '/pro/calendar',
-  messages: '/pro/messages',
+  messages: '/messages',
   profile: '/pro/profile/public-profile',
 } as const
 
@@ -23,7 +24,7 @@ function shouldHideOnPath(pathname: string) {
   return false
 }
 
-export default function ProSessionFooter() {
+export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
   const pathname = usePathname()
   if (!pathname) return null
   if (shouldHideOnPath(pathname)) return null
@@ -85,6 +86,7 @@ export default function ProSessionFooter() {
             href={ROUTES.messages}
             icon="💬"
             active={isActivePath(pathname, ROUTES.messages)}
+            rightSlot={messagesBadge ? <BadgeDot label={messagesBadge} /> : null}
           />
 
           <NavItem label="Profile" href={ROUTES.profile} icon="👤" active={isActivePath(pathname, ROUTES.profile)} />

@@ -1,31 +1,94 @@
 // app/_components/ClientSessionFooter/useClientFooterBadge.ts
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-function normalizeBadge(v: unknown): string | null {
-  const s = typeof v === 'string' ? v.trim() : ''
-  return s ? s : null
+function formatBadgeCount(n: number): string | null {
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n > 99 ? '99+' : String(n)
 }
 
 export function useClientFooterBadge() {
   const [badge, setBadge] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
+  const cancelledRef = useRef(false)
+  const inFlightRef = useRef(false)
 
-    fetch('/api/client/footer', { method: 'GET', cache: 'no-store' })
-      .then((r) => r.json().catch(() => ({})))
-      .then((data: any) => {
-        if (cancelled) return
-        if (data?.ok !== true) return
-        setBadge(normalizeBadge(data?.inboxBadge))
+  async function load() {
+    if (cancelledRef.current) return
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+
+    try {
+      const res = await fetch('/api/messages/unread-count', {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
       })
-      .catch(() => {})
+
+      const data = await res.json().catch(() => ({} as any))
+      if (cancelledRef.current) return
+      if (!res.ok || data?.ok !== true) return
+
+      if (typeof data?.badge === 'string') {
+          setBadge(data.badge)
+        } else {
+          const n = Number(data?.count || 0)
+          setBadge(formatBadgeCount(n))
+        }
+
+    } catch {
+      // ignore transient network errors
+    } finally {
+      inFlightRef.current = false
+    }
+  }
+
+  useEffect(() => {
+    cancelledRef.current = false
+
+    // initial load
+    void load()
+
+    // poll while visible (gentle)
+    let pollId: number | null = null
+
+    const startPolling = () => {
+      if (pollId != null) return
+      pollId = window.setInterval(() => {
+        if (document.visibilityState !== 'visible') return
+        void load()
+      }, 10_000) // every 10s (safe + responsive)
+    }
+
+    const stopPolling = () => {
+      if (pollId == null) return
+      window.clearInterval(pollId)
+      pollId = null
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void load()
+        startPolling()
+      } else {
+        stopPolling()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+
+    // kick polling state based on current visibility
+    onVisibility()
 
     return () => {
-      cancelled = true
+      cancelledRef.current = true
+      stopPolling()
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return badge

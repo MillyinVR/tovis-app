@@ -12,7 +12,7 @@ const ROUTES = {
   // Center CTA: straight into discovery + booking behavior.
   // You can change this later to open a drawer instead.
   book: '/looks?book=1',
-  inbox: '/client/aftercare',
+  messages: '/messages',
   bookings: '/client/bookings',
 } as const
 
@@ -27,7 +27,7 @@ function shouldHideOnPath(pathname: string) {
   return false
 }
 
-export default function ClientSessionFooter({ inboxBadge }: { inboxBadge?: string | null }) {
+export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
   const pathname = usePathname()
   if (!pathname) return null
   if (shouldHideOnPath(pathname)) return null
@@ -35,8 +35,7 @@ export default function ClientSessionFooter({ inboxBadge }: { inboxBadge?: strin
   // If server passed a badge (from /client/layout), use it.
   // Otherwise fetch (useful if you ever show footer on /looks, etc).
   const fetched = useClientFooterBadge()
-  const badge = inboxBadge ?? fetched
-
+  const badge = messagesBadge ?? fetched
   return (
     <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="tovis-glass border-t border-white/10">
@@ -65,12 +64,13 @@ export default function ClientSessionFooter({ inboxBadge }: { inboxBadge?: strin
           </div>
 
           <NavItem
-            label="Inbox"
-            href={ROUTES.inbox}
-            icon="🔔"
-            active={isActivePath(pathname, ROUTES.inbox)}
+            label="Messages"
+            href={ROUTES.messages}
+            icon="💬"
+            active={isActivePath(pathname, ROUTES.messages)}
             rightSlot={badge ? <BadgeDot label={badge} /> : null}
           />
+
 
           <NavItem
             label="Bookings"

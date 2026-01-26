@@ -8,7 +8,7 @@ import FavoriteButton from './FavoriteButton'
 import ShareButton from './ShareButton'
 import { moneyToString } from '@/lib/money'
 import { sanitizeTimeZone } from '@/lib/timeZone'
-
+import { messageStartHref } from '@/lib/messages'
 // If you want the pro footer to show when a pro "views as client"
 import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
 
@@ -186,7 +186,10 @@ export default async function PublicProfessionalProfilePage({
   const loginHref = buildLoginHref(fromPath)
 
   const mustLogin = !viewer
-  const messageHref = mustLogin ? loginHref : `/messages?to=${pro.id}`
+  const messageHref = mustLogin
+  ? loginHref
+  : messageStartHref({ kind: 'PRO_PROFILE', professionalId: pro.id })
+
 
   // sanitize, always (kept here only if your UI wants to display it)
   const proTimeZone = sanitizeTimeZone(pro.timeZone, 'America/Los_Angeles')

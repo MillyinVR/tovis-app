@@ -183,7 +183,11 @@ export default async function BookingReceiptPage(props: PageProps) {
   const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
   const proProfileHref = prof?.id ? `/professionals/${encodeURIComponent(prof.id)}` : null
 
-  const messageHref = messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
+  const messageHref =
+    isClientViewer || isProViewer
+      ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
+      : null
+
 
   const duration =
     (Number(booking.totalDurationMinutes ?? 0) > 0
@@ -352,15 +356,16 @@ export default async function BookingReceiptPage(props: PageProps) {
           >
             Add to calendar
           </a>
-
           {messageHref ? (
-            <a
+            <Link
               href={messageHref}
               className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
             >
-              Message {proName}
-            </a>
+              {isClientViewer ? `Message ${proName}` : 'Message client'}
+            </Link>
+
           ) : null}
+
 
           {proProfileHref ? (
             <Link

@@ -10,8 +10,8 @@ export type AppRole = 'PRO' | 'CLIENT' | 'ADMIN' | 'GUEST'
 
 type Props = {
   role: AppRole
-  // optional client badge (aftercare unread count)
-  clientInboxBadge?: string | null
+  // ✅ unified badge for messages unread count
+  messagesBadge?: string | null
 }
 
 function setFooterSpace(px: number) {
@@ -19,7 +19,7 @@ function setFooterSpace(px: number) {
   document.documentElement.style.setProperty('--app-footer-space', `${px}px`)
 }
 
-export default function FooterShell({ role, clientInboxBadge }: Props) {
+export default function FooterShell({ role, messagesBadge }: Props) {
   const pathname = usePathname()
 
   const hideOnAuth =
@@ -34,7 +34,7 @@ export default function FooterShell({ role, clientInboxBadge }: Props) {
     }
 
     // Match your actual footer needs:
-    // PRO has 72 footer + ~28 center bump = ~100
+    // PRO has ~72 footer + ~28 center bump = ~100
     if (role === 'PRO') {
       setFooterSpace(100)
       return
@@ -51,8 +51,8 @@ export default function FooterShell({ role, clientInboxBadge }: Props) {
 
   if (hideOnAuth) return null
 
-  if (role === 'PRO') return <ProSessionFooterPortal />
-  if (role === 'CLIENT') return <ClientSessionFooterPortal inboxBadge={clientInboxBadge ?? null} />
+  if (role === 'PRO') return <ProSessionFooterPortal messagesBadge={messagesBadge ?? null} />
+  if (role === 'CLIENT') return <ClientSessionFooterPortal messagesBadge={messagesBadge ?? null} />
 
   return null
 }

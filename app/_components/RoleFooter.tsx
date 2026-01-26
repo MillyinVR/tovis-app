@@ -1,14 +1,9 @@
 // app/_components/RoleFooter.tsx
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import FooterShell, { type AppRole } from './FooterShell'
+import { clampSmallCount, getUnreadThreadCountForUser } from '@/lib/messagesUnread'
 
 export const dynamic = 'force-dynamic'
-
-function clampSmallCount(n: number) {
-  if (!Number.isFinite(n) || n <= 0) return null
-  return n > 99 ? '99+' : String(n)
-}
 
 export default async function RoleFooter() {
   const user = await getCurrentUser().catch(() => null)
@@ -22,21 +17,13 @@ export default async function RoleFooter() {
           ? 'ADMIN'
           : 'GUEST'
 
-  // Optional: client aftercare badge (unread count)
-  let clientInboxBadge: string | null = null
+  let messagesBadge: string | null = null
 
-  if (role === 'CLIENT' && user?.clientProfile?.id) {
-    clientInboxBadge = await prisma.clientNotification
-      .count({
-        where: {
-          clientId: user.clientProfile.id,
-          type: 'AFTERCARE',
-          readAt: null,
-        } as any,
-      })
+  if ((role === 'CLIENT' || role === 'PRO') && user?.id) {
+    messagesBadge = await getUnreadThreadCountForUser(user.id)
       .then(clampSmallCount)
-      .catch(() => null) // ✅ best-effort; footer should never fail
+      .catch(() => null)
   }
 
-  return <FooterShell role={role} clientInboxBadge={clientInboxBadge} />
+  return <FooterShell role={role} messagesBadge={messagesBadge} />
 }
