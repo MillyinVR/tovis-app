@@ -1,5 +1,4 @@
 // app/api/messages/resolve/route.ts
-
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
@@ -20,7 +19,15 @@ function viewerIds(user: any) {
   return { clientId, proId }
 }
 
+function asBool(v: unknown) {
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true'
+  return false
+}
+
 export async function POST(req: Request) {
+  const debugId = Math.random().toString(36).slice(2, 9)
+
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
@@ -28,11 +35,15 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}))
     const contextType = asCtxType(body?.contextType)
     const contextId = pickString(body?.contextId)
-    if (!contextType || !contextId) return jsonFail(400, 'Missing contextType/contextId.')
+    const createIfMissing = asBool(body?.createIfMissing) // default false
+
+    if (!contextType || !contextId) {
+      console.warn('[messages/resolve] missing context', { debugId, contextType, contextId })
+      return jsonFail(400, 'Missing contextType/contextId.')
+    }
 
     const { clientId: viewerClientId, proId: viewerProId } = viewerIds(user)
 
-    // Determine clientId + professionalId for the thread based on context
     let clientId: string | null = null
     let professionalId: string | null = null
     let bookingId: string | null = null
@@ -46,12 +57,14 @@ export async function POST(req: Request) {
         select: { id: true, clientId: true, professionalId: true, serviceId: true, offeringId: true },
       })
       if (!b) return jsonFail(404, 'Booking not found.')
+
       clientId = b.clientId
       professionalId = b.professionalId
       serviceId = b.serviceId
       offeringId = b.offeringId ?? null
 
-      const allowed = (viewerClientId && viewerClientId === clientId) || (viewerProId && viewerProId === professionalId)
+      const allowed =
+        (viewerClientId && viewerClientId === clientId) || (viewerProId && viewerProId === professionalId)
       if (!allowed) return jsonFail(403, 'Forbidden.')
     }
 
@@ -61,6 +74,7 @@ export async function POST(req: Request) {
 
       const proId = pickString(body?.professionalId)
       if (!proId) return jsonFail(400, 'Missing professionalId for SERVICE thread.')
+
       clientId = viewerClientId
       professionalId = proId
     }
@@ -74,6 +88,7 @@ export async function POST(req: Request) {
         select: { id: true, professionalId: true, serviceId: true },
       })
       if (!off) return jsonFail(404, 'Offering not found.')
+
       clientId = viewerClientId
       professionalId = off.professionalId
       serviceId = off.serviceId
@@ -81,10 +96,12 @@ export async function POST(req: Request) {
 
     if (contextType === 'PRO_PROFILE') {
       if (!viewerClientId && !viewerProId) return jsonFail(403, 'Unauthorized.')
+
       professionalId = contextId
-      if (viewerClientId) clientId = viewerClientId
-      else {
-        // Pro opening a profile thread with a client requires clientId supplied
+
+      if (viewerClientId) {
+        clientId = viewerClientId
+      } else {
         const cid = pickString(body?.clientId)
         if (!cid) return jsonFail(400, 'Missing clientId for PRO_PROFILE when opened by pro.')
         clientId = cid
@@ -93,8 +110,16 @@ export async function POST(req: Request) {
 
     if (!clientId || !professionalId) return jsonFail(400, 'Could not resolve thread participants.')
 
-    // upsert thread
-    const thread = await prisma.messageThread.upsert({
+    // ✅ Validate both profiles exist (prevents “threads to nowhere”)
+    const [clientProfile, proProfile] = await Promise.all([
+      prisma.clientProfile.findUnique({ where: { id: clientId }, select: { id: true, userId: true } }),
+      prisma.professionalProfile.findUnique({ where: { id: professionalId }, select: { id: true, userId: true } }),
+    ])
+    if (!clientProfile?.userId) return jsonFail(404, 'Client profile missing.')
+    if (!proProfile?.userId) return jsonFail(404, 'Professional profile missing.')
+
+    // ✅ Find existing thread first (do NOT create by default)
+    const existing = await prisma.messageThread.findUnique({
       where: {
         clientId_professionalId_contextType_contextId: {
           clientId,
@@ -103,47 +128,62 @@ export async function POST(req: Request) {
           contextId,
         },
       },
-      update: {
-        bookingId,
-        serviceId,
-        offeringId,
-      },
-      create: {
-        clientId,
-        professionalId,
-        contextType: contextType as any,
-        contextId,
-        bookingId,
-        serviceId,
-        offeringId,
-        participants: {
-          create: [
-            { userId: user.id, role: user.role as any },
-            // create the other participant too (deterministic)
-          ],
-        },
-      },
-      select: { id: true, contextType: true, contextId: true, clientId: true, professionalId: true },
+      select: { id: true },
     })
 
-    // ensure both participants exist (client + pro userIds)
-    const [clientUser, proUser] = await Promise.all([
-      prisma.clientProfile.findUnique({ where: { id: clientId }, select: { userId: true } }),
-      prisma.professionalProfile.findUnique({ where: { id: professionalId }, select: { userId: true } }),
-    ])
+    if (existing?.id) {
+      // Ensure both participants exist (idempotent)
+      await prisma.$transaction([
+        prisma.messageThreadParticipant.upsert({
+          where: { threadId_userId: { threadId: existing.id, userId: clientProfile.userId } },
+          update: {},
+          create: { threadId: existing.id, userId: clientProfile.userId, role: 'CLIENT' as any },
+        }),
+        prisma.messageThreadParticipant.upsert({
+          where: { threadId_userId: { threadId: existing.id, userId: proProfile.userId } },
+          update: {},
+          create: { threadId: existing.id, userId: proProfile.userId, role: 'PRO' as any },
+        }),
+      ])
 
-    const needed = [clientUser?.userId, proUser?.userId].filter(Boolean) as string[]
-    for (const uid of needed) {
-      await prisma.messageThreadParticipant.upsert({
-        where: { threadId_userId: { threadId: thread.id, userId: uid } },
-        update: {},
-        create: { threadId: thread.id, userId: uid, role: uid === proUser?.userId ? 'PRO' : 'CLIENT' },
-      })
+      return jsonOk({ ok: true, thread: { id: existing.id } })
     }
 
-    return jsonOk({ ok: true, thread })
+    if (!createIfMissing) {
+      // ✅ do not create an empty thread
+      console.info('[messages/resolve] no existing thread; not creating', { debugId, contextType, contextId })
+      return jsonOk({ ok: true, thread: null })
+    }
+
+    // ✅ Create thread + participants atomically (no partial create)
+    const created = await prisma.$transaction(async (tx) => {
+      const t = await tx.messageThread.create({
+        data: {
+          clientId,
+          professionalId,
+          contextType: contextType as any,
+          contextId,
+          bookingId,
+          serviceId,
+          offeringId,
+        },
+        select: { id: true },
+      })
+
+      await tx.messageThreadParticipant.createMany({
+        data: [
+          { threadId: t.id, userId: clientProfile.userId, role: 'CLIENT' as any },
+          { threadId: t.id, userId: proProfile.userId, role: 'PRO' as any },
+        ],
+        skipDuplicates: true,
+      })
+
+      return t
+    })
+
+    return jsonOk({ ok: true, thread: { id: created.id } })
   } catch (e: any) {
-    console.error('POST /api/messages/resolve', e)
+    console.error('POST /api/messages/resolve', { debugId, err: e?.message || e })
     return jsonFail(500, e?.message || 'Internal error')
   }
 }

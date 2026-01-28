@@ -23,9 +23,13 @@ export default function ThreadClient(props: { threadId: string; myUserId: string
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
 
   const lastId = useMemo(() => messages[messages.length - 1]?.id ?? null, [messages])
+
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const cancelledRef = useRef(false)
+  const inFlightRef = useRef(false)
 
   function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
@@ -43,25 +47,36 @@ export default function ThreadClient(props: { threadId: string; myUserId: string
   }
 
   async function fetchLatest() {
+    if (cancelledRef.current) return
+    if (inFlightRef.current) return
+    inFlightRef.current = true
     setLoading(true)
+
     try {
       const res = await fetch(`/api/messages/threads/${encodeURIComponent(threadId)}`, {
         method: 'GET',
         cache: 'no-store',
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok || !data?.ok) return
+
+      if (!res.ok || !data?.ok) {
+        setErr(data?.error || 'Could not refresh messages.')
+        return
+      }
 
       const next: Msg[] = (data.messages || []) as Msg[]
       const nextLast = next[next.length - 1]?.id ?? null
 
-      // Only update if something actually changed
       if (nextLast && nextLast !== lastId) {
         setMessages(next)
         queueMicrotask(() => scrollToBottom('auto'))
-        markRead()
       }
+
+      // If we can see the thread, we consider it read
+      void markRead()
+      setErr(null)
     } finally {
+      inFlightRef.current = false
       setLoading(false)
     }
   }
@@ -71,6 +86,8 @@ export default function ThreadClient(props: { threadId: string; myUserId: string
     if (!trimmed || sending) return
 
     setSending(true)
+    setErr(null)
+
     try {
       const res = await fetch(`/api/messages/threads/${encodeURIComponent(threadId)}`, {
         method: 'POST',
@@ -78,49 +95,88 @@ export default function ThreadClient(props: { threadId: string; myUserId: string
         body: JSON.stringify({ body: trimmed }),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok || !data?.ok) return
 
-      // optimistic-ish append (server returns message)
+      if (!res.ok || !data?.ok) {
+        setErr(data?.error || 'Send failed.')
+        return
+      }
+
       const msg = data.message as Msg
       setText('')
       setMessages((prev) => [...prev, msg])
       queueMicrotask(() => scrollToBottom('auto'))
-      markRead()
+      void markRead()
     } finally {
       setSending(false)
     }
   }
 
-  // mark read on mount + focus
   useEffect(() => {
-    markRead()
-    // jump to bottom on first render
-    queueMicrotask(() => scrollToBottom('auto'))
+    cancelledRef.current = false
 
-    const onFocus = () => markRead()
+    // initial render: scroll down + mark read
+    queueMicrotask(() => scrollToBottom('auto'))
+    void markRead()
+
+    const onFocus = () => void markRead()
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    return () => {
+      cancelledRef.current = true
+      window.removeEventListener('focus', onFocus)
+    }
   }, [threadId])
 
-// polling (every 4s)
-useEffect(() => {
-  const t = window.setInterval(() => {
-    fetchLatest()
-  }, 4000)
+  // Poll only while visible
+  useEffect(() => {
+    let t: number | null = null
 
-  return () => window.clearInterval(t)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [threadId])
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      void fetchLatest()
+    }
+
+    const start = () => {
+      if (t != null) return
+      t = window.setInterval(tick, 4000)
+    }
+    const stop = () => {
+      if (t == null) return
+      window.clearInterval(t)
+      t = null
+    }
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchLatest()
+        start()
+      } else {
+        stop()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVis)
+    onVis()
+
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVis)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, lastId])
 
   return (
     <div className="mt-4">
+      {err ? (
+        <div className="mb-2 rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-semibold text-textSecondary">
+          {err}
+        </div>
+      ) : null}
+
       <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary">
         <div className="max-h-[60vh] overflow-auto px-4 py-3">
           {messages.length === 0 ? (
-            <div className="py-8 text-center text-[12px] font-semibold text-textSecondary">
-              No messages yet. Start it off.
-            </div>
+            <div className="py-8 text-center text-[12px] font-semibold text-textSecondary">No messages yet. Start it off.</div>
           ) : (
             <div className="grid gap-2">
               {messages.map((m) => {
@@ -134,9 +190,7 @@ useEffect(() => {
                 return (
                   <div key={m.id} className={`flex ${align}`}>
                     <div className="max-w-[85%]">
-                      <div className={`rounded-card px-4 py-2 text-[13px] font-semibold ${bubble}`}>
-                        {m.body || ''}
-                      </div>
+                      <div className={`rounded-card px-4 py-2 text-[13px] font-semibold ${bubble}`}>{m.body || ''}</div>
                       <div className={`mt-1 text-[10px] font-semibold text-textSecondary ${mine ? 'text-right' : ''}`}>
                         {fmtTime(created)}
                       </div>
@@ -157,14 +211,14 @@ useEffect(() => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  send()
+                  void send()
                 }
               }}
               placeholder="Message…"
               className="h-11 w-full rounded-full border border-white/10 bg-bgPrimary px-4 text-[13px] font-semibold text-textPrimary outline-none placeholder:text-textSecondary focus:border-white/20"
             />
             <button
-              onClick={send}
+              onClick={() => void send()}
               disabled={!text.trim() || sending}
               className="h-11 shrink-0 rounded-full bg-accentPrimary px-5 text-[13px] font-black text-bgPrimary disabled:opacity-50"
             >
@@ -174,11 +228,7 @@ useEffect(() => {
 
           <div className="mt-2 flex items-center justify-between text-[11px] font-semibold text-textSecondary">
             <span>{loading ? 'Updating…' : ' '}</span>
-            <button
-              onClick={() => fetchLatest()}
-              className="font-black text-textPrimary hover:opacity-80"
-              type="button"
-            >
+            <button onClick={() => void fetchLatest()} className="font-black text-textPrimary hover:opacity-80" type="button">
               Refresh
             </button>
           </div>

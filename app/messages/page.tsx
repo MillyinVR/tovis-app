@@ -44,9 +44,12 @@ export default async function MessagesInboxPage() {
   if (!user) redirect('/login?from=/messages')
 
   const threads = await prisma.messageThread.findMany({
-    where: { participants: { some: { userId: user.id } } },
-    orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
-    take: 60,
+  where: {
+    participants: { some: { userId: user.id } },
+    lastMessageAt: { not: null }, // ✅ add this
+  },
+  orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
+  take: 60,
     select: {
       id: true,
       contextType: true,

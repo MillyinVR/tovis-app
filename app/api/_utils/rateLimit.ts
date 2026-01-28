@@ -11,6 +11,8 @@ type RateLimitBucket =
   | 'looks:comment'
   | 'consultation:decision'
   | 'google:proxy'
+  | 'messages:send'
+
 
 type LimitConfig = {
   tokens: number
@@ -25,6 +27,7 @@ const LIMITS: Record<RateLimitBucket, LimitConfig> = {
   'looks:comment': { tokens: 12, window: '1 m', prefix: 'rl:looks:comment' },
   'consultation:decision': { tokens: 8, window: '5 m', prefix: 'rl:consultation:decision' },
   'google:proxy': { tokens: 60, window: '1 m', prefix: 'rl:google:proxy' },
+  'messages:send': { tokens: 12, window: '1 m', prefix: 'rl:messages:send' },
 }
 
 const redis = Redis.fromEnv()
