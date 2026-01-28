@@ -16,7 +16,17 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 import { safeJson } from '../_utils/http'
-import { startOfDay, startOfMonth, startOfWeek, toDateInputValue, toIso, toTimeInputValue, roundUpToNext15, clamp } from '../_utils/date'
+import {
+  addDays,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  toDateInputValue,
+  toIso,
+  toTimeInputValue,
+  roundUpToNext15,
+  clamp,
+} from '../_utils/date'
 import {
   PX_PER_MINUTE,
   SNAP_MINUTES,
@@ -73,12 +83,12 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [needsTimeZoneSetup, setNeedsTimeZoneSetup] = useState(false)
   const tzSetupSavedRef = useRef(false)
 
-  // Working hours are now per-locationType (SALON vs MOBILE)
+  // Working hours are per-locationType (SALON vs MOBILE)
   const [canSalon, setCanSalon] = useState(true)
   const [canMobile, setCanMobile] = useState(false)
   const [activeLocationType, setActiveLocationType] = useState<LocationType>('SALON')
 
-  const [workingHours, setWorkingHours] = useState<WorkingHoursJson>(null) // hours for ACTIVE locationType
+  const [workingHours, setWorkingHours] = useState<WorkingHoursJson>(null)
   const [stats, setStats] = useState<CalendarStats>(null)
 
   const [loading, setLoading] = useState(true)
@@ -104,6 +114,10 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [selectedServiceId, setSelectedServiceId] = useState<string>('')
   const [durationMinutes, setDurationMinutes] = useState<number>(60)
   const [allowOutsideHours, setAllowOutsideHours] = useState(false)
+
+  // ✅ NEW: separate state for ManagementModal actions (don’t fight booking modal save state)
+  const [managementActionBusyId, setManagementActionBusyId] = useState<string | null>(null)
+  const [managementActionError, setManagementActionError] = useState<string | null>(null)
 
   // drag + resize
   const dragEventIdRef = useRef<string | null>(null)
@@ -268,7 +282,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       setLoading(true)
       setError(null)
 
-      // 1) Load calendar core (events, tz, canSalon/canMobile, stats, autoAccept, management)
+      // 1) core
       const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
       const data = await safeJson(res)
 
@@ -298,7 +312,6 @@ export function useCalendarData({ view, currentDate }: Args) {
       setCanSalon(nextCanSalon)
       setCanMobile(nextCanMobile)
 
-      // Keep active tab valid as permissions change
       setActiveLocationType((prev) => pickLocationType(nextCanSalon, nextCanMobile, prev))
 
       const bookingEvents = (Array.isArray(data?.events) ? data.events : []) as CalendarEvent[]
@@ -318,7 +331,7 @@ export function useCalendarData({ view, currentDate }: Args) {
         setManagement({ todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
       }
 
-      // 2) Range-based blocked events
+      // 2) range blocks
       const { from, to } = rangeForViewUtcInProTz(view, currentDate, nextTz)
 
       const blocksRes = await fetch(
@@ -331,15 +344,14 @@ export function useCalendarData({ view, currentDate }: Args) {
       const blocks = (blocksRes.ok && Array.isArray(blocksData?.blocks) ? blocksData.blocks : []) as BlockRow[]
       const blockEvents = blocks.map(blockToEvent)
 
-      // 3) Working hours for ACTIVE location type (SALON/MOBILE)
+      // 3) working hours for ACTIVE type
       const effectiveLocationType = pickLocationType(nextCanSalon, nextCanMobile, activeLocationType)
       const nextHours = await loadWorkingHoursFor(effectiveLocationType)
 
       if (seq !== loadSeqRef.current) return
-
       setWorkingHours(nextHours)
 
-      // 4) Merge + sort
+      // 4) merge + sort
       const nextEvents = [...blockEvents, ...bookingEvents].sort(
         (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
       )
@@ -364,7 +376,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentDate])
 
-  // Reload workingHours when the user switches SALON/MOBILE
+  // Reload workingHours when switching SALON/MOBILE
   useEffect(() => {
     let cancelled = false
     async function loadHoursOnly() {
@@ -382,7 +394,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLocationType])
 
-  // blocked minutes today computed locally (timezone-aware)
+  // blocked minutes today (timezone-aware)
   const blockedMinutesToday = useMemo(() => {
     const tz = sanitizeTimeZone(timeZone, 'UTC')
     const dayStartUtc = startOfDayUtcInTimeZone(new Date(), tz)
@@ -452,6 +464,51 @@ export function useCalendarData({ view, currentDate }: Args) {
     if (!bid) return
     setEditBlockId(bid)
     setEditBlockOpen(true)
+  }
+
+  // ✅ OPTION B: approve/deny directly from the ManagementModal by booking id
+  async function setBookingStatusById(args: { bookingId: string; status: 'ACCEPTED' | 'CANCELLED' }) {
+    const { bookingId, status } = args
+    if (!bookingId) return
+    if (managementActionBusyId) return
+
+    setManagementActionBusyId(bookingId)
+    setManagementActionError(null)
+    // inside setBookingStatusById, before fetch(...)
+    const current = eventsRef.current.find((x) => x.id === bookingId)
+    const currentStatus = String((current as any)?.status || '').toUpperCase()
+
+    if (currentStatus && currentStatus === status) {
+      // already in that status; don't spam API / don't trigger "No changes provided."
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, notifyClient: true }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(data?.error || 'Failed to update booking.')
+
+      // refresh counts + lists (overlay stays open)
+      await loadCalendar()
+    } catch (e: any) {
+      console.error(e)
+      setManagementActionError(e?.message || 'Failed to update booking.')
+      setTimeout(() => setManagementActionError(null), 3500)
+    } finally {
+      setManagementActionBusyId(null)
+    }
+  }
+
+  async function approveBookingById(bookingId: string) {
+    return setBookingStatusById({ bookingId, status: 'ACCEPTED' })
+  }
+
+  async function denyBookingById(bookingId: string) {
+    return setBookingStatusById({ bookingId, status: 'CANCELLED' })
   }
 
   // Booking modal
@@ -680,14 +737,10 @@ export function useCalendarData({ view, currentDate }: Args) {
       } else {
         const current = eventsRef.current.find((x) => x.id === pendingChange.eventId)
         const startIso =
-          pendingChange.kind === 'move'
-            ? pendingChange.nextStartIso
-            : current?.startsAt ?? pendingChange.original.startsAt
+          pendingChange.kind === 'move' ? pendingChange.nextStartIso : current?.startsAt ?? pendingChange.original.startsAt
 
         const dur =
-          pendingChange.kind === 'resize'
-            ? pendingChange.nextTotalDurationMinutes
-            : eventDurationMinutes(pendingChange.original)
+          pendingChange.kind === 'resize' ? pendingChange.nextTotalDurationMinutes : eventDurationMinutes(pendingChange.original)
 
         const endIso = new Date(new Date(startIso).getTime() + dur * 60_000).toISOString()
 
@@ -771,9 +824,7 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     setEvents((prev) =>
       prev.map((e) =>
-        e.id === eventId
-          ? { ...e, startsAt: nextStart.toISOString(), endsAt: nextEnd.toISOString(), durationMinutes: dur }
-          : e,
+        e.id === eventId ? { ...e, startsAt: nextStart.toISOString(), endsAt: nextEnd.toISOString(), durationMinutes: dur } : e,
       ),
     )
 
@@ -811,16 +862,14 @@ export function useCalendarData({ view, currentDate }: Args) {
     const endMinutes = snapMinutes(y / PX_PER_MINUTE)
     const rawDur = endMinutes - s.startMinutes
 
-    // ✅ Never allow 0/negative durations while resizing
+    // never allow 0/negative durations
     const dur = Math.max(SNAP_MINUTES, roundTo15(rawDur))
 
     const tz = sanitizeTimeZone(timeZone, 'UTC')
     const start = utcFromDayAndMinutesInTimeZone(s.day, s.startMinutes, tz)
     const end = new Date(start.getTime() + dur * 60_000)
 
-    setEvents((prev) =>
-      prev.map((ev) => (ev.id === s.eventId ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur } : ev)),
-    )
+    setEvents((prev) => prev.map((ev) => (ev.id === s.eventId ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur } : ev)))
   }
 
   function onResizeEnd() {
@@ -842,11 +891,7 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     if (dur === s.originalDuration) {
       const rollbackEnd = new Date(start.getTime() + s.originalDuration * 60_000)
-      setEvents((prev) =>
-        prev.map((x) =>
-          x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x,
-        ),
-      )
+      setEvents((prev) => prev.map((x) => (x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x)))
       return
     }
 
@@ -895,9 +940,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     void loadCalendar()
   }
 
-  const isOverlayOpen = Boolean(
-    confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen,
-  )
+  const isOverlayOpen = Boolean(confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen)
 
   return {
     view,
@@ -909,13 +952,11 @@ export function useCalendarData({ view, currentDate }: Args) {
     needsTimeZoneSetup,
     blockedMinutesToday,
 
-    // ✅ New: location mode awareness
     canSalon,
     canMobile,
     activeLocationType,
     setActiveLocationType,
 
-    // Working hours for the ACTIVE location type
     workingHours,
     setWorkingHours,
 
@@ -980,6 +1021,12 @@ export function useCalendarData({ view, currentDate }: Args) {
     submitChanges,
     approveBooking,
     denyBooking,
+
+    // ✅ NEW: for ManagementModal Option B
+    approveBookingById,
+    denyBookingById,
+    managementActionBusyId,
+    managementActionError,
 
     openBookingOrBlock,
     closeBooking,

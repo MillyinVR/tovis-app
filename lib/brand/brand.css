@@ -1,21 +1,21 @@
 /* lib/brand/brand.css */
 /* Defaults (in case provider hasn’t mounted yet) */
 :root {
-  --bg-primary: 15 17 21;
-  --bg-secondary: 20 22 28;
-  --text-primary: 230 232 237;
-  --text-secondary: 182 187 196;
-  --surface-glass: 230 232 237;
-  --accent-primary: 201 162 77;
-  --accent-primary-hover: 226 200 120;
-  --micro-accent: 207 166 160;
+  --bg-primary: 10 12 16;
+  --bg-secondary: 16 19 25;
+  --text-primary: 236 238 242;
+  --text-secondary: 170 176 188;
+  --surface-glass: 255 255 255;
+  --accent-primary: 212 173 88;
+  --accent-primary-hover: 235 206 138;
+  --micro-accent: 208 168 164;
 
-  --glass-blur: 20px;
-  --glass-opacity: 0.08;
+  --glass-blur: 24px;
+  --glass-opacity: 0.10;
   --shadow-color: 0 0 0;
 
   --radius-app-icon: 28px;
-  --radius-card: 20px;
+  --radius-card: 22px;
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
     "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji",
@@ -30,11 +30,11 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Reusable “glass” surface utility (works with plain CSS or className) */
+/* Keep this as a basic generic utility */
 .brand-glass {
   background: rgb(var(--surface-glass) / var(--glass-opacity));
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid rgb(var(--surface-glass) / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.10);
   border-radius: var(--radius-card);
 }

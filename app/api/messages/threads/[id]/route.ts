@@ -11,10 +11,7 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(
-  req: Request,
-  ctx: { params: { id: string } | Promise<{ id: string }> },
-) {
+export async function GET(req: Request, ctx: { params: { id: string } | Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
@@ -23,7 +20,7 @@ export async function GET(
     if (!id) return jsonFail(400, 'Missing id.')
 
     const url = new URL(req.url)
-    const cursor = pickString(url.searchParams.get('cursor'))
+    const cursor = pickString(url.searchParams.get('cursor')) ?? null
     const take = 40
 
     const thread = await prisma.messageThread.findUnique({
@@ -33,6 +30,7 @@ export async function GET(
         participants: { where: { userId: user.id }, select: { userId: true }, take: 1 },
       },
     })
+
     if (!thread) return jsonFail(404, 'Thread not found.')
     if (!thread.participants.length) return jsonFail(403, 'Forbidden.')
 
@@ -61,10 +59,7 @@ export async function GET(
   }
 }
 
-export async function POST(
-  req: Request,
-  ctx: { params: { id: string } | Promise<{ id: string }> },
-) {
+export async function POST(req: Request, ctx: { params: { id: string } | Promise<{ id: string }> }) {
   const debugId = Math.random().toString(36).slice(2, 9)
 
   try {
@@ -74,18 +69,17 @@ export async function POST(
     const { id } = await Promise.resolve(ctx.params)
     if (!id) return jsonFail(400, 'Missing id.')
 
-    // ✅ Rate limit (user-first, then IP)
+    // ✅ Rate limit BEFORE parsing + DB work
     const identity = await rateLimitIdentity(user.id)
     const limited = await enforceRateLimit({
       bucket: 'messages:send',
       identity,
-      keySuffix: id, // per-thread shaping
+      keySuffix: id, // per-thread protection
     })
     if (limited) return limited
 
-    const body = await req.json().catch(() => ({}))
+    const body = await req.json().catch(() => ({} as any))
 
-    // ✅ Correct null-safe pick + trim (no hacks, TS is happy)
     const raw = pickString(body?.body)
     const text = (raw ?? '').trim()
 
@@ -97,14 +91,15 @@ export async function POST(
         where: { id },
         select: {
           id: true,
-          participants: { where: { userId: user.id }, select: { userId: true }, take: 1 },
+          participants: { where: { userId: user!.id }, select: { userId: true }, take: 1 },
         },
       })
+
       if (!thread) return { ok: false as const, status: 404, error: 'Thread not found.' }
       if (!thread.participants.length) return { ok: false as const, status: 403, error: 'Forbidden.' }
 
       const msg = await tx.message.create({
-        data: { threadId: id, senderUserId: user.id, body: text },
+        data: { threadId: id, senderUserId: user!.id, body: text },
         select: { id: true, body: true, createdAt: true, senderUserId: true },
       })
 
@@ -113,9 +108,8 @@ export async function POST(
         data: { lastMessageAt: msg.createdAt, lastMessagePreview: text.slice(0, 140) },
       })
 
-      // sender has read their own message
       await tx.messageThreadParticipant.update({
-        where: { threadId_userId: { threadId: id, userId: user.id } },
+        where: { threadId_userId: { threadId: id, userId: user!.id } },
         data: { lastReadAt: msg.createdAt },
       })
 
@@ -123,11 +117,7 @@ export async function POST(
     })
 
     if (!result.ok) {
-      console.warn('[messages/thread send] blocked', {
-        debugId,
-        status: result.status,
-        error: result.error,
-      })
+      console.warn('[messages/thread send] blocked', { debugId, status: result.status, error: result.error })
       return jsonFail(result.status, result.error)
     }
 

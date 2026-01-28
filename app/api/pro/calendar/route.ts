@@ -116,6 +116,7 @@ export async function GET() {
       const end = addMinutes(start, baseDuration + buffer)
 
       const status = String(b.status || '').toUpperCase()
+
       const firstItemName =
         Array.isArray(b.serviceItems) && b.serviceItems.length
           ? String(b.serviceItems[0]?.service?.name || '').trim()
@@ -129,7 +130,7 @@ export async function GET() {
       const clientName = fn || ln ? `${fn} ${ln}`.trim() : email || 'Client'
 
       return {
-        id: String(b.id),
+        id: String(b.id), // ✅ booking id is clean
         kind: 'BOOKING' as const,
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
@@ -161,7 +162,7 @@ export async function GET() {
       const title = bl.note?.trim() ? bl.note.trim() : 'Blocked time'
 
       return {
-        id: `block_${String(bl.id)}`,
+        id: `block_${String(bl.id)}`, // ✅ block id is prefixed
         kind: 'BLOCK' as const,
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
@@ -198,7 +199,10 @@ export async function GET() {
       return new Date(e.startsAt).getTime() >= now.getTime()
     })
 
-    const waitlistTodayEvents = bookingEvents.filter((e) => isToday(e.startsAt) && String(e.status).toUpperCase() === 'WAITLIST')
+    const waitlistTodayEvents = bookingEvents.filter(
+      (e) => isToday(e.startsAt) && String(e.status || '').toUpperCase() === 'WAITLIST',
+    )
+
     const blockedTodayEvents = blockEvents.filter((e) => isToday(e.startsAt))
     const blockedMinutesToday = blockedTodayEvents.reduce((acc, e) => acc + (e.durationMinutes || 0), 0)
 

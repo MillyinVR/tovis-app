@@ -1,4 +1,3 @@
-// app/pro/calendar/page.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -27,7 +26,6 @@ export default function ProCalendarPage() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
 
   const cal = useCalendarData({ view, currentDate })
-
   const timeZone = pickTimeZone(cal.timeZone)
 
   const visibleDays = useMemo(() => {
@@ -79,7 +77,6 @@ export default function ProCalendarPage() {
             activeLocationType={cal.activeLocationType}
             onChangeLocationType={(next) => cal.setActiveLocationType(next)}
             onSavedAny={() => {
-              // ensure grid refreshes if it uses workingHours
               cal.reload()
             }}
           />
@@ -169,7 +166,7 @@ export default function ProCalendarPage() {
         activeKey={cal.managementKey}
         management={cal.management}
         onClose={cal.closeManagement}
-        onSetKey={cal.setManagementKey}
+        onSetKey={(k) => cal.setManagementKey(k)}
         onPickEvent={(ev) => {
           cal.closeManagement()
           cal.openBookingOrBlock(ev.id)
@@ -182,6 +179,10 @@ export default function ProCalendarPage() {
           cal.closeManagement()
           void cal.oneClickBlockFullDay(new Date())
         }}
+        onApproveBookingId={(bookingId: string) => void cal.approveBookingById(bookingId)}
+        onDenyBookingId={(bookingId: string) => void cal.denyBookingById(bookingId)}
+        actionBusyId={cal.managementActionBusyId}
+        actionError={cal.managementActionError}
       />
 
       <ConfirmChangeModal

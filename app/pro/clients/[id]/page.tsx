@@ -8,6 +8,7 @@ import EditAlertBannerForm from './EditAlertBannerForm'
 import { moneyToString } from '@/lib/money'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import type { ReactNode } from 'react'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +26,14 @@ function formatDate(d: Date | string) {
 function safeUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
+
+function buildProToClientMessageHref(args: { proId: string; clientId: string }) {
+  const { proId, clientId } = args
+  return `/messages/start?contextType=PRO_PROFILE&contextId=${encodeURIComponent(proId)}&clientId=${encodeURIComponent(
+    clientId,
+  )}`
+}
+
 
 function statusTone(status: unknown) {
   const s = safeUpper(status)
@@ -59,8 +68,8 @@ function SectionCard({
   id: string
   title: string
   subtitle?: string
-  right?: React.ReactNode
-  children: React.ReactNode
+  right?: ReactNode
+  children: ReactNode
 }) {
   return (
     <section id={id} className="grid gap-3">
@@ -127,6 +136,7 @@ export default async function ClientDetailPage(props: {
 
   // On this page, since it's gated, internal linking is safe.
   const canSeeClient = true
+  const messageHref = buildProToClientMessageHref({ proId, clientId })
 
   const sp = (await props.searchParams?.catch(() => ({} as SearchParams))) ?? ({} as SearchParams)
   const bookingQ = firstParam(sp.q).trim()
@@ -324,6 +334,13 @@ export default async function ClientDetailPage(props: {
 
             <div className="flex flex-wrap gap-2 md:justify-end">
               <a
+                href={messageHref}
+                className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+              >
+                Message
+              </a>
+
+              <a
                 href={`/pro/bookings/new?clientId=${encodeURIComponent(client.id)}`}
                 className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
               >
@@ -334,6 +351,7 @@ export default async function ClientDetailPage(props: {
                 <EditAlertBannerForm clientId={client.id} initialAlertBanner={client.alertBanner ?? null} />
               </div>
             </div>
+
           </div>
         </div>
       </header>
