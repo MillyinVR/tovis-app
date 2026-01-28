@@ -58,13 +58,19 @@ function prettyServiceTitle(title?: string | null) {
   return t || 'Appointment'
 }
 
-// ✅ Booking events have clean id, blocks have "block_<id>".
-// This guarantees approve/deny/message never accidentally uses a block id.
+/**
+ * Booking events have clean id, blocks have "block_<id>".
+ * This guarantees approve/deny/message never accidentally uses a block id.
+ */
 function bookingIdFor(ev: CalendarEvent): string | null {
   const raw = String((ev as any)?.bookingId || (ev as any)?.apiId || ev.id || '').trim()
   if (!raw) return null
   if (raw.startsWith('block_')) return null
   return raw.replace(/^booking[_:]/, '').trim()
+}
+
+function buttonBase() {
+  return 'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass focus:outline-none focus:ring-2 focus:ring-white/15'
 }
 
 export function ManagementModal(props: {
@@ -79,7 +85,7 @@ export function ManagementModal(props: {
 
   onApproveBookingId?: (bookingId: string) => void | Promise<void>
   onDenyBookingId?: (bookingId: string) => void | Promise<void>
-  actionBusyId?: string | null
+  actionBusyId?: string | null // expects bookingId for booking actions
   actionError?: string | null
 }) {
   const {
@@ -103,13 +109,28 @@ export function ManagementModal(props: {
   const activeList = management?.[activeKey] || []
 
   const sortedList = useMemo(() => {
-    // Premium touch: pending sorted a bit more intentionally
-    if (activeKey !== 'pendingRequests') return activeList
     const copy = [...activeList]
+
+    // Premium touch: in Pending, keep true pending at top if statuses vary
+    if (activeKey === 'pendingRequests') {
+      copy.sort((a, b) => {
+        const as = String((a as any)?.status || '').toUpperCase()
+        const bs = String((b as any)?.status || '').toUpperCase()
+
+        const aPri = as === 'PENDING' ? 0 : 1
+        const bPri = bs === 'PENDING' ? 0 : 1
+
+        if (aPri !== bPri) return aPri - bPri
+        return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
+      })
+      return copy
+    }
+
     copy.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
     return copy
   }, [activeKey, activeList])
 
+  // Close on Escape (only active when open)
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -119,6 +140,7 @@ export function ManagementModal(props: {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
+  // Lock body scroll behind modal (only when open)
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
@@ -128,6 +150,7 @@ export function ManagementModal(props: {
     }
   }, [open])
 
+  // Reset deny confirm when closing or switching lists
   useEffect(() => {
     if (!open) {
       setConfirmDenyId(null)
@@ -147,6 +170,7 @@ export function ManagementModal(props: {
       onMouseDown={onClose}
       role="dialog"
       aria-modal="true"
+      aria-label="Management"
     >
       <div
         className="tovis-glass w-full max-w-200 overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-2xl"
@@ -169,17 +193,16 @@ export function ManagementModal(props: {
             <div className="flex items-center gap-2">
               {activeKey === 'blockedToday' ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={onCreateBlockNow}
-                    className="rounded-full bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
-                  >
+                  <button type="button" onClick={onCreateBlockNow} className={buttonBase()}>
                     + Block time
                   </button>
                   <button
                     type="button"
                     onClick={onBlockFullDayToday}
-                    className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                    className={[
+                      'rounded-full border border-white/10 bg-transparent px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass',
+                      'focus:outline-none focus:ring-2 focus:ring-white/15',
+                    ].join(' ')}
                   >
                     Block full day
                   </button>
@@ -189,7 +212,8 @@ export function ManagementModal(props: {
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                className={buttonBase()}
+                aria-label="Close management"
               >
                 Close
               </button>
@@ -207,11 +231,12 @@ export function ManagementModal(props: {
                     type="button"
                     onClick={() => onSetKey(k)}
                     className={[
-                      'rounded-full border px-3 py-1.5 text-[12px] font-black transition',
+                      'rounded-full border px-3 py-1.5 text-[12px] font-black transition focus:outline-none focus:ring-2 focus:ring-white/15',
                       active
                         ? 'border-white/10 bg-bgPrimary text-textPrimary'
                         : 'border-white/10 bg-transparent text-textSecondary hover:bg-surfaceGlass hover:text-textPrimary',
                     ].join(' ')}
+                    aria-pressed={active}
                   >
                     {titleFor(k)} <span className="text-textSecondary">({management[k]?.length ?? 0})</span>
                   </button>
@@ -235,12 +260,12 @@ export function ManagementModal(props: {
             <div className="grid gap-3">
               {sortedList.map((ev) => {
                 const isBlock = isBlockedEvent(ev)
-                const busy = Boolean(actionBusyId && actionBusyId === ev.id)
-
                 const clientName = (ev.clientName || '').trim()
                 const timeLabel = formatStartsAt(ev.startsAt)
-
                 const bookingId = bookingIdFor(ev)
+
+                // ✅ Busy should match bookingId (not ev.id), since actions are booking-based
+                const busy = Boolean(actionBusyId && bookingId && actionBusyId === bookingId)
 
                 return (
                   <div
@@ -268,7 +293,8 @@ export function ManagementModal(props: {
                           </div>
 
                           <div className="mt-1 truncate text-[12px] font-semibold text-textSecondary">
-                            {isBlock ? ev.clientName || ev.note || 'Personal time' : clientName || 'Client'} • {timeLabel}
+                            {isBlock ? ev.clientName || (ev as any)?.note || 'Personal time' : clientName || 'Client'} •{' '}
+                            {timeLabel}
                           </div>
                         </div>
                       </div>
@@ -283,7 +309,8 @@ export function ManagementModal(props: {
                         <button
                           type="button"
                           onClick={() => onPickEvent(ev)}
-                          className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                          className={buttonBase()}
+                          aria-label={activeKey === 'pendingRequests' && !isBlock ? 'Review or reschedule' : 'Open'}
                         >
                           {activeKey === 'pendingRequests' && !isBlock ? 'Review / Reschedule' : 'Open'}
                         </button>
@@ -291,7 +318,8 @@ export function ManagementModal(props: {
                         {canShowMessage(activeKey, ev) && bookingId ? (
                           <a
                             href={messageHrefForBooking(bookingId)}
-                            className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                            className={buttonBase()}
+                            aria-label="Message client"
                           >
                             Message
                           </a>
@@ -306,10 +334,14 @@ export function ManagementModal(props: {
                                 type="button"
                                 disabled={busy}
                                 onClick={() => setConfirmDenyId(null)}
-                                className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textSecondary hover:bg-surfaceGlass disabled:opacity-50"
+                                className={[
+                                  'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textSecondary hover:bg-surfaceGlass disabled:opacity-50',
+                                  'focus:outline-none focus:ring-2 focus:ring-white/15',
+                                ].join(' ')}
                               >
                                 Cancel
                               </button>
+
                               <button
                                 type="button"
                                 disabled={busy || !onDenyBookingId || !bookingId}
@@ -317,7 +349,10 @@ export function ManagementModal(props: {
                                   if (bookingId) void onDenyBookingId?.(bookingId)
                                   setConfirmDenyId(null)
                                 }}
-                                className="rounded-full border border-toneDanger/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-50"
+                                className={[
+                                  'rounded-full border border-toneDanger/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-50',
+                                  'focus:outline-none focus:ring-2 focus:ring-white/15',
+                                ].join(' ')}
                               >
                                 {busy ? 'Working…' : 'Confirm deny'}
                               </button>
@@ -327,7 +362,10 @@ export function ManagementModal(props: {
                               type="button"
                               disabled={busy || !onDenyBookingId || !bookingId}
                               onClick={() => setConfirmDenyId(ev.id)}
-                              className="rounded-full border border-toneDanger/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-50"
+                              className={[
+                                'rounded-full border border-toneDanger/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-50',
+                                'focus:outline-none focus:ring-2 focus:ring-white/15',
+                              ].join(' ')}
                             >
                               Deny
                             </button>
@@ -339,7 +377,10 @@ export function ManagementModal(props: {
                             onClick={() => {
                               if (bookingId) void onApproveBookingId?.(bookingId)
                             }}
-                            className="rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-50"
+                            className={[
+                              'rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-50',
+                              'focus:outline-none focus:ring-2 focus:ring-white/15',
+                            ].join(' ')}
                           >
                             {busy ? 'Working…' : 'Approve'}
                           </button>

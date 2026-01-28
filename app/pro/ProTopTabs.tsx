@@ -1,8 +1,10 @@
 // app/pro/ProTopTabs.tsx
+
 'use client'
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 
 type Tab = { href: string; label: string; match?: 'exact' | 'prefix' }
 
@@ -29,29 +31,81 @@ export default function ProTopTabs() {
   const month = search?.get('month')
   const withMonth = (href: string) => (month ? `${href}?month=${encodeURIComponent(month)}` : href)
 
-  return (
-    <div className="sticky z-40 border-b border-white/10 bg-bgPrimary/80 backdrop-blur"
-         style={{ top: 48 }}>
-      <nav className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none]">
-        {tabs.map((t) => {
-          const active = isActive(pathname, t)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const [hasOverflow, setHasOverflow] = useState(false)
 
-          return (
-            <Link
-              key={t.href}
-              href={withMonth(t.href)}
-              className={[
-                'inline-flex shrink-0 items-center rounded-full border px-3 py-2 text-[12px] font-black transition',
-                active
-                  ? 'border-white/20 bg-bgSecondary text-textPrimary'
-                  : 'border-transparent bg-transparent text-textSecondary hover:border-white/10 hover:bg-bgSecondary/60',
-              ].join(' ')}
-            >
-              {t.label}
-            </Link>
-          )
-        })}
-      </nav>
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+
+    const update = () => {
+      setHasOverflow(el.scrollWidth > el.clientWidth + 2)
+    }
+
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div
+      className="sticky z-40 border-b border-white/10 bg-bgPrimary/80 backdrop-blur"
+      style={{ top: 48 }}
+    >
+      {/* subtle top highlight */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
+
+      <div className="relative mx-auto max-w-5xl">
+        <div
+          ref={scrollerRef}
+          className="flex gap-2 overflow-x-auto px-3 py-2 looksNoScrollbar"
+        >
+          {tabs.map((t) => {
+            const active = isActive(pathname, t)
+
+            return (
+              <Link
+                key={t.href}
+                href={withMonth(t.href)}
+                className={[
+                  'relative shrink-0 rounded-full px-4 py-2 text-[12px] font-black transition-all duration-300',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20',
+                  active
+                    ? [
+                        // ACTIVE = luxe, tactile, magnetic
+                        'bg-bgSecondary/90 text-textPrimary',
+                        'border border-white/20',
+                        'shadow-[0_8px_30px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.12)]',
+                        'scale-[1.04]',
+                      ].join(' ')
+                    : [
+                        // INACTIVE = calm, secondary
+                        'text-textSecondary',
+                        'border border-transparent',
+                        'hover:bg-bgSecondary/60 hover:text-textPrimary',
+                        'hover:shadow-[0_4px_18px_rgba(0,0,0,0.25)]',
+                      ].join(' '),
+                ].join(' ')}
+              >
+                {t.label}
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* Stronger edge fades (intentional, not shy) */}
+        {hasOverflow && (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-bgPrimary via-bgPrimary/90 to-transparent" />
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-bgPrimary via-bgPrimary/90 to-transparent" />
+          </>
+        )}
+
+        {/* bottom depth */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-b from-transparent to-black/15" />
+      </div>
     </div>
   )
 }

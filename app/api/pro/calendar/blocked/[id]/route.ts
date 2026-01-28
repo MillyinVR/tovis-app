@@ -1,5 +1,4 @@
 // app/api/pro/calendar/blocked/[id]/route.ts
-// app/api/pro/calendar/blocked/[id]/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 

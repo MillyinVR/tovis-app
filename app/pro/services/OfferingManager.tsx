@@ -247,7 +247,7 @@ export default function OfferingManager({
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-4">
       {offerings.map((o) => (
         <OfferingCard
           key={o.id}
@@ -332,7 +332,7 @@ function OfferingCard(props: {
   const [mobilePrice, setMobilePrice] = useState(o.mobilePriceStartingAt ?? '')
   const [mobileDuration, setMobileDuration] = useState(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
 
-  // ---------- add-ons editor state ----------
+  // add-ons editor state
   const [addonsOpen, setAddonsOpen] = useState(false)
 
   useEffect(() => {
@@ -347,6 +347,8 @@ function OfferingCard(props: {
     setAddonsOpen(false)
   }, [isOpen, o])
 
+  const disabled = busy || uploadBusy
+
   function summaryLine() {
     const parts: string[] = []
     if (o.offersInSalon && o.salonPriceStartingAt && o.salonDurationMinutes) {
@@ -359,9 +361,7 @@ function OfferingCard(props: {
   }
 
   const inputBase =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
-
-  const disabled = busy || uploadBusy
+    'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
 
   function validateAndBuildPatch():
     | {
@@ -431,11 +431,48 @@ function OfferingCard(props: {
     }
   }
 
+  // --- Luxe button styles (no hex, just your tokens) ---
+  const btnBase =
+    'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
+
+  const btnSoft =
+    'border border-white/10 bg-bgPrimary/60 text-textPrimary hover:border-white/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
+
+  const btnAccent =
+    'border border-accentPrimary/45 bg-bgPrimary/55 text-textPrimary hover:border-accentPrimary/75 hover:bg-bgPrimary/85 shadow-[0_14px_34px_rgb(0_0_0/0.30)]'
+
+  const btnDanger =
+    'border border-toneDanger/30 bg-bgPrimary/55 text-toneDanger hover:border-toneDanger/60 hover:bg-bgPrimary/85'
+
+  const chip =
+    'inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/40 px-2.5 py-1 text-[10px] font-black text-textSecondary'
+
   return (
-    <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 gap-3">
-          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgPrimary">
+    <div
+      className={[
+        'relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary',
+        'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
+      ].join(' ')}
+    >
+      {/* gradient border + specular highlight */}
+      <div
+        className={[
+          'pointer-events-none absolute inset-0',
+          'before:absolute before:inset-0 before:content-[\'\']',
+          'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.14),transparent_60%)]',
+          'after:absolute after:inset-0 after:content-[\'\']',
+          'after:bg-[linear-gradient(135deg,rgb(var(--accent-primary)/0.18),transparent_35%,rgb(var(--micro-accent)/0.14))]',
+          'after:opacity-70',
+        ].join(' ')}
+      />
+      <div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
+
+      <div className="relative p-4">
+        {/* TOP ROW */}
+        <div className="flex items-start gap-3">
+          {/* image */}
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgPrimary/50">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(40px_40px_at_30%_20%,rgb(255_255_255/0.20),transparent_60%)]" />
             {imgSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={imgSrc} alt="" className="h-full w-full object-cover" />
@@ -446,57 +483,53 @@ function OfferingCard(props: {
             )}
           </div>
 
+          {/* info */}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13px] font-black text-textPrimary">{displayName}</div>
-            {o.categoryName ? (
-              <div className="mt-0.5 text-[12px] font-black text-textSecondary">{o.categoryName}</div>
-            ) : null}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-black text-textPrimary">{displayName}</div>
+                {o.categoryName ? (
+                  <div className="mt-0.5 text-[12px] font-black text-textSecondary">{o.categoryName}</div>
+                ) : (
+                  <div className="mt-0.5 text-[12px] text-textSecondary"> </div>
+                )}
+              </div>
+
+              {/* Edit button as “top-right” primary control */}
+              <button type="button" onClick={onToggle} disabled={disabled} className={[btnBase, btnSoft].join(' ')}>
+                {isOpen ? 'Close' : 'Edit'}
+              </button>
+            </div>
+
             <div className="mt-2 text-[12px] text-textSecondary">{summaryLine()}</div>
 
-            <div className="mt-1 text-[12px] text-textSecondary">
-              Min price: <span className="font-black text-textPrimary">${normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
+            {/* meta chips */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className={chip}>
+                Min {normalizeMoney2(o.minPrice) ?? o.minPrice}
+              </span>
+
               {o.serviceIsAddOnEligible ? (
-                <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                <span className={chip}>
                   Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}
                 </span>
               ) : null}
-              <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
-                Image: {imageLabel(o)}
-              </span>
+
+              <span className={chip}>Image • {imageLabel(o)}</span>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onToggle}
-              disabled={disabled}
-              className={[
-                'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                disabled
-                  ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                  : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
-              ].join(' ')}
-            >
-              {isOpen ? 'Close' : 'Edit'}
-            </button>
-
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={disabled}
-              className={[
-                'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                disabled
-                  ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                  : 'border-toneDanger/40 bg-bgPrimary text-toneDanger hover:border-toneDanger/60',
-              ].join(' ')}
-            >
-              {busy ? 'Working…' : 'Remove'}
-            </button>
-          </div>
+        {/* ACTIONS (mobile-safe, no overflow) */}
+        <div className="mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={disabled}
+            className={[btnBase, btnDanger, 'col-span-1 sm:col-auto'].join(' ')}
+          >
+            {busy ? 'Working…' : 'Remove'}
+          </button>
 
           {enableServiceImageUpload ? (
             <>
@@ -512,193 +545,184 @@ function OfferingCard(props: {
                   e.currentTarget.value = ''
                 }}
               />
-
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={disabled}
-                className={[
-                  'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                  disabled
-                    ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                    : 'border-accentPrimary/40 bg-bgPrimary text-textPrimary hover:border-accentPrimary/70',
-                ].join(' ')}
+                className={[btnBase, btnAccent, 'col-span-1 sm:col-auto'].join(' ')}
               >
                 {uploadBusy ? 'Uploading…' : 'Upload image'}
               </button>
             </>
-          ) : null}
+          ) : (
+            <div className="col-span-1 sm:hidden" />
+          )}
+
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setAddonsOpen((v) => !v)}
+            className={[btnBase, btnSoft, 'col-span-1 sm:col-auto'].join(' ')}
+          >
+            {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
+          </button>
         </div>
+
+        {/* EXPAND */}
+        {isOpen ? (
+          <form
+            className="mt-4 grid gap-4 border-t border-white/10 pt-4"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (disabled) return
+
+              const result = validateAndBuildPatch()
+              if (!result.ok) {
+                setError(result.error)
+                return
+              }
+
+              onSave(result.patch)
+            }}
+          >
+            <label className="grid gap-2">
+              <div className="text-[12px] font-black text-textPrimary">Description (optional)</div>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={disabled}
+                rows={3}
+                className={inputBase}
+                placeholder="Short, clear, client-friendly."
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+                <input
+                  type="checkbox"
+                  checked={offersInSalon}
+                  onChange={(e) => setOffersInSalon(e.target.checked)}
+                  disabled={disabled}
+                  className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                />
+                Offer in Salon
+              </label>
+
+              <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+                <input
+                  type="checkbox"
+                  checked={offersMobile}
+                  onChange={(e) => setOffersMobile(e.target.checked)}
+                  disabled={disabled}
+                  className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                />
+                Offer Mobile
+              </label>
+            </div>
+
+            {addonsOpen ? (
+              <AddOnsManager
+                offeringId={o.id}
+                disabled={disabled}
+                onError={(msg) => setError(msg)}
+                onSuccess={(msg) => setSuccess(msg)}
+                onRefresh={() => refresh()}
+              />
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div
+                className={[
+                  'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
+                  offersInSalon ? '' : 'opacity-70',
+                ].join(' ')}
+              >
+                <div className="mb-2 text-[12px] font-black text-textPrimary">Salon</div>
+                <div className="grid gap-2">
+                  <label className="grid gap-1">
+                    <div className="text-[11px] font-black text-textSecondary">Starting at</div>
+                    <input
+                      value={salonPrice}
+                      onChange={(e) => setSalonPrice(e.target.value)}
+                      disabled={disabled || !offersInSalon}
+                      inputMode="decimal"
+                      className={inputBase}
+                      placeholder="e.g. 120 or 120.00"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <div className="text-[11px] font-black text-textSecondary">Minutes</div>
+                    <input
+                      value={salonDuration}
+                      onChange={(e) => setSalonDuration(e.target.value)}
+                      disabled={disabled || !offersInSalon}
+                      type="number"
+                      min={1}
+                      className={inputBase}
+                      placeholder="e.g. 90"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div
+                className={[
+                  'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
+                  offersMobile ? '' : 'opacity-70',
+                ].join(' ')}
+              >
+                <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile</div>
+                <div className="grid gap-2">
+                  <label className="grid gap-1">
+                    <div className="text-[11px] font-black text-textSecondary">Starting at</div>
+                    <input
+                      value={mobilePrice}
+                      onChange={(e) => setMobilePrice(e.target.value)}
+                      disabled={disabled || !offersMobile}
+                      inputMode="decimal"
+                      className={inputBase}
+                      placeholder="e.g. 150 or 150.00"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <div className="text-[11px] font-black text-textSecondary">Minutes</div>
+                    <input
+                      value={mobileDuration}
+                      onChange={(e) => setMobileDuration(e.target.value)}
+                      disabled={disabled || !offersMobile}
+                      type="number"
+                      min={1}
+                      className={inputBase}
+                      placeholder="e.g. 90"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
+            {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={disabled}
+                className={[
+                  'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
+                  disabled
+                    ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                    : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
+                ].join(' ')}
+              >
+                {busy ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
+        ) : null}
       </div>
-
-      {isOpen ? (
-        <form
-          className="mt-4 grid gap-3 border-t border-white/10 pt-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (disabled) return
-
-            const result = validateAndBuildPatch()
-            if (!result.ok) {
-              setError(result.error)
-              return
-            }
-
-            onSave(result.patch)
-          }}
-        >
-          <label className="grid gap-2">
-            <div className="text-[12px] font-black text-textPrimary">Description (optional)</div>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={disabled}
-              rows={3}
-              className={inputBase}
-              placeholder="Short, clear, client-friendly."
-            />
-          </label>
-
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
-              <input
-                type="checkbox"
-                checked={offersInSalon}
-                onChange={(e) => setOffersInSalon(e.target.checked)}
-                disabled={disabled}
-                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-              />
-              Offer in Salon
-            </label>
-
-            <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
-              <input
-                type="checkbox"
-                checked={offersMobile}
-                onChange={(e) => setOffersMobile(e.target.checked)}
-                disabled={disabled}
-                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-              />
-              Offer Mobile
-            </label>
-
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => setAddonsOpen((v) => !v)}
-              className={[
-                'rounded-full border px-3 py-2 text-[12px] font-black transition',
-                disabled
-                  ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                  : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
-              ].join(' ')}
-            >
-              {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
-            </button>
-          </div>
-
-          {/* ✅ ADD-ONS EDITOR GOES RIGHT HERE */}
-          {addonsOpen ? (
-            <AddOnsManager
-              offeringId={o.id}
-              disabled={disabled}
-              onError={(msg) => setError(msg)}
-              onSuccess={(msg) => setSuccess(msg)}
-              onRefresh={() => refresh()}
-            />
-          ) : null}
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div
-              className={[
-                'rounded-card border border-white/10 bg-bgPrimary p-3',
-                offersInSalon ? '' : 'opacity-70',
-              ].join(' ')}
-            >
-              <div className="mb-2 text-[12px] font-black text-textPrimary">Salon</div>
-              <div className="grid gap-2">
-                <label className="grid gap-1">
-                  <div className="text-[11px] font-black text-textSecondary">Starting at</div>
-                  <input
-                    value={salonPrice}
-                    onChange={(e) => setSalonPrice(e.target.value)}
-                    disabled={disabled || !offersInSalon}
-                    inputMode="decimal"
-                    className={inputBase}
-                    placeholder="e.g. 120 or 120.00"
-                  />
-                </label>
-
-                <label className="grid gap-1">
-                  <div className="text-[11px] font-black text-textSecondary">Minutes</div>
-                  <input
-                    value={salonDuration}
-                    onChange={(e) => setSalonDuration(e.target.value)}
-                    disabled={disabled || !offersInSalon}
-                    type="number"
-                    min={1}
-                    className={inputBase}
-                    placeholder="e.g. 90"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div
-              className={[
-                'rounded-card border border-white/10 bg-bgPrimary p-3',
-                offersMobile ? '' : 'opacity-70',
-              ].join(' ')}
-            >
-              <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile</div>
-              <div className="grid gap-2">
-                <label className="grid gap-1">
-                  <div className="text-[11px] font-black text-textSecondary">Starting at</div>
-                  <input
-                    value={mobilePrice}
-                    onChange={(e) => setMobilePrice(e.target.value)}
-                    disabled={disabled || !offersMobile}
-                    inputMode="decimal"
-                    className={inputBase}
-                    placeholder="e.g. 150 or 150.00"
-                  />
-                </label>
-
-                <label className="grid gap-1">
-                  <div className="text-[11px] font-black text-textSecondary">Minutes</div>
-                  <input
-                    value={mobileDuration}
-                    onChange={(e) => setMobileDuration(e.target.value)}
-                    disabled={disabled || !offersMobile}
-                    type="number"
-                    min={1}
-                    className={inputBase}
-                    placeholder="e.g. 90"
-                  />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
-          {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={disabled}
-              className={[
-                'rounded-card border px-4 py-3 text-[13px] font-black transition',
-                disabled
-                  ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                  : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
-              ].join(' ')}
-            >
-              {busy ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
-        </form>
-      ) : null}
     </div>
   )
 }
@@ -778,7 +802,6 @@ function AddOnsManager(props: {
     setSaving(true)
 
     try {
-      // keep sort order if exists
       const existingSort = new Map(attached.map((a) => [a.addOnServiceId, a.sortOrder]))
 
       const ids = Object.keys(selected).filter((id) => selected[id])
@@ -816,13 +839,12 @@ function AddOnsManager(props: {
   }
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="relative overflow-hidden rounded-card border border-white/10 bg-bgPrimary/35 p-3">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(560px_200px_at_25%_0%,rgb(255_255_255/0.10),transparent_60%)]" />
+      <div className="relative flex items-center justify-between gap-3">
         <div>
           <div className="text-[12px] font-black text-textPrimary">Add-ons for this service</div>
-          <div className="mt-1 text-[11px] text-textSecondary">
-            Choose which add-ons clients can pick during booking.
-          </div>
+          <div className="mt-1 text-[11px] text-textSecondary">Choose which add-ons clients can pick during booking.</div>
         </div>
 
         <button
@@ -830,27 +852,27 @@ function AddOnsManager(props: {
           onClick={save}
           disabled={disabled || saving || loading}
           className={[
-            'rounded-full border px-3 py-2 text-[12px] font-black transition',
+            'rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]',
             disabled || saving || loading
               ? 'cursor-not-allowed border-white/10 bg-bgSecondary text-textSecondary opacity-70'
-              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_14px_34px_rgb(0_0_0/0.30)]',
           ].join(' ')}
         >
           {saving ? 'Saving…' : 'Save add-ons'}
         </button>
       </div>
 
-      {loading ? <div className="mt-2 text-[12px] text-textSecondary">Loading…</div> : null}
+      {loading ? <div className="relative mt-2 text-[12px] text-textSecondary">Loading…</div> : null}
 
       {!loading && eligible.length === 0 ? (
-        <div className="mt-2 text-[12px] text-textSecondary">
+        <div className="relative mt-2 text-[12px] text-textSecondary">
           No add-on services exist yet. Mark services as “Add-on eligible” in Admin.
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-3">
+      <div className="relative mt-3 grid gap-3">
         {grouped.map(({ group, items }) => (
-          <div key={group} className="rounded-card border border-white/10 bg-bgSecondary p-3">
+          <div key={group} className="rounded-card border border-white/10 bg-bgSecondary/40 p-3">
             <div className="text-[11px] font-black text-textSecondary">{group}</div>
 
             <div className="mt-2 grid gap-2">
@@ -861,7 +883,7 @@ function AddOnsManager(props: {
                 return (
                   <div
                     key={s.id}
-                    className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary/35 px-3 py-2"
+                    className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary/30 px-3 py-2"
                   >
                     <label className="flex min-w-0 flex-1 items-start gap-2">
                       <input
@@ -890,7 +912,7 @@ function AddOnsManager(props: {
                       disabled={disabled || !isOn}
                       onClick={() => setRecommended((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
                       className={[
-                        'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black',
+                        'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
                         !isOn
                           ? 'border-white/10 bg-bgSecondary text-textSecondary opacity-60'
                           : recommended[s.id]
