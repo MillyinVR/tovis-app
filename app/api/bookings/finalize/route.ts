@@ -1,11 +1,11 @@
 // app/api/bookings/finalize/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import type { BookingSource, ServiceLocationType } from '@prisma/client'
-import { Prisma } from '@prisma/client'
+import { Prisma, NotificationType, type BookingSource, type ServiceLocationType } from '@prisma/client'
 import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
+import { createProNotification } from '@/lib/notifications/proNotifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,10 +49,6 @@ type HoldRow = {
 
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
 type WorkingHours = Record<string, WorkingHoursDay>
-
-function sumDecimal(values: Prisma.Decimal[]) {
-  return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
-}
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
@@ -102,8 +98,8 @@ function parseHHMM(v?: string) {
 }
 
 function weekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof WorkingHours {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC')
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(dateUtc).toLowerCase()
+  const tz = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(dateUtc).toLowerCase()
 
   if (weekday.startsWith('mon')) return 'mon'
   if (weekday.startsWith('tue')) return 'tue'
@@ -121,7 +117,7 @@ function ensureWithinWorkingHours(args: {
   timeZone: string
 }): { ok: true } | { ok: false; error: string } {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
 
   if (!workingHours || typeof workingHours !== 'object') {
     return { ok: false, error: 'This professional has not set working hours yet.' }
@@ -173,10 +169,7 @@ function fail(status: number, code: string, error: string, details?: any) {
 
 function pickStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return []
-  return v
-    .map((x) => (typeof x === 'string' ? x.trim() : ''))
-    .filter(Boolean)
-    .slice(0, 25)
+  return v.map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean).slice(0, 25)
 }
 
 function requireApptTimeZone(args: { locationTimeZone: unknown; holdTimeZone: unknown }) {
@@ -196,7 +189,7 @@ export async function POST(request: Request) {
   try {
     const auth = await requireClient()
     if (auth.res) return auth.res
-    const { clientId } = auth
+    const { clientId, user } = auth
 
     const body = (await request.json().catch(() => ({}))) as FinalizeBookingBody
 
@@ -210,11 +203,7 @@ export async function POST(request: Request) {
 
     const addOnIds = pickStringArray(body.addOnIds)
 
-    const source: BookingSource = normalizeSourceLoose({
-      sourceRaw: body.source,
-      mediaId,
-      aftercareToken,
-    })
+    const source: BookingSource = normalizeSourceLoose({ sourceRaw: body.source, mediaId, aftercareToken })
 
     const locationType = normalizeLocationTypeStrict(body.locationType)
     if (!locationType) return fail(400, 'MISSING_LOCATION_TYPE', 'Missing locationType.')
@@ -243,7 +232,6 @@ export async function POST(request: Request) {
     })
 
     if (!offering || !offering.isActive) return fail(400, 'OFFERING_INACTIVE', 'Invalid or inactive offering.')
-
     if (locationType === 'SALON' && !offering.offersInSalon) return fail(400, 'MODE_NOT_SUPPORTED', 'This service is not offered in-salon.')
     if (locationType === 'MOBILE' && !offering.offersMobile) return fail(400, 'MODE_NOT_SUPPORTED', 'This service is not offered as mobile.')
 
@@ -254,25 +242,22 @@ export async function POST(request: Request) {
       return fail(400, 'PRICING_NOT_SET', `Pricing is not set for ${locationType === 'MOBILE' ? 'mobile' : 'salon'} bookings.`)
     }
 
-    const durationMinutes = Number(durationSnapshot ?? 0)
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return fail(400, 'INVALID_DURATION', 'Offering duration is invalid for this booking type.')
+    const baseDurationMinutes = Number(durationSnapshot ?? 0)
+    if (!Number.isFinite(baseDurationMinutes) || baseDurationMinutes <= 0) {
+      return fail(400, 'INVALID_DURATION', 'Offering duration is invalid for this booking type.')
+    }
 
     const now = new Date()
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = autoAccept ? 'ACCEPTED' : 'PENDING'
 
-    // Aftercare validation
     let rebookOfBookingIdForCreate: string | null = null
     if (source === 'AFTERCARE') {
       if (!aftercareToken) return fail(400, 'AFTERCARE_TOKEN_MISSING', 'Missing aftercare token.')
 
       const aftercare = await prisma.aftercareSummary.findUnique({
         where: { publicToken: aftercareToken },
-        select: {
-          booking: {
-            select: { id: true, status: true, clientId: true, professionalId: true, serviceId: true, offeringId: true },
-          },
-        },
+        select: { booking: { select: { id: true, status: true, clientId: true, professionalId: true, serviceId: true, offeringId: true } } },
       })
 
       if (!aftercare?.booking) return fail(400, 'AFTERCARE_TOKEN_INVALID', 'Invalid aftercare token.')
@@ -321,28 +306,110 @@ export async function POST(request: Request) {
 
       const loc = await tx.professionalLocation.findFirst({
         where: { id: hold.locationId, professionalId: offering.professionalId, isBookable: true },
-        select: {
-          id: true,
-          timeZone: true,
-          workingHours: true,
-          bufferMinutes: true,
-          formattedAddress: true,
-          lat: true,
-          lng: true,
-        },
+        select: { id: true, timeZone: true, workingHours: true, bufferMinutes: true, formattedAddress: true, lat: true, lng: true },
       })
       if (!loc) throw new Error('LOCATION_NOT_FOUND')
 
       const tzRes = requireApptTimeZone({ locationTimeZone: loc.timeZone, holdTimeZone: hold.locationTimeZone })
       if (!tzRes.ok) throw new Error('TIMEZONE_REQUIRED')
-      const apptTz = sanitizeTimeZone(tzRes.timeZone, 'UTC')
+      const apptTz = sanitizeTimeZone(tzRes.timeZone, 'UTC') || 'UTC'
 
       const bufferMinutes = Math.max(0, Math.min(120, Number(loc.bufferMinutes ?? 0) || 0))
-
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
-      const requestedEnd = addMinutes(requestedStart, durationMinutes)
 
       if (requestedStart.getTime() < addMinutes(new Date(), 5).getTime()) throw new Error('TIME_IN_PAST')
+
+      if (openingId) {
+        const activeOpening = await tx.lastMinuteOpening.findFirst({
+          where: { id: openingId, status: 'ACTIVE' },
+          select: { id: true, startAt: true, professionalId: true, offeringId: true, serviceId: true },
+        })
+
+        if (!activeOpening) throw new Error('OPENING_NOT_AVAILABLE')
+        if (activeOpening.professionalId !== offering.professionalId) throw new Error('OPENING_NOT_AVAILABLE')
+        if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) throw new Error('OPENING_NOT_AVAILABLE')
+        if (activeOpening.serviceId && activeOpening.serviceId !== offering.serviceId) throw new Error('OPENING_NOT_AVAILABLE')
+        if (normalizeToMinute(new Date(activeOpening.startAt)).getTime() !== requestedStart.getTime()) throw new Error('OPENING_NOT_AVAILABLE')
+
+        const updated = await tx.lastMinuteOpening.updateMany({
+          where: { id: openingId, status: 'ACTIVE' },
+          data: { status: 'BOOKED' },
+        })
+        if (updated.count !== 1) throw new Error('OPENING_NOT_AVAILABLE')
+      }
+
+      const addOnLinks = addOnIds.length
+        ? await tx.offeringAddOn.findMany({
+            where: {
+              id: { in: addOnIds },
+              offeringId: offering.id,
+              isActive: true,
+              OR: [{ locationType: null }, { locationType }],
+              addOnService: { isActive: true, isAddOnEligible: true },
+            },
+            select: {
+              id: true,
+              addOnServiceId: true,
+              sortOrder: true,
+              priceOverride: true,
+              durationOverrideMinutes: true,
+              addOnService: { select: { id: true, defaultDurationMinutes: true, minPrice: true } },
+            },
+            take: 50,
+          })
+        : []
+
+      if (addOnIds.length && addOnLinks.length !== addOnIds.length) throw new Error('ADDONS_INVALID')
+
+      const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
+
+      const proAddOnOfferings = addOnServiceIds.length
+        ? await tx.professionalServiceOffering.findMany({
+            where: { professionalId: offering.professionalId, isActive: true, serviceId: { in: addOnServiceIds } },
+            select: { serviceId: true, salonPriceStartingAt: true, salonDurationMinutes: true, mobilePriceStartingAt: true, mobileDurationMinutes: true },
+            take: 200,
+          })
+        : []
+
+      const byServiceId = new Map(proAddOnOfferings.map((o) => [o.serviceId, o]))
+
+      const resolvedAddOns = addOnLinks.map((x) => {
+        const svc = x.addOnService
+        const proOff = byServiceId.get(svc.id) || null
+
+        const dur =
+          x.durationOverrideMinutes ??
+          (locationType === 'MOBILE' ? proOff?.mobileDurationMinutes : proOff?.salonDurationMinutes) ??
+          svc.defaultDurationMinutes ??
+          0
+
+        const price =
+          x.priceOverride ??
+          (locationType === 'MOBILE' ? proOff?.mobilePriceStartingAt : proOff?.salonPriceStartingAt) ??
+          svc.minPrice
+
+        return {
+          offeringAddOnId: x.id,
+          serviceId: svc.id,
+          durationMinutesSnapshot: Number(dur) || 0,
+          priceSnapshot: new Prisma.Decimal(price as any),
+          sortOrder: x.sortOrder ?? 0,
+        }
+      })
+
+      for (const a of resolvedAddOns) {
+        if (!Number.isFinite(a.durationMinutesSnapshot) || a.durationMinutesSnapshot <= 0) throw new Error('ADDONS_INVALID')
+        if (!a.priceSnapshot) throw new Error('ADDONS_INVALID')
+      }
+
+      const addOnsDurationTotal = resolvedAddOns.reduce((sum, a) => sum + a.durationMinutesSnapshot, 0)
+      const addOnsPriceTotal = resolvedAddOns.reduce((acc, a) => acc.add(a.priceSnapshot), new Prisma.Decimal(0))
+
+      const basePrice = new Prisma.Decimal(priceStartingAt as any)
+      const subtotal = basePrice.add(addOnsPriceTotal)
+
+      const totalDurationMinutes = baseDurationMinutes + addOnsDurationTotal
+      const requestedEnd = addMinutes(requestedStart, totalDurationMinutes)
 
       const whCheck = ensureWithinWorkingHours({
         scheduledStartUtc: requestedStart,
@@ -352,7 +419,6 @@ export async function POST(request: Request) {
       })
       if (!whCheck.ok) throw new Error(`WH:${whCheck.error}`)
 
-      // Conflict check
       const windowStart = addMinutes(requestedStart, -24 * 60)
       const windowEnd = addMinutes(requestedStart, 24 * 60)
 
@@ -379,106 +445,6 @@ export async function POST(request: Request) {
 
       if (hasConflict) throw new Error('TIME_NOT_AVAILABLE')
 
-      // Optional opening claim
-      if (openingId) {
-        const activeOpening = await tx.lastMinuteOpening.findFirst({
-          where: { id: openingId, status: 'ACTIVE' },
-          select: { id: true, startAt: true, professionalId: true, offeringId: true, serviceId: true },
-        })
-
-        if (!activeOpening) throw new Error('OPENING_NOT_AVAILABLE')
-        if (activeOpening.professionalId !== offering.professionalId) throw new Error('OPENING_NOT_AVAILABLE')
-        if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) throw new Error('OPENING_NOT_AVAILABLE')
-        if (activeOpening.serviceId && activeOpening.serviceId !== offering.serviceId) throw new Error('OPENING_NOT_AVAILABLE')
-        if (normalizeToMinute(new Date(activeOpening.startAt)).getTime() !== requestedStart.getTime()) throw new Error('OPENING_NOT_AVAILABLE')
-
-        const updated = await tx.lastMinuteOpening.updateMany({
-          where: { id: openingId, status: 'ACTIVE' },
-          data: { status: 'BOOKED' },
-        })
-        if (updated.count !== 1) throw new Error('OPENING_NOT_AVAILABLE')
-      }
-
-      // ✅ ADD-ONS: validate links + resolve price/duration
-      const addOnLinks = addOnIds.length
-        ? await tx.offeringAddOn.findMany({
-            where: {
-              id: { in: addOnIds },
-              offeringId: offering.id,
-              isActive: true,
-              OR: [{ locationType: null }, { locationType }],
-              addOnService: { isActive: true, isAddOnEligible: true },
-            },
-            include: {
-              addOnService: {
-                select: { id: true, defaultDurationMinutes: true, minPrice: true },
-              },
-            },
-            take: 50,
-          })
-        : []
-
-      if (addOnIds.length && addOnLinks.length !== addOnIds.length) {
-        throw new Error('ADDONS_INVALID')
-      }
-
-      const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
-
-      const proAddOnOfferings = addOnServiceIds.length
-        ? await tx.professionalServiceOffering.findMany({
-            where: {
-              professionalId: offering.professionalId,
-              isActive: true,
-              serviceId: { in: addOnServiceIds },
-            },
-            select: {
-              serviceId: true,
-              salonPriceStartingAt: true,
-              salonDurationMinutes: true,
-              mobilePriceStartingAt: true,
-              mobileDurationMinutes: true,
-            },
-            take: 200,
-          })
-        : []
-
-      const byServiceId = new Map(proAddOnOfferings.map((o) => [o.serviceId, o]))
-
-      const resolvedAddOns = addOnLinks.map((x) => {
-        const svc = x.addOnService
-        const proOff = byServiceId.get(svc.id) || null
-
-        const dur =
-          x.durationOverrideMinutes ??
-          (locationType === 'MOBILE' ? proOff?.mobileDurationMinutes : proOff?.salonDurationMinutes) ??
-          svc.defaultDurationMinutes ??
-          0
-
-        const price =
-          x.priceOverride ??
-          (locationType === 'MOBILE' ? proOff?.mobilePriceStartingAt : proOff?.salonPriceStartingAt) ??
-          svc.minPrice
-
-        return {
-          addOnId: x.id, // OfferingAddOn.id
-          serviceId: svc.id,
-          priceSnapshot: price,
-          durationMinutesSnapshot: Number(dur) || 0,
-          sortOrder: x.sortOrder ?? 0,
-        }
-      })
-
-      for (const a of resolvedAddOns) {
-        if (!Number.isFinite(a.durationMinutesSnapshot) || a.durationMinutesSnapshot <= 0) throw new Error('ADDONS_INVALID')
-        if (!a.priceSnapshot) throw new Error('ADDONS_INVALID')
-      }
-
-      const addOnsPriceTotal = sumDecimal(resolvedAddOns.map((a) => a.priceSnapshot as unknown as Prisma.Decimal))
-      const addOnsDurationTotal = resolvedAddOns.reduce((sum, a) => sum + a.durationMinutesSnapshot, 0)
-
-      const subtotal = new Prisma.Decimal(priceStartingAt as any).add(addOnsPriceTotal)
-
-      // Create booking first
       const created = await tx.booking.create({
         data: {
           clientId,
@@ -494,7 +460,7 @@ export async function POST(request: Request) {
           rebookOfBookingId: rebookOfBookingIdForCreate,
 
           subtotalSnapshot: subtotal,
-          totalDurationMinutes: durationMinutes + addOnsDurationTotal,
+          totalDurationMinutes,
           bufferMinutes,
 
           locationId: loc.id,
@@ -505,24 +471,22 @@ export async function POST(request: Request) {
           locationLatSnapshot: hold.locationLatSnapshot ?? (typeof loc.lat === 'number' ? loc.lat : undefined),
           locationLngSnapshot: hold.locationLngSnapshot ?? (typeof loc.lng === 'number' ? loc.lng : undefined),
         },
-        select: { id: true, status: true },
+        select: { id: true, status: true, scheduledFor: true, professionalId: true },
       })
 
-      // Create base item (explicit)
       const baseItem = await tx.bookingServiceItem.create({
         data: {
           bookingId: created.id,
           serviceId: offering.serviceId,
           offeringId: offering.id,
           itemType: 'BASE' as any,
-          priceSnapshot: priceStartingAt as any,
-          durationMinutesSnapshot: durationMinutes,
+          priceSnapshot: basePrice as any,
+          durationMinutesSnapshot: baseDurationMinutes,
           sortOrder: 0,
         },
         select: { id: true },
       })
 
-      // Create add-on items (child of base item)
       if (resolvedAddOns.length) {
         await tx.bookingServiceItem.createMany({
           data: resolvedAddOns.map((a) => ({
@@ -534,12 +498,11 @@ export async function POST(request: Request) {
             priceSnapshot: a.priceSnapshot as any,
             durationMinutesSnapshot: a.durationMinutesSnapshot,
             sortOrder: 100 + a.sortOrder,
-            notes: `ADDON:${a.addOnId}`,
+            notes: `ADDON:${a.offeringAddOnId}`,
           })),
         })
       }
 
-      // mark any opening notification as booked
       if (openingId) {
         await tx.openingNotification.updateMany({
           where: { clientId, openingId, bookedAt: null },
@@ -548,8 +511,22 @@ export async function POST(request: Request) {
       }
 
       await tx.bookingHold.delete({ where: { id: hold.id } })
-
       return created
+    })
+
+    // ✅ pro notification + dedupe
+    const notifType =
+      booking.status === 'PENDING' ? NotificationType.BOOKING_REQUEST : NotificationType.BOOKING_UPDATE
+
+    await createProNotification({
+      professionalId: booking.professionalId,
+      type: notifType,
+      title: notifType === NotificationType.BOOKING_REQUEST ? 'New booking request' : 'New booking confirmed',
+      body: '',
+      href: `/pro/bookings/${booking.id}`,
+      actorUserId: user?.id ?? null,
+      bookingId: booking.id,
+      dedupeKey: `PRO_NOTIF:${String(notifType)}:${booking.id}`,
     })
 
     return NextResponse.json({ ok: true, booking }, { status: 201 })
