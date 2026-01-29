@@ -72,8 +72,8 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
   // Footer + safe-area math so the modal never hides behind bottom nav
   const footerPx = UI_SIZES.footerHeight ?? 0
-  const modalSafePaddingBottom = `calc(${footerPx}px + env(safe-area-inset-bottom, 0px) + 18px)`
   const modalMaxHeight = `calc(100dvh - ${footerPx}px - 18px)`
+  const actionSafePaddingBottom = `calc(${footerPx}px + env(safe-area-inset-bottom, 0px) + 14px)`
 
   const filteredServices = useMemo(() => {
     const q = serviceQuery.trim().toLowerCase()
@@ -86,13 +86,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     for (const s of serviceOptions) map.set(s.id, s.name)
     return map
   }, [serviceOptions])
-
-  const selectedServiceNames = useMemo(() => {
-    return selectedServiceIds
-      .map((id) => selectedServiceMap.get(id) || '')
-      .filter(Boolean)
-      .slice(0, 12)
-  }, [selectedServiceIds, selectedServiceMap])
 
   function toggleService(id: string) {
     setSelectedServiceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
@@ -209,18 +202,19 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
       {/* Edit modal */}
       {openEdit ? (
         <div className="fixed inset-0 z-[9999] bg-black/60" onClick={() => !busy && setOpenEdit(false)}>
-          {/* Centered sheet */}
+          {/* Centered sheet (Option B: header / body / actions) */}
           <div
             className={cx(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
               'border border-white/12 bg-bgPrimary/70 backdrop-blur-2xl',
               'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
+              'grid grid-rows-[auto_1fr_auto]',
             )}
-            style={{
-              maxHeight: modalMaxHeight,
-              paddingBottom: modalSafePaddingBottom,
-            }}
+            style={{ maxHeight: modalMaxHeight }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit media"
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
@@ -244,16 +238,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
               </button>
             </div>
 
-            {/* Scrollable body */}
-            <div className="looksNoScrollbar max-h-[calc(100dvh-260px)] overflow-y-auto p-4">
+            {/* Scrollable body (ONLY this scrolls) */}
+            <div className="looksNoScrollbar overflow-y-auto p-4">
               <div className="grid gap-4">
                 {/* Caption */}
                 <Field
                   label="Caption"
                   right={
-                    <span className="text-[11px] font-semibold text-textSecondary">
-                      {caption.trim().length}/300
-                    </span>
+                    <span className="text-[11px] font-semibold text-textSecondary">{caption.trim().length}/300</span>
                   }
                 >
                   <textarea
@@ -283,7 +275,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                   />
                 </Field>
 
-                {/* Toggles (Hermès switch rows) */}
+                {/* Toggles */}
                 <div className="rounded-[18px] border border-white/12 bg-bgPrimary/25 p-3">
                   <HermesToggleRow
                     label="Show in Looks feed"
@@ -302,7 +294,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                   />
                 </div>
 
-                {/* Selected services tray */}
+                {/* Services */}
                 <Field
                   label="Services attached"
                   right={
@@ -346,7 +338,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     </div>
                   )}
 
-                  {/* Service search */}
                   <div className="mt-3">
                     <input
                       value={serviceQuery}
@@ -361,7 +352,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     />
                   </div>
 
-                  {/* Service list */}
                   <div className="mt-2 max-h-[260px] overflow-auto rounded-[18px] border border-white/10 bg-bgPrimary/20">
                     {filteredServices.map((s) => {
                       const on = selectedServiceIds.includes(s.id)
@@ -387,12 +377,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                                 : 'border border-white/10 bg-bgPrimary/25 text-textSecondary',
                             )}
                           >
-                            <span
-                              className={cx(
-                                'h-1.5 w-1.5 rounded-full',
-                                on ? 'bg-accentPrimary' : 'bg-white/35',
-                              )}
-                            />
+                            <span className={cx('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-white/35')} />
                             {on ? 'Selected' : 'Add'}
                           </span>
                         </button>
@@ -400,9 +385,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     })}
 
                     {filteredServices.length === 0 ? (
-                      <div className="px-4 py-4 text-[12px] font-semibold text-textSecondary">
-                        No services found.
-                      </div>
+                      <div className="px-4 py-4 text-[12px] font-semibold text-textSecondary">No services found.</div>
                     ) : null}
                   </div>
                 </Field>
@@ -415,8 +398,11 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
               </div>
             </div>
 
-            {/* Sticky actions */}
-            <div className="absolute inset-x-0 bottom-0 border-t border-white/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl">
+            {/* Actions row (NOT absolute; always visible) */}
+            <div
+              className="border-t border-white/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl"
+              style={{ paddingBottom: actionSafePaddingBottom }}
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold text-white/55">
                   {visibility === 'PRIVATE' ? 'Hidden from public.' : 'Public visibility enabled.'}
@@ -526,12 +512,7 @@ function Segmented<T extends string>({
           >
             <div className="flex items-center justify-between gap-2">
               <div className="text-[13px] font-black text-textPrimary">{opt.label}</div>
-              <div
-                className={cx(
-                  'h-2 w-2 rounded-full',
-                  active ? 'bg-accentPrimary' : 'bg-white/35',
-                )}
-              />
+              <div className={cx('h-2 w-2 rounded-full', active ? 'bg-accentPrimary' : 'bg-white/35')} />
             </div>
             {opt.sub ? <div className="mt-0.5 text-[11px] font-semibold text-textSecondary">{opt.sub}</div> : null}
           </button>
@@ -569,7 +550,6 @@ function HermesToggleRow({
         {hint ? <div className="mt-0.5 text-[11px] font-semibold text-textSecondary">{hint}</div> : null}
       </div>
 
-      {/* Hermès-style: Status pill + switch with jewel dot */}
       <div className="flex items-center gap-2">
         <span
           className={cx(
@@ -590,7 +570,6 @@ function HermesToggleRow({
           )}
           aria-hidden="true"
         >
-          {/* inner highlight */}
           <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/10 to-transparent" />
 
           <div
@@ -600,7 +579,6 @@ function HermesToggleRow({
               value ? 'translate-x-7' : 'translate-x-0',
             )}
           >
-            {/* tiny “jewel” */}
             <div
               className={cx(
                 'absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full',
