@@ -208,7 +208,7 @@ export default async function ProReviewsPage() {
                             }}
                           >
                             <Link
-                              href={`/pro/media/${m.id}`}
+                              href={`/media/${m.id}`}
                               style={{
                                 display: 'block',
                                 position: 'relative',

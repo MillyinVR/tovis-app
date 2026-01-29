@@ -1,62 +1,99 @@
 // app/api/pro/media/[id]/route.ts
-import { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { getCurrentUser } from '@/lib/currentUser'
 
-export const dynamic = 'force-dynamic'
-
-type Props = { params: Promise<{ id: string }> }
-type StorageBucket = 'media-public' | 'media-private'
-
-function isStorageBucket(v: unknown): v is StorageBucket {
-  return v === 'media-public' || v === 'media-private'
+function pickString(v: unknown) {
+  return typeof v === 'string' ? v.trim() : ''
+}
+function pickBool(v: unknown) {
+  return typeof v === 'boolean' ? v : null
+}
+function pickVisibility(v: unknown): 'PUBLIC' | 'PRIVATE' | null {
+  const s = pickString(v).toUpperCase()
+  if (s === 'PUBLIC' || s === 'PRIVATE') return s
+  return null
+}
+function pickStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.map((x) => pickString(x)).filter(Boolean)
 }
 
-export async function DELETE(_req: NextRequest, props: Props) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await requirePro()
-    if (auth.res) return auth.res
-    const professionalId = auth.professionalId
+    const { id } = await ctx.params
+    const mediaId = pickString(id)
+    if (!mediaId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { id: rawId } = await props.params
-    const mediaId = pickString(rawId)
-    if (!mediaId) return jsonFail(400, 'Missing media id.')
+    const user = await getCurrentUser()
+    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const proId = user.professionalProfile.id
 
-    const media = await prisma.mediaAsset.findUnique({
+    const existing = await prisma.mediaAsset.findUnique({
       where: { id: mediaId },
-      select: {
-        id: true,
-        professionalId: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
+      select: { id: true, professionalId: true },
+    })
+    if (!existing || existing.professionalId !== proId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    const body = await req.json().catch(() => ({} as any))
+
+    const captionRaw = body?.caption
+    const caption = captionRaw == null ? null : pickString(captionRaw) || null
+
+    const visibility = pickVisibility(body?.visibility)
+    const isEligibleForLooks = pickBool(body?.isEligibleForLooks)
+    const isFeaturedInPortfolio = pickBool(body?.isFeaturedInPortfolio)
+    const serviceIds = pickStringArray(body?.serviceIds)
+
+    await prisma.mediaAsset.update({
+      where: { id: mediaId },
+      data: {
+        caption,
+        ...(visibility ? { visibility } : {}),
+        ...(isEligibleForLooks == null ? {} : { isEligibleForLooks }),
+        ...(isFeaturedInPortfolio == null ? {} : { isFeaturedInPortfolio }),
+
+        // Replace attached services
+        services: {
+          deleteMany: {},
+          create: serviceIds.map((serviceId) => ({ serviceId })),
+        },
       },
     })
 
-    if (!media) return jsonFail(404, 'Media not found.')
-    if (media.professionalId !== professionalId) return jsonFail(403, 'Forbidden.')
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+  }
+}
 
-    const mainBucket = isStorageBucket(media.storageBucket) ? media.storageBucket : null
-    const mainPath = pickString(media.storagePath)
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await ctx.params
+    const mediaId = pickString(id)
+    if (!mediaId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    if (mainBucket && mainPath) {
-      await supabaseAdmin.storage.from(mainBucket).remove([mainPath]).catch(() => null)
+    const user = await getCurrentUser()
+    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    const proId = user.professionalProfile.id
 
-    const tBucket = isStorageBucket(media.thumbBucket) ? media.thumbBucket : null
-    const tPath = pickString(media.thumbPath)
-
-    if (tBucket && tPath) {
-      await supabaseAdmin.storage.from(tBucket).remove([tPath]).catch(() => null)
+    const existing = await prisma.mediaAsset.findUnique({
+      where: { id: mediaId },
+      select: { id: true, professionalId: true },
+    })
+    if (!existing || existing.professionalId !== proId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
     await prisma.mediaAsset.delete({ where: { id: mediaId } })
-
-    return jsonOk({ ok: true }, 200)
-  } catch (e) {
-    console.error('DELETE /api/pro/media/[id] error', e)
-    return jsonFail(500, 'Internal server error')
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
   }
 }

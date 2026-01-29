@@ -279,7 +279,7 @@ export default async function PublicProfessionalProfilePage({
                 return (
                   <Link
                     key={m.id}
-                    href={`/professionals/${pro.id}/media/${m.id}`}
+                    href={`/media/${m.id}`}
                     className="group relative block aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
                     title={m.caption || 'Open'}
                   >

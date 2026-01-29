@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import ReviewsPanel from '../ReviewsPanel'
 import EditProfileButton from './EditProfileButton'
 import ShareButton from './ShareButton'
+import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { moneyToString } from '@/lib/money'
 import type { Prisma } from '@prisma/client'
 
@@ -18,7 +19,6 @@ const ROUTES = {
   proHome: '/pro',
   proServices: '/pro/services',
   proMessages: '/pro/messages',
-  proMedia: '/pro/media',
   proMediaNew: '/pro/media/new',
   proPublicProfile: '/pro/profile/public-profile',
 } as const
@@ -97,7 +97,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
   const tab = pickTab(resolved)
   const proId = user.professionalProfile.id
 
-  // ✅ Tight select: only what the page renders
   const pro = await prisma.professionalProfile.findUnique({
     where: { id: proId },
     select: {
@@ -131,7 +130,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
       },
       reviews: {
         orderBy: { createdAt: 'desc' },
-        take: 200, // keep reasonable cap
+        take: 200,
         select: {
           id: true,
           rating: true,
@@ -155,18 +154,31 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
   if (!pro) redirect(ROUTES.proHome)
 
-  const [portfolioMedia, favoritesCount] = await Promise.all([
+  const [portfolioMedia, favoritesCount, serviceOptions] = await Promise.all([
+    // ✅ show ALL media owned so they can manage from profile (PUBLIC + PRIVATE)
     prisma.mediaAsset.findMany({
-      where: {
-        professionalId: pro.id,
-        visibility: 'PUBLIC',
-        isFeaturedInPortfolio: true,
-      },
+      where: { professionalId: pro.id },
       orderBy: { createdAt: 'desc' },
-      take: 60,
-      select: { id: true, url: true, thumbUrl: true, caption: true, mediaType: true },
+      take: 120,
+      select: {
+        id: true,
+        url: true,
+        thumbUrl: true,
+        caption: true,
+        mediaType: true,
+        visibility: true,
+        isEligibleForLooks: true,
+        isFeaturedInPortfolio: true,
+        services: { select: { serviceId: true } },
+      },
     }),
     prisma.professionalFavorite.count({ where: { professionalId: pro.id } }),
+    prisma.service.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      take: 500,
+      select: { id: true, name: true },
+    }),
   ])
 
   const reviewCount = pro.reviews.length
@@ -217,14 +229,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
               title="Upload a new portfolio/Looks post"
             >
               + Upload
-            </Link>
-
-            <Link
-              href={ROUTES.proMedia}
-              className="rounded-[18px] border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
-              title="View all your media and manage portfolio toggles"
-            >
-              Manage media
             </Link>
 
             <ShareButton url={publicUrl} />
@@ -311,47 +315,86 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
       {tab === 'portfolio' ? (
         <section className="pt-4">
-          {portfolioMedia.length === 0 ? (
-            <div className="grid gap-3">
-              <EmptyBox>No portfolio posts yet.</EmptyBox>
-              <Link
-                href={ROUTES.proMediaNew}
-                className="inline-flex w-fit items-center gap-2 rounded-[18px] border border-accentPrimary/40 bg-accentPrimary px-4 py-2 text-[13px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-              >
-                + Upload your first post
-              </Link>
-              <div className="text-[12px] text-textSecondary">
-                Portfolio posts also show in Looks automatically. Because your work deserves attention and your code deserves fewer edge cases.
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {/* Upload tile */}
+            <Link
+              href={ROUTES.proMediaNew}
+              className="group relative grid aspect-square place-items-center overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary hover:border-white/20"
+              title="Upload"
+            >
+              <div className="grid place-items-center gap-2 text-textPrimary">
+                <div className="grid h-12 w-12 place-items-center rounded-full border border-white/10 bg-bgPrimary/40 text-[22px] font-black">
+                  +
+                </div>
+                <div className="text-[12px] font-extrabold text-textSecondary">Upload</div>
               </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
-              {portfolioMedia.map((m) => {
-                const src = m.thumbUrl || m.url
-                const isVideo = m.mediaType === 'VIDEO'
-                return (
-                  <Link
-                    key={m.id}
-                    href={`/pro/media/${m.id}`}
-                    className="group relative block aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
-                    title={m.caption || 'Open'}
-                  >
+            </Link>
+
+            {portfolioMedia.map((m) => {
+              const src = m.thumbUrl || m.url
+              const isVideo = m.mediaType === 'VIDEO'
+              const isPrivate = m.visibility === 'PRIVATE'
+
+              return (
+                <div
+                  key={m.id}
+                  className="group relative aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
+                  title={m.caption || 'Open'}
+                >
+                  <Link href={`/media/${m.id}`} className="absolute inset-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={src}
-                      alt={m.caption || 'Portfolio'}
-                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                    />
-                    {isVideo ? (
-                      <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                        VIDEO
-                      </div>
-                    ) : null}
+                    <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
                   </Link>
-                )
-              })}
+
+                  {/* badges */}
+                  <div className="pointer-events-none absolute left-2 bottom-2 flex flex-wrap gap-1.5">
+                    {isPrivate ? (
+                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                        ONLY YOU
+                      </span>
+                    ) : null}
+                    {m.isEligibleForLooks ? (
+                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                        LOOKS
+                      </span>
+                    ) : null}
+                    {m.isFeaturedInPortfolio ? (
+                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                        PORTFOLIO
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {isVideo ? (
+                    <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                      VIDEO
+                    </div>
+                  ) : null}
+
+                  {/* owner overflow menu */}
+                  <div className="absolute left-2 top-2 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                    <OwnerMediaMenu
+                      mediaId={m.id}
+                      serviceOptions={serviceOptions}
+                      initial={{
+                        caption: m.caption ?? null,
+                        visibility: m.visibility,
+                        isEligibleForLooks: Boolean(m.isEligibleForLooks),
+                        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+                        serviceIds: (m.services || []).map((s) => s.serviceId).filter(Boolean),
+                      }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {portfolioMedia.length === 0 ? (
+            <div className="mt-3 text-[12px] text-textSecondary">
+              No posts yet. Go ahead—feed the algorithm.
             </div>
-          )}
+          ) : null}
         </section>
       ) : null}
 
@@ -383,12 +426,18 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                         <div className="truncate text-[13px] font-black text-textPrimary">
                           {off.title || off.service?.name || 'Service'}
                         </div>
-                        {off.description ? <div className="mt-1 line-clamp-2 text-[12px] text-textSecondary">{off.description}</div> : null}
+                        {off.description ? (
+                          <div className="mt-1 line-clamp-2 text-[12px] text-textSecondary">{off.description}</div>
+                        ) : null}
                       </div>
                     </div>
 
                     <div className="text-right text-[12px] text-textSecondary">
-                      {price != null ? <div className="font-black text-textPrimary">${moneyToString(price)}</div> : <div className="font-black text-textPrimary">–</div>}
+                      {price != null ? (
+                        <div className="font-black text-textPrimary">${moneyToString(price)}</div>
+                      ) : (
+                        <div className="font-black text-textPrimary">–</div>
+                      )}
                       {duration != null ? <div>{duration} min</div> : <div>–</div>}
                     </div>
                   </div>
@@ -438,5 +487,9 @@ function TabLink({ href, active, children }: { href: string; active: boolean; ch
 }
 
 function EmptyBox({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-[18px] border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">{children}</div>
+  return (
+    <div className="rounded-[18px] border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
+      {children}
+    </div>
+  )
 }
