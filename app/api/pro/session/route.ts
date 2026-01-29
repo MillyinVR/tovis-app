@@ -12,6 +12,7 @@ function fullName(first?: string | null, last?: string | null) {
 
 function stepFromSessionStep(step: SessionStep | null): StepKey {
   if (step === SessionStep.DONE) return 'aftercare'
+
   if (
     step === SessionStep.CONSULTATION ||
     step === SessionStep.CONSULTATION_PENDING_CLIENT ||
@@ -20,6 +21,7 @@ function stepFromSessionStep(step: SessionStep | null): StepKey {
   ) {
     return 'consult'
   }
+
   return 'session'
 }
 
@@ -93,6 +95,25 @@ function centerFrom(args: {
   return { label: 'Session', action: 'NAVIGATE', href: hrefForStep(bookingId, sessionStep) }
 }
 
+async function getBeforeAfterCounts(bookingId: string) {
+  // One query instead of two separate count() calls
+  const groups = await prisma.mediaAsset.groupBy({
+    by: ['phase'],
+    where: { bookingId, phase: { in: [MediaPhase.BEFORE, MediaPhase.AFTER] } },
+    _count: { _all: true },
+  })
+
+  let before = 0
+  let after = 0
+
+  for (const g of groups) {
+    if (g.phase === MediaPhase.BEFORE) before = g._count._all
+    if (g.phase === MediaPhase.AFTER) after = g._count._all
+  }
+
+  return { before, after }
+}
+
 export async function GET() {
   try {
     const auth = await requirePro()
@@ -131,10 +152,7 @@ export async function GET() {
     })
 
     if (active) {
-      const [beforeCount, afterCount] = await Promise.all([
-        prisma.mediaAsset.count({ where: { bookingId: active.id, phase: MediaPhase.BEFORE } }),
-        prisma.mediaAsset.count({ where: { bookingId: active.id, phase: MediaPhase.AFTER } }),
-      ])
+      const { before, after } = await getBeforeAfterCounts(active.id)
 
       const firstItemName = active.serviceItems?.[0]?.service?.name ?? null
       const serviceName = firstItemName ?? active.service?.name ?? ''
@@ -147,18 +165,15 @@ export async function GET() {
           id: active.id,
           sessionStep: active.sessionStep ?? null,
           serviceName,
-          clientName:
-            fullName(active.client?.firstName, active.client?.lastName) ||
-            active.client?.user?.email ||
-            '',
+          clientName: fullName(active.client?.firstName, active.client?.lastName) || active.client?.user?.email || '',
           scheduledFor: active.scheduledFor ? active.scheduledFor.toISOString() : null,
         },
         center: centerFrom({
           mode: 'ACTIVE',
           bookingId: active.id,
           sessionStep: active.sessionStep ?? null,
-          hasBeforeMedia: beforeCount > 0,
-          hasAfterMedia: afterCount > 0,
+          hasBeforeMedia: before > 0,
+          hasAfterMedia: after > 0,
         }),
       }
 
@@ -212,10 +227,7 @@ export async function GET() {
           id: next.id,
           sessionStep: next.sessionStep ?? null,
           serviceName,
-          clientName:
-            fullName(next.client?.firstName, next.client?.lastName) ||
-            next.client?.user?.email ||
-            '',
+          clientName: fullName(next.client?.firstName, next.client?.lastName) || next.client?.user?.email || '',
           scheduledFor: next.scheduledFor ? next.scheduledFor.toISOString() : null,
         },
         center: centerFrom({

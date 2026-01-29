@@ -4,7 +4,7 @@ import { Redis } from '@upstash/redis'
 import { Ratelimit } from '@upstash/ratelimit'
 import { jsonFail } from './responses'
 
-type RateLimitBucket =
+export type RateLimitBucket =
   | 'holds:create'
   | 'bookings:reschedule'
   | 'looks:like'
@@ -12,7 +12,6 @@ type RateLimitBucket =
   | 'consultation:decision'
   | 'google:proxy'
   | 'messages:send'
-
 
 type LimitConfig = {
   tokens: number
@@ -34,30 +33,48 @@ const redis = Redis.fromEnv()
 
 async function getClientIpFromHeaders(): Promise<string | null> {
   const h = await headers()
+
+  // Standard on Vercel / proxies
   const xff = h.get('x-forwarded-for')
-  if (xff) return xff.split(',')[0]?.trim() || null
+  if (xff) {
+    const first = xff.split(',')[0]?.trim()
+    return first || null
+  }
+
+  // Some setups set this
   const rip = h.get('x-real-ip')
-  return rip?.trim() || null
+  if (rip) return rip.trim() || null
+
+  return null
 }
 
-export type RateLimitIdentity =
-  | { kind: 'user'; id: string }
-  | { kind: 'ip'; id: string }
+export type RateLimitIdentity = { kind: 'user'; id: string } | { kind: 'ip'; id: string }
 
 export async function rateLimitIdentity(userId?: string | null): Promise<RateLimitIdentity | null> {
-  if (userId && typeof userId === 'string') return { kind: 'user', id: userId }
+  const u = typeof userId === 'string' ? userId.trim() : ''
+  if (u) return { kind: 'user', id: u }
+
   const ip = await getClientIpFromHeaders()
   return ip ? { kind: 'ip', id: ip } : null
 }
 
-function buildLimiter(bucket: RateLimitBucket) {
+// Tiny runtime cache so we don’t re-create Ratelimit objects constantly
+const limiterCache = new Map<RateLimitBucket, Ratelimit>()
+
+function getLimiter(bucket: RateLimitBucket) {
+  const hit = limiterCache.get(bucket)
+  if (hit) return hit
+
   const cfg = LIMITS[bucket]
-  return new Ratelimit({
+  const limiter = new Ratelimit({
     redis,
     limiter: Ratelimit.slidingWindow(cfg.tokens, cfg.window),
     prefix: cfg.prefix,
     analytics: true,
   })
+
+  limiterCache.set(bucket, limiter)
+  return limiter
 }
 
 export async function enforceRateLimit(args: {
@@ -68,12 +85,14 @@ export async function enforceRateLimit(args: {
   const { bucket, identity, keySuffix } = args
   if (!identity) return null
 
-  const limiter = buildLimiter(bucket)
+  const limiter = getLimiter(bucket)
   const key = `${identity.kind}:${identity.id}${keySuffix ? `:${keySuffix}` : ''}`
 
   const result = await limiter.limit(key)
+
   if (result.success) return null
 
+  // result.reset is a unix ms timestamp
   const retryAfterSec = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000))
 
   return jsonFail(
@@ -81,7 +100,11 @@ export async function enforceRateLimit(args: {
     'Too many requests. Please slow down.',
     {
       code: 'RATE_LIMITED',
-      details: { limit: result.limit, remaining: result.remaining, reset: result.reset },
+      details: {
+        limit: result.limit,
+        remaining: result.remaining,
+        reset: result.reset,
+      },
     },
     {
       headers: {

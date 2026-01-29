@@ -1,7 +1,7 @@
 // app/_components/ProSessionFooter/useProSession.ts
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import type { ProSessionPayload, SessionBooking, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
 
@@ -64,6 +64,11 @@ function normalizeAction(v: unknown): UiSessionCenterAction {
 
 const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
 
+// Tuning knobs
+const POLL_MS = 60_000
+const SOFT_THROTTLE_MS = 10_000
+const ROUTE_THROTTLE_MS = 1500
+
 export function useProSession() {
   const router = useRouter()
   const pathname = usePathname()
@@ -80,10 +85,11 @@ export function useProSession() {
   const inFlightRef = useRef<AbortController | null>(null)
   const inFlightPromiseRef = useRef<Promise<void> | null>(null)
   const redirectedRef = useRef(false)
-  const lastLoadAtRef = useRef<number>(0)
 
-  // Monotonic request id so only the latest request updates/cleans up.
+  const lastLoadAtRef = useRef<number>(0)
   const reqIdRef = useRef(0)
+
+  const visibilityDebounceRef = useRef<number | null>(null)
 
   const isReadyOrActive = mode === 'UPCOMING' || mode === 'ACTIVE'
 
@@ -91,81 +97,90 @@ export function useProSession() {
     return !booking || loading || !!actionLoading || !isReadyOrActive || center.action === 'NONE'
   }, [booking, loading, actionLoading, isReadyOrActive, center.action])
 
-  async function loadSession(opts?: { silent?: boolean; force?: boolean }) {
-    // Dedupe: if a load is already running and we aren't forcing, reuse it.
-    if (inFlightPromiseRef.current && !opts?.force) return inFlightPromiseRef.current
+  const loadSession = useCallback(
+    async (opts?: { silent?: boolean; force?: boolean }) => {
+      const now = Date.now()
 
-    if (opts?.force) {
-      inFlightRef.current?.abort()
-      inFlightRef.current = null
-      inFlightPromiseRef.current = null
-    }
-
-    const controller = new AbortController()
-    inFlightRef.current = controller
-
-    const myReqId = ++reqIdRef.current
-
-    if (!opts?.silent) {
-      setLoading(true)
-      setError(null)
-    }
-
-    const promise = (async () => {
-      try {
-        const res = await fetch('/api/pro/session', {
-          method: 'GET',
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-
-        if (res.status === 401) {
-          if (!redirectedRef.current) {
-            redirectedRef.current = true
-            redirectToLogin(router, 'pro-session')
-          }
-          return
-        }
-
-        redirectedRef.current = false
-        const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean }
-
-        if (!res.ok || data?.ok !== true) {
-          setMode('IDLE')
-          setBooking(null)
-          setCenter(DEFAULT_CENTER)
-          if (!opts?.silent) setError(errorFromResponse(res, data))
-          return
-        }
-
-        setMode(normalizeMode(data.mode))
-        setBooking((data.booking as SessionBooking) ?? null)
-
-        const c = data.center as any
-        const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
-        const action = normalizeAction(c?.action)
-        const href = isSafeInternalHref(c?.href) ? c.href : null
-
-        setCenter({ label, action, href })
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return
-        if (!opts?.silent) setError('Network error loading session.')
-      } finally {
-        // Only the latest request cleans up. Older ones should not stomp state.
-        if (reqIdRef.current === myReqId) {
-          if (inFlightRef.current === controller) inFlightRef.current = null
-          inFlightPromiseRef.current = null
-          if (!opts?.silent) setLoading(false)
-        }
+      // Soft throttle: if we just loaded recently and we're not forcing, skip.
+      if (!opts?.force && now - (lastLoadAtRef.current || 0) < SOFT_THROTTLE_MS) {
+        return
       }
-    })()
 
-    inFlightPromiseRef.current = promise
-    lastLoadAtRef.current = Date.now()
-    return promise
-  }
+      // Dedupe: if a load is already running and we aren't forcing, reuse it.
+      if (inFlightPromiseRef.current && !opts?.force) return inFlightPromiseRef.current
 
-  // Initial load + polling (only when visible)
+      if (opts?.force) {
+        inFlightRef.current?.abort()
+        inFlightRef.current = null
+        inFlightPromiseRef.current = null
+      }
+
+      const controller = new AbortController()
+      inFlightRef.current = controller
+
+      const myReqId = ++reqIdRef.current
+
+      if (!opts?.silent) {
+        setLoading(true)
+        setError(null)
+      }
+
+      const promise = (async () => {
+        try {
+          const res = await fetch('/api/pro/session', {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal,
+          })
+
+          if (res.status === 401) {
+            if (!redirectedRef.current) {
+              redirectedRef.current = true
+              redirectToLogin(router, 'pro-session')
+            }
+            return
+          }
+
+          redirectedRef.current = false
+          const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean }
+
+          if (!res.ok || data?.ok !== true) {
+            setMode('IDLE')
+            setBooking(null)
+            setCenter(DEFAULT_CENTER)
+            if (!opts?.silent) setError(errorFromResponse(res, data))
+            return
+          }
+
+          setMode(normalizeMode(data.mode))
+          setBooking((data.booking as SessionBooking) ?? null)
+
+          const c = data.center as any
+          const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
+          const action = normalizeAction(c?.action)
+          const href = isSafeInternalHref(c?.href) ? c.href : null
+
+          setCenter({ label, action, href })
+        } catch (err: any) {
+          if (err?.name === 'AbortError') return
+          if (!opts?.silent) setError('Network error loading session.')
+        } finally {
+          if (reqIdRef.current === myReqId) {
+            if (inFlightRef.current === controller) inFlightRef.current = null
+            inFlightPromiseRef.current = null
+            if (!opts?.silent) setLoading(false)
+          }
+        }
+      })()
+
+      inFlightPromiseRef.current = promise
+      lastLoadAtRef.current = now
+      return promise
+    },
+    [router],
+  )
+
+  // Initial load + polling (visible only)
   useEffect(() => {
     let pollId: number | null = null
 
@@ -174,7 +189,7 @@ export function useProSession() {
       pollId = window.setInterval(() => {
         if (document.visibilityState !== 'visible') return
         void loadSession({ silent: true })
-      }, 30_000)
+      }, POLL_MS)
     }
 
     const stopPolling = () => {
@@ -183,40 +198,42 @@ export function useProSession() {
       pollId = null
     }
 
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        void loadSession({ silent: true })
-        startPolling()
-      } else {
-        stopPolling()
-      }
+    const scheduleVisibilityLoad = () => {
+      if (visibilityDebounceRef.current) window.clearTimeout(visibilityDebounceRef.current)
+      visibilityDebounceRef.current = window.setTimeout(() => {
+        if (document.visibilityState === 'visible') {
+          void loadSession({ silent: true })
+          startPolling()
+        } else {
+          stopPolling()
+        }
+      }, 200)
     }
 
-    void loadSession({ silent: false })
-    onVisibility()
+    void loadSession({ silent: false, force: true })
+    scheduleVisibilityLoad()
 
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('focus', onVisibility)
+    document.addEventListener('visibilitychange', scheduleVisibilityLoad)
+    window.addEventListener('focus', scheduleVisibilityLoad)
 
     return () => {
       stopPolling()
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('focus', onVisibility)
+      if (visibilityDebounceRef.current) window.clearTimeout(visibilityDebounceRef.current)
+      document.removeEventListener('visibilitychange', scheduleVisibilityLoad)
+      window.removeEventListener('focus', scheduleVisibilityLoad)
       inFlightRef.current?.abort()
       inFlightRef.current = null
       inFlightPromiseRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [loadSession])
 
-  // Route change refresh, throttled
+  // Route change refresh (throttled)
   useEffect(() => {
     const now = Date.now()
     const elapsed = now - (lastLoadAtRef.current || 0)
-    if (elapsed < 800) return
+    if (elapsed < ROUTE_THROTTLE_MS) return
     void loadSession({ silent: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname])
+  }, [pathname, loadSession])
 
   async function handleCenterClick() {
     if (!booking || centerDisabled) return

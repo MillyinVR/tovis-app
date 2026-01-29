@@ -1,6 +1,7 @@
 // lib/booking/pickLocation.ts
 import { prisma } from '@/lib/prisma'
 import type { ServiceLocationType, ProfessionalLocationType } from '@prisma/client'
+import { TtlCache, stableKey } from '@/lib/cache/ttlCache'
 
 type PickBookableLocationArgs = {
   professionalId: string
@@ -13,11 +14,14 @@ function cleanId(v: unknown) {
 }
 
 function allowedProfessionalTypes(locationType: ServiceLocationType): ProfessionalLocationType[] {
-  // Booking mode (ServiceLocationType) -> Stored location types (ProfessionalLocationType)
   if (locationType === 'MOBILE') return ['MOBILE_BASE']
-  // SALON booking includes both SALON and SUITE locations
   return ['SALON', 'SUITE']
 }
+
+// ✅ module-scope cache (Node runtime). Great for a single server / local dev.
+// If you deploy serverless, this still helps “warm” instances but isn’t guaranteed shared.
+const locationCache = new TtlCache<any>(800)
+const TTL_MS = 10 * 60_000 // 10 minutes
 
 export async function pickBookableLocation(args: PickBookableLocationArgs) {
   const professionalId = cleanId(args.professionalId)
@@ -26,6 +30,10 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
 
   if (!professionalId) return null
 
+  const cacheKey = stableKey(['pickBookableLocation', professionalId, args.locationType, requestedLocationId])
+  const cached = locationCache.get(cacheKey)
+  if (cached) return cached
+
   const select = {
     id: true,
     type: true,
@@ -33,7 +41,6 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
     isPrimary: true,
     isBookable: true,
 
-    // schedule + booking defaults
     timeZone: true,
     workingHours: true,
     bufferMinutes: true,
@@ -41,11 +48,9 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
     advanceNoticeMinutes: true,
     maxDaysAhead: true,
 
-    // ✅ geo (needed by holds/bookings snapshots)
     lat: true,
     lng: true,
 
-    // display
     city: true,
     formattedAddress: true,
     createdAt: true,
@@ -62,7 +67,10 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
       },
       select,
     })
-    if (byId?.id) return byId
+    if (byId?.id) {
+      locationCache.set(cacheKey, byId, TTL_MS)
+      return byId
+    }
   }
 
   // 2) Otherwise pick the best match for this booking mode
@@ -76,5 +84,7 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
     select,
   })
 
-  return best?.id ? best : null
+  const result = best?.id ? best : null
+  if (result) locationCache.set(cacheKey, result, TTL_MS)
+  return result
 }

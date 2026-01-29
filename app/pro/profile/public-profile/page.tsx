@@ -9,6 +9,7 @@ import ShareButton from './ShareButton'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { moneyToString } from '@/lib/money'
 import type { Prisma } from '@prisma/client'
+import ProAccountMenu from './ProAccountMenu'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,11 +17,12 @@ type SearchParams = { [key: string]: string | string[] | undefined }
 type TabKey = 'portfolio' | 'services' | 'reviews'
 
 const ROUTES = {
-  proHome: '/pro',
+  proHome: '/pro/dashboard',
   proServices: '/pro/services',
-  proMessages: '/pro/messages',
+  messages: '/messages',
   proMediaNew: '/pro/media/new',
   proPublicProfile: '/pro/profile/public-profile',
+  looks: '/looks',
 } as const
 
 function pickTab(resolved: SearchParams | undefined): TabKey {
@@ -155,7 +157,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
   if (!pro) redirect(ROUTES.proHome)
 
   const [portfolioMedia, favoritesCount, serviceOptions] = await Promise.all([
-    // ✅ show ALL media owned so they can manage from profile (PUBLIC + PRIVATE)
     prisma.mediaAsset.findMany({
       where: { professionalId: pro.id },
       orderBy: { createdAt: 'desc' },
@@ -232,6 +233,14 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
             </Link>
 
             <ShareButton url={publicUrl} />
+
+            <ProAccountMenu
+              publicUrl={publicUrl}
+              looksHref={ROUTES.looks}
+              proServicesHref={ROUTES.proServices}
+              uploadHref={ROUTES.proMediaNew}
+              messagesHref={ROUTES.messages}
+            />
           </div>
         </div>
 
@@ -284,7 +293,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           </Link>
 
           <Link
-            href={ROUTES.proMessages}
+            href={ROUTES.messages}
             className="rounded-[18px] border border-white/10 bg-bgSecondary px-4 py-2 text-[13px] font-black text-textPrimary hover:border-white/20"
             title="Open your messages"
           >
@@ -316,7 +325,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
       {tab === 'portfolio' ? (
         <section className="pt-4">
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
-            {/* Upload tile */}
             <Link
               href={ROUTES.proMediaNew}
               className="group relative grid aspect-square place-items-center overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary hover:border-white/20"
@@ -346,7 +354,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                     <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
                   </Link>
 
-                  {/* badges */}
                   <div className="pointer-events-none absolute left-2 bottom-2 flex flex-wrap gap-1.5">
                     {isPrivate ? (
                       <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
@@ -371,7 +378,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                     </div>
                   ) : null}
 
-                  {/* owner overflow menu */}
                   <div className="absolute left-2 top-2 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition">
                     <OwnerMediaMenu
                       mediaId={m.id}
@@ -391,9 +397,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           </div>
 
           {portfolioMedia.length === 0 ? (
-            <div className="mt-3 text-[12px] text-textSecondary">
-              No posts yet. Go ahead—feed the algorithm.
-            </div>
+            <div className="mt-3 text-[12px] text-textSecondary">No posts yet. Go ahead—feed the algorithm.</div>
           ) : null}
         </section>
       ) : null}

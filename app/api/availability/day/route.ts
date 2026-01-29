@@ -182,7 +182,107 @@ function computeDayBoundsUtc(dateYMD: { year: number; month: number; day: number
   return { timeZone, dayStartUtc, dayEndExclusiveUtc }
 }
 
-async function computeDaySlots(args: {
+function mergeBusyIntervals(list: BusyInterval[]) {
+  const sorted = list
+    .filter((x) => x.start.getTime() < x.end.getTime())
+    .sort((a, b) => a.start.getTime() - b.start.getTime())
+
+  const out: BusyInterval[] = []
+  for (const cur of sorted) {
+    const prev = out[out.length - 1]
+    if (!prev) {
+      out.push({ start: new Date(cur.start), end: new Date(cur.end) })
+      continue
+    }
+    if (cur.start.getTime() <= prev.end.getTime()) {
+      if (cur.end.getTime() > prev.end.getTime()) prev.end = new Date(cur.end)
+    } else {
+      out.push({ start: new Date(cur.start), end: new Date(cur.end) })
+    }
+  }
+  return out
+}
+
+async function loadBusyIntervals(args: {
+  professionalId: string
+  locationId: string
+  windowStartUtc: Date
+  windowEndUtc: Date
+  nowUtc: Date
+  durationMinutes: number
+  adjacencyBufferMinutes: number
+}) {
+  const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, durationMinutes, adjacencyBufferMinutes } = args
+
+  const [bookings, holds, blocks] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        professionalId,
+        scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
+        NOT: { status: 'CANCELLED' },
+      },
+      select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+      take: 5000,
+    }),
+
+    prisma.bookingHold.findMany({
+      where: {
+        professionalId,
+        scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
+        expiresAt: { gt: nowUtc },
+      },
+      select: { scheduledFor: true, expiresAt: true },
+      take: 5000,
+    }),
+
+    prisma.calendarBlock.findMany({
+      where: {
+        professionalId,
+        startsAt: { lt: windowEndUtc },
+        endsAt: { gt: windowStartUtc },
+        OR: [{ locationId: null }, { locationId }],
+      },
+      select: { startsAt: true, endsAt: true },
+      take: 5000,
+    }),
+  ])
+
+  const adjBuf = clampInt(Number(adjacencyBufferMinutes ?? 0) || 0, 0, 120)
+
+  const busy: BusyInterval[] = [
+    ...bookings
+      .filter((b) => String(b.status ?? '').toUpperCase() !== 'CANCELLED')
+      .map((b) => {
+        const start = normalizeToMinute(new Date(b.scheduledFor))
+        const baseDur = Number(b.totalDurationMinutes || durationMinutes)
+        const bBuf = Number(b.bufferMinutes ?? 0)
+        const effectiveBuf = Number.isFinite(bBuf) ? clampInt(bBuf, 0, 120) : adjBuf
+        return { start, end: addMinutes(start, baseDur + effectiveBuf) }
+      }),
+
+    ...holds
+      .filter((h) => new Date(h.expiresAt).getTime() > nowUtc.getTime())
+      .map((h) => {
+        const start = normalizeToMinute(new Date(h.scheduledFor))
+        return { start, end: addMinutes(start, durationMinutes + adjBuf) }
+      }),
+
+    ...blocks.map((bl) => ({ start: new Date(bl.startsAt), end: new Date(bl.endsAt) })),
+  ]
+
+  return mergeBusyIntervals(busy)
+}
+
+function isSlotFree(busy: BusyInterval[], slotStart: Date, slotEnd: Date) {
+  for (let i = 0; i < busy.length; i++) {
+    const bi = busy[i]
+    if (bi.start.getTime() >= slotEnd.getTime()) return true
+    if (overlaps(slotStart, slotEnd, bi.start, bi.end)) return false
+  }
+  return true
+}
+
+async function computeDaySlotsFast(args: {
   professionalId: string
   locationId: string
   dateYMD: { year: number; month: number; day: number }
@@ -192,14 +292,13 @@ async function computeDaySlots(args: {
   workingHours: unknown | null
   leadTimeMinutes: number
   adjacencyBufferMinutes: number
+  busy: BusyInterval[]
   debug?: boolean
 }): Promise<
   | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: any }
   | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: any }
 > {
   const {
-    professionalId,
-    locationId,
     dateYMD,
     durationMinutes,
     stepMinutes,
@@ -207,6 +306,7 @@ async function computeDaySlots(args: {
     workingHours,
     leadTimeMinutes,
     adjacencyBufferMinutes,
+    busy,
     debug,
   } = args
 
@@ -271,65 +371,7 @@ async function computeDaySlots(args: {
     }
   }
 
-  const scanStartUtc = addMinutes(dayStartUtc, -24 * 60)
-  const scanEndUtc = addMinutes(dayEndExclusiveUtc, 24 * 60)
-
-  const [bookings, holds, blocks] = await Promise.all([
-    prisma.booking.findMany({
-      where: {
-        professionalId,
-        scheduledFor: { gte: scanStartUtc, lt: scanEndUtc },
-        NOT: { status: 'CANCELLED' },
-      },
-      select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
-      take: 3000,
-    }),
-
-    prisma.bookingHold.findMany({
-      where: {
-        professionalId,
-        scheduledFor: { gte: scanStartUtc, lt: scanEndUtc },
-        expiresAt: { gt: nowUtc },
-      },
-      select: { scheduledFor: true, expiresAt: true },
-      take: 3000,
-    }),
-
-    prisma.calendarBlock.findMany({
-      where: {
-        professionalId,
-        startsAt: { lt: scanEndUtc },
-        endsAt: { gt: scanStartUtc },
-        OR: [{ locationId: null }, { locationId }],
-      },
-      select: { startsAt: true, endsAt: true, locationId: true },
-      take: 3000,
-    }),
-  ])
-
   const adjBuf = clampInt(Number(adjacencyBufferMinutes ?? 0) || 0, 0, 120)
-
-  const busy: BusyInterval[] = [
-    ...bookings
-      .filter((b) => String(b.status ?? '').toUpperCase() !== 'CANCELLED')
-      .map((b) => {
-        const start = normalizeToMinute(new Date(b.scheduledFor))
-        const baseDur = Number(b.totalDurationMinutes || durationMinutes)
-        const bBuf = Number(b.bufferMinutes ?? 0)
-        const effectiveBuf = Number.isFinite(bBuf) ? clampInt(bBuf, 0, 120) : adjBuf
-        return { start, end: addMinutes(start, baseDur + effectiveBuf) }
-      }),
-
-    ...holds
-      .filter((h) => new Date(h.expiresAt).getTime() > nowUtc.getTime())
-      .map((h) => {
-        const start = normalizeToMinute(new Date(h.scheduledFor))
-        return { start, end: addMinutes(start, durationMinutes + adjBuf) }
-      }),
-
-    ...blocks.map((bl) => ({ start: new Date(bl.startsAt), end: new Date(bl.endsAt) })),
-  ]
-
   const cutoffUtc = addMinutes(nowUtc, clampInt(Number(leadTimeMinutes ?? 0) || 0, 0, 240))
   const step = normalizeStepMinutes(stepMinutes, 30)
 
@@ -359,7 +401,7 @@ async function computeDaySlots(args: {
     if (slotEndWorkUtc > dayEndExclusiveUtc) continue
 
     const slotEndWithBufferUtc = addMinutes(slotStartUtc, durationMinutes + adjBuf)
-    if (busy.some((bi) => overlaps(slotStartUtc, slotEndWithBufferUtc, bi.start, bi.end))) continue
+    if (!isSlotFree(busy, slotStartUtc, slotEndWithBufferUtc)) continue
 
     slots.push(slotStartUtc.toISOString())
   }
@@ -392,7 +434,6 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: 'Missing professionalId or serviceId.' }, { status: 400 })
     }
 
-    // ✅ Pull service name/category from admin-created Services
     const [pro, service, offering] = await Promise.all([
       prisma.professionalProfile.findUnique({
         where: { id: professionalId },
@@ -442,7 +483,6 @@ export async function GET(req: Request) {
     const locId = String(locAny.id || '').trim()
     if (!locId) return NextResponse.json({ ok: false, error: 'Bookable location is missing id.' }, { status: 500 })
 
-    // ✅ Strict: require location tz
     const timeZone = requireLocationTimeZone(locAny.timeZone)
     if (!timeZone) {
       return NextResponse.json(
@@ -483,24 +523,46 @@ export async function GET(req: Request) {
       mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
     }
 
+    const workingHours = locAny.workingHours ?? null
+
     // SUMMARY MODE
     if (!dateStr) {
       const daysAhead = Math.min(14, maxAdvanceDays)
+      const ymds = Array.from({ length: daysAhead }, (_, i) =>
+        addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i),
+      )
+
+      const firstBounds = computeDayBoundsUtc(ymds[0], timeZone)
+      const lastBounds = computeDayBoundsUtc(ymds[ymds.length - 1], timeZone)
+
+      const windowStartUtc = addMinutes(firstBounds.dayStartUtc, -24 * 60)
+      const windowEndUtc = addMinutes(lastBounds.dayEndExclusiveUtc, 24 * 60)
+
+      const busy = await loadBusyIntervals({
+        professionalId,
+        locationId: locId,
+        windowStartUtc,
+        windowEndUtc,
+        nowUtc,
+        durationMinutes,
+        adjacencyBufferMinutes,
+      })
+
       const availableDays: Array<{ date: string; slotCount: number }> = []
       let firstError: string | null = null
 
-      for (let i = 0; i < daysAhead; i++) {
-        const ymd = addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i)
-        const result = await computeDaySlots({
+      for (const ymd of ymds) {
+        const result = await computeDaySlotsFast({
           professionalId,
           locationId: locId,
           dateYMD: ymd,
           durationMinutes,
           stepMinutes,
           timeZone,
-          workingHours: locAny.workingHours ?? null,
+          workingHours,
           leadTimeMinutes,
           adjacencyBufferMinutes,
+          busy,
           debug: false,
         })
 
@@ -526,7 +588,6 @@ export async function GET(req: Request) {
         serviceId,
         professionalId,
 
-        // ✅ include real service labels
         serviceName: service.name,
         serviceCategoryName: service.category?.name ?? null,
 
@@ -547,7 +608,7 @@ export async function GET(req: Request) {
           location: pro.location ?? null,
           offeringId: offering.id,
           isCreator: true as const,
-          timeZone, // keep consistent
+          timeZone,
         },
 
         availableDays,
@@ -571,16 +632,31 @@ export async function GET(req: Request) {
       )
     }
 
-    const result = await computeDaySlots({
+    const bounds = computeDayBoundsUtc(ymd, timeZone)
+    const windowStartUtc = addMinutes(bounds.dayStartUtc, -24 * 60)
+    const windowEndUtc = addMinutes(bounds.dayEndExclusiveUtc, 24 * 60)
+
+    const busy = await loadBusyIntervals({
+      professionalId,
+      locationId: locId,
+      windowStartUtc,
+      windowEndUtc,
+      nowUtc,
+      durationMinutes,
+      adjacencyBufferMinutes,
+    })
+
+    const result = await computeDaySlotsFast({
       professionalId,
       locationId: locId,
       dateYMD: ymd,
       durationMinutes,
       stepMinutes,
       timeZone,
-      workingHours: locAny.workingHours ?? null,
+      workingHours,
       leadTimeMinutes,
       adjacencyBufferMinutes,
+      busy,
       debug,
     })
 

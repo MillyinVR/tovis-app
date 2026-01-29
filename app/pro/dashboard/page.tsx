@@ -276,8 +276,9 @@ export default async function ProDashboardPage({ searchParams }: { searchParams?
   const nextY = m === 12 ? y + 1 : y
   const nextM = m === 12 ? 1 : m + 1
 
-  const prevHref = `/pro?month=${monthKey(prevY, prevM)}`
-  const nextHref = `/pro?month=${monthKey(nextY, nextM)}`
+  const prevHref = `/pro/dashboard?month=${monthKey(prevY, prevM)}`
+  const nextHref = `/pro/dashboard?month=${monthKey(nextY, nextM)}`
+
 
   const revenueLabel = moneyToString(cur.revenueTotalDollars) ?? '0.00'
   const tipsLabel = moneyToString(cur.tipsDollars) ?? '0.00'

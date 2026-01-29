@@ -7,15 +7,22 @@ import NavItem from './NavItem'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
 
 const ROUTES = {
-  home: '/pro/dashboard',
+  // Pro "homebase"
   calendar: '/pro/calendar',
+
+  // Pro "Looks"
+  looks: '/looks',
+
   messages: '/messages',
   profile: '/pro/profile/public-profile',
+
+  // Optional: keep dashboard route around for anywhere else (not in footer)
+  dashboard: '/pro/dashboard',
 } as const
 
 function isActivePath(pathname: string, href: string) {
-  if (href === '/pro') return pathname === '/pro'
-  return pathname === href || pathname.startsWith(href + '/')
+  const base = href.split('?')[0]
+  return pathname === base || pathname.startsWith(base + '/')
 }
 
 function shouldHideOnPath(pathname: string) {
@@ -49,7 +56,12 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
 
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem label="Home" href={ROUTES.home} icon="🏠" active={isActivePath(pathname, ROUTES.home)} />
+          <NavItem
+            label="Looks"
+            href={ROUTES.looks}
+            icon="✨"
+            active={isActivePath(pathname, ROUTES.looks)}
+          />
 
           <NavItem
             label="Calendar"
@@ -89,7 +101,12 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
             rightSlot={messagesBadge ? <BadgeDot label={messagesBadge} /> : null}
           />
 
-          <NavItem label="Profile" href={ROUTES.profile} icon="👤" active={isActivePath(pathname, ROUTES.profile)} />
+          <NavItem
+            label="Profile"
+            href={ROUTES.profile}
+            icon="👤"
+            active={isActivePath(pathname, ROUTES.profile)}
+          />
         </div>
       </div>
     </div>
