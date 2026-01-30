@@ -1,5 +1,4 @@
 // app/pro/calendar/page.tsx
-
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -56,9 +55,11 @@ export default function ProCalendarPage() {
           })
 
   return (
-    <main className="mx-auto mt-10 max-w-275 px-4 font-sans text-textPrimary">
+    <main className="mx-auto max-w-275 px-4 pb-10 pt-6 font-sans text-textPrimary md:pt-10">
+      {/* ✅ unified “glass header” rhythm */}
       <CalendarHeader />
 
+      {/* ✅ management strip already good; sits as a glass section */}
       <ManagementStrip
         stats={cal.stats}
         management={cal.management}
@@ -71,20 +72,24 @@ export default function ProCalendarPage() {
         onOpenManagement={cal.openManagement}
       />
 
+      {/* ✅ working hours editor becomes a proper panel */}
       {cal.showHoursForm && (
-        <div className="mb-4 rounded-2xl border border-white/10 bg-bgSecondary p-4">
-          <WorkingHoursTabs
-            canSalon={Boolean(cal.canSalon)}
-            canMobile={Boolean(cal.canMobile)}
-            activeLocationType={cal.activeLocationType}
-            onChangeLocationType={(next) => cal.setActiveLocationType(next)}
-            onSavedAny={() => {
-              cal.reload()
-            }}
-          />
-        </div>
+        <section className="mb-4">
+          <div className="tovis-glass-soft tovis-noise border border-white/10 px-4 py-4 md:px-5">
+            <WorkingHoursTabs
+              canSalon={Boolean(cal.canSalon)}
+              canMobile={Boolean(cal.canMobile)}
+              activeLocationType={cal.activeLocationType}
+              onChangeLocationType={(next) => cal.setActiveLocationType(next)}
+              onSavedAny={() => {
+                cal.reload()
+              }}
+            />
+          </div>
+        </section>
       )}
 
+      {/* ✅ controls are now glass, mobile-stacked */}
       <CalendarHeaderControls
         view={view}
         setView={setView}
@@ -102,8 +107,17 @@ export default function ProCalendarPage() {
         }}
       />
 
-      {cal.loading && <div className="mb-2 text-sm text-textSecondary">Loading…</div>}
-      {cal.error && <div className="mb-2 text-sm text-red-400">{cal.error}</div>}
+      {cal.loading && (
+        <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-3 text-sm text-textSecondary">
+          Loading…
+        </div>
+      )}
+
+      {cal.error && (
+        <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-toneDanger">
+          {cal.error}
+        </div>
+      )}
 
       {(view === 'day' || view === 'week') && (
         <DayWeekGrid
@@ -112,6 +126,7 @@ export default function ProCalendarPage() {
           events={cal.events}
           workingHours={cal.workingHours}
           timeZone={timeZone}
+          locationType={cal.activeLocationType}
           onClickEvent={cal.openBookingOrBlock}
           onCreateForClick={cal.openCreateForClick}
           onDragStart={cal.drag.onDragStart}
@@ -134,6 +149,7 @@ export default function ProCalendarPage() {
         />
       )}
 
+      {/* Modals */}
       <CreateBookingModal
         open={cal.createOpen}
         onClose={() => cal.setCreateOpen(false)}

@@ -18,6 +18,7 @@ export type ChipClasses = {
   bg: string
   border: string
   text: string
+  ring?: string
 }
 
 export function statusLabel(status?: string | null): string {
@@ -33,7 +34,6 @@ export function statusLabel(status?: string | null): string {
   if (s === 'RESCHEDULE_REQUESTED') return 'Reschedule requested'
   if (s === 'BLOCKED') return 'Blocked'
 
-  // fallback for any new statuses you add later
   return s
     .toLowerCase()
     .split('_')
@@ -43,48 +43,60 @@ export function statusLabel(status?: string | null): string {
 
 /**
  * Returns Tailwind class names for event chips / blocks (as an object).
+ * Design goals:
+ * - Calm base contrast (luxury)
+ * - Clear meaning (trust)
+ * - No neon / no harsh borders
  */
 export function eventChipClasses(ev: CalendarEventLike): ChipClasses {
-  // BLOCKED TIME (personal / unavailable)
-  if (ev.isBlocked || String(ev.status || '').toUpperCase() === 'BLOCKED') {
+  const status = String(ev.status || '').toUpperCase()
+
+  // BLOCKED
+  if (ev.isBlocked || status === 'BLOCKED') {
     return {
-      bg: 'bg-bgSecondary',
+      bg: 'bg-bgSecondary/45',
       border: 'border-white/10',
-      text: 'text-textSecondary',
+      text: 'text-textPrimary',
+      ring: 'ring-white/8',
     }
   }
 
-  const status = String(ev.status || '').toUpperCase()
-
   switch (status) {
     case 'PENDING':
+    case 'RESCHEDULE_REQUESTED':
       return {
-        bg: 'bg-amber-500/10',
-        border: 'border-amber-500/40',
-        text: 'text-amber-200',
+        bg: 'bg-amber-500/7',
+        border: 'border-amber-500/22',
+        text: 'text-textPrimary',
+        ring: 'ring-amber-500/12',
       }
 
     case 'CANCELLED':
     case 'DECLINED':
+    case 'NO_SHOW':
       return {
-        bg: 'bg-red-500/10',
-        border: 'border-red-500/40',
-        text: 'text-red-200',
+        bg: 'bg-red-500/7',
+        border: 'border-red-500/22',
+        text: 'text-textPrimary',
+        ring: 'ring-red-500/12',
       }
 
     case 'COMPLETED':
       return {
-        bg: 'bg-emerald-500/10',
-        border: 'border-emerald-500/40',
-        text: 'text-emerald-200',
+        bg: 'bg-emerald-500/7',
+        border: 'border-emerald-500/22',
+        text: 'text-textPrimary',
+        ring: 'ring-emerald-500/12',
       }
 
     case 'ACCEPTED':
     default:
+      // Primary money/status = accentPrimary (your gold)
       return {
-        bg: 'bg-brand/10',
-        border: 'border-brand/50',
-        text: 'text-brand',
+        bg: 'bg-accentPrimary/10',
+        border: 'border-accentPrimary/26',
+        text: 'text-textPrimary',
+        ring: 'ring-accentPrimary/14',
       }
   }
 }
@@ -94,5 +106,5 @@ export function eventChipClasses(ev: CalendarEventLike): ChipClasses {
  */
 export function eventChipClassName(ev: CalendarEventLike): string {
   const c = eventChipClasses(ev)
-  return `${c.bg} ${c.border} ${c.text}`
+  return `${c.bg} ${c.border} ${c.text} ${c.ring || ''}`
 }

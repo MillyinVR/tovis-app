@@ -7,9 +7,8 @@ import ReviewsPanel from '../ReviewsPanel'
 import EditProfileButton from './EditProfileButton'
 import ShareButton from './ShareButton'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
-import { moneyToString } from '@/lib/money'
-import type { Prisma } from '@prisma/client'
 import ProAccountMenu from './ProAccountMenu'
+import ServicesManagerSection from '../_sections/ServicesManagerSection'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +17,6 @@ type TabKey = 'portfolio' | 'services' | 'reviews'
 
 const ROUTES = {
   proHome: '/pro/dashboard',
-  proServices: '/pro/services',
   messages: '/messages',
   proMediaNew: '/pro/media/new',
   proPublicProfile: '/pro/profile/public-profile',
@@ -34,49 +32,6 @@ function pickTab(resolved: SearchParams | undefined): TabKey {
         : undefined
 
   return raw === 'services' || raw === 'reviews' ? raw : 'portfolio'
-}
-
-function pickOfferingImage(off: { customImageUrl?: string | null; service?: { defaultImageUrl?: string | null } | null }) {
-  const src = (off.customImageUrl || off.service?.defaultImageUrl || '').trim()
-  return src || null
-}
-
-type MoneyLike = string | number | Prisma.Decimal | null | undefined
-
-function toMoneyLike(v: unknown): MoneyLike {
-  if (v == null) return null
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
-  if (typeof v === 'string') {
-    const s = v.trim()
-    if (!s) return null
-    const n = Number(s)
-    return Number.isFinite(n) ? n : s
-  }
-  if (typeof v === 'object') {
-    const anyObj = v as { toString?: () => string }
-    if (typeof anyObj.toString === 'function') return anyObj.toString()
-  }
-  return null
-}
-
-function pickOfferingPrice(off: {
-  salonPriceStartingAt?: unknown | null
-  mobilePriceStartingAt?: unknown | null
-  service?: { minPrice?: unknown | null } | null
-}): MoneyLike {
-  return toMoneyLike(off.salonPriceStartingAt ?? off.mobilePriceStartingAt ?? off.service?.minPrice ?? null)
-}
-
-function pickOfferingDuration(off: {
-  salonDurationMinutes?: number | null
-  mobileDurationMinutes?: number | null
-  service?: { defaultDurationMinutes?: number | null } | null
-}) {
-  return (
-    (typeof off.salonDurationMinutes === 'number' ? off.salonDurationMinutes : null) ??
-    (typeof off.mobileDurationMinutes === 'number' ? off.mobileDurationMinutes : null) ??
-    (typeof off.service?.defaultDurationMinutes === 'number' ? off.service.defaultDurationMinutes : null)
-  )
 }
 
 function formatClientName(input: { userEmail?: string | null; firstName?: string | null; lastName?: string | null }) {
@@ -108,28 +63,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
       location: true,
       avatarUrl: true,
       professionType: true,
-      offerings: {
-        where: { isActive: true },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          customImageUrl: true,
-          salonPriceStartingAt: true,
-          mobilePriceStartingAt: true,
-          salonDurationMinutes: true,
-          mobileDurationMinutes: true,
-          service: {
-            select: {
-              name: true,
-              defaultImageUrl: true,
-              minPrice: true,
-              defaultDurationMinutes: true,
-            },
-          },
-        },
-      },
       reviews: {
         orderBy: { createdAt: 'desc' },
         take: 200,
@@ -237,7 +170,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
             <ProAccountMenu
               publicUrl={publicUrl}
               looksHref={ROUTES.looks}
-              proServicesHref={ROUTES.proServices}
+              proServicesHref={`${ROUTES.proPublicProfile}?tab=services`}
               uploadHref={ROUTES.proMediaNew}
               messagesHref={ROUTES.messages}
             />
@@ -284,12 +217,13 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
+          {/* ✅ “Add services” opens overlay via query param */}
           <Link
-            href={ROUTES.proServices}
+            href="/pro/profile/public-profile?tab=services&add=1"
             className="rounded-[18px] border border-white/10 bg-accentPrimary/15 px-4 py-2 text-[13px] font-black text-textPrimary hover:border-white/20"
-            title="Go to your services to manage and preview what clients can book"
+            title="Add services to your menu"
           >
-            Manage services
+            Add services
           </Link>
 
           <Link
@@ -378,7 +312,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                     </div>
                   ) : null}
 
-                  <div className="absolute left-2 top-2 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                  <div className="absolute left-2 top-2 z-10 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
                     <OwnerMediaMenu
                       mediaId={m.id}
                       serviceOptions={serviceOptions}
@@ -404,51 +338,8 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
       {tab === 'services' ? (
         <section className="pt-4">
-          {pro.offerings.length === 0 ? (
-            <EmptyBox>No services yet.</EmptyBox>
-          ) : (
-            <div className="grid gap-3">
-              {pro.offerings.map((off) => {
-                const imgSrc = pickOfferingImage(off)
-                const price = pickOfferingPrice(off)
-                const duration = pickOfferingDuration(off)
-
-                return (
-                  <div
-                    key={off.id}
-                    className="tovis-glass flex items-center justify-between gap-3 rounded-[18px] border border-white/10 p-3 sm:p-4"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary">
-                        {imgSrc ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imgSrc} alt="" className="h-full w-full object-cover" />
-                        ) : null}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">
-                          {off.title || off.service?.name || 'Service'}
-                        </div>
-                        {off.description ? (
-                          <div className="mt-1 line-clamp-2 text-[12px] text-textSecondary">{off.description}</div>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="text-right text-[12px] text-textSecondary">
-                      {price != null ? (
-                        <div className="font-black text-textPrimary">${moneyToString(price)}</div>
-                      ) : (
-                        <div className="font-black text-textPrimary">–</div>
-                      )}
-                      {duration != null ? <div>{duration} min</div> : <div>–</div>}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+          {/* ✅ Single source of truth */}
+          <ServicesManagerSection variant="section" title={null} subtitle={null} />
         </section>
       ) : null}
 

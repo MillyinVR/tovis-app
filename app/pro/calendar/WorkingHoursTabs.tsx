@@ -8,23 +8,33 @@ function TabButton({
   active,
   onClick,
   children,
+  tone,
 }: {
   active: boolean
   onClick: () => void
   children: React.ReactNode
+  tone: 'salon' | 'mobile'
 }) {
+  const accent =
+    tone === 'salon'
+      ? 'border-brand/30 bg-brand/8'
+      : 'border-emerald-500/25 bg-emerald-500/6'
+
   return (
     <button
       type="button"
       onClick={onClick}
       className={[
-        'rounded-full px-3 py-1 text-[12px] font-black transition',
+        'relative overflow-hidden rounded-full px-3 py-2 text-[12px] font-extrabold',
+        'border transition focus-visible:outline-none',
+        'hover:scale-[1.01] active:scale-[0.99] will-change-transform',
         active
-          ? 'bg-accentPrimary text-bgPrimary'
-          : 'border border-white/10 text-textPrimary hover:border-white/20',
+          ? `text-textPrimary ${accent} shadow-sm`
+          : 'border-white/10 text-textSecondary hover:text-textPrimary hover:border-white/20 hover:bg-bgSecondary/35',
       ].join(' ')}
     >
       {children}
+      {active ? <span className="absolute inset-0 pointer-events-none ring-1 ring-white/10" /> : null}
     </button>
   )
 }
@@ -50,12 +60,10 @@ export default function WorkingHoursTabs({
     const tabs: LocationType[] = []
     if (canSalon) tabs.push('SALON')
     if (canMobile) tabs.push('MOBILE')
-    // Always have at least one tab so the form can load.
     if (!tabs.length) tabs.push('SALON')
     return tabs
   }, [canSalon, canMobile])
 
-  // controlled/uncontrolled support
   const [localActive, setLocalActive] = useState<LocationType>(availableTabs[0])
   const active: LocationType = activeLocationType ?? localActive
 
@@ -71,7 +79,6 @@ export default function WorkingHoursTabs({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // keep local active valid if availableTabs changes
   useEffect(() => {
     const next = availableTabs.includes(active) ? active : availableTabs[0]
     if (next !== active) setActive(next)
@@ -86,9 +93,8 @@ export default function WorkingHoursTabs({
         setError(null)
         setLoading(true)
 
-        const modes = availableTabs
         const results = await Promise.all(
-          modes.map(async (m) => {
+          availableTabs.map(async (m) => {
             const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(m)}`, {
               method: 'GET',
               cache: 'no-store',
@@ -124,31 +130,39 @@ export default function WorkingHoursTabs({
   return (
     <div className="grid gap-3">
       {showTabs && (
-        <div className="flex items-center gap-2">
+        <div className="tovis-glass-soft tovis-noise flex flex-wrap items-center gap-2 px-3 py-2">
           {availableTabs.includes('SALON') && (
-            <TabButton active={active === 'SALON'} onClick={() => setActive('SALON')}>
+            <TabButton active={active === 'SALON'} onClick={() => setActive('SALON')} tone="salon">
               Salon hours
             </TabButton>
           )}
           {availableTabs.includes('MOBILE') && (
-            <TabButton active={active === 'MOBILE'} onClick={() => setActive('MOBILE')}>
+            <TabButton active={active === 'MOBILE'} onClick={() => setActive('MOBILE')} tone="mobile">
               Mobile hours
             </TabButton>
           )}
+          <div className="ml-auto hidden text-xs font-semibold text-textSecondary md:block">
+            Editing:{' '}
+            <span className="font-extrabold text-textPrimary">
+              {active === 'SALON' ? 'Salon' : 'Mobile'}
+            </span>
+          </div>
         </div>
       )}
 
       {loading ? <div className="text-[12px] text-textSecondary">Loading schedule…</div> : null}
-      {error ? <div className="text-[11px] font-semibold text-toneDanger">{error}</div> : null}
+      {error ? <div className="text-[12px] font-extrabold text-toneDanger">{error}</div> : null}
 
-      <WorkingHoursForm
-        locationType={active}
-        initialHours={initialByMode[active]}
-        onSaved={(hours) => {
-          setInitialByMode((prev) => ({ ...prev, [active]: hours }))
-          onSavedAny?.()
-        }}
-      />
+      <div className="tovis-glass-soft tovis-noise p-4">
+        <WorkingHoursForm
+          locationType={active}
+          initialHours={initialByMode[active]}
+          onSaved={(hours) => {
+            setInitialByMode((prev) => ({ ...prev, [active]: hours }))
+            onSavedAny?.()
+          }}
+        />
+      </div>
     </div>
   )
 }

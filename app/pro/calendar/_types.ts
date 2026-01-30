@@ -1,3 +1,4 @@
+// app/pro/calendar/_types.ts
 import type { IanaTimeZone } from '@/lib/timeZone'
 
 export type ViewMode = 'day' | 'week' | 'month'

@@ -3,7 +3,7 @@ import type { CalendarEvent, WorkingHoursJson, BlockRow } from '../_types'
 import { DAY_KEYS, addDays, clamp, startOfDay } from './date'
 import { sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
 
-export const PX_PER_MINUTE = 1
+export const PX_PER_MINUTE = 1.5
 export const SNAP_MINUTES = 15
 export const MIN_DURATION = 15
 export const MAX_DURATION = 12 * 60

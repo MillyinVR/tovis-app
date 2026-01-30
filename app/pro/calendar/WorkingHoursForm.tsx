@@ -22,8 +22,8 @@ type WorkingHoursState = Record<WeekdayKey, DayConfig>
 
 type ApiDayConfig = {
   enabled: boolean
-  start: string // "09:00" or "9:00"
-  end: string // "17:00" or "5:00"
+  start: string
+  end: string
 }
 
 export type ApiWorkingHours = Record<WeekdayKey, ApiDayConfig> | null
@@ -48,7 +48,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-// ✅ Accepts both "9:00" and "09:00"
 function parseTime24(time: string | null | undefined): { hour: number; minute: number; period: Period } {
   if (!time || typeof time !== 'string') return { hour: 9, minute: 0, period: 'AM' }
 
@@ -224,9 +223,11 @@ function Select({
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       className={[
-        'h-9 rounded-xl border border-white/10 bg-bgPrimary px-2 text-[12px] font-semibold text-textPrimary',
+        // ✅ glass-consistent control
+        'h-10 rounded-xl border border-white/10 bg-bgSecondary/40 px-2 text-[12px] font-extrabold text-textPrimary',
+        'shadow-sm backdrop-blur-md ring-1 ring-white/6',
         'focus:outline-none focus:ring-2 focus:ring-accentPrimary/40',
-        disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-white/20',
+        disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-white/20 hover:bg-bgSecondary/55',
         className,
       ].join(' ')}
     >
@@ -249,6 +250,11 @@ export default function WorkingHoursForm({
 
   const minuteOptions = useMemo(() => [0, 15, 30, 45], [])
 
+  const locationHint =
+    locationType === 'MOBILE'
+      ? 'border-emerald-500/20 bg-emerald-500/6'
+      : 'border-brand/25 bg-brand/6'
+
   useEffect(() => {
     let cancelled = false
 
@@ -257,7 +263,6 @@ export default function WorkingHoursForm({
         setError(null)
         setMessage(null)
 
-        // If parent passed hours (even null), trust them
         if (initialHours !== undefined) {
           const next = hydrateFromApi(initialHours)
           if (!cancelled) setState(next)
@@ -360,123 +365,141 @@ export default function WorkingHoursForm({
 
   return (
     <form onSubmit={handleSubmit} className="text-textPrimary">
+      {/* ✅ context strip: what you are editing */}
+      <div className={['mb-3 rounded-2xl border px-3 py-2 text-[12px] font-semibold text-textSecondary', locationHint].join(' ')}>
+        Editing base schedule for{' '}
+        <span className="font-extrabold text-textPrimary">{locationType === 'SALON' ? 'Salon' : 'Mobile'}</span>
+      </div>
+
+      {/* ✅ mobile-first layout: each day becomes a card row on small screens */}
       <div className="grid gap-2">
-        <div className="grid grid-cols-[120px_1fr_1fr] items-center gap-2 text-[12px]">
+        {/* Header labels (desktop only) */}
+        <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-2 text-[12px] md:grid">
           <div />
-          <div className="font-black text-textPrimary">Start</div>
-          <div className="font-black text-textPrimary">End</div>
-
-          {DAYS.map(({ key, label }) => {
-            const cfg = state[key]
-            const faded = !cfg.enabled
-
-            return (
-              <div key={key} className="contents">
-                <label className="flex items-center gap-2 text-[12px] font-semibold">
-                  <input
-                    type="checkbox"
-                    checked={cfg.enabled}
-                    onChange={(e) => updateDay(key, 'enabled', e.target.checked)}
-                    className="h-4 w-4 accent-accentPrimary"
-                  />
-                  <span className="font-black">{label}</span>
-                </label>
-
-                <div className={['flex gap-2', faded ? 'opacity-50' : 'opacity-100'].join(' ')}>
-                  <Select
-                    value={cfg.startHour}
-                    disabled={!cfg.enabled}
-                    onChange={(v) => updateDay(key, 'startHour', clamp(parseInt(v, 10) || 9, 1, 12))}
-                    className="w-[70px]"
-                  >
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </Select>
-
-                  <Select
-                    value={cfg.startMinute}
-                    disabled={!cfg.enabled}
-                    onChange={(v) => updateDay(key, 'startMinute', clamp(parseInt(v, 10) || 0, 0, 59))}
-                    className="w-[80px]"
-                  >
-                    {minuteOptions.map((m) => (
-                      <option key={m} value={m}>
-                        {String(m).padStart(2, '0')}
-                      </option>
-                    ))}
-                  </Select>
-
-                  <Select
-                    value={cfg.startPeriod}
-                    disabled={!cfg.enabled}
-                    onChange={(v) => updateDay(key, 'startPeriod', (v === 'PM' ? 'PM' : 'AM') as Period)}
-                    className="w-[80px]"
-                  >
-                    <option value="AM">AM</option>
-                    <option value="PM">PM</option>
-                  </Select>
-                </div>
-
-                <div className={['flex gap-2', faded ? 'opacity-50' : 'opacity-100'].join(' ')}>
-                  <Select
-                    value={cfg.endHour}
-                    disabled={!cfg.enabled}
-                    onChange={(v) => updateDay(key, 'endHour', clamp(parseInt(v, 10) || 5, 1, 12))}
-                    className="w-[70px]"
-                  >
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </Select>
-
-                  <Select
-                    value={cfg.endMinute}
-                    disabled={!cfg.enabled}
-                    onChange={(v) => updateDay(key, 'endMinute', clamp(parseInt(v, 10) || 0, 0, 59))}
-                    className="w-[80px]"
-                  >
-                    {minuteOptions.map((m) => (
-                      <option key={m} value={m}>
-                        {String(m).padStart(2, '0')}
-                      </option>
-                    ))}
-                  </Select>
-
-                  <Select
-                    value={cfg.endPeriod}
-                    disabled={!cfg.enabled}
-                    onChange={(v) => updateDay(key, 'endPeriod', (v === 'PM' ? 'PM' : 'AM') as Period)}
-                    className="w-[80px]"
-                  >
-                    <option value="AM">AM</option>
-                    <option value="PM">PM</option>
-                  </Select>
-                </div>
-              </div>
-            )
-          })}
+          <div className="font-extrabold text-textPrimary">Start</div>
+          <div className="font-extrabold text-textPrimary">End</div>
         </div>
 
-        <div className="mt-3 flex items-center gap-3">
+        {DAYS.map(({ key, label }) => {
+          const cfg = state[key]
+          const faded = !cfg.enabled
+
+          return (
+            <div
+              key={key}
+              className={[
+                'tovis-glass-soft tovis-noise rounded-2xl border border-white/10 p-3',
+                'grid gap-2 md:grid-cols-[120px_1fr_1fr] md:items-center md:gap-3',
+                faded ? 'opacity-70' : 'opacity-100',
+              ].join(' ')}
+            >
+              {/* Day + toggle */}
+              <label className="flex items-center gap-2 text-[12px] font-extrabold">
+                <input
+                  type="checkbox"
+                  checked={cfg.enabled}
+                  onChange={(e) => updateDay(key, 'enabled', e.target.checked)}
+                  className="h-4 w-4 accent-accentPrimary"
+                />
+                <span className="text-textPrimary">{label}</span>
+                {!cfg.enabled ? <span className="text-textSecondary font-semibold">(off)</span> : null}
+              </label>
+
+              {/* Start */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="md:hidden text-[11px] font-semibold text-textSecondary col-span-3">Start</div>
+
+                <Select
+                  value={cfg.startHour}
+                  disabled={!cfg.enabled}
+                  onChange={(v) => updateDay(key, 'startHour', clamp(parseInt(v, 10) || 9, 1, 12))}
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  value={cfg.startMinute}
+                  disabled={!cfg.enabled}
+                  onChange={(v) => updateDay(key, 'startMinute', clamp(parseInt(v, 10) || 0, 0, 59))}
+                >
+                  {minuteOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {String(m).padStart(2, '0')}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  value={cfg.startPeriod}
+                  disabled={!cfg.enabled}
+                  onChange={(v) => updateDay(key, 'startPeriod', (v === 'PM' ? 'PM' : 'AM') as Period)}
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </Select>
+              </div>
+
+              {/* End */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="md:hidden text-[11px] font-semibold text-textSecondary col-span-3">End</div>
+
+                <Select
+                  value={cfg.endHour}
+                  disabled={!cfg.enabled}
+                  onChange={(v) => updateDay(key, 'endHour', clamp(parseInt(v, 10) || 5, 1, 12))}
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  value={cfg.endMinute}
+                  disabled={!cfg.enabled}
+                  onChange={(v) => updateDay(key, 'endMinute', clamp(parseInt(v, 10) || 0, 0, 59))}
+                >
+                  {minuteOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {String(m).padStart(2, '0')}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  value={cfg.endPeriod}
+                  disabled={!cfg.enabled}
+                  onChange={(v) => updateDay(key, 'endPeriod', (v === 'PM' ? 'PM' : 'AM') as Period)}
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </Select>
+              </div>
+            </div>
+          )
+        })}
+
+        <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
           <button
             type="submit"
             disabled={saving}
             className={[
-              'inline-flex items-center rounded-full border border-white/10 px-4 py-2 text-[12px] font-black transition',
+              'inline-flex items-center justify-center rounded-full border border-white/10 px-4 py-3 text-[12px] font-extrabold transition',
               'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
-              saving ? 'cursor-not-allowed opacity-70' : '',
+              'shadow-sm',
+              saving ? 'cursor-not-allowed opacity-70' : 'hover:scale-[1.01] active:scale-[0.99]',
             ].join(' ')}
           >
-            {saving ? 'Saving…' : 'Save base schedule'}
+            {saving ? 'Saving…' : 'Save schedule'}
           </button>
 
-          {message ? <div className="text-[11px] font-semibold text-toneSuccess">{message}</div> : null}
-          {error ? <div className="text-[11px] font-semibold text-toneDanger">{error}</div> : null}
+          {message ? <div className="text-[12px] font-extrabold text-toneSuccess">{message}</div> : null}
+          {error ? <div className="text-[12px] font-extrabold text-toneDanger">{error}</div> : null}
         </div>
 
         <div className="mt-2 text-[11px] text-textSecondary">

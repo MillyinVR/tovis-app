@@ -6,6 +6,7 @@ import type { CalendarEvent } from '../_types'
 import { DAY_KEYS, isSameDay } from '../_utils/date'
 import { eventChipClasses } from '../_utils/statusStyles'
 import { isBlockedEvent } from '../_utils/calendarMath'
+import { eventChipClassName } from '../_utils/statusStyles'
 
 export function MonthGrid(props: {
   visibleDays: Date[]
@@ -62,7 +63,10 @@ export function MonthGrid(props: {
                   return (
                     <div
                       key={ev.id}
-                      className={['rounded-full px-3 py-1 text-xs truncate', eventChipClasses(ev)].join(' ')}
+                      className={[
+                        'rounded-full px-3 py-1 text-xs truncate border shadow-sm backdrop-blur-md ring-1 ring-white/8',
+                        eventChipClassName(ev),
+                      ].join(' ')}
                       title={isBlock ? 'Blocked' : ev.title}
                     >
                       {isBlock ? 'Blocked' : ev.title}

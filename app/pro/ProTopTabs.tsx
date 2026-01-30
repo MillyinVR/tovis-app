@@ -1,5 +1,4 @@
 // app/pro/ProTopTabs.tsx
-
 'use client'
 
 import Link from 'next/link'
@@ -10,7 +9,7 @@ type Tab = { href: string; label: string; match?: 'exact' | 'prefix' }
 
 const tabs: Tab[] = [
   { href: '/pro/dashboard', label: 'Overview', match: 'exact' },
-  { href: '/pro/services', label: 'Services', match: 'prefix' },
+  // ✅ removed: { href: '/pro/services', label: 'Services', match: 'prefix' },
   { href: '/pro/reviews', label: 'Reviews', match: 'prefix' },
   { href: '/pro/aftercare', label: 'Aftercare', match: 'prefix' },
   { href: '/pro/bookings', label: 'Bookings', match: 'prefix' },
@@ -50,18 +49,11 @@ export default function ProTopTabs() {
   }, [])
 
   return (
-    <div
-      className="sticky z-40 border-b border-white/10 bg-bgPrimary/80 backdrop-blur"
-      style={{ top: 48 }}
-    >
-      {/* subtle top highlight */}
+    <div className="sticky z-40 border-b border-white/10 bg-bgPrimary/80 backdrop-blur" style={{ top: 48 }}>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
 
       <div className="relative mx-auto max-w-5xl">
-        <div
-          ref={scrollerRef}
-          className="flex gap-2 overflow-x-auto px-3 py-2 looksNoScrollbar"
-        >
+        <div ref={scrollerRef} className="flex gap-2 overflow-x-auto px-3 py-2 looksNoScrollbar">
           {tabs.map((t) => {
             const active = isActive(pathname, t)
 
@@ -74,14 +66,12 @@ export default function ProTopTabs() {
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20',
                   active
                     ? [
-                        // ACTIVE = luxe, tactile, magnetic
                         'bg-bgSecondary/90 text-textPrimary',
                         'border border-white/20',
                         'shadow-[0_8px_30px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.12)]',
                         'scale-[1.04]',
                       ].join(' ')
                     : [
-                        // INACTIVE = calm, secondary
                         'text-textSecondary',
                         'border border-transparent',
                         'hover:bg-bgSecondary/60 hover:text-textPrimary',
@@ -95,7 +85,6 @@ export default function ProTopTabs() {
           })}
         </div>
 
-        {/* Stronger edge fades (intentional, not shy) */}
         {hasOverflow && (
           <>
             <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-bgPrimary via-bgPrimary/90 to-transparent" />
@@ -103,7 +92,6 @@ export default function ProTopTabs() {
           </>
         )}
 
-        {/* bottom depth */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-b from-transparent to-black/15" />
       </div>
     </div>

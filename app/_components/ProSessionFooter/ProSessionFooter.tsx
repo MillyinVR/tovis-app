@@ -1,22 +1,17 @@
 // app/_components/ProSessionFooter/ProSessionFooter.tsx
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useProSession } from './useProSession'
 import NavItem from './NavItem'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
 
 const ROUTES = {
-  // Pro "homebase"
   calendar: '/pro/calendar',
-
-  // Pro "Looks"
   looks: '/looks',
-
   messages: '/messages',
   profile: '/pro/profile/public-profile',
-
-  // Optional: keep dashboard route around for anywhere else (not in footer)
   dashboard: '/pro/dashboard',
 } as const
 
@@ -26,13 +21,37 @@ function isActivePath(pathname: string, href: string) {
 }
 
 function shouldHideOnPath(pathname: string) {
-  // Hide on auth routes so login/signup pages are clean.
   if (pathname.startsWith('/login') || pathname.startsWith('/signup')) return true
   return false
 }
 
+function setFooterSpace(px: number) {
+  if (typeof document === 'undefined') return
+  document.documentElement.style.setProperty('--app-footer-space', `${Math.max(0, Math.round(px))}px`)
+}
+
 export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
   const pathname = usePathname()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+
+    const update = () => {
+      const h = el.getBoundingClientRect().height
+      // add a tiny “breathing” buffer so nothing kisses the footer
+      setFooterSpace(h + 10)
+    }
+
+    update()
+
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+
+    return () => ro.disconnect()
+  }, [])
+
   if (!pathname) return null
   if (shouldHideOnPath(pathname)) return null
 
@@ -44,6 +63,7 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
 
   return (
     <div
+      ref={rootRef}
       data-testid="pro-session-footer"
       className="fixed inset-x-0 bottom-0 z-200"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
@@ -56,21 +76,9 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
 
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem
-            label="Looks"
-            href={ROUTES.looks}
-            icon="✨"
-            active={isActivePath(pathname, ROUTES.looks)}
-          />
+          <NavItem label="Looks" href={ROUTES.looks} icon="✨" active={isActivePath(pathname, ROUTES.looks)} />
+          <NavItem label="Calendar" href={ROUTES.calendar} icon="📅" active={isActivePath(pathname, ROUTES.calendar)} />
 
-          <NavItem
-            label="Calendar"
-            href={ROUTES.calendar}
-            icon="📅"
-            active={isActivePath(pathname, ROUTES.calendar)}
-          />
-
-          {/* center action */}
           <div className="relative -mt-8 flex w-22 justify-center">
             <button
               type="button"
@@ -101,12 +109,7 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
             rightSlot={messagesBadge ? <BadgeDot label={messagesBadge} /> : null}
           />
 
-          <NavItem
-            label="Profile"
-            href={ROUTES.profile}
-            icon="👤"
-            active={isActivePath(pathname, ROUTES.profile)}
-          />
+          <NavItem label="Profile" href={ROUTES.profile} icon="👤" active={isActivePath(pathname, ROUTES.profile)} />
         </div>
       </div>
     </div>

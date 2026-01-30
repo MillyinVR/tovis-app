@@ -74,6 +74,53 @@ a {
     0 10px 30px rgb(0 0 0 / 0.35),
     0 1px 0 rgb(255 255 255 / 0.06) inset;
 }
+/* ===== Stronger glass for overlays (readable) ===== */
+.tovis-glass-strong {
+  position: relative;
+  border-radius: var(--radius-card);
+
+  /* more opaque surface for legibility */
+  background: linear-gradient(
+    180deg,
+    rgb(var(--bg-secondary) / 0.92) 0%,
+    rgb(var(--bg-secondary) / 0.84) 100%
+  );
+
+  border: 1px solid rgb(255 255 255 / 0.12);
+
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.05));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.05));
+
+  box-shadow:
+    0 18px 70px rgb(0 0 0 / 0.60),
+    0 1px 0 rgb(255 255 255 / 0.07) inset;
+}
+
+.tovis-glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+
+  background: radial-gradient(
+    700px 240px at 28% 0%,
+    rgb(255 255 255 / 0.14),
+    transparent 60%
+  );
+
+  opacity: 1;
+}
+
+/* Optional: inner scrim layer for readability on top of glass */
+.tovis-overlay-scrim {
+  background: linear-gradient(
+    180deg,
+    rgb(0 0 0 / 0.20) 0%,
+    rgb(0 0 0 / 0.42) 100%
+  );
+}
+
 
 /* Specular highlight */
 .tovis-glass::before {
@@ -158,4 +205,44 @@ body::after {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* ===== Luxe Motion Helpers ===== */
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes overlayFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Optional “expensive air” noise (panel-only) */
+.tovis-noise {
+  position: relative;
+}
+
+.tovis-noise::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.10;
+  mix-blend-mode: overlay;
+
+  /* subtle, non-hex */
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgb(255 255 255 / 0.18) 0, transparent 55%),
+    radial-gradient(1px 1px at 70% 60%, rgb(0 0 0 / 0.16) 0, transparent 55%),
+    radial-gradient(1px 1px at 45% 80%, rgb(255 255 255 / 0.12) 0, transparent 55%);
+  background-size: 220px 220px;
+  background-repeat: repeat;
+}
+
+/* Better mobile scroll behavior inside overlays */
+.overlayScroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
