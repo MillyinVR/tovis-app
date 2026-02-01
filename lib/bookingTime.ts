@@ -2,7 +2,7 @@
 /**
  * Booking-time helpers (single source for UI + API boundaries)
  * - Uses lib/timeZone.ts for DST-safe conversions
- * - Uses FormatInTimeZone.ts for consistent formatting
+ * - Uses formatInTimeZone.ts for consistent formatting
  *
  * Rule: store instants as UTC ISO strings. Only format in a timezone at the edges.
  */
