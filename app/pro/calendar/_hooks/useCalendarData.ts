@@ -16,17 +16,7 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 import { safeJson } from '../_utils/http'
-import {
-  addDays,
-  startOfDay,
-  startOfMonth,
-  startOfWeek,
-  toDateInputValue,
-  toIso,
-  toTimeInputValue,
-  roundUpToNext15,
-  clamp,
-} from '../_utils/date'
+import { addDays, startOfMonth, startOfWeek, toIso, roundUpToNext15, clamp } from '../_utils/date'
 import {
   PX_PER_MINUTE,
   SNAP_MINUTES,
@@ -39,36 +29,118 @@ import {
   isOutsideWorkingHours,
 } from '../_utils/calendarMath'
 import {
+  DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
   zonedTimeToUtc,
   utcFromDayAndMinutesInTimeZone,
+  getZonedParts,
 } from '@/lib/timeZone'
 
 type Args = { view: ViewMode; currentDate: Date }
 type LocationType = 'SALON' | 'MOBILE'
-
-function getBrowserTimeZone(): string {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (tz && isValidIanaTimeZone(tz)) return tz
-  } catch {
-    // ignore
-  }
-  return 'UTC'
-}
-
-// Anchor a "day" to local noon to avoid DST edges for weekday math.
-function anchorDayLocalNoon(year: number, month1: number, day: number) {
-  return new Date(year, month1 - 1, day, 12, 0, 0, 0)
-}
 
 function pickLocationType(canSalon: boolean, canMobile: boolean, preferred?: LocationType): LocationType {
   if (preferred && ((preferred === 'SALON' && canSalon) || (preferred === 'MOBILE' && canMobile))) return preferred
   if (canSalon) return 'SALON'
   if (canMobile) return 'MOBILE'
   return 'SALON'
+}
+
+// Anchor a "day" to local noon for working-hours weekday math (not timezone conversion).
+function anchorDayLocalNoon(year: number, month1: number, day: number) {
+  return new Date(year, month1 - 1, day, 12, 0, 0, 0)
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function toDateInputValueInTimeZone(dateUtc: Date, tz: string) {
+  const p = getZonedParts(dateUtc, tz)
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`
+}
+
+function toTimeInputValueInTimeZone(dateUtc: Date, tz: string) {
+  const p = getZonedParts(dateUtc, tz)
+  return `${pad2(p.hour)}:${pad2(p.minute)}`
+}
+
+/**
+ * View range in UTC, anchored to TZ day boundaries (strict).
+ * - Day: [start of day, +1 day)
+ * - Week: start at Sunday 00:00 in tz, 7 days
+ * - Month view: 6-week grid starting at week-start containing 1st of month (tz), 42 days
+ */
+function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
+  const safeTz = sanitizeTimeZone(tz, DEFAULT_TIME_ZONE)
+
+  if (v === 'day') {
+    const from = startOfDayUtcInTimeZone(focusUtc, safeTz)
+    const to = new Date(from.getTime() + 24 * 60 * 60_000)
+    return { from, to }
+  }
+
+  // Week start: compute in TZ, then build from local Y/M/D at 00:00 in TZ.
+  if (v === 'week') {
+    const p = getZonedParts(focusUtc, safeTz)
+
+    // Day-of-week in TZ (Sun=0..Sat=6)
+    const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(focusUtc)
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+    const dow = map[weekdayShort] ?? 0
+
+    // Local Y/M/D for week start in TZ
+    const weekStartDay = p.day - dow
+
+    const from = zonedTimeToUtc({
+      year: p.year,
+      month: p.month,
+      day: weekStartDay,
+      hour: 0,
+      minute: 0,
+      second: 0,
+      timeZone: safeTz,
+    })
+
+    const to = new Date(from.getTime() + 7 * 24 * 60 * 60_000)
+    return { from, to }
+  }
+
+  // Month grid: find local first-of-month in TZ, then go to week start containing it, then 42 days.
+  const p = getZonedParts(focusUtc, safeTz)
+
+  const firstOfMonthUtc = zonedTimeToUtc({
+    year: p.year,
+    month: p.month,
+    day: 1,
+    hour: 12, // noon to avoid DST edge weirdness when deriving weekday
+    minute: 0,
+    second: 0,
+    timeZone: safeTz,
+  })
+
+  const firstWeekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(
+    firstOfMonthUtc,
+  )
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const firstDow = map[firstWeekdayShort] ?? 0
+
+  const firstParts = getZonedParts(firstOfMonthUtc, safeTz)
+  const gridStartDay = firstParts.day - firstDow
+
+  const from = zonedTimeToUtc({
+    year: firstParts.year,
+    month: firstParts.month,
+    day: gridStartDay,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone: safeTz,
+  })
+  const to = new Date(from.getTime() + 42 * 24 * 60 * 60_000)
+  return { from, to }
 }
 
 export function useCalendarData({ view, currentDate }: Args) {
@@ -78,10 +150,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     eventsRef.current = events
   }, [events])
 
-  // default: browser TZ, later replaced by API TZ
-  const [timeZone, setTimeZone] = useState<string>(getBrowserTimeZone())
+  // ✅ Strict: start at UTC until API tells us the pro/location timezone.
+  const [timeZone, setTimeZone] = useState<string>(DEFAULT_TIME_ZONE)
   const [needsTimeZoneSetup, setNeedsTimeZoneSetup] = useState(false)
-  const tzSetupSavedRef = useRef(false)
 
   // Working hours are per-locationType (SALON vs MOBILE)
   const [canSalon, setCanSalon] = useState(true)
@@ -196,27 +267,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     return computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
   }
 
-  function rangeForViewUtcInProTz(v: ViewMode, d: Date, tz: string) {
-    const safeTz = sanitizeTimeZone(tz, 'UTC')
-
-    if (v === 'day') {
-      const fromLocal = startOfDay(d)
-      const from = startOfDayUtcInTimeZone(fromLocal, safeTz)
-      const to = new Date(from.getTime() + 24 * 60 * 60_000)
-      return { from, to }
-    }
-    if (v === 'week') {
-      const fromLocal = startOfWeek(d)
-      const from = startOfDayUtcInTimeZone(fromLocal, safeTz)
-      const to = new Date(from.getTime() + 7 * 24 * 60 * 60_000)
-      return { from, to }
-    }
-    const fromLocal = startOfWeek(startOfMonth(d))
-    const from = startOfDayUtcInTimeZone(fromLocal, safeTz)
-    const to = new Date(from.getTime() + 42 * 24 * 60 * 60_000)
-    return { from, to }
-  }
-
   async function loadServicesOnce() {
     if (servicesLoaded) return
     try {
@@ -250,21 +300,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     }
   }
 
-  async function saveTimeZoneIfMissing(tz: string) {
-    if (tzSetupSavedRef.current) return
-    tzSetupSavedRef.current = true
-    try {
-      const res = await fetch('/api/pro/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeZone: tz }),
-      })
-      if (!res.ok) tzSetupSavedRef.current = false
-    } catch {
-      tzSetupSavedRef.current = false
-    }
-  }
-
   async function loadWorkingHoursFor(locationType: LocationType) {
     const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`, {
       method: 'GET',
@@ -293,18 +328,19 @@ export function useCalendarData({ view, currentDate }: Args) {
         return
       }
 
-      const browserTz = getBrowserTimeZone()
       const apiTzRaw = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
       const apiTzValid = isValidIanaTimeZone(apiTzRaw)
-      const nextTz = apiTzValid ? apiTzRaw : browserTz || 'UTC'
 
+      // ✅ Strict: if API tz is missing/invalid, do NOT use browser tz.
+      // Use UTC for rendering and force tz setup in UI.
+      const nextTz = apiTzValid ? apiTzRaw : DEFAULT_TIME_ZONE
       setTimeZone(nextTz)
 
       const needsSetup = Boolean(data?.needsTimeZoneSetup) || !apiTzValid
       setNeedsTimeZoneSetup(needsSetup)
 
-      if (needsSetup && isValidIanaTimeZone(browserTz)) {
-        void saveTimeZoneIfMissing(browserTz)
+      if (!apiTzValid) {
+        console.warn('[Calendar] API timezone missing/invalid; forcing UTC until pro sets timezone.', { apiTzRaw })
       }
 
       const nextCanSalon = Boolean(data?.canSalon ?? true)
@@ -331,8 +367,8 @@ export function useCalendarData({ view, currentDate }: Args) {
         setManagement({ todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
       }
 
-      // 2) range blocks
-      const { from, to } = rangeForViewUtcInProTz(view, currentDate, nextTz)
+      // 2) range blocks (STRICT TZ RANGE)
+      const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, nextTz)
 
       const blocksRes = await fetch(
         `/api/pro/calendar/blocked?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`,
@@ -396,7 +432,7 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   // blocked minutes today (timezone-aware)
   const blockedMinutesToday = useMemo(() => {
-    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
     const dayStartUtc = startOfDayUtcInTimeZone(new Date(), tz)
     const dayEndUtc = new Date(dayStartUtc.getTime() + 24 * 60 * 60_000)
 
@@ -439,7 +475,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     try {
       setLoading(true)
       setError(null)
-      const tz = sanitizeTimeZone(timeZone, 'UTC')
+      const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
       const startUtc = startOfDayUtcInTimeZone(day, tz)
       const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
       await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
@@ -454,8 +490,15 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   function openCreateBlockNow() {
-    const start = roundUpToNext15(new Date())
-    setBlockCreateInitialStart(start)
+    // ✅ Round up in the calendar TZ, not browser local.
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+    const nowUtc = new Date()
+    const p = getZonedParts(nowUtc, tz)
+    const minutesNow = p.hour * 60 + p.minute
+    const rounded = snapMinutes(Math.ceil(minutesNow / 15) * 15)
+    const startUtc = utcFromDayAndMinutesInTimeZone(nowUtc, rounded, tz)
+
+    setBlockCreateInitialStart(startUtc)
     setBlockCreateOpen(true)
   }
 
@@ -474,12 +517,11 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     setManagementActionBusyId(bookingId)
     setManagementActionError(null)
-    // inside setBookingStatusById, before fetch(...)
+
     const current = eventsRef.current.find((x) => x.id === bookingId)
     const currentStatus = String((current as any)?.status || '').toUpperCase()
-
     if (currentStatus && currentStatus === status) {
-      // already in that status; don't spam API / don't trigger "No changes provided."
+      setManagementActionBusyId(null)
       return
     }
 
@@ -491,8 +533,6 @@ export function useCalendarData({ view, currentDate }: Args) {
       })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(data?.error || 'Failed to update booking.')
-
-      // refresh counts + lists (overlay stays open)
       await loadCalendar()
     } catch (e: any) {
       console.error(e)
@@ -537,9 +577,11 @@ export function useCalendarData({ view, currentDate }: Args) {
       const b = data?.booking as BookingDetails
       setBooking(b)
 
+      // ✅ Fill inputs in CALENDAR TZ (strict), not browser local.
+      const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
       const start = new Date(b.scheduledFor)
-      setReschedDate(toDateInputValue(start))
-      setReschedTime(toTimeInputValue(start))
+      setReschedDate(toDateInputValueInTimeZone(start, tz))
+      setReschedTime(toTimeInputValueInTimeZone(start, tz))
       setNotifyClient(true)
 
       const svcList = (Array.isArray(data?.services) ? data.services : services) as ServiceOption[]
@@ -582,7 +624,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       startMinutes,
       endMinutes,
       workingHours,
-      timeZone: sanitizeTimeZone(timeZone, 'UTC'),
+      timeZone: sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE),
     })
   }
 
@@ -600,7 +642,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       const [hh, mi] = (reschedTime || '').split(':').map((x) => Number(x))
       if (!Number.isFinite(hh) || !Number.isFinite(mi)) throw new Error('Pick a valid time.')
 
-      const tz = sanitizeTimeZone(timeZone, 'UTC')
+      const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
       const nextStart = zonedTimeToUtc({
         year: yyyy,
@@ -740,7 +782,9 @@ export function useCalendarData({ view, currentDate }: Args) {
           pendingChange.kind === 'move' ? pendingChange.nextStartIso : current?.startsAt ?? pendingChange.original.startsAt
 
         const dur =
-          pendingChange.kind === 'resize' ? pendingChange.nextTotalDurationMinutes : eventDurationMinutes(pendingChange.original)
+          pendingChange.kind === 'resize'
+            ? pendingChange.nextTotalDurationMinutes
+            : eventDurationMinutes(pendingChange.original)
 
         const endIso = new Date(new Date(startIso).getTime() + dur * 60_000).toISOString()
 
@@ -814,7 +858,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     const rawMinutes = y / PX_PER_MINUTE
     const topMinutes = snapMinutes(rawMinutes - dragGrabOffsetMinutesRef.current)
 
-    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
     const nextStart = utcFromDayAndMinutesInTimeZone(day, topMinutes, tz)
 
     if (nextStart.toISOString() === original.startsAt) return
@@ -862,10 +906,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     const endMinutes = snapMinutes(y / PX_PER_MINUTE)
     const rawDur = endMinutes - s.startMinutes
 
-    // never allow 0/negative durations
     const dur = Math.max(SNAP_MINUTES, roundTo15(rawDur))
 
-    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
     const start = utcFromDayAndMinutesInTimeZone(s.day, s.startMinutes, tz)
     const end = new Date(start.getTime() + dur * 60_000)
 
@@ -891,7 +934,9 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     if (dur === s.originalDuration) {
       const rollbackEnd = new Date(start.getTime() + s.originalDuration * 60_000)
-      setEvents((prev) => prev.map((x) => (x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x)))
+      setEvents((prev) =>
+        prev.map((x) => (x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x)),
+      )
       return
     }
 
@@ -920,7 +965,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     const y = clientY - columnTop
     const mins = snapMinutes(y / PX_PER_MINUTE)
 
-    const tz = sanitizeTimeZone(timeZone, 'UTC')
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
     const startUtc = utcFromDayAndMinutesInTimeZone(day, mins, tz)
 
     setCreateInitialStart(startUtc)
@@ -940,7 +985,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     void loadCalendar()
   }
 
-  const isOverlayOpen = Boolean(confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen)
+  const isOverlayOpen = Boolean(
+    confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen,
+  )
 
   return {
     view,

@@ -1,5 +1,5 @@
-// lib/FormatInTimeZone.ts
-import { sanitizeTimeZone } from '@/lib/timeZone'
+// lib/formatInTimeZone.ts
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 type DateLike = Date | string | number
 
@@ -17,18 +17,11 @@ export function formatInTimeZone(
   const d = toDate(date)
   if (!d) return 'Invalid date'
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   return new Intl.DateTimeFormat(locale, { ...options, timeZone: tz }).format(d)
 }
 
-/**
- * Handy “appointment time” formatter used across SMS + UI.
- */
-export function formatAppointmentWhen(
-  date: DateLike,
-  timeZone: string,
-  locale?: string,
-) {
+export function formatAppointmentWhen(date: DateLike, timeZone: string, locale?: string) {
   return formatInTimeZone(
     date,
     timeZone,
@@ -43,17 +36,12 @@ export function formatAppointmentWhen(
   )
 }
 
-export function formatRangeInTimeZone(
-  start: DateLike,
-  end: DateLike,
-  timeZone: string,
-  locale?: string,
-) {
+export function formatRangeInTimeZone(start: DateLike, end: DateLike, timeZone: string, locale?: string) {
   const s = toDate(start)
   const e = toDate(end)
   if (!s || !e) return 'Invalid range'
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
   const left = new Intl.DateTimeFormat(locale, {
     timeZone: tz,

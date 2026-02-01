@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 
 const SNAP_MINUTES = 15
 
@@ -47,12 +47,13 @@ export default function BlockTimeModal(props: {
   open: boolean
   onClose: () => void
   initialStart: Date // UTC instant user clicked
-  timeZone: string // pro IANA timezone
+  timeZone: string // pro IANA timezone (may be empty/invalid until setup)
   onCreated: (block: BlockRow) => void
 }) {
   const { open, onClose, initialStart, timeZone, onCreated } = props
 
-  const tz = useMemo(() => sanitizeTimeZone(timeZone) ?? 'America/Los_Angeles', [timeZone])
+  // ✅ Always resolve to a valid IANA TZ. Never fall back to LA.
+  const tz = useMemo(() => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), [timeZone])
 
   // Build initial inputs: clicked instant rendered into the pro timezone
   const init = useMemo(() => {
@@ -78,8 +79,8 @@ export default function BlockTimeModal(props: {
     const minuteRaw = Number(map.minute)
 
     const snapped = snapMinutes(hourRaw * 60 + minuteRaw)
-    const hour = Math.floor(snapped / 60)
-    const minute = snapped % 60
+    const hour = clamp(Math.floor(snapped / 60), 0, 23)
+    const minute = clamp(snapped % 60, 0, 59)
 
     return {
       date: toDateInputValueFromParts({ year, month, day }),
@@ -123,7 +124,7 @@ export default function BlockTimeModal(props: {
       const t = parseHHMM(time)
       const dur = clamp(snapMinutes(Number(durationMinutes || 60)), 15, 12 * 60)
 
-      // wall-clock in pro TZ -> UTC instant
+      // ✅ wall-clock in pro TZ -> UTC instant
       const startUtc = zonedTimeToUtc({
         year: yyyy,
         month: mm,
@@ -134,9 +135,9 @@ export default function BlockTimeModal(props: {
         timeZone: tz,
       })
 
-      const endUtc = new Date(startUtc.getTime() + dur * 60_000)
-
       if (!Number.isFinite(startUtc.getTime())) throw new Error('Invalid start time.')
+
+      const endUtc = new Date(startUtc.getTime() + dur * 60_000)
       if (endUtc.getTime() <= startUtc.getTime()) throw new Error('End time must be after start time.')
 
       const res = await fetch('/api/pro/calendar/blocked', {
@@ -171,6 +172,8 @@ export default function BlockTimeModal(props: {
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-520px overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
+        role="dialog"
+        aria-modal="true"
       >
         <div className="flex items-center justify-between border-b border-white/10 p-4">
           <div className="text-sm font-extrabold text-textPrimary">Block personal time</div>
@@ -185,10 +188,10 @@ export default function BlockTimeModal(props: {
         </div>
 
         <div className="p-4">
-          {error && <div className="mb-3 text-xs font-semibold text-red-400">{error}</div>}
+          {error && <div className="mb-3 text-xs font-semibold text-toneDanger">{error}</div>}
 
           <div className="mb-3 text-xs text-textSecondary">
-            Timezone: <span className="font-bold text-textPrimary">{tz}</span>
+            Timezone: <span className="font-black text-textPrimary">{tz}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

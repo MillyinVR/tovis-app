@@ -5,8 +5,9 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 import { COPY } from '@/lib/copy'
-import { formatInTimeZone } from '@/lib/FormatInTimeZone'
+import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,8 @@ function safeId(v: unknown): string | null {
 }
 
 function formatDateInTz(d: Date, timeZone: string) {
-  return formatInTimeZone(d, timeZone, {
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+  return formatInTimeZone(d, tz, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -52,17 +54,7 @@ type InboxRow = {
 
 function SmallPill({ label }: { label: string }) {
   return (
-    <span
-      className="border border-accentPrimary/35 bg-accentPrimary/12 text-accentPrimary"
-      style={{
-        marginLeft: 8,
-        fontSize: 10,
-        fontWeight: 900,
-        padding: '3px 8px',
-        borderRadius: 999,
-        letterSpacing: 0.3,
-      }}
-    >
+    <span className="ml-2 inline-flex items-center rounded-full border border-accentPrimary/35 bg-accentPrimary/12 px-2 py-0.5 text-[10px] font-black tracking-wide text-accentPrimary">
       {label}
     </span>
   )
@@ -91,7 +83,7 @@ export default async function ClientAftercareInboxPage() {
       aftercareId: true,
       booking: {
         select: {
-          // minimum select to build ClientBookingDTO truthfully
+          // ✅ minimum select to build ClientBookingDTO truthfully
           id: true,
           status: true,
           source: true,
@@ -110,6 +102,7 @@ export default async function ClientAftercareInboxPage() {
 
           service: { select: { id: true, name: true } },
 
+          // ✅ keep timeZone here because dto resolver accepts professionalTimeZone
           professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
 
           location: {
@@ -162,54 +155,58 @@ export default async function ClientAftercareInboxPage() {
     },
   })) as InboxRow[]
 
+  // ✅ DTOs must be awaited (buildClientBookingDTO is async)
+  const rows = await Promise.all(
+    items.map(async (n) => {
+      const raw = n.booking
+
+      let dto: ClientBookingDTO | null = null
+      if (raw) {
+        try {
+          dto = await buildClientBookingDTO({
+            booking: raw as any,
+            unreadAftercare: false,
+            hasPendingConsultationApproval: false,
+          })
+        } catch {
+          dto = null
+        }
+      }
+
+      return { n, raw, dto }
+    }),
+  )
+
   return (
-    <main style={{ maxWidth: 860, margin: '28px auto 90px', padding: '0 16px' }}>
-      <h1 className="text-textPrimary" style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
-        {COPY.aftercareInbox.title}
-      </h1>
+    <main className="mx-auto w-full max-w-[860px] px-4 pb-24 pt-7 text-textPrimary">
+      <h1 className="text-[22px] font-black">{COPY.aftercareInbox.title}</h1>
+      <div className="mt-1 text-[13px] font-semibold text-textSecondary">{COPY.aftercareInbox.subtitle}</div>
 
-      <div className="text-textSecondary" style={{ marginTop: 6, fontSize: 13 }}>
-        {COPY.aftercareInbox.subtitle}
-      </div>
-
-      {items.length === 0 ? (
-        <div className="border border-surfaceGlass/10 bg-bgSecondary" style={{ marginTop: 18, borderRadius: 14, padding: 16 }}>
-          <div className="text-textPrimary" style={{ fontWeight: 900, marginBottom: 6 }}>
-            {COPY.aftercareInbox.emptyTitle}
-          </div>
-          <div className="text-textSecondary" style={{ fontSize: 13 }}>
-            {COPY.aftercareInbox.emptyBody}
-          </div>
+      {rows.length === 0 ? (
+        <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
+          <div className="text-sm font-black text-textPrimary">{COPY.aftercareInbox.emptyTitle}</div>
+          <div className="mt-1 text-[13px] font-semibold text-textSecondary">{COPY.aftercareInbox.emptyBody}</div>
         </div>
       ) : (
-        <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
-          {items.map((n) => {
-            const raw = n.booking
+        <div className="mt-4 grid gap-2.5">
+          {rows.map(({ n, raw, dto }) => {
+            const bookingId = safeId(dto?.id ?? raw?.id ?? n.bookingId)
+            const href = bookingId ? `/client/bookings/${encodeURIComponent(bookingId)}?step=aftercare` : null
 
-            const bookingId = safeId(raw?.id ?? n.bookingId)
             const isUnread = !n.readAt
-
-            // Build DTO when booking is present; fall back gracefully when missing
-            let dto: ClientBookingDTO | null = null
-            try {
-              if (raw) {
-                dto = buildClientBookingDTO({
-                  booking: raw as any,
-                  unreadAftercare: false,
-                  hasPendingConsultationApproval: false,
-                })
-              }
-            } catch {
-              dto = null
-            }
-
             const title = dto?.display?.title || safeText(n.title, COPY.aftercareInbox.serviceFallback)
 
             const proId = dto?.professional?.id ?? raw?.professional?.id ?? null
-            const proName = safeText(dto?.professional?.businessName ?? raw?.professional?.businessName, COPY.aftercareInbox.proFallback)
+            const proName = safeText(
+              dto?.professional?.businessName ?? raw?.professional?.businessName,
+              COPY.aftercareInbox.proFallback,
+            )
 
-            const tz = dto?.timeZone || 'UTC'
-            const date = toDate(dto?.scheduledFor || raw?.scheduledFor)
+            // ✅ DTO timezone truth (already resolved via TimeZoneTruth)
+            // If dto missing, fall back to DEFAULT_TIME_ZONE only (no LA guessing here).
+            const tz = sanitizeTimeZone(dto?.timeZone, DEFAULT_TIME_ZONE)
+
+            const date = toDate(dto?.scheduledFor ?? raw?.scheduledFor)
             const dateLabel = date ? formatDateInTz(date, tz) : ''
 
             const mode = String(n.aftercare?.rebookMode || '').trim().toUpperCase()
@@ -220,55 +217,49 @@ export default async function ClientAftercareInboxPage() {
                   ? COPY.aftercareInbox.hintRecommendedDate
                   : COPY.aftercareInbox.hintNotes
 
-            const href = bookingId ? `/client/bookings/${encodeURIComponent(bookingId)}?step=aftercare` : null
-
             return (
               <div
                 key={n.id}
-                className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
-                style={{
-                  borderRadius: 14,
-                  padding: 14,
-                  display: 'grid',
-                  gap: 6,
-                  position: 'relative',
-                  opacity: href ? 1 : 0.6,
-                }}
+                className={[
+                  'rounded-card border border-white/10 bg-bgSecondary p-4',
+                  href ? '' : 'opacity-70',
+                ].join(' ')}
               >
-                <div style={{ position: 'relative', zIndex: 1, display: 'grid', gap: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                    <div style={{ fontWeight: 900 }}>
+                <div className="grid gap-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
+                    <div className="text-[14px] font-black text-textPrimary">
                       {title}
                       {isUnread ? <SmallPill label={COPY.aftercareInbox.newPill} /> : null}
                     </div>
 
-                    <div className="text-textSecondary" style={{ fontSize: 12 }}>
-                      {dateLabel ? `${dateLabel} · ${tz}` : ''}
+                    <div className="text-[12px] font-semibold text-textSecondary">
+                      {dateLabel ? (
+                        <>
+                          {dateLabel} <span className="opacity-75">· {tz}</span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
 
-                  {/* Pro link should always work (no overlay stealing clicks) */}
-                  <div style={{ position: 'relative', zIndex: 2 }}>
-                    <ProProfileLink proId={proId} label={proName} className="text-textSecondary font-semibold" />
+                  <div>
+                    <ProProfileLink
+                      proId={proId}
+                      label={proName}
+                      className="text-textSecondary font-semibold hover:opacity-80"
+                    />
                   </div>
 
-                  <div className="text-textSecondary" style={{ fontSize: 12, opacity: 0.85 }}>
-                    {hint}
-                  </div>
+                  <div className="text-[12px] font-semibold text-textSecondary/90">{hint}</div>
 
                   {n.body ? (
-                    <div className="text-textSecondary" style={{ fontSize: 12, lineHeight: 1.35, opacity: 0.9 }}>
-                      {n.body}
-                    </div>
+                    <div className="text-[12px] font-semibold leading-snug text-textSecondary/90">{n.body}</div>
                   ) : null}
 
-                  {/* Single, clean CTA to open the aftercare. Avoids nested anchors. */}
                   {href ? (
                     <Link
                       href={href}
                       aria-label={`Open aftercare: ${title}`}
-                      className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
-                      style={{ justifySelf: 'start', textDecoration: 'none', marginTop: 6 }}
+                      className="mt-1 inline-flex w-fit rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
                     >
                       {COPY.aftercareInbox.openCta}
                     </Link>

@@ -460,9 +460,10 @@ model ProfessionalLocation {
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
 
-  bookings Booking[]
-  holds    BookingHold[]
-  blocks   CalendarBlock[]
+  bookings           Booking[]
+  holds              BookingHold[]
+  blocks             CalendarBlock[]
+  lastMinuteOpenings LastMinuteOpening[]
 
   @@index([professionalId])
   @@index([professionalId, isPrimary])
@@ -701,6 +702,12 @@ model LastMinuteOpening {
   serviceId      String?
   offeringId     String?
 
+  locationType ServiceLocationType
+  locationId   String
+  location     ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  timeZone     String
+
   startAt DateTime
   endAt   DateTime?
 
@@ -721,7 +728,9 @@ model LastMinuteOpening {
   @@index([professionalId, startAt])
   @@index([serviceId, startAt])
   @@index([status, startAt])
+  @@index([professionalId, locationId, startAt])
 }
+
 
 model OpeningNotification {
   id        String @id @default(cuid())

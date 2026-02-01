@@ -2,13 +2,16 @@
 import { prisma } from '@/lib/prisma'
 import { OpeningStatus, type ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
+import { pickBookableLocation } from '@/lib/booking/pickLocation'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
 type CreateOpeningBody = {
   offeringId?: unknown
-  startAt?: unknown
+  startAt?: unknown // ISO string (UTC instant)
   locationType?: unknown
+  locationId?: unknown // ✅ optional: let pro pick a specific bookable location
   discountPct?: unknown
   note?: unknown
 }
@@ -31,9 +34,11 @@ function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
 }
 
-function normalizeLocationType(v: unknown): ServiceLocationType {
+function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = upper(v)
-  return s === 'MOBILE' ? 'MOBILE' : 'SALON'
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
 }
 
 function clampInt(n: unknown, fallback: number, min: number, max: number) {
@@ -84,6 +89,11 @@ export async function GET(req: Request) {
         createdAt: true,
         updatedAt: true,
 
+        // ✅ truth fields (new)
+        locationType: true,
+        locationId: true,
+        timeZone: true,
+
         offering: {
           select: {
             id: true,
@@ -126,12 +136,12 @@ export async function POST(req: Request) {
     const offeringId = pickString(body.offeringId)
     const startAt = parseIsoDate(body.startAt)
     const locationType = normalizeLocationType(body.locationType)
+    const requestedLocationId = pickString(body.locationId)
     const note = pickString(body.note)
     const discountPct = parseDiscountPct(body.discountPct)
 
-    if (!offeringId || !startAt) {
-      return jsonFail(400, 'Missing offeringId or startAt.')
-    }
+    if (!offeringId || !startAt) return jsonFail(400, 'Missing offeringId or startAt.')
+    if (!locationType) return jsonFail(400, 'Missing/invalid locationType. Use SALON or MOBILE.')
 
     // buffer: don’t allow openings "right now" or in the past
     const BUFFER_MINUTES = 5
@@ -156,20 +166,32 @@ export async function POST(req: Request) {
     })
 
     if (!offering) return jsonFail(404, 'Offering not found or inactive.')
+    if (locationType === 'SALON' && !offering.offersInSalon) return jsonFail(400, 'This offering is not available in-salon.')
+    if (locationType === 'MOBILE' && !offering.offersMobile) return jsonFail(400, 'This offering is not available as mobile.')
 
-    if (locationType === 'SALON' && !offering.offersInSalon) {
-      return jsonFail(400, 'This offering is not available in-salon.')
-    }
-    if (locationType === 'MOBILE' && !offering.offersMobile) {
-      return jsonFail(400, 'This offering is not available as mobile.')
+    // ✅ location truth: pick a bookable location for this opening
+    const loc = await pickBookableLocation({
+      professionalId,
+      requestedLocationId: requestedLocationId || null,
+      locationType,
+    })
+
+    if (!loc) return jsonFail(409, 'No bookable location found for this opening.')
+
+    const locAny = loc as any
+    const locId = String(locAny.id || '').trim()
+    const tz = String(locAny.timeZone || '').trim()
+
+    if (!locId) return jsonFail(500, 'Bookable location is missing id.')
+    if (!tz || !isValidIanaTimeZone(tz)) {
+      return jsonFail(
+        409,
+        'This location is missing a valid timezone. Set a timezone on your bookable location before creating openings.',
+      )
     }
 
     const durationMinutes = (() => {
-      const modeDur =
-        locationType === 'MOBILE'
-          ? offering.mobileDurationMinutes
-          : offering.salonDurationMinutes
-
+      const modeDur = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
       const fallback = offering.service.defaultDurationMinutes ?? 60
       return clampInt(modeDur ?? fallback, 60, 15, 12 * 60)
     })()
@@ -186,12 +208,9 @@ export async function POST(req: Request) {
       },
       select: { id: true },
     })
+    if (overlapOpening) return jsonFail(409, 'You already have an active opening overlapping that time.')
 
-    if (overlapOpening) {
-      return jsonFail(409, 'You already have an active opening overlapping that time.')
-    }
-
-    // reject overlaps with bookings (PENDING/ACCEPTED) using a tighter window
+    // reject overlaps with bookings (PENDING/ACCEPTED)
     const windowStart = addMinutes(startAt, -durationMinutes * 2)
     const windowEnd = addMinutes(startAt, durationMinutes * 2)
 
@@ -201,12 +220,7 @@ export async function POST(req: Request) {
         status: { in: ['PENDING', 'ACCEPTED'] as any },
         scheduledFor: { gte: windowStart, lte: windowEnd },
       },
-      select: {
-        id: true,
-        scheduledFor: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-      },
+      select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true },
       take: 50,
       orderBy: { scheduledFor: 'asc' },
     })
@@ -218,20 +232,23 @@ export async function POST(req: Request) {
       const bEnd = addMinutes(bStart, bDur + bBuf)
       return startAt < bEnd && bStart < endAt
     })
-
-    if (overlapsBooking) {
-      return jsonFail(409, 'That time overlaps an existing booking.')
-    }
+    if (overlapsBooking) return jsonFail(409, 'That time overlaps an existing booking.')
 
     const created = await prisma.lastMinuteOpening.create({
       data: {
         professionalId,
         serviceId: offering.serviceId,
         offeringId: offering.id,
+
+        // ✅ persist truth
+        locationType,
+        locationId: locId,
+        timeZone: tz,
+
         startAt,
         endAt,
         status: OpeningStatus.ACTIVE,
-        discountPct, // Int? ok to be null
+        discountPct,
         note,
       },
       select: {
@@ -243,6 +260,9 @@ export async function POST(req: Request) {
         note: true,
         offeringId: true,
         serviceId: true,
+        locationType: true,
+        locationId: true,
+        timeZone: true,
       },
     })
 
@@ -275,14 +295,10 @@ export async function PATCH(req: Request) {
     if (!openingId) return jsonFail(400, 'Missing openingId.')
 
     const status = parseOpeningStatus(body.status)
-    const note = body.note === undefined ? undefined : pickString(body.note) // allow clear to null by sending ""
+    const note = body.note === undefined ? undefined : pickString(body.note) // allow clear by sending ""
     const discountPct = body.discountPct === undefined ? undefined : parseDiscountPct(body.discountPct)
 
-    // If they provided a status but it's invalid -> reject.
-    if (body.status != null && pickString(body.status) && !status) {
-      return jsonFail(400, 'Invalid status.')
-    }
-    // If provided discountPct but invalid -> reject.
+    if (body.status != null && pickString(body.status) && !status) return jsonFail(400, 'Invalid status.')
     if (body.discountPct !== undefined && body.discountPct !== null && discountPct === null) {
       return jsonFail(400, 'Invalid discountPct. Must be 0–90 (or null).')
     }

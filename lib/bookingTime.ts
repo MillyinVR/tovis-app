@@ -8,7 +8,7 @@
  */
 
 import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, ymdInTimeZone } from '@/lib/timeZone'
-import { formatInTimeZone } from '@/lib/FormatInTimeZone'
+import { formatInTimeZone } from '@/lib/formatInTimeZone'
 
 type DateLike = Date | string | number
 

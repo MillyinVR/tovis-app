@@ -2,9 +2,15 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import type { ServiceLocationType } from '@prisma/client'
-import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
+import {
+  sanitizeTimeZone,
+  DEFAULT_TIME_ZONE,
+  getZonedParts,
+  minutesSinceMidnightInTimeZone,
+} from '@/lib/timeZone'
+import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +22,7 @@ type WorkingHours = Record<string, WorkingHoursDay>
 
 type HoldRow = {
   id: string
-  clientId: string
+  clientId: string | null
   professionalId: string
   scheduledFor: Date
   expiresAt: Date
@@ -38,63 +44,32 @@ function normalizeToMinute(d: Date) {
   return x
 }
 
+function clampInt(n: number, min: number, max: number) {
+  const x = Math.trunc(Number(n))
+  if (!Number.isFinite(x)) return min
+  return Math.max(min, Math.min(max, x))
+}
+
+/** Accepts both "9:00" and "09:00" */
 function parseHHMM(v?: string) {
-  if (!v || typeof v !== 'string') return null
-  const m = /^(\d{2}):(\d{2})$/.exec(v.trim())
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v ?? '').trim())
   if (!m) return null
   const hh = Number(m[1])
   const mm = Number(m[2])
   if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23) return null
-  if (mm < 0 || mm > 59) return null
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
   return { hh, mm }
 }
 
-function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
-  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
-}
+function weekdayKeyFromUtcInstant(dateUtc: Date, timeZoneRaw: string): keyof WorkingHours {
+  const timeZone = sanitizeTimeZone(timeZoneRaw, DEFAULT_TIME_ZONE)
+  const p = getZonedParts(dateUtc, timeZone)
 
-function getZonedParts(dateUtc: Date, timeZoneRaw: string) {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
+  // Use a stable mid-day anchor to determine weekday in that timezone.
+  // (Avoids oddities around midnight transitions.)
+  const noonLocalAsUtc = new Date(Date.UTC(p.year, p.month - 1, p.day, 12, 0, 0))
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(noonLocalAsUtc).toLowerCase()
 
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    hourCycle: 'h23',
-  } as any)
-
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-
-  let year = Number(map.year)
-  let month = Number(map.month)
-  let day = Number(map.day)
-  let hour = Number(map.hour)
-  const minute = Number(map.minute)
-  const second = Number(map.second)
-
-  if (hour === 24) {
-    hour = 0
-    const next = addDaysToYMD(year, month, day, 1)
-    year = next.year
-    month = next.month
-    day = next.day
-  }
-
-  return { year, month, day, hour, minute, second }
-}
-
-function getWeekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof WorkingHours {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(dateUtc).toLowerCase()
   if (weekday.startsWith('mon')) return 'mon'
   if (weekday.startsWith('tue')) return 'tue'
   if (weekday.startsWith('wed')) return 'wed'
@@ -102,12 +77,6 @@ function getWeekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof Work
   if (weekday.startsWith('fri')) return 'fri'
   if (weekday.startsWith('sat')) return 'sat'
   return 'sun'
-}
-
-function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZoneRaw: string) {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
-  const z = getZonedParts(dateUtc, timeZone)
-  return z.hour * 60 + z.minute
 }
 
 function ensureWithinWorkingHours(args: {
@@ -123,7 +92,7 @@ function ensureWithinWorkingHours(args: {
   }
 
   const wh = workingHours as WorkingHours
-  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, timeZone)
+  const dayKey = weekdayKeyFromUtcInstant(scheduledStartUtc, timeZone)
   const rule = wh?.[dayKey]
 
   if (!rule || rule.enabled === false) {
@@ -142,13 +111,14 @@ function ensureWithinWorkingHours(args: {
     return { ok: false, error: 'This professional’s working hours are misconfigured.' }
   }
 
-  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
-  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
-
-  const endDayKey = getWeekdayKeyInTimeZone(scheduledEndUtc, timeZone)
+  // Must be same local day
+  const endDayKey = weekdayKeyFromUtcInstant(scheduledEndUtc, timeZone)
   if (endDayKey !== dayKey) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
   }
+
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
 
   if (startMin < windowStartMin || endMin > windowEndMin) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
@@ -197,10 +167,8 @@ export async function POST(req: Request, { params }: Ctx) {
         professionalId: true,
         startedAt: true,
         finishedAt: true,
-
         totalDurationMinutes: true,
         bufferMinutes: true,
-
         locationId: true,
         locationTimeZone: true,
       },
@@ -216,8 +184,8 @@ export async function POST(req: Request, { params }: Ctx) {
       return fail(409, 'ALREADY_STARTED', 'This booking has started and cannot be rescheduled.')
     }
 
-    const totalDurationMinutes = Number(booking.totalDurationMinutes ?? 0)
-    if (!Number.isFinite(totalDurationMinutes) || totalDurationMinutes <= 0) {
+    const totalDurationMinutes = clampInt(booking.totalDurationMinutes ?? 0, 1, 24 * 60)
+    if (!totalDurationMinutes) {
       return fail(409, 'INVALID_DURATION', 'This booking has an invalid duration and cannot be rescheduled.')
     }
 
@@ -236,7 +204,8 @@ export async function POST(req: Request, { params }: Ctx) {
       })) as HoldRow | null
 
       if (!hold) return { ok: false as const, status: 404, error: 'Hold not found.' }
-      if (hold.clientId !== clientId) return { ok: false as const, status: 403, error: 'Hold does not belong to you.' }
+      if (!hold.clientId || hold.clientId !== clientId)
+        return { ok: false as const, status: 403, error: 'Hold does not belong to you.' }
       if (hold.expiresAt.getTime() <= now.getTime())
         return { ok: false as const, status: 409, error: 'Hold expired. Please pick a new time.' }
 
@@ -264,16 +233,26 @@ export async function POST(req: Request, { params }: Ctx) {
 
       if (!loc) return { ok: false as const, status: 409, error: 'This location is no longer available.' }
 
-      const apptTzCandidate = sanitizeTimeZone(loc.timeZone, 'America/Los_Angeles') || 'America/Los_Angeles'
-      const apptTz = isValidIanaTimeZone(apptTzCandidate) ? apptTzCandidate : 'America/Los_Angeles'
+      // ✅ Timezone truth: LOCATION timezone must be valid.
+      // No Los Angeles “helpfulness”. If missing, fail.
+      const tzRes = await resolveApptTimeZone({
+        location: { id: loc.id, timeZone: loc.timeZone },
+        professionalId: booking.professionalId,
+        fallback: DEFAULT_TIME_ZONE,
+        requireValid: true,
+      })
 
-      const bufferMinutes = Math.max(0, Math.min(180, Number(loc.bufferMinutes ?? booking.bufferMinutes ?? 0) || 0))
+      if (!tzRes.ok) return { ok: false as const, status: 409, error: 'This location is missing a valid timezone.' }
+      const apptTz = tzRes.timeZone
+
+      const bufferMinutes = clampInt(loc.bufferMinutes ?? booking.bufferMinutes ?? 0, 0, 180)
 
       const newStart = normalizeToMinute(new Date(hold.scheduledFor))
-      if (!Number.isFinite(newStart.getTime())) {
+      if (Number.isNaN(newStart.getTime())) {
         return { ok: false as const, status: 400, error: 'Hold time is invalid. Please pick a new slot.' }
       }
 
+      // a tiny grace window is fine, but don’t allow actual past
       if (newStart.getTime() < now.getTime() - 60_000) {
         return { ok: false as const, status: 400, error: 'That time is in the past.' }
       }
@@ -288,6 +267,7 @@ export async function POST(req: Request, { params }: Ctx) {
       })
       if (!whCheck.ok) return { ok: false as const, status: 400, error: whCheck.error }
 
+      // Conflict check (simple window)
       const windowStart = addMinutes(newStart, -24 * 60)
       const windowEnd = addMinutes(newStart, 24 * 60)
 
@@ -297,6 +277,7 @@ export async function POST(req: Request, { params }: Ctx) {
           id: { not: booking.id },
           status: { in: ['PENDING', 'ACCEPTED'] as any },
           scheduledFor: { gte: windowStart, lte: windowEnd },
+          NOT: { status: 'CANCELLED' as any },
         },
         select: {
           id: true,
@@ -308,12 +289,14 @@ export async function POST(req: Request, { params }: Ctx) {
       })
 
       const hasConflict = others.some((b) => {
-        const bDur = Number(b.totalDurationMinutes ?? 0)
-        const bBuf = Number(b.bufferMinutes ?? 0)
-        if (!Number.isFinite(bDur) || bDur <= 0) return false
+        const bDur = clampInt(b.totalDurationMinutes ?? 0, 0, 24 * 60)
+        if (!bDur) return false
 
+        const bBuf = clampInt(b.bufferMinutes ?? 0, 0, 180)
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
-        const bEnd = addMinutes(bStart, bDur + (Number.isFinite(bBuf) ? bBuf : 0))
+        if (Number.isNaN(bStart.getTime())) return false
+
+        const bEnd = addMinutes(bStart, bDur + bBuf)
         return overlaps(bStart, bEnd, newStart, newEnd)
       })
 
@@ -330,12 +313,12 @@ export async function POST(req: Request, { params }: Ctx) {
         data: {
           scheduledFor: newStart,
           locationType,
-
           bufferMinutes,
 
           locationId: loc.id,
           locationTimeZone: apptTz,
 
+          // snapshots (keep minimal + stable)
           locationAddressSnapshot: loc.formattedAddress ? ({ formattedAddress: loc.formattedAddress } as any) : undefined,
           locationLatSnapshot: typeof loc.lat === 'number' ? loc.lat : undefined,
           locationLngSnapshot: typeof loc.lng === 'number' ? loc.lng : undefined,

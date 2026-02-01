@@ -1,7 +1,7 @@
 // app/pro/calendar/page.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import CreateBookingModal from './CreateBookingModal'
 import BlockTimeModal from './BlockTimeModal'
 import EditBlockModal from './EditBlockModal'
@@ -16,50 +16,93 @@ import { ManagementModal } from './_components/ManagementModal'
 import { BookingModal } from './_components/BookingModal'
 
 import type { ViewMode } from './_types'
-import { addDays, formatMonthRange, formatWeekRange, startOfDay } from './_utils/date'
 
-function pickTimeZone(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : 'America/Los_Angeles'
+// ✅ Single source of truth for calendar date math
+import {
+  anchorNoonInTimeZone,
+  addDaysAnchorNoonInTimeZone,
+  addMonthsAnchorNoonInTimeZone,
+  startOfMonthAnchorNoonInTimeZone,
+  startOfWeekAnchorNoonInTimeZone,
+  formatWeekRangeInTimeZone,
+  formatMonthRangeInTimeZone,
+  formatDayLabelInTimeZone,
+} from './_utils/date'
+
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone, startOfDayUtcInTimeZone, ymdInTimeZone } from '@/lib/timeZone'
+
+function safeTz(raw: unknown) {
+  return sanitizeTimeZone(typeof raw === 'string' ? raw : '', DEFAULT_TIME_ZONE)
+}
+
+function sameLocalDayInTz(aUtc: Date, bUtc: Date, tz: string) {
+  return ymdInTimeZone(aUtc, tz) === ymdInTimeZone(bUtc, tz)
+}
+
+function headerLabelFor(view: ViewMode, anchorUtc: Date, tz: string) {
+  if (view === 'day') return formatDayLabelInTimeZone(anchorUtc, tz)
+  if (view === 'week') return formatWeekRangeInTimeZone(anchorUtc, tz)
+  return formatMonthRangeInTimeZone(anchorUtc, tz)
 }
 
 export default function ProCalendarPage() {
   const [view, setView] = useState<ViewMode>('week')
-  const [currentDate, setCurrentDate] = useState<Date>(new Date())
+
+  // ✅ Strict: focus date stored as a TZ-noon anchor (UTC Date).
+  // Start with "now", then normalize once we know TZ.
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date())
 
   const cal = useCalendarData({ view, currentDate })
-  const timeZone = pickTimeZone(cal.timeZone)
+
+  // ✅ Use calendar tz; if missing/invalid the hook uses DEFAULT_TIME_ZONE (UTC).
+  const timeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
+
+  // ✅ Normalize currentDate to noon-in-TZ. Avoid pointless re-anchoring loops.
+  const didNormalizeRef = useRef(false)
+  useEffect(() => {
+    setCurrentDate((d) => {
+      const anchored = anchorNoonInTimeZone(d, timeZone)
+
+      if (!didNormalizeRef.current) {
+        didNormalizeRef.current = true
+        return anchored
+      }
+
+      // Only change if it would actually move the local calendar day in this TZ
+      return sameLocalDayInTz(d, anchored, timeZone) ? d : anchored
+    })
+  }, [timeZone])
 
   const visibleDays = useMemo(() => {
-    if (view === 'day') return [startOfDay(currentDate)]
+    const tz = timeZone
 
-    if (view === 'week') {
-      const start = cal.utils.startOfWeek(currentDate)
-      return Array.from({ length: 7 }, (_, i) => addDays(start, i))
+    // Build the grid using TZ-anchored day starts (UTC Dates representing midnight-in-TZ)
+    if (view === 'day') {
+      const startUtc = startOfDayUtcInTimeZone(currentDate, tz)
+      return [startUtc]
     }
 
-    const first = cal.utils.startOfMonth(currentDate)
-    const firstWeekStart = cal.utils.startOfWeek(first)
-    return Array.from({ length: 42 }, (_, i) => addDays(firstWeekStart, i))
-  }, [view, currentDate, cal.utils])
+    if (view === 'week') {
+      // ✅ Monday-start week (comes from _utils/date.ts)
+      const weekStartNoon = startOfWeekAnchorNoonInTimeZone(currentDate, tz)
+      const weekStartDayStartUtc = startOfDayUtcInTimeZone(weekStartNoon, tz)
+      return Array.from({ length: 7 }, (_, i) => new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000))
+    }
 
-  const headerLabel =
-    view === 'month'
-      ? formatMonthRange(currentDate)
-      : view === 'week'
-        ? formatWeekRange(currentDate)
-        : currentDate.toLocaleDateString(undefined, {
-            weekday: 'long',
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          })
+    // month grid: start at week start that contains the 1st of the month
+    const monthStartNoon = startOfMonthAnchorNoonInTimeZone(currentDate, tz)
+    const firstWeekNoon = startOfWeekAnchorNoonInTimeZone(monthStartNoon, tz)
+    const firstGridDayStartUtc = startOfDayUtcInTimeZone(firstWeekNoon, tz)
+
+    return Array.from({ length: 42 }, (_, i) => new Date(firstGridDayStartUtc.getTime() + i * 24 * 60 * 60_000))
+  }, [view, currentDate, timeZone])
+
+  const headerLabel = useMemo(() => headerLabelFor(view, currentDate, timeZone), [view, currentDate, timeZone])
 
   return (
     <main className="mx-auto max-w-275 px-4 pb-10 pt-6 font-sans text-textPrimary md:pt-10">
-      {/* ✅ unified “glass header” rhythm */}
       <CalendarHeader />
 
-      {/* ✅ management strip already good; sits as a glass section */}
       <ManagementStrip
         stats={cal.stats}
         management={cal.management}
@@ -72,7 +115,6 @@ export default function ProCalendarPage() {
         onOpenManagement={cal.openManagement}
       />
 
-      {/* ✅ working hours editor becomes a proper panel */}
       {cal.showHoursForm && (
         <section className="mb-4">
           <div className="tovis-glass-soft tovis-noise border border-white/10 px-4 py-4 md:px-5">
@@ -89,21 +131,20 @@ export default function ProCalendarPage() {
         </section>
       )}
 
-      {/* ✅ controls are now glass, mobile-stacked */}
       <CalendarHeaderControls
         view={view}
         setView={setView}
         headerLabel={headerLabel}
-        onToday={() => setCurrentDate(new Date())}
+        onToday={() => setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))}
         onBack={() => {
-          if (view === 'day') setCurrentDate((d) => addDays(d, -1))
-          else if (view === 'week') setCurrentDate((d) => addDays(d, -7))
-          else setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, d.getDate()))
+          if (view === 'day') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -1, timeZone))
+          else if (view === 'week') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -7, timeZone))
+          else setCurrentDate((d) => addMonthsAnchorNoonInTimeZone(d, -1, timeZone))
         }}
         onNext={() => {
-          if (view === 'day') setCurrentDate((d) => addDays(d, 1))
-          else if (view === 'week') setCurrentDate((d) => addDays(d, 7))
-          else setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, d.getDate()))
+          if (view === 'day') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, 1, timeZone))
+          else if (view === 'week') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, 7, timeZone))
+          else setCurrentDate((d) => addMonthsAnchorNoonInTimeZone(d, 1, timeZone))
         }}
       />
 
@@ -142,8 +183,9 @@ export default function ProCalendarPage() {
           visibleDays={visibleDays}
           currentDate={currentDate}
           events={cal.events}
+          timeZone={timeZone}
           onPickDay={(d) => {
-            setCurrentDate(d)
+            setCurrentDate(anchorNoonInTimeZone(d, timeZone))
             setView('day')
           }}
         />

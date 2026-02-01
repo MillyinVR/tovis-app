@@ -3,7 +3,14 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToFixed2String } from '@/lib/money'
-import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
+import {
+  sanitizeTimeZone,
+  isValidIanaTimeZone,
+  getZonedParts,
+  minutesSinceMidnightInTimeZone,
+} from '@/lib/timeZone'
+import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -46,71 +53,19 @@ async function safeJsonReq(req: Request) {
   return req.json().catch(() => ({})) as Promise<any>
 }
 
-/** Working-hours enforcement (LOCATION truth) */
+function fail(status: number, error: string, details?: any) {
+  const dev = process.env.NODE_ENV !== 'production'
+  return NextResponse.json(dev && details != null ? { ok: false, error, details } : { ok: false, error }, { status })
+}
+
+/* ---------------------------------------------
+   Working-hours enforcement (LOCATION truth)
+   --------------------------------------------- */
+
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
 type WorkingHours = Record<string, WorkingHoursDay>
 
-function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
-  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
-}
-
-function getZonedParts(dateUtc: Date, timeZoneRaw: string) {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
-
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    hourCycle: 'h23',
-  } as any)
-
-  const parts = dtf.formatToParts(dateUtc)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-
-  let year = Number(map.year)
-  let month = Number(map.month)
-  let day = Number(map.day)
-  let hour = Number(map.hour)
-  const minute = Number(map.minute)
-  const second = Number(map.second)
-
-  // Safari-ish edge case: hour can be "24"
-  if (hour === 24) {
-    hour = 0
-    const next = addDaysToYMD(year, month, day, 1)
-    year = next.year
-    month = next.month
-    day = next.day
-  }
-
-  return { year, month, day, hour, minute, second }
-}
-
-function getWeekdayKeyInTimeZone(
-  dateUtc: Date,
-  timeZoneRaw: string,
-): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
-    .format(dateUtc)
-    .toLowerCase()
-
-  if (weekday.startsWith('mon')) return 'mon'
-  if (weekday.startsWith('tue')) return 'tue'
-  if (weekday.startsWith('wed')) return 'wed'
-  if (weekday.startsWith('thu')) return 'thu'
-  if (weekday.startsWith('fri')) return 'fri'
-  if (weekday.startsWith('sat')) return 'sat'
-  return 'sun'
-}
-
+/** "09:00" only (strict) */
 function parseHHMM(v?: string) {
   if (!v || typeof v !== 'string') return null
   const m = /^(\d{2}):(\d{2})$/.exec(v.trim())
@@ -122,9 +77,17 @@ function parseHHMM(v?: string) {
   return { hh, mm }
 }
 
-function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZoneRaw: string) {
-  const z = getZonedParts(dateUtc, timeZoneRaw)
-  return z.hour * 60 + z.minute
+function weekdayKeyFromZonedParts(z: { year: number; month: number; day: number; timeZone: string }) {
+  // Create a UTC instant from local parts (no DST safety needed; this is just for weekday labeling)
+  const asUtc = new Date(Date.UTC(z.year, z.month - 1, z.day, 12, 0, 0, 0))
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: z.timeZone, weekday: 'short' }).format(asUtc).toLowerCase()
+  if (wd.startsWith('mon')) return 'mon'
+  if (wd.startsWith('tue')) return 'tue'
+  if (wd.startsWith('wed')) return 'wed'
+  if (wd.startsWith('thu')) return 'thu'
+  if (wd.startsWith('fri')) return 'fri'
+  if (wd.startsWith('sat')) return 'sat'
+  return 'sun'
 }
 
 function ensureWithinWorkingHours(args: {
@@ -139,8 +102,21 @@ function ensureWithinWorkingHours(args: {
     return { ok: false, error: 'Working hours are not set yet.' }
   }
 
+  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
   const wh = workingHours as WorkingHours
-  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, timeZone)
+
+  // ✅ Must start & end on the same *local* day in tz
+  const sParts = getZonedParts(scheduledStartUtc, tz)
+  const eParts = getZonedParts(scheduledEndUtc, tz)
+  const sameLocalDay =
+    sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+
+  if (!sameLocalDay) {
+    return { ok: false, error: 'That time is outside your working hours.' }
+  }
+
+  // determine day key using the local date parts (stable)
+  const dayKey = weekdayKeyFromZonedParts({ ...sParts, timeZone: tz })
   const rule = wh?.[dayKey]
 
   if (!rule || rule.enabled === false) {
@@ -159,13 +135,8 @@ function ensureWithinWorkingHours(args: {
     return { ok: false, error: 'Your working hours are misconfigured.' }
   }
 
-  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
-  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
-
-  const endDayKey = getWeekdayKeyInTimeZone(scheduledEndUtc, timeZone)
-  if (endDayKey !== dayKey) {
-    return { ok: false, error: 'That time is outside your working hours.' }
-  }
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
 
   if (startMin < windowStartMin || endMin > windowEndMin) {
     return { ok: false, error: 'That time is outside your working hours.' }
@@ -174,16 +145,48 @@ function ensureWithinWorkingHours(args: {
   return { ok: true }
 }
 
-function normalizeTimeZone(tz: unknown, fallback: string) {
-  const raw = typeof tz === 'string' ? tz.trim() : ''
-  const cleaned = sanitizeTimeZone(raw, fallback) || fallback
+/* ---------------------------------------------
+   Time zone resolution
+   --------------------------------------------- */
+
+function normalizeTimeZoneStrict(tzRaw: unknown, fallback: string) {
+  const s = typeof tzRaw === 'string' ? tzRaw.trim() : ''
+  if (s && isValidIanaTimeZone(s)) return s
+  // sanitizeTimeZone handles unknowns; keep one consistent fallback
+  const cleaned = sanitizeTimeZone(s, fallback) || fallback
   return isValidIanaTimeZone(cleaned) ? cleaned : fallback
 }
 
-function fail(status: number, error: string, details?: any) {
-  const dev = process.env.NODE_ENV !== 'production'
-  return NextResponse.json(dev && details != null ? { ok: false, error, details } : { ok: false, error }, { status })
+async function resolveBookingTimeZone(args: {
+  bookingLocationTimeZone: unknown
+  bookingLocationId: string | null
+  professionalId: string
+  proTimeZone: unknown
+  fallback?: string
+}) {
+  const fallback = args.fallback ?? 'UTC'
+
+  // 1) booking.locationTimeZone (strongest)
+  const locTzDirect = typeof args.bookingLocationTimeZone === 'string' ? args.bookingLocationTimeZone.trim() : ''
+  if (locTzDirect && isValidIanaTimeZone(locTzDirect)) return locTzDirect
+
+  // 2) location.timeZone
+  if (args.bookingLocationId) {
+    const loc = await prisma.professionalLocation.findFirst({
+      where: { id: args.bookingLocationId, professionalId: args.professionalId },
+      select: { timeZone: true },
+    })
+    const locTz = typeof loc?.timeZone === 'string' ? loc.timeZone.trim() : ''
+    if (locTz && isValidIanaTimeZone(locTz)) return locTz
+  }
+
+  // 3) pro.timeZone
+  return normalizeTimeZoneStrict(args.proTimeZone, fallback)
 }
+
+/* ---------------------------------------------
+   Handlers
+   --------------------------------------------- */
 
 export async function GET(_req: Request, { params }: Ctx) {
   try {
@@ -265,20 +268,16 @@ export async function GET(_req: Request, { params }: Ctx) {
     const ln = booking.client?.lastName?.trim() || ''
     const fullName = fn || ln ? `${fn} ${ln}`.trim() : booking.client?.user?.email || 'Client'
 
-    // timezone truth order: booking.locationTimeZone > location.timeZone > pro.timeZone > fallback
-    let tz = normalizeTimeZone(booking.locationTimeZone, 'America/Los_Angeles')
+    const tzRes = await resolveApptTimeZone({
+  bookingLocationTimeZone: booking.locationTimeZone,
+  locationId: booking.locationId ?? null,
+  professionalId: booking.professionalId,
+  professionalTimeZone: booking.professional?.timeZone,
+  fallback: 'UTC',
+})
 
-    if (!booking.locationTimeZone && booking.locationId) {
-      const loc = await prisma.professionalLocation.findFirst({
-        where: { id: booking.locationId, professionalId: booking.professionalId },
-        select: { timeZone: true },
-      })
-      if (loc?.timeZone) tz = normalizeTimeZone(loc.timeZone, tz)
-    }
+const tz = tzRes.ok ? tzRes.timeZone : 'UTC'
 
-    if (!booking.locationTimeZone && !booking.locationId) {
-      tz = normalizeTimeZone(booking.professional?.timeZone, tz)
-    }
 
     // For the pro booking editor UI: list services from active offerings
     const offerings = await prisma.professionalServiceOffering.findMany({
@@ -324,7 +323,6 @@ export async function GET(_req: Request, { params }: Ctx) {
           totalDurationMinutes: durationMinutes,
 
           subtotalSnapshot: moneyToFixed2String(
-            // prefer stored if present, else computed from items
             booking.subtotalSnapshot ?? (computedSubtotal as any),
           ),
 
@@ -381,10 +379,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     const serviceItemsRaw = Array.isArray(body?.serviceItems) ? body.serviceItems : null
 
     const wantsSomething =
-      !!scheduledForRaw ||
-      bufferRaw != null ||
-      durationMinutesRaw != null ||
-      serviceItemsRaw != null
+      !!scheduledForRaw || bufferRaw != null || durationMinutesRaw != null || serviceItemsRaw != null
 
     if (!wantsSomething) return fail(400, 'No changes provided.')
 
@@ -419,14 +414,12 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
           bufferMinutes: true,
           totalDurationMinutes: true,
-          subtotalSnapshot: true,
 
           professionalId: true,
           clientId: true,
 
           locationId: true,
           locationTimeZone: true,
-
           professional: { select: { timeZone: true } },
 
           serviceItems: {
@@ -443,9 +436,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
         throw new Error('CANNOT_EDIT_CANCELLED')
       }
 
-      // Determine appointment timezone from location first
-      let apptTz = normalizeTimeZone(existing.locationTimeZone, 'America/Los_Angeles')
-
+      // ✅ LOCATION truth for working-hours/timezone
       const loc = existing.locationId
         ? await tx.professionalLocation.findFirst({
             where: { id: existing.locationId, professionalId: existing.professionalId, isBookable: true },
@@ -453,10 +444,19 @@ export async function PATCH(req: Request, { params }: Ctx) {
           })
         : null
 
-      if (loc?.timeZone) apptTz = normalizeTimeZone(loc.timeZone, apptTz)
-      if (!existing.locationTimeZone && !loc?.timeZone) {
-        apptTz = normalizeTimeZone(existing.professional?.timeZone, apptTz)
-      }
+      // booking.locationTimeZone > location.timeZone > pro.timeZone > UTC
+      const tzRes = await resolveApptTimeZone({
+        bookingLocationTimeZone: existing.locationTimeZone,
+        location: loc ? { id: existing.locationId, timeZone: loc.timeZone } : null,
+        locationId: existing.locationId ?? null,
+        professionalId: existing.professionalId,
+        professionalTimeZone: existing.professional?.timeZone,
+        fallback: 'UTC',
+      })
+
+      if (!tzRes.ok) throw new Error('TIMEZONE_REQUIRED')
+      const apptTz = tzRes.timeZone
+
 
       // Replace-all serviceItems if provided (no legacy "serviceId" shortcut)
       if (serviceItemsRaw) {
@@ -475,7 +475,6 @@ export async function PATCH(req: Request, { params }: Ctx) {
           if (price == null || price < 0) throw new Error('BAD_ITEMS')
           if (dur == null || dur < 15 || dur > 12 * 60) throw new Error('BAD_ITEMS')
 
-          // ensure offering belongs to this pro and matches serviceId
           const off = await tx.professionalServiceOffering.findFirst({
             where: { id: offeringId, professionalId: existing.professionalId, serviceId, isActive: true },
             select: { id: true },
@@ -497,7 +496,6 @@ export async function PATCH(req: Request, { params }: Ctx) {
         }
       }
 
-      // Reload items to compute subtotal + duration unless duration explicitly set
       const itemsNow = await tx.bookingServiceItem.findMany({
         where: { bookingId: existing.id },
         orderBy: { sortOrder: 'asc' },
@@ -510,23 +508,17 @@ export async function PATCH(req: Request, { params }: Ctx) {
       const finalStart = nextStart ?? normalizeToMinute(new Date(existing.scheduledFor))
       const finalBuffer = nextBuffer ?? Math.max(0, Number(existing.bufferMinutes ?? 0))
 
-      const durationFallback =
-        Number(existing.totalDurationMinutes ?? 0) > 0 ? Number(existing.totalDurationMinutes) : 60
-
-      const finalDuration =
-        nextTotalDuration ??
-        (computedDuration > 0 ? computedDuration : durationFallback)
+      const durationFallback = Number(existing.totalDurationMinutes ?? 0) > 0 ? Number(existing.totalDurationMinutes) : 60
+      const finalDuration = nextTotalDuration ?? (computedDuration > 0 ? computedDuration : durationFallback)
 
       const finalEnd = addMinutes(finalStart, finalDuration + finalBuffer)
 
-      // Working hours check (location truth)
       const whCheck = ensureWithinWorkingHours({
         scheduledStartUtc: finalStart,
         scheduledEndUtc: finalEnd,
         workingHours: loc?.workingHours,
         timeZone: apptTz,
       })
-
       if (!whCheck.ok && !allowOutside) throw new Error(`WH:${whCheck.error}`)
 
       // Conflict check with other bookings
@@ -579,8 +571,6 @@ export async function PATCH(req: Request, { params }: Ctx) {
       })
 
       if (notifyClient) {
-        // You can replace this later with your real notification system.
-        // Keeping this minimal so it doesn't become another "legacy" trap.
         try {
           await tx.clientNotification.create({
             data: {

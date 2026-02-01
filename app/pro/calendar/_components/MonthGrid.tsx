@@ -1,23 +1,47 @@
 // app/pro/calendar/_components/MonthGrid.tsx
-
 'use client'
 
 import type { CalendarEvent } from '../_types'
-import { DAY_KEYS, isSameDay } from '../_utils/date'
-import { eventChipClasses } from '../_utils/statusStyles'
+import { DAY_KEYS } from '../_utils/date'
 import { isBlockedEvent } from '../_utils/calendarMath'
 import { eventChipClassName } from '../_utils/statusStyles'
+import { ymdInTimeZone } from '@/lib/timeZone'
+
+const MIDDAY_MS = 12 * 60 * 60 * 1000
+
+function stableYmdForVisibleDay(d: Date, timeZone: string) {
+  return ymdInTimeZone(new Date(d.getTime() + MIDDAY_MS), timeZone)
+}
 
 export function MonthGrid(props: {
   visibleDays: Date[]
   currentDate: Date
   events: CalendarEvent[]
+  timeZone: string
   onPickDay: (d: Date) => void
 }) {
-  const { visibleDays, currentDate, events, onPickDay } = props
+  const { visibleDays, currentDate, events, timeZone, onPickDay } = props
+
+  const currentMonth = new Intl.DateTimeFormat('en-US', { timeZone, month: 'numeric', year: 'numeric' }).format(currentDate)
+
+  function inCurrentMonth(day: Date) {
+    const m = new Intl.DateTimeFormat('en-US', { timeZone, month: 'numeric', year: 'numeric' }).format(day)
+    return m === currentMonth
+  }
 
   function eventsForDay(day: Date) {
-    return events.filter((ev) => isSameDay(new Date(ev.startsAt), day))
+    const dayYmd = stableYmdForVisibleDay(day, timeZone)
+
+    // include multi-day events (start..end inclusive) in that day bucket
+    return events.filter((ev) => {
+      const sMs = new Date(ev.startsAt).getTime()
+      const eMs = new Date(ev.endsAt).getTime()
+      if (!Number.isFinite(sMs) || !Number.isFinite(eMs) || eMs <= sMs) return false
+
+      const startYmd = ymdInTimeZone(new Date(sMs), timeZone)
+      const endYmd = ymdInTimeZone(new Date(eMs - 1), timeZone) // inclusive
+      return dayYmd >= startYmd && dayYmd <= endYmd
+    })
   }
 
   return (
@@ -32,9 +56,11 @@ export function MonthGrid(props: {
 
       <div className="grid grid-cols-7">
         {visibleDays.map((d, idx) => {
-          const inMonth = d.getMonth() === currentDate.getMonth()
+          const inMonth = inCurrentMonth(d)
           const dayEvents = eventsForDay(d).slice(0, 2)
           const extra = Math.max(0, eventsForDay(d).length - dayEvents.length)
+
+          const isToday = stableYmdForVisibleDay(d, timeZone) === ymdInTimeZone(new Date(), timeZone)
 
           return (
             <button
@@ -49,8 +75,11 @@ export function MonthGrid(props: {
               ].join(' ')}
             >
               <div className="flex items-baseline justify-between">
-                <div className={['text-sm font-black', inMonth ? 'text-textPrimary' : 'text-textSecondary'].join(' ')}>{d.getDate()}</div>
-                {isSameDay(d, new Date()) && (
+                <div className={['text-sm font-black', inMonth ? 'text-textPrimary' : 'text-textSecondary'].join(' ')}>
+                  {new Intl.DateTimeFormat('en-US', { timeZone, day: 'numeric' }).format(d)}
+                </div>
+
+                {isToday && (
                   <div className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-extrabold">
                     Today
                   </div>

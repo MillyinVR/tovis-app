@@ -3,8 +3,8 @@ import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { sanitizeTimeZone } from '@/lib/timeZone'
 import AftercareForm from './AftercareForm'
+import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,13 +31,11 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
 
   const proId = user.professionalProfile.id
 
-  // Fetch pro timezone explicitly (avoids relying on getCurrentUser shape)
+  // Fetch pro timezone explicitly (avoid relying on getCurrentUser shape)
   const proProfile = await prisma.professionalProfile.findUnique({
     where: { id: proId },
     select: { timeZone: true },
   })
-
-  const proTimeZone = sanitizeTimeZone(proProfile?.timeZone, 'America/Los_Angeles')
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -71,6 +69,17 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
 
   if (!booking) notFound()
   if (booking.professionalId !== proId) redirect('/pro')
+
+  // ✅ Timezone truth (no LA default):
+  // booking.locationTimeZone > proProfile.timeZone > UTC
+  const tzRes = await resolveApptTimeZone({
+    bookingLocationTimeZone: booking.locationTimeZone,
+    professionalTimeZone: proProfile?.timeZone,
+    fallback: 'UTC',
+    requireValid: false,
+  })
+
+  const timeZone = tzRes.ok ? tzRes.timeZone : 'UTC'
 
   const aftercare = booking.aftercareSummary
 
@@ -130,7 +139,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
       <div className="mt-4">
         <AftercareForm
           bookingId={bookingId}
-          timeZone={proTimeZone}
+          timeZone={timeZone}
           existingNotes={aftercare?.notes ?? ''}
           existingRebookMode={existingRebookMode}
           existingRebookedFor={existingRebookedFor}

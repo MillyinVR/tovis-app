@@ -1,7 +1,7 @@
 // app/api/pro/settings/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,26 +9,42 @@ function pickBoolean(v: unknown): boolean | undefined {
   return typeof v === 'boolean' ? v : undefined
 }
 
-function pickNonEmptyString(v: unknown): string | undefined {
-  if (typeof v !== 'string') return undefined
-  const s = v.trim()
-  return s ? s : undefined
+function pickString(v: unknown): string | null {
+  return typeof v === 'string' ? v : null
 }
 
-function normalizeTimeZoneInput(raw: unknown): { ok: true; value?: string } | { ok: false; error: string } {
-  if (raw === undefined) return { ok: true, value: undefined }
+/**
+ * STRICT timezone input:
+ * - undefined => no change
+ * - null or "" => clear (set null)
+ * - valid IANA string => set trimmed string
+ * - anything else => 400
+ *
+ * Never "sanitize" invalid input into UTC here.
+ * If the user sends garbage, we reject it.
+ */
+function normalizeTimeZonePatch(
+  raw: unknown,
+): { ok: true; value?: string | null } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, value: undefined } // no change
 
-  const candidate = pickNonEmptyString(raw)
-  if (!candidate) {
-    return { ok: false, error: 'Invalid timeZone (must be a non-empty IANA timezone string).' }
+  if (raw === null) return { ok: true, value: null } // clear
+
+  const s = pickString(raw)
+  if (s === null) {
+    return { ok: false, error: 'Invalid timeZone. Provide a valid IANA timezone string, null, or omit the field.' }
   }
 
-  const cleaned = sanitizeTimeZone(candidate, 'UTC') || ''
-  if (!cleaned || !isValidIanaTimeZone(cleaned)) {
-    return { ok: false, error: 'Invalid timeZone (must be a valid IANA timezone, e.g. "America/Los_Angeles").' }
+  const trimmed = s.trim()
+
+  // allow clear with empty string
+  if (!trimmed) return { ok: true, value: null }
+
+  if (!isValidIanaTimeZone(trimmed)) {
+    return { ok: false, error: 'Invalid timeZone (must be a valid IANA timezone, e.g. "America/New_York").' }
   }
 
-  return { ok: true, value: cleaned }
+  return { ok: true, value: trimmed }
 }
 
 export async function PATCH(req: Request) {
@@ -41,19 +57,19 @@ export async function PATCH(req: Request) {
 
     const autoAcceptBookings = pickBoolean(body?.autoAcceptBookings)
 
-    const tzResult = normalizeTimeZoneInput(body?.timeZone)
+    const tzResult = normalizeTimeZonePatch(body?.timeZone)
     if (!tzResult.ok) return jsonFail(400, tzResult.error)
-    const timeZone = tzResult.value // undefined => no change
+    const timeZone = tzResult.value // undefined=no change, null=clear, string=set
 
     if (autoAcceptBookings === undefined && timeZone === undefined) {
-      return jsonFail(400, 'Nothing to update. Provide autoAcceptBookings (boolean) and/or timeZone (IANA string).')
+      return jsonFail(400, 'Nothing to update. Provide autoAcceptBookings (boolean) and/or timeZone.')
     }
 
     const professionalProfile = await prisma.professionalProfile.update({
       where: { id: proProfileId },
       data: {
         ...(autoAcceptBookings !== undefined ? { autoAcceptBookings } : {}),
-        ...(timeZone !== undefined ? { timeZone } : {}),
+        ...(timeZone !== undefined ? { timeZone } : {}), // ✅ can set null
       },
       select: {
         id: true,

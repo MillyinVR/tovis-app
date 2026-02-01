@@ -4,21 +4,31 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import MediaUploader from '../MediaUploader'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
-function fmtDate(v: any) {
+function upper(v: unknown) {
+  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function fmtInTimeZone(value: unknown, timeZone: string) {
   try {
-    const d = v instanceof Date ? v : new Date(String(v))
+    const d = value instanceof Date ? value : new Date(String(value))
     if (Number.isNaN(d.getTime())) return ''
-    return d.toLocaleString()
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: tz,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d)
   } catch {
     return ''
   }
-}
-
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
 export default async function ProAfterPhotosPage(props: { params: Promise<{ id: string }> }) {
@@ -43,6 +53,9 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
     redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
   }
 
+  // ✅ Use PRO timezone. No LA fallback. If missing/invalid, fall back to DEFAULT_TIME_ZONE (UTC).
+  const proTz = sanitizeTimeZone(user.professionalProfile.timeZone, DEFAULT_TIME_ZONE)
+
   const items = await prisma.mediaAsset.findMany({
     where: { bookingId, phase: 'AFTER' as any },
     select: {
@@ -60,7 +73,9 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
   })
 
   const serviceName = booking.service?.name ?? 'Service'
-  const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
+  const clientFirst = booking.client?.firstName ?? ''
+  const clientLast = booking.client?.lastName ?? ''
+  const clientName = `${clientFirst} ${clientLast}`.trim() || 'Client'
   const canContinue = items.length > 0
 
   return (
@@ -100,6 +115,10 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
             <span className="text-xs font-black text-textPrimary">Unlocked.</span>
           )}
         </div>
+
+        <div className="mt-3 text-[11px] font-semibold text-textSecondary">
+          Times shown in <span className="font-black text-textPrimary">{proTz}</span>
+        </div>
       </div>
 
       <section className="mt-4">
@@ -117,7 +136,9 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
               <div key={m.id} className="rounded-card border border-white/10 bg-bgSecondary p-3">
                 <div className="text-xs font-black text-textPrimary">
                   {m.mediaType} · {m.visibility}
-                  <span className="ml-2 font-semibold text-textSecondary">· {fmtDate(m.createdAt)}</span>
+                  <span className="ml-2 font-semibold text-textSecondary">
+                    · {fmtInTimeZone(m.createdAt, proTz)}
+                  </span>
                 </div>
 
                 {m.caption ? <div className="mt-1 text-sm text-textSecondary">{m.caption}</div> : null}
@@ -132,7 +153,12 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
                     Open media
                   </a>
                   {m.thumbUrl ? (
-                    <a href={m.thumbUrl} target="_blank" rel="noreferrer" className="text-accentPrimary hover:opacity-80">
+                    <a
+                      href={m.thumbUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accentPrimary hover:opacity-80"
+                    >
                       Open thumb
                     </a>
                   ) : null}

@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import MonthlySourcePie from '../MonthlySourcePie'
-import { sanitizeTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
 import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -27,9 +27,9 @@ function parseMonthParam(raw: unknown) {
  * monthEndUtc   = start of next month at 00:00 in pro tz (as UTC instant)
  */
 function monthWindowUtcForProTz(args: { y: number; m: number; timeZone: string }) {
-  const tz = sanitizeTimeZone(args.timeZone, 'UTC')
+  const tz = sanitizeTimeZone(args.timeZone, DEFAULT_TIME_ZONE)
 
-  // noon UTC on the 1st avoids DST edge cases
+  // noon UTC on the 1st avoids DST edge cases when converting to "start of day in tz"
   const anchorThis = new Date(Date.UTC(args.y, args.m - 1, 1, 12, 0, 0))
   const anchorNext = new Date(Date.UTC(args.y, args.m, 1, 12, 0, 0))
 
@@ -44,25 +44,45 @@ function monthKey(y: number, m: number) {
 }
 
 function monthLabelInTimeZone(y: number, m: number, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const d = new Date(Date.UTC(y, m - 1, 1, 12, 0, 0))
   return new Intl.DateTimeFormat(undefined, { timeZone: tz, month: 'long', year: 'numeric' }).format(d)
+}
+
+/**
+ * Pro-local "today" month/year (server-safe)
+ * (This avoids UTC month drift for pros not in UTC.)
+ */
+function currentYearMonthInTimeZone(now: Date, timeZone: string) {
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(now)
+
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+
+  const y = Number(map.year)
+  const m = Number(map.month)
+
+  return {
+    y: Number.isFinite(y) && y > 0 ? y : now.getUTCFullYear(),
+    m: Number.isFinite(m) && m >= 1 && m <= 12 ? m : now.getUTCMonth() + 1,
+  }
 }
 
 // Prisma Decimal dollars -> number dollars (safe-ish for dashboard math)
 function decimalToNumber(v: Prisma.Decimal | null | undefined): number {
   if (!v) return 0
-  // Prisma.Decimal supports toNumber(), but toString() is also safe.
   if (typeof (v as Prisma.Decimal).toNumber === 'function') {
     const n = (v as Prisma.Decimal).toNumber()
     return Number.isFinite(n) ? n : 0
   }
   const n = Number(String(v))
   return Number.isFinite(n) ? n : 0
-}
-
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
 async function getMonthlyStats(proId: string, monthStartUtc: Date, monthEndUtc: Date) {
@@ -87,14 +107,10 @@ async function getMonthlyStats(proId: string, monthStartUtc: Date, monthEndUtc: 
   const clientIds = Array.from(new Set(bookingsInMonth.map((b) => b.clientId)))
 
   // ✅ revenue from Booking.subtotalSnapshot (dollars)
-  const serviceRevenueDollars = bookingsInMonth.reduce((sum: number, b) => {
-    return sum + decimalToNumber(b.subtotalSnapshot)
-  }, 0)
+  const serviceRevenueDollars = bookingsInMonth.reduce((sum: number, b) => sum + decimalToNumber(b.subtotalSnapshot), 0)
 
   // ✅ tips from Booking.tipAmount (dollars)
-  const tipsDollars = bookingsInMonth.reduce((sum: number, b) => {
-    return sum + decimalToNumber(b.tipAmount)
-  }, 0)
+  const tipsDollars = bookingsInMonth.reduce((sum: number, b) => sum + decimalToNumber(b.tipAmount), 0)
 
   const reviewAgg = await prisma.review.aggregate({
     where: {
@@ -251,14 +267,15 @@ export default async function ProDashboardPage({ searchParams }: { searchParams?
   const resolved = searchParams ? await searchParams : undefined
   const parsed = parseMonthParam(resolved?.month)
 
-  const proTz = sanitizeTimeZone(user.professionalProfile.timeZone, 'America/Los_Angeles')
+  // ✅ Strict: never LA fallback. If invalid/missing -> DEFAULT_TIME_ZONE.
+  const proTz = sanitizeTimeZone(user.professionalProfile.timeZone, DEFAULT_TIME_ZONE)
 
+  // ✅ Default month/year should be "now in pro timezone" (not UTC).
   const now = new Date()
-  const fallbackY = now.getUTCFullYear()
-  const fallbackM = now.getUTCMonth() + 1
+  const fallback = currentYearMonthInTimeZone(now, proTz)
 
-  const y = parsed?.y ?? fallbackY
-  const m = parsed?.m ?? fallbackM
+  const y = parsed?.y ?? fallback.y
+  const m = parsed?.m ?? fallback.m
 
   const { monthStartUtc, monthEndUtc } = monthWindowUtcForProTz({ y, m, timeZone: proTz })
 
@@ -279,12 +296,11 @@ export default async function ProDashboardPage({ searchParams }: { searchParams?
   const prevHref = `/pro/dashboard?month=${monthKey(prevY, prevM)}`
   const nextHref = `/pro/dashboard?month=${monthKey(nextY, nextM)}`
 
-
   const revenueLabel = moneyToString(cur.revenueTotalDollars) ?? '0.00'
   const tipsLabel = moneyToString(cur.tipsDollars) ?? '0.00'
 
   return (
-    <main className="mx-auto max-w-5xl px-4 pt-10 pb-24 font-sans">
+    <main className="mx-auto max-w-5xl px-4 pb-24 pt-10 font-sans">
       {/* Month scroller */}
       <div className="mb-6 flex items-center justify-center gap-4">
         <Link

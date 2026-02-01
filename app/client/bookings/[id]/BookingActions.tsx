@@ -3,15 +3,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
-import { formatAppointmentWhen } from '@/lib/FormatInTimeZone'
+import { DEFAULT_TIME_ZONE, getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 
 type Props = {
   bookingId: string
   status: any
   scheduledFor: string // ISO UTC
   durationMinutesSnapshot?: number | null
-  appointmentTz?: string | null // ✅ booking.timeZone (DTO) or server-derived
+  appointmentTz?: string | null // ✅ booking.locationTimeZone (DTO) or server-derived
 }
 
 function upper(v: unknown) {
@@ -24,27 +24,23 @@ function toDateIsoUtc(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-function formatWhen(d: Date, timeZone: string) {
-  return formatAppointmentWhen(d, timeZone)
-}
-
 /**
- * ISO (UTC) -> datetime-local string shown in the given timeZone,
- * without relying on browser implicit conversions.
+ * ISO (UTC) -> datetime-local string shown in the given (already-sanitized) timeZone.
+ * No browser implicit conversions.
  */
-function toDatetimeLocalValueInTimeZone(isoUtc: string, timeZone: string) {
+function toDatetimeLocalValueInTimeZone(isoUtc: string, tz: string) {
   const d = toDateIsoUtc(isoUtc)
   if (!d) return ''
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+
   const p = getZonedParts(d, tz)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
 }
 
 /**
- * datetime-local value -> UTC Date, interpreting the wall clock in timeZone.
+ * datetime-local value -> UTC Date, interpreting the wall clock in (already-sanitized) timeZone.
  */
-function fromDatetimeLocalValueInTimeZone(v: string, timeZone: string): Date | null {
+function fromDatetimeLocalValueInTimeZone(v: string, tz: string): Date | null {
   if (!v || typeof v !== 'string') return null
   const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
   if (!m) return null
@@ -58,12 +54,12 @@ function fromDatetimeLocalValueInTimeZone(v: string, timeZone: string): Date | n
   if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
   const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
   return Number.isNaN(utc.getTime()) ? null : utc
 }
 
 async function safeJson(res: Response) {
+  if (res.status === 204) return {} as any
   return (await res.json().catch(() => ({}))) as any
 }
 
@@ -99,14 +95,14 @@ export default function BookingActions({
   const canCancel = !isCancelled && !isCompleted
   const canReschedule = (isPending || isAccepted) && !isCancelled && !isCompleted
 
-  const tz = useMemo(() => sanitizeTimeZone(appointmentTz || 'UTC', 'UTC'), [appointmentTz])
+  // ✅ sanitize once, with policy-approved fallback
+  const tz = useMemo(() => sanitizeTimeZone(appointmentTz, DEFAULT_TIME_ZONE), [appointmentTz])
 
   const scheduledDate = useMemo(() => toDateIsoUtc(scheduledFor), [scheduledFor])
 
   const whenLabel = useMemo(() => {
-    const d = scheduledDate
-    if (!d) return 'Unknown time'
-    return formatWhen(d, tz)
+    if (!scheduledDate) return 'Unknown time'
+    return formatAppointmentWhen(scheduledDate, tz)
   }, [scheduledDate, tz])
 
   const [busy, setBusy] = useState(false)
@@ -121,7 +117,12 @@ export default function BookingActions({
   }, [scheduledFor, tz])
 
   const abortRef = useRef<AbortController | null>(null)
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+  }, [])
 
   function resetAlerts() {
     setError(null)
@@ -154,6 +155,9 @@ export default function BookingActions({
       if (e?.name === 'AbortError') return
       setError(e?.message || 'Something went wrong.')
     } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
       setBusy(false)
     }
   }
@@ -178,7 +182,7 @@ export default function BookingActions({
       if (sameMinute) return setError('Choose a different time than the current one.')
     }
 
-    const ok = window.confirm(`Reschedule to:\n\n${formatWhen(nextUtc, tz)}\n\nProceed?`)
+    const ok = window.confirm(`Reschedule to:\n\n${formatAppointmentWhen(nextUtc, tz)}\n\nProceed?`)
     if (!ok) return
 
     // ✅ API expects UTC ISO

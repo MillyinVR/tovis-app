@@ -116,6 +116,16 @@ function isValidHttpUrl(url: string) {
   }
 }
 
+function safeId() {
+  // crypto.randomUUID exists in modern browsers; fallback keeps it safe in odd environments.
+  try {
+    // @ts-ignore
+    return typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+  } catch {
+    return `${Date.now()}-${Math.random()}`
+  }
+}
+
 /**
  * Convert ISO (UTC instant) -> datetime-local string in a given IANA timezone.
  * Output format: "YYYY-MM-DDTHH:MM"
@@ -125,7 +135,8 @@ function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): str
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
 
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  // ✅ no LA fallback: UTC is our safe default
+  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
   const p = getZonedParts(d, tz)
 
   const yyyy = String(p.year).padStart(4, '0')
@@ -160,7 +171,8 @@ function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string
   if (hour < 0 || hour > 23) return null
   if (minute < 0 || minute > 59) return null
 
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  // ✅ no LA fallback
+  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
   const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
   if (Number.isNaN(utc.getTime())) return null
   return utc.toISOString()
@@ -228,7 +240,8 @@ export default function AftercareForm({
 }: Props) {
   const router = useRouter()
 
-  const tz = useMemo(() => sanitizeTimeZone(timeZone, 'America/Los_Angeles'), [timeZone])
+  // ✅ never LA fallback; UTC fallback only
+  const tz = useMemo(() => sanitizeTimeZone(timeZone, 'UTC') || 'UTC', [timeZone])
 
   const [notes, setNotes] = useState((existingNotes || '').slice(0, NOTES_MAX))
 
@@ -274,13 +287,20 @@ export default function AftercareForm({
 
     setProducts(
       (existingRecommendedProducts || []).slice(0, MAX_PRODUCTS).map((p) => ({
-        id: p.id || crypto.randomUUID(),
+        id: p.id || safeId(),
         name: p.name || '',
         url: p.url || '',
         note: p.note || '',
       })),
     )
-  }, [existingRebookMode, existingRebookedFor, existingRebookWindowStart, existingRebookWindowEnd, existingRecommendedProducts, tz])
+  }, [
+    existingRebookMode,
+    existingRebookedFor,
+    existingRebookWindowStart,
+    existingRebookWindowEnd,
+    existingRecommendedProducts,
+    tz,
+  ])
 
   useEffect(() => {
     return () => {
@@ -350,7 +370,7 @@ export default function AftercareForm({
   function addProduct() {
     if (products.length >= MAX_PRODUCTS) return
     setProductsError(null)
-    setProducts((p) => [...p, { id: crypto.randomUUID(), name: '', url: '', note: '' }])
+    setProducts((p) => [...p, { id: safeId(), name: '', url: '', note: '' }])
   }
 
   function updateProduct(id: string, patch: Partial<RecommendedProduct>) {
@@ -748,7 +768,8 @@ export default function AftercareForm({
                 <div className="text-sm font-semibold text-microAccent">{windowError}</div>
               ) : (
                 <div className="text-xs font-semibold text-textSecondary">
-                  Client will be prompted to book within this range. Timezone: <span className="text-textPrimary">{tz}</span>
+                  Client will be prompted to book within this range. Timezone:{' '}
+                  <span className="text-textPrimary">{tz}</span>
                 </div>
               )}
             </div>

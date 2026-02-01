@@ -1,9 +1,10 @@
 // app/pro/calendar/_components/BookingModal.tsx
 'use client'
 
+import { useMemo } from 'react'
 import type { BookingDetails, ServiceOption } from '../_types'
-import { formatAppointmentWhen } from '@/lib/FormatInTimeZone'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 export function BookingModal(props: {
   open: boolean
@@ -40,6 +41,7 @@ export function BookingModal(props: {
     booking,
     services,
     timeZone,
+
     reschedDate,
     reschedTime,
     durationMinutes,
@@ -48,6 +50,7 @@ export function BookingModal(props: {
     allowOutsideHours,
     editOutside,
     saving,
+
     onClose,
     onChangeReschedDate,
     onChangeReschedTime,
@@ -60,12 +63,20 @@ export function BookingModal(props: {
     onDeny,
   } = props
 
+  // ✅ Strict policy: never LA fallback. If missing/invalid, fall back to DEFAULT_TIME_ZONE.
+  const tz = useMemo(() => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), [timeZone])
+
+  const isPending = String(booking?.status || '').toUpperCase() === 'PENDING'
+
+  function close() {
+    if (saving) return
+    onClose()
+  }
+
   if (!open) return null
 
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
-
   return (
-    <div className="fixed inset-0 z-999 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-999 flex items-center justify-center bg-black/50 p-4" onClick={close}>
       <div
         className="w-full max-w-150 overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -77,8 +88,9 @@ export function BookingModal(props: {
 
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/70"
+            onClick={close}
+            disabled={saving}
+            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/70 disabled:opacity-70"
           >
             Close
           </button>
@@ -112,7 +124,7 @@ export function BookingModal(props: {
                   <span className="opacity-75">· {tz}</span> ({booking.totalDurationMinutes} min)
                 </div>
 
-                {String(booking.status || '').toUpperCase() === 'PENDING' ? (
+                {isPending ? (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -222,8 +234,9 @@ export function BookingModal(props: {
                 <div className="mt-4 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={onClose}
-                    className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40"
+                    onClick={close}
+                    disabled={saving}
+                    className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-70"
                   >
                     Cancel
                   </button>

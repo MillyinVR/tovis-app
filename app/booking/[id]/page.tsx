@@ -4,10 +4,11 @@ import { notFound, redirect } from 'next/navigation'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { sanitizeTimeZone } from '@/lib/timeZone'
 import { moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { messageStartHref } from '@/lib/messages'
+
+import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,8 @@ type PageProps = {
 }
 
 function fmtInTimeZone(dateUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  // ✅ Never LA fallback — sanitize to UTC if invalid
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   return new Intl.DateTimeFormat(undefined, {
     timeZone: tz,
     weekday: 'short',
@@ -77,6 +79,30 @@ function sumDecimal(values: Prisma.Decimal[]) {
   return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
 }
 
+/**
+ * ✅ Receipt display timezone truth:
+ * 1) booking.locationTimeZone (snapshot)
+ * 2) booking.location.timeZone (booked location)
+ * 3) pro.timeZone
+ * 4) UTC
+ */
+function resolveReceiptTimeZone(args: {
+  bookingLocationTimeZone: unknown
+  bookedLocationTimeZone: unknown
+  proTimeZone: unknown
+}) {
+  const bookingTz = pickTimeZoneOrNull(args.bookingLocationTimeZone)
+  if (bookingTz) return bookingTz
+
+  const locTz = pickTimeZoneOrNull(args.bookedLocationTimeZone)
+  if (locTz) return locTz
+
+  const proTz = pickTimeZoneOrNull(args.proTimeZone)
+  if (proTz) return proTz
+
+  return DEFAULT_TIME_ZONE
+}
+
 export default async function BookingReceiptPage(props: PageProps) {
   const { id } = await Promise.resolve(props.params)
   if (!id || typeof id !== 'string') notFound()
@@ -99,6 +125,17 @@ export default async function BookingReceiptPage(props: PageProps) {
 
       subtotalSnapshot: true,
       totalDurationMinutes: true,
+
+      // ✅ booking snapshot timezone (highest truth for the appointment)
+      locationTimeZone: true,
+
+      // ✅ booked location (in case snapshot is missing and we need a fallback)
+      location: {
+        select: {
+          id: true,
+          timeZone: true,
+        },
+      },
 
       service: {
         select: {
@@ -177,22 +214,24 @@ export default async function BookingReceiptPage(props: PageProps) {
       })
     : null
 
-  const appointmentTz = sanitizeTimeZone(prof?.timeZone ?? null, 'America/Los_Angeles')
+  // ✅ Appointment timezone resolution (no LA fallback)
+  const appointmentTz = resolveReceiptTimeZone({
+    bookingLocationTimeZone: (booking as any).locationTimeZone,
+    bookedLocationTimeZone: (booking as any).location?.timeZone,
+    proTimeZone: prof?.timeZone,
+  })
+
   const when = fmtInTimeZone(new Date(booking.scheduledFor), appointmentTz)
 
   const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
   const proProfileHref = prof?.id ? `/professionals/${encodeURIComponent(prof.id)}` : null
 
   const messageHref =
-    isClientViewer || isProViewer
-      ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
-      : null
-
+    isClientViewer || isProViewer ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id }) : null
 
   const duration =
-    (Number(booking.totalDurationMinutes ?? 0) > 0
-      ? Number(booking.totalDurationMinutes)
-      : svc?.defaultDurationMinutes) ?? null
+    (Number(booking.totalDurationMinutes ?? 0) > 0 ? Number(booking.totalDurationMinutes) : svc?.defaultDurationMinutes) ??
+    null
 
   const locationTypeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
@@ -226,12 +265,7 @@ export default async function BookingReceiptPage(props: PageProps) {
 
             {locationLabel ? (
               mapsHref ? (
-                <a
-                  href={mapsHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-textSecondary hover:opacity-80"
-                >
+                <a href={mapsHref} target="_blank" rel="noreferrer" className="text-textSecondary hover:opacity-80">
                   {' · '}
                   {locationLabel}
                 </a>
@@ -344,9 +378,7 @@ export default async function BookingReceiptPage(props: PageProps) {
         <div className="text-[12px] font-black text-textSecondary">Next moves</div>
 
         <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-          {isWaiting
-            ? 'Most pros confirm quickly. You’ll see it update automatically.'
-            : 'You’re all set. Keep this handy for day-of details.'}
+          {isWaiting ? 'Most pros confirm quickly. You’ll see it update automatically.' : 'You’re all set. Keep this handy for day-of details.'}
         </div>
 
         <div className="mt-3 grid gap-2">
@@ -356,6 +388,7 @@ export default async function BookingReceiptPage(props: PageProps) {
           >
             Add to calendar
           </a>
+
           {messageHref ? (
             <Link
               href={messageHref}
@@ -363,9 +396,7 @@ export default async function BookingReceiptPage(props: PageProps) {
             >
               {isClientViewer ? `Message ${proName}` : 'Message client'}
             </Link>
-
           ) : null}
-
 
           {proProfileHref ? (
             <Link

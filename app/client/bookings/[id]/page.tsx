@@ -8,7 +8,7 @@ import BookingActions from './BookingActions'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 import { COPY } from '@/lib/copy'
-import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
+import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 
 export const dynamic = 'force-dynamic'
 
@@ -198,7 +198,8 @@ export default async function ClientBookingPage(props: {
     redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`)
   }
 
-  // 1) Load raw booking in the exact shape needed to build ClientBookingDTO (Option 1e)
+  // 1) Load raw booking in the exact shape needed to build ClientBookingDTO
+  //    Keep raw around only for: auth, aftercare lookup key, and unread notification marking.
   const raw = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: {
@@ -277,7 +278,7 @@ export default async function ClientBookingPage(props: {
   if (!raw) notFound()
   if (raw.clientId !== user.clientProfile.id) redirect('/client/bookings')
 
-  // 2) Aftercare summary (not part of ClientBookingDTO; page-specific)
+  // 2) Aftercare summary (page-specific)
   const aftercare = await prisma.aftercareSummary.findFirst({
     where: { bookingId: raw.id },
     select: {
@@ -311,7 +312,15 @@ export default async function ClientBookingPage(props: {
     orderBy: { createdAt: 'desc' },
   })
 
-  // 4) Unread aftercare badge handling (page-specific)
+  // 4) Build DTO (single source of truth for booking core)
+  const hasPendingConsult = needsConsultationApproval(raw)
+  const booking = await buildClientBookingDTO({
+    booking: raw as any,
+    unreadAftercare: false, // list/inbox computes this; this page manages read state when viewing aftercare tab
+    hasPendingConsultationApproval: hasPendingConsult,
+  })
+
+  // 5) Unread aftercare badge handling (page-specific, depends on aftercare id)
   let showUnreadAftercareBadge = false
   if (step === 'aftercare' && aftercare?.id) {
     const unread = await prisma.clientNotification.findFirst({
@@ -342,16 +351,8 @@ export default async function ClientBookingPage(props: {
     }
   }
 
-  // 5) Build DTO (single source of truth for booking core)
-  const hasPendingConsult = needsConsultationApproval(raw)
-  const booking: ClientBookingDTO = buildClientBookingDTO({
-    booking: raw as any,
-    unreadAftercare: false, // dashboard/list computes this; this page handles its own aftercare read logic
-    hasPendingConsultationApproval: hasPendingConsult,
-  })
-
   // --- Render derived from DTO ---
-  const appointmentTz = sanitizeTimeZone(booking.timeZone, 'UTC')
+  const appointmentTz = sanitizeTimeZone(booking.timeZone, 'UTC') // DTO uses TimeZoneTruth; sanitize defensively
   const scheduled = toDate(booking.scheduledFor)
   const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : COPY.common.unknownTime
 
@@ -373,9 +374,7 @@ export default async function ClientBookingPage(props: {
   const sessionStepUpper = upper(booking.sessionStep)
 
   const showConsultationApproval =
-    Boolean(booking.hasPendingConsultationApproval) &&
-    statusUpper !== 'CANCELLED' &&
-    statusUpper !== 'COMPLETED'
+    Boolean(booking.hasPendingConsultationApproval) && statusUpper !== 'CANCELLED' && statusUpper !== 'COMPLETED'
 
   const canShowConsultTab =
     statusUpper !== 'CANCELLED' &&
@@ -401,9 +400,7 @@ export default async function ClientBookingPage(props: {
     null
 
   const proLabel =
-    booking.professional?.businessName ||
-    (raw as any)?.professional?.user?.email ||
-    COPY.common.professionalFallback
+    booking.professional?.businessName || (raw as any)?.professional?.user?.email || COPY.common.professionalFallback
 
   const title = booking.display?.title || COPY.bookings.titleFallback
   const locLine = booking.locationLabel || ''
@@ -420,7 +417,12 @@ export default async function ClientBookingPage(props: {
           {COPY.bookings.backToBookings}
         </a>
 
-        <span className={['inline-flex items-center rounded-full px-3 py-1 text-xs font-black', pillClassByVariant(pillVariant)].join(' ')}>
+        <span
+          className={[
+            'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
+            pillClassByVariant(pillVariant),
+          ].join(' ')}
+        >
           {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
         </span>
       </div>
@@ -653,7 +655,9 @@ export default async function ClientBookingPage(props: {
                   <span className="text-textSecondary"> · {appointmentTz}</span>
                 </div>
               ) : (
-                <div className="mb-3 text-xs font-semibold text-textSecondary">{COPY.bookings.aftercare.noRebookRecommendation}</div>
+                <div className="mb-3 text-xs font-semibold text-textSecondary">
+                  {COPY.bookings.aftercare.noRebookRecommendation}
+                </div>
               )}
 
               {showRebookCTA ? (
@@ -668,7 +672,9 @@ export default async function ClientBookingPage(props: {
               ) : null}
 
               {!aftercareToken && upper(booking.status) === 'COMPLETED' ? (
-                <div className="mt-2 text-xs font-semibold text-textSecondary">{COPY.bookings.aftercare.rebookLinkNotAvailable}</div>
+                <div className="mt-2 text-xs font-semibold text-textSecondary">
+                  {COPY.bookings.aftercare.rebookLinkNotAvailable}
+                </div>
               ) : null}
             </div>
           ) : null}

@@ -3,7 +3,7 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
-import { formatAppointmentWhen, formatRangeInTimeZone } from '@/lib/FormatInTimeZone'
+import { formatAppointmentWhen, formatRangeInTimeZone } from '@/lib/formatInTimeZone'
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 
 export const dynamic = 'force-dynamic'
@@ -84,6 +84,14 @@ function computeRebookInfo(
   }
 
   return { mode: 'NONE', label: null }
+}
+
+function safeDecimalString(v: unknown): string | null {
+  if (v == null) return null
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  if (typeof v === 'object' && v && typeof (v as any).toString === 'function') return (v as any).toString()
+  return null
 }
 
 export default async function ClientRebookFromAftercarePage(props: {
@@ -198,29 +206,38 @@ export default async function ClientRebookFromAftercarePage(props: {
 
   const rawBooking = aftercare.booking
 
-  // Build booking DTO (single truth)
+  // ✅ Build booking DTO (async)
   let dto: ClientBookingDTO
   try {
-    dto = buildClientBookingDTO({
+    dto = await buildClientBookingDTO({
       booking: rawBooking as any,
       unreadAftercare: false,
       hasPendingConsultationApproval: false,
     })
   } catch {
-    // Hard fallback (should be rare)
+    // Hard fallback (rare). Keep it renderable + timezone safe.
+    const fallbackTz = sanitizeTimeZone(rawBooking.locationTimeZone ?? rawBooking.professional?.timeZone, 'UTC')
+
     dto = {
       id: String(rawBooking.id),
-      status: String(rawBooking.status ?? ''),
-      source: String(rawBooking.source ?? ''),
-      sessionStep: String(rawBooking.sessionStep ?? ''),
+      status: (rawBooking.status as any) ?? null,
+      source: (rawBooking.source as any) ?? null,
+      sessionStep: (rawBooking.sessionStep as any) ?? null,
+
       scheduledFor: (rawBooking.scheduledFor as any)?.toISOString?.() ?? new Date().toISOString(),
       totalDurationMinutes: Number(rawBooking.totalDurationMinutes ?? 0),
       bufferMinutes: Number(rawBooking.bufferMinutes ?? 0),
-      subtotalSnapshot: rawBooking.subtotalSnapshot?.toString?.() ?? null,
+
+      subtotalSnapshot: safeDecimalString(rawBooking.subtotalSnapshot),
+
       locationType: (rawBooking.locationType as any) ?? null,
       locationId: rawBooking.locationId ? String(rawBooking.locationId) : null,
-      timeZone: sanitizeTimeZone(rawBooking.locationTimeZone ?? rawBooking.professional?.timeZone, 'UTC'),
+
+      timeZone: fallbackTz,
+      timeZoneSource: 'FALLBACK',
+
       locationLabel: null,
+
       professional: rawBooking.professional
         ? {
             id: String(rawBooking.professional.id),
@@ -229,11 +246,24 @@ export default async function ClientRebookFromAftercarePage(props: {
             timeZone: rawBooking.professional.timeZone ?? null,
           }
         : null,
-      bookedLocation: null,
-      display: { title: 'Service', baseName: 'Service', addOnNames: [], addOnCount: 0 },
+
+      bookedLocation: rawBooking.location
+        ? {
+            id: String(rawBooking.location.id),
+            name: rawBooking.location.name ?? null,
+            formattedAddress: rawBooking.location.formattedAddress ?? null,
+            city: rawBooking.location.city ?? null,
+            state: rawBooking.location.state ?? null,
+            timeZone: rawBooking.location.timeZone ?? null,
+          }
+        : null,
+
+      display: { title: rawBooking.service?.name ?? 'Service', baseName: rawBooking.service?.name ?? 'Service', addOnNames: [], addOnCount: 0 },
       items: [],
+
       hasUnreadAftercare: false,
       hasPendingConsultationApproval: false,
+
       consultation: null,
     }
   }
@@ -315,7 +345,6 @@ export default async function ClientRebookFromAftercarePage(props: {
 
   const bookHref = `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
   const proId = dto.professional?.id || rawBooking.professionalId
-
   const locationLabel = dto.locationLabel || null
 
   return (

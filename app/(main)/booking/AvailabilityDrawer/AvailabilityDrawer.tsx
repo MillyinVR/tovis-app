@@ -33,7 +33,13 @@ import { useAvailability } from './hooks/useAvailability'
 import { useHoldTimer } from './hooks/useHoldTimer'
 import { useDebugFlag } from './hooks/useDebugFlag'
 
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
+
+/**
+ * ✅ No Los Angeles fallback anywhere.
+ * UTC is a neutral "we have nothing" fallback.
+ */
+const FALLBACK_TZ = 'UTC' as const
 
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
@@ -45,16 +51,19 @@ function periodOfHour(h: number): Period {
 
 function getViewerTimeZoneClient(): string {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles'
+    const raw = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+    // If browser gives junk, we fall back to UTC, not LA.
+    return sanitizeTimeZone(raw, FALLBACK_TZ)
   } catch {
-    return 'America/Los_Angeles'
+    return FALLBACK_TZ
   }
 }
 
 function fmtInTz(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
+
   return new Intl.DateTimeFormat(undefined, {
     timeZone: tz,
     weekday: 'short',
@@ -66,9 +75,10 @@ function fmtInTz(isoUtc: string, timeZone: string) {
 }
 
 function fmtSelectedLine(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
+
   return new Intl.DateTimeFormat(undefined, {
     timeZone: tz,
     weekday: 'long',
@@ -81,14 +91,16 @@ function fmtSelectedLine(isoUtc: string, timeZone: string) {
 }
 
 function hourInTz(isoUtc: string, timeZone: string): number | null {
-  const tz = sanitizeTimeZone(timeZone, 'America/Los_Angeles')
+  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return null
+
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hour: '2-digit',
     hour12: false,
   }).formatToParts(d)
+
   const hh = parts.find((p) => p.type === 'hour')?.value
   const n = hh ? Number(hh) : NaN
   return Number.isFinite(n) ? n : null
@@ -114,6 +126,27 @@ const FALLBACK_OFFERING: AvailabilityOffering = {
   mobilePriceStartingAt: null,
 }
 
+/**
+ * ✅ Appointment timezone MUST come from server summary (location tz).
+ * We do NOT invent Los Angeles. We fall back to viewer tz, then UTC.
+ */
+function resolveAppointmentTimeZone(args: {
+  summaryTimeZone?: unknown
+  primaryProTimeZone?: unknown
+  viewerTimeZone?: string
+}) {
+  const s = typeof args.summaryTimeZone === 'string' ? args.summaryTimeZone.trim() : ''
+  if (s && isValidIanaTimeZone(s)) return s
+
+  const p = typeof args.primaryProTimeZone === 'string' ? args.primaryProTimeZone.trim() : ''
+  if (p && isValidIanaTimeZone(p)) return p
+
+  const v = typeof args.viewerTimeZone === 'string' ? args.viewerTimeZone.trim() : ''
+  if (v && isValidIanaTimeZone(v)) return v
+
+  return FALLBACK_TZ
+}
+
 export default function AvailabilityDrawer({
   open,
   onClose,
@@ -126,7 +159,8 @@ export default function AvailabilityDrawer({
   const router = useRouter()
   const debug = useDebugFlag()
 
-  const [viewerTz, setViewerTz] = useState<string>('America/Los_Angeles')
+  // viewer tz: computed once on mount; never LA.
+  const [viewerTz, setViewerTz] = useState<string>(FALLBACK_TZ)
   useEffect(() => {
     setViewerTz(getViewerTimeZoneClient())
   }, [])
@@ -138,8 +172,7 @@ export default function AvailabilityDrawer({
    */
   const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
 
-  // ✅ Summary refetches whenever locationType changes
-  // IMPORTANT: we need setData so we can clear stale summary when user toggles.
+  // Summary refetches whenever locationType changes
   const { loading, error, data, setError, setData } = useAvailability(open, context, locationType)
   const summary = isSummary(data) ? data : null
 
@@ -169,15 +202,24 @@ export default function AvailabilityDrawer({
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } = useHoldTimer(holdUntil)
 
   /**
-   * ✅ Appointment timezone MUST be the LOCATION timezone from server summary.
-   * If missing (rare), fall back to pro tz, viewer tz, then LA.
+   * ✅ The appointment timezone.
+   * - Prefer server summary tz (location tz)
+   * - Then pro tz (rare fallback)
+   * - Then viewer tz
+   * - Then UTC
+   *
+   * Also: sanitize once here (no LA fallback).
    */
   const appointmentTz = useMemo(() => {
-    const tz = summary?.timeZone || primary?.timeZone || viewerTz || 'America/Los_Angeles'
-    return sanitizeTimeZone(tz, 'America/Los_Angeles')
+    const resolved = resolveAppointmentTimeZone({
+      summaryTimeZone: summary?.timeZone,
+      primaryProTimeZone: primary?.timeZone,
+      viewerTimeZone: viewerTz,
+    })
+    return sanitizeTimeZone(resolved, FALLBACK_TZ)
   }, [summary?.timeZone, primary?.timeZone, viewerTz])
 
-  const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
+  const showLocalHint = viewerTz !== appointmentTz
 
   const effectiveServiceId = summary?.serviceId ?? context?.serviceId ?? null
   const canWaitlist = Boolean(summary?.waitlistSupported && context?.professionalId && effectiveServiceId)
@@ -212,16 +254,16 @@ export default function AvailabilityDrawer({
     setOtherSlots({})
     void hardResetUi({ deleteHold: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, context?.mediaId, context?.professionalId, context?.serviceId, context?.source])
+  }, [open, context?.mediaId, context?.professionalId, context?.serviceId, (context as any)?.offeringId, context?.source])
 
   /**
-   * ✅ Sync locationType with server ONLY after the fetch completes.
+   * ✅ Sync locationType with server ONLY after fetch completes.
    * Fixes "snapback" while refetching.
    */
   useEffect(() => {
     if (!open) return
     if (!summary) return
-    if (loading) return // ✅ critical guard
+    if (loading) return
     if (holding) return
     if (selected?.holdId) return
 
@@ -235,7 +277,7 @@ export default function AvailabilityDrawer({
     }
   }, [open, summary, loading, holding, selected?.holdId, locationType, hardResetUi])
 
-  // ✅ if only one mode is allowed, force it
+  // if only one mode is allowed, force it
   useEffect(() => {
     if (!open) return
     if (!summary) return
@@ -258,7 +300,7 @@ export default function AvailabilityDrawer({
     }
   }, [open, summary, allowed.salon, allowed.mobile, locationType, hardResetUi, setData])
 
-  // ✅ default day
+  // default day
   useEffect(() => {
     if (!open) return
     if (!days?.length) return
@@ -434,7 +476,7 @@ export default function AvailabilityDrawer({
         proId,
         offeringId,
         slotISO: parsed.scheduledForISO,
-        proTimeZone: appointmentTz, // keep for compatibility
+        proTimeZone: appointmentTz, // legacy field; value is correct appointment tz now
         holdId: parsed.holdId,
       })
       setHoldUntil(parsed.holdUntilMs)
@@ -447,10 +489,6 @@ export default function AvailabilityDrawer({
     }
   }
 
-  /**
-   * ✅ New flow: go to Add-ons first.
-   * No booking is created here anymore.
-   */
   function onContinue() {
     if (!selected?.holdId || !selected?.offeringId) return
     if (holding) return
@@ -516,7 +554,14 @@ export default function AvailabilityDrawer({
           </div>
         </>
       }
-      footer={<StickyCTA canContinue={Boolean(selected?.holdId && holdUntil)} loading={holding} onContinue={onContinue} selectedLine={selectedLine} />}
+      footer={
+        <StickyCTA
+          canContinue={Boolean(selected?.holdId && holdUntil)}
+          loading={holding}
+          onContinue={onContinue}
+          selectedLine={selectedLine}
+        />
+      }
     >
       <div className="looksNoScrollbar overflow-y-auto px-4 pb-4" style={{ paddingBottom: STICKY_CTA_H + 14 }}>
         {loading ? (
@@ -555,7 +600,7 @@ export default function AvailabilityDrawer({
                   offering={offering}
                   onChange={(t) => {
                     void hardResetUi({ deleteHold: true })
-                    setData(null) // ✅ clear stale summary immediately
+                    setData(null)
                     setLocationType(t)
                     setSelectedDayYMD(null)
                     setPrimarySlots([])
@@ -587,12 +632,19 @@ export default function AvailabilityDrawer({
                   <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
                     You’re booking <span className="font-black text-textPrimary">{appointmentTz}</span> time.
                     <span className="ml-2">
-                      Your local time: <span className="font-black text-textPrimary">{fmtInTz(selected.slotISO, viewerTz)}</span>
+                      Your local time:{' '}
+                      <span className="font-black text-textPrimary">{fmtInTz(selected.slotISO, viewerTz)}</span>
                     </span>
                   </div>
                 ) : null}
 
-                <WaitlistPanel canWaitlist={canWaitlist} appointmentTz={appointmentTz} context={context} effectiveServiceId={effectiveServiceId} noPrimarySlots={noPrimarySlots} />
+                <WaitlistPanel
+                  canWaitlist={canWaitlist}
+                  appointmentTz={appointmentTz}
+                  context={context}
+                  effectiveServiceId={effectiveServiceId}
+                  noPrimarySlots={noPrimarySlots}
+                />
 
                 <OtherPros
                   others={(others || []).map((p) => ({ ...p, slots: otherSlots[p.id] || [] }))}

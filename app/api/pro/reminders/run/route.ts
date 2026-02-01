@@ -2,9 +2,78 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { sendSmsReminder, formatReminderMessage, markRemindersSent } from '@/lib/reminders'
-import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
+import {
+  DEFAULT_TIME_ZONE,
+  isValidIanaTimeZone,
+  pickTimeZoneOrNull,
+  sanitizeTimeZone,
+  getZonedParts,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
+
+async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown): Promise<string> {
+  const primary = await prisma.professionalLocation.findFirst({
+    where: { professionalId: proId, isBookable: true, isPrimary: true },
+    select: { timeZone: true },
+  })
+  const primaryTz = pickTimeZoneOrNull(primary?.timeZone)
+  if (primaryTz) return primaryTz
+
+  const any = await prisma.professionalLocation.findFirst({
+    where: { professionalId: proId, isBookable: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    select: { timeZone: true },
+  })
+  const anyTz = pickTimeZoneOrNull(any?.timeZone)
+  if (anyTz) return anyTz
+
+  const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
+  if (proTz) return proTz
+
+  return DEFAULT_TIME_ZONE
+}
+
+/**
+ * STRICT: booking tz must be present AND valid IANA.
+ * No schedule fallback. No UTC fallback. No pro fallback.
+ */
+function requireBookingTimeZone(raw: unknown): string | null {
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  if (!s) return null
+  return isValidIanaTimeZone(s) ? s : null
+}
+
+/**
+ * DST-safe "tomorrow" window computed in scheduleTz.
+ */
+function computeTomorrowWindowUtc(nowUtc: Date, scheduleTz: string) {
+  const tz = sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
+  const p = getZonedParts(nowUtc, tz)
+
+  const startOfTomorrowUtc = zonedTimeToUtc({
+    year: p.year,
+    month: p.month,
+    day: p.day + 1,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+
+  const startOfDayAfterUtc = zonedTimeToUtc({
+    year: p.year,
+    month: p.month,
+    day: p.day + 2,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+
+  return { tz, startOfTomorrowUtc, startOfDayAfterUtc }
+}
 
 export async function POST() {
   try {
@@ -17,32 +86,14 @@ export async function POST() {
       select: { timeZone: true, businessName: true },
     })
 
-    const proTimeZone = sanitizeTimeZone(pro?.timeZone, 'America/Los_Angeles')
     const businessName = pro?.businessName ?? null
 
-    // ✅ Compute "tomorrow" window in the PRO's timezone
+    // ✅ schedule tz for batching window only (never LA fallback)
+    const scheduleTz = await resolveProScheduleTimeZone(professionalId, pro?.timeZone)
+
+    // ✅ DST-safe window
     const nowUtc = new Date()
-    const parts = getZonedParts(nowUtc, proTimeZone)
-
-    const startOfTomorrowUtc = zonedTimeToUtc({
-      year: parts.year,
-      month: parts.month,
-      day: parts.day + 1,
-      hour: 0,
-      minute: 0,
-      second: 0,
-      timeZone: proTimeZone,
-    })
-
-    const startOfDayAfterUtc = zonedTimeToUtc({
-      year: parts.year,
-      month: parts.month,
-      day: parts.day + 2,
-      hour: 0,
-      minute: 0,
-      second: 0,
-      timeZone: proTimeZone,
-    })
+    const { startOfTomorrowUtc, startOfDayAfterUtc } = computeTomorrowWindowUtc(nowUtc, scheduleTz)
 
     const bookings = await prisma.booking.findMany({
       where: {
@@ -51,9 +102,12 @@ export async function POST() {
         scheduledFor: { gte: startOfTomorrowUtc, lt: startOfDayAfterUtc },
         reminderSentAt: null,
       },
-      include: {
-        client: { include: { user: true } },
-        service: true,
+      select: {
+        id: true,
+        scheduledFor: true,
+        locationTimeZone: true, // ✅ REQUIRED for strict message tz
+        client: { select: { firstName: true, phone: true } },
+        service: { select: { name: true } },
       },
       take: 2000,
     })
@@ -62,13 +116,20 @@ export async function POST() {
     const skipped: { id: string; reason: string }[] = []
 
     for (const b of bookings) {
-      const phone = String(b.client.phone || '').trim()
+      const phone = String(b.client?.phone || '').trim()
       if (!phone) {
         skipped.push({ id: b.id, reason: 'no_phone' })
         continue
       }
 
-      const clientFirstName = String(b.client.firstName || '').trim() || 'there'
+      // ✅ STRICT: no tz = no reminder
+      const bookingTz = requireBookingTimeZone(b.locationTimeZone)
+      if (!bookingTz) {
+        skipped.push({ id: b.id, reason: 'missing_or_invalid_booking_timezone' })
+        continue
+      }
+
+      const clientFirstName = String(b.client?.firstName || '').trim() || 'there'
       const serviceName = String(b.service?.name || '').trim() || 'appointment'
 
       const message = formatReminderMessage({
@@ -76,7 +137,7 @@ export async function POST() {
         serviceName,
         scheduledFor: new Date(b.scheduledFor),
         businessName,
-        timeZone: proTimeZone,
+        timeZone: bookingTz, // ✅ strict truth
       })
 
       try {
@@ -97,7 +158,7 @@ export async function POST() {
         processed: bookings.length,
         sent: sentIds.length,
         skipped,
-        timeZoneUsed: proTimeZone,
+        scheduleTimeZoneUsed: scheduleTz, // batching only
         windowUtc: {
           start: startOfTomorrowUtc.toISOString(),
           end: startOfDayAfterUtc.toISOString(),

@@ -1,5 +1,7 @@
 // lib/dto/clientBooking.ts
 import type { Prisma } from '@prisma/client'
+import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 export type ClientBookingItemDTO = {
   id: string
@@ -26,10 +28,14 @@ export type ClientBookingDTO = {
 
   locationType: string | null
   locationId: string | null
+
+  // ✅ appointment timezone as determined by TimeZoneTruth
   timeZone: string | null
+  // optional: where it came from (helps debugging / UI)
+  timeZoneSource?: 'BOOKING' | 'HOLD' | 'LOCATION' | 'PRO' | 'FALLBACK'
+
   locationLabel: string | null
 
-  // keep pro minimal and schema-correct
   professional: {
     id: string
     businessName: string | null
@@ -37,7 +43,6 @@ export type ClientBookingDTO = {
     timeZone: string | null
   } | null
 
-  // optional: include the booked location for display
   bookedLocation: {
     id: string
     name: string | null
@@ -76,14 +81,6 @@ function decimalToString(v: unknown): string | null {
   return null
 }
 
-function resolveTimeZone(args: {
-  bookingLocationTimeZone: string | null
-  locationTimeZone: string | null
-  proTimeZone: string | null
-}) {
-  return (args.bookingLocationTimeZone || args.locationTimeZone || args.proTimeZone || 'UTC').trim() || 'UTC'
-}
-
 function buildLocationLabel(args: {
   locationAddressSnapshot: unknown
   location: { formattedAddress: string | null; name: string | null; city: string | null; state: string | null } | null
@@ -107,7 +104,7 @@ function buildLocationLabel(args: {
   return null
 }
 
-export function buildClientBookingDTO(input: {
+export async function buildClientBookingDTO(input: {
   booking: Prisma.BookingGetPayload<{
     select: {
       id: true
@@ -130,7 +127,6 @@ export function buildClientBookingDTO(input: {
 
       professional: { select: { id: true; businessName: true; location: true; timeZone: true } }
 
-      // ✅ booking’s locked location
       location: {
         select: {
           id: true
@@ -173,7 +169,7 @@ export function buildClientBookingDTO(input: {
   }>
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
-}): ClientBookingDTO {
+}): Promise<ClientBookingDTO> {
   const { booking: b } = input
 
   const items: ClientBookingItemDTO[] = (b.serviceItems ?? []).map((it) => ({
@@ -205,14 +201,23 @@ export function buildClientBookingDTO(input: {
     proLocation: b.professional?.location ?? null,
   })
 
-  const timeZone = resolveTimeZone({
+  // ✅ SINGLE SOURCE OF TRUTH for appointment timezone
+  // Policy: never default to America/Los_Angeles. UTC is the only safe fallback.
+  const tzRes = await resolveApptTimeZone({
     bookingLocationTimeZone: b.locationTimeZone ?? null,
-    locationTimeZone: b.location?.timeZone ?? null,
-    proTimeZone: b.professional?.timeZone ?? null,
+    location: b.location ? { id: b.location.id, timeZone: b.location.timeZone } : null,
+    locationId: b.locationId ?? null,
+    professionalId: b.professional?.id ?? null,
+    professionalTimeZone: b.professional?.timeZone ?? null,
+    fallback: DEFAULT_TIME_ZONE,
+    requireValid: false, // client view should still render even if tz missing
   })
 
-  const consultBlobNeeded =
-    Boolean(b.consultationApproval) || Boolean(b.consultationNotes) || b.consultationPrice != null
+  // If ok, it is already valid IANA. Still sanitize defensively to DEFAULT_TIME_ZONE.
+  const timeZone = tzRes.ok ? sanitizeTimeZone(tzRes.timeZone, DEFAULT_TIME_ZONE) : DEFAULT_TIME_ZONE
+  const timeZoneSource = tzRes.ok ? tzRes.source : 'FALLBACK'
+
+  const consultBlobNeeded = Boolean(b.consultationApproval) || Boolean(b.consultationNotes) || b.consultationPrice != null
 
   const consultation = consultBlobNeeded
     ? {
@@ -245,6 +250,8 @@ export function buildClientBookingDTO(input: {
     locationId: String(b.locationId ?? '') || null,
 
     timeZone,
+    timeZoneSource,
+
     locationLabel,
 
     professional: b.professional

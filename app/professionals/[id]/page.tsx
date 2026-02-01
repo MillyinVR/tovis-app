@@ -7,13 +7,10 @@ import ReviewsPanel from '@/app/pro/profile/ReviewsPanel'
 import FavoriteButton from './FavoriteButton'
 import ShareButton from './ShareButton'
 import { moneyToString } from '@/lib/money'
-import { sanitizeTimeZone } from '@/lib/timeZone'
 import { messageStartHref } from '@/lib/messages'
-// If you want the pro footer to show when a pro "views as client"
 import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
-
-// NEW: client overlay for Services tab booking
 import ServicesBookingOverlay from './ServicesBookingOverlay'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +43,13 @@ function formatOfferingPricing(off: any) {
   if (off.offersMobile && mobilePrice && mobileMin) lines.push(`Mobile: $${mobilePrice} • ${mobileMin} min`)
 
   return lines
+}
+
+function displayTimeZoneOrNull(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const tz = raw.trim()
+  if (!tz) return null
+  return isValidIanaTimeZone(tz) ? tz : null
 }
 
 export default async function PublicProfessionalProfilePage({
@@ -132,6 +136,7 @@ export default async function PublicProfessionalProfilePage({
   })
 
   const isClientViewer = viewer?.role === 'CLIENT' && !!viewer?.id
+
   const isFavoritedByMe = isClientViewer
     ? !!(await prisma.professionalFavorite.findUnique({
         where: { professionalId_userId: { professionalId: pro.id, userId: viewer!.id } },
@@ -186,13 +191,10 @@ export default async function PublicProfessionalProfilePage({
   const loginHref = buildLoginHref(fromPath)
 
   const mustLogin = !viewer
-  const messageHref = mustLogin
-  ? loginHref
-  : messageStartHref({ kind: 'PRO_PROFILE', professionalId: pro.id })
+  const messageHref = mustLogin ? loginHref : messageStartHref({ kind: 'PRO_PROFILE', professionalId: pro.id })
 
-
-  // sanitize, always (kept here only if your UI wants to display it)
-  const proTimeZone = sanitizeTimeZone(pro.timeZone, 'America/Los_Angeles')
+  // ✅ Display only (no fallback, no sanitize, no recreation)
+  const proTimeZone = displayTimeZoneOrNull(pro.timeZone)
 
   const tabs = [
     { id: 'portfolio' as const, label: 'Portfolio', href: `/professionals/${pro.id}` },
@@ -202,9 +204,6 @@ export default async function PublicProfessionalProfilePage({
 
   return (
     <main className="mx-auto max-w-240 px-4 pb-28 pt-6">
-      {/* Header / actions / whatever you already had above... */}
-
-      {/* Example top actions (keep your existing UI) */}
       <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="flex items-start justify-between gap-3">
           <Link href="/looks" className="text-[12px] font-black text-textSecondary hover:text-textPrimary">
@@ -257,7 +256,6 @@ export default async function PublicProfessionalProfilePage({
         </div>
       </section>
 
-      {/* Tabs */}
       <nav className="mt-6 flex gap-2 border-b border-white/10">
         {tabs.map((t) => (
           <TabLink key={t.id} active={activeTab === t.id} href={t.href}>
@@ -266,7 +264,6 @@ export default async function PublicProfessionalProfilePage({
         ))}
       </nav>
 
-      {/* Portfolio */}
       {activeTab === 'portfolio' ? (
         <section className="pt-4">
           {portfolioMedia.length === 0 ? (
@@ -298,7 +295,6 @@ export default async function PublicProfessionalProfilePage({
         </section>
       ) : null}
 
-      {/* SERVICES (now uses overlay, no /offerings links, no proTimeZone query param) */}
       {activeTab === 'services' ? (
         <section className="mt-4">
           <div className="mb-2 text-[13px] font-black text-textPrimary">Services</div>
@@ -323,7 +319,6 @@ export default async function PublicProfessionalProfilePage({
         </section>
       ) : null}
 
-      {/* REVIEWS */}
       {activeTab === 'reviews' ? (
         <section className="pt-4">
           {reviewCount === 0 ? (

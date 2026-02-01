@@ -3,14 +3,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import type { ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
-import {
-  getZonedParts,
-  minutesSinceMidnightInTimeZone,
-  sanitizeTimeZone,
-  zonedTimeToUtc,
-  isValidIanaTimeZone,
-} from '@/lib/timeZone'
+import { getZonedParts, minutesSinceMidnightInTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
+import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 
 export const dynamic = 'force-dynamic'
 
@@ -136,6 +131,19 @@ function ensureWithinWorkingHours(args: {
   return { ok: true }
 }
 
+/**
+ * Month-boundary-safe YMD +1
+ * (we use UTC noon to avoid DST edge weirdness when normalizing dates)
+ */
+function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
+  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
+}
+
+/**
+ * Day window in UTC for the LOCAL day (in appt tz) that contains instantUtc.
+ * This is used to bound booking conflict queries reliably.
+ */
 function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: string }) {
   const tz = sanitizeTimeZone(args.timeZone, 'UTC')
   const parts = getZonedParts(args.instantUtc, tz)
@@ -150,10 +158,11 @@ function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: strin
     timeZone: tz,
   })
 
+  const next = addDaysToYMD(parts.year, parts.month, parts.day, 1)
   const dayEndExclusiveUtc = zonedTimeToUtc({
-    year: parts.year,
-    month: parts.month,
-    day: parts.day + 1,
+    year: next.year,
+    month: next.month,
+    day: next.day,
     hour: 0,
     minute: 0,
     second: 0,
@@ -183,6 +192,7 @@ export async function POST(req: NextRequest) {
     const scheduledForParsed = new Date(scheduledForRaw)
     if (!isValidDate(scheduledForParsed)) return jsonFail(400, 'Invalid scheduledFor.')
 
+    // scheduledFor is expected to be UTC ISO coming from availability slots
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
     // must be in the near future
@@ -233,16 +243,22 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 400, error: 'No bookable location found for this professional.' }
       }
 
-      // ✅ STRICT: location timezone must be valid for booking safety
-      const locTzRaw = typeof loc.timeZone === 'string' ? loc.timeZone.trim() : ''
-      if (!isValidIanaTimeZone(locTzRaw)) {
+      const tzRes = await resolveApptTimeZone({
+        location: { id: loc.id, timeZone: loc.timeZone },
+        professionalId: offering.professionalId,
+        fallback: 'UTC',
+        requireValid: true, // ✅ strict: must be valid to place holds
+      })
+
+      if (!tzRes.ok) {
         return {
           ok: false as const,
           status: 409,
           error: 'This professional must set a valid timezone for their bookable location before accepting bookings.',
         }
       }
-      const apptTz = sanitizeTimeZone(locTzRaw, 'UTC')
+
+      const apptTz = tzRes.timeZone
 
       // enforce working-hours in LOCATION timezone
       const whCheck = ensureWithinWorkingHours({
@@ -297,7 +313,7 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
       }
 
-      // booking conflicts (same local day in tz window)
+      // booking conflicts (same local day window in appt tz)
       const { dayStartUtc, dayEndExclusiveUtc } = getDayWindowUtcFromUtcInstant({
         instantUtc: requestedStart,
         timeZone: apptTz,

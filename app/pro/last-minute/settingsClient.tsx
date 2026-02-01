@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 
 type Block = { id: string; startAt: string; endAt: string; reason: string | null }
 
@@ -63,7 +63,7 @@ function parseDatetimeLocal(value: string) {
 function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return ''
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(d, tz)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
@@ -72,13 +72,13 @@ function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
 function datetimeLocalToIso(value: string, timeZone: string) {
   const parts = parseDatetimeLocal(value)
   if (!parts) return null
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const utc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
   return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
 }
 
 function fmtRangeInTimeZone(startIsoUtc: string, endIsoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const s = new Date(startIsoUtc)
   const e = new Date(endIsoUtc)
   if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 'Invalid range'
@@ -129,17 +129,42 @@ function TogglePill({
   )
 }
 
+/**
+ * Seed defaults in PRO TZ (not browser TZ):
+ * take "now" in pro TZ, convert to UTC instant, add minutes, then format back to datetime-local in pro TZ.
+ */
+function seedDatetimeLocalNowPlusMinutes(timeZone: string, plusMinutes: number) {
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+  const nowUtc = new Date()
+  const p = getZonedParts(nowUtc, tz)
+
+  // snap to the top of the hour in PRO TZ (minutes=0, seconds=0)
+  const baseUtc = zonedTimeToUtc({
+    year: p.year,
+    month: p.month,
+    day: p.day,
+    hour: p.hour,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+
+  const shifted = new Date(baseUtc.getTime() + plusMinutes * 60_000)
+  return toDatetimeLocalFromIso(shifted.toISOString(), tz)
+}
+
 export default function LastMinuteSettingsClient({ initial }: { initial: Initial }) {
   const router = useRouter()
 
   // ✅ PRO TIMEZONE is truth. Browser TZ is not.
+  // ✅ Strict policy: never LA fallback. If missing/invalid, fall back to DEFAULT_TIME_ZONE (UTC).
   const timeZone = useMemo(() => {
     const raw = typeof initial?.timeZone === 'string' ? initial.timeZone.trim() : ''
     if (raw && isValidIanaTimeZone(raw)) return raw
-    return 'America/Los_Angeles' // safe default for your MVP, but ideally always present
+    return DEFAULT_TIME_ZONE
   }, [initial?.timeZone])
 
-  const tzLabel = sanitizeTimeZone(timeZone, 'UTC')
+  const tzLabel = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -163,23 +188,9 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
 
   const [blocks, setBlocks] = useState<Block[]>(initial.settings.blocks ?? [])
 
-  // Seed defaults in PRO TZ, not browser TZ
-  const [blockStart, setBlockStart] = useState(() => {
-    const now = new Date()
-    now.setSeconds(0, 0)
-    now.setMinutes(0)
-    now.setHours(now.getHours() + 1)
-    return toDatetimeLocalFromIso(now.toISOString(), timeZone)
-  })
-
-  const [blockEnd, setBlockEnd] = useState(() => {
-    const now = new Date()
-    now.setSeconds(0, 0)
-    now.setMinutes(0)
-    now.setHours(now.getHours() + 2)
-    return toDatetimeLocalFromIso(now.toISOString(), timeZone)
-  })
-
+  // ✅ Seed defaults based on PRO TZ, not browser math
+  const [blockStart, setBlockStart] = useState(() => seedDatetimeLocalNowPlusMinutes(timeZone, 60))
+  const [blockEnd, setBlockEnd] = useState(() => seedDatetimeLocalNowPlusMinutes(timeZone, 120))
   const [blockReason, setBlockReason] = useState('')
 
   const ruleByService = useMemo(() => {
@@ -260,6 +271,11 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
       const newBlock = (data?.block ?? data) as Block
       setBlocks((prev) => [...prev, newBlock].sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt)))
       setBlockReason('')
+
+      // nice UX: advance defaults forward again in PRO TZ
+      setBlockStart(seedDatetimeLocalNowPlusMinutes(timeZone, 60))
+      setBlockEnd(seedDatetimeLocalNowPlusMinutes(timeZone, 120))
+
       router.refresh()
     } catch (e: any) {
       setErr(e?.message || 'Add block failed')
@@ -302,9 +318,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-220px">
             <div className="text-[14px] font-black text-textPrimary">Last-minute bookings</div>
-            <div className={`${hint} mt-1`}>
-              Fill gaps without discount-begging. You control eligibility, windows, and blocks.
-            </div>
+            <div className={`${hint} mt-1`}>Fill gaps without discount-begging. You control eligibility, windows, and blocks.</div>
             <div className={`${hint} mt-2`}>
               Times are interpreted in <span className="font-black">{tzLabel}</span>
             </div>

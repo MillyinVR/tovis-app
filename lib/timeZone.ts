@@ -4,9 +4,16 @@
  * - Intl-only (no deps)
  * - Handles DST via fixed-point refinement
  * - Hardens against the rare Intl "hour=24" edge case
+ *
+ * IMPORTANT APP POLICY:
+ * - Never default to America/Los_Angeles implicitly.
+ * - Use UTC for safe fallbacks unless you explicitly have a better source of truth.
  */
 
 export type IanaTimeZone = string
+
+/** Default fallback when a timezone is missing/invalid. */
+export const DEFAULT_TIME_ZONE: IanaTimeZone = 'UTC'
 
 export function isValidIanaTimeZone(tz: string | null | undefined) {
   if (!tz || typeof tz !== 'string') return false
@@ -18,9 +25,22 @@ export function isValidIanaTimeZone(tz: string | null | undefined) {
   }
 }
 
-export function sanitizeTimeZone(tz: unknown, fallback = 'UTC') {
+/**
+ * Returns a valid IANA timezone string.
+ * If invalid, returns the provided fallback (defaults to UTC).
+ */
+export function sanitizeTimeZone(tz: unknown, fallback: IanaTimeZone = DEFAULT_TIME_ZONE): IanaTimeZone {
   const s = typeof tz === 'string' ? tz.trim() : ''
-  return isValidIanaTimeZone(s) ? s : fallback
+  return isValidIanaTimeZone(s) ? (s as IanaTimeZone) : fallback
+}
+
+/**
+ * Returns a valid IANA timezone string OR null.
+ * Use this when you want the UI to hide timezone rather than invent one.
+ */
+export function pickTimeZoneOrNull(tz: unknown): IanaTimeZone | null {
+  const s = typeof tz === 'string' ? tz.trim() : ''
+  return isValidIanaTimeZone(s) ? (s as IanaTimeZone) : null
 }
 
 function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
@@ -37,7 +57,7 @@ function addDaysToYMD(year: number, month: number, day: number, daysToAdd: numbe
  * When that happens, we treat it as 00:00 of the *next* day.
  */
 export function getZonedParts(dateUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
   // Force 24-hour cycle via locale extension.
   // This avoids some "24" weirdness, but we still harden below.
@@ -84,7 +104,7 @@ export function getZonedParts(dateUtc: Date, timeZone: string) {
  *   local 00:00 -> UTC 08:00, offset = +480
  */
 export function timeZoneOffsetMinutes(atUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(atUtc, tz)
 
   // Interpret the *local wall clock* as if it were UTC:
@@ -108,7 +128,7 @@ export function zonedTimeToUtc(args: {
   second?: number
   timeZone: string
 }) {
-  const tz = sanitizeTimeZone(args.timeZone, 'UTC')
+  const tz = sanitizeTimeZone(args.timeZone, DEFAULT_TIME_ZONE)
   const second = args.second ?? 0
 
   // local interpreted as UTC
@@ -130,7 +150,7 @@ export function zonedTimeToUtc(args: {
  * Start of day in `timeZone`, returned as UTC instant.
  */
 export function startOfDayUtcInTimeZone(dateUtcInstant: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(dateUtcInstant, tz)
   return zonedTimeToUtc({ year: p.year, month: p.month, day: p.day, hour: 0, minute: 0, second: 0, timeZone: tz })
 }
@@ -139,7 +159,7 @@ export function startOfDayUtcInTimeZone(dateUtcInstant: Date, timeZone: string) 
  * YYYY-MM-DD for a UTC instant as seen in `timeZone`.
  */
 export function ymdInTimeZone(dateUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(dateUtc, tz)
   const yyyy = String(p.year).padStart(4, '0')
   const mm = String(p.month).padStart(2, '0')
@@ -151,7 +171,7 @@ export function ymdInTimeZone(dateUtc: Date, timeZone: string) {
  * Minutes since midnight in `timeZone` for a UTC instant.
  */
 export function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(dateUtc, tz)
   return p.hour * 60 + p.minute
 }
@@ -161,7 +181,7 @@ export function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) 
  * and return the UTC instant for that wall-clock time.
  */
 export function utcFromDayAndMinutesInTimeZone(day: Date, minutesFromMidnight: number, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(day, tz)
   const mins = Math.max(0, Math.min(24 * 60 - 1, Math.floor(minutesFromMidnight)))
   const hh = Math.floor(mins / 60)

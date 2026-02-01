@@ -24,7 +24,11 @@ function isAllowedDecisionStep(stepRaw: unknown) {
   return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || step === 'NONE' || step === ''
 }
 
-async function loadBookingDTO(args: { bookingId: string; unreadAftercare: boolean; hasPendingConsultationApproval: boolean }) {
+async function loadBookingDTO(args: {
+  bookingId: string
+  unreadAftercare: boolean
+  hasPendingConsultationApproval: boolean
+}): Promise<Awaited<ReturnType<typeof buildClientBookingDTO>> | null> {
   const b = await prisma.booking.findUnique({
     where: { id: args.bookingId },
     select: {
@@ -100,12 +104,13 @@ async function loadBookingDTO(args: { bookingId: string; unreadAftercare: boolea
 
   if (!b) return null
 
-  return buildClientBookingDTO({
+  return await buildClientBookingDTO({
     booking: b as any,
     unreadAftercare: Boolean(args.unreadAftercare),
     hasPendingConsultationApproval: Boolean(args.hasPendingConsultationApproval),
   })
 }
+
 
 export async function handleConsultationDecision(action: ConsultationDecisionAction, ctx: ConsultationDecisionCtx) {
   try {

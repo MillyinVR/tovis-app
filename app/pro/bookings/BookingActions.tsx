@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { pickTimeZoneOrNull } from '@/lib/timeZone'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 
 type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type LoadingAction = 'ACCEPT' | 'CANCEL' | 'START' | 'FINISH'
@@ -13,6 +14,11 @@ type Props = {
   currentStatus: BookingStatus | string
   startedAt?: string | null
   finishedAt?: string | null
+
+  /**
+   * Appointment timezone (preferred: booking.locationTimeZone).
+   * UI policy: do NOT invent a timezone if missing — hide timestamps instead.
+   */
   timeZone?: string | null
 }
 
@@ -33,17 +39,19 @@ function parseIso(iso?: string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
+/**
+ * UI formatting:
+ * - If tz is missing/invalid, return null (don’t lie)
+ * - If date invalid, return null
+ */
 function formatWhen(iso: string | null | undefined, timeZone?: string | null) {
   const d = parseIso(iso)
   if (!d) return null
-  const tz = timeZone ? sanitizeTimeZone(timeZone, 'America/Los_Angeles') : undefined
-  return d.toLocaleString(undefined, {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+
+  const tz = pickTimeZoneOrNull(timeZone)
+  if (!tz) return null
+
+  return formatAppointmentWhen(d, tz)
 }
 
 async function safeJson(res: Response) {
@@ -75,7 +83,7 @@ function extractNextHref(data: any): string | null {
  *  - data.status
  *  - data.booking.status
  *  - data.data.status
- * Anything else is a hard error (because we’re done pretending).
+ * Anything else is a hard error.
  */
 function extractStatusStrict(data: any): BookingStatus {
   const candidate =
@@ -91,13 +99,7 @@ function extractIso(data: any, key: 'startedAt' | 'finishedAt') {
   return typeof maybe === 'string' && parseIso(maybe) ? maybe : null
 }
 
-export default function BookingActions({
-  bookingId,
-  currentStatus,
-  startedAt,
-  finishedAt,
-  timeZone,
-}: Props) {
+export default function BookingActions({ bookingId, currentStatus, startedAt, finishedAt, timeZone }: Props) {
   const router = useRouter()
 
   const [status, setStatus] = useState<BookingStatus | null>(null)
@@ -203,8 +205,7 @@ export default function BookingActions({
         return
       }
 
-      // 🔒 Canonical response enforcement:
-      // If backend returns a non-canonical status, we treat it as a bug immediately.
+      // 🔒 Canonical response enforcement
       const nextStatus = extractStatusStrict(data)
       setStatus(nextStatus)
 
@@ -273,9 +274,7 @@ export default function BookingActions({
       <div className="text-[12px] text-textSecondary">
         Status: <span className="font-black text-textPrimary">{status}</span>
         {started ? (
-          <span className="ml-2 text-textSecondary">
-            • Started{startedLabel ? ` ${startedLabel}` : ''}
-          </span>
+          <span className="ml-2 text-textSecondary">• Started{startedLabel ? ` ${startedLabel}` : ''}</span>
         ) : null}
       </div>
 

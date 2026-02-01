@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
 
 type WorkingHoursJson =
   | {
@@ -51,7 +51,7 @@ function toTimeInputValueFromParts(parts: { hour: number; minute: number }) {
   return `${hh}:${mm}`
 }
 
-function getWorkingWindowForDayKey(dayKey: typeof DAY_KEYS[number], workingHours: WorkingHoursJson) {
+function getWorkingWindowForDayKey(dayKey: (typeof DAY_KEYS)[number], workingHours: WorkingHoursJson) {
   if (!workingHours) return null
   const cfg = (workingHours as any)[dayKey]
   if (!cfg || !cfg.enabled || !cfg.start || !cfg.end) return null
@@ -81,7 +81,7 @@ export default function CreateBookingModal(props: {
   onClose: () => void
   workingHours: WorkingHoursJson
   initialStart: Date // UTC instant you clicked (or “now”)
-  timeZone: string // ✅ pro timezone (IANA)
+  timeZone: string // ✅ pro timezone (IANA) (may be empty before setup)
   services?: ServiceLite[]
   onCreated: (ev: {
     id: string
@@ -95,14 +95,15 @@ export default function CreateBookingModal(props: {
 }) {
   const { open, onClose, workingHours, initialStart, onCreated, services: servicesProp } = props
 
-  const tz = useMemo(() => sanitizeTimeZone(props.timeZone, 'America/Los_Angeles'), [props.timeZone])
+  // ✅ Never default to LA. Use DEFAULT_TIME_ZONE when missing/invalid.
+  const tz = useMemo(() => sanitizeTimeZone(props.timeZone, DEFAULT_TIME_ZONE), [props.timeZone])
 
   const init = useMemo(() => {
-    // Convert UTC instant -> wall clock in tz, then snap minutes
+    // UTC instant -> wall clock parts in tz -> snap minutes
     const p = getZonedParts(initialStart, tz)
     const snapped = snapMinutes(p.hour * 60 + p.minute)
-    const hour = Math.floor(snapped / 60)
-    const minute = snapped % 60
+    const hour = clamp(Math.floor(snapped / 60), 0, 23)
+    const minute = clamp(snapped % 60, 0, 59)
 
     return {
       date: toDateInputValueFromParts({ year: p.year, month: p.month, day: p.day }),
@@ -133,6 +134,11 @@ export default function CreateBookingModal(props: {
   // race-cancel for search
   const lastSearchIdRef = useRef(0)
 
+  function close() {
+    if (saving) return
+    onClose()
+  }
+
   useEffect(() => {
     if (!open) return
 
@@ -141,6 +147,8 @@ export default function CreateBookingModal(props: {
     setClientQuery('')
     setRecentClients([])
     setOtherClients([])
+    setSearching(false)
+
     setSelectedServiceIds([])
     setInternalNotes('')
     setBufferMinutes(0)
@@ -148,6 +156,7 @@ export default function CreateBookingModal(props: {
     setDateStr(init.date)
     setTimeStr(init.time)
 
+    // services
     if (servicesProp && servicesProp.length) {
       setServices(servicesProp)
     } else {
@@ -173,10 +182,13 @@ export default function CreateBookingModal(props: {
 
   useEffect(() => {
     if (!open) return
+
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
 
     const q = clientQuery.trim()
     if (!q) {
+      // clear search results
+      lastSearchIdRef.current += 1
       setRecentClients([])
       setOtherClients([])
       setSearching(false)
@@ -237,6 +249,7 @@ export default function CreateBookingModal(props: {
   const outsideHours = useMemo(() => {
     if (!wallClock) return false
 
+    // wall clock -> UTC instant (validity + weekday calc)
     const startUtc = zonedTimeToUtc({
       year: wallClock.year,
       month: wallClock.month,
@@ -249,6 +262,7 @@ export default function CreateBookingModal(props: {
 
     if (!Number.isFinite(startUtc.getTime())) return true
 
+    // Determine weekday in TZ for this instant (matches the selected wall-clock day)
     const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
       .format(startUtc)
       .slice(0, 3)
@@ -268,9 +282,9 @@ export default function CreateBookingModal(props: {
     return startM < window.startMinutes || endM > window.endMinutes
   }, [wallClock, workingHours, computedDuration, bufferMinutes, tz])
 
-  if (!open) return null
-
   async function createBooking() {
+    if (saving) return
+
     if (!selectedClient) {
       setErr('Select a client.')
       return
@@ -302,7 +316,7 @@ export default function CreateBookingModal(props: {
 
       const payload = {
         clientId: selectedClient.id,
-        scheduledFor: startUtc.toISOString(), // ✅ correct instant
+        scheduledFor: startUtc.toISOString(),
         serviceIds: selectedServiceIds,
         totalDurationMinutes: computedDuration,
         bufferMinutes: Number(bufferMinutes) || 0,
@@ -338,7 +352,7 @@ export default function CreateBookingModal(props: {
         durationMinutes: Number(b.totalDurationMinutes ?? computedDuration),
       })
 
-      onClose()
+      close()
     } catch (e: any) {
       console.error(e)
       setErr(e?.message || 'Failed to create booking.')
@@ -347,18 +361,23 @@ export default function CreateBookingModal(props: {
     }
   }
 
+  if (!open) return null
+
   return (
-    <div className="fixed inset-0 z-1300 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-1300 flex items-center justify-center bg-black/50 p-4" onClick={close}>
       <div
         className="w-full max-w-720px overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
       >
         <div className="flex items-center justify-between border-b border-white/10 p-4">
           <div className="font-extrabold">Schedule appointment</div>
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-xs font-semibold hover:bg-bgSecondary/70"
+            onClick={close}
+            disabled={saving}
+            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-xs font-semibold hover:bg-bgSecondary/70 disabled:opacity-70"
           >
             Close
           </button>
@@ -377,7 +396,7 @@ export default function CreateBookingModal(props: {
             </div>
           )}
 
-          {err && <div className="mb-2 text-sm text-red-400">{err}</div>}
+          {err && <div className="mb-2 text-sm text-toneDanger">{err}</div>}
 
           {/* Client search */}
           <div className="mb-4">
@@ -392,8 +411,7 @@ export default function CreateBookingModal(props: {
 
             {!!clientQuery.trim() && (
               <div className="mt-2 text-xs text-textSecondary">
-                Results: {recentClients.length} your clients, {otherClients.length} other
-                {searching ? ' (searching...)' : ''}
+                Results: {recentClients.length} your clients, {otherClients.length} other{searching ? ' (searching...)' : ''}
               </div>
             )}
 
@@ -494,10 +512,7 @@ export default function CreateBookingModal(props: {
                   const dur = Number(s.durationMinutes ?? 0) || 0
 
                   return (
-                    <label
-                      key={s.id}
-                      className="flex items-center gap-3 rounded-2xl border border-white/10 bg-bgSecondary/30 p-3"
-                    >
+                    <label key={s.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-bgSecondary/30 p-3">
                       <input
                         type="checkbox"
                         checked={checked}
@@ -550,7 +565,7 @@ export default function CreateBookingModal(props: {
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
               disabled={saving}
               className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold hover:bg-bgSecondary/40 disabled:opacity-70"
             >

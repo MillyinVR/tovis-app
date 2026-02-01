@@ -70,7 +70,6 @@ export async function GET() {
 
         service: { select: { id: true, name: true } },
 
-        // ✅ ProfessionalProfile DOES NOT have city/state in your schema
         professional: {
           select: {
             id: true,
@@ -80,7 +79,6 @@ export async function GET() {
           },
         },
 
-        // ✅ Booking is locked to a specific ProfessionalLocation (this is where city/state live)
         location: {
           select: {
             id: true,
@@ -92,7 +90,6 @@ export async function GET() {
           },
         },
 
-        // ✅ Base + add-ons truth
         serviceItems: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           take: 80,
@@ -143,17 +140,19 @@ export async function GET() {
         .filter((x): x is string => Boolean(x)),
     )
 
-    // 3) Build DTOs (single source of truth)
-    const dtos = bookings.map((b) => {
-      const hasPending = needsConsultationApproval(b)
-      const unreadAftercare = unreadBookingIds.has(b.id)
+    // 3) Build DTOs (single source of truth) ✅ MUST await because buildClientBookingDTO is async now
+    const dtos = await Promise.all(
+      bookings.map(async (b) => {
+        const hasPending = needsConsultationApproval(b)
+        const unreadAftercare = unreadBookingIds.has(b.id)
 
-      return buildClientBookingDTO({
-        booking: b as any,
-        unreadAftercare,
-        hasPendingConsultationApproval: hasPending,
-      })
-    })
+        return await buildClientBookingDTO({
+          booking: b as any,
+          unreadAftercare,
+          hasPendingConsultationApproval: hasPending,
+        })
+      }),
+    )
 
     // 4) Waitlist (schema-aligned selects)
     // Note: WaitlistEntry.professional is ProfessionalProfile (no city/state).

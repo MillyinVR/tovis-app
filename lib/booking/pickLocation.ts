@@ -1,12 +1,13 @@
 // lib/booking/pickLocation.ts
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType, ProfessionalLocationType } from '@prisma/client'
+import type { ServiceLocationType, ProfessionalLocationType, Prisma } from '@prisma/client'
 import { TtlCache, stableKey } from '@/lib/cache/ttlCache'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 type PickBookableLocationArgs = {
   professionalId: string
   requestedLocationId?: string | null
-  locationType: ServiceLocationType // booking mode: 'SALON' | 'MOBILE'
+  locationType: ServiceLocationType // 'SALON' | 'MOBILE'
 }
 
 function cleanId(v: unknown) {
@@ -14,16 +15,47 @@ function cleanId(v: unknown) {
 }
 
 function allowedProfessionalTypes(locationType: ServiceLocationType): ProfessionalLocationType[] {
-  if (locationType === 'MOBILE') return ['MOBILE_BASE']
-  return ['SALON', 'SUITE']
+  return locationType === 'MOBILE' ? ['MOBILE_BASE'] : ['SALON', 'SUITE']
 }
 
-// ✅ module-scope cache (Node runtime). Great for a single server / local dev.
-// If you deploy serverless, this still helps “warm” instances but isn’t guaranteed shared.
-const locationCache = new TtlCache<any>(800)
+const select = {
+  id: true,
+  type: true,
+  name: true,
+  isPrimary: true,
+  isBookable: true,
+
+  timeZone: true,
+  workingHours: true,
+  bufferMinutes: true,
+  stepMinutes: true,
+  advanceNoticeMinutes: true,
+  maxDaysAhead: true,
+
+  lat: true,
+  lng: true,
+
+  city: true,
+  formattedAddress: true,
+  createdAt: true,
+} satisfies Prisma.ProfessionalLocationSelect
+
+type PickedLocation = Prisma.ProfessionalLocationGetPayload<{ select: typeof select }>
+
+// module-scope cache
+const locationCache = new TtlCache<PickedLocation>(800)
 const TTL_MS = 10 * 60_000 // 10 minutes
 
-export async function pickBookableLocation(args: PickBookableLocationArgs) {
+function isUsableLocation(loc: PickedLocation | null): loc is PickedLocation {
+  if (!loc?.id) return false
+  const tz = typeof loc.timeZone === 'string' ? loc.timeZone.trim() : ''
+  if (!tz || !isValidIanaTimeZone(tz)) return false
+  // workingHours is Json in schema; still sanity check shape
+  if (!loc.workingHours || typeof loc.workingHours !== 'object') return false
+  return true
+}
+
+export async function pickBookableLocation(args: PickBookableLocationArgs): Promise<PickedLocation | null> {
   const professionalId = cleanId(args.professionalId)
   const requestedLocationId = cleanId(args.requestedLocationId)
   const allowedTypes = allowedProfessionalTypes(args.locationType)
@@ -34,29 +66,7 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
   const cached = locationCache.get(cacheKey)
   if (cached) return cached
 
-  const select = {
-    id: true,
-    type: true,
-    name: true,
-    isPrimary: true,
-    isBookable: true,
-
-    timeZone: true,
-    workingHours: true,
-    bufferMinutes: true,
-    stepMinutes: true,
-    advanceNoticeMinutes: true,
-    maxDaysAhead: true,
-
-    lat: true,
-    lng: true,
-
-    city: true,
-    formattedAddress: true,
-    createdAt: true,
-  } as const
-
-  // 1) If a specific location id is requested, only honor if matches booking mode + bookable
+  // 1) honor requested id only if it matches booking mode + is bookable
   if (requestedLocationId) {
     const byId = await prisma.professionalLocation.findFirst({
       where: {
@@ -67,13 +77,14 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
       },
       select,
     })
-    if (byId?.id) {
+
+    if (isUsableLocation(byId)) {
       locationCache.set(cacheKey, byId, TTL_MS)
       return byId
     }
   }
 
-  // 2) Otherwise pick the best match for this booking mode
+  // 2) otherwise pick best match for this booking mode
   const best = await prisma.professionalLocation.findFirst({
     where: {
       professionalId,
@@ -84,7 +95,8 @@ export async function pickBookableLocation(args: PickBookableLocationArgs) {
     select,
   })
 
-  const result = best?.id ? best : null
-  if (result) locationCache.set(cacheKey, result, TTL_MS)
-  return result
+  if (!isUsableLocation(best)) return null
+
+  locationCache.set(cacheKey, best, TTL_MS)
+  return best
 }

@@ -4,9 +4,18 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
-import { getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 import { Prisma } from '@prisma/client'
 import ClientNameLink from '@/app/_components/ClientNameLink'
+
+import {
+  DEFAULT_TIME_ZONE,
+  isValidIanaTimeZone,
+  pickTimeZoneOrNull,
+  sanitizeTimeZone,
+  getZonedParts,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,16 +30,6 @@ function normalizeStatusFilter(raw: unknown): StatusFilter {
   const s = String(raw || '').toUpperCase().trim()
   if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') return s
   return 'ALL'
-}
-
-function formatDate(d: Date, timeZone: string) {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(d)
 }
 
 function formatStatus(status: string) {
@@ -106,13 +105,90 @@ function FilterPills({ active }: { active: StatusFilter }) {
   )
 }
 
-// ✅ Strongly-typed select (includes add-ons)
+
+async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown): Promise<string> {
+  const primary = await prisma.professionalLocation.findFirst({
+    where: { professionalId: proId, isBookable: true, isPrimary: true },
+    select: { timeZone: true },
+  })
+
+  const primaryTz = pickTimeZoneOrNull(primary?.timeZone)
+  if (primaryTz) return primaryTz
+
+  const any = await prisma.professionalLocation.findFirst({
+    where: { professionalId: proId, isBookable: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    select: { timeZone: true },
+  })
+
+  const anyTz = pickTimeZoneOrNull(any?.timeZone)
+  if (anyTz) return anyTz
+
+  const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
+  if (proTz) return proTz
+
+  return DEFAULT_TIME_ZONE
+}
+
+/**
+ * Row display timezone:
+ * Prefer booking.locationTimeZone snapshot (appointment truth),
+ * else fall back to scheduleTz (validated/sanitized to UTC).
+ */
+function bookingDisplayTimeZone(bookingLocationTimeZone: unknown, scheduleTz: string) {
+  const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
+  if (bookingTz) return bookingTz
+  return sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
+}
+
+function formatWhenForRow(date: Date, tz: string) {
+  const safe = isValidIanaTimeZone(tz) ? tz : DEFAULT_TIME_ZONE
+  return formatAppointmentWhen(date, safe)
+}
+
+/**
+ * DST-safe boundaries:
+ * "Today" and "Tomorrow" are computed as local day-starts in scheduleTz,
+ * converted to UTC instants via zonedTimeToUtc.
+ */
+function computeTodayTomorrowBoundsUtc(nowUtc: Date, scheduleTz: string) {
+  const tz = sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
+  const p = getZonedParts(nowUtc, tz)
+
+  const startOfTodayUtc = zonedTimeToUtc({
+    year: p.year,
+    month: p.month,
+    day: p.day,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+
+  // ✅ no "+24h" — day+1 in local calendar time, DST-safe
+  const startOfTomorrowUtc = zonedTimeToUtc({
+    year: p.year,
+    month: p.month,
+    day: p.day + 1,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+
+  return { startOfTodayUtc, startOfTomorrowUtc, tz }
+}
+
+// ✅ Strongly-typed select (includes add-ons + booking tz snapshot)
 const bookingSelect = {
   id: true,
   status: true,
   scheduledFor: true,
   startedAt: true,
   finishedAt: true,
+
+  // ✅ booking snapshot tz (preferred for display)
+  locationTimeZone: true,
 
   totalDurationMinutes: true,
   subtotalSnapshot: true,
@@ -123,7 +199,6 @@ const bookingSelect = {
 
   service: { select: { name: true } },
 
-  // ✅ THIS is the missing piece
   serviceItems: {
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     select: {
@@ -131,8 +206,6 @@ const bookingSelect = {
       itemType: true, // "BASE" | "ADD_ON"
       sortOrder: true,
       service: { select: { name: true } },
-
-      // optional display helpers if you want them later:
       priceSnapshot: true,
       durationMinutesSnapshot: true,
       parentItemId: true,
@@ -150,7 +223,6 @@ const bookingSelect = {
     },
   },
 } satisfies Prisma.BookingSelect
-
 
 type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
 
@@ -193,7 +265,6 @@ function PriceBlock({ b }: { b: BookingRow }) {
 function getBaseAndAddOnNames(b: BookingRow) {
   const items = Array.isArray(b.serviceItems) ? b.serviceItems : []
 
-  // Prefer itemType if present, otherwise fallback to "first item is base"
   const base =
     items.find((x) => String((x as any).itemType || '').toUpperCase() === 'BASE') ??
     items.sort((a, c) => (a.sortOrder ?? 0) - (c.sortOrder ?? 0))[0] ??
@@ -210,12 +281,12 @@ function getBaseAndAddOnNames(b: BookingRow) {
 function Section({
   title,
   items,
-  timeZone,
+  scheduleTz,
   visibleClientIdSet,
 }: {
   title: string
   items: BookingRow[]
-  timeZone: string
+  scheduleTz: string
   visibleClientIdSet: Set<string>
 }) {
   return (
@@ -235,6 +306,8 @@ function Section({
             const dur = durationLabel(b.totalDurationMinutes)
             const canLinkClient = visibleClientIdSet.has(String(b.client.id))
 
+            const rowTz = bookingDisplayTimeZone(b.locationTimeZone, scheduleTz)
+
             return (
               <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -248,9 +321,7 @@ function Section({
                             <div className="truncate text-[13px] font-black text-textPrimary">{baseName}</div>
 
                             {addOnNames.length ? (
-                              <div className="mt-1 truncate text-[12px] text-textSecondary">
-                                + {addOnNames.join(', ')}
-                              </div>
+                              <div className="mt-1 truncate text-[12px] text-textSecondary">+ {addOnNames.join(', ')}</div>
                             ) : null}
                           </div>
                         )
@@ -268,7 +339,7 @@ function Section({
                     </div>
 
                     <div className="mt-2 text-[12px] text-textSecondary">
-                      {formatDate(b.scheduledFor, timeZone)}
+                      {formatWhenForRow(b.scheduledFor, rowTz)}
                       {dur ? ` • ${dur} min` : ''}
                     </div>
 
@@ -290,6 +361,7 @@ function Section({
                       currentStatus={b.status}
                       startedAt={b.startedAt ? b.startedAt.toISOString() : null}
                       finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
+                      timeZone={rowTz} // ✅ booking snapshot preferred
                     />
                   </div>
                 </div>
@@ -312,30 +384,13 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
   const statusFilter = normalizeStatusFilter(firstParam(sp.status))
 
   const proId = user.professionalProfile.id
-  const timeZone = sanitizeTimeZone(user.professionalProfile.timeZone, 'America/Los_Angeles')
 
+  // ✅ schedule timezone for “Today/Upcoming/Past” buckets (never LA fallback)
+  const scheduleTz = await resolveProScheduleTimeZone(proId, user.professionalProfile.timeZone)
+
+  // ✅ DST-safe “Today” boundaries anchored to scheduleTz
   const nowUtc = new Date()
-  const nowParts = getZonedParts(nowUtc, timeZone)
-
-  const startOfTodayUtc = zonedTimeToUtc({
-    year: nowParts.year,
-    month: nowParts.month,
-    day: nowParts.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone,
-  })
-
-  const startOfTomorrowUtc = zonedTimeToUtc({
-    year: nowParts.year,
-    month: nowParts.month,
-    day: nowParts.day + 1,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone,
-  })
+  const { startOfTodayUtc, startOfTomorrowUtc } = computeTodayTomorrowBoundsUtc(nowUtc, scheduleTz)
 
   const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
 
@@ -379,6 +434,8 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     }),
   ])
 
+  const showTz = pickTimeZoneOrNull(scheduleTz)
+
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
       <header className="mb-5">
@@ -386,7 +443,8 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
           <div>
             <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
             <div className="mt-1 text-[12px] text-textSecondary">
-              Today, upcoming, and past. <span className="text-textSecondary/70">({timeZone})</span>
+              Today, upcoming, and past.
+              {showTz ? <span className="text-textSecondary/70"> ({showTz})</span> : null}
             </div>
           </div>
 
@@ -405,9 +463,9 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       </header>
 
       <div className="grid gap-6">
-        <Section title="Today" items={todayBookings} timeZone={timeZone} visibleClientIdSet={visibleClientIdSet} />
-        <Section title="Upcoming" items={upcomingBookings} timeZone={timeZone} visibleClientIdSet={visibleClientIdSet} />
-        <Section title="Past" items={pastBookings} timeZone={timeZone} visibleClientIdSet={visibleClientIdSet} />
+        <Section title="Today" items={todayBookings} scheduleTz={scheduleTz} visibleClientIdSet={visibleClientIdSet} />
+        <Section title="Upcoming" items={upcomingBookings} scheduleTz={scheduleTz} visibleClientIdSet={visibleClientIdSet} />
+        <Section title="Past" items={pastBookings} scheduleTz={scheduleTz} visibleClientIdSet={visibleClientIdSet} />
       </div>
     </main>
   )

@@ -3,7 +3,7 @@
 
 import type { ProCard, SelectedHold } from '../types'
 import { getHourInTimeZone, formatSlotLabel, formatSlotFullLabel } from '@/lib/bookingTime'
-import { formatInTimeZone } from '@/lib/FormatInTimeZone'
+import { formatInTimeZone } from '@/lib/formatInTimeZone'
 
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 

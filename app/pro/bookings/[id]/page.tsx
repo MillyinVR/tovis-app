@@ -4,22 +4,17 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from '../BookingActions'
 import { moneyToString } from '@/lib/money'
-import { sanitizeTimeZone } from '@/lib/timeZone'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 
-export const dynamic = 'force-dynamic'
+import {
+  DEFAULT_TIME_ZONE,
+  pickTimeZoneOrNull,
+  sanitizeTimeZone,
+} from '@/lib/timeZone'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 
-function formatDateTime(d: Date, timeZone: string) {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(d)
-}
+export const dynamic = 'force-dynamic'
 
 function safeUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -60,6 +55,41 @@ function SectionCard({ title, subtitle, children }: { title: string; subtitle?: 
   )
 }
 
+/**
+ * Schedule timezone for a pro (used as fallback / “owner of calendar”):
+ * Prefer primary bookable location tz, else any bookable, else pro.profile tz, else UTC.
+ * Never LA fallback.
+ */
+async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown): Promise<string> {
+  const primary = await prisma.professionalLocation.findFirst({
+    where: { professionalId: proId, isBookable: true, isPrimary: true },
+    select: { timeZone: true },
+  })
+
+  const primaryTz = pickTimeZoneOrNull(primary?.timeZone)
+  if (primaryTz) return primaryTz
+
+  const any = await prisma.professionalLocation.findFirst({
+    where: { professionalId: proId, isBookable: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    select: { timeZone: true },
+  })
+
+  const anyTz = pickTimeZoneOrNull(any?.timeZone)
+  if (anyTz) return anyTz
+
+  const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
+  if (proTz) return proTz
+
+  return DEFAULT_TIME_ZONE
+}
+
+function resolveAppointmentTimeZone(bookingLocationTimeZone: unknown, scheduleTz: string) {
+  const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
+  if (bookingTz) return bookingTz
+  return sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
+}
+
 export default async function ProBookingDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params
 
@@ -69,7 +99,6 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
   }
 
   const proId = user.professionalProfile.id
-  const proTimeZone = sanitizeTimeZone(user.professionalProfile.timeZone, 'America/Los_Angeles')
 
   const booking = await prisma.booking.findFirst({
     where: { id, professionalId: proId },
@@ -86,9 +115,19 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
   const visibility = await getProClientVisibility(proId, booking.clientId)
   const canLinkClient = visibility.canViewClient
 
-  const apptTimeZone = sanitizeTimeZone((booking as any).locationTimeZone, proTimeZone)
+  // ✅ schedule tz (calendar owner) + appointment tz (booking snapshot preferred)
+  const scheduleTz = await resolveProScheduleTimeZone(proId, user.professionalProfile.timeZone)
+  const apptTz = resolveAppointmentTimeZone((booking as any).locationTimeZone, scheduleTz)
+
   const total = moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ?? '0.00'
   const dur = Math.round(Number(booking.totalDurationMinutes ?? 0)) || 0
+
+  const scheduledLabel = formatAppointmentWhen(booking.scheduledFor, apptTz)
+  const startedLabel = booking.startedAt ? formatAppointmentWhen(booking.startedAt, apptTz) : '—'
+  const finishedLabel = booking.finishedAt ? formatAppointmentWhen(booking.finishedAt, apptTz) : '—'
+
+  // Only show tz badge if it differs from schedule tz (so we don’t spam)
+  const showTzBadge = apptTz !== scheduleTz
 
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
@@ -108,6 +147,7 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
               currentStatus={booking.status}
               startedAt={booking.startedAt ? booking.startedAt.toISOString() : null}
               finishedAt={booking.finishedAt ? booking.finishedAt.toISOString() : null}
+              timeZone={apptTz} // ✅ critical: keep actions timestamps consistent
             />
           </div>
         </div>
@@ -131,9 +171,9 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
             </div>
 
             <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-              {formatDateTime(booking.scheduledFor, apptTimeZone)}
+              {scheduledLabel}
               {dur ? ` • ${dur} min` : ''}
-              {apptTimeZone !== proTimeZone ? <span className="text-textSecondary/70"> · {apptTimeZone}</span> : null}
+              {showTzBadge ? <span className="text-textSecondary/70"> · {apptTz}</span> : null}
             </div>
           </div>
 
@@ -161,20 +201,13 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
         <SectionCard title="Timing" subtitle="State timestamps for this booking.">
           <div className="grid gap-2 text-[12px] font-semibold text-textSecondary">
             <div>
-              Scheduled:{' '}
-              <span className="font-black text-textPrimary">{formatDateTime(booking.scheduledFor, apptTimeZone)}</span>
+              Scheduled: <span className="font-black text-textPrimary">{scheduledLabel}</span>
             </div>
             <div>
-              Started:{' '}
-              <span className="font-black text-textPrimary">
-                {booking.startedAt ? formatDateTime(booking.startedAt, apptTimeZone) : '—'}
-              </span>
+              Started: <span className="font-black text-textPrimary">{startedLabel}</span>
             </div>
             <div>
-              Finished:{' '}
-              <span className="font-black text-textPrimary">
-                {booking.finishedAt ? formatDateTime(booking.finishedAt, apptTimeZone) : '—'}
-              </span>
+              Finished: <span className="font-black text-textPrimary">{finishedLabel}</span>
             </div>
           </div>
         </SectionCard>

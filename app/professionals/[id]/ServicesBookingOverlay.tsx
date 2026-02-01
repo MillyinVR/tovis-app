@@ -6,7 +6,7 @@ import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer'
 import type { DrawerContext } from '@/app/(main)/booking/AvailabilityDrawer/types'
 
 type UiOffering = {
-  id: string
+  id: string // offeringId
   serviceId: string
   name: string
   description: string | null
@@ -24,21 +24,29 @@ export default function ServicesBookingOverlay({
   const [open, setOpen] = React.useState(false)
   const [ctx, setCtx] = React.useState<DrawerContext | null>(null)
 
-  function openForService(serviceId: string) {
-    const next: DrawerContext = {
-      professionalId,
-      serviceId,
-      mediaId: null,
-      source: 'REQUESTED',
-    }
-    setCtx(next)
-    setOpen(true)
-  }
-
-  function close() {
+  const close = React.useCallback(() => {
     setOpen(false)
-    setCtx(null)
-  }
+    // let drawer animate closed before nuking context (prevents UI flicker in some drawers)
+    window.setTimeout(() => setCtx(null), 150)
+  }, [])
+
+  const openForOffering = React.useCallback(
+    (off: UiOffering) => {
+      const next: DrawerContext = {
+        professionalId,
+        serviceId: off.serviceId,
+        offeringId: off.id, // ✅ IMPORTANT: pass offeringId so booking flow can resolve location + tz correctly
+        mediaId: null,
+        source: 'REQUESTED',
+      } as any
+
+      setCtx(next)
+      setOpen(true)
+    },
+    [professionalId],
+  )
+
+  if (!offerings || offerings.length === 0) return null
 
   return (
     <>
@@ -47,8 +55,12 @@ export default function ServicesBookingOverlay({
           <button
             key={off.id}
             type="button"
-            onClick={() => openForService(off.serviceId)}
-            className="flex w-full items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3 text-left text-textPrimary hover:border-white/20"
+            onClick={() => openForOffering(off)}
+            className={[
+              'flex w-full items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3 text-left text-textPrimary',
+              'transition hover:border-white/20 hover:bg-surfaceGlass',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/50',
+            ].join(' ')}
             title="Book this service"
           >
             <div className="flex min-w-0 flex-1 gap-3">
@@ -63,7 +75,9 @@ export default function ServicesBookingOverlay({
                 <div className="truncate text-[13px] font-black">{off.name}</div>
 
                 {off.description ? (
-                  <div className="mt-1 text-[12px] font-semibold text-textSecondary">{off.description}</div>
+                  <div className="mt-1 line-clamp-2 text-[12px] font-semibold text-textSecondary">
+                    {off.description}
+                  </div>
                 ) : null}
 
                 {off.pricingLines.length ? (

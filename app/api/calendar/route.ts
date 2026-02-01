@@ -1,7 +1,7 @@
 // app/api/calendar/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
+import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
 
 import { pickString } from '@/app/api/_utils/pick'
 import { normalizeEmail } from '@/app/api/_utils/email'
@@ -52,6 +52,75 @@ function pickFormattedAddress(snapshot: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
+function clampDurationMinutes(v: unknown, fallback: number) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  const x = Math.trunc(n)
+  return Math.max(1, Math.min(12 * 60, x))
+}
+
+function requireBookingTimeZone(raw: unknown): { ok: true; timeZone: string } | { ok: false; error: string } {
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  if (!s) {
+    return {
+      ok: false,
+      error: 'This booking is missing a timezone. The professional must set a valid IANA timezone for their location.',
+    }
+  }
+
+  const cleaned = sanitizeTimeZone(s, 'UTC') || ''
+  if (!cleaned || !isValidIanaTimeZone(cleaned)) {
+    return {
+      ok: false,
+      error: 'This booking has an invalid timezone. The professional must set a valid IANA timezone for their location.',
+    }
+  }
+
+  return { ok: true, timeZone: cleaned }
+}
+
+function looksLikeRealLocation(s: string) {
+  // not perfect — just blocks obvious junk like "N/A", "Online", empty, etc.
+  const v = s.trim()
+  if (!v) return false
+  const up = v.toUpperCase()
+  if (up === 'N/A' || up === 'NA' || up === 'NONE' || up === 'UNKNOWN') return false
+  if (up.includes('ONLINE') || up.includes('VIRTUAL')) return false
+  return true
+}
+
+function requireSalonLocation(args: {
+  locationType: unknown
+  locationAddressSnapshot: unknown
+  professionalLocation: unknown
+}): { ok: true; location: string | null } | { ok: false; error: string } {
+  const type = typeof args.locationType === 'string' ? args.locationType.trim().toUpperCase() : ''
+
+  // MOBILE: location line is optional (client-specific address may exist elsewhere)
+  if (type !== 'SALON') {
+    const addr = pickFormattedAddress(args.locationAddressSnapshot)
+    if (addr) return { ok: true, location: addr }
+
+    const proLoc = typeof args.professionalLocation === 'string' ? args.professionalLocation.trim() : ''
+    if (proLoc && looksLikeRealLocation(proLoc)) return { ok: true, location: proLoc }
+
+    return { ok: true, location: null }
+  }
+
+  // SALON: must have a usable location line.
+  const addr = pickFormattedAddress(args.locationAddressSnapshot)
+  if (addr) return { ok: true, location: addr }
+
+  const proLoc = typeof args.professionalLocation === 'string' ? args.professionalLocation.trim() : ''
+  if (proLoc && looksLikeRealLocation(proLoc)) return { ok: true, location: proLoc }
+
+  return {
+    ok: false,
+    error:
+      'This salon booking is missing a location address. The professional must set a formatted address for the booking/location before a calendar invite can be generated.',
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const { user, res } = await requireUser()
@@ -75,6 +144,7 @@ export async function GET(req: Request) {
         scheduledFor: true,
         totalDurationMinutes: true,
 
+        locationType: true, // ✅ needed for strict SALON behavior
         locationTimeZone: true,
         locationAddressSnapshot: true,
 
@@ -83,7 +153,6 @@ export async function GET(req: Request) {
             id: true,
             businessName: true,
             location: true,
-            timeZone: true,
             user: { select: { email: true } },
           },
         },
@@ -103,24 +172,31 @@ export async function GET(req: Request) {
     const isClient = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
     const isPro = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
     const isAdmin = role === 'ADMIN'
-
     if (!isAdmin && !isClient && !isPro) return jsonFail(403, 'Forbidden')
 
     const startUtc = new Date(booking.scheduledFor)
+    if (!Number.isFinite(startUtc.getTime())) return jsonFail(500, 'Booking has an invalid scheduled time.')
 
-    const minutesRaw = Number(booking.totalDurationMinutes ?? 60)
-    const minutes = Number.isFinite(minutesRaw) ? Math.max(1, Math.min(12 * 60, minutesRaw)) : 60
-    const endUtc = new Date(startUtc.getTime() + minutes * 60_000)
+    const durationMinutes = clampDurationMinutes(booking.totalDurationMinutes, 60)
+    const endUtc = new Date(startUtc.getTime() + durationMinutes * 60_000)
+
+    // ✅ strict timezone (LOCATION truth)
+    const tzRes = requireBookingTimeZone(booking.locationTimeZone)
+    if (!tzRes.ok) return jsonFail(409, tzRes.error)
+    const appointmentTz = tzRes.timeZone
+
+    // ✅ strict SALON location requirement
+    const locRes = requireSalonLocation({
+      locationType: booking.locationType,
+      locationAddressSnapshot: booking.locationAddressSnapshot,
+      professionalLocation: booking.professional?.location,
+    })
+    if (!locRes.ok) return jsonFail(409, locRes.error)
+    const location = locRes.location
 
     const serviceName = booking.service?.name || 'Appointment'
     const proName = booking.professional?.businessName || booking.professional?.user?.email || 'Professional'
     const title = `${serviceName} with ${proName}`
-
-    const location =
-      pickFormattedAddress(booking.locationAddressSnapshot) ||
-      (typeof booking.professional?.location === 'string' && booking.professional.location.trim()
-        ? booking.professional.location.trim()
-        : '')
 
     const description = [
       `Service: ${serviceName}`,
@@ -130,12 +206,6 @@ export async function GET(req: Request) {
     ]
       .filter(Boolean)
       .join('\n')
-
-    const appointmentTz =
-      sanitizeTimeZone(
-        booking.locationTimeZone || booking.professional?.timeZone || 'America/Los_Angeles',
-        'America/Los_Angeles',
-      ) || 'America/Los_Angeles'
 
     const uid = `${booking.id}@tovis`
     const dtstamp = toICSDateUtc(new Date())
@@ -147,18 +217,6 @@ export async function GET(req: Request) {
     const clientEmail = normalizeEmail(booking.client?.user?.email)
 
     const organizerLine = proEmail ? `ORGANIZER;CN=${icsEscape(proName)}:mailto:${icsEscape(proEmail)}` : null
-
-    /**
-     * PRIVACY NOTE:
-     * Right now this includes the client's email when generating an ICS for the pro.
-     * If you want "don't reveal contact info until access" more strictly,
-     * you can conditionally include attendee only for the requester, e.g.
-     *
-     * - if (isClient) include proEmail
-     * - if (isPro) include clientEmail only when booking.status is ACCEPTED/COMPLETED (etc)
-     *
-     * Keeping existing behavior for now.
-     */
     const attendeeLine = clientEmail
       ? `ATTENDEE;CN=${icsEscape(clientDisplayName(booking.client))};ROLE=REQ-PARTICIPANT;RSVP=FALSE:mailto:${icsEscape(
           clientEmail,

@@ -1,7 +1,7 @@
 // lib/reminders.ts
 import twilio from 'twilio'
 import { prisma } from './prisma'
-import { formatAppointmentWhen } from '@/lib/FormatInTimeZone'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID
