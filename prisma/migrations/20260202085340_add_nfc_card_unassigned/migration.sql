@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "NfcCardType" ADD VALUE 'UNASSIGNED';

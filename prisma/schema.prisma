@@ -176,10 +176,12 @@ enum ConsultationApprovalStatus {
 }
 
 enum NfcCardType {
+  UNASSIGNED
   CLIENT_REFERRAL
   PRO_BOOKING
   SALON_WHITE_LABEL
 }
+
 
 enum ProfessionalLocationType {
   SALON
