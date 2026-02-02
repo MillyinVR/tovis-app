@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+
 import CreateBookingModal from './CreateBookingModal'
 import BlockTimeModal from './BlockTimeModal'
 import EditBlockModal from './EditBlockModal'
@@ -29,14 +30,10 @@ import {
   formatDayLabelInTimeZone,
 } from './_utils/date'
 
-import { DEFAULT_TIME_ZONE, sanitizeTimeZone, startOfDayUtcInTimeZone, ymdInTimeZone } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
 
 function safeTz(raw: unknown) {
   return sanitizeTimeZone(typeof raw === 'string' ? raw : '', DEFAULT_TIME_ZONE)
-}
-
-function sameLocalDayInTz(aUtc: Date, bUtc: Date, tz: string) {
-  return ymdInTimeZone(aUtc, tz) === ymdInTimeZone(bUtc, tz)
 }
 
 function headerLabelFor(view: ViewMode, anchorUtc: Date, tz: string) {
@@ -48,8 +45,7 @@ function headerLabelFor(view: ViewMode, anchorUtc: Date, tz: string) {
 export default function ProCalendarPage() {
   const [view, setView] = useState<ViewMode>('week')
 
-  // ✅ Strict: focus date stored as a TZ-noon anchor (UTC Date).
-  // Start with "now", then normalize once we know TZ.
+  // Start with "now" (will be normalized once we know the calendar TZ)
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date())
 
   const cal = useCalendarData({ view, currentDate })
@@ -57,21 +53,25 @@ export default function ProCalendarPage() {
   // ✅ Use calendar tz; if missing/invalid the hook uses DEFAULT_TIME_ZONE (UTC).
   const timeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
 
-  // ✅ Normalize currentDate to noon-in-TZ. Avoid pointless re-anchoring loops.
-  const didNormalizeRef = useRef(false)
+  /**
+   * ✅ Boot gate:
+   * - On first mount we may render with UTC first (before API tz arrives),
+   *   then re-render with real tz (America/Los_Angeles), causing a visible “jump”.
+   *
+   * Fix: initialize the focus date ONCE after the first load finishes,
+   * and don’t render the calendar grids until then.
+   */
+  const [booted, setBooted] = useState(false)
+  const didBootRef = useRef(false)
+
   useEffect(() => {
-    setCurrentDate((d) => {
-      const anchored = anchorNoonInTimeZone(d, timeZone)
+    if (didBootRef.current) return
+    if (cal.loading) return
 
-      if (!didNormalizeRef.current) {
-        didNormalizeRef.current = true
-        return anchored
-      }
-
-      // Only change if it would actually move the local calendar day in this TZ
-      return sameLocalDayInTz(d, anchored, timeZone) ? d : anchored
-    })
-  }, [timeZone])
+    setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
+    didBootRef.current = true
+    setBooted(true)
+  }, [cal.loading, timeZone])
 
   const visibleDays = useMemo(() => {
     const tz = timeZone
@@ -123,9 +123,7 @@ export default function ProCalendarPage() {
               canMobile={Boolean(cal.canMobile)}
               activeLocationType={cal.activeLocationType}
               onChangeLocationType={(next) => cal.setActiveLocationType(next)}
-              onSavedAny={() => {
-                cal.reload()
-              }}
+              onSavedAny={() => cal.reload()}
             />
           </div>
         </section>
@@ -135,7 +133,13 @@ export default function ProCalendarPage() {
         view={view}
         setView={setView}
         headerLabel={headerLabel}
-        onToday={() => setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))}
+        onToday={() => {
+          // If we haven’t booted yet, “Today” should still behave sensibly.
+          const next = anchorNoonInTimeZone(new Date(), timeZone)
+          setCurrentDate(next)
+          if (!booted) setBooted(true)
+          didBootRef.current = true
+        }}
         onBack={() => {
           if (view === 'day') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -1, timeZone))
           else if (view === 'week') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -7, timeZone))
@@ -148,7 +152,15 @@ export default function ProCalendarPage() {
         }}
       />
 
-      {cal.loading && (
+      {/* Boot placeholder (prevents “UTC week flash”) */}
+      {!booted && (
+        <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-6 text-sm text-textSecondary">
+          Loading calendar…
+        </div>
+      )}
+
+      {/* Regular loading/error (still useful after boot, e.g. manual reloads) */}
+      {booted && cal.loading && (
         <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-3 text-sm text-textSecondary">
           Loading…
         </div>
@@ -160,14 +172,15 @@ export default function ProCalendarPage() {
         </div>
       )}
 
-      {(view === 'day' || view === 'week') && (
+      {(view === 'day' || view === 'week') && booted && (
         <DayWeekGrid
           view={view}
           visibleDays={visibleDays}
           events={cal.events}
-          workingHours={cal.workingHours}
+          workingHoursSalon={cal.workingHoursSalon}
+          workingHoursMobile={cal.workingHoursMobile}
+          activeLocationType={cal.activeLocationType}
           timeZone={timeZone}
-          locationType={cal.activeLocationType}
           onClickEvent={cal.openBookingOrBlock}
           onCreateForClick={cal.openCreateForClick}
           onDragStart={cal.drag.onDragStart}
@@ -178,7 +191,7 @@ export default function ProCalendarPage() {
         />
       )}
 
-      {view === 'month' && (
+      {view === 'month' && booted && (
         <MonthGrid
           visibleDays={visibleDays}
           currentDate={currentDate}
@@ -195,7 +208,7 @@ export default function ProCalendarPage() {
       <CreateBookingModal
         open={cal.createOpen}
         onClose={() => cal.setCreateOpen(false)}
-        workingHours={cal.workingHours}
+        workingHours={cal.workingHoursActive}
         initialStart={cal.createInitialStart}
         timeZone={timeZone}
         services={cal.services}

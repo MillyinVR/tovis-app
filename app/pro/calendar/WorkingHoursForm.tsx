@@ -22,14 +22,15 @@ type WorkingHoursState = Record<WeekdayKey, DayConfig>
 
 type ApiDayConfig = {
   enabled: boolean
-  start: string
-  end: string
+  start: string // "HH:MM"
+  end: string   // "HH:MM"
 }
 
-export type ApiWorkingHours = Record<WeekdayKey, ApiDayConfig> | null
+// ✅ keep API type strict (object), but allow prop to be null/undefined
+export type ApiWorkingHours = Record<WeekdayKey, ApiDayConfig>
 
 type WorkingHoursFormProps = {
-  initialHours?: ApiWorkingHours
+  initialHours?: ApiWorkingHours | null
   onSaved?: (hours: ApiWorkingHours) => void
   locationType?: LocationType
 }
@@ -44,40 +45,72 @@ const DAYS: Array<{ key: WeekdayKey; label: string }> = [
   { key: 'sun', label: 'Sun' },
 ]
 
+const DAY_KEYS: WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-function parseTime24(time: string | null | undefined): { hour: number; minute: number; period: Period } {
-  if (!time || typeof time !== 'string') return { hour: 9, minute: 0, period: 'AM' }
+function isObject(x: unknown): x is Record<string, unknown> {
+  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+}
 
-  const m = /^(\d{1,2}):(\d{2})$/.exec(time.trim())
-  if (!m) return { hour: 9, minute: 0, period: 'AM' }
+/** Accept "9:00" or "09:00" and normalize to HH:MM, else null */
+function normalizeHHMM(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : ''
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s)
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
 
-  const rawH = Number(m[1])
-  const rawM = Number(m[2])
-
-  const hh24 = Number.isFinite(rawH) ? clamp(rawH, 0, 23) : 9
-  const mm = Number.isFinite(rawM) ? clamp(rawM, 0, 59) : 0
-
-  let period: Period = 'AM'
-  let hh12 = hh24
-
-  if (hh24 === 0) {
-    hh12 = 12
-    period = 'AM'
-  } else if (hh24 === 12) {
-    hh12 = 12
-    period = 'PM'
-  } else if (hh24 > 12) {
-    hh12 = hh24 - 12
-    period = 'PM'
-  } else {
-    hh12 = hh24
-    period = 'AM'
+function looksLikeApiHours(v: unknown): v is ApiWorkingHours {
+  if (!isObject(v)) return false
+  for (const d of DAY_KEYS) {
+    const row = (v as any)[d]
+    if (!isObject(row)) return false
+    if (typeof row.enabled !== 'boolean') return false
+    if (typeof row.start !== 'string') return false
+    if (typeof row.end !== 'string') return false
+    // don’t require valid times here — we normalize below
   }
+  return true
+}
 
-  return { hour: hh12, minute: mm, period }
+/**
+ * ✅ Real default:
+ * - Mon–Fri enabled 9–5
+ * - Sat/Sun off
+ */
+function defaultApiHours(): ApiWorkingHours {
+  const weekday = { enabled: true, start: '09:00', end: '17:00' }
+  const weekend = { enabled: false, start: '09:00', end: '17:00' }
+  return {
+    mon: { ...weekday },
+    tue: { ...weekday },
+    wed: { ...weekday },
+    thu: { ...weekday },
+    fri: { ...weekday },
+    sat: { ...weekend },
+    sun: { ...weekend },
+  }
+}
+
+function parseTime24(time: string | null | undefined): { hour: number; minute: number; period: Period } {
+  const t = normalizeHHMM(time)
+  if (!t) return { hour: 9, minute: 0, period: 'AM' }
+
+  const [hStr, mStr] = t.split(':')
+  const hh24 = clamp(Number(hStr), 0, 23)
+  const mm = clamp(Number(mStr), 0, 59)
+
+  if (hh24 === 0) return { hour: 12, minute: mm, period: 'AM' }
+  if (hh24 === 12) return { hour: 12, minute: mm, period: 'PM' }
+  if (hh24 > 12) return { hour: hh24 - 12, minute: mm, period: 'PM' }
+  return { hour: hh24, minute: mm, period: 'AM' }
 }
 
 function toTime24(hour: number, minute: number, period: Period): string {
@@ -137,28 +170,34 @@ function errorFromResponse(res: Response, data: any) {
   return `Request failed (${res.status}).`
 }
 
+/** UI state defaults match API defaults */
 function buildDefaultState(): WorkingHoursState {
+  const api = defaultApiHours()
   const next = {} as WorkingHoursState
   for (const { key } of DAYS) {
+    const cfg = api[key]
+    const startParsed = parseTime24(cfg.start)
+    const endParsed = parseTime24(cfg.end)
     next[key] = {
-      enabled: true,
-      startHour: 9,
-      startMinute: 0,
-      startPeriod: 'AM',
-      endHour: 5,
-      endMinute: 0,
-      endPeriod: 'PM',
+      enabled: Boolean(cfg.enabled),
+      startHour: startParsed.hour,
+      startMinute: startParsed.minute,
+      startPeriod: startParsed.period,
+      endHour: endParsed.hour,
+      endMinute: endParsed.minute,
+      endPeriod: endParsed.period,
     }
   }
   return next
 }
 
-function hydrateFromApi(api: ApiWorkingHours): WorkingHoursState {
+function hydrateFromApi(raw: ApiWorkingHours | null | undefined): WorkingHoursState {
   const next = buildDefaultState()
-  if (!api) return next
+  if (!raw) return next
+  if (!looksLikeApiHours(raw)) return next
 
   for (const { key } of DAYS) {
-    const cfg = api[key]
+    const cfg = raw[key]
     if (!cfg) continue
 
     const startParsed = parseTime24(cfg.start)
@@ -223,7 +262,6 @@ function Select({
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       className={[
-        // ✅ glass-consistent control
         'h-10 rounded-xl border border-white/10 bg-bgSecondary/40 px-2 text-[12px] font-extrabold text-textPrimary',
         'shadow-sm backdrop-blur-md ring-1 ring-white/6',
         'focus:outline-none focus:ring-2 focus:ring-accentPrimary/40',
@@ -236,11 +274,7 @@ function Select({
   )
 }
 
-export default function WorkingHoursForm({
-  initialHours,
-  onSaved,
-  locationType = 'SALON',
-}: WorkingHoursFormProps) {
+export default function WorkingHoursForm({ initialHours, onSaved, locationType = 'SALON' }: WorkingHoursFormProps) {
   const router = useRouter()
 
   const [state, setState] = useState<WorkingHoursState | null>(null)
@@ -250,10 +284,11 @@ export default function WorkingHoursForm({
 
   const minuteOptions = useMemo(() => [0, 15, 30, 45], [])
 
+  // ✅ token-only tint (no emerald/brand)
   const locationHint =
     locationType === 'MOBILE'
-      ? 'border-emerald-500/20 bg-emerald-500/6'
-      : 'border-brand/25 bg-brand/6'
+      ? 'border-toneInfo/25 bg-toneInfo/10'
+      : 'border-accentPrimary/25 bg-accentPrimary/10'
 
   useEffect(() => {
     let cancelled = false
@@ -263,8 +298,9 @@ export default function WorkingHoursForm({
         setError(null)
         setMessage(null)
 
+        // If parent gives us initialHours (even null), hydrate from it.
         if (initialHours !== undefined) {
-          const next = hydrateFromApi(initialHours)
+          const next = hydrateFromApi(initialHours ?? null)
           if (!cancelled) setState(next)
           return
         }
@@ -285,8 +321,10 @@ export default function WorkingHoursForm({
           return
         }
 
-        const api: ApiWorkingHours = (data?.workingHours ?? null) as ApiWorkingHours
+        const apiRaw = data?.workingHours
+        const api = looksLikeApiHours(apiRaw) ? (apiRaw as ApiWorkingHours) : null
         const next = hydrateFromApi(api)
+
         if (!cancelled) setState(next)
       } catch (e) {
         console.error(e)
@@ -350,6 +388,8 @@ export default function WorkingHoursForm({
 
       setMessage('Schedule saved.')
       onSaved?.(payload)
+
+      // Refresh so calendar overlay + any server components update
       router.refresh()
     } catch (err: any) {
       console.error(err)
@@ -365,15 +405,14 @@ export default function WorkingHoursForm({
 
   return (
     <form onSubmit={handleSubmit} className="text-textPrimary">
-      {/* ✅ context strip: what you are editing */}
+      {/* context strip */}
       <div className={['mb-3 rounded-2xl border px-3 py-2 text-[12px] font-semibold text-textSecondary', locationHint].join(' ')}>
         Editing base schedule for{' '}
         <span className="font-extrabold text-textPrimary">{locationType === 'SALON' ? 'Salon' : 'Mobile'}</span>
       </div>
 
-      {/* ✅ mobile-first layout: each day becomes a card row on small screens */}
       <div className="grid gap-2">
-        {/* Header labels (desktop only) */}
+        {/* header labels desktop */}
         <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-2 text-[12px] md:grid">
           <div />
           <div className="font-extrabold text-textPrimary">Start</div>
@@ -393,7 +432,6 @@ export default function WorkingHoursForm({
                 faded ? 'opacity-70' : 'opacity-100',
               ].join(' ')}
             >
-              {/* Day + toggle */}
               <label className="flex items-center gap-2 text-[12px] font-extrabold">
                 <input
                   type="checkbox"
@@ -407,7 +445,7 @@ export default function WorkingHoursForm({
 
               {/* Start */}
               <div className="grid grid-cols-3 gap-2">
-                <div className="md:hidden text-[11px] font-semibold text-textSecondary col-span-3">Start</div>
+                <div className="md:hidden col-span-3 text-[11px] font-semibold text-textSecondary">Start</div>
 
                 <Select
                   value={cfg.startHour}
@@ -445,7 +483,7 @@ export default function WorkingHoursForm({
 
               {/* End */}
               <div className="grid grid-cols-3 gap-2">
-                <div className="md:hidden text-[11px] font-semibold text-textSecondary col-span-3">End</div>
+                <div className="md:hidden col-span-3 text-[11px] font-semibold text-textSecondary">End</div>
 
                 <Select
                   value={cfg.endHour}
@@ -503,8 +541,7 @@ export default function WorkingHoursForm({
         </div>
 
         <div className="mt-2 text-[11px] text-textSecondary">
-          This is your base schedule for <span className="font-semibold">{locationType.toLowerCase()}</span>. Availability also depends on buffers,
-          bookings, holds, and blocks.
+          This sets your base availability for <span className="font-semibold">{locationType.toLowerCase()}</span>. Bookings and blocks will still override it.
         </div>
       </div>
     </form>

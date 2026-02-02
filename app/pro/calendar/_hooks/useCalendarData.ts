@@ -16,7 +16,7 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 import { safeJson } from '../_utils/http'
-import { addDays, startOfMonth, startOfWeek, toIso, roundUpToNext15, clamp } from '../_utils/date'
+import { startOfMonth, startOfWeek, toIso, clamp } from '../_utils/date'
 import {
   PX_PER_MINUTE,
   SNAP_MINUTES,
@@ -25,7 +25,6 @@ import {
   computeDurationMinutesFromIso,
   isBlockedEvent,
   extractBlockId,
-  blockToEvent,
   isOutsideWorkingHours,
 } from '../_utils/calendarMath'
 import {
@@ -69,9 +68,14 @@ function toTimeInputValueInTimeZone(dateUtc: Date, tz: string) {
 
 /**
  * View range in UTC, anchored to TZ day boundaries (strict).
- * - Day: [start of day, +1 day)
- * - Week: start at Sunday 00:00 in tz, 7 days
- * - Month view: 6-week grid starting at week-start containing 1st of month (tz), 42 days
+ *
+ * IMPORTANT:
+ * - Week start MUST match the UI visibleDays construction.
+ * - Your UI uses MONDAY-first weeks (Mon..Sun).
+ *
+ * - Day:   [start of day, +1 day)
+ * - Week:  start at Monday 00:00 in tz, 7 days
+ * - Month: 6-week grid starting at Monday of the week containing the 1st (tz), 42 days
  */
 function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
   const safeTz = sanitizeTimeZone(tz, DEFAULT_TIME_ZONE)
@@ -82,16 +86,14 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     return { from, to }
   }
 
-  // Week start: compute in TZ, then build from local Y/M/D at 00:00 in TZ.
+  // Week start: Monday-first (Mon=0..Sun=6)
   if (v === 'week') {
     const p = getZonedParts(focusUtc, safeTz)
 
-    // Day-of-week in TZ (Sun=0..Sat=6)
     const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(focusUtc)
-    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
-    const dow = map[weekdayShort] ?? 0
+    const mapMon: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
+    const dow = mapMon[weekdayShort] ?? 0
 
-    // Local Y/M/D for week start in TZ
     const weekStartDay = p.day - dow
 
     const from = zonedTimeToUtc({
@@ -108,7 +110,7 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     return { from, to }
   }
 
-  // Month grid: find local first-of-month in TZ, then go to week start containing it, then 42 days.
+  // Month grid: find local first-of-month in TZ, then go to Monday of that week, then 42 days.
   const p = getZonedParts(focusUtc, safeTz)
 
   const firstOfMonthUtc = zonedTimeToUtc({
@@ -121,11 +123,9 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     timeZone: safeTz,
   })
 
-  const firstWeekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(
-    firstOfMonthUtc,
-  )
-  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
-  const firstDow = map[firstWeekdayShort] ?? 0
+  const firstWeekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(firstOfMonthUtc)
+  const mapMon: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
+  const firstDow = mapMon[firstWeekdayShort] ?? 0
 
   const firstParts = getZonedParts(firstOfMonthUtc, safeTz)
   const gridStartDay = firstParts.day - firstDow
@@ -139,6 +139,7 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     second: 0,
     timeZone: safeTz,
   })
+
   const to = new Date(from.getTime() + 42 * 24 * 60 * 60_000)
   return { from, to }
 }
@@ -159,7 +160,14 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [canMobile, setCanMobile] = useState(false)
   const [activeLocationType, setActiveLocationType] = useState<LocationType>('SALON')
 
-  const [workingHours, setWorkingHours] = useState<WorkingHoursJson>(null)
+  const [workingHoursSalon, setWorkingHoursSalon] = useState<WorkingHoursJson>(null)
+  const [workingHoursMobile, setWorkingHoursMobile] = useState<WorkingHoursJson>(null)
+
+  const workingHoursActive = useMemo(
+    () => (activeLocationType === 'MOBILE' ? workingHoursMobile : workingHoursSalon),
+    [activeLocationType, workingHoursSalon, workingHoursMobile],
+  )
+
   const [stats, setStats] = useState<CalendarStats>(null)
 
   const [loading, setLoading] = useState(true)
@@ -186,7 +194,7 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [durationMinutes, setDurationMinutes] = useState<number>(60)
   const [allowOutsideHours, setAllowOutsideHours] = useState(false)
 
-  // ✅ NEW: separate state for ManagementModal actions (don’t fight booking modal save state)
+  // ✅ separate state for ManagementModal actions
   const [managementActionBusyId, setManagementActionBusyId] = useState<string | null>(null)
   const [managementActionError, setManagementActionError] = useState<string | null>(null)
 
@@ -317,10 +325,29 @@ export function useCalendarData({ view, currentDate }: Args) {
       setLoading(true)
       setError(null)
 
-      // 1) core
-      const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
-      const data = await safeJson(res)
+      // We start with whatever tz we currently have (initially UTC).
+      // If the API returns a different valid tz, we’ll refetch once so range aligns to pro tz.
+      const tzGuess = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
+      async function fetchCalendarFor(tzForRange: string) {
+        const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, tzForRange)
+
+        // DEV sanity check (remove later if you want)
+        if (process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.log('[Calendar range]', { view, tzForRange, from: from.toISOString(), to: to.toISOString() })
+        }
+
+        const res = await fetch(
+          `/api/pro/calendar?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`,
+          { cache: 'no-store' },
+        )
+        const data = await safeJson(res)
+        return { res, data, from, to }
+      }
+
+      // 1) fetch using current tz guess
+      let { res, data } = await fetchCalendarFor(tzGuess)
       if (seq !== loadSeqRef.current) return
 
       if (!res.ok) {
@@ -331,11 +358,22 @@ export function useCalendarData({ view, currentDate }: Args) {
       const apiTzRaw = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
       const apiTzValid = isValidIanaTimeZone(apiTzRaw)
 
-      // ✅ Strict: if API tz is missing/invalid, do NOT use browser tz.
-      // Use UTC for rendering and force tz setup in UI.
+      // ✅ strict: never fall back to browser tz
       const nextTz = apiTzValid ? apiTzRaw : DEFAULT_TIME_ZONE
-      setTimeZone(nextTz)
 
+      // 2) if API gives a different valid tz, refetch ONCE so range boundaries are correct
+      if (apiTzValid && nextTz !== tzGuess) {
+        const second = await fetchCalendarFor(nextTz)
+        if (seq !== loadSeqRef.current) return
+
+        if (second.res.ok) {
+          res = second.res
+          data = second.data
+        }
+      }
+
+      // Apply tz + setup flags
+      setTimeZone(nextTz)
       const needsSetup = Boolean(data?.needsTimeZoneSetup) || !apiTzValid
       setNeedsTimeZoneSetup(needsSetup)
 
@@ -343,15 +381,14 @@ export function useCalendarData({ view, currentDate }: Args) {
         console.warn('[Calendar] API timezone missing/invalid; forcing UTC until pro sets timezone.', { apiTzRaw })
       }
 
+      // Capabilities + active location mode
       const nextCanSalon = Boolean(data?.canSalon ?? true)
       const nextCanMobile = Boolean(data?.canMobile ?? false)
       setCanSalon(nextCanSalon)
       setCanMobile(nextCanMobile)
-
       setActiveLocationType((prev) => pickLocationType(nextCanSalon, nextCanMobile, prev))
 
-      const bookingEvents = (Array.isArray(data?.events) ? data.events : []) as CalendarEvent[]
-
+      // Stats + management + auto-accept
       setStats((data?.stats ?? null) as CalendarStats)
       setAutoAccept(Boolean(data?.autoAcceptBookings))
 
@@ -367,30 +404,18 @@ export function useCalendarData({ view, currentDate }: Args) {
         setManagement({ todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
       }
 
-      // 2) range blocks (STRICT TZ RANGE)
-      const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, nextTz)
+      // ✅ Calendar API returns BOTH bookings + blocks in data.events
+      // ✅ Should include past/present/future within the requested view range, excluding cancelled.
+      const apiEvents = (Array.isArray(data?.events) ? data.events : []) as CalendarEvent[]
 
-      const blocksRes = await fetch(
-        `/api/pro/calendar/blocked?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`,
-        { cache: 'no-store' },
-      )
-      const blocksData = await safeJson(blocksRes)
+      // 3) working hours for BOTH types (so DayColumn can show both overlays)
+      const [nextSalon, nextMobile] = await Promise.all([loadWorkingHoursFor('SALON'), loadWorkingHoursFor('MOBILE')])
       if (seq !== loadSeqRef.current) return
+      setWorkingHoursSalon(nextSalon)
+      setWorkingHoursMobile(nextMobile)
 
-      const blocks = (blocksRes.ok && Array.isArray(blocksData?.blocks) ? blocksData.blocks : []) as BlockRow[]
-      const blockEvents = blocks.map(blockToEvent)
-
-      // 3) working hours for ACTIVE type
-      const effectiveLocationType = pickLocationType(nextCanSalon, nextCanMobile, activeLocationType)
-      const nextHours = await loadWorkingHoursFor(effectiveLocationType)
-
-      if (seq !== loadSeqRef.current) return
-      setWorkingHours(nextHours)
-
-      // 4) merge + sort
-      const nextEvents = [...blockEvents, ...bookingEvents].sort(
-        (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
-      )
+      // 4) sort + set
+      const nextEvents = [...apiEvents].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
       setEvents(nextEvents)
     } catch (e) {
       console.error(e)
@@ -411,24 +436,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     void loadCalendar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentDate])
-
-  // Reload workingHours when switching SALON/MOBILE
-  useEffect(() => {
-    let cancelled = false
-    async function loadHoursOnly() {
-      try {
-        const next = await loadWorkingHoursFor(activeLocationType)
-        if (!cancelled) setWorkingHours(next)
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load working hours.')
-      }
-    }
-    void loadHoursOnly()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLocationType])
 
   // blocked minutes today (timezone-aware)
   const blockedMinutesToday = useMemo(() => {
@@ -623,7 +630,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       day: dayAnchor,
       startMinutes,
       endMinutes,
-      workingHours,
+      workingHours: workingHoursActive,
       timeZone: sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE),
     })
   }
@@ -661,7 +668,7 @@ export function useCalendarData({ view, currentDate }: Args) {
         day: dayAnchor,
         startMinutes: hh * 60 + mi,
         endMinutes: hh * 60 + mi + snappedDur,
-        workingHours,
+        workingHours: workingHoursActive,
         timeZone: tz,
       })
 
@@ -1004,8 +1011,12 @@ export function useCalendarData({ view, currentDate }: Args) {
     activeLocationType,
     setActiveLocationType,
 
-    workingHours,
-    setWorkingHours,
+    // ✅ hours: both + active
+    workingHoursSalon,
+    setWorkingHoursSalon,
+    workingHoursMobile,
+    setWorkingHoursMobile,
+    workingHoursActive,
 
     stats,
 
@@ -1069,7 +1080,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     approveBooking,
     denyBooking,
 
-    // ✅ NEW: for ManagementModal Option B
+    // ✅ for ManagementModal Option B
     approveBookingById,
     denyBookingById,
     managementActionBusyId,

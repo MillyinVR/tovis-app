@@ -1,11 +1,10 @@
+// app/pro/calendar/_components/_grid/TimeGutter.tsx
 'use client'
 
 import { useMemo } from 'react'
 import { PX_PER_MINUTE } from '../../_utils/calendarMath'
 
 function hourLabel(hour24: number) {
-  // Locale-friendly 12-hour label without timezone side-effects
-  // 0 -> 12 AM, 13 -> 1 PM, etc.
   const h = hour24 % 12
   const hour12 = h === 0 ? 12 : h
   const suffix = hour24 < 12 ? 'AM' : 'PM'
@@ -17,14 +16,23 @@ export function TimeGutter(props: { totalMinutes: number; timeZone: string }) {
   const hours = useMemo(() => Array.from({ length: 24 }, (_, h) => h), [])
 
   return (
-    <div className="relative border-r border-white/8 bg-bgSecondary/25">
-      {/* subtle vertical fade so it feels less “boxed” */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-bgPrimary/25 to-transparent" />
+    <div
+      className={[
+        'relative',
+        // ✅ inherit CalendarShell paper — don’t repaint it gray
+        'bg-transparent',
+        'border-r border-white/10',
+      ].join(' ')}
+    >
+      {/* subtle top fade (still “paper”) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-white/10 to-transparent" />
+
+      {/* slight inner divider */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/10" />
 
       <div className="relative" style={{ height: totalMinutes * PX_PER_MINUTE }}>
         {hours.map((h) => (
           <div key={h} className="relative" style={{ height: 60 * PX_PER_MINUTE }}>
-            {/* Hour */}
             <div
               className="absolute left-0 right-0 text-center text-[13px] font-semibold text-textSecondary"
               style={{ top: 2 }}
@@ -32,7 +40,6 @@ export function TimeGutter(props: { totalMinutes: number; timeZone: string }) {
               {hourLabel(h)}
             </div>
 
-            {/* Quarter-hour ticks */}
             {[15, 30, 45].map((min) => (
               <div
                 key={min}

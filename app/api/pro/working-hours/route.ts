@@ -22,7 +22,7 @@ function normalizeMode(v: unknown): LocationMode {
   return s === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
-function preferredTypesForMode(mode: LocationMode): ProfessionalLocationType[] {
+function typesForMode(mode: LocationMode): ProfessionalLocationType[] {
   return mode === 'MOBILE' ? (['MOBILE_BASE'] as const) : (['SALON', 'SUITE'] as const)
 }
 
@@ -63,13 +63,16 @@ function looksLikeWorkingHours(v: unknown): v is WorkingHoursObj {
 }
 
 function normalizeWorkingHours(raw: WorkingHoursObj): WorkingHoursObj {
-  const out = defaultWorkingHours()
+  const fallback = defaultWorkingHours()
+  const out = { ...fallback } as WorkingHoursObj
+
   for (const d of DAYS) {
     const src = raw[d]
-    const start = normalizeHHMM(src?.start) ?? out[d].start
-    const end = normalizeHHMM(src?.end) ?? out[d].end
+    const start = normalizeHHMM(src?.start) ?? fallback[d].start
+    const end = normalizeHHMM(src?.end) ?? fallback[d].end
     out[d] = { enabled: Boolean(src?.enabled), start, end }
   }
+
   return out
 }
 
@@ -78,13 +81,46 @@ function safeHoursFromDb(raw: unknown): { hours: WorkingHoursObj; usedDefault: b
   return { hours: defaultWorkingHours(), usedDefault: true }
 }
 
-async function ensureAtLeastOneBookableLocationForModeTx(args: {
+/**
+ * Pick a representative bookable location for a given mode.
+ * - First try matching types for that mode (salon/suite OR mobile_base)
+ * - Prefer primary, then oldest (stable)
+ * - If none exist for that mode, fallback to ANY bookable location
+ *
+ * NOTE: This is only used for GET responses and UI overlays.
+ * Saving behavior is handled separately (POST) and updates all matching bookable locations.
+ */
+async function pickRepresentativeLocation(args: { professionalId: string; mode: LocationMode }) {
+  const { professionalId, mode } = args
+  const types = typesForMode(mode)
+
+  const loc = await prisma.professionalLocation.findFirst({
+    where: { professionalId, isBookable: true, type: { in: types as any } },
+    select: { id: true, type: true, isPrimary: true, workingHours: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+  })
+
+  if (loc) return loc
+
+  return prisma.professionalLocation.findFirst({
+    where: { professionalId, isBookable: true },
+    select: { id: true, type: true, isPrimary: true, workingHours: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+  })
+}
+
+/**
+ * Ensure at least one bookable location exists for the requested mode.
+ * We do NOT want to silently create locations during GET.
+ * This is POST-only so saving hours never "updates 0 rows" due to missing locations.
+ */
+async function ensureBookableLocationForModeTx(args: {
   tx: Prisma.TransactionClient
   professionalId: string
   mode: LocationMode
 }) {
   const { tx, professionalId, mode } = args
-  const types = preferredTypesForMode(mode)
+  const types = typesForMode(mode)
 
   const existing = await tx.professionalLocation.findFirst({
     where: { professionalId, isBookable: true, type: { in: types as any } },
@@ -115,25 +151,6 @@ async function ensureAtLeastOneBookableLocationForModeTx(args: {
   return created.id
 }
 
-async function pickRepresentativeLocation(args: { professionalId: string; mode: LocationMode }) {
-  const { professionalId, mode } = args
-  const types = preferredTypesForMode(mode)
-
-  const loc = await prisma.professionalLocation.findFirst({
-    where: { professionalId, isBookable: true, type: { in: types as any } },
-    select: { id: true, type: true, isPrimary: true, workingHours: true },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-  })
-
-  if (loc) return loc
-
-  return prisma.professionalLocation.findFirst({
-    where: { professionalId, isBookable: true },
-    select: { id: true, type: true, isPrimary: true, workingHours: true },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-  })
-}
-
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
@@ -145,6 +162,8 @@ export async function GET(req: Request) {
 
     const loc = await pickRepresentativeLocation({ professionalId, mode })
 
+    // If they literally have no bookable location at all, return defaults
+    // and make it explicit to the UI that this is a placeholder.
     if (!loc) {
       return jsonOk(
         {
@@ -188,7 +207,7 @@ export async function POST(req: Request) {
 
     const { searchParams } = new URL(req.url)
     const mode = normalizeMode(searchParams.get('locationType'))
-    const types = preferredTypesForMode(mode)
+    const types = typesForMode(mode)
 
     const body = await req.json().catch(() => null)
     if (!isObject(body)) return jsonFail(400, 'Invalid body')
@@ -201,15 +220,16 @@ export async function POST(req: Request) {
     const normalized = normalizeWorkingHours(workingHoursRaw)
 
     const result = await prisma.$transaction(async (tx) => {
-      // Ensure we have at least one *bookable* location for this mode (so updateMany can’t hit zero)
-      await ensureAtLeastOneBookableLocationForModeTx({ tx, professionalId, mode })
+      // ✅ Make sure the mode has at least one bookable location
+      await ensureBookableLocationForModeTx({ tx, professionalId, mode })
 
+      // ✅ Update ALL bookable locations that match the mode types
       const updated = await tx.professionalLocation.updateMany({
         where: { professionalId, isBookable: true, type: { in: types as any } },
         data: { workingHours: normalized as unknown as Prisma.InputJsonValue },
       })
 
-      // If we updated nothing, something is misconfigured (wrong enum types, isBookable false, etc.)
+      // If we updated nothing, we want rich debug (because it means your location data is misconfigured).
       if (updated.count === 0) {
         const all = await tx.professionalLocation.findMany({
           where: { professionalId },
@@ -221,11 +241,7 @@ export async function POST(req: Request) {
         return {
           ok: false as const,
           updatedCount: 0,
-          debug: {
-            mode,
-            expectedTypes: types,
-            locations: all,
-          },
+          debug: { mode, expectedTypes: types, locations: all },
         }
       }
 
@@ -260,6 +276,7 @@ export async function POST(req: Request) {
         locationId: rep?.id ?? null,
         location: rep ? { id: rep.id, type: rep.type, isPrimary: rep.isPrimary } : null,
         workingHours: normalized,
+        usedDefault: false,
         updatedCount: result.updatedCount,
         updatedLocationIds: result.updatedLocations.map((l) => l.id),
       },

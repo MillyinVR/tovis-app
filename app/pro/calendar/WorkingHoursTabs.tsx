@@ -4,6 +4,53 @@
 import { useEffect, useMemo, useState } from 'react'
 import WorkingHoursForm, { type ApiWorkingHours, type LocationType } from './WorkingHoursForm'
 
+type Props = {
+  canSalon: boolean
+  canMobile: boolean
+  activeLocationType?: LocationType
+  onChangeLocationType?: (next: LocationType) => void
+  onSavedAny?: () => void
+}
+
+/**
+ * A safe, explicit default so we never feed `null` into the form.
+ * Shape matches the API: mon..sun => { enabled, start, end }
+ */
+function defaultHours(): ApiWorkingHours {
+  const make = (enabled: boolean) => ({ enabled, start: '09:00', end: '17:00' })
+  return {
+    mon: make(true),
+    tue: make(true),
+    wed: make(true),
+    thu: make(true),
+    fri: make(true),
+    sat: make(false),
+    sun: make(false),
+  } as any
+}
+
+function isObject(x: unknown): x is Record<string, unknown> {
+  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+}
+
+/** Lightweight shape check so “null/garbage” can’t silently become “closed” */
+function looksLikeHours(v: unknown): v is ApiWorkingHours {
+  if (!isObject(v)) return false
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+  for (const d of days) {
+    const row = (v as any)[d]
+    if (!isObject(row)) return false
+    if (typeof row.enabled !== 'boolean') return false
+    if (typeof row.start !== 'string') return false
+    if (typeof row.end !== 'string') return false
+  }
+  return true
+}
+
+async function safeJson(res: Response) {
+  return res.json().catch(() => ({})) as Promise<any>
+}
+
 function TabButton({
   active,
   onClick,
@@ -15,10 +62,11 @@ function TabButton({
   children: React.ReactNode
   tone: 'salon' | 'mobile'
 }) {
+  // ✅ token-based (no random emerald literal)
   const accent =
     tone === 'salon'
-      ? 'border-brand/30 bg-brand/8'
-      : 'border-emerald-500/25 bg-emerald-500/6'
+      ? 'border-accentPrimary/30 bg-accentPrimary/10'
+      : 'border-toneInfo/30 bg-toneInfo/10'
 
   return (
     <button
@@ -39,23 +87,19 @@ function TabButton({
   )
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
-
 export default function WorkingHoursTabs({
   canSalon,
   canMobile,
   activeLocationType,
   onChangeLocationType,
   onSavedAny,
-}: {
-  canSalon: boolean
-  canMobile: boolean
-  activeLocationType?: LocationType
-  onChangeLocationType?: (next: LocationType) => void
-  onSavedAny?: () => void
-}) {
+}: Props) {
+  /**
+   * UI tabs:
+   * - if they can do salon => show salon tab
+   * - if they can do mobile => show mobile tab
+   * - otherwise show salon tab (so UI doesn’t die)
+   */
   const availableTabs = useMemo(() => {
     const tabs: LocationType[] = []
     if (canSalon) tabs.push('SALON')
@@ -72,46 +116,66 @@ export default function WorkingHoursTabs({
     else setLocalActive(next)
   }
 
+  /**
+   * ✅ Always keep non-null hours in state.
+   * If server gives null/invalid, we fall back to defaults.
+   */
   const [initialByMode, setInitialByMode] = useState<Record<LocationType, ApiWorkingHours>>({
-    SALON: null,
-    MOBILE: null,
+    SALON: defaultHours(),
+    MOBILE: defaultHours(),
   })
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Keep active tab valid if capabilities change
   useEffect(() => {
     const next = availableTabs.includes(active) ? active : availableTabs[0]
     if (next !== active) setActive(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableTabs.join('|')])
 
+  /**
+   * ✅ Load BOTH schedules (SALON + MOBILE) whenever possible.
+   * Even if UI only shows one tab, the calendar overlay benefits from having both.
+   *
+   * This prevents the “why do I see nothing?” issue when union logic expects both.
+   */
   useEffect(() => {
     let cancelled = false
+
+    async function load(mode: LocationType) {
+      const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(mode)}`, {
+        method: 'GET',
+        cache: 'no-store',
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(data?.error || `Failed to load ${mode} hours.`)
+
+      const raw = data?.workingHours
+      return looksLikeHours(raw) ? (raw as ApiWorkingHours) : defaultHours()
+    }
 
     async function loadAll() {
       try {
         setError(null)
         setLoading(true)
 
-        const results = await Promise.all(
-          availableTabs.map(async (m) => {
-            const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(m)}`, {
-              method: 'GET',
-              cache: 'no-store',
-            })
-            const data = await safeJson(res)
-            if (!res.ok) throw new Error(data?.error || `Failed to load ${m} hours.`)
-            return [m, (data?.workingHours ?? null) as ApiWorkingHours] as const
-          }),
-        )
+        const wantsSalon = canSalon || availableTabs.includes('SALON')
+        const wantsMobile = canMobile || availableTabs.includes('MOBILE')
+
+        const [salon, mobile] = await Promise.all([
+          wantsSalon ? load('SALON') : Promise.resolve(defaultHours()),
+          wantsMobile ? load('MOBILE') : Promise.resolve(defaultHours()),
+        ])
 
         if (cancelled) return
 
-        setInitialByMode((prev) => {
-          const next = { ...prev }
-          for (const [m, hours] of results) next[m] = hours
-          return next
-        })
+        setInitialByMode((prev) => ({
+          ...prev,
+          SALON: salon,
+          MOBILE: mobile,
+        }))
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Failed to load hours.')
       } finally {
@@ -123,7 +187,7 @@ export default function WorkingHoursTabs({
     return () => {
       cancelled = true
     }
-  }, [availableTabs])
+  }, [canSalon, canMobile, availableTabs])
 
   const showTabs = availableTabs.length > 1
 
@@ -141,11 +205,10 @@ export default function WorkingHoursTabs({
               Mobile hours
             </TabButton>
           )}
+
           <div className="ml-auto hidden text-xs font-semibold text-textSecondary md:block">
             Editing:{' '}
-            <span className="font-extrabold text-textPrimary">
-              {active === 'SALON' ? 'Salon' : 'Mobile'}
-            </span>
+            <span className="font-extrabold text-textPrimary">{active === 'SALON' ? 'Salon' : 'Mobile'}</span>
           </div>
         </div>
       )}
@@ -156,9 +219,13 @@ export default function WorkingHoursTabs({
       <div className="tovis-glass-soft tovis-noise p-4">
         <WorkingHoursForm
           locationType={active}
-          initialHours={initialByMode[active]}
+          // ✅ never null now
+          initialHours={initialByMode[active] ?? defaultHours()}
           onSaved={(hours) => {
-            setInitialByMode((prev) => ({ ...prev, [active]: hours }))
+            // ✅ defensive: if form returns garbage somehow, don’t destroy schedule
+            const safe = looksLikeHours(hours) ? hours : defaultHours()
+
+            setInitialByMode((prev) => ({ ...prev, [active]: safe }))
             onSavedAny?.()
           }}
         />

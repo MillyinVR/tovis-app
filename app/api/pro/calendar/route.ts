@@ -33,7 +33,14 @@ function locationSupportsMobile(type: ProfessionalLocationType) {
   return type === 'MOBILE_BASE'
 }
 
-export async function GET() {
+function toDateOrNull(v: unknown) {
+  const s = typeof v === 'string' ? v.trim() : ''
+  if (!s) return null
+  const d = new Date(s)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+export async function GET(req: Request) {
   try {
     const auth = await requirePro()
     if (auth.res) return auth.res
@@ -67,14 +74,26 @@ export async function GET() {
     const proTz = sanitizeTimeZone(tzRaw, 'UTC')
     const needsTimeZoneSetup = !tzValid
 
+    // ✅ IMPORTANT: range comes from client
+    const url = new URL(req.url)
     const now = new Date()
-    const from = startOfDayUtcInTimeZone(now, proTz)
-    const toExclusive = addDaysUtc(from, 60)
+
+    const defaultFrom = startOfDayUtcInTimeZone(now, proTz)
+    const defaultToExclusive = addDaysUtc(defaultFrom, 90) // a safer default than 60
+
+    const from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
+    const toExclusive = toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
+
+    // guardrails (avoid insane queries)
+    const maxSpanDays = 370
+    const spanDays = Math.ceil((toExclusive.getTime() - from.getTime()) / (24 * 60 * 60_000))
+    const safeToExclusive =
+      spanDays > maxSpanDays ? new Date(from.getTime() + maxSpanDays * 24 * 60 * 60_000) : toExclusive
 
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        scheduledFor: { gte: from, lt: toExclusive },
+        scheduledFor: { gte: from, lt: safeToExclusive },
         NOT: { status: 'CANCELLED' satisfies BookingStatus },
       },
       select: {
@@ -99,14 +118,14 @@ export async function GET() {
         },
       },
       orderBy: { scheduledFor: 'asc' },
-      take: 800,
+      take: 1200,
     })
 
     const blocks = await prisma.calendarBlock.findMany({
-      where: { professionalId, startsAt: { lt: toExclusive }, endsAt: { gt: from } },
+      where: { professionalId, startsAt: { lt: safeToExclusive }, endsAt: { gt: from } },
       select: { id: true, startsAt: true, endsAt: true, note: true, locationId: true },
       orderBy: { startsAt: 'asc' },
-      take: 800,
+      take: 1200,
     })
 
     const bookingEvents = bookings.map((b) => {
@@ -130,7 +149,7 @@ export async function GET() {
       const clientName = fn || ln ? `${fn} ${ln}`.trim() : email || 'Client'
 
       return {
-        id: String(b.id), // ✅ booking id is clean
+        id: String(b.id),
         kind: 'BOOKING' as const,
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
@@ -162,7 +181,7 @@ export async function GET() {
       const title = bl.note?.trim() ? bl.note.trim() : 'Blocked time'
 
       return {
-        id: `block_${String(bl.id)}`, // ✅ block id is prefixed
+        id: `block_${String(bl.id)}`,
         kind: 'BLOCK' as const,
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
@@ -180,6 +199,7 @@ export async function GET() {
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     )
 
+    // stats/management still “today” based on proTz
     const todayStart = startOfDayUtcInTimeZone(now, proTz)
     const todayEndExclusive = addDaysUtc(todayStart, 1)
 
@@ -195,8 +215,7 @@ export async function GET() {
 
     const pendingRequestEvents = bookingEvents.filter((e) => {
       const s = String(e.status || '').toUpperCase()
-      if (s !== 'PENDING') return false
-      return new Date(e.startsAt).getTime() >= now.getTime()
+      return s === 'PENDING' && new Date(e.startsAt).getTime() >= now.getTime()
     })
 
     const waitlistTodayEvents = bookingEvents.filter(
