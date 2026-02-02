@@ -1,3 +1,4 @@
+// app/(auth)/_components/signup/SignupClient.tsx
 'use client'
 
 import Link from 'next/link'
@@ -39,12 +40,6 @@ function HelpText({ children }: { children: React.ReactNode }) {
   return <span className="text-xs text-textSecondary/80">{children}</span>
 }
 
-/**
- * Premium input:
- * - soft fill (not “empty rectangle”)
- * - restrained border
- * - calm focus ring
- */
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
@@ -80,109 +75,133 @@ function PasswordToggle({ pressed, onClick }: { pressed: boolean; onClick: () =>
   )
 }
 
-function RoleSegment({
-  active,
-  onClick,
-  title,
-  subtitle,
+function PillToggle({
+  left,
+  right,
+  value,
+  onChange,
 }: {
-  active: boolean
-  onClick: () => void
-  title: string
-  subtitle: string
+  left: { label: string; value: string }
+  right: { label: string; value: string }
+  value: string
+  onChange: (v: string) => void
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cx(
-        'relative w-full select-none rounded-full px-3 py-1.5 text-left transition',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-        active
-          ? 'bg-accentPrimary/14 text-textPrimary ring-1 ring-accentPrimary/25'
-          : 'text-textSecondary hover:text-textPrimary',
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="grid gap-0.5">
-          <div className="text-sm font-black">{title}</div>
-          <div className={cx('text-[11px] leading-snug', active ? 'text-textSecondary/85' : 'text-textSecondary/70')}>
-            {subtitle}
-          </div>
-        </div>
+  const base =
+    'inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-accentPrimary/20'
+  const active = 'bg-accentPrimary/14 text-textPrimary ring-1 ring-accentPrimary/25'
+  const idle = 'text-textSecondary hover:text-textPrimary'
 
-        <span
-          className={cx(
-            'h-2.5 w-2.5 rounded-full transition',
-            active ? 'bg-accentPrimary ring-2 ring-accentPrimary/20' : 'bg-surfaceGlass/20',
-          )}
-          aria-hidden="true"
-        />
+  return (
+    <div className={cx('rounded-full border p-1', 'border-surfaceGlass/12 bg-bgPrimary/25 tovis-glass-soft')}>
+      <div className="grid grid-cols-2 gap-1">
+        <button type="button" className={cx(base, value === left.value ? active : idle)} onClick={() => onChange(left.value)}>
+          {left.label}
+        </button>
+        <button type="button" className={cx(base, value === right.value ? active : idle)} onClick={() => onChange(right.value)}>
+          {right.label}
+        </button>
       </div>
-    </button>
+    </div>
   )
 }
 
-function PrimaryButton({
-  children,
-  loading,
-  disabled,
-}: {
-  children: React.ReactNode
-  loading?: boolean
-  disabled?: boolean
-}) {
+type GooglePrediction = {
+  placeId: string
+  description: string
+  mainText: string
+  secondaryText: string
+}
+
+type GooglePlaceDetails = {
+  placeId: string
+  name: string | null
+  formattedAddress: string | null
+  lat: number | null
+  lng: number | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  countryCode: string | null
+}
+
+async function fetchAutocomplete(args: { input: string; sessionToken: string }) {
+  const url = new URL('/api/google/places/autocomplete', window.location.origin)
+  url.searchParams.set('input', args.input)
+  url.searchParams.set('sessionToken', args.sessionToken)
+  url.searchParams.set('components', 'country:us')
+  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || 'Autocomplete failed.')
+  const predictions = Array.isArray(data?.predictions) ? data.predictions : []
+  return predictions.map((p: any) => ({
+    placeId: String(p?.placeId ?? ''),
+    description: String(p?.description ?? ''),
+    mainText: String(p?.mainText ?? ''),
+    secondaryText: String(p?.secondaryText ?? ''),
+  })) as GooglePrediction[]
+}
+
+async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }) {
+  const url = new URL('/api/google/places/details', window.location.origin)
+  url.searchParams.set('placeId', args.placeId)
+  url.searchParams.set('sessionToken', args.sessionToken)
+  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || 'Place details failed.')
+  const p = data?.place ?? {}
+  return {
+    placeId: String(p?.placeId ?? args.placeId),
+    name: typeof p?.name === 'string' ? p.name : null,
+    formattedAddress: typeof p?.formattedAddress === 'string' ? p.formattedAddress : null,
+    lat: typeof p?.lat === 'number' ? p.lat : null,
+    lng: typeof p?.lng === 'number' ? p.lng : null,
+    city: typeof p?.city === 'string' ? p.city : null,
+    state: typeof p?.state === 'string' ? p.state : null,
+    postalCode: typeof p?.postalCode === 'string' ? p.postalCode : null,
+    countryCode: typeof p?.countryCode === 'string' ? p.countryCode : null,
+  } as GooglePlaceDetails
+}
+
+async function fetchTimeZoneId(args: { lat: number; lng: number }) {
+  const url = new URL('/api/google/timezone', window.location.origin)
+  url.searchParams.set('lat', String(args.lat))
+  url.searchParams.set('lng', String(args.lng))
+  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || 'Timezone lookup failed.')
+  return String(data?.timeZoneId ?? '')
+}
+
+function PrimaryButton({ children, loading }: { children: React.ReactNode; loading: boolean }) {
   return (
     <button
       type="submit"
-      disabled={disabled || loading}
+      disabled={loading}
       className={cx(
-        // ✅ group for arrow hover micro-motion
-        'group relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
+        'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
-        // base fill (premium = filled, not outlined)
         'bg-accentPrimary/26 text-textPrimary',
-        // glass sheen
         'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
         'hover:bg-accentPrimary/30 hover:border-accentPrimary/45 hover:before:opacity-100',
         'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
         loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
       )}
     >
-      {/* tiny inner highlight edge */}
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
       />
-
-      {/* content + micro arrow */}
-      <span className="relative inline-flex items-center gap-2">
-        <span>{children}</span>
-        <span
-          aria-hidden="true"
-          className={cx('inline-block transition-transform duration-200', 'group-hover:translate-x-0.5')}
-        >
-          →
-        </span>
-      </span>
+      <span className="relative">{children}</span>
     </button>
   )
 }
 
-function SecondaryLinkButton({
-  href,
-  children,
-}: {
-  href: string
-  children: React.ReactNode
-}) {
+function SecondaryLinkButton({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
       href={href}
       className={cx(
-        // slightly smaller than primary, still button-y + noticeable
-        'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-[13px] font-black transition',
+        'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
         'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
@@ -210,6 +229,19 @@ export default function SignupClient() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
+  // ✅ Pro work mode
+  const [proMode, setProMode] = useState<'SALON' | 'MOBILE'>('SALON')
+
+  // Google session token (stable per signup page load)
+  const sessionToken = useMemo(() => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now())), [])
+
+  // Location selection state
+  const [locQuery, setLocQuery] = useState('')
+  const [locPredictions, setLocPredictions] = useState<GooglePrediction[]>([])
+  const [locLoading, setLocLoading] = useState(false)
+  const [locPicked, setLocPicked] = useState<GooglePlaceDetails | null>(null)
+  const [timeZoneId, setTimeZoneId] = useState<string | null>(null)
+
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -218,11 +250,125 @@ export default function SignupClient() {
       ? { title: 'Book Services', subtitle: 'Browse and book services, save favorites, and manage appointments.' }
       : { title: 'Offer Services', subtitle: 'Offer services, get booked, and manage your schedule in one place.' }
 
+  async function refreshPredictions(input: string) {
+    setLocPicked(null)
+    setTimeZoneId(null)
+    setLocQuery(input)
+
+    const trimmed = input.trim()
+    if (trimmed.length < 2) {
+      setLocPredictions([])
+      return
+    }
+
+    setLocLoading(true)
+    try {
+      const preds = await fetchAutocomplete({ input: trimmed, sessionToken })
+      setLocPredictions(preds.slice(0, 6))
+    } catch {
+      setLocPredictions([])
+    } finally {
+      setLocLoading(false)
+    }
+  }
+
+  async function pickPrediction(p: GooglePrediction) {
+    setError(null)
+    setLocLoading(true)
+    try {
+      const details = await fetchPlaceDetails({ placeId: p.placeId, sessionToken })
+      if (details.lat == null || details.lng == null) throw new Error('Selected place is missing coordinates.')
+      const tz = await fetchTimeZoneId({ lat: details.lat, lng: details.lng })
+      if (!tz) throw new Error('No timezone returned.')
+      setLocPicked(details)
+      setTimeZoneId(tz)
+      setLocPredictions([])
+      setLocQuery(p.description)
+    } catch (e: any) {
+      setLocPicked(null)
+      setTimeZoneId(null)
+      setError(e?.message || 'Could not confirm location.')
+    } finally {
+      setLocLoading(false)
+    }
+  }
+
+  function locationLabel() {
+    if (role === 'CLIENT') return 'ZIP code'
+    if (proMode === 'MOBILE') return 'Base ZIP code'
+    return 'Salon address'
+  }
+
+  function locationPlaceholder() {
+    if (role === 'CLIENT') return 'Enter your ZIP code'
+    if (proMode === 'MOBILE') return 'Enter your base ZIP code'
+    return 'Search your salon address'
+  }
+
+  function isLocationConfirmed() {
+    // We confirm location by selecting a place that has tz + (zip OR address)
+    if (!locPicked || !timeZoneId) return false
+
+    if (role === 'CLIENT') return Boolean(locPicked.postalCode)
+    if (proMode === 'MOBILE') return Boolean(locPicked.postalCode)
+    return Boolean(locPicked.formattedAddress) && Boolean(locPicked.placeId)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return
 
     setError(null)
+
+    // ✅ enforce location confirm at signup
+    if (!isLocationConfirmed() || !timeZoneId || !locPicked) {
+      setError('Please confirm your location first.')
+      return
+    }
+
+    // ✅ enforce pro phone
+    if (role === 'PRO' && !sanitizePhone(phone)) {
+      setError('Phone number is required for professionals.')
+      return
+    }
+
+    const signupLocation =
+      role === 'PRO'
+        ? proMode === 'SALON'
+          ? {
+              kind: 'PRO_SALON',
+              placeId: locPicked.placeId,
+              formattedAddress: locPicked.formattedAddress ?? locQuery,
+              city: locPicked.city,
+              state: locPicked.state,
+              postalCode: locPicked.postalCode,
+              countryCode: locPicked.countryCode,
+              lat: locPicked.lat,
+              lng: locPicked.lng,
+              timeZoneId,
+              name: locPicked.name,
+            }
+          : {
+              kind: 'PRO_MOBILE',
+              postalCode: locPicked.postalCode ?? locQuery,
+              city: locPicked.city,
+              state: locPicked.state,
+              countryCode: locPicked.countryCode,
+              lat: locPicked.lat,
+              lng: locPicked.lng,
+              timeZoneId,
+            }
+        : {
+            kind: 'CLIENT_ZIP',
+            postalCode: locPicked.postalCode ?? locQuery,
+            city: locPicked.city,
+            state: locPicked.state,
+            countryCode: locPicked.countryCode,
+            lat: locPicked.lat,
+            lng: locPicked.lng,
+            timeZoneId,
+          }
+
     setLoading(true)
 
     try {
@@ -237,6 +383,12 @@ export default function SignupClient() {
           lastName,
           phone: phone ? sanitizePhone(phone) : undefined,
           tapIntentId: ti ?? undefined,
+
+          // ✅ timezone driven from confirmed place
+          timeZone: timeZoneId,
+
+          // ✅ pro/client location payload
+          signupLocation,
         }),
       })
 
@@ -252,7 +404,7 @@ export default function SignupClient() {
       const nextUrl = sanitizeNextUrl(data?.nextUrl)
       if (nextUrl) return router.replace(nextUrl)
 
-      if (data?.user?.role === 'PRO') router.replace('/pro/onboarding/verification')
+      if (data?.user?.role === 'PRO') router.replace('/pro/services')
       else router.replace('/client')
     } catch (err) {
       console.error(err)
@@ -274,22 +426,21 @@ export default function SignupClient() {
             <div className="text-[11px] text-textSecondary/70">You can change this later.</div>
           </div>
 
-          <div className={cx('rounded-card border p-1', 'border-surfaceGlass/12 bg-bgPrimary/25 tovis-glass-soft')}>
-            <div className="grid grid-cols-2 gap-1">
-              <RoleSegment
-                active={role === 'CLIENT'}
-                onClick={() => setRole('CLIENT')}
-                title="Book Services"
-                subtitle="For clients"
-              />
-              <RoleSegment
-                active={role === 'PRO'}
-                onClick={() => setRole('PRO')}
-                title="Offer Services"
-                subtitle="For professionals"
-              />
-            </div>
-          </div>
+          <PillToggle
+            left={{ label: 'Book Services', value: 'CLIENT' }}
+            right={{ label: 'Offer Services', value: 'PRO' }}
+            value={role}
+            onChange={(v) => {
+              const next = v === 'PRO' ? 'PRO' : 'CLIENT'
+              setRole(next)
+              setError(null)
+              // reset location state when switching roles
+              setLocQuery('')
+              setLocPredictions([])
+              setLocPicked(null)
+              setTimeZoneId(null)
+            }}
+          />
 
           <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
             <span className="font-black text-textPrimary">{roleCopy.title}:</span>{' '}
@@ -298,10 +449,87 @@ export default function SignupClient() {
 
           {role === 'PRO' ? (
             <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
-              Pro tip: use your <span className="font-black text-textPrimary">legal name</span> as it appears on your
-              license.
+              Pro tip: use your <span className="font-black text-textPrimary">legal name</span> as it appears on your license.
             </div>
           ) : null}
+        </div>
+
+        {/* Pro mode toggle */}
+        {role === 'PRO' ? (
+          <div className="grid gap-2">
+            <FieldLabel>Where do you offer services?</FieldLabel>
+            <PillToggle
+              left={{ label: 'In Salon', value: 'SALON' }}
+              right={{ label: 'Mobile', value: 'MOBILE' }}
+              value={proMode}
+              onChange={(v) => {
+                const next = v === 'MOBILE' ? 'MOBILE' : 'SALON'
+                setProMode(next)
+                setError(null)
+                // reset location state when switching mode
+                setLocQuery('')
+                setLocPredictions([])
+                setLocPicked(null)
+                setTimeZoneId(null)
+              }}
+            />
+          </div>
+        ) : null}
+
+        {/* Location confirm */}
+        <div className="grid gap-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <FieldLabel>{locationLabel()}</FieldLabel>
+            {timeZoneId ? <span className="text-[11px] font-black text-textSecondary/80">{timeZoneId}</span> : null}
+          </div>
+
+          <div className="relative">
+            <Input
+              value={locQuery}
+              onChange={(e) => refreshPredictions(e.target.value)}
+              placeholder={locationPlaceholder()}
+              autoComplete="off"
+              inputMode={role !== 'PRO' || proMode === 'MOBILE' ? 'numeric' : 'text'}
+            />
+
+            {/* Suggestions */}
+            {locPredictions.length > 0 ? (
+              <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-card border border-surfaceGlass/12 bg-bgPrimary/60 tovis-glass-soft">
+                <div className="max-h-64 overflow-auto p-1">
+                  {locPredictions.map((p) => (
+                    <button
+                      key={p.placeId}
+                      type="button"
+                      onClick={() => pickPrediction(p)}
+                      className={cx(
+                        'w-full rounded-card px-3 py-2 text-left transition',
+                        'hover:bg-bgPrimary/35 focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
+                      )}
+                    >
+                      <div className="text-sm font-black text-textPrimary">{p.mainText || p.description}</div>
+                      <div className="text-xs text-textSecondary/80">{p.secondaryText}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            {locLoading ? <HelpText>Confirming…</HelpText> : null}
+
+            {isLocationConfirmed() ? (
+              <span className="text-xs font-black text-accentPrimary">Confirmed</span>
+            ) : (
+              <HelpText>
+                {role === 'PRO'
+                  ? proMode === 'MOBILE'
+                    ? 'Pick your ZIP from the dropdown to confirm.'
+                    : 'Pick your address from the dropdown to confirm.'
+                  : 'Pick your ZIP from the dropdown to confirm.'}
+              </HelpText>
+            )}
+          </div>
         </div>
 
         <div className="h-px w-full bg-surfaceGlass/10" />
@@ -323,7 +551,7 @@ export default function SignupClient() {
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Phone</FieldLabel>
-            <span className="text-xs font-black text-textSecondary/80">Optional</span>
+            {role === 'CLIENT' ? <span className="text-xs font-black text-textSecondary/80">Optional</span> : null}
           </div>
           <Input
             value={phone}
@@ -331,21 +559,15 @@ export default function SignupClient() {
             inputMode="tel"
             autoComplete="tel"
             placeholder="+1 (___) ___-____"
+            required={role === 'PRO'}
           />
-          <HelpText>For reminders / verification later.</HelpText>
+          <HelpText>{role === 'PRO' ? 'Required for professionals.' : 'For reminders / verification later.'}</HelpText>
         </label>
 
         {/* Email */}
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
-          <Input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            required
-            autoComplete="email"
-            inputMode="email"
-          />
+          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" inputMode="email" />
         </label>
 
         {/* Password */}
@@ -363,7 +585,7 @@ export default function SignupClient() {
             autoComplete="new-password"
             placeholder="Create a strong one"
           />
-          <HelpText>Use at least 8 characters.</HelpText>
+          <HelpText>Use a strong password you won’t forget.</HelpText>
         </label>
 
         {error ? (
@@ -374,10 +596,7 @@ export default function SignupClient() {
 
         {/* CTA stack */}
         <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading} disabled={loading}>
-            {loading ? 'Creating…' : 'Sign up'}
-          </PrimaryButton>
-
+          <PrimaryButton loading={loading}>{loading ? 'Creating…' : 'Sign up'}</PrimaryButton>
           <SecondaryLinkButton href={loginHref}>Sign in</SecondaryLinkButton>
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-textSecondary">
