@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
-import { pickString } from '@/app/api/_utils/pick'
+import { pickString, normalizeEmail } from '@/app/api/_utils'
 
 type LoginBody = {
   email?: unknown
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as LoginBody
 
-    const email = pickString(body.email)
+    const email = normalizeEmail(body.email)
     const password = pickString(body.password)
     const tapIntentId = pickString(body.tapIntentId)
 
@@ -46,12 +46,8 @@ export async function POST(request: Request) {
 
     const response = NextResponse.json(
       {
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-        },
-        nextUrl: consumed.nextUrl,
+        user: { id: user.id, email: user.email, role: user.role },
+        nextUrl: consumed?.nextUrl ?? null,
       },
       { status: 200 },
     )

@@ -18,6 +18,8 @@ type RegisterBody = {
   timeZone?: unknown
 }
 
+const PASSWORD_MIN_LEN = 8
+
 function cleanPhone(v: unknown): string | null {
   const raw = pickString(v)
   if (!raw) return null
@@ -40,23 +42,49 @@ function normalizeTimeZone(v: unknown): string | null {
   return isValidIanaTimeZone(tz) ? tz : null
 }
 
+function validatePassword(password: string): string | null {
+  // ✅ modern + low-friction: just length (no “must contain symbol” nonsense)
+  if (password.length < PASSWORD_MIN_LEN) {
+    return `Password must be at least ${PASSWORD_MIN_LEN} characters.`
+  }
+
+  // Optional tiny guardrail (keeps it classy, avoids worst offenders)
+  const lower = password.toLowerCase().trim()
+  if (lower === 'password' || lower === 'password123' || lower === '12345678') {
+    return 'Please choose a stronger password.'
+  }
+
+  return null
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as RegisterBody
 
     const email = normalizeEmail(body.email)
-    const password = pickString(body.password)
     const role = normalizeRole(body.role)
 
     const firstName = pickString(body.firstName)
     const lastName = pickString(body.lastName)
+
     const phone = cleanPhone(body.phone)
     const tapIntentId = pickString(body.tapIntentId)
-
     const timeZone = normalizeTimeZone(body.timeZone)
 
-    if (!email || !password || !role) {
+    const password = pickString(body.password)
+
+    // Required fields
+    if (!email || !role) {
       return jsonFail(400, 'Missing required fields.', { code: 'MISSING_FIELDS' })
+    }
+
+    if (!password) {
+      return jsonFail(400, 'Password is required.', { code: 'MISSING_PASSWORD' })
+    }
+
+    const passwordErr = validatePassword(password)
+    if (passwordErr) {
+      return jsonFail(400, passwordErr, { code: 'WEAK_PASSWORD' })
     }
 
     if (!firstName || !lastName) {
@@ -67,11 +95,13 @@ export async function POST(request: Request) {
       return jsonFail(400, 'Phone number is required for professionals.', { code: 'PHONE_REQUIRED' })
     }
 
+    // Uniqueness
     const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } })
     if (existing) {
       return jsonFail(400, 'Email already in use.', { code: 'EMAIL_IN_USE' })
     }
 
+    // Create user
     const passwordHash = await hashPassword(password)
 
     const user = await prisma.user.create({

@@ -4,7 +4,7 @@
 import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useProSession } from './useProSession'
-import NavItem from './NavItem'
+import NavItem from '../navigation/FooterNavItem'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
 
 const ROUTES = {

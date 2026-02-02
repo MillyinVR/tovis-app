@@ -1,4 +1,4 @@
-// app/_components/ClientSessionFooter/NavItem.tsx
+// app/_components/navigation/FooterNavItem.tsx
 'use client'
 
 import Link from 'next/link'

@@ -1,3 +1,4 @@
+// lib/authClient.ts 
 'use client'
 
 export function currentPathWithQuery() {

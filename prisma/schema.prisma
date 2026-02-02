@@ -313,9 +313,10 @@ model User {
   mediaComments MediaComment[]
 
   // opposite relation for MediaAsset.uploadedByUser
-  uploadedMedia MediaAsset[] @relation("UploadedMedia")
-  nfcCards      NfcCard[]
-  tapIntents    TapIntent[]
+  uploadedMedia       MediaAsset[]         @relation("UploadedMedia")
+  nfcCards            NfcCard[]
+  tapIntents          TapIntent[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model ClientProfile {
@@ -706,7 +707,7 @@ model LastMinuteOpening {
   locationId   String
   location     ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
-  timeZone     String
+  timeZone String
 
   startAt DateTime
   endAt   DateTime?
@@ -730,7 +731,6 @@ model LastMinuteOpening {
   @@index([status, startAt])
   @@index([professionalId, locationId, startAt])
 }
-
 
 model OpeningNotification {
   id        String @id @default(cuid())
@@ -1409,7 +1409,7 @@ model CalendarBlock {
 }
 
 model NfcCard {
-  id   String      @id // this is what’s encoded in the NFC URL
+  id              String   @id @default(cuid()) // this is what’s encoded in the NFC URL
   type NfcCardType
 
   // “ownership” (never changes once claimed)
@@ -1428,6 +1428,7 @@ model NfcCard {
   salonSlug String? // or salonId if you already have a Salon model
 
   isActive          Boolean            @default(true)
+  shortCode         String             @unique
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   tapIntents        TapIntent[]
@@ -1481,4 +1482,22 @@ model AttributionEvent {
   @@index([cardId])
   @@index([actorUserId])
   @@index([creditedUserId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  // Optional: nice for auditing / abuse detection
+  ip        String?
+  userAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }

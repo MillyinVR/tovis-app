@@ -2,7 +2,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import NavItem from './NavItem'
+import NavItem from '../navigation/FooterNavItem'
 import BadgeDot from './BadgeDot'
 import { useClientFooterBadge } from './useClientFooterBadge'
 

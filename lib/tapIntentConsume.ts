@@ -61,7 +61,11 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     if (!user) return { ok: true as const, nextUrl: null as string | null }
 
     const nextUrlFromPayload = safeNextUrl((ti.payloadJson as any)?.nextUrl)
-    const fallbackNextUrl = user.role === 'PRO' ? '/pro' : '/client'
+    const fallbackNextUrl =
+      user.role === 'ADMIN' ? '/admin' :
+      user.role === 'PRO' ? '/pro/calendar' :
+      '/looks'
+
     const nextUrl = nextUrlFromPayload ?? fallbackNextUrl
 
     // Load card
