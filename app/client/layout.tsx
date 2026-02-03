@@ -1,6 +1,7 @@
 // app/client/layout.tsx
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
+import ClientSessionFooter from '../_components/ClientSessionFooter/ClientSessionFooter' // adjust path to your footer component
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +72,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
       }}
     >
       {children}
+      
     </a>
   )
 }

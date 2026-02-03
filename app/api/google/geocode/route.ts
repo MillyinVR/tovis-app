@@ -1,3 +1,4 @@
+// app/api/google/geocode/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
 
@@ -51,12 +52,15 @@ export async function GET(req: Request) {
 
     const cm = componentMap(Array.isArray(first?.address_components) ? first.address_components : [])
 
+    const resolvedPostal = cm.postal_code || null
+    if (!resolvedPostal) return jsonFail(400, 'Could not resolve a valid postal code.')
+
     return jsonOk({
       ok: true,
       geo: {
         lat,
         lng,
-        postalCode: cm.postal_code || null,
+        postalCode: resolvedPostal,
         city: cm.locality || cm.postal_town || null,
         state: cm.administrative_area_level_1 || null,
         countryCode: cm.country || null,

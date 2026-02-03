@@ -1,12 +1,6 @@
 // app/api/google/places/autocomplete/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import {
-  getGoogleMapsKey,
-  fetchWithTimeout,
-  safeJson,
-  clampGoogleRadiusMeters,
-  assertGoogleOk,
-} from '@/app/api/_utils'
+import { getGoogleMapsKey, fetchWithTimeout, safeJson, clampGoogleRadiusMeters } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,53 +22,71 @@ export async function GET(req: Request) {
     const lng = pickNumber(searchParams.get('lng'))
     const radiusMeters = pickNumber(searchParams.get('radiusMeters')) ?? 50_000
 
-    // Optional: bias to US; change/remove if you want global
     const components = pickString(searchParams.get('components')) ?? 'country:us'
+    const regionCode = components.startsWith('country:')
+      ? components.replace('country:', '').toUpperCase()
+      : undefined
 
-    const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json')
-    url.searchParams.set('key', getGoogleMapsKey())
-    url.searchParams.set('input', input)
-    url.searchParams.set('language', 'en')
-    url.searchParams.set('components', components)
+    const url = 'https://places.googleapis.com/v1/places:autocomplete'
 
-    if (lat != null && lng != null) {
-      url.searchParams.set('location', `${lat},${lng}`)
-      url.searchParams.set('radius', String(clampGoogleRadiusMeters(radiusMeters)))
+    const body: any = {
+      input,
+      languageCode: 'en',
     }
 
-    if (sessionToken) url.searchParams.set('sessiontoken', sessionToken)
+    if (sessionToken) body.sessionToken = sessionToken
+    if (regionCode) body.regionCode = regionCode
 
-    const res = await fetchWithTimeout(url.toString(), {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
+    // Optional: bias results toward the user's area
+    if (lat != null && lng != null) {
+      body.locationBias = {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: clampGoogleRadiusMeters(radiusMeters),
+        },
+      }
+    }
+
+    // Optional: helps nudge toward address-y results (works well for salon flow)
+    // Remove if you want broader suggestions.
+    body.includedPrimaryTypes = ['street_address', 'premise', 'subpremise']
+
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': getGoogleMapsKey(),
+      },
+      body: JSON.stringify(body),
       cache: 'no-store',
     })
 
     const data = await safeJson<any>(res)
+    if (!res.ok) return jsonFail(502, 'Google request failed.', { details: data })
 
-    if (!res.ok) {
-      return jsonFail(502, 'Google request failed.', { details: data })
-    }
+    const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : []
 
-    const status = String(data?.status ?? '')
-    try {
-      assertGoogleOk(status, data?.error_message)
-    } catch (err: any) {
-      return jsonFail(400, err?.message || `Google status: ${status}`, { details: data })
-    }
+    const predictions = suggestions
+      .map((s: any) => s?.placePrediction)
+      .filter(Boolean)
+      .map((p: any) => {
+        const mainText = pickString(p?.structuredFormat?.mainText?.text) ?? ''
+        const secondaryText = pickString(p?.structuredFormat?.secondaryText?.text) ?? ''
+        const description =
+          pickString(p?.text?.text) ?? [mainText, secondaryText].filter(Boolean).join(', ')
 
-    const predictions = Array.isArray(data?.predictions) ? data.predictions : []
+        return {
+          placeId: String(p?.placeId ?? ''),
+          description: String(description ?? ''),
+          mainText: String(mainText ?? ''),
+          secondaryText: String(secondaryText ?? ''),
+          types: Array.isArray(p?.types) ? p.types : [],
+        }
+      })
+      .filter((p: any) => p.placeId && p.description)
 
-    return jsonOk({
-      ok: true,
-      predictions: predictions.map((p: any) => ({
-        placeId: String(p?.place_id ?? ''),
-        description: String(p?.description ?? ''),
-        mainText: String(p?.structured_formatting?.main_text ?? ''),
-        secondaryText: String(p?.structured_formatting?.secondary_text ?? ''),
-        types: Array.isArray(p?.types) ? p.types : [],
-      })),
-    })
+    return jsonOk({ ok: true, predictions })
   } catch (e: any) {
     const msg = e?.name === 'AbortError' ? 'Google request timed out.' : e?.message || 'Internal error'
     console.error('GET /api/google/places/autocomplete error', e)

@@ -4,12 +4,17 @@ import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-function componentMap(addressComponents: any[]) {
+/**
+ * Places API (New): Place Details
+ * GET https://places.googleapis.com/v1/places/{placeId}
+ * Requires FieldMask header.
+ */
+function componentMapFromAddressComponents(addressComponents: any[] | undefined) {
   const out: Record<string, string> = {}
   for (const c of addressComponents || []) {
     const types: string[] = Array.isArray(c?.types) ? c.types : []
-    const longName = typeof c?.long_name === 'string' ? c.long_name : ''
-    const shortName = typeof c?.short_name === 'string' ? c.short_name : ''
+    const longName = typeof c?.longText === 'string' ? c.longText : ''
+    const shortName = typeof c?.shortText === 'string' ? c.shortText : ''
     for (const t of types) {
       if (!t) continue
       out[t] = shortName || longName
@@ -27,39 +32,46 @@ export async function GET(req: Request) {
 
     const sessionToken = pickString(searchParams.get('sessionToken'))
 
-    const url = new URL('https://maps.googleapis.com/maps/api/place/details/json')
-    url.searchParams.set('key', getGoogleMapsKey())
-    url.searchParams.set('place_id', placeId)
-    url.searchParams.set(
-      'fields',
-      ['place_id', 'name', 'formatted_address', 'geometry/location', 'address_component', 'types'].join(','),
-    )
-    url.searchParams.set('language', 'en')
-    if (sessionToken) url.searchParams.set('sessiontoken', sessionToken)
+    const url = `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`
 
-    const res = await fetchWithTimeout(url.toString(), {
+    const res = await fetchWithTimeout(url, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'X-Goog-Api-Key': getGoogleMapsKey(),
+        // FieldMask is REQUIRED by Places API (New)
+        'X-Goog-FieldMask': [
+          'id',
+          'displayName',
+          'formattedAddress',
+          'location',
+          'addressComponents',
+          'types',
+        ].join(','),
+        ...(sessionToken ? { 'X-Goog-Session-Token': sessionToken } : {}),
+      },
       cache: 'no-store',
     })
 
     const data = await safeJson<any>(res)
-
     if (!res.ok) return jsonFail(502, 'Google request failed.', { details: data })
 
-    const status = String(data?.status ?? '')
-    if (status !== 'OK') {
-      return jsonFail(400, data?.error_message || `Google status: ${status}`, { details: data })
-    }
+    // New API fields
+    const loc = data?.location ?? {}
+    const lat = typeof loc?.latitude === 'number' ? loc.latitude : null
+    const lng = typeof loc?.longitude === 'number' ? loc.longitude : null
 
-    const r = data?.result ?? {}
-    const loc = r?.geometry?.location ?? {}
-    const lat = typeof loc?.lat === 'number' ? loc.lat : null
-    const lng = typeof loc?.lng === 'number' ? loc.lng : null
+    const formattedAddress = typeof data?.formattedAddress === 'string' ? data.formattedAddress : null
+    const name =
+      typeof data?.displayName?.text === 'string'
+        ? data.displayName.text
+        : typeof data?.displayName === 'string'
+          ? data.displayName
+          : null
 
-    const comps = Array.isArray(r?.address_components) ? r.address_components : []
-    const cm = componentMap(comps)
+    const cm = componentMapFromAddressComponents(Array.isArray(data?.addressComponents) ? data.addressComponents : [])
 
+    // Match your previous “legacy” keys as best as possible
     const city = cm.locality || cm.postal_town || cm.sublocality || null
     const state = cm.administrative_area_level_1 || null
     const postalCode = cm.postal_code || null
@@ -68,9 +80,9 @@ export async function GET(req: Request) {
     return jsonOk({
       ok: true,
       place: {
-        placeId: String(r?.place_id ?? placeId),
-        name: typeof r?.name === 'string' ? r.name : null,
-        formattedAddress: typeof r?.formatted_address === 'string' ? r.formatted_address : null,
+        placeId: String(data?.id ?? placeId),
+        name,
+        formattedAddress,
         lat,
         lng,
         components: cm,
@@ -78,7 +90,7 @@ export async function GET(req: Request) {
         state,
         postalCode,
         countryCode,
-        types: Array.isArray(r?.types) ? r.types : [],
+        types: Array.isArray(data?.types) ? data.types : [],
       },
     })
   } catch (e: any) {

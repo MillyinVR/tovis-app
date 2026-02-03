@@ -287,6 +287,8 @@ model AdminPermission {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
+  phone     String?  @unique @db.VarChar(32) // E.164 preferred: +16195551234
+  phoneVerifiedAt DateTime?
   password  String
   role      Role
   createdAt DateTime @default(now())
@@ -319,7 +321,26 @@ model User {
   nfcCards            NfcCard[]
   tapIntents          TapIntent[]
   passwordResetTokens PasswordResetToken[]
+
+  phoneVerifications PhoneVerification[]
 }
+
+model PhoneVerification {
+  id        String   @id @default(cuid())
+  userId    String
+  phone     String   @db.VarChar(32)
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([phone])
+  @@index([expiresAt])
+}
+
 
 model ClientProfile {
   id                   String                      @id @default(cuid())

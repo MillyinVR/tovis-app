@@ -40,6 +40,12 @@ function HelpText({ children }: { children: React.ReactNode }) {
   return <span className="text-xs text-textSecondary/80">{children}</span>
 }
 
+/**
+ * Premium input:
+ * - soft fill
+ * - restrained border
+ * - calm focus ring
+ */
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
@@ -94,14 +100,49 @@ function PillToggle({
   return (
     <div className={cx('rounded-full border p-1', 'border-surfaceGlass/12 bg-bgPrimary/25 tovis-glass-soft')}>
       <div className="grid grid-cols-2 gap-1">
-        <button type="button" className={cx(base, value === left.value ? active : idle)} onClick={() => onChange(left.value)}>
+        <button
+          type="button"
+          className={cx(base, value === left.value ? active : idle)}
+          onClick={() => onChange(left.value)}
+        >
           {left.label}
         </button>
-        <button type="button" className={cx(base, value === right.value ? active : idle)} onClick={() => onChange(right.value)}>
+        <button
+          type="button"
+          className={cx(base, value === right.value ? active : idle)}
+          onClick={() => onChange(right.value)}
+        >
           {right.label}
         </button>
       </div>
     </div>
+  )
+}
+
+function TinyButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cx(
+        'inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-black transition',
+        'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
+        'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
+        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -112,16 +153,19 @@ type GooglePrediction = {
   secondaryText: string
 }
 
-type GooglePlaceDetails = {
-  placeId: string
-  name: string | null
-  formattedAddress: string | null
-  lat: number | null
-  lng: number | null
+type ConfirmedLocation = {
+  timeZoneId: string
+  lat: number
+  lng: number
   city: string | null
   state: string | null
-  postalCode: string | null
   countryCode: string | null
+
+  postalCode: string | null
+
+  placeId: string | null
+  formattedAddress: string | null
+  name: string | null
 }
 
 async function fetchAutocomplete(args: { input: string; sessionToken: string }) {
@@ -129,25 +173,31 @@ async function fetchAutocomplete(args: { input: string; sessionToken: string }) 
   url.searchParams.set('input', args.input)
   url.searchParams.set('sessionToken', args.sessionToken)
   url.searchParams.set('components', 'country:us')
+
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Autocomplete failed.')
+  if (!res.ok) throw new Error(data?.error || 'Location search failed.')
+
   const predictions = Array.isArray(data?.predictions) ? data.predictions : []
-  return predictions.map((p: any) => ({
-    placeId: String(p?.placeId ?? ''),
-    description: String(p?.description ?? ''),
-    mainText: String(p?.mainText ?? ''),
-    secondaryText: String(p?.secondaryText ?? ''),
-  })) as GooglePrediction[]
+  return predictions
+    .map((p: any) => ({
+      placeId: String(p?.placeId ?? ''),
+      description: String(p?.description ?? ''),
+      mainText: String(p?.mainText ?? ''),
+      secondaryText: String(p?.secondaryText ?? ''),
+    }))
+    .filter((p: any) => p.placeId && p.description) as GooglePrediction[]
 }
 
 async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }) {
   const url = new URL('/api/google/places/details', window.location.origin)
   url.searchParams.set('placeId', args.placeId)
   url.searchParams.set('sessionToken', args.sessionToken)
+
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Place details failed.')
+  if (!res.ok) throw new Error(data?.error || 'Could not confirm selected location.')
+
   const p = data?.place ?? {}
   return {
     placeId: String(p?.placeId ?? args.placeId),
@@ -159,24 +209,59 @@ async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }
     state: typeof p?.state === 'string' ? p.state : null,
     postalCode: typeof p?.postalCode === 'string' ? p.postalCode : null,
     countryCode: typeof p?.countryCode === 'string' ? p.countryCode : null,
-  } as GooglePlaceDetails
+  }
+}
+
+async function fetchGeocodeByPostal(args: { postalCode: string }) {
+  const url = new URL('/api/google/geocode', window.location.origin)
+  url.searchParams.set('postalCode', args.postalCode)
+  url.searchParams.set('components', 'country:us')
+
+  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || 'ZIP lookup failed.')
+
+  const g = data?.geo ?? {}
+  const lat = typeof g?.lat === 'number' ? g.lat : null
+  const lng = typeof g?.lng === 'number' ? g.lng : null
+  const postalCode = typeof g?.postalCode === 'string' ? g.postalCode : null
+  const city = typeof g?.city === 'string' ? g.city : null
+  const state = typeof g?.state === 'string' ? g.state : null
+  const countryCode = typeof g?.countryCode === 'string' ? g.countryCode : null
+
+  if (lat == null || lng == null) throw new Error('ZIP lookup returned no coordinates.')
+  if (!postalCode) throw new Error('ZIP lookup did not resolve a valid postal code.')
+
+  return { lat, lng, postalCode, city, state, countryCode }
 }
 
 async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   const url = new URL('/api/google/timezone', window.location.origin)
   url.searchParams.set('lat', String(args.lat))
   url.searchParams.set('lng', String(args.lng))
+
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data?.error || 'Timezone lookup failed.')
-  return String(data?.timeZoneId ?? '')
+
+  const tz = String(data?.timeZoneId ?? '')
+  if (!tz) throw new Error('No timezone returned.')
+  return tz
 }
 
-function PrimaryButton({ children, loading }: { children: React.ReactNode; loading: boolean }) {
+function PrimaryButton({
+  children,
+  loading,
+  disabled,
+}: {
+  children: React.ReactNode
+  loading: boolean
+  disabled?: boolean
+}) {
   return (
     <button
       type="submit"
-      disabled={loading}
+      disabled={disabled || loading}
       className={cx(
         'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
@@ -212,6 +297,11 @@ function SecondaryLinkButton({ href, children }: { href: string; children: React
   )
 }
 
+function isUsZip(raw: string) {
+  const s = raw.trim()
+  return /^\d{5}(-\d{4})?$/.test(s)
+}
+
 export default function SignupClient() {
   const router = useRouter()
   const sp = useSearchParams()
@@ -229,18 +319,21 @@ export default function SignupClient() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
-  // ✅ Pro work mode
   const [proMode, setProMode] = useState<'SALON' | 'MOBILE'>('SALON')
 
-  // Google session token (stable per signup page load)
-  const sessionToken = useMemo(() => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now())), [])
+  // stable per load
+  const sessionToken = useMemo(
+    () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now())),
+    [],
+  )
 
-  // Location selection state
+  // location input
   const [locQuery, setLocQuery] = useState('')
   const [locPredictions, setLocPredictions] = useState<GooglePrediction[]>([])
   const [locLoading, setLocLoading] = useState(false)
-  const [locPicked, setLocPicked] = useState<GooglePlaceDetails | null>(null)
-  const [timeZoneId, setTimeZoneId] = useState<string | null>(null)
+
+  // confirmed
+  const [confirmed, setConfirmed] = useState<ConfirmedLocation | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -250,10 +343,42 @@ export default function SignupClient() {
       ? { title: 'Book Services', subtitle: 'Browse and book services, save favorites, and manage appointments.' }
       : { title: 'Offer Services', subtitle: 'Offer services, get booked, and manage your schedule in one place.' }
 
+  const locationMode: 'ZIP' | 'SALON_ADDRESS' =
+    role === 'PRO' && proMode === 'SALON' ? 'SALON_ADDRESS' : 'ZIP'
+
+  function resetLocation(nextQuery = '') {
+    setLocQuery(nextQuery)
+    setLocPredictions([])
+    setConfirmed(null)
+  }
+
+  function locationLabel() {
+    if (role === 'CLIENT') return 'ZIP code'
+    if (proMode === 'MOBILE') return 'Base ZIP code'
+    return 'Salon address'
+  }
+
+  function locationPlaceholder() {
+    if (locationMode === 'ZIP') return 'Enter your ZIP code (e.g. 92101)'
+    return 'Search your salon address'
+  }
+
+  function isLocationConfirmed() {
+    if (!confirmed) return false
+    if (locationMode === 'ZIP') return Boolean(confirmed.postalCode)
+    return Boolean(confirmed.placeId) && Boolean(confirmed.formattedAddress)
+  }
+
   async function refreshPredictions(input: string) {
-    setLocPicked(null)
-    setTimeZoneId(null)
+    setError(null)
+    setConfirmed(null)
     setLocQuery(input)
+
+    // ZIP flow: no predictions
+    if (locationMode === 'ZIP') {
+      setLocPredictions([])
+      return
+    }
 
     const trimmed = input.trim()
     if (trimmed.length < 2) {
@@ -265,8 +390,9 @@ export default function SignupClient() {
     try {
       const preds = await fetchAutocomplete({ input: trimmed, sessionToken })
       setLocPredictions(preds.slice(0, 6))
-    } catch {
+    } catch (e: any) {
       setLocPredictions([])
+      setError(e?.message || 'Location search is unavailable right now.')
     } finally {
       setLocLoading(false)
     }
@@ -275,43 +401,71 @@ export default function SignupClient() {
   async function pickPrediction(p: GooglePrediction) {
     setError(null)
     setLocLoading(true)
+
     try {
       const details = await fetchPlaceDetails({ placeId: p.placeId, sessionToken })
       if (details.lat == null || details.lng == null) throw new Error('Selected place is missing coordinates.')
+
       const tz = await fetchTimeZoneId({ lat: details.lat, lng: details.lng })
-      if (!tz) throw new Error('No timezone returned.')
-      setLocPicked(details)
-      setTimeZoneId(tz)
+
+      setConfirmed({
+        timeZoneId: tz,
+        lat: details.lat,
+        lng: details.lng,
+        city: details.city,
+        state: details.state,
+        countryCode: details.countryCode,
+        postalCode: details.postalCode,
+        placeId: details.placeId,
+        formattedAddress: details.formattedAddress,
+        name: details.name,
+      })
+
       setLocPredictions([])
       setLocQuery(p.description)
     } catch (e: any) {
-      setLocPicked(null)
-      setTimeZoneId(null)
+      setConfirmed(null)
       setError(e?.message || 'Could not confirm location.')
     } finally {
       setLocLoading(false)
     }
   }
 
-  function locationLabel() {
-    if (role === 'CLIENT') return 'ZIP code'
-    if (proMode === 'MOBILE') return 'Base ZIP code'
-    return 'Salon address'
-  }
+  async function confirmZip() {
+    setError(null)
 
-  function locationPlaceholder() {
-    if (role === 'CLIENT') return 'Enter your ZIP code'
-    if (proMode === 'MOBILE') return 'Enter your base ZIP code'
-    return 'Search your salon address'
-  }
+    const raw = locQuery.trim()
+    if (!isUsZip(raw)) {
+      setError('Please enter a valid 5-digit ZIP code.')
+      return
+    }
 
-  function isLocationConfirmed() {
-    // We confirm location by selecting a place that has tz + (zip OR address)
-    if (!locPicked || !timeZoneId) return false
+    setLocLoading(true)
+    try {
+      const geo = await fetchGeocodeByPostal({ postalCode: raw })
+      const tz = await fetchTimeZoneId({ lat: geo.lat, lng: geo.lng })
 
-    if (role === 'CLIENT') return Boolean(locPicked.postalCode)
-    if (proMode === 'MOBILE') return Boolean(locPicked.postalCode)
-    return Boolean(locPicked.formattedAddress) && Boolean(locPicked.placeId)
+      setConfirmed({
+        timeZoneId: tz,
+        lat: geo.lat,
+        lng: geo.lng,
+        city: geo.city,
+        state: geo.state,
+        countryCode: geo.countryCode,
+        postalCode: geo.postalCode,
+        placeId: null,
+        formattedAddress: null,
+        name: null,
+      })
+
+      setLocPredictions([])
+      setLocQuery(geo.postalCode ?? raw)
+    } catch (e: any) {
+      setConfirmed(null)
+      setError(e?.message || 'Could not confirm ZIP code.')
+    } finally {
+      setLocLoading(false)
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -320,15 +474,15 @@ export default function SignupClient() {
 
     setError(null)
 
-    // ✅ enforce location confirm at signup
-    if (!isLocationConfirmed() || !timeZoneId || !locPicked) {
-      setError('Please confirm your location first.')
+    // ✅ Phone required for ALL
+    if (!sanitizePhone(phone).trim()) {
+      setError('Phone number is required.')
       return
     }
 
-    // ✅ enforce pro phone
-    if (role === 'PRO' && !sanitizePhone(phone)) {
-      setError('Phone number is required for professionals.')
+    // ✅ location must be confirmed
+    if (!isLocationConfirmed() || !confirmed) {
+      setError(locationMode === 'ZIP' ? 'Please confirm your ZIP code.' : 'Please choose a salon location from the dropdown.')
       return
     }
 
@@ -337,36 +491,36 @@ export default function SignupClient() {
         ? proMode === 'SALON'
           ? {
               kind: 'PRO_SALON',
-              placeId: locPicked.placeId,
-              formattedAddress: locPicked.formattedAddress ?? locQuery,
-              city: locPicked.city,
-              state: locPicked.state,
-              postalCode: locPicked.postalCode,
-              countryCode: locPicked.countryCode,
-              lat: locPicked.lat,
-              lng: locPicked.lng,
-              timeZoneId,
-              name: locPicked.name,
+              placeId: confirmed.placeId!,
+              formattedAddress: confirmed.formattedAddress ?? locQuery,
+              city: confirmed.city,
+              state: confirmed.state,
+              postalCode: confirmed.postalCode,
+              countryCode: confirmed.countryCode,
+              lat: confirmed.lat,
+              lng: confirmed.lng,
+              timeZoneId: confirmed.timeZoneId,
+              name: confirmed.name,
             }
           : {
               kind: 'PRO_MOBILE',
-              postalCode: locPicked.postalCode ?? locQuery,
-              city: locPicked.city,
-              state: locPicked.state,
-              countryCode: locPicked.countryCode,
-              lat: locPicked.lat,
-              lng: locPicked.lng,
-              timeZoneId,
+              postalCode: confirmed.postalCode ?? locQuery,
+              city: confirmed.city,
+              state: confirmed.state,
+              countryCode: confirmed.countryCode,
+              lat: confirmed.lat,
+              lng: confirmed.lng,
+              timeZoneId: confirmed.timeZoneId,
             }
         : {
             kind: 'CLIENT_ZIP',
-            postalCode: locPicked.postalCode ?? locQuery,
-            city: locPicked.city,
-            state: locPicked.state,
-            countryCode: locPicked.countryCode,
-            lat: locPicked.lat,
-            lng: locPicked.lng,
-            timeZoneId,
+            postalCode: confirmed.postalCode ?? locQuery,
+            city: confirmed.city,
+            state: confirmed.state,
+            countryCode: confirmed.countryCode,
+            lat: confirmed.lat,
+            lng: confirmed.lng,
+            timeZoneId: confirmed.timeZoneId,
           }
 
     setLoading(true)
@@ -381,13 +535,12 @@ export default function SignupClient() {
           role,
           firstName,
           lastName,
-          phone: phone ? sanitizePhone(phone) : undefined,
+          phone: sanitizePhone(phone),
           tapIntentId: ti ?? undefined,
 
-          // ✅ timezone driven from confirmed place
-          timeZone: timeZoneId,
+          // kept for compatibility (server prefers signupLocation.timeZoneId)
+          timeZone: confirmed.timeZoneId,
 
-          // ✅ pro/client location payload
           signupLocation,
         }),
       })
@@ -405,7 +558,7 @@ export default function SignupClient() {
       if (nextUrl) return router.replace(nextUrl)
 
       if (data?.user?.role === 'PRO') router.replace('/pro/services')
-      else router.replace('/client')
+      else router.replace('/client/looks')
     } catch (err) {
       console.error(err)
       setError('Network error.')
@@ -434,11 +587,7 @@ export default function SignupClient() {
               const next = v === 'PRO' ? 'PRO' : 'CLIENT'
               setRole(next)
               setError(null)
-              // reset location state when switching roles
-              setLocQuery('')
-              setLocPredictions([])
-              setLocPicked(null)
-              setTimeZoneId(null)
+              resetLocation('')
             }}
           />
 
@@ -466,11 +615,7 @@ export default function SignupClient() {
                 const next = v === 'MOBILE' ? 'MOBILE' : 'SALON'
                 setProMode(next)
                 setError(null)
-                // reset location state when switching mode
-                setLocQuery('')
-                setLocPredictions([])
-                setLocPicked(null)
-                setTimeZoneId(null)
+                resetLocation('')
               }}
             />
           </div>
@@ -480,7 +625,9 @@ export default function SignupClient() {
         <div className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>{locationLabel()}</FieldLabel>
-            {timeZoneId ? <span className="text-[11px] font-black text-textSecondary/80">{timeZoneId}</span> : null}
+            {confirmed?.timeZoneId ? (
+              <span className="text-[11px] font-black text-textSecondary/80">{confirmed.timeZoneId}</span>
+            ) : null}
           </div>
 
           <div className="relative">
@@ -489,11 +636,11 @@ export default function SignupClient() {
               onChange={(e) => refreshPredictions(e.target.value)}
               placeholder={locationPlaceholder()}
               autoComplete="off"
-              inputMode={role !== 'PRO' || proMode === 'MOBILE' ? 'numeric' : 'text'}
+              inputMode={locationMode === 'ZIP' ? 'numeric' : 'text'}
             />
 
-            {/* Suggestions */}
-            {locPredictions.length > 0 ? (
+            {/* Suggestions (salon-only) */}
+            {locationMode === 'SALON_ADDRESS' && locPredictions.length > 0 ? (
               <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-card border border-surfaceGlass/12 bg-bgPrimary/60 tovis-glass-soft">
                 <div className="max-h-64 overflow-auto p-1">
                   {locPredictions.map((p) => (
@@ -516,20 +663,25 @@ export default function SignupClient() {
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            {locLoading ? <HelpText>Confirming…</HelpText> : null}
+            {locLoading ? <HelpText>Confirming…</HelpText> : <span />}
 
             {isLocationConfirmed() ? (
               <span className="text-xs font-black text-accentPrimary">Confirmed</span>
+            ) : locationMode === 'ZIP' ? (
+              <TinyButton onClick={confirmZip} disabled={locLoading || !locQuery.trim()}>
+                Confirm ZIP
+              </TinyButton>
             ) : (
-              <HelpText>
-                {role === 'PRO'
-                  ? proMode === 'MOBILE'
-                    ? 'Pick your ZIP from the dropdown to confirm.'
-                    : 'Pick your address from the dropdown to confirm.'
-                  : 'Pick your ZIP from the dropdown to confirm.'}
-              </HelpText>
+              <HelpText>Pick your address from the dropdown to confirm.</HelpText>
             )}
           </div>
+
+          {confirmed && (confirmed.city || confirmed.state || confirmed.postalCode) ? (
+            <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
+              <span className="font-black text-textPrimary">Location:</span>{' '}
+              <span>{[confirmed.city, confirmed.state, confirmed.postalCode].filter(Boolean).join(', ')}</span>
+            </div>
+          ) : null}
         </div>
 
         <div className="h-px w-full bg-surfaceGlass/10" />
@@ -547,27 +699,36 @@ export default function SignupClient() {
           </label>
         </div>
 
-        {/* Phone */}
+        {/* Phone (required for everyone) */}
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Phone</FieldLabel>
-            {role === 'CLIENT' ? <span className="text-xs font-black text-textSecondary/80">Optional</span> : null}
+            <span className="text-xs font-black text-textSecondary/80">Required</span>
           </div>
+
           <Input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             inputMode="tel"
             autoComplete="tel"
             placeholder="+1 (___) ___-____"
-            required={role === 'PRO'}
+            required
           />
-          <HelpText>{role === 'PRO' ? 'Required for professionals.' : 'For reminders / verification later.'}</HelpText>
+
+          <HelpText>We use this for appointment confirmations and account verification.</HelpText>
         </label>
 
         {/* Email */}
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" inputMode="email" />
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            required
+            autoComplete="email"
+            inputMode="email"
+          />
         </label>
 
         {/* Password */}
@@ -596,7 +757,10 @@ export default function SignupClient() {
 
         {/* CTA stack */}
         <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading}>{loading ? 'Creating…' : 'Sign up'}</PrimaryButton>
+          <PrimaryButton loading={loading} disabled={loading}>
+            {loading ? 'Creating…' : 'Sign up'}
+          </PrimaryButton>
+
           <SecondaryLinkButton href={loginHref}>Sign in</SecondaryLinkButton>
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-textSecondary">
