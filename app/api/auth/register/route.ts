@@ -8,6 +8,11 @@ import crypto from 'crypto'
 import Twilio from 'twilio'
 
 export const dynamic = 'force-dynamic'
+console.log('[register] DATABASE_URL host =', (() => {
+  const u = process.env.DATABASE_URL
+  if (!u) return '(missing)'
+  try { return new URL(u).host } catch { return '(invalid url)' }
+})())
 
 /* =========================================================
    Types
