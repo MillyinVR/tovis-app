@@ -31,7 +31,15 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-function PrimaryButton({ children, loading, disabled }: { children: React.ReactNode; loading: boolean; disabled?: boolean }) {
+function PrimaryButton({
+  children,
+  loading,
+  disabled,
+}: {
+  children: React.ReactNode
+  loading: boolean
+  disabled?: boolean
+}) {
   return (
     <button
       type="submit"
@@ -82,17 +90,19 @@ function TinyButton({
   )
 }
 
+function sanitizeNextUrl(raw: string | null) {
+  const s = (raw ?? '').trim()
+  if (!s) return null
+  if (!s.startsWith('/')) return null
+  if (s.startsWith('//')) return null
+  return s
+}
+
 export default function VerifyPhonePage() {
   const router = useRouter()
   const sp = useSearchParams()
 
-  const nextUrl = useMemo(() => {
-    const raw = sp.get('next') || ''
-    if (!raw) return null
-    if (!raw.startsWith('/')) return null
-    if (raw.startsWith('//')) return null
-    return raw
-  }, [sp])
+  const nextUrl = useMemo(() => sanitizeNextUrl(sp.get('next')), [sp])
 
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -115,7 +125,8 @@ export default function VerifyPhonePage() {
       const data = await safeJson(res)
 
       if (!res.ok) {
-        const retry = data?.retryAfterSeconds ? ` Try again in ~${Math.ceil(data.retryAfterSeconds / 60)} min.` : ''
+        const retry =
+          data?.retryAfterSeconds ? ` Try again in ~${Math.ceil(Number(data.retryAfterSeconds) / 60)} min.` : ''
         setError((data?.error || 'Could not resend code.') + retry)
         return
       }
@@ -136,7 +147,7 @@ export default function VerifyPhonePage() {
     setError(null)
     setInfo(null)
 
-    const trimmed = code.replace(/\s+/g, '')
+    const trimmed = code.replace(/[^\d]/g, '')
     if (!/^\d{6}$/.test(trimmed)) {
       setError('Enter the 6-digit code.')
       return
@@ -157,7 +168,7 @@ export default function VerifyPhonePage() {
       }
 
       router.refresh()
-      router.replace(nextUrl ?? '/client/looks')
+      router.replace(nextUrl ?? '/looks') // ✅ fix: /client/looks was 404 in prod
     } catch (e) {
       console.error(e)
       setError('Network error.')
@@ -174,7 +185,7 @@ export default function VerifyPhonePage() {
 
           <Input
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, ''))}
             inputMode="numeric"
             autoComplete="one-time-code"
             placeholder="123456"
@@ -183,7 +194,7 @@ export default function VerifyPhonePage() {
 
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-textSecondary/80">Didn’t get it?</span>
-            <TinyButton onClick={resend} disabled={sending}>
+            <TinyButton onClick={resend} disabled={sending || loading}>
               {sending ? 'Sending…' : 'Resend code'}
             </TinyButton>
           </div>
@@ -201,7 +212,7 @@ export default function VerifyPhonePage() {
           </div>
         ) : null}
 
-        <PrimaryButton loading={loading} disabled={loading}>
+        <PrimaryButton loading={loading} disabled={loading || sending}>
           {loading ? 'Verifying…' : 'Verify phone'}
         </PrimaryButton>
 

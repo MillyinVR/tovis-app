@@ -6,6 +6,7 @@ import { verifyToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 function sha256(input: string) {
   return crypto.createHash('sha256').update(input).digest('hex')
@@ -16,8 +17,18 @@ function generateSmsCode() {
   return String(n).padStart(6, '0')
 }
 
+/**
+ * Compatible with both:
+ * - cookies(): ReadonlyRequestCookies
+ * - cookies(): Promise<ReadonlyRequestCookies>
+ */
+async function readCookies() {
+  const c = cookies() as any
+  return typeof c?.then === 'function' ? await c : c
+}
+
 async function getUserIdFromCookie(): Promise<string | null> {
-  const cookieStore = await cookies()
+  const cookieStore = await readCookies()
   const token = cookieStore.get('tovis_token')?.value
   if (!token) return null
   const payload = verifyToken(token)
@@ -53,10 +64,14 @@ async function sendTwilioSms(args: { to: string; body: string }) {
     cache: 'no-store',
   })
 
-  const data = await res.json().catch(() => ({}))
+  const data = await res.json().catch(() => ({} as any))
+
   if (!res.ok) {
+    // Twilio typically returns: code, message, more_info, status
     const msg = typeof data?.message === 'string' ? data.message : 'SMS send failed.'
-    throw new Error(msg)
+    const code = data?.code ? ` (Twilio code ${data.code})` : ''
+    const status = data?.status ? ` status=${data.status}` : ` status=${res.status}`
+    throw new Error(`${msg}${code}${status}`)
   }
 
   return data
@@ -95,7 +110,7 @@ export async function POST(request: Request) {
     if (!userId) return jsonFail(401, 'Not authenticated.', { code: 'UNAUTHENTICATED' })
 
     const body = (await request.json().catch(() => ({}))) as { phone?: unknown }
-    const phoneOverride = pickString(body.phone)
+    const phoneOverride = pickString(body.phone)?.trim() || null
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -133,14 +148,20 @@ export async function POST(request: Request) {
       })
     })
 
-    await sendTwilioSms({
+    const twilio = await sendTwilioSms({
       to: phone,
       body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
     })
 
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[phone/send] sent', { to: phone, sid: twilio?.sid })
+    } else {
+      console.log('[phone/send] sent', { sid: twilio?.sid })
+    }
+
     return jsonOk({ ok: true }, 200)
-  } catch (err) {
-    console.error('[phone/send] error', err)
+  } catch (err: any) {
+    console.error('[phone/send] error', err?.message || err)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

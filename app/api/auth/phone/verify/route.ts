@@ -6,13 +6,24 @@ import { verifyToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 function sha256(input: string) {
   return crypto.createHash('sha256').update(input).digest('hex')
 }
 
+/**
+ * Compatible with both:
+ * - cookies(): ReadonlyRequestCookies
+ * - cookies(): Promise<ReadonlyRequestCookies>
+ */
+async function readCookies() {
+  const c = cookies() as any
+  return typeof c?.then === 'function' ? await c : c
+}
+
 async function getUserIdFromCookie(): Promise<string | null> {
-  const cookieStore = await cookies()
+  const cookieStore = await readCookies()
   const token = cookieStore.get('tovis_token')?.value
   if (!token) return null
   const payload = verifyToken(token)
@@ -54,9 +65,7 @@ export async function POST(request: Request) {
       orderBy: { createdAt: 'desc' },
     })
 
-    if (!match) {
-      return jsonFail(400, 'Incorrect or expired code.', { code: 'CODE_MISMATCH' })
-    }
+    if (!match) return jsonFail(400, 'Incorrect or expired code.', { code: 'CODE_MISMATCH' })
 
     await prisma.$transaction(async (tx) => {
       await tx.phoneVerification.update({
@@ -69,24 +78,21 @@ export async function POST(request: Request) {
         data: { phoneVerifiedAt: now },
       })
 
-      if (user.role === 'CLIENT') {
-        await tx.clientProfile.updateMany({
-          where: { userId },
-          data: { phoneVerifiedAt: now },
-        })
-      }
+      // Keep profiles in sync (since you’re storing there too)
+      await tx.clientProfile.updateMany({
+        where: { userId },
+        data: { phoneVerifiedAt: now },
+      })
 
-      if (user.role === 'PRO') {
-        await tx.professionalProfile.updateMany({
-          where: { userId },
-          data: { phoneVerifiedAt: now },
-        })
-      }
+      await tx.professionalProfile.updateMany({
+        where: { userId },
+        data: { phoneVerifiedAt: now },
+      })
     })
 
     return jsonOk({ ok: true }, 200)
-  } catch (err) {
-    console.error('[phone/verify] error', err)
+  } catch (err: any) {
+    console.error('[phone/verify] error', err?.message || err)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

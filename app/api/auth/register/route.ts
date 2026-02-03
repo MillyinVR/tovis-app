@@ -5,6 +5,7 @@ import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
 import crypto from 'crypto'
+import Twilio from 'twilio'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +64,12 @@ type RegisterBody = {
    Helpers
 ========================================================= */
 
+function envOrThrow(name: string) {
+  const v = process.env[name]
+  if (!v) throw new Error(`Missing env var: ${name}`)
+  return v
+}
+
 function cleanPhone(v: unknown): string | null {
   const raw = pickString(v)
   if (!raw) return null
@@ -100,12 +107,7 @@ function isLocationPayload(v: any): v is SignupLocation {
   }
 
   if (v.kind === 'PRO_MOBILE' || v.kind === 'CLIENT_ZIP') {
-    return (
-      typeof v.postalCode === 'string' &&
-      typeof v.lat === 'number' &&
-      typeof v.lng === 'number' &&
-      typeof v.timeZoneId === 'string'
-    )
+    return typeof v.postalCode === 'string' && typeof v.lat === 'number' && typeof v.lng === 'number' && typeof v.timeZoneId === 'string'
   }
 
   return false
@@ -132,12 +134,30 @@ function generateSmsCode() {
   return String(n).padStart(6, '0')
 }
 
+/**
+ * Sends the verification SMS through Twilio.
+ * - Requires: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+ */
 async function sendPhoneVerificationSms(args: { to: string; code: string }) {
-  // TODO: Wire to Twilio/MessageBird/etc.
+  const accountSid = envOrThrow('TWILIO_ACCOUNT_SID')
+  const authToken = envOrThrow('TWILIO_AUTH_TOKEN')
+  const from = envOrThrow('TWILIO_FROM_NUMBER')
+
+  const client = Twilio(accountSid, authToken)
+
+  const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
+
+  const msg = await client.messages.create({
+    to: args.to,
+    from,
+    body,
+  })
+
+  // Don't log codes in production
   if (process.env.NODE_ENV !== 'production') {
-    console.log('[phone-verification] send sms to:', args.to, 'code:', args.code)
+    console.log('[phone-verification] twilio sent', { sid: msg.sid, to: args.to, from })
   } else {
-    console.log('[phone-verification] send sms to:', args.to)
+    console.log('[phone-verification] twilio sent', { sid: msg.sid, to: args.to })
   }
 }
 
@@ -160,7 +180,7 @@ export async function POST(request: Request) {
     const firstName = pickString(body.firstName)
     const lastName = pickString(body.lastName)
 
-    // ✅ required for ALL users (client + pro)
+    // ✅ required for ALL users
     const phone = cleanPhone(body.phone)
 
     const tapIntentId = pickString(body.tapIntentId)
@@ -289,7 +309,7 @@ export async function POST(request: Request) {
         select: { id: true, email: true, role: true, phone: true },
       })
 
-      // invalidate old unused codes (defensive)
+      // invalidate old unused codes
       await tx.phoneVerification.updateMany({
         where: { userId: user.id, usedAt: null },
         data: { usedAt: new Date() },
@@ -307,13 +327,17 @@ export async function POST(request: Request) {
       return { user, code }
     })
 
-    // send SMS AFTER tx success
-    await sendPhoneVerificationSms({ to: user.phone!, code })
+    // ✅ Send SMS AFTER tx success
+    try {
+      await sendPhoneVerificationSms({ to: user.phone!, code })
+    } catch (smsErr) {
+      // If SMS fails, we still created the account. That's okay.
+      // We return a clear flag so the UI can offer "Resend code".
+      console.error('[phone-verification] failed to send', smsErr)
+    }
 
     const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
 
-    // NOTE: You can choose to delay cookie issuance until verification.
-    // For now we keep it, but we signal the client to route to verification first.
     const token = createToken({ userId: user.id, role: user.role })
 
     const res = jsonOk(
@@ -347,6 +371,13 @@ export async function POST(request: Request) {
   } catch (err: any) {
     if (isPrismaUniqueError(err)) {
       return jsonFail(400, 'Email or phone already in use.', { code: 'DUPLICATE_ACCOUNT' })
+    }
+
+    // Missing Twilio env vars, etc.
+    const msg = String(err?.message || '')
+    if (msg.includes('Missing env var: TWILIO_')) {
+      console.error('[phone-verification] twilio env missing', err)
+      return jsonFail(500, 'SMS provider is not configured.', { code: 'SMS_NOT_CONFIGURED' })
     }
 
     console.error('Register error', err)
