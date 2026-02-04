@@ -3,35 +3,18 @@ import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 import ClientBookingsDashboard from '../ClientBookingsDashboard'
-import LastMinuteOpenings from '../components/LastMinuteOpenings'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ClientBookingsPage() {
   const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'CLIENT') redirect('/login?from=/client/bookings')
+  if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
+    redirect('/login?from=/client/bookings')
+  }
 
   return (
-    <main style={{ maxWidth: 980, margin: '40px auto', padding: '0 16px', fontFamily: 'system-ui' }}>
-      <div style={{ marginBottom: 18 }}>
-        <h1 className="text-textPrimary" style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>
-          Your bookings
-        </h1>
-        <p className="text-textSecondary" style={{ margin: '6px 0 0' }}>
-          Everything in one place.
-        </p>
-      </div>
-
-      <LastMinuteOpenings />
-      <div style={{ height: 12 }} />
-
-      <Suspense
-        fallback={
-          <div className="text-textSecondary" style={{ fontSize: 13 }}>
-            Loading your bookings…
-          </div>
-        }
-      >
+    <main className="h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] overflow-hidden">
+      <Suspense fallback={<div className="text-sm font-semibold text-textSecondary">Loading…</div>}>
         <ClientBookingsDashboard />
       </Suspense>
     </main>

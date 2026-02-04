@@ -18,7 +18,7 @@ type Svc = { name: string } | null
 
 type OpeningRow = {
   id: string
-  startAt: string // ISO UTC
+  startAt: string
   endAt: string | null
   discountPct: number | null
   note: string | null
@@ -37,6 +37,12 @@ type NotificationRow = {
   opening: OpeningRow
 }
 
+type TabKey = 'forYou' | 'openNow'
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ')
+}
+
 function safeArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
 }
@@ -46,7 +52,6 @@ async function safeJson(res: Response) {
 }
 
 function proTz(o: OpeningRow) {
-  // always valid IANA or fallback
   return sanitizeTimeZone(o.professional?.timeZone, 'UTC')
 }
 
@@ -54,44 +59,36 @@ function openingHref(o: OpeningRow) {
   if (!o.offeringId) return null
   const tz = proTz(o)
 
-  // scheduledFor is the opening start (UTC ISO). We also pass proTimeZone explicitly.
   return `/offerings/${encodeURIComponent(o.offeringId)}?scheduledFor=${encodeURIComponent(
-    o.startAt,
+    o.startAt
   )}&source=DISCOVERY&openingId=${encodeURIComponent(o.id)}&proTimeZone=${encodeURIComponent(tz)}`
 }
 
 function TierPill({ tier }: { tier: string }) {
   const label =
-    tier === 'TIER1_WAITLIST_LAPSED'
-      ? 'Priority'
-      : tier === 'TIER2_FAVORITE_VIEWER'
-        ? 'For you'
-        : 'Open'
+    tier === 'TIER1_WAITLIST_LAPSED' ? 'Priority' : tier === 'TIER2_FAVORITE_VIEWER' ? 'For you' : 'Open'
 
   return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[11px] font-black text-textPrimary">
       {label}
     </span>
   )
 }
 
-function Section({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string
-  subtitle?: string | null
-  children: React.ReactNode
-}) {
+function MiniTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
-    <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="text-sm font-black text-textPrimary">{title}</div>
-        {subtitle ? <div className="text-xs font-semibold text-textSecondary">{subtitle}</div> : null}
-      </div>
-      {children}
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        'relative inline-flex items-center px-1 pb-2 text-[12px] font-black transition',
+        'outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bgPrimary',
+        active ? 'text-textPrimary' : 'text-textSecondary hover:text-textPrimary'
+      )}
+    >
+      {label}
+      {active ? <span className="absolute -bottom-[1px] left-0 h-[2px] w-full bg-accentPrimary" /> : null}
+    </button>
   )
 }
 
@@ -123,7 +120,6 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
         <span className="font-black">
           <ProProfileLink proId={o.professional?.id ?? null} label={proLabel} className="text-textPrimary" />
         </span>
-
         {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
         {discount ? <span className="text-textSecondary"> · {discount}</span> : null}
       </div>
@@ -134,7 +130,7 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
         {href ? (
           <a
             href={href}
-            className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-3 py-2 text-xs font-black text-bgPrimary shadow-sm transition hover:bg-accentPrimaryHover"
+            className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-3 py-2 text-xs font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
           >
             Book this slot
           </a>
@@ -147,6 +143,7 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
 }
 
 export default function LastMinuteOpenings() {
+  const [tab, setTab] = useState<TabKey>('openNow')
   const [feed, setFeed] = useState<OpeningRow[]>([])
   const [notif, setNotif] = useState<NotificationRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -172,8 +169,15 @@ export default function LastMinuteOpenings() {
         if (!fRes.ok) throw new Error(fData?.error || 'Failed to load openings feed.')
 
         if (!alive) return
-        setNotif(safeArray<NotificationRow>(nData?.notifications))
-        setFeed(safeArray<OpeningRow>(fData?.openings))
+
+        const notifications = safeArray<NotificationRow>(nData?.notifications)
+        const openings = safeArray<OpeningRow>(fData?.openings)
+
+        setNotif(notifications)
+        setFeed(openings)
+
+        // default mini-tab: "For you" if it exists
+        if (notifications.length > 0) setTab('forYou')
       } catch (e: any) {
         if (!alive) return
         setErr(e?.message || 'Failed to load openings.')
@@ -195,36 +199,45 @@ export default function LastMinuteOpenings() {
     return hasAny ? 'Last-minute openings' : 'No last-minute openings right now'
   }, [loading, err, notif.length, feed.length])
 
-  if (loading) return <div className="text-sm font-medium text-textSecondary">{headerLine}</div>
+  if (loading) return <div className="text-sm font-semibold text-textSecondary">{headerLine}</div>
 
   if (err) {
     return (
-      <div className="rounded-card border border-white/10 bg-surfaceGlass p-4">
+      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="mb-1 text-sm font-black text-textPrimary">{headerLine}</div>
         <div className="text-sm font-semibold text-microAccent">{err}</div>
       </div>
     )
   }
 
-  return (
-    <div className="grid gap-3">
-      {notif.length > 0 ? (
-        <Section title="For you" subtitle="Based on your activity and waitlist">
-          {notif.slice(0, 5).map((n) => (
-            <OpeningCard key={n.id} o={n.opening} badge={<TierPill tier={n.tier} />} />
-          ))}
-        </Section>
-      ) : null}
+  const showForYou = tab === 'forYou'
+  const list = showForYou ? notif.map((n) => ({ key: n.id, opening: n.opening, badge: <TierPill tier={n.tier} /> })) : feed.map((o) => ({ key: o.id, opening: o, badge: null }))
 
-      <Section title="Open now" subtitle="Next 48 hours">
-        {feed.length > 0 ? (
-          feed.slice(0, 8).map((o) => <OpeningCard key={o.id} o={o} />)
+  return (
+    <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[13px] font-black text-textPrimary">Last-minute openings</div>
+          <div className="text-[12px] font-semibold text-textSecondary">
+            {showForYou ? 'Based on your activity & waitlist' : 'Next 48 hours'}
+          </div>
+        </div>
+
+        <div className="inline-flex items-end gap-5 border-b border-white/10">
+          {notif.length > 0 ? <MiniTab active={tab === 'forYou'} label="For you" onClick={() => setTab('forYou')} /> : null}
+          <MiniTab active={tab === 'openNow'} label="Open now" onClick={() => setTab('openNow')} />
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {list.length ? (
+          list.slice(0, 8).map((row) => <OpeningCard key={row.key} o={row.opening} badge={row.badge} />)
         ) : (
-          <div className="text-sm font-medium text-textSecondary">
+          <div className="text-sm font-semibold text-textSecondary">
             When pros open slots, they’ll show up here. People love impulse decisions, especially when it’s eyeliner.
           </div>
         )}
-      </Section>
+      </div>
     </div>
   )
 }

@@ -1,9 +1,11 @@
 // app/client/layout.tsx
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
-import ClientSessionFooter from '../_components/ClientSessionFooter/ClientSessionFooter' // adjust path to your footer component
+import ClientSessionFooter from '../_components/ClientSessionFooter/ClientSessionFooter'
 
 export const dynamic = 'force-dynamic'
+
+const FOOTER_H = '4.5rem' // matches your footer h-18
 
 export default async function ClientLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser().catch(() => null)
@@ -12,67 +14,18 @@ export default async function ClientLayout({ children }: { children: React.React
     redirect('/login?from=/client')
   }
 
-  const displayName = user.clientProfile?.firstName || user.email || 'there'
-
   return (
-    <div className="min-h-screen bg-bgPrimary text-textPrimary" style={{ fontFamily: 'system-ui' }}>
-      {/* Top bar */}
-      <header
-        className="border-b border-surfaceGlass/10"
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
-          background: 'rgb(var(--bg-primary) / 0.72)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-        }}
-      >
-        <div style={{ maxWidth: 980, margin: '0 auto', padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ display: 'grid', gap: 2 }}>
-              <div className="text-textSecondary" style={{ fontSize: 12, fontWeight: 800 }}>
-                Client
-              </div>
-              <div className="text-textPrimary" style={{ fontSize: 16, fontWeight: 900 }}>
-                Hi, {displayName}
-              </div>
-            </div>
+    <div className="fixed inset-0 bg-bgPrimary text-textPrimary">
+      {/* Viewport-locked shell */}
+      <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4 pt-4">
+        {/* Main content area — MUST be min-h-0 so children can scroll internally */}
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
 
-            <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-              <NavLink href="/client">Dashboard</NavLink>
-              <NavLink href="/client/bookings">Bookings</NavLink>
-              <NavLink href="/client/aftercare">Aftercare</NavLink>
-              <NavLink href="/client/settings">Settings</NavLink>
-            </nav>
-          </div>
-        </div>
-      </header>
+        {/* Spacer so content never sits under the fixed footer */}
+        <div style={{ height: `calc(${FOOTER_H} + env(safe-area-inset-bottom) + 16px)` }} />
+      </div>
 
-      {/* Page content */}
-      <div style={{ maxWidth: 980, margin: '0 auto', padding: '18px 16px' }}>{children}</div>
+      <ClientSessionFooter />
     </div>
-  )
-}
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      className="border border-surfaceGlass/10 bg-bgSecondary text-textPrimary"
-      style={{
-        textDecoration: 'none',
-        borderRadius: 999,
-        padding: '8px 12px',
-        fontSize: 12,
-        fontWeight: 900,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-      }}
-    >
-      {children}
-      
-    </a>
   )
 }
