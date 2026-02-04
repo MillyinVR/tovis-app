@@ -1,24 +1,47 @@
 // lib/money.ts
 import { Prisma } from '@prisma/client'
 
-type MoneyInput = Prisma.Decimal | string | number
+export type MoneyInput = Prisma.Decimal | string | number
 
 function stripTrailingZeros(s: string) {
   // "80.00" -> "80", "80.50" -> "80.50"
   return s.replace(/\.00$/, '')
 }
 
-function isMoneyString(s: string) {
-  // allow "80", "80.5", "80.50"
-  return /^\d+(\.\d{1,2})?$/.test(s)
+/**
+ * ✅ Single source of truth: validate a money string.
+ * Accepts "80", "80.5", "80.50" (1–2 decimals).
+ */
+export function isMoneyString(s: string) {
+  return /^\d+(\.\d{1,2})?$/.test(s.trim())
 }
 
-function normalizeToFixed2(s: string) {
-  // assumes s already matches isMoneyString
+/**
+ * ✅ Normalize a money-ish string to 2dp fixed (string).
+ * Returns null if invalid.
+ *
+ * "80" -> "80.00"
+ * "80.5" -> "80.50"
+ * "80.50" -> "80.50"
+ */
+export function normalizeMoney2(v: string) {
+  const s = v.trim()
+  if (!isMoneyString(s)) return null
   const [a, b = ''] = s.split('.')
   if (b.length === 0) return `${a}.00`
   if (b.length === 1) return `${a}.${b}0`
   return `${a}.${b}`
+}
+
+/**
+ * ✅ Convert a money string (dollars) into integer cents.
+ * Returns null if invalid.
+ */
+export function moneyToCentsInt(v: string) {
+  const n = normalizeMoney2(v)
+  if (!n) return null
+  const [a, b] = n.split('.')
+  return parseInt(a, 10) * 100 + parseInt(b, 10)
 }
 
 // ✅ overloads so TS knows what happens when null isn't possible
@@ -31,9 +54,12 @@ export function moneyToString(v: MoneyInput | null | undefined): string | null {
   if (typeof v === 'string') {
     const s = v.trim()
     if (!s) return null
-    // if it's money-ish, normalize to 2dp first so stripping is consistent
-    if (isMoneyString(s)) return stripTrailingZeros(normalizeToFixed2(s))
-    // fallback: keep old behavior (trim + strip) without pretending it's valid money
+
+    // If it's valid money, normalize then strip ".00" consistently
+    const fixed = normalizeMoney2(s)
+    if (fixed) return stripTrailingZeros(fixed)
+
+    // fallback: keep old behavior without pretending it's valid money
     return stripTrailingZeros(s)
   }
 
@@ -59,10 +85,8 @@ export function moneyToFixed2String(v: MoneyInput | null | undefined): string | 
   }
 
   if (typeof v === 'string') {
-    const s = v.trim()
-    if (!s) return null
-    if (!isMoneyString(s)) return null
-    return normalizeToFixed2(s)
+    const fixed = normalizeMoney2(v)
+    return fixed
   }
 
   // Prisma.Decimal
@@ -86,10 +110,9 @@ export function parseMoney(input: unknown): Prisma.Decimal {
   }
 
   if (typeof input === 'string') {
-    const s = input.trim()
-    if (!s) throw new Error('Invalid money amount.')
-    if (!isMoneyString(s)) throw new Error('Invalid money amount.')
-    return new Prisma.Decimal(normalizeToFixed2(s))
+    const fixed = normalizeMoney2(input)
+    if (!fixed) throw new Error('Invalid money amount.')
+    return new Prisma.Decimal(fixed)
   }
 
   // Prisma.Decimal already

@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
-import type { Prisma } from '@prisma/client'
 
 import OfferingManager from '@/app/pro/services/OfferingManager'
 import ServicesManagerSectionClient from './ServicesManagerSectionClient'
@@ -36,21 +35,84 @@ export default async function ServicesManagerSection({
 
   const categories = await prisma.serviceCategory.findMany({
     where: { isActive: true, parentId: null },
-    include: {
+    orderBy: { name: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      services: {
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          minPrice: true,
+          defaultDurationMinutes: true,
+          defaultImageUrl: true,
+          isAddOnEligible: true,
+          addOnGroup: true,
+        },
+      },
       children: {
         where: { isActive: true },
-        include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } },
         orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          services: {
+            where: { isActive: true },
+            orderBy: { name: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              minPrice: true,
+              defaultDurationMinutes: true,
+              defaultImageUrl: true,
+              isAddOnEligible: true,
+              addOnGroup: true,
+            },
+          },
+        },
       },
-      services: { where: { isActive: true }, orderBy: { name: 'asc' } },
     },
-    orderBy: { name: 'asc' },
   })
 
   const offerings = await prisma.professionalServiceOffering.findMany({
     where: { professionalId: profId, isActive: true },
-    include: { service: { include: { category: true } } },
     orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      serviceId: true,
+      description: true,
+      customImageUrl: true,
+
+      offersInSalon: true,
+      offersMobile: true,
+
+      salonPriceStartingAt: true,
+      salonDurationMinutes: true,
+
+      mobilePriceStartingAt: true,
+      mobileDurationMinutes: true,
+
+      service: {
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          minPrice: true,
+          defaultImageUrl: true,
+          isAddOnEligible: true,
+          addOnGroup: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+            },
+          },
+        },
+      },
+    },
   })
 
   const categoryPayload = categories.map((cat) => ({
@@ -59,11 +121,11 @@ export default async function ServicesManagerSection({
     services: cat.services.map((s) => ({
       id: String(s.id),
       name: s.name,
-      minPrice: moneyToString((s as any).minPrice) ?? '0.00',
+      minPrice: moneyToString(s.minPrice) ?? '0.00',
       defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
-      defaultImageUrl: (s as any).defaultImageUrl ?? null,
-      isAddOnEligible: Boolean((s as any).isAddOnEligible),
-      addOnGroup: (s as any).addOnGroup ?? null,
+      defaultImageUrl: s.defaultImageUrl ?? null,
+      isAddOnEligible: Boolean(s.isAddOnEligible),
+      addOnGroup: s.addOnGroup ?? null,
     })),
     children: cat.children.map((child) => ({
       id: String(child.id),
@@ -71,11 +133,11 @@ export default async function ServicesManagerSection({
       services: child.services.map((s) => ({
         id: String(s.id),
         name: s.name,
-        minPrice: moneyToString((s as any).minPrice) ?? '0.00',
+        minPrice: moneyToString(s.minPrice) ?? '0.00',
         defaultDurationMinutes: s.defaultDurationMinutes ?? 60,
-        defaultImageUrl: (s as any).defaultImageUrl ?? null,
-        isAddOnEligible: Boolean((s as any).isAddOnEligible),
-        addOnGroup: (s as any).addOnGroup ?? null,
+        defaultImageUrl: s.defaultImageUrl ?? null,
+        isAddOnEligible: Boolean(s.isAddOnEligible),
+        addOnGroup: s.addOnGroup ?? null,
       })),
     })),
   }))
@@ -99,12 +161,16 @@ export default async function ServicesManagerSection({
 
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,
-    defaultImageUrl: (o.service as any).defaultImageUrl ?? null,
+    defaultImageUrl: o.service.defaultImageUrl ?? null,
 
-    minPrice: moneyToString((o.service as any).minPrice) ?? '0.00',
+    minPrice: moneyToString(o.service.minPrice) ?? '0.00',
 
-    serviceIsAddOnEligible: Boolean((o.service as any).isAddOnEligible),
-    serviceAddOnGroup: (o.service as any).addOnGroup ?? null,
+    serviceIsAddOnEligible: Boolean(o.service.isAddOnEligible),
+    serviceAddOnGroup: o.service.addOnGroup ?? null,
+
+    // ✅ Option 1 (standardized names)
+    isServiceActive: Boolean(o.service.isActive),
+    isCategoryActive: Boolean(o.service.category?.isActive ?? false),
   }))
 
   const outer = variant === 'page' ? 'mx-auto max-w-960px px-4 pb-28 pt-6' : 'mx-auto max-w-5xl pt-4'

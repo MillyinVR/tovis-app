@@ -198,13 +198,19 @@ export async function POST(request: Request) {
     }
 
     const service = await prisma.service.findUnique({
-      where: { id: serviceId },
-      select: { id: true, isActive: true, minPrice: true },
-    })
+  where: { id: serviceId },
+  select: {
+    id: true,
+    isActive: true,
+    minPrice: true,
+    category: { select: { isActive: true } },
+  },
+})
 
-    if (!service || !service.isActive) {
-      return NextResponse.json({ error: 'Invalid service' }, { status: 400 })
-    }
+if (!service || !service.isActive || !service.category?.isActive) {
+  return NextResponse.json({ error: 'This service is currently unavailable.' }, { status: 400 })
+}
+
 
     const data: any = {
       professionalId: profId,

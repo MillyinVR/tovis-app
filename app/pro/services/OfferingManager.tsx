@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 
 type Offering = {
   id: string
@@ -33,6 +34,18 @@ type Offering = {
 
   mobilePriceStartingAt: string | null
   mobileDurationMinutes: number | null
+
+  /**
+   * ✅ Option 1 support (preferred names)
+   */
+  isServiceActive?: boolean
+  isCategoryActive?: boolean
+
+  /**
+   * ✅ Back-compat with payload currently being sent
+   */
+  serviceIsActive?: boolean
+  categoryIsActive?: boolean
 }
 
 type Props = {
@@ -49,25 +62,8 @@ function pickString(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-// ---------- money helpers ----------
-function isValidMoneyString(v: string) {
-  return /^\d+(\.\d{1,2})?$/.test(v.trim())
-}
-
-function normalizeMoney2(v: string) {
-  const s = v.trim()
-  if (!isValidMoneyString(s)) return null
-  const [a, b = ''] = s.split('.')
-  if (b.length === 0) return `${a}.00`
-  if (b.length === 1) return `${a}.${b}0`
-  return `${a}.${b}`
-}
-
-function moneyToCents(v: string) {
-  const n = normalizeMoney2(v)
-  if (!n) return null
-  const [a, b] = n.split('.')
-  return parseInt(a, 10) * 100 + parseInt(b, 10)
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ')
 }
 
 function pickImage(o: Offering) {
@@ -81,7 +77,17 @@ function imageLabel(o: Offering) {
   return 'None'
 }
 
-// ---------- Add-ons types (API payloads) ----------
+function upstreamFlags(o: Offering) {
+  // Normalize the two naming schemes once.
+  const serviceFlag = o.isServiceActive ?? o.serviceIsActive
+  const categoryFlag = o.isCategoryActive ?? o.categoryIsActive
+
+  const serviceOk = serviceFlag !== false // default to true if undefined
+  const categoryOk = categoryFlag !== false // default to true if undefined
+
+  return { serviceOk, categoryOk, upstreamOk: serviceOk && categoryOk }
+}
+
 type EligibleAddOn = {
   id: string
   name: string
@@ -181,18 +187,16 @@ export default function OfferingManager({
     clearMessages(offeringId)
 
     try {
-      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, {
-        method: 'DELETE',
-      })
-
+      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
+
       if (!res.ok) {
         setError(offeringId, data?.error || `Remove failed (${res.status}).`)
         return
       }
 
       router.refresh()
-      if (openId === offeringId) setOpenId(null)
+      setOpenId((cur) => (cur === offeringId ? null : cur))
     } catch {
       setError(offeringId, 'Network error while removing.')
     } finally {
@@ -226,17 +230,15 @@ export default function OfferingManager({
       const cacheBuster = typeof init?.cacheBuster === 'number' ? init.cacheBuster : null
 
       if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
-      if (!publicUrl) throw new Error('Upload init missing publicUrl (this should be public).')
+      if (!publicUrl) throw new Error('Upload init missing publicUrl.')
 
       const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
         contentType: file.type,
         upsert: true,
       })
-
       if (upErr) throw new Error(upErr.message || 'Upload failed.')
 
       const finalUrl = cacheBuster ? `${publicUrl}?v=${cacheBuster}` : publicUrl
-
       await saveOffering(o.id, { customImageUrl: finalUrl })
       setSuccess(o.id, 'Image updated.')
     } catch (e: any) {
@@ -324,6 +326,9 @@ function OfferingCard(props: {
   const displayName = enforceCanonicalServiceNames ? o.serviceName : o.title || o.serviceName
   const imgSrc = pickImage(o)
 
+  const { upstreamOk } = upstreamFlags(o)
+
+  // Local editor state
   const [description, setDescription] = useState(o.description ?? '')
   const [offersInSalon, setOffersInSalon] = useState(Boolean(o.offersInSalon))
   const [offersMobile, setOffersMobile] = useState(Boolean(o.offersMobile))
@@ -332,7 +337,6 @@ function OfferingCard(props: {
   const [mobilePrice, setMobilePrice] = useState(o.mobilePriceStartingAt ?? '')
   const [mobileDuration, setMobileDuration] = useState(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
 
-  // add-ons editor state
   const [addonsOpen, setAddonsOpen] = useState(false)
 
   useEffect(() => {
@@ -347,7 +351,9 @@ function OfferingCard(props: {
     setAddonsOpen(false)
   }, [isOpen, o])
 
-  const disabled = busy || uploadBusy
+  // ✅ Option 1: lock edits when upstream disabled, still allow Remove.
+  const disabledForEdit = busy || uploadBusy || !upstreamOk
+  const disabledForRemove = busy || uploadBusy
 
   function summaryLine() {
     const parts: string[] = []
@@ -359,9 +365,6 @@ function OfferingCard(props: {
     }
     return parts.length ? parts.join('  ·  ') : 'No pricing set'
   }
-
-  const inputBase =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
 
   function validateAndBuildPatch():
     | {
@@ -381,7 +384,7 @@ function OfferingCard(props: {
       return { ok: false, error: 'Enable at least Salon or Mobile.' }
     }
 
-    const minCents = moneyToCents(o.minPrice) ?? 0
+    const minCents = moneyToCentsInt(o.minPrice) ?? 0
 
     let salonPriceNorm: string | null = null
     let salonDurInt: number | null = null
@@ -389,7 +392,7 @@ function OfferingCard(props: {
       salonPriceNorm = normalizeMoney2(salonPrice)
       if (!salonPriceNorm) return { ok: false, error: 'Salon price must be like 50 or 49.99.' }
 
-      const salonCents = moneyToCents(salonPriceNorm)
+      const salonCents = moneyToCentsInt(salonPriceNorm)
       if (salonCents == null || salonCents < minCents) {
         return { ok: false, error: `Salon price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.` }
       }
@@ -406,7 +409,7 @@ function OfferingCard(props: {
       mobilePriceNorm = normalizeMoney2(mobilePrice)
       if (!mobilePriceNorm) return { ok: false, error: 'Mobile price must be like 50 or 49.99.' }
 
-      const mobileCents = moneyToCents(mobilePriceNorm)
+      const mobileCents = moneyToCentsInt(mobilePriceNorm)
       if (mobileCents == null || mobileCents < minCents) {
         return { ok: false, error: `Mobile price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.` }
       }
@@ -431,7 +434,9 @@ function OfferingCard(props: {
     }
   }
 
-  // --- Luxe button styles (no hex, just your tokens) ---
+  const inputBase =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
+
   const btnBase =
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
@@ -447,31 +452,38 @@ function OfferingCard(props: {
   const chip =
     'inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/40 px-2.5 py-1 text-[10px] font-black text-textSecondary'
 
+  const chipWarn =
+    'inline-flex items-center rounded-full border border-toneWarn/30 bg-bgPrimary/50 px-2.5 py-1 text-[10px] font-black text-toneWarn'
+
   return (
     <div
-      className={[
-        'relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary',
-        'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
-      ].join(' ')}
+      className={cx(
+        'relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
+        !upstreamOk && 'opacity-[0.92]',
+      )}
     >
       {/* gradient border + specular highlight */}
       <div
-        className={[
+        className={cx(
           'pointer-events-none absolute inset-0',
-          'before:absolute before:inset-0 before:content-[\'\']',
+          "before:absolute before:inset-0 before:content-['']",
           'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.14),transparent_60%)]',
-          'after:absolute after:inset-0 after:content-[\'\']',
+          "after:absolute after:inset-0 after:content-['']",
           'after:bg-[linear-gradient(135deg,rgb(var(--accent-primary)/0.18),transparent_35%,rgb(var(--micro-accent)/0.14))]',
           'after:opacity-70',
-        ].join(' ')}
+        )}
       />
       <div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
 
       <div className="relative p-4">
-        {/* TOP ROW */}
+        {/* TOP */}
         <div className="flex items-start gap-3">
-          {/* image */}
-          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgPrimary/50">
+          <div
+            className={cx(
+              'relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgPrimary/50',
+              !upstreamOk && 'grayscale',
+            )}
+          >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(40px_40px_at_30%_20%,rgb(255_255_255/0.20),transparent_60%)]" />
             {imgSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -483,7 +495,6 @@ function OfferingCard(props: {
             )}
           </div>
 
-          {/* info */}
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -495,38 +506,39 @@ function OfferingCard(props: {
                 )}
               </div>
 
-              {/* Edit button as “top-right” primary control */}
-              <button type="button" onClick={onToggle} disabled={disabled} className={[btnBase, btnSoft].join(' ')}>
+              <button type="button" onClick={onToggle} disabled={busy || uploadBusy} className={cx(btnBase, btnSoft)}>
                 {isOpen ? 'Close' : 'Edit'}
               </button>
             </div>
 
             <div className="mt-2 text-[12px] text-textSecondary">{summaryLine()}</div>
 
-            {/* meta chips */}
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className={chip}>
-                Min {normalizeMoney2(o.minPrice) ?? o.minPrice}
-              </span>
+              {!upstreamOk ? <span className={chipWarn}>Unavailable</span> : null}
+              <span className={chip}>Min {normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
 
               {o.serviceIsAddOnEligible ? (
-                <span className={chip}>
-                  Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}
-                </span>
+                <span className={chip}>Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}</span>
               ) : null}
 
               <span className={chip}>Image • {imageLabel(o)}</span>
             </div>
+
+            {!upstreamOk ? (
+              <div className="mt-2 text-[12px] text-textSecondary">
+                This service is unavailable in the library. You can remove it from your menu.
+              </div>
+            ) : null}
           </div>
         </div>
 
-        {/* ACTIONS (mobile-safe, no overflow) */}
+        {/* ACTIONS */}
         <div className="mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <button
             type="button"
             onClick={onRemove}
-            disabled={disabled}
-            className={[btnBase, btnDanger, 'col-span-1 sm:col-auto'].join(' ')}
+            disabled={disabledForRemove}
+            className={cx(btnBase, btnDanger, 'col-span-1 sm:col-auto')}
           >
             {busy ? 'Working…' : 'Remove'}
           </button>
@@ -548,8 +560,8 @@ function OfferingCard(props: {
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                disabled={disabled}
-                className={[btnBase, btnAccent, 'col-span-1 sm:col-auto'].join(' ')}
+                disabled={disabledForEdit}
+                className={cx(btnBase, btnAccent, 'col-span-1 sm:col-auto')}
               >
                 {uploadBusy ? 'Uploading…' : 'Upload image'}
               </button>
@@ -560,9 +572,9 @@ function OfferingCard(props: {
 
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabledForEdit}
             onClick={() => setAddonsOpen((v) => !v)}
-            className={[btnBase, btnSoft, 'col-span-1 sm:col-auto'].join(' ')}
+            className={cx(btnBase, btnSoft, 'col-span-1 sm:col-auto')}
           >
             {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
           </button>
@@ -574,7 +586,11 @@ function OfferingCard(props: {
             className="mt-4 grid gap-4 border-t border-white/10 pt-4"
             onSubmit={(e) => {
               e.preventDefault()
-              if (disabled) return
+
+              if (disabledForEdit) {
+                if (!upstreamOk) setError('This service is unavailable. Remove it from your menu.')
+                return
+              }
 
               const result = validateAndBuildPatch()
               if (!result.ok) {
@@ -585,12 +601,18 @@ function OfferingCard(props: {
               onSave(result.patch)
             }}
           >
+            {!upstreamOk ? (
+              <div className="rounded-card border border-toneWarn/25 bg-bgPrimary/40 p-3 text-[12px] text-textSecondary">
+                Editing is disabled because this service is unavailable in the library.
+              </div>
+            ) : null}
+
             <label className="grid gap-2">
               <div className="text-[12px] font-black text-textPrimary">Description (optional)</div>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                disabled={disabled}
+                disabled={disabledForEdit}
                 rows={3}
                 className={inputBase}
                 placeholder="Short, clear, client-friendly."
@@ -603,7 +625,7 @@ function OfferingCard(props: {
                   type="checkbox"
                   checked={offersInSalon}
                   onChange={(e) => setOffersInSalon(e.target.checked)}
-                  disabled={disabled}
+                  disabled={disabledForEdit}
                   className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
                 />
                 Offer in Salon
@@ -614,7 +636,7 @@ function OfferingCard(props: {
                   type="checkbox"
                   checked={offersMobile}
                   onChange={(e) => setOffersMobile(e.target.checked)}
-                  disabled={disabled}
+                  disabled={disabledForEdit}
                   className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
                 />
                 Offer Mobile
@@ -624,7 +646,7 @@ function OfferingCard(props: {
             {addonsOpen ? (
               <AddOnsManager
                 offeringId={o.id}
-                disabled={disabled}
+                disabled={disabledForEdit}
                 onError={(msg) => setError(msg)}
                 onSuccess={(msg) => setSuccess(msg)}
                 onRefresh={() => refresh()}
@@ -632,12 +654,7 @@ function OfferingCard(props: {
             ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
-              <div
-                className={[
-                  'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
-                  offersInSalon ? '' : 'opacity-70',
-                ].join(' ')}
-              >
+              <div className={cx('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersInSalon && 'opacity-70')}>
                 <div className="mb-2 text-[12px] font-black text-textPrimary">Salon</div>
                 <div className="grid gap-2">
                   <label className="grid gap-1">
@@ -645,7 +662,7 @@ function OfferingCard(props: {
                     <input
                       value={salonPrice}
                       onChange={(e) => setSalonPrice(e.target.value)}
-                      disabled={disabled || !offersInSalon}
+                      disabled={disabledForEdit || !offersInSalon}
                       inputMode="decimal"
                       className={inputBase}
                       placeholder="e.g. 120 or 120.00"
@@ -657,7 +674,7 @@ function OfferingCard(props: {
                     <input
                       value={salonDuration}
                       onChange={(e) => setSalonDuration(e.target.value)}
-                      disabled={disabled || !offersInSalon}
+                      disabled={disabledForEdit || !offersInSalon}
                       type="number"
                       min={1}
                       className={inputBase}
@@ -667,12 +684,7 @@ function OfferingCard(props: {
                 </div>
               </div>
 
-              <div
-                className={[
-                  'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
-                  offersMobile ? '' : 'opacity-70',
-                ].join(' ')}
-              >
+              <div className={cx('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersMobile && 'opacity-70')}>
                 <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile</div>
                 <div className="grid gap-2">
                   <label className="grid gap-1">
@@ -680,7 +692,7 @@ function OfferingCard(props: {
                     <input
                       value={mobilePrice}
                       onChange={(e) => setMobilePrice(e.target.value)}
-                      disabled={disabled || !offersMobile}
+                      disabled={disabledForEdit || !offersMobile}
                       inputMode="decimal"
                       className={inputBase}
                       placeholder="e.g. 150 or 150.00"
@@ -692,7 +704,7 @@ function OfferingCard(props: {
                     <input
                       value={mobileDuration}
                       onChange={(e) => setMobileDuration(e.target.value)}
-                      disabled={disabled || !offersMobile}
+                      disabled={disabledForEdit || !offersMobile}
                       type="number"
                       min={1}
                       className={inputBase}
@@ -709,13 +721,13 @@ function OfferingCard(props: {
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={disabled}
-                className={[
+                disabled={disabledForEdit}
+                className={cx(
                   'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
-                  disabled
+                  disabledForEdit
                     ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                     : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
-                ].join(' ')}
+                )}
               >
                 {busy ? 'Saving…' : 'Save changes'}
               </button>
@@ -747,10 +759,9 @@ function AddOnsManager(props: {
   async function load() {
     setLoading(true)
     try {
-      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, {
-        cache: 'no-store',
-      })
+      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, { cache: 'no-store' })
       const data = await safeJson(res)
+
       if (!res.ok || data?.ok !== true) {
         onError(data?.error || `Failed to load add-ons (${res.status}).`)
         return
@@ -803,7 +814,6 @@ function AddOnsManager(props: {
 
     try {
       const existingSort = new Map(attached.map((a) => [a.addOnServiceId, a.sortOrder]))
-
       const ids = Object.keys(selected).filter((id) => selected[id])
 
       const items = ids.map((addOnServiceId, idx) => ({
@@ -851,12 +861,12 @@ function AddOnsManager(props: {
           type="button"
           onClick={save}
           disabled={disabled || saving || loading}
-          className={[
+          className={cx(
             'rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]',
             disabled || saving || loading
               ? 'cursor-not-allowed border-white/10 bg-bgSecondary text-textSecondary opacity-70'
               : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_14px_34px_rgb(0_0_0/0.30)]',
-          ].join(' ')}
+          )}
         >
           {saving ? 'Saving…' : 'Save add-ons'}
         </button>
@@ -911,14 +921,14 @@ function AddOnsManager(props: {
                       type="button"
                       disabled={disabled || !isOn}
                       onClick={() => setRecommended((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
-                      className={[
+                      className={cx(
                         'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
                         !isOn
                           ? 'border-white/10 bg-bgSecondary text-textSecondary opacity-60'
                           : recommended[s.id]
                             ? 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary'
                             : 'border-white/10 bg-bgSecondary text-textSecondary hover:border-white/20',
-                      ].join(' ')}
+                      )}
                     >
                       {recommended[s.id] ? 'Recommended' : 'Recommend'}
                     </button>

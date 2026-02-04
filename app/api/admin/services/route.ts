@@ -1,5 +1,4 @@
 // app/api/admin/services/route.ts
-
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -73,7 +72,6 @@ export async function POST(req: NextRequest) {
     const defaultImageUrlRaw = (pickString(form.get('defaultImageUrl')) ?? '').trim()
     const defaultImageUrl = defaultImageUrlRaw || null
 
-    // ✅ NEW add-on fields
     const isAddOnEligible = pickBool(form.get('isAddOnEligible')) ?? false
     const addOnGroupRaw = (pickString(form.get('addOnGroup')) ?? '').trim()
     const addOnGroup = addOnGroupRaw || null
@@ -106,8 +104,6 @@ export async function POST(req: NextRequest) {
         defaultImageUrl,
         allowMobile,
         isActive: true,
-
-        // ✅ NEW
         isAddOnEligible,
         addOnGroup,
       },
@@ -126,7 +122,8 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => null)
 
-    return NextResponse.json({ ok: true, service: created }, { status: 201 })
+    // ✅ PRG: redirect to the new service editor (best admin UX)
+    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(created.id)}`, req.url), { status: 303 })
   } catch (e) {
     console.error('POST /api/admin/services error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

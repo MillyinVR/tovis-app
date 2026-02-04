@@ -182,7 +182,6 @@ enum NfcCardType {
   SALON_WHITE_LABEL
 }
 
-
 enum ProfessionalLocationType {
   SALON
   SUITE
@@ -198,6 +197,12 @@ enum NotificationType {
   BOOKING_REQUEST
   BOOKING_UPDATE
   REVIEW
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
 }
 
 // =======================
@@ -285,14 +290,14 @@ model AdminPermission {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  phone     String?  @unique @db.VarChar(32) // E.164 preferred: +16195551234
+  id              String    @id @default(cuid())
+  email           String    @unique
+  phone           String?   @unique @db.VarChar(32) // E.164 preferred: +16195551234
   phoneVerifiedAt DateTime?
-  password  String
-  role      Role
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  password        String
+  role            Role
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   adminActionLogs    AdminActionLog[]           @relation("AdminUserLogs")
   adminPermissions   AdminPermission[]
@@ -323,16 +328,19 @@ model User {
   passwordResetTokens PasswordResetToken[]
 
   phoneVerifications PhoneVerification[]
+
+  supportTicketsCreated SupportTicket[] @relation("SupportTicketCreatedBy")
+  supportTicketsHandled SupportTicket[] @relation("SupportTicketHandledBy")
 }
 
 model PhoneVerification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  phone     String   @db.VarChar(32)
+  phone     String    @db.VarChar(32)
   codeHash  String
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -340,7 +348,6 @@ model PhoneVerification {
   @@index([phone])
   @@index([expiresAt])
 }
-
 
 model ClientProfile {
   id                   String                      @id @default(cuid())
@@ -1432,7 +1439,7 @@ model CalendarBlock {
 }
 
 model NfcCard {
-  id              String   @id @default(cuid()) // this is what’s encoded in the NFC URL
+  id   String      @id @default(cuid()) // this is what’s encoded in the NFC URL
   type NfcCardType
 
   // “ownership” (never changes once claimed)
@@ -1523,4 +1530,28 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model SupportTicket {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdByUserId String?
+  createdByRole   String? // "CLIENT" | "PRO" | "GUEST" (store as string to avoid enum coupling)
+
+  subject String
+  message String
+  status  SupportTicketStatus @default(OPEN)
+
+  // Optional admin handling
+  handledByAdminId String?
+  handledAt        DateTime?
+
+  // Optional relations if you want them later
+  createdByUser  User? @relation("SupportTicketCreatedBy", fields: [createdByUserId], references: [id])
+  handledByAdmin User? @relation("SupportTicketHandledBy", fields: [handledByAdminId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([createdByUserId, createdAt])
 }

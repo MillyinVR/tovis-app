@@ -166,8 +166,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.professionalServiceOffering.findFirst({
         where: { id: offeringId, professionalId: profId },
-        include: { service: { select: { minPrice: true } } },
+        include: {
+          service: {
+            select: {
+              minPrice: true,
+              isActive: true,
+              category: { select: { isActive: true } },
+            },
+          },
+        },
       })
+
 
       if (!existing) return { kind: 'NOT_FOUND' as const }
 
@@ -175,6 +184,21 @@ export async function PATCH(request: Request, ctx: Ctx) {
         typeof body.offersInSalon === 'boolean' ? body.offersInSalon : Boolean(existing.offersInSalon)
       const nextOffersMobile =
         typeof body.offersMobile === 'boolean' ? body.offersMobile : Boolean(existing.offersMobile)
+      const serviceOk = Boolean(existing.service.isActive && existing.service.category?.isActive)
+
+      if (!serviceOk) {
+        // allow only deactivation
+        if (body.isActive === false) {
+          const saved = await tx.professionalServiceOffering.update({
+            where: { id: existing.id },
+            data: { isActive: false },
+            include: { service: { include: { category: true } } },
+          })
+          return { kind: 'OK' as const, offering: saved }
+        }
+
+        return { kind: 'ERROR' as const, status: 400, msg: 'This service is currently unavailable.' }
+      }
 
       if (!nextOffersInSalon && !nextOffersMobile) {
         return { kind: 'ERROR' as const, status: 400, msg: 'Enable at least Salon or Mobile.' }

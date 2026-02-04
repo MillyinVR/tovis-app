@@ -26,12 +26,12 @@ export async function GET(req: Request) {
 
     if (!media) return jsonFail(404, 'Not found.')
 
-    // Already public URL stored
-    if (typeof media.url === 'string' && media.url.startsWith('http')) {
+    // ✅ Only short-circuit if PUBLIC
+    if (media.visibility === 'PUBLIC' && typeof media.url === 'string' && media.url.startsWith('http')) {
       return jsonOk({ url: media.url })
     }
 
-    // Private or storage-path based media requires auth
+    // Anything non-public requires auth
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
 
@@ -45,7 +45,6 @@ export async function GET(req: Request) {
     if (!bucket || !path) return jsonFail(500, 'Missing storage info.')
 
     const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, 60) // 60s
-
     if (error || !data?.signedUrl) return jsonFail(500, error?.message || 'Failed to sign URL.')
 
     return jsonOk({ url: data.signedUrl })
