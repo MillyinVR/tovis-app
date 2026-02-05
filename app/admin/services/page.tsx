@@ -6,10 +6,36 @@ import { prisma } from '@/lib/prisma'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import ServiceHeroGrid from './_components/ServiceHeroGrid'
 import ServicesBrowseBar from './_components/ServicesBrowseBar'
+import ServicesCreateWizard from './_components/ServicesCreateWizard'
 
 export const dynamic = 'force-dynamic'
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>
+
+type CategoryRow = {
+  id: string
+  name: string
+  slug: string
+  parentId: string | null
+  isActive: boolean
+}
+
+type CategoryDTO = { id: string; name: string; parentId: string | null }
+
+type ServiceDTO = {
+  id: string
+  name: string
+  description: string | null
+  defaultDurationMinutes: number | null
+  minPrice: string | null
+  defaultImageUrl: string | null
+  allowMobile: boolean
+  isActive: boolean
+  isAddOnEligible: boolean
+  addOnGroup: string | null
+  categoryId: string | null
+  categoryName: string | null
+}
 
 function CardShell({
   title,
@@ -64,14 +90,69 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   )
 }
 
-function toStr(v: string | string[] | undefined) {
+function firstStr(v: string | string[] | undefined) {
   if (Array.isArray(v)) return v[0] ?? ''
   return v ?? ''
 }
 
-function toInt(v: string, fallback: number) {
-  const n = Number.parseInt(v, 10)
+function asBool01(v: string | string[] | undefined, defaultOne = true) {
+  const s = String(firstStr(v)).trim()
+  if (!s) return defaultOne
+  return s !== '0'
+}
+
+function asPosInt(v: string | string[] | undefined, fallback: number) {
+  const s = String(firstStr(v)).trim()
+  const n = Number.parseInt(s, 10)
   return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function buildCategoryIndex(categories: CategoryRow[]) {
+  const byId = new Map<string, CategoryRow>()
+  const childrenByParent = new Map<string, CategoryRow[]>()
+
+  for (const c of categories) {
+    byId.set(c.id, c)
+    if (c.parentId) {
+      const pid = c.parentId
+      const arr = childrenByParent.get(pid) ?? []
+      arr.push(c)
+      childrenByParent.set(pid, arr)
+    }
+  }
+
+  // ensure deterministic child ordering even if DB ordering changes later
+  for (const [pid, kids] of childrenByParent.entries()) {
+    kids.sort((a, b) => a.name.localeCompare(b.name))
+    childrenByParent.set(pid, kids)
+  }
+
+  const top = categories.filter((c) => !c.parentId).slice().sort((a, b) => a.name.localeCompare(b.name))
+
+  return { byId, childrenByParent, top }
+}
+
+function resolveCategoryIdsFilter(args: {
+  categoryId: string
+  includeChildren: boolean
+  byId: Map<string, CategoryRow>
+  childrenByParent: Map<string, CategoryRow[]>
+}) {
+  const { categoryId, includeChildren, byId, childrenByParent } = args
+  const picked = byId.get(categoryId)
+  if (!picked) return null
+
+  if (!includeChildren) return [categoryId]
+
+  // include children only when top-level
+  if (picked.parentId) return [categoryId]
+
+  const kids = childrenByParent.get(categoryId) ?? []
+  return [categoryId, ...kids.map((k) => k.id)]
 }
 
 export default async function AdminServicesPage(props: { searchParams?: SearchParams }) {
@@ -81,44 +162,49 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
 
   const sp = (await props.searchParams) ?? {}
 
-  const q = String(toStr(sp.q)).trim()
-  const activeOnly = toStr(sp.active || '1') !== '0'
+  const q = String(firstStr(sp.q)).trim()
+  const activeOnly = asBool01(sp.active, true)
 
-  const categoryFilter = String(toStr(sp.cat)).trim()
-  const includeChildren = toStr(sp.kids || '1') !== '0'
-  const page = toInt(toStr(sp.page || '1'), 1)
-  const per = Math.min(120, Math.max(12, toInt(toStr(sp.per || '36'), 36)))
+  const categoryFilter = String(firstStr(sp.cat)).trim()
+  const includeChildren = asBool01(sp.kids, true)
 
-  const categories = await prisma.serviceCategory.findMany({
+  const requestedPage = asPosInt(sp.page, 1)
+  const per = clamp(asPosInt(sp.per, 36), 12, 120)
+
+  // Categories: load once (admin catalog sizes can get big; keep this high but sane)
+  const rawCategories = await prisma.serviceCategory.findMany({
     orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
     select: { id: true, name: true, slug: true, parentId: true, isActive: true },
-    take: 2000,
+    take: 4000,
   })
 
-  const catById = new Map<string, (typeof categories)[number]>()
-  for (const c of categories) catById.set(String(c.id), c)
+  const categories: CategoryRow[] = rawCategories.map((c) => ({
+    id: String(c.id),
+    name: c.name,
+    slug: c.slug,
+    parentId: c.parentId ? String(c.parentId) : null,
+    isActive: Boolean(c.isActive),
+  }))
 
-  // Resolve category IDs to include (category + optional children)
-  let categoryIdsToInclude: string[] | null = null
-  if (categoryFilter) {
-    const picked = catById.get(categoryFilter)
-    if (picked) {
-      const isTop = !picked.parentId
-      if (isTop && includeChildren) {
-        const kids = categories.filter((c) => String(c.parentId || '') === categoryFilter).map((c) => String(c.id))
-        categoryIdsToInclude = [categoryFilter, ...kids]
-      } else {
-        categoryIdsToInclude = [categoryFilter]
-      }
-    }
-  }
+  const { byId, childrenByParent, top } = buildCategoryIndex(categories)
 
-  const whereClause: any = {
+  const categoryIdsToInclude =
+    categoryFilter && byId.has(categoryFilter)
+      ? resolveCategoryIdsFilter({
+          categoryId: categoryFilter,
+          includeChildren,
+          byId,
+          childrenByParent,
+        })
+      : null
+
+  // Build Prisma where clause (typed-ish, avoid any)
+  const where = {
     ...(q
       ? {
           OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { category: { name: { contains: q, mode: 'insensitive' } } },
+            { name: { contains: q, mode: 'insensitive' as const } },
+            { category: { name: { contains: q, mode: 'insensitive' as const } } },
           ],
         }
       : {}),
@@ -126,40 +212,43 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
     ...(categoryIdsToInclude ? { categoryId: { in: categoryIdsToInclude } } : {}),
   }
 
-  const [total, services] = await Promise.all([
-    prisma.service.count({ where: whereClause }),
-    prisma.service.findMany({
-      where: whereClause,
-      orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
-      skip: (page - 1) * per,
-      take: per,
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        categoryId: true,
-        isActive: true,
-        allowMobile: true,
-        defaultDurationMinutes: true,
-        minPrice: true,
-        defaultImageUrl: true,
-        isAddOnEligible: true,
-        addOnGroup: true,
-        category: { select: { id: true, name: true } },
-      },
-    }),
-  ])
+  // ✅ Correct pagination:
+  // 1) count
+  // 2) clamp page
+  // 3) fetch using clamped page
+  const total = await prisma.service.count({ where })
 
   const totalPages = Math.max(1, Math.ceil(total / per))
-  const clampedPage = Math.min(Math.max(1, page), totalPages)
+  const page = clamp(requestedPage, 1, totalPages)
 
-  const categoryPayload = categories.map((c) => ({
-    id: String(c.id),
+  const services = await prisma.service.findMany({
+    where,
+    orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
+    skip: (page - 1) * per,
+    take: per,
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      categoryId: true,
+      isActive: true,
+      allowMobile: true,
+      defaultDurationMinutes: true,
+      minPrice: true,
+      defaultImageUrl: true,
+      isAddOnEligible: true,
+      addOnGroup: true,
+      category: { select: { id: true, name: true } },
+    },
+  })
+
+  const categoryPayload: CategoryDTO[] = categories.map((c) => ({
+    id: c.id,
     name: c.name,
-    parentId: c.parentId ? String(c.parentId) : null,
+    parentId: c.parentId,
   }))
 
-  const servicesPayload = services.map((s) => ({
+  const servicesPayload: ServiceDTO[] = services.map((s) => ({
     id: String(s.id),
     name: s.name,
     description: s.description ?? null,
@@ -173,16 +262,6 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
     isAddOnEligible: Boolean(s.isAddOnEligible),
     addOnGroup: s.addOnGroup ?? null,
   }))
-
-  const topCats = categories.filter((c) => !c.parentId)
-  const childrenByParent = new Map<string, typeof categories>()
-  for (const c of categories) {
-    if (!c.parentId) continue
-    const pid = String(c.parentId)
-    const arr = childrenByParent.get(pid) ?? []
-    arr.push(c)
-    childrenByParent.set(pid, arr)
-  }
 
   return (
     <main className="grid gap-4">
@@ -232,8 +311,8 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
           </form>
 
           <div className="mt-4 grid gap-3">
-            {topCats.map((c) => {
-              const kids = childrenByParent.get(String(c.id)) ?? []
+            {top.map((c) => {
+              const kids = childrenByParent.get(c.id) ?? []
               return (
                 <div key={c.id} className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -241,7 +320,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
                       {c.name} <span className="text-xs font-bold text-textSecondary">({c.slug})</span>
                     </div>
 
-                    <form action={`/api/admin/categories/${encodeURIComponent(String(c.id))}`} method="post">
+                    <form action={`/api/admin/categories/${encodeURIComponent(c.id)}`} method="post">
                       <input type="hidden" name="_method" value="PATCH" />
                       <input type="hidden" name="isActive" value={String(!c.isActive)} />
                       <button
@@ -265,7 +344,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
                             <span className="text-xs text-textSecondary">({k.slug})</span>
                           </div>
 
-                          <form action={`/api/admin/categories/${encodeURIComponent(String(k.id))}`} method="post">
+                          <form action={`/api/admin/categories/${encodeURIComponent(k.id)}`} method="post">
                             <input type="hidden" name="_method" value="PATCH" />
                             <input type="hidden" name="isActive" value={String(!k.isActive)} />
                             <button
@@ -289,60 +368,10 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
 
         {/* Services */}
         <CardShell title="Services" subtitle={`${total} total • ordered by category`}>
-          {/* Create service (unchanged) */}
-          <form
-            action="/api/admin/services"
-            method="post"
-            className="grid gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/30 p-3"
-          >
-            <FieldLabel>Create service</FieldLabel>
+          <ServicesCreateWizard categories={categoryPayload} />
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input name="name" placeholder="Service name (ex: Haircut)" required />
 
-              <Select name="categoryId" required defaultValue="">
-                <option value="" disabled>
-                  Select category
-                </option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.parentId ? '↳ ' : ''}
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input name="minPrice" placeholder="Min price (ex: 45 or 45.00)" />
-              <Input name="defaultDurationMinutes" placeholder="Default minutes (ex: 60)" />
-            </div>
-
-            <label className="flex items-center gap-2 text-xs font-black text-textPrimary">
-              <input
-                type="checkbox"
-                name="allowMobile"
-                value="true"
-                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-              />
-              Allow mobile by default
-            </label>
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                className="rounded-full border border-accentPrimary/45 bg-accentPrimary/15 px-4 py-2 text-xs font-black text-accentPrimary hover:bg-accentPrimary/20 hover:border-accentPrimary/60 active:scale-[0.98] transition"
-              >
-                Create
-              </button>
-            </div>
-
-            <div className="text-[11px] text-textSecondary">
-              After creating, you’ll be taken to the service detail page to review and refine.
-            </div>
-          </form>
-
-          {/* ✅ Sticky browse + pagination */}
+          {/* Browse + pagination */}
           <div className="mt-4">
             <ServicesBrowseBar
               categories={categoryPayload}
@@ -352,13 +381,13 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
                 cat: categoryFilter || '',
                 kids: includeChildren ? '1' : '0',
                 per: String(per),
-                page: clampedPage,
+                page,
               }}
               stats={{ total, totalPages }}
             />
           </div>
 
-          {/* ✅ Hero cards */}
+          {/* Hero grid */}
           <div className="mt-4">
             <ServiceHeroGrid services={servicesPayload} categories={categoryPayload} />
           </div>

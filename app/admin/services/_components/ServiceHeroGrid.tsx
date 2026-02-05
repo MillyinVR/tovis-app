@@ -1,4 +1,4 @@
-// app/admin/services/_components/ServiceHeroGrid.tsx
+// app/admin/services/_components/ServiceHeroGrid.tsx 
 'use client'
 
 import { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from 'react'
@@ -69,7 +69,6 @@ function withCacheBuster(url: string, cb?: number | null) {
 }
 
 function haptic(ms = 8) {
-  // Subtle “tap” feedback on supported devices (mobile mostly)
   try {
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(ms)
   } catch {
@@ -95,11 +94,7 @@ function StatusPill(props: { dirty: boolean; saving: boolean }) {
       ? 'border-[rgb(var(--micro-accent))/0.35] bg-[rgb(var(--micro-accent))/0.12] text-textPrimary'
       : 'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary'
 
-  return (
-    <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black', tone)}>
-      {label}
-    </span>
-  )
+  return <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black', tone)}>{label}</span>
 }
 
 /** Lock page scroll while modal is open */
@@ -108,11 +103,9 @@ function useLockBodyScroll(locked: boolean) {
     if (!locked) return
     const prevOverflow = document.body.style.overflow
     const prevPaddingRight = document.body.style.paddingRight
-
     const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
     document.body.style.overflow = 'hidden'
     if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`
-
     return () => {
       document.body.style.overflow = prevOverflow
       document.body.style.paddingRight = prevPaddingRight
@@ -211,14 +204,34 @@ function isVisible(el: HTMLElement) {
 }
 
 /** Premium shimmer image */
+/** Premium shimmer image */
 function ImageWithShimmer(props: { src: string; alt?: string; className?: string }) {
   const { src, alt = '', className } = props
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
+  const imgRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
     setLoaded(false)
     setFailed(false)
+  }, [src])
+
+  // ✅ Fix: if the image is already in cache, onLoad might not fire
+  useEffect(() => {
+    const img = imgRef.current
+    if (!img) return
+
+    // if it’s already finished loading, reflect that in state
+    if (img.complete) {
+      if (img.naturalWidth > 0) {
+        setLoaded(true)
+        setFailed(false)
+      } else {
+        // complete but no pixels = failed
+        setLoaded(true)
+        setFailed(true)
+      }
+    }
   }, [src])
 
   return (
@@ -234,10 +247,18 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
       {!failed ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          ref={imgRef}
           src={src}
           alt={alt}
-          className={cx('relative z-[1] h-full w-full object-cover transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
-          onLoad={() => setLoaded(true)}
+          className={cx(
+            'relative z-[1] h-full w-full object-cover transition-opacity',
+            loaded ? 'opacity-100' : 'opacity-0',
+          )}
+          loading="lazy"
+          onLoad={() => {
+            setFailed(false)
+            setLoaded(true)
+          }}
           onError={() => {
             setFailed(true)
             setLoaded(true)
@@ -265,6 +286,7 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
   )
 }
 
+
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 function Toast(props: ToastState) {
   const toneClasses =
@@ -288,11 +310,13 @@ function Toast(props: ToastState) {
   )
 }
 
+type FormMeta = { dirty: boolean; canSave: boolean; uploadBusy: boolean }
+type FormHandle = { submit: () => void }
+
 export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categories: CategoryDTO[] }) {
   const { services, categories } = props
   const router = useRouter()
 
-  // Live state so hero cards update immediately when image uploads etc.
   const [liveServices, setLiveServices] = useState<ServiceDTO[]>(services)
   useEffect(() => setLiveServices(services), [services])
 
@@ -301,36 +325,18 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Header UI state (fed by the form)
-  const [dirty, setDirty] = useState(false)
-  const [canSave, setCanSave] = useState(false)
-  const [uploadBusy, setUploadBusy] = useState(false)
+  const [meta, setMeta] = useState<FormMeta>({ dirty: false, canSave: false, uploadBusy: false })
 
   const [toast, setToast] = useState<ToastState | null>(null)
   const toastTimer = useRef<number | null>(null)
 
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const formRef = useRef<ServiceEditFormHandle | null>(null)
+  const formRef = useRef<FormHandle | null>(null)
 
   const current = useMemo(() => liveServices.find((s) => s.id === openId) ?? null, [openId, liveServices])
   const isOpen = Boolean(current)
 
   useLockBodyScroll(isOpen)
-
-  const close = () => {
-    if (busy) return
-    setOpenId(null)
-    setError(null)
-    setDirty(false)
-    setCanSave(false)
-    setUploadBusy(false)
-  }
-
-  useModalA11y({
-    isOpen,
-    panelRef: panelRef as any,
-    onClose: close,
-  })
 
   function showToast(next: ToastState, ms = 2400) {
     setToast(next)
@@ -343,6 +349,15 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
       if (toastTimer.current) window.clearTimeout(toastTimer.current)
     }
   }, [])
+
+  const close = () => {
+    if (busy) return
+    setOpenId(null)
+    setError(null)
+    setMeta({ dirty: false, canSave: false, uploadBusy: false })
+  }
+
+  useModalA11y({ isOpen, panelRef: panelRef as any, onClose: close })
 
   function patchLiveService(id: string, patch: Partial<ServiceDTO>) {
     setLiveServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
@@ -363,7 +378,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
       const res = await fetch(`/api/admin/services/${encodeURIComponent(id)}`, { method: 'POST', body: form })
       const data = await safeJson(res)
 
-      if (!res.ok) {
+      if (!res.ok || data?.ok !== true) {
         const msg = data?.error || `Save failed (${res.status}).`
         setError(msg)
         showToast({ tone: 'error', title: 'Save failed', body: msg })
@@ -371,8 +386,8 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
       }
 
       showToast({ tone: 'success', title: 'Saved', body: 'Service updated successfully.' }, 2000)
-      setDirty(false)
-      setCanSave(false)
+
+      setMeta((m) => ({ ...m, dirty: false, canSave: false }))
       setOpenId(null)
       router.refresh()
     } catch {
@@ -401,18 +416,12 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
   const btnBase =
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-extrabold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
-  const btnSoft =
-    'border border-surfaceGlass/15 bg-bgPrimary/35 text-textPrimary hover:border-surfaceGlass/25 hover:bg-bgPrimary/45'
-
-  const btnAccent =
-    'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
-
-  const btnPrimary =
-    'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
+  const btnSoft = 'border border-surfaceGlass/15 bg-bgPrimary/35 text-textPrimary hover:border-surfaceGlass/25 hover:bg-bgPrimary/45'
+  const btnAccent = 'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
+  const btnPrimary = 'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
 
   return (
     <>
-      {/* Toast */}
       <AnimatePresence>
         {toast ? (
           <motion.div
@@ -427,15 +436,11 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
         ) : null}
       </AnimatePresence>
 
-      {/* Hero cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {liveServices.map((s) => (
           <div
             key={s.id}
-            className={cx(
-              'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary',
-              'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
-            )}
+            className={cx('relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary', 'shadow-[0_18px_50px_rgb(0_0_0/0.45)]')}
           >
             <div
               className={cx(
@@ -455,9 +460,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                 {s.defaultImageUrl ? (
                   <ImageWithShimmer src={s.defaultImageUrl} className="aspect-[16/10] w-full" />
                 ) : (
-                  <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">
-                    No image
-                  </div>
+                  <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">No image</div>
                 )}
               </div>
 
@@ -503,7 +506,6 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
         ))}
       </div>
 
-      {/* Modal */}
       <AnimatePresence>
         {current ? (
           <motion.div key="svc-edit" className="fixed inset-0 z-[9000]" initial="initial" animate="animate" exit="exit">
@@ -522,7 +524,6 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                   'tovis-glass-strong tovis-noise',
                   'rounded-t-[26px] sm:rounded-[26px] border border-white/12',
                   'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
-                  // key: panel is a column; body scrolls
                   'max-h-[calc(100vh-12px)] sm:max-h-[calc(100vh-80px)]',
                   'flex flex-col',
                 )}
@@ -530,22 +531,21 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                 <div className="pointer-events-none absolute inset-0 tovis-overlay-scrim" />
                 <div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
 
-                {/* Header (sticky inside panel) */}
+                {/* Header */}
                 <div className="relative z-[2] flex items-start justify-between gap-3 border-b border-white/10 bg-bgSecondary/70 px-4 py-3 backdrop-blur-xl">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <div className="text-[14px] font-black tracking-[0.04em] text-textPrimary">Edit service</div>
-                      <StatusPill dirty={dirty} saving={busy} />
+                      <StatusPill dirty={meta.dirty} saving={busy} />
                     </div>
                     <div className="mt-0.5 truncate text-[12px] text-textSecondary">{current.name}</div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {/* ✅ Save moved to top-left of Close (in this right cluster it reads perfectly on mobile) */}
                     <button
                       type="button"
                       className={cx(btnBase, btnPrimary)}
-                      disabled={!canSave || busy || uploadBusy}
+                      disabled={!meta.canSave || busy || meta.uploadBusy}
                       onClick={() => {
                         haptic(10)
                         formRef.current?.submit()
@@ -569,7 +569,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                 </div>
 
                 {/* Scroll body */}
-                <div className={cx('relative z-[1] flex-1 overflow-y-auto overscroll-contain', 'looksNoScrollbar')}>
+                <div className="relative z-[1] flex-1 overflow-y-auto overscroll-contain">
                   <ServiceEditForm
                     ref={formRef}
                     service={current}
@@ -577,14 +577,9 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                     inputBase={inputBase}
                     busy={busy}
                     error={error}
-                    onClose={close}
                     onToast={showToast}
                     onOptimistic={(patch) => patchLiveService(current.id, patch)}
-                    onMetaChange={(m) => {
-                      setDirty(m.dirty)
-                      setCanSave(m.canSave)
-                      setUploadBusy(m.uploadBusy)
-                    }}
+                    onMetaChange={setMeta}
                     onSave={(payload) => save(current.id, payload)}
                   />
                 </div>
@@ -597,28 +592,21 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
   )
 }
 
-type ServiceEditMeta = { dirty: boolean; canSave: boolean; uploadBusy: boolean }
-
-type ServiceEditFormHandle = {
-  submit: () => void
-}
-
 const ServiceEditForm = forwardRef<
-  ServiceEditFormHandle,
+  FormHandle,
   {
     service: ServiceDTO
     categories: CategoryDTO[]
     inputBase: string
     busy: boolean
     error: string | null
-    onClose: () => void
     onSave: (payload: Record<string, any>) => void
     onOptimistic: (patch: Partial<ServiceDTO>) => void
     onToast: (t: ToastState, ms?: number) => void
-    onMetaChange: (m: ServiceEditMeta) => void
+    onMetaChange: (m: FormMeta) => void
   }
 >(function ServiceEditFormInner(props, ref) {
-  const { service, categories, inputBase, busy, error, onClose, onSave, onOptimistic, onToast, onMetaChange } = props
+  const { service, categories, inputBase, busy, error, onSave, onOptimistic, onToast, onMetaChange } = props
 
   const fileRef = useRef<HTMLInputElement | null>(null)
 
@@ -637,8 +625,23 @@ const ServiceEditForm = forwardRef<
   const [uploadBusy, setUploadBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
 
-  // Reset when switching services
+  // ✅ Baseline snapshot must NOT shift when optimistic updates happen.
+  // We capture it once per service.id.
+  const baselineRef = useRef<{
+    name: string
+    description: string
+    categoryId: string
+    defaultDurationMinutes: string
+    minPrice: string
+    allowMobile: boolean
+    isActive: boolean
+    isAddOnEligible: boolean
+    addOnGroup: string
+    defaultImageUrl: string
+  } | null>(null)
+
   useEffect(() => {
+    // reset form when modal switches to a different service
     setName(service.name)
     setDescription(service.description ?? '')
     setCategoryId(service.categoryId ?? '')
@@ -649,14 +652,12 @@ const ServiceEditForm = forwardRef<
     setIsAddOnEligible(Boolean(service.isAddOnEligible))
     setAddOnGroup(service.addOnGroup ?? '')
     setDefaultImageUrl(service.defaultImageUrl ?? null)
+
     setUploadBusy(false)
     setLocalError(null)
-  }, [service.id]) // only on id change
 
-  const baseline = useMemo(() => {
-    // Baseline snapshot for dirty detection
-    return {
-      name: service.name ?? '',
+    baselineRef.current = {
+      name: (service.name ?? '').trim(),
       description: service.description ?? '',
       categoryId: service.categoryId ?? '',
       defaultDurationMinutes: service.defaultDurationMinutes ? String(service.defaultDurationMinutes) : '',
@@ -667,51 +668,48 @@ const ServiceEditForm = forwardRef<
       addOnGroup: service.addOnGroup ?? '',
       defaultImageUrl: service.defaultImageUrl ?? '',
     }
-  }, [service])
-
-  const current = useMemo(() => {
-    return {
-      name: name.trim(),
-      description: description,
-      categoryId: categoryId,
-      defaultDurationMinutes: defaultDurationMinutes,
-      minPrice: minPrice,
-      allowMobile,
-      isActive,
-      isAddOnEligible,
-      addOnGroup: addOnGroup,
-      defaultImageUrl: (defaultImageUrl ?? '').trim(),
-    }
-  }, [name, description, categoryId, defaultDurationMinutes, minPrice, allowMobile, isActive, isAddOnEligible, addOnGroup, defaultImageUrl])
+  }, [service.id])
 
   const dirty = useMemo(() => {
-    // Compare normalized values
+    const b = baselineRef.current
+    if (!b) return false
+    const curImg = (defaultImageUrl ?? '').trim()
+
     return (
-      current.name !== baseline.name ||
-      (current.description ?? '') !== (baseline.description ?? '') ||
-      (current.categoryId ?? '') !== (baseline.categoryId ?? '') ||
-      (current.defaultDurationMinutes ?? '') !== (baseline.defaultDurationMinutes ?? '') ||
-      (current.minPrice ?? '') !== (baseline.minPrice ?? '') ||
-      Boolean(current.allowMobile) !== Boolean(baseline.allowMobile) ||
-      Boolean(current.isActive) !== Boolean(baseline.isActive) ||
-      Boolean(current.isAddOnEligible) !== Boolean(baseline.isAddOnEligible) ||
-      (current.addOnGroup ?? '') !== (baseline.addOnGroup ?? '') ||
-      (current.defaultImageUrl ?? '') !== (baseline.defaultImageUrl ?? '')
+      name.trim() !== b.name ||
+      (description ?? '') !== b.description ||
+      (categoryId ?? '') !== b.categoryId ||
+      (defaultDurationMinutes ?? '') !== b.defaultDurationMinutes ||
+      (minPrice ?? '') !== b.minPrice ||
+      Boolean(allowMobile) !== Boolean(b.allowMobile) ||
+      Boolean(isActive) !== Boolean(b.isActive) ||
+      Boolean(isAddOnEligible) !== Boolean(b.isAddOnEligible) ||
+      (addOnGroup ?? '') !== b.addOnGroup ||
+      curImg !== (b.defaultImageUrl ?? '')
     )
-  }, [current, baseline])
+  }, [
+    name,
+    description,
+    categoryId,
+    defaultDurationMinutes,
+    minPrice,
+    allowMobile,
+    isActive,
+    isAddOnEligible,
+    addOnGroup,
+    defaultImageUrl,
+  ])
 
   const canSave = useMemo(() => {
     if (busy) return false
     if (uploadBusy) return false
     if (!dirty) return false
-    if (!current.name.trim()) return false
-    if (!current.categoryId) return false
-
-    const img = current.defaultImageUrl
+    if (!name.trim()) return false
+    if (!categoryId) return false
+    const img = (defaultImageUrl ?? '').trim()
     if (img && !isAbsoluteHttpUrl(img)) return false
-
     return true
-  }, [busy, uploadBusy, dirty, current.name, current.categoryId, current.defaultImageUrl])
+  }, [busy, uploadBusy, dirty, name, categoryId, defaultImageUrl])
 
   useEffect(() => {
     onMetaChange({ dirty, canSave, uploadBusy })
@@ -760,11 +758,10 @@ const ServiceEditForm = forwardRef<
 
       const finalUrl = withCacheBuster(publicUrl, cacheBuster)
 
-      // Update modal + hero card immediately (still requires Save to persist)
       setDefaultImageUrl(finalUrl)
       onOptimistic({ defaultImageUrl: finalUrl })
 
-      onToast({ tone: 'success', title: 'Image uploaded', body: 'Hit Save to persist it.' }, 2200)
+      onToast({ tone: 'success', title: 'Image uploaded', body: 'Save is now enabled — hit it to persist.' }, 2200)
     } catch (e: any) {
       const msg = e?.message || 'Failed to upload image.'
       setLocalError(msg)
@@ -782,8 +779,9 @@ const ServiceEditForm = forwardRef<
 
     const img = (defaultImageUrl ?? '').trim()
     if (img && !isAbsoluteHttpUrl(img)) {
+      const msg = 'That URL doesn’t look valid.'
       setLocalError('Image URL looks invalid.')
-      onToast({ tone: 'error', title: 'Invalid image URL', body: 'That URL doesn’t look valid.' })
+      onToast({ tone: 'error', title: 'Invalid image URL', body: msg })
       return
     }
 
@@ -849,7 +847,7 @@ const ServiceEditForm = forwardRef<
                   haptic(8)
                   setDefaultImageUrl(null)
                   onOptimistic({ defaultImageUrl: null })
-                  onToast({ tone: 'success', title: 'Image removed', body: 'Hit Save to persist it.' }, 2000)
+                  onToast({ tone: 'success', title: 'Image removed', body: 'Save to persist.' }, 2000)
                 }}
               >
                 Remove
@@ -891,14 +889,7 @@ const ServiceEditForm = forwardRef<
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1">
             <div className="text-xs font-extrabold text-textSecondary">Min price</div>
-            <input
-              className={inputBase}
-              value={minPrice}
-              onChange={(e) => setMinPrice(e.target.value)}
-              disabled={busy}
-              inputMode="decimal"
-              placeholder="e.g. 45 or 45.00"
-            />
+            <input className={inputBase} value={minPrice} onChange={(e) => setMinPrice(e.target.value)} disabled={busy} inputMode="decimal" />
           </label>
 
           <label className="grid gap-1">
@@ -909,21 +900,13 @@ const ServiceEditForm = forwardRef<
               onChange={(e) => setDefaultDurationMinutes(e.target.value)}
               disabled={busy}
               inputMode="numeric"
-              placeholder="e.g. 60"
             />
           </label>
         </div>
 
         <label className="grid gap-1">
           <div className="text-xs font-extrabold text-textSecondary">Description</div>
-          <textarea
-            className={inputBase}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={busy}
-            rows={3}
-            placeholder="Client-friendly description that appears across the platform."
-          />
+          <textarea className={inputBase} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} rows={3} />
         </label>
 
         <div className="grid gap-3 rounded-2xl border border-white/10 bg-bgPrimary/25 p-3">
@@ -933,7 +916,10 @@ const ServiceEditForm = forwardRef<
             <input
               type="checkbox"
               checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
+              onChange={(e) => {
+                haptic(6)
+                setIsActive(e.target.checked)
+              }}
               disabled={busy}
               className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
             />
@@ -944,7 +930,10 @@ const ServiceEditForm = forwardRef<
             <input
               type="checkbox"
               checked={allowMobile}
-              onChange={(e) => setAllowMobile(e.target.checked)}
+              onChange={(e) => {
+                haptic(6)
+                setAllowMobile(e.target.checked)
+              }}
               disabled={busy}
               className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
             />
@@ -955,7 +944,10 @@ const ServiceEditForm = forwardRef<
             <input
               type="checkbox"
               checked={isAddOnEligible}
-              onChange={(e) => setIsAddOnEligible(e.target.checked)}
+              onChange={(e) => {
+                haptic(6)
+                setIsAddOnEligible(e.target.checked)
+              }}
               disabled={busy}
               className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
             />
@@ -977,15 +969,8 @@ const ServiceEditForm = forwardRef<
         {localError ? <div className="text-sm text-toneDanger">{localError}</div> : null}
         {error ? <div className="text-sm text-toneDanger">{error}</div> : null}
 
-        {/* Spacer so last field isn’t cramped against bottom */}
         <div className="h-8" />
-
-        {/* Tiny footer hint (optional, subtle) */}
-        <div className="text-[11px] text-textSecondary/80">
-          Tip: Save is in the header so your fixed footer nav can’t steal it again.
-        </div>
-
-        <button type="button" onClick={onClose} className="hidden" aria-hidden="true" />
+        <div className="text-[11px] text-textSecondary/80">Save lives in the header so the footer can’t steal it again.</div>
       </div>
     </div>
   )

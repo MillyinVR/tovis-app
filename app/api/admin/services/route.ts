@@ -1,4 +1,3 @@
-// app/api/admin/services/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -6,6 +5,7 @@ import { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
 import { parseMoney } from '@/lib/money'
+import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,13 +16,25 @@ async function requireSupport(userId: string) {
   })
 }
 
+function wantsJson(req: NextRequest) {
+  // Explicit query param wins
+  const url = new URL(req.url)
+  if (url.searchParams.get('format') === 'json') return true
+
+  // Then accept header (fetch callers typically set this)
+  const accept = req.headers.get('accept') || ''
+  if (accept.includes('application/json')) return true
+
+  return false
+}
+
 export async function GET() {
   try {
     const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
     if (res) return res
 
     const ok = await requireSupport(user.id)
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!ok) return jsonFail(403, 'Forbidden')
 
     const services = await prisma.service.findMany({
       orderBy: { name: 'asc' },
@@ -41,10 +53,10 @@ export async function GET() {
       take: 2000,
     })
 
-    return NextResponse.json({ ok: true, services }, { status: 200 })
+    return jsonOk({ services }, 200)
   } catch (e) {
     console.error('GET /api/admin/services error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }
 
@@ -54,15 +66,16 @@ export async function POST(req: NextRequest) {
     if (res) return res
 
     const ok = await requireSupport(user.id)
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!ok) return jsonFail(403, 'Forbidden')
 
     const form = await req.formData()
     const method = (pickMethod(form.get('_method')) ?? 'POST').toUpperCase()
-    if (method !== 'POST') return NextResponse.json({ error: 'Unsupported operation.' }, { status: 400 })
+    if (method !== 'POST') return jsonFail(400, 'Unsupported operation.')
 
     const name = (pickString(form.get('name')) ?? '').trim()
     const categoryId = (pickString(form.get('categoryId')) ?? '').trim()
 
+    // Note: keep your default, but allow empty to become default
     const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes')) ?? 60
     const minPriceRaw = (pickString(form.get('minPrice')) ?? '').trim()
 
@@ -77,21 +90,23 @@ export async function POST(req: NextRequest) {
     const addOnGroup = addOnGroupRaw || null
 
     if (!name || !categoryId) {
-      return NextResponse.json({ error: 'Missing name or categoryId.' }, { status: 400 })
+      return jsonFail(400, 'Missing name or categoryId.')
     }
 
+    // Scope check: must be allowed in this category
     const okCategory = await hasAdminPermission({
       adminUserId: user.id,
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
       scope: { categoryId },
     })
-    if (!okCategory) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!okCategory) return jsonFail(403, 'Forbidden')
 
+    // Parse money: allow blank -> 0, otherwise validate format
     let minPrice
     try {
       minPrice = parseMoney(minPriceRaw || '0')
     } catch {
-      return NextResponse.json({ error: 'Invalid minPrice. Use e.g. 45 or 45.00' }, { status: 400 })
+      return jsonFail(400, 'Invalid minPrice. Use e.g. 45 or 45.00')
     }
 
     const created = await prisma.service.create({
@@ -107,7 +122,7 @@ export async function POST(req: NextRequest) {
         isAddOnEligible,
         addOnGroup,
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, categoryId: true },
     })
 
     await prisma.adminActionLog
@@ -115,17 +130,25 @@ export async function POST(req: NextRequest) {
         data: {
           adminUserId: user.id,
           serviceId: created.id,
-          categoryId,
+          categoryId: created.categoryId,
           action: 'SERVICE_CREATED',
           note: created.name,
         },
       })
       .catch(() => null)
 
-    // ✅ PRG: redirect to the new service editor (best admin UX)
-    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(created.id)}`, req.url), { status: 303 })
+    // ✅ JSON mode for wizard / fetch callers
+    if (wantsJson(req)) {
+      // Keep response minimal + stable for clients
+      return jsonOk({ id: String(created.id), name: created.name }, 200)
+    }
+
+    // ✅ Default behavior unchanged (PRG redirect)
+    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(String(created.id))}`, req.url), {
+      status: 303,
+    })
   } catch (e) {
     console.error('POST /api/admin/services error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }
