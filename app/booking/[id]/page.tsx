@@ -78,6 +78,24 @@ function isAddOnItem(x: Pick<ServiceItemRow, 'notes' | 'sortOrder'>) {
 function sumDecimal(values: Prisma.Decimal[]) {
   return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
 }
+function decimalToNumber(v: unknown): number | null {
+  if (v == null) return null
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+
+  // Prisma.Decimal has toNumber()
+  if (typeof (v as any)?.toNumber === 'function') {
+    const n = (v as any).toNumber()
+    return Number.isFinite(n) ? n : null
+  }
+
+  // fallback for strings
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+
+  return null
+}
 
 /**
  * ✅ Receipt display timezone truth:
@@ -207,8 +225,8 @@ export default async function BookingReceiptPage(props: PageProps) {
   const mapsHref = isSalon
     ? mapsHrefFromLocation({
         placeId: primaryLoc?.placeId ?? null,
-        lat: primaryLoc?.lat ?? null,
-        lng: primaryLoc?.lng ?? null,
+        lat: decimalToNumber(primaryLoc?.lat),
+        lng: decimalToNumber(primaryLoc?.lng),
         formattedAddress: primaryLoc?.formattedAddress ?? null,
         name: primaryLoc?.name ?? null,
       })

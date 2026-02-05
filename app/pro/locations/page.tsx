@@ -1,11 +1,22 @@
 // app/pro/locations/page.tsx
-
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import LocationsClient from './LocationsClient'
 
 export const dynamic = 'force-dynamic'
+
+function decimalToNumber(v: unknown): number | null {
+  if (v == null) return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  // Prisma Decimal has toNumber() + toString()
+  if (typeof (v as any).toNumber === 'function') {
+    const n = (v as any).toNumber()
+    return Number.isFinite(n) ? n : null
+  }
+  const n = Number(String(v))
+  return Number.isFinite(n) ? n : null
+}
 
 export default async function ProLocationsPage() {
   const user = await getCurrentUser().catch(() => null)
@@ -36,6 +47,27 @@ export default async function ProLocationsPage() {
     take: 100,
   })
 
+  const initialLocations = locations.map((l) => ({
+    id: l.id,
+    type: l.type,
+    name: l.name ?? null,
+    isPrimary: Boolean(l.isPrimary),
+    isBookable: Boolean(l.isBookable),
+
+    formattedAddress: l.formattedAddress ?? null,
+    city: l.city ?? null,
+    state: l.state ?? null,
+    postalCode: l.postalCode ?? null,
+    countryCode: l.countryCode ?? null,
+    placeId: l.placeId ?? null,
+
+    lat: decimalToNumber(l.lat),
+    lng: decimalToNumber(l.lng),
+
+    timeZone: l.timeZone ?? null,
+    createdAt: l.createdAt.toISOString(),
+  }))
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div>
@@ -45,9 +77,7 @@ export default async function ProLocationsPage() {
         </p>
       </div>
 
-      <LocationsClient
-        initialLocations={locations.map((l) => ({ ...l, createdAt: l.createdAt.toISOString() }))}
-      />
+      <LocationsClient initialLocations={initialLocations} />
     </div>
   )
 }

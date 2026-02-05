@@ -470,8 +470,8 @@ model ProfessionalLocation {
   placeId          String?
 
   // Geo
-  lat Float?
-  lng Float?
+  lat Decimal? @db.Decimal(10, 7)
+  lng Decimal? @db.Decimal(10, 7)
 
   // ✅ Source of truth for booking timezone
   timeZone String? @db.VarChar(64)
@@ -496,6 +496,7 @@ model ProfessionalLocation {
   blocks             CalendarBlock[]
   lastMinuteOpenings LastMinuteOpening[]
 
+  @@index([placeId])
   @@index([professionalId])
   @@index([professionalId, isPrimary])
   @@index([professionalId, isBookable])

@@ -136,17 +136,18 @@ async function ensureBookableLocationsForOffering(args: {
     const name = type === 'MOBILE_BASE' ? 'Mobile' : 'Salon'
 
     await tx.professionalLocation.create({
-      data: {
-        professionalId,
-        type,
-        name,
-        isPrimary: shouldBePrimary,
-        isBookable: true,
-        timeZone: null,
-        workingHours: defaultWorkingHours() as unknown as Prisma.InputJsonValue,
-      },
-      select: { id: true },
-    })
+  data: {
+    professionalId,
+    type,
+    name: type === 'MOBILE_BASE' ? 'Set mobile base' : 'Set salon address',
+    isPrimary: false,
+    isBookable: false,
+    timeZone: null,
+    workingHours: defaultWorkingHours() as unknown as Prisma.InputJsonValue,
+  },
+  select: { id: true },
+})
+
   }
 }
 

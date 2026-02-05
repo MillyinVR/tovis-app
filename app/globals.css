@@ -1,5 +1,7 @@
 /* app/globals.css */
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
 
 /* App-wide hygiene */
 html,

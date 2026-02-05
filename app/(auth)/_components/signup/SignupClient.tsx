@@ -302,6 +302,14 @@ function isUsZip(raw: string) {
   return /^\d{5}(-\d{4})?$/.test(s)
 }
 
+function normalizeHandleInput(raw: string) {
+  // UI helper only; server should be source of truth for uniqueness/normalization.
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 24)
+}
+
 export default function SignupClient() {
   const router = useRouter()
   const sp = useSearchParams()
@@ -319,7 +327,13 @@ export default function SignupClient() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
+  // ✅ pro fields
+  const [businessName, setBusinessName] = useState('')
+  const [professionType, setProfessionType] = useState('')
+  const [handle, setHandle] = useState('')
+
   const [proMode, setProMode] = useState<'SALON' | 'MOBILE'>('SALON')
+  const [mobileRadiusKm, setMobileRadiusKm] = useState('15')
 
   // stable per load
   const sessionToken = useMemo(
@@ -343,8 +357,7 @@ export default function SignupClient() {
       ? { title: 'Book Services', subtitle: 'Browse and book services, save favorites, and manage appointments.' }
       : { title: 'Offer Services', subtitle: 'Offer services, get booked, and manage your schedule in one place.' }
 
-  const locationMode: 'ZIP' | 'SALON_ADDRESS' =
-    role === 'PRO' && proMode === 'SALON' ? 'SALON_ADDRESS' : 'ZIP'
+  const locationMode: 'ZIP' | 'SALON_ADDRESS' = role === 'PRO' && proMode === 'SALON' ? 'SALON_ADDRESS' : 'ZIP'
 
   function resetLocation(nextQuery = '') {
     setLocQuery(nextQuery)
@@ -486,11 +499,25 @@ export default function SignupClient() {
       return
     }
 
+    // ✅ Pro required fields
+    if (role === 'PRO') {
+      if (!businessName.trim()) return setError('Business name is required for pros.')
+      if (!professionType.trim()) return setError('Profession is required for pros.')
+      if (!handle.trim()) return setError('Handle is required for pros.')
+
+      if (proMode === 'MOBILE') {
+        const n = Number(mobileRadiusKm)
+        if (!Number.isFinite(n) || n < 1 || n > 200) {
+          return setError('Please enter a mobile radius between 1 and 200 km.')
+        }
+      }
+    }
+
     const signupLocation =
       role === 'PRO'
         ? proMode === 'SALON'
           ? {
-              kind: 'PRO_SALON',
+              kind: 'PRO_SALON' as const,
               placeId: confirmed.placeId!,
               formattedAddress: confirmed.formattedAddress ?? locQuery,
               city: confirmed.city,
@@ -503,7 +530,7 @@ export default function SignupClient() {
               name: confirmed.name,
             }
           : {
-              kind: 'PRO_MOBILE',
+              kind: 'PRO_MOBILE' as const,
               postalCode: confirmed.postalCode ?? locQuery,
               city: confirmed.city,
               state: confirmed.state,
@@ -511,9 +538,10 @@ export default function SignupClient() {
               lat: confirmed.lat,
               lng: confirmed.lng,
               timeZoneId: confirmed.timeZoneId,
+              radiusKm: Number(mobileRadiusKm),
             }
         : {
-            kind: 'CLIENT_ZIP',
+            kind: 'CLIENT_ZIP' as const,
             postalCode: confirmed.postalCode ?? locQuery,
             city: confirmed.city,
             state: confirmed.state,
@@ -540,6 +568,12 @@ export default function SignupClient() {
 
           // kept for compatibility (server prefers signupLocation.timeZoneId)
           timeZone: confirmed.timeZoneId,
+
+          // ✅ pro details
+          businessName: role === 'PRO' ? businessName.trim() : undefined,
+          professionType: role === 'PRO' ? professionType.trim() : undefined,
+          handle: role === 'PRO' ? normalizeHandleInput(handle.trim()) : undefined,
+          mobileRadiusKm: role === 'PRO' && proMode === 'MOBILE' ? Number(mobileRadiusKm) : undefined,
 
           signupLocation,
         }),
@@ -569,6 +603,9 @@ export default function SignupClient() {
 
   const loginHref = ti ? `/login?ti=${encodeURIComponent(ti)}` : '/login'
 
+  const handlePreview = normalizeHandleInput(handle.trim())
+  const handleIsTrimmed = handle.trim() !== handlePreview
+
   return (
     <AuthShell title="Create Account" subtitle="Join our community of beauty professionals and clients.">
       <form onSubmit={handleSubmit} className="grid gap-5">
@@ -588,6 +625,15 @@ export default function SignupClient() {
               setRole(next)
               setError(null)
               resetLocation('')
+
+              // pro-only fields: keep but clear if switching to client
+              if (next === 'CLIENT') {
+                setBusinessName('')
+                setProfessionType('')
+                setHandle('')
+                setProMode('SALON')
+                setMobileRadiusKm('15')
+              }
             }}
           />
 
@@ -684,6 +730,24 @@ export default function SignupClient() {
           ) : null}
         </div>
 
+        {/* Pro mobile radius */}
+        {role === 'PRO' && proMode === 'MOBILE' ? (
+          <label className="grid gap-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <FieldLabel>Mobile radius (km)</FieldLabel>
+              <span className="text-xs font-black text-textSecondary/80">Required</span>
+            </div>
+            <Input
+              value={mobileRadiusKm}
+              onChange={(e) => setMobileRadiusKm(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 15"
+              required
+            />
+            <HelpText>How far you travel from your base ZIP.</HelpText>
+          </label>
+        ) : null}
+
         <div className="h-px w-full bg-surfaceGlass/10" />
 
         {/* Identity */}
@@ -698,6 +762,61 @@ export default function SignupClient() {
             <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required autoComplete="family-name" />
           </label>
         </div>
+
+        {/* Pro details */}
+        {role === 'PRO' ? (
+          <div className="grid gap-3">
+            <label className="grid gap-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <FieldLabel>Business name</FieldLabel>
+                <span className="text-xs font-black text-textSecondary/80">Required</span>
+              </div>
+              <Input
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                required
+                placeholder="e.g. TOVIS Beauty Studio"
+                autoComplete="organization"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel>Profession</FieldLabel>
+                  <span className="text-xs font-black text-textSecondary/80">Required</span>
+                </div>
+                <Input
+                  value={professionType}
+                  onChange={(e) => setProfessionType(e.target.value)}
+                  required
+                  placeholder="e.g. Hair, Nails, Esthetics"
+                />
+              </label>
+
+              <label className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel>Handle</FieldLabel>
+                  <span className="text-xs font-black text-textSecondary/80">Required</span>
+                </div>
+                <Input
+                  value={handle}
+                  onChange={(e) => setHandle(e.target.value)}
+                  required
+                  placeholder="e.g. probytorii"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <HelpText>
+                  Your profile link will look like{' '}
+                  <span className="font-black text-textPrimary">/pro/{handlePreview || 'your-handle'}</span>
+                  {handleIsTrimmed ? <span className="text-toneWarn"> (we’ll trim symbols)</span> : null}
+                </HelpText>
+              </label>
+            </div>
+          </div>
+        ) : null}
 
         {/* Phone (required for everyone) */}
         <label className="grid gap-1.5">
@@ -721,14 +840,7 @@ export default function SignupClient() {
         {/* Email */}
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
-          <Input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            required
-            autoComplete="email"
-            inputMode="email"
-          />
+          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" inputMode="email" />
         </label>
 
         {/* Password */}

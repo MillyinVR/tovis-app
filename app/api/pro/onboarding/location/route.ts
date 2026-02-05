@@ -13,6 +13,9 @@ type Body = {
   postalCode?: unknown // required for MOBILE (US zip)
   radiusKm?: unknown // required for MOBILE
   sessionToken?: unknown // optional pass-through for Places billing/session
+
+  // ✅ NEW: controls whether the created location becomes primary
+  makePrimary?: unknown // boolean, defaults true
 }
 
 function normalizeMode(v: unknown): 'SALON' | 'SUITE' | 'MOBILE' | null {
@@ -30,6 +33,10 @@ function pickInt(v: unknown): number | null {
     return Number.isFinite(n) ? Math.trunc(n) : null
   }
   return null
+}
+
+function pickBool(v: unknown): boolean | null {
+  return typeof v === 'boolean' ? v : null
 }
 
 function componentMap(addressComponents: any[]) {
@@ -169,13 +176,18 @@ export async function POST(req: Request) {
     const mode = normalizeMode(body.mode)
     if (!mode) return jsonFail(400, 'Missing or invalid mode.', { code: 'INVALID_MODE' })
 
-    // Clear old primary flag (we keep locations, but only one is primary)
-    await prisma.professionalLocation.updateMany({
-      where: { professionalId: proId, isPrimary: true },
-      data: { isPrimary: false },
-    })
+    // ✅ NEW: default to true so existing callers behave the same
+    const makePrimary = pickBool(body.makePrimary) ?? true
 
     const workingHours = defaultWorkingHours()
+
+    // ✅ Only clear old primary IF we are making this new one primary
+    if (makePrimary) {
+      await prisma.professionalLocation.updateMany({
+        where: { professionalId: proId, isPrimary: true },
+        data: { isPrimary: false },
+      })
+    }
 
     if (mode === 'SALON' || mode === 'SUITE') {
       const placeId = pickString(body.placeId)
@@ -198,7 +210,7 @@ export async function POST(req: Request) {
           professionalId: proId,
           type: locationType as any,
           name: nameOverride || loc.name || null,
-          isPrimary: true,
+          isPrimary: makePrimary,
           isBookable: true,
 
           formattedAddress: loc.formattedAddress,
@@ -214,10 +226,10 @@ export async function POST(req: Request) {
           timeZone: tz,
           workingHours,
         },
-        select: { id: true, type: true, timeZone: true },
+        select: { id: true, type: true, timeZone: true, isPrimary: true },
       })
 
-      // Keep pro fallback timezone updated
+      // Keep pro fallback timezone updated (always)
       await prisma.professionalProfile.update({
         where: { id: proId },
         data: {
@@ -238,7 +250,6 @@ export async function POST(req: Request) {
 
     if (!postalCode) return jsonFail(400, 'Missing postalCode.', { code: 'MISSING_POSTAL' })
 
-    // You can tune these bounds; I’m preventing “9999km” nonsense.
     if (!radiusKm || radiusKm < 1 || radiusKm > 200) {
       return jsonFail(400, 'Invalid radiusKm.', { code: 'INVALID_RADIUS' })
     }
@@ -256,7 +267,7 @@ export async function POST(req: Request) {
         professionalId: proId,
         type: 'MOBILE_BASE',
         name: 'Mobile base',
-        isPrimary: true,
+        isPrimary: makePrimary,
         isBookable: true,
 
         city: geo.city,
@@ -270,7 +281,7 @@ export async function POST(req: Request) {
         timeZone: tz,
         workingHours,
       },
-      select: { id: true, type: true, timeZone: true },
+      select: { id: true, type: true, timeZone: true, isPrimary: true },
     })
 
     await prisma.professionalProfile.update({

@@ -8,10 +8,10 @@ import { useClientFooterBadge } from './useClientFooterBadge'
 
 const ROUTES = {
   home: '/client',
+  // ✅ new: search page you created
+  search: '/search', // <-- change if your route is different (ex: '/client/search')
+  // ✅ center CTA becomes Looks
   looks: '/looks',
-  // Center CTA: straight into discovery + booking behavior.
-  // You can change this later to open a drawer instead.
-  book: '/looks?book=1',
   messages: '/messages',
   bookings: '/client/bookings',
 } as const
@@ -32,34 +32,38 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
   if (!pathname) return null
   if (shouldHideOnPath(pathname)) return null
 
-  // If server passed a badge (from /client/layout), use it.
-  // Otherwise fetch (useful if you ever show footer on /looks, etc).
   const fetched = useClientFooterBadge()
   const badge = messagesBadge ?? fetched
+
+  const looksActive = isActivePath(pathname, ROUTES.looks)
+  const searchActive = isActivePath(pathname, ROUTES.search)
+
   return (
     <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
           <NavItem label="Home" href={ROUTES.home} icon="🏠" active={isActivePath(pathname, ROUTES.home)} />
 
-          <NavItem label="Looks" href={ROUTES.looks} icon="✨" active={isActivePath(pathname, ROUTES.looks)} />
+          {/* ✅ Looks slot becomes Search */}
+          <NavItem label="Search" href={ROUTES.search} icon="🗺️" active={searchActive} />
 
-          {/* center action */}
+          {/* ✅ Center action becomes Looks */}
           <div className="relative -mt-8 flex w-22 justify-center">
             <a
-              href={ROUTES.book}
+              href={ROUTES.looks}
               className={[
                 'tovis-glass',
                 'grid h-16 w-16 place-items-center rounded-full border border-white/15',
                 'text-[11px] font-black text-textPrimary',
                 'hover:border-white/25 active:scale-[0.98]',
                 'ring-2 ring-white/10',
+                looksActive ? 'border-white/25 ring-white/20' : '',
                 'no-underline',
               ].join(' ')}
-              title="Book"
-              aria-label="Book"
+              title="Looks"
+              aria-label="Looks"
             >
-              <span className="leading-none">Book</span>
+              <span className="leading-none">Looks</span>
             </a>
           </div>
 
@@ -71,13 +75,7 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
             rightSlot={badge ? <BadgeDot label={badge} /> : null}
           />
 
-
-          <NavItem
-            label="Bookings"
-            href={ROUTES.bookings}
-            icon="🗓️"
-            active={isActivePath(pathname, ROUTES.bookings)}
-          />
+          <NavItem label="Bookings" href={ROUTES.bookings} icon="🗓️" active={isActivePath(pathname, ROUTES.bookings)} />
         </div>
       </div>
     </div>
