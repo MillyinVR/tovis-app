@@ -2,9 +2,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import type { MediaType, MediaVisibility, Role } from '@prisma/client'
-import { requireClient, pickString, jsonFail, safeUrl, resolveStoragePointers } from '@/app/api/_utils'
+import { requireClient, pickString, jsonFail, safeUrl, resolveStoragePointers, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
+
+const MAX_CLIENT_IMAGES = 6
+const MAX_CLIENT_VIDEOS = 1
+const MAX_TOTAL = MAX_CLIENT_IMAGES + MAX_CLIENT_VIDEOS
 
 type AddReviewMediaBody = { media?: unknown }
 
@@ -53,6 +57,23 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   return items
 }
 
+function enforceCaps(items: IncomingMediaItem[]) {
+  if (items.length > MAX_TOTAL) {
+    return `You can upload up to ${MAX_CLIENT_IMAGES} images + ${MAX_CLIENT_VIDEOS} video (${MAX_TOTAL} total).`
+  }
+
+  let images = 0
+  let videos = 0
+  for (const m of items) {
+    if (m.mediaType === 'VIDEO') videos++
+    else images++
+  }
+
+  if (images > MAX_CLIENT_IMAGES) return `You can upload up to ${MAX_CLIENT_IMAGES} images.`
+  if (videos > MAX_CLIENT_VIDEOS) return `You can upload up to ${MAX_CLIENT_VIDEOS} video.`
+  return null
+}
+
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
@@ -66,6 +87,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     const body = (await req.json().catch(() => ({}))) as AddReviewMediaBody
     const mediaItems = parseMedia(body.media)
     if (!mediaItems.length) return jsonFail(400, 'No valid media provided.')
+
+    const capError = enforceCaps(mediaItems)
+    if (capError) return jsonFail(400, capError)
 
     const resolved = mediaItems.map((m) => {
       const ptrs = resolveStoragePointers(m)
@@ -88,57 +112,75 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       )
     }
 
-    const created = await prisma.$transaction(
-      resolved.map((m) =>
-        prisma.mediaAsset.create({
-          data: {
-            professionalId: review.professionalId,
-            bookingId: review.bookingId!,
-            reviewId: review.id,
+    // Optional: enforce total media cap INCLUDING what’s already attached
+    const existingCount = await prisma.mediaAsset.count({
+      where: { reviewId: review.id, uploadedByRole: 'CLIENT' },
+    })
+    if (existingCount + resolved.length > MAX_TOTAL) {
+      return jsonFail(400, `This review already has ${existingCount} upload(s). Max is ${MAX_TOTAL}.`)
+    }
 
-            url: m.url,
-            thumbUrl: m.thumbUrl ?? null,
-            mediaType: m.mediaType,
+    const created = await prisma.$transaction(async (tx) => {
+      const rows = await Promise.all(
+        resolved.map((m) =>
+          tx.mediaAsset.create({
+            data: {
+              professionalId: review.professionalId,
+              bookingId: review.bookingId!,
+              reviewId: review.id,
 
-            visibility: 'PRIVATE' as MediaVisibility,
-            uploadedByUserId: user.id,
-            uploadedByRole: 'CLIENT' as Role,
+              url: m.url,
+              thumbUrl: m.thumbUrl ?? null,
+              mediaType: m.mediaType,
 
-            isFeaturedInPortfolio: false,
-            isEligibleForLooks: false,
-            reviewLocked: true,
+              visibility: 'PUBLIC' as MediaVisibility,
+              uploadedByUserId: user.id,
+              uploadedByRole: 'CLIENT' as Role,
 
-            storageBucket: m.storageBucket!,
-            storagePath: m.storagePath!,
-            thumbBucket: m.thumbBucket ?? null,
-            thumbPath: m.thumbPath ?? null,
-          },
-          select: {
-            id: true,
-            url: true,
-            thumbUrl: true,
-            mediaType: true,
-            createdAt: true,
-            isFeaturedInPortfolio: true,
-            isEligibleForLooks: true,
-            storageBucket: true,
-            storagePath: true,
-            thumbBucket: true,
-            thumbPath: true,
-          },
-        }),
-      ),
-    )
+              isFeaturedInPortfolio: false,
+              isEligibleForLooks: false,
+              reviewLocked: true,
 
-    const updated = await prisma.review.findUnique({
-      where: { id: reviewId },
-      include: { mediaAssets: true },
+              storageBucket: m.storageBucket!,
+              storagePath: m.storagePath!,
+              thumbBucket: m.thumbBucket ?? null,
+              thumbPath: m.thumbPath ?? null,
+            },
+            select: {
+              id: true,
+              url: true,
+              thumbUrl: true,
+              mediaType: true,
+              createdAt: true,
+              isFeaturedInPortfolio: true,
+              isEligibleForLooks: true,
+              storageBucket: true,
+              storagePath: true,
+              thumbBucket: true,
+              thumbPath: true,
+            },
+          }),
+        ),
+      )
+
+      const updated = await tx.review.findUnique({
+        where: { id: reviewId },
+        include: { mediaAssets: true },
+      })
+
+      return { rows, updated }
     })
 
-    return NextResponse.json({ ok: true, createdCount: created.length, created, review: updated }, { status: 201 })
+    return NextResponse.json(
+      { ok: true, createdCount: created.rows.length, created: created.rows, review: created.updated },
+      { status: 201 },
+    )
   } catch (e: any) {
     console.error('POST /api/client/reviews/[id]/media error', e)
-    const msg = typeof e?.message === 'string' && e.message.includes('Media') ? e.message : 'Internal server error'
+    const msg =
+      typeof e?.message === 'string' && (e.message.includes('Media') || e.message.includes('storage'))
+        ? e.message
+        : 'Internal server error'
     return jsonFail(500, msg)
   }
 }

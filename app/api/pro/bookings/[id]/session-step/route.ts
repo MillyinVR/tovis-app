@@ -30,7 +30,6 @@ type Step =
 function requiresApprovedConsultation(step: Step) {
   const s = upper(step)
   return (
-    s === 'BEFORE_PHOTOS' ||
     s === 'SERVICE_IN_PROGRESS' ||
     s === 'FINISH_REVIEW' ||
     s === 'AFTER_PHOTOS' ||

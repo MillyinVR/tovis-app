@@ -1,25 +1,14 @@
 // app/api/pro/bookings/[id]/start/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
-import { BookingStatus } from '@prisma/client'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { BookingStatus, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function trimmed(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function jsonError(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status })
-}
-
 /**
- * Start window: 15 min before -> 15 min after scheduledFor
- * scheduledFor is stored as a UTC instant. "Now" is also a UTC instant.
- * This is correct and timezone-safe.
+ * Start window: 15 min before -> 15 min after scheduledFor (UTC instants)
  */
 function isWithinStartWindow(scheduledFor: Date, now: Date) {
   const start = scheduledFor.getTime() - 15 * 60 * 1000
@@ -30,13 +19,13 @@ function isWithinStartWindow(scheduledFor: Date, now: Date) {
 
 export async function POST(_request: Request, ctx: Ctx) {
   try {
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = trimmed(id)
-    if (!bookingId) return jsonError('Missing booking id.', 400)
+    const auth = await requirePro()
+    if (auth.res) return auth.res
+    const proId = auth.professionalId
 
-    const user = await getCurrentUser().catch(() => null)
-    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!proId) return jsonError('Not authorized.', 401)
+    const { id } = await Promise.resolve(ctx.params)
+    const bookingId = pickString(id)
+    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -51,33 +40,21 @@ export async function POST(_request: Request, ctx: Ctx) {
       },
     })
 
-    if (!booking) return jsonError('Booking not found.', 404)
-    if (booking.professionalId !== proId) return jsonError('You can only start your own bookings.', 403)
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.professionalId !== proId) return jsonFail(403, 'You can only start your own bookings.')
 
-    // ✅ Canonical status checks (no string guessing)
-    if (booking.status === BookingStatus.CANCELLED) {
-      return jsonError('Cancelled bookings cannot be started.', 409)
-    }
-
-    if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
-      return jsonError('This session is already finished.', 409)
-    }
-
-    // ✅ Hard rule: must accept before start
-    if (booking.status === BookingStatus.PENDING) {
-      return jsonError('You must accept this appointment before you can start it.', 409)
-    }
+    if (booking.status === BookingStatus.CANCELLED) return jsonFail(409, 'Cancelled bookings cannot be started.')
+    if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) return jsonFail(409, 'This session is already finished.')
+    if (booking.status === BookingStatus.PENDING) return jsonFail(409, 'You must accept this appointment before you can start it.')
 
     const now = new Date()
-
-    // ✅ Enforce start window
     if (!isWithinStartWindow(booking.scheduledFor, now)) {
-      return jsonError('You can start this appointment 15 minutes before or after the scheduled time.', 409)
+      return jsonFail(409, 'You can start this appointment 15 minutes before or after the scheduled time.')
     }
 
-    // ✅ Idempotent start
+    // Idempotent
     if (booking.startedAt) {
-      return NextResponse.json(
+      return jsonOk(
         {
           ok: true,
           booking: {
@@ -87,38 +64,28 @@ export async function POST(_request: Request, ctx: Ctx) {
             finishedAt: booking.finishedAt,
             sessionStep: booking.sessionStep,
           },
-          nextHref: null,
+          nextHref: `/pro/bookings/${encodeURIComponent(booking.id)}?step=consult`,
         },
-        { status: 200 },
+        200,
       )
     }
 
-    // ✅ Start begins consultation
     const updated = await prisma.booking.update({
       where: { id: booking.id },
-      data: {
-        startedAt: now,
-        sessionStep: 'CONSULTATION' as any,
-      },
-      select: {
-        id: true,
-        status: true,
-        startedAt: true,
-        finishedAt: true,
-        sessionStep: true,
-      },
+      data: { startedAt: now, sessionStep: SessionStep.CONSULTATION },
+      select: { id: true, status: true, startedAt: true, finishedAt: true, sessionStep: true },
     })
 
-    return NextResponse.json(
+    return jsonOk(
       {
         ok: true,
         booking: updated,
-        nextHref: null,
+        nextHref: `/pro/bookings/${encodeURIComponent(updated.id)}?step=consult`,
       },
-      { status: 200 },
+      200,
     )
-  } catch (err) {
-    console.error('POST /api/pro/bookings/[id]/start error', err)
-    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 })
+  } catch (e) {
+    console.error('POST /api/pro/bookings/[id]/start error', e)
+    return jsonFail(500, 'Internal server error')
   }
 }

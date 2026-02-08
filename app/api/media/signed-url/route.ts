@@ -16,8 +16,7 @@ export async function GET(req: Request) {
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
 
-    // Optional hardening: ensure this path belongs to a MediaAsset record
-    // so nobody signs random private objects if they guess paths.
+
     const media = await prisma.mediaAsset.findFirst({
       where: { storagePath: path },
       select: { storageBucket: true, storagePath: true, visibility: true, professionalId: true },
@@ -28,7 +27,7 @@ export async function GET(req: Request) {
     // Minimal access rule (same as your /media/url route):
     const isOwnerPro = user.role === 'PRO' && user.professionalProfile?.id === media.professionalId
 
-    // If PUBLIC, allow any logged-in user; if PRIVATE, only owner pro for now.
+
     if (media.visibility !== 'PUBLIC' && !isOwnerPro) return jsonFail(403, 'Forbidden.')
 
     const bucket = pickString(media.storageBucket) ?? process.env.SUPABASE_STORAGE_BUCKET ?? 'media-public'

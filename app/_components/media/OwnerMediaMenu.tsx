@@ -4,8 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
+import { MediaVisibility } from '@prisma/client'
 
-type Visibility = 'PUBLIC' | 'PRIVATE'
+type Visibility = MediaVisibility
+
 type ServiceOption = { id: string; name: string }
 
 type Props = {
@@ -106,7 +108,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           caption: caption.trim() || null,
-          visibility,
+          visibility, // ✅ Prisma enum value
           isEligibleForLooks,
           isFeaturedInPortfolio,
           serviceIds: selectedServiceIds,
@@ -202,7 +204,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
       {/* Edit modal */}
       {openEdit ? (
         <div className="fixed inset-0 z-[9999] bg-black/60" onClick={() => !busy && setOpenEdit(false)}>
-          {/* Centered sheet (Option B: header / body / actions) */}
           <div
             className={cx(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
@@ -238,15 +239,13 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
               </button>
             </div>
 
-            {/* Scrollable body (ONLY this scrolls) */}
+            {/* Body */}
             <div className="looksNoScrollbar overflow-y-auto p-4">
               <div className="grid gap-4">
                 {/* Caption */}
                 <Field
                   label="Caption"
-                  right={
-                    <span className="text-[11px] font-semibold text-textSecondary">{caption.trim().length}/300</span>
-                  }
+                  right={<span className="text-[11px] font-semibold text-textSecondary">{caption.trim().length}/300</span>}
                 >
                   <textarea
                     value={caption}
@@ -262,15 +261,18 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                   />
                 </Field>
 
-                {/* Visibility (Hermès segmented) */}
-                <Field label="Who can view" hint="Public shows everywhere you allow. Only you hides it completely.">
-                  <Segmented
+                {/* Visibility */}
+                <Field
+                  label="Who can view"
+                  hint="Public shows on your profile and in Looks. Client + you is private (not public)."
+                >
+                  <Segmented<Visibility>
                     value={visibility}
                     disabled={busy}
                     onChange={setVisibility}
                     options={[
-                      { value: 'PUBLIC', label: 'Public', sub: 'Visible to clients' },
-                      { value: 'PRIVATE', label: 'Only you', sub: 'Hidden' },
+                      { value: MediaVisibility.PUBLIC, label: 'Public', sub: 'Visible to clients' },
+                      { value: MediaVisibility.PRO_CLIENT, label: 'Client + you', sub: 'Private (not public)' },
                     ]}
                   />
                 </Field>
@@ -297,11 +299,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 {/* Services */}
                 <Field
                   label="Services attached"
-                  right={
-                    <span className="text-[11px] font-semibold text-textSecondary">
-                      {selectedServiceIds.length} selected
-                    </span>
-                  }
+                  right={<span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>}
                 >
                   {selectedServiceIds.length ? (
                     <div className="flex flex-wrap gap-2 rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3">
@@ -398,14 +396,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
               </div>
             </div>
 
-            {/* Actions row (NOT absolute; always visible) */}
+            {/* Actions */}
             <div
               className="border-t border-white/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl"
               style={{ paddingBottom: actionSafePaddingBottom }}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold text-white/55">
-                  {visibility === 'PRIVATE' ? 'Hidden from public.' : 'Public visibility enabled.'}
+                  {visibility === MediaVisibility.PRO_CLIENT ? 'Private to client + you.' : 'Public visibility enabled.'}
                 </div>
 
                 <div className="flex justify-end gap-2">

@@ -275,7 +275,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
             {portfolioMedia.map((m) => {
               const src = m.thumbUrl || m.url
               const isVideo = m.mediaType === 'VIDEO'
-              const isPrivate = m.visibility === 'PRIVATE'
+              const isPrivate = m.visibility === 'PRO_CLIENT'
 
               return (
                 <div

@@ -89,7 +89,7 @@ enum MediaType {
 
 enum MediaVisibility {
   PUBLIC
-  PRIVATE
+  PRO_CLIENT   // visible to pro + client only (booking/aftercare world)
 }
 
 enum WaitlistStatus {

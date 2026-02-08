@@ -1,4 +1,4 @@
-// app/media/[id]/page.tsx
+// app/media/[id]/page.tsx  (apply same changes if your failing file is app/pro/media/[id]/page.tsx)
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
@@ -6,12 +6,11 @@ import { getCurrentUser } from '@/lib/currentUser'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
+import { MediaVisibility } from '@prisma/client'
 
 type PageProps = {
   params: Promise<{ id: string }>
 }
-
-type Visibility = 'PUBLIC' | 'PRIVATE'
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -50,8 +49,8 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
     },
   })
 
-  // Only PUBLIC media is viewable on this route
-  if (!media || (media.visibility as Visibility) !== 'PUBLIC') notFound()
+  // ✅ Only PUBLIC media is viewable on this route
+  if (!media || media.visibility !== MediaVisibility.PUBLIC) notFound()
 
   const viewer = await getCurrentUser().catch(() => null)
   const isOwner =
@@ -108,7 +107,6 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
       }
       topRight={
         <div className="flex items-start gap-2">
-          {/* engagement pill (TikTok-y, but quiet-luxury) */}
           <div
             className={cx(
               'select-none rounded-full',
@@ -125,14 +123,14 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
             </div>
           </div>
 
-          {/* owner menu */}
+          {/* ✅ Owner menu uses REAL Prisma enum */}
           {isOwner ? (
             <OwnerMediaMenu
               mediaId={media.id}
               serviceOptions={serviceOptions}
               initial={{
                 caption: media.caption ?? null,
-                visibility: media.visibility as Visibility,
+                visibility: media.visibility, // ✅ no casting, no fake union
                 isEligibleForLooks: Boolean(media.isEligibleForLooks),
                 isFeaturedInPortfolio: Boolean(media.isFeaturedInPortfolio),
                 serviceIds: (media.services || []).map((s) => s.serviceId).filter(Boolean),
@@ -143,8 +141,6 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
       }
       bottom={
         hasLowerThird ? (
-          // ✅ TRUE TikTok behavior:
-          // bottom overlay is a floating “lower third” that sits ABOVE footerOffsetPx (handled in MediaFullscreenViewer)
           <div className="pointer-events-none">
             <div className="pointer-events-auto mx-auto w-full max-w-[560px]">
               <div
@@ -155,14 +151,10 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
                   'shadow-[0_22px_70px_rgba(0,0,0,0.70)]',
                 )}
               >
-                {/* Caption */}
                 {media.caption?.trim() ? (
-                  <div className="text-[14px] font-black leading-snug text-textPrimary">
-                    {media.caption.trim()}
-                  </div>
+                  <div className="text-[14px] font-black leading-snug text-textPrimary">{media.caption.trim()}</div>
                 ) : null}
 
-                {/* Tags */}
                 {tags.length ? (
                   <div className={cx('mt-2 flex flex-wrap gap-2', media.caption?.trim() ? '' : 'mt-0')}>
                     {tags.map((name, idx) => (
@@ -181,12 +173,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
                   </div>
                 ) : null}
 
-                {/* Micro-hint (only for owners, ultra subtle) */}
-                {isOwner ? (
-                  <div className="mt-2 text-[11px] font-semibold text-white/45">
-                    Manage with ⋯
-                  </div>
-                ) : null}
+                {isOwner ? <div className="mt-2 text-[11px] font-semibold text-white/45">Manage with ⋯</div> : null}
               </div>
             </div>
           </div>

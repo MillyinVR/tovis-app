@@ -30,7 +30,10 @@ type Body = {
 
   recommendedProducts?: unknown
 
-  // optional: client sends tz for debugging; server does NOT trust it as truth
+  // ✅ only notify client when true
+  sendToClient?: unknown
+
+  // optional debug only
   timeZone?: unknown
 }
 
@@ -107,7 +110,6 @@ function normalizeRecommendedProducts(input: unknown) {
     const noteRaw = typeof row?.note === 'string' ? row.note.trim() : ''
     const note = noteRaw ? noteRaw.slice(0, PRODUCT_NOTE_MAX) : null
 
-    // ignore blank rows
     if (!name && !url && !note) continue
 
     if (!name) return { error: 'Each recommended product needs a name.' as const }
@@ -140,8 +142,6 @@ function makeClientNotifDedupeKey(bookingId: string) {
 /**
  * Appointment/aftercare timezone for DISPLAY ONLY:
  * booking.locationTimeZone > pro.timeZone > UTC
- *
- * No Los Angeles fallback.
  */
 function resolveAftercareTimeZone(args: { bookingLocationTimeZone?: unknown; professionalTimeZone?: unknown }) {
   const bookingTz = typeof args.bookingLocationTimeZone === 'string' ? args.bookingLocationTimeZone.trim() : ''
@@ -166,11 +166,6 @@ function formatDateTimeInTimeZone(date: Date, timeZone: string) {
   }).format(date)
 }
 
-/**
- * For rebook reminders:
- * - BOOKED_NEXT_APPOINTMENT: dueAt = rebookedFor - daysBefore
- * - RECOMMENDED_WINDOW: dueAt = windowStart - daysBefore
- */
 function computeRebookReminderDueAt(args: {
   mode: AftercareRebookMode
   rebookedFor: Date | null
@@ -182,8 +177,12 @@ function computeRebookReminderDueAt(args: {
   return addDaysByMs(base, -Math.abs(args.daysBefore))
 }
 
+/**
+ * ✅ Wrap-up eligibility:
+ * allow aftercare while in FINISH_REVIEW (wrap-up start), AFTER_PHOTOS (wrap-up), or DONE.
+ */
 function sessionStepEligible(step: SessionStep | null | undefined) {
-  return step === SessionStep.DONE || step === SessionStep.AFTER_PHOTOS
+  return step === SessionStep.FINISH_REVIEW || step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
 }
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -254,6 +253,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const body = (await request.json().catch(() => ({}))) as Body
 
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, NOTES_MAX) : ''
+    const sendToClient = toBool(body.sendToClient)
 
     const normalizedProducts = normalizeRecommendedProducts(body.recommendedProducts)
     if ((normalizedProducts as any)?.error) return jsonError((normalizedProducts as any).error, 400)
@@ -277,7 +277,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const rebookReminderDaysBefore = clamp(toInt(body.rebookReminderDaysBefore, 2), 1, 30)
     const productReminderDaysAfter = clamp(toInt(body.productReminderDaysAfter, 7), 1, 180)
 
-    // Load booking + pro tz in one hit (don’t trust getCurrentUser shape for tz)
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
@@ -300,18 +299,14 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (booking.professionalId !== proId) return jsonError('Forbidden.', 403)
 
     if (booking.status === BookingStatus.CANCELLED) return jsonError('This booking is cancelled.', 409)
-    if (booking.status === BookingStatus.PENDING) {
-      return jsonError('Aftercare can’t be posted until the booking is confirmed.', 409)
-    }
+    if (booking.status === BookingStatus.PENDING) return jsonError('Aftercare can’t be posted until the booking is confirmed.', 409)
 
     if (!sessionStepEligible(booking.sessionStep)) {
       return jsonError(
-        `Aftercare is locked until after-photos is complete. Current step: ${booking.sessionStep ?? 'NONE'}.`,
+        `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`,
         409,
       )
     }
-
-    const shouldCompleteBooking = booking.sessionStep === SessionStep.DONE
 
     // timezone used for reminder copy (booking tz > pro tz > UTC)
     const aftercareTimeZone = resolveAftercareTimeZone({
@@ -319,7 +314,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       professionalTimeZone: booking.professional?.timeZone,
     })
 
-    // Optional sanity check: client tz doesn't override truth
+    // debug only: client tz doesn't override truth
     const clientTz = typeof body.timeZone === 'string' ? body.timeZone.trim() : ''
     const clientTzOk = clientTz ? isValidIanaTimeZone(clientTz) : false
 
@@ -395,52 +390,46 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         })
       }
 
-      // Client notification: dedupe by dedupeKey, and reset readAt on updates
-      const notifKey = makeClientNotifDedupeKey(booking.id)
-      const notifTitle = `Aftercare: ${booking.service?.name ?? 'Your appointment'}`
-      const bodyPreview = notes.trim() ? notes.trim().slice(0, 240) : null
+      // ✅ Only notify client when pro explicitly sends
+      let clientNotified = false
+      if (sendToClient) {
+        const notifKey = makeClientNotifDedupeKey(booking.id)
+        const notifTitle = `Aftercare: ${booking.service?.name ?? 'Your appointment'}`
+        const bodyPreview = notes.trim() ? notes.trim().slice(0, 240) : null
 
-      const existingNotif = await tx.clientNotification.findFirst({
-        where: { dedupeKey: notifKey },
-        select: { id: true },
-      })
+        const existingNotif = await tx.clientNotification.findFirst({
+          where: { dedupeKey: notifKey },
+          select: { id: true },
+        })
 
-      if (!existingNotif) {
-        await tx.clientNotification.create({
-          data: {
-            dedupeKey: notifKey,
-            clientId: booking.clientId,
-            type: ClientNotificationType.AFTERCARE,
-            title: notifTitle,
-            body: bodyPreview,
-            bookingId: booking.id,
-            aftercareId: aftercare.id,
-            readAt: null,
-          },
-        })
-      } else {
-        await tx.clientNotification.update({
-          where: { id: existingNotif.id },
-          data: {
-            type: ClientNotificationType.AFTERCARE,
-            title: notifTitle,
-            body: bodyPreview,
-            bookingId: booking.id,
-            aftercareId: aftercare.id,
-            readAt: null,
-          },
-        })
-      }
+        if (!existingNotif) {
+          await tx.clientNotification.create({
+            data: {
+              dedupeKey: notifKey,
+              clientId: booking.clientId,
+              type: ClientNotificationType.AFTERCARE,
+              title: notifTitle,
+              body: bodyPreview,
+              bookingId: booking.id,
+              aftercareId: aftercare.id,
+              readAt: null,
+            },
+          })
+        } else {
+          await tx.clientNotification.update({
+            where: { id: existingNotif.id },
+            data: {
+              type: ClientNotificationType.AFTERCARE,
+              title: notifTitle,
+              body: bodyPreview,
+              bookingId: booking.id,
+              aftercareId: aftercare.id,
+              readAt: null,
+            },
+          })
+        }
 
-      if (shouldCompleteBooking) {
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: BookingStatus.COMPLETED,
-            finishedAt: booking.finishedAt ?? new Date(),
-            sessionStep: SessionStep.DONE,
-          },
-        })
+        clientNotified = true
       }
 
       let remindersTouched = 0
@@ -498,7 +487,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
       // Product follow-up reminder
       const productKey = makeReminderDedupeKey(booking.id, 'PRODUCT_FOLLOWUP')
-
       if (createProductReminder) {
         const base = booking.finishedAt ?? booking.scheduledFor ?? new Date()
         const due = addDaysByMs(base, productReminderDaysAfter)
@@ -536,14 +524,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         remindersTouched += del.count
       }
 
-      return {
-        aftercare,
-        remindersTouched,
-        completed: shouldCompleteBooking,
-      }
+      return { aftercare, remindersTouched, clientNotified }
     })
-
-    const nextHref = result.completed ? '/pro/calendar' : `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`
 
     return NextResponse.json(
       {
@@ -551,7 +533,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         aftercareId: result.aftercare.id,
         publicToken: result.aftercare.publicToken,
         remindersTouched: result.remindersTouched,
-        completed: result.completed,
+        clientNotified: result.clientNotified,
 
         rebookMode: result.aftercare.rebookMode,
         rebookedFor: result.aftercare.rebookedFor ? result.aftercare.rebookedFor.toISOString() : null,
@@ -560,8 +542,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
         timeZoneUsed: aftercareTimeZone,
         clientTimeZoneReceived: clientTzOk ? clientTz : null,
-
-        nextHref,
       },
       { status: 200 },
     )

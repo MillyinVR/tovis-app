@@ -1,6 +1,7 @@
 // app/api/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { BookingStatus, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,21 +9,19 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 const NOTES_MAX = 2000
 
-/**
- * Route-local money helpers (only used here).
- * If you later add "@/lib/money", replace these imports and delete.
- */
-function moneyStringToCents(raw: string): number {
-  // Accept "123", "123.4", "123.45", "$1,234.50"
+function moneyStringToCents(raw: string): number | null {
   const cleaned = raw.replace(/\$/g, '').replace(/,/g, '').trim()
-  if (!cleaned) return 0
+  if (!cleaned) return null
   const m = /^(\d+)(?:\.(\d{0,}))?$/.exec(cleaned)
-  if (!m) return 0
+  if (!m) return null
+
   const whole = m[1] || '0'
   let frac = (m[2] || '').slice(0, 2)
   while (frac.length < 2) frac += '0'
+
   const cents = Number(whole) * 100 + Number(frac || '0')
-  return Number.isFinite(cents) ? Math.max(0, cents) : 0
+  if (!Number.isFinite(cents) || cents < 0) return null
+  return cents
 }
 
 function parseMoneyToCents(v: unknown): number | null {
@@ -31,13 +30,9 @@ function parseMoneyToCents(v: unknown): number | null {
     if (!Number.isFinite(v) || v < 0) return null
     return Math.round(v * 100)
   }
-  if (typeof v === 'string') {
-    const cents = moneyStringToCents(v)
-    return cents >= 0 ? cents : null
-  }
+  if (typeof v === 'string') return moneyStringToCents(v)
   const s = (v as any)?.toString?.()
-  if (typeof s === 'string') return moneyStringToCents(s)
-  return null
+  return typeof s === 'string' ? moneyStringToCents(s) : null
 }
 
 function centsToMoneyString(cents: number): string {
@@ -49,24 +44,81 @@ function centsToMoneyString(cents: number): string {
 
 function parseProposedServicesJson(v: unknown): any | null {
   if (v == null) return null
-
-  // If already an object/array, accept
   if (typeof v === 'object') return v
-
-  // If stringified JSON, parse it
   if (typeof v === 'string') {
     const s = v.trim()
     if (!s) return null
     try {
       const parsed = JSON.parse(s)
-      if (parsed && typeof parsed === 'object') return parsed
-      return null
+      return parsed && typeof parsed === 'object' ? parsed : null
     } catch {
       return null
     }
   }
-
   return null
+}
+
+type ProposedServiceRef = { serviceId?: unknown; offeringId?: unknown }
+
+function extractServiceRefsFromProposedJson(
+  v: any,
+): Array<{ serviceId: string | null; offeringId: string | null }> {
+  const out: Array<{ serviceId: string | null; offeringId: string | null }> = []
+
+  const visit = (node: any) => {
+    if (!node) return
+    if (Array.isArray(node)) {
+      for (const x of node) visit(x)
+      return
+    }
+    if (typeof node !== 'object') return
+
+    const maybe = node as ProposedServiceRef
+    const serviceId = typeof maybe.serviceId === 'string' && maybe.serviceId.trim() ? maybe.serviceId.trim() : null
+    const offeringId = typeof maybe.offeringId === 'string' && maybe.offeringId.trim() ? maybe.offeringId.trim() : null
+
+    if (serviceId || offeringId) out.push({ serviceId, offeringId })
+
+    for (const k of Object.keys(node)) visit((node as any)[k])
+  }
+
+  visit(v)
+  return out
+}
+
+async function validateProposedServicesAreFromProOfferings(args: {
+  proId: string
+  proposedServicesJson: any
+}) {
+  const refs = extractServiceRefsFromProposedJson(args.proposedServicesJson)
+
+  if (!refs.length) {
+    return { ok: false as const, error: 'Proposal must include serviceId (and ideally offeringId) for each line item.' }
+  }
+
+  const offerings = await prisma.professionalServiceOffering.findMany({
+    where: { professionalId: args.proId, isActive: true },
+    select: { id: true, serviceId: true },
+    take: 1000,
+  })
+
+  const allowedOfferingIds = new Set(offerings.map((o) => String(o.id)))
+  const allowedServiceIds = new Set(offerings.map((o) => String(o.serviceId)))
+
+  for (const r of refs) {
+    if (r.offeringId && !allowedOfferingIds.has(r.offeringId)) {
+      return { ok: false as const, error: 'Proposal includes an offering that is not active for this pro.' }
+    }
+    if (r.serviceId && !allowedServiceIds.has(r.serviceId)) {
+      return { ok: false as const, error: 'Proposal includes a service that is not active for this pro.' }
+    }
+  }
+
+  return { ok: true as const }
+}
+
+function canProSendProposal(step: SessionStep | null) {
+  return step === SessionStep.CONSULTATION || step === SessionStep.CONSULTATION_PENDING_CLIENT
 }
 
 export async function POST(req: Request, ctx: Ctx) {
@@ -101,18 +153,33 @@ export async function POST(req: Request, ctx: Ctx) {
         professionalId: true,
         clientId: true,
         status: true,
+        startedAt: true,
         finishedAt: true,
+        sessionStep: true,
       },
     })
 
     if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden')
+    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
 
-    // finalized = cancelled OR completed OR has finishedAt
-    const statusUpper = typeof booking.status === 'string' ? booking.status.toUpperCase() : ''
-    if (statusUpper === 'CANCELLED' || statusUpper === 'COMPLETED' || booking.finishedAt) {
-      return jsonFail(409, 'This booking is finalized.')
+    if (booking.status === BookingStatus.CANCELLED) return jsonFail(409, 'This booking is cancelled.')
+    if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) return jsonFail(409, 'This booking is finalized.')
+
+    // ✅ Consult is intended to happen while client is present.
+    // If you want to allow proposals BEFORE start, delete this.
+    if (!booking.startedAt) return jsonFail(409, 'Start the appointment before sending a consultation proposal.')
+
+    // ✅ No legacy: only allow during consult flows
+    if (!canProSendProposal(booking.sessionStep ?? null)) {
+      return jsonFail(409, 'Booking is not in a consultation stage.')
     }
+
+    // ✅ Validate payload matches pro offerings (prevents “weird JSON” from getting stored)
+    const valid = await validateProposedServicesAreFromProOfferings({
+      proId,
+      proposedServicesJson,
+    })
+    if (!valid.ok) return jsonFail(400, valid.error)
 
     const proposedTotalMoney = centsToMoneyString(proposedCents)
 
@@ -125,7 +192,7 @@ export async function POST(req: Request, ctx: Ctx) {
           proId: booking.professionalId,
           status: 'PENDING',
           proposedServicesJson: proposedServicesJson as any,
-          proposedTotal: proposedTotalMoney as any, // Decimal string
+          proposedTotal: proposedTotalMoney as any, // Decimal string OK
           notes,
           approvedAt: null,
           rejectedAt: null,
@@ -138,23 +205,16 @@ export async function POST(req: Request, ctx: Ctx) {
           approvedAt: null,
           rejectedAt: null,
         } as any,
-        select: {
-          id: true,
-          status: true,
-          proposedTotal: true,
-          updatedAt: true,
-        },
+        select: { id: true, status: true, proposedTotal: true, updatedAt: true },
       })
 
       const updatedBooking = await tx.booking.update({
         where: { id: booking.id },
-        data: {
-          sessionStep: 'CONSULTATION_PENDING_CLIENT' as any,
-        } as any,
+        data: { sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT },
         select: { id: true, sessionStep: true },
       })
 
-      // Notify client (best effort)
+      // Best-effort notify client
       try {
         await tx.clientNotification.create({
           data: {
@@ -163,7 +223,7 @@ export async function POST(req: Request, ctx: Ctx) {
             title: 'Consultation proposal ready',
             body: 'Your professional sent an updated service total for approval.',
             bookingId: booking.id,
-            dedupeKey: `CONSULTATION_PROPOSED:${booking.id}:${approval.updatedAt.toISOString()}`,
+            dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
           } as any,
         })
       } catch (e) {
@@ -183,10 +243,6 @@ export async function POST(req: Request, ctx: Ctx) {
     )
   } catch (e: any) {
     console.error('POST /api/pro/bookings/[id]/consultation-proposal error', e)
-    return jsonFail(
-      500,
-      'Internal server error',
-      process.env.NODE_ENV !== 'production' ? { name: e?.name, code: e?.code } : undefined,
-    )
+    return jsonFail(500, 'Internal server error')
   }
 }

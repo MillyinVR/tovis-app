@@ -140,11 +140,22 @@ export async function loadClientBookingPage(bookingId: string) {
   })
 
   const media = await prisma.mediaAsset.findMany({
-    where: { bookingId: raw.id },
-    orderBy: { createdAt: 'asc' },
-    take: 50,
-    select: { id: true, url: true, thumbUrl: true, mediaType: true, phase: true, createdAt: true },
-  })
+  where: { bookingId: raw.id },
+  orderBy: { createdAt: 'asc' },
+  take: 80,
+  select: {
+    id: true,
+    url: true,
+    thumbUrl: true,
+    mediaType: true,
+    phase: true,
+    createdAt: true,
+    visibility: true,
+    uploadedByRole: true,
+    reviewId: true,
+  },
+})
+
 
   return { user, raw, aftercare, existingReview, media }
 }

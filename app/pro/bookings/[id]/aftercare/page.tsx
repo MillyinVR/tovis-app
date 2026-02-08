@@ -31,7 +31,6 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
 
   const proId = user.professionalProfile.id
 
-  // Fetch pro timezone explicitly (avoid relying on getCurrentUser shape)
   const proProfile = await prisma.professionalProfile.findUnique({
     where: { id: proId },
     select: { timeZone: true },
@@ -70,8 +69,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   if (!booking) notFound()
   if (booking.professionalId !== proId) redirect('/pro')
 
-  // ✅ Timezone truth (no LA default):
-  // booking.locationTimeZone > proProfile.timeZone > UTC
+  // ✅ Timezone truth (booking.locationTimeZone > proProfile.timeZone > UTC)
   const tzRes = await resolveApptTimeZone({
     bookingLocationTimeZone: booking.locationTimeZone,
     professionalTimeZone: proProfile?.timeZone,
@@ -115,12 +113,10 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const serviceName = booking.service?.name ?? 'Service'
   const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
 
-  const backHref = `/pro/bookings/${encodeURIComponent(bookingId)}/session`
-
   return (
     <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
       <Link
-        href={backHref}
+        href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
         prefetch
         className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
       >
@@ -132,7 +128,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
 
       <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="text-sm font-semibold text-textSecondary">
-          Write clear instructions, add product links, set rebook guidance, then send.
+          Aftercare and after-photos are a wrap-up pair. Do either first — then send when you’re ready.
         </div>
       </div>
 

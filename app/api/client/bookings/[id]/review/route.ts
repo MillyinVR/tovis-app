@@ -10,9 +10,15 @@ import {
   resolveStoragePointers,
   parseIdArray,
   parseRating1to5,
+  jsonOk,
 } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
+
+const MAX_ATTACH_APPT_MEDIA = 6
+const MAX_CLIENT_IMAGES = 6
+const MAX_CLIENT_VIDEOS = 1
+const MAX_CLIENT_MEDIA_TOTAL = MAX_CLIENT_IMAGES + MAX_CLIENT_VIDEOS
 
 type CreateReviewBody = {
   rating?: unknown
@@ -67,6 +73,34 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   return items
 }
 
+function enforceClientMediaCaps(items: IncomingMediaItem[]) {
+  if (!items.length) return null
+
+  if (items.length > MAX_CLIENT_MEDIA_TOTAL) {
+    return `You can upload up to ${MAX_CLIENT_IMAGES} images + ${MAX_CLIENT_VIDEOS} video (${MAX_CLIENT_MEDIA_TOTAL} total).`
+  }
+
+  let images = 0
+  let videos = 0
+  for (const m of items) {
+    if (m.mediaType === 'VIDEO') videos++
+    else images++
+  }
+
+  if (images > MAX_CLIENT_IMAGES) return `You can upload up to ${MAX_CLIENT_IMAGES} images.`
+  if (videos > MAX_CLIENT_VIDEOS) return `You can upload up to ${MAX_CLIENT_VIDEOS} video.`
+  return null
+}
+
+/**
+ * Review media visibility rule:
+ * - Anything attached to a review is PUBLIC (client opted in by attaching/uploading).
+ *
+ * If your schema still uses PRIVATE/PUBLIC only, this should be PUBLIC.
+ * If you later add PRO_CLIENT, that's for booking/aftercare-only media, not review media.
+ */
+const REVIEW_MEDIA_VISIBILITY = 'PUBLIC' as MediaVisibility
+
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
@@ -86,7 +120,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const reviewBody = typeof body.body === 'string' ? body.body.trim() : null
 
     const clientMediaItems = parseMedia(body.media)
-    const attachedMediaIds = parseIdArray(body.attachedMediaIds, 2)
+
+    // Allow selecting up to 6 appointment media (pro-uploaded booking media only)
+    const attachedMediaIds = parseIdArray(body.attachedMediaIds, MAX_ATTACH_APPT_MEDIA)
+
+    // Enforce caps for client uploads
+    const capError = enforceClientMediaCaps(clientMediaItems)
+    if (capError) return jsonFail(400, capError)
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -111,13 +151,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     // Validate pointers before transaction (fast fail)
     const resolvedClientMedia = clientMediaItems.map((m) => {
       const ptrs = resolveStoragePointers(m)
-      if (!ptrs) {
-        throw new Error('Media must include storageBucket/storagePath or a parsable Supabase Storage URL.')
-      }
+      if (!ptrs) throw new Error('Media must include storageBucket/storagePath or a parsable Supabase Storage URL.')
       return { ...m, ...ptrs }
     })
 
     const created = await prisma.$transaction(async (tx) => {
+      // Only allow attaching PRO-uploaded booking media that isn't already attached/locked into a review
       const attachables = attachedMediaIds.length
         ? await tx.mediaAsset.findMany({
             where: {
@@ -147,12 +186,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         select: { id: true },
       })
 
+      // Attach selected appointment media -> becomes PUBLIC because it is now in a review
       if (attachables.length) {
         await tx.mediaAsset.updateMany({
           where: { id: { in: attachables.map((a) => a.id) } },
           data: {
             reviewId: review.id,
-            visibility: 'PRIVATE' as MediaVisibility,
+            visibility: REVIEW_MEDIA_VISIBILITY,
             isEligibleForLooks: false,
             isFeaturedInPortfolio: false,
             reviewLocked: true,
@@ -160,6 +200,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         })
       }
 
+      // Client-uploaded media for review -> created as PUBLIC (review media)
       if (resolvedClientMedia.length) {
         await tx.mediaAsset.createMany({
           data: resolvedClientMedia.map((m) => ({
@@ -171,7 +212,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
             thumbUrl: m.thumbUrl ?? null,
             mediaType: m.mediaType,
 
-            visibility: 'PRIVATE' as MediaVisibility,
+            visibility: REVIEW_MEDIA_VISIBILITY,
             uploadedByUserId: user.id,
             uploadedByRole: 'CLIENT' as Role,
 
@@ -198,6 +239,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
               thumbUrl: true,
               mediaType: true,
               createdAt: true,
+              visibility: true,
+              uploadedByRole: true,
               isFeaturedInPortfolio: true,
               isEligibleForLooks: true,
               storageBucket: true,

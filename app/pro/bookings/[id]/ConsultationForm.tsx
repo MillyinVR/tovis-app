@@ -64,7 +64,7 @@ function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16)
 }
 
-export default function ConsultationForm({ bookingId, initialNotes, initialPrice }: Props) {
+export default function ConsultationForm({ bookingId, initialNotes }: Props) {
   const router = useRouter()
 
   const [notes, setNotes] = useState(initialNotes || '')
@@ -118,25 +118,6 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     }
   }, [bookingId])
 
-  useEffect(() => {
-    if (items.length) return
-    const raw = initialPrice !== null && initialPrice !== undefined ? String(initialPrice) : ''
-    const parsed = normalizeMoneyInput(raw)
-    if (!parsed.ok || parsed.value == null) return
-
-    setItems([
-      {
-        key: uid(),
-        offeringId: '',
-        serviceId: '',
-        label: 'Consultation total (legacy)',
-        categoryName: null,
-        price: parsed.value,
-      },
-    ])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPrice])
-
   const total = useMemo(() => sumMoneyStrings(items), [items])
   const totalLabel = useMemo(() => `$${total.toFixed(2)}`, [total])
 
@@ -145,10 +126,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     setMessage(null)
 
     const opt = services.find((s) => s.offeringId === selectedOfferingId)
-    if (!opt) {
-      setError('Select a service to add.')
-      return
-    }
+    if (!opt) return setError('Select a service to add.')
 
     setItems((prev) => [
       ...prev,
@@ -174,6 +152,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
   const itemsValid = useMemo(() => {
     if (!items.length) return false
     for (const it of items) {
+      if (!it.offeringId || !it.serviceId) return false
       const p = normalizeMoneyInput(it.price)
       if (!p.ok || p.value == null) return false
     }
@@ -201,17 +180,17 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
       const proposedServicesJson = {
         currency: 'USD',
         items: items.map((it) => ({
-          offeringId: it.offeringId || null,
-          serviceId: it.serviceId || null,
+          offeringId: it.offeringId,
+          serviceId: it.serviceId,
           label: it.label,
           categoryName: it.categoryName || null,
-          price: normalizeMoneyInput(it.price).value,
+          price: normalizeMoneyInput(it.price).value, // string like "12.34"
         })),
       }
 
       const proposedTotal = total.toFixed(2)
 
-      const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/consultation`, {
+      const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/consultation-proposal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -219,10 +198,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
       })
 
       const data = await safeJson(res)
-      if (!res.ok) {
-        setError(errorFromResponse(res, data))
-        return
-      }
+      if (!res.ok) return setError(errorFromResponse(res, data))
 
       setMessage('Sent to client for approval.')
       router.refresh()
@@ -306,11 +282,7 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
                       disabled={saving}
                       onChange={(e) => updateItemPrice(it.key, e.target.value)}
                       placeholder="0.00"
-                      className={[
-                        field,
-                        'w-[140px]',
-                        parsed.ok ? '' : 'ring-2 ring-toneDanger/40',
-                      ].join(' ')}
+                      className={[field, 'w-[140px]', parsed.ok ? '' : 'ring-2 ring-toneDanger/40'].join(' ')}
                     />
                   </div>
 

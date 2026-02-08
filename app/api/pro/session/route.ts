@@ -10,37 +10,35 @@ function fullName(first?: string | null, last?: string | null) {
   return `${first ?? ''} ${last ?? ''}`.trim()
 }
 
+/**
+ * ✅ Canonical aftercare pipeline
+ * consult -> before photos -> service -> after photos -> aftercare
+ */
 function stepFromSessionStep(step: SessionStep | null): StepKey {
+  // Aftercare / done
   if (step === SessionStep.DONE) return 'aftercare'
 
-  if (
-    step === SessionStep.CONSULTATION ||
-    step === SessionStep.CONSULTATION_PENDING_CLIENT ||
-    step === SessionStep.NONE ||
-    !step
-  ) {
-    return 'consult'
-  }
+  // Consult phase (including "waiting on client")
+  if (step === SessionStep.CONSULTATION || step === SessionStep.CONSULTATION_PENDING_CLIENT) return 'consult'
 
+  // All other steps are inside the session execution
   return 'session'
 }
 
-function hrefForStep(bookingId: string, sessionStep: SessionStep | null) {
+function hrefForStep(bookingId: string, step: SessionStep | null) {
   const base = `/pro/bookings/${encodeURIComponent(bookingId)}`
 
-  if (sessionStep === SessionStep.DONE) return `${base}/aftercare`
+  // If step is unset (null), we treat it as "consult is the entry point"
+  if (!step) return `${base}?step=consult`
 
-  if (
-    sessionStep === SessionStep.CONSULTATION ||
-    sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT ||
-    sessionStep === SessionStep.NONE ||
-    !sessionStep
-  ) {
+  if (step === SessionStep.DONE) return `${base}/aftercare`
+
+  if (step === SessionStep.CONSULTATION || step === SessionStep.CONSULTATION_PENDING_CLIENT) {
     return `${base}?step=consult`
   }
 
-  if (sessionStep === SessionStep.BEFORE_PHOTOS) return `${base}/session/before-photos`
-  if (sessionStep === SessionStep.AFTER_PHOTOS) return `${base}/session/after-photos`
+  if (step === SessionStep.BEFORE_PHOTOS) return `${base}/session/before-photos`
+  if (step === SessionStep.AFTER_PHOTOS) return `${base}/session/after-photos`
 
   return `${base}?step=session`
 }
@@ -60,14 +58,28 @@ function centerFrom(args: {
 
   const base = `/pro/bookings/${encodeURIComponent(bookingId)}`
 
+  // UPCOMING: always start at consult
   if (mode === 'UPCOMING') {
     return { label: 'Start', action: 'START', href: `${base}?step=consult` }
   }
 
-  // ACTIVE
+  // ACTIVE: route based on step
+  // If sessionStep is unset, consult is the entry point
+  if (!sessionStep) {
+    return { label: 'Consult', action: 'NAVIGATE', href: `${base}?step=consult` }
+  }
+
+  if (sessionStep === SessionStep.CONSULTATION || sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT) {
+    return { label: 'Consult', action: 'NAVIGATE', href: `${base}?step=consult` }
+  }
+
   if (sessionStep === SessionStep.BEFORE_PHOTOS) {
     if (hasBeforeMedia) return { label: 'Session', action: 'NAVIGATE', href: `${base}?step=session` }
     return { label: 'Camera', action: 'CAPTURE_BEFORE', href: `${base}/session/before-photos` }
+  }
+
+  if (sessionStep === SessionStep.SERVICE_IN_PROGRESS || sessionStep === SessionStep.FINISH_REVIEW) {
+    return { label: 'Finish', action: 'FINISH', href: null }
   }
 
   if (sessionStep === SessionStep.AFTER_PHOTOS) {
@@ -75,28 +87,15 @@ function centerFrom(args: {
     return { label: 'Camera', action: 'CAPTURE_AFTER', href: `${base}/session/after-photos` }
   }
 
-  if (sessionStep === SessionStep.SERVICE_IN_PROGRESS || sessionStep === SessionStep.FINISH_REVIEW) {
-    return { label: 'Finish', action: 'FINISH', href: null }
-  }
-
   if (sessionStep === SessionStep.DONE) {
     return { label: 'Aftercare', action: 'NAVIGATE', href: `${base}/aftercare` }
   }
 
-  if (
-    sessionStep === SessionStep.CONSULTATION ||
-    sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT ||
-    sessionStep === SessionStep.NONE ||
-    !sessionStep
-  ) {
-    return { label: 'Consult', action: 'NAVIGATE', href: `${base}?step=consult` }
-  }
-
+  // Default: go to whatever page matches the step
   return { label: 'Session', action: 'NAVIGATE', href: hrefForStep(bookingId, sessionStep) }
 }
 
 async function getBeforeAfterCounts(bookingId: string) {
-  // One query instead of two separate count() calls
   const groups = await prisma.mediaAsset.groupBy({
     by: ['phase'],
     where: { bookingId, phase: { in: [MediaPhase.BEFORE, MediaPhase.AFTER] } },

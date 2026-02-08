@@ -178,7 +178,7 @@ export default async function ClientAftercareInboxPage() {
   )
 
   return (
-    <main className="mx-auto w-full max-w-[860px] px-4 pb-24 pt-7 text-textPrimary">
+    <main className="mx-auto w-full max-w-860px px-4 pb-24 pt-7 text-textPrimary">
       <h1 className="text-[22px] font-black">{COPY.aftercareInbox.title}</h1>
       <div className="mt-1 text-[13px] font-semibold text-textSecondary">{COPY.aftercareInbox.subtitle}</div>
 

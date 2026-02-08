@@ -1,28 +1,51 @@
 // app/pro/bookings/[id]/session/after-photos/page.tsx
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
-import { prisma } from '@/lib/prisma'
+import { headers } from 'next/headers'
+
 import { getCurrentUser } from '@/lib/currentUser'
-import MediaUploader from '../MediaUploader'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import MediaUploader from '../MediaUploader'
+import { getServerOrigin } from '@/lib/serverOrigin'
 
 export const dynamic = 'force-dynamic'
+
+type ApiItem = {
+  id: string
+  mediaType: 'IMAGE' | 'VIDEO'
+  caption: string | null
+  createdAt: string
+  reviewId: string | null
+
+  signedUrl: string | null
+  signedThumbUrl: string | null
+}
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ')
+}
 
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-function fmtInTimeZone(value: unknown, timeZone: string) {
-  try {
-    const d = value instanceof Date ? value : new Date(String(value))
-    if (Number.isNaN(d.getTime())) return ''
-    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+function Card(props: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cx('tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4', props.className)}>
+      {props.children}
+    </div>
+  )
+}
 
+function safeDateString(raw: unknown, timeZone: string) {
+  try {
+    const d = new Date(String(raw))
+    if (Number.isNaN(d.getTime())) return ''
     return new Intl.DateTimeFormat(undefined, {
-      timeZone: tz,
+      timeZone,
       year: 'numeric',
       month: 'short',
-      day: 'numeric',
+      day: '2-digit',
       hour: 'numeric',
       minute: '2-digit',
     }).format(d)
@@ -31,7 +54,35 @@ function fmtInTimeZone(value: unknown, timeZone: string) {
   }
 }
 
-export default async function ProAfterPhotosPage(props: { params: Promise<{ id: string }> }) {
+/**
+ * ✅ Long-term correctness:
+ * - forwards cookies to API so requirePro() works
+ * - supports absolute or relative base URL
+ */
+async function fetchProMedia(bookingId: string, phase: 'AFTER') {
+  const origin = (await getServerOrigin()) || ''
+  const url = origin
+    ? `${origin}/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=${phase}`
+    : `/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=${phase}`
+
+  // Forward auth cookies so your API can validate the pro
+  const h = await headers()
+  const cookie = h.get('cookie') ?? ''
+
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: cookie ? { cookie } : undefined,
+  }).catch(() => null)
+
+  if (!res?.ok) return [] as ApiItem[]
+
+  const data = (await res.json().catch(() => ({}))) as any
+  return (data?.items ?? []) as ApiItem[]
+}
+
+type PageProps = { params: Promise<{ id: string }> }
+
+export default async function ProAfterPhotosPage(props: PageProps) {
   const { id } = await props.params
   const bookingId = String(id || '').trim()
   if (!bookingId) notFound()
@@ -41,41 +92,11 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
     redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/session/after-photos`)
   }
 
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    include: { service: true, client: true },
-  })
-  if (!booking) notFound()
-  if (booking.professionalId !== user.professionalProfile.id) redirect('/pro')
-
-  const step = upper((booking as any).sessionStep || 'NONE')
-  if (step !== 'AFTER_PHOTOS' && step !== 'DONE') {
-    redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
-  }
-
-  // ✅ Use PRO timezone. No LA fallback. If missing/invalid, fall back to DEFAULT_TIME_ZONE (UTC).
   const proTz = sanitizeTimeZone(user.professionalProfile.timeZone, DEFAULT_TIME_ZONE)
 
-  const items = await prisma.mediaAsset.findMany({
-    where: { bookingId, phase: 'AFTER' as any },
-    select: {
-      id: true,
-      url: true,
-      thumbUrl: true,
-      caption: true,
-      mediaType: true,
-      visibility: true,
-      isEligibleForLooks: true,
-      isFeaturedInPortfolio: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: 'desc' },
-  })
+  // ✅ pull signed URLs via API (requires cookies forwarded)
+  const items = await fetchProMedia(bookingId, 'AFTER')
 
-  const serviceName = booking.service?.name ?? 'Service'
-  const clientFirst = booking.client?.firstName ?? ''
-  const clientLast = booking.client?.lastName ?? ''
-  const clientName = `${clientFirst} ${clientLast}`.trim() || 'Client'
   const canContinue = items.length > 0
 
   return (
@@ -87,12 +108,12 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
         ← Back to session
       </Link>
 
-      <h1 className="mt-3 text-lg font-black">After photos: {serviceName}</h1>
-      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
+      <h1 className="mt-3 text-lg font-black">After photos</h1>
 
-      <div className="tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
+      <Card>
         <div className="text-sm text-textSecondary">
-          Add at least one after photo to unlock aftercare. Your footer button should advance you once you’ve added one.
+          Add at least one after photo to unlock aftercare. Saved{' '}
+          <span className="font-black text-textPrimary">privately</span>.
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -119,7 +140,7 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
         <div className="mt-3 text-[11px] font-semibold text-textSecondary">
           Times shown in <span className="font-black text-textPrimary">{proTz}</span>
         </div>
-      </div>
+      </Card>
 
       <section className="mt-4">
         <MediaUploader bookingId={bookingId} phase="AFTER" />
@@ -132,39 +153,52 @@ export default async function ProAfterPhotosPage(props: { params: Promise<{ id: 
           <div className="mt-2 text-sm text-textSecondary">None yet.</div>
         ) : (
           <div className="mt-3 grid gap-3">
-            {items.map((m) => (
-              <div key={m.id} className="rounded-card border border-white/10 bg-bgSecondary p-3">
-                <div className="text-xs font-black text-textPrimary">
-                  {m.mediaType} · {m.visibility}
-                  <span className="ml-2 font-semibold text-textSecondary">
-                    · {fmtInTimeZone(m.createdAt, proTz)}
-                  </span>
-                </div>
+            {items.map((m) => {
+              const src = m.signedThumbUrl || m.signedUrl
+              const wasReleased = Boolean(m.reviewId)
+              const when = safeDateString(m.createdAt, proTz)
 
-                {m.caption ? <div className="mt-1 text-sm text-textSecondary">{m.caption}</div> : null}
+              return (
+                <div key={m.id} className="rounded-card border border-white/10 bg-bgSecondary p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-black text-textPrimary">
+                    <span>{m.mediaType} · PRIVATE</span>
+                    {when ? <span className="font-semibold text-textSecondary">· {when}</span> : null}
+                  </div>
 
-                <div className="mt-2 flex flex-wrap gap-3 text-xs font-semibold text-textSecondary">
-                  {m.isEligibleForLooks ? <span>Eligible for Looks</span> : null}
-                  {m.isFeaturedInPortfolio ? <span>Featured</span> : null}
-                </div>
+                  {m.caption ? <div className="mt-1 text-sm text-textSecondary">{m.caption}</div> : null}
 
-                <div className="mt-2 flex flex-wrap gap-3 text-xs font-black">
-                  <a href={m.url} target="_blank" rel="noreferrer" className="text-accentPrimary hover:opacity-80">
-                    Open media
-                  </a>
-                  {m.thumbUrl ? (
-                    <a
-                      href={m.thumbUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-accentPrimary hover:opacity-80"
-                    >
-                      Open thumb
-                    </a>
-                  ) : null}
+                  {src ? (
+                    <div className="mt-2 overflow-hidden rounded-card border border-white/10 bg-bgPrimary">
+                      {m.mediaType === 'VIDEO' ? (
+                        // eslint-disable-next-line jsx-a11y/media-has-caption
+                        <video src={src} controls className="block h-56 w-full object-cover" />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={src} alt="After media" className="block h-44 w-full object-cover" />
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 rounded-card border border-white/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
+                      Couldn’t generate a signed URL (file missing or storage error).
+                    </div>
+                  )}
+
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs font-black">
+                    {m.signedUrl ? (
+                      <a href={m.signedUrl} target="_blank" rel="noreferrer" className="text-accentPrimary hover:opacity-80">
+                        Open media
+                      </a>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-2 text-[11px] font-semibold text-textSecondary">
+                    {wasReleased
+                      ? 'Client attached this to a review (released).'
+                      : 'Stays private unless the client attaches it to a review.'}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
