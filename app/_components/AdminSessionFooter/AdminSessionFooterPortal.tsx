@@ -1,3 +1,4 @@
+// app/_components/AdminSessionFooter/AdminSessionFooterPortal.tsx
 'use client'
 
 import { createPortal } from 'react-dom'

@@ -1,17 +1,15 @@
-// app/_components/ClientSessionFooter/ClientSessionFooter.tsx
+// app/_components/GuestSessionFooter/GuestSessionFooter.tsx
 'use client'
 
 import { usePathname } from 'next/navigation'
 import NavItem from '../navigation/FooterNavItem'
-import BadgeDot from './BadgeDot'
-import { useClientFooterBadge } from './useClientFooterBadge'
 
 const ROUTES = {
-  home: '/client',
+  home: '/',
   search: '/search',
   looks: '/looks',
-  messages: '/messages',
-  bookings: '/client/bookings',
+  login: '/login',
+  signup: '/signup',
 } as const
 
 function isActivePath(pathname: string, href: string) {
@@ -19,25 +17,24 @@ function isActivePath(pathname: string, href: string) {
   return pathname === base || pathname.startsWith(base + '/')
 }
 
-export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
+export default function GuestSessionFooter() {
   const pathname = usePathname()
-  const fetched = useClientFooterBadge()
-  const badge = messagesBadge ?? fetched
+  if (!pathname) return null
 
-  // If pathname is temporarily null during hydration, still render (don’t disappear).
-  const path = pathname ?? ''
-
-  const looksActive = isActivePath(path, ROUTES.looks)
-  const searchActive = isActivePath(path, ROUTES.search)
+  const homeActive = isActivePath(pathname, ROUTES.home)
+  const searchActive = isActivePath(pathname, ROUTES.search)
+  const looksActive = isActivePath(pathname, ROUTES.looks)
+  const loginActive = isActivePath(pathname, ROUTES.login) || isActivePath(pathname, ROUTES.signup)
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem label="Home" href={ROUTES.home} icon="🏠" active={isActivePath(path, ROUTES.home)} />
+          <NavItem label="Home" href={ROUTES.home} icon="🏠" active={homeActive} />
 
           <NavItem label="Search" href={ROUTES.search} icon="🗺️" active={searchActive} />
 
+          {/* Center CTA: Looks */}
           <div className="relative -mt-8 flex w-22 justify-center">
             <a
               href={ROUTES.looks}
@@ -57,15 +54,9 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
             </a>
           </div>
 
-          <NavItem
-            label="Messages"
-            href={ROUTES.messages}
-            icon="💬"
-            active={isActivePath(path, ROUTES.messages)}
-            rightSlot={badge ? <BadgeDot label={badge} /> : null}
-          />
+          <NavItem label="Log in" href={ROUTES.login} icon="🔑" active={loginActive} />
 
-          <NavItem label="Bookings" href={ROUTES.bookings} icon="🗓️" active={isActivePath(path, ROUTES.bookings)} />
+          <NavItem label="Sign up" href={ROUTES.signup} icon="✨" active={isActivePath(pathname, ROUTES.signup)} />
         </div>
       </div>
     </div>

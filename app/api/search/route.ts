@@ -15,8 +15,15 @@ function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.trunc(n)))
 }
 
+function toNum(v: unknown): number | null {
+  if (v == null) return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  const n = Number(String(v))
+  return Number.isFinite(n) ? n : null
+}
+
 function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const R = 3958.7613
+  const R = 3958.7613 // miles
   const toRad = (d: number) => (d * Math.PI) / 180
 
   const dLat = toRad(b.lat - a.lat)
@@ -76,21 +83,29 @@ function buildMapsHref(args: {
 }) {
   const { label, formattedAddress, lat, lng, placeId } = args
 
-  // Prefer coordinates for navigation reliability
   if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
-    // Universal-ish: Apple Maps will happily open this, and Google Maps usually does too.
-    // If you want “choose app” behavior, the OS will typically route correctly.
-    const q = encodeURIComponent(label?.trim() || formattedAddress?.trim() || 'Salon')
+    const q = encodeURIComponent(label?.trim() || formattedAddress?.trim() || 'Location')
     return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&destination_place_id=${encodeURIComponent(
       placeId || '',
     )}&travelmode=driving&dir_action=navigate&query=${q}`
   }
 
-  // If no coords, fall back to address search
   const dest = encodeURIComponent((formattedAddress || label || '').trim())
   if (dest) return `https://www.google.com/maps/search/?api=1&query=${dest}`
 
   return null
+}
+
+type LocationDTO = {
+  id: string
+  formattedAddress: string | null
+  city: string | null
+  state: string | null
+  timeZone: string | null
+  placeId: string | null
+  lat: number | null
+  lng: number | null
+  isPrimary: boolean
 }
 
 export async function GET(req: Request) {
@@ -103,6 +118,8 @@ export async function GET(req: Request) {
 
     const lat = pickNumber(searchParams.get('lat'))
     const lng = pickNumber(searchParams.get('lng'))
+
+    // ✅ This endpoint is miles (not km)
     const radiusMiles = (() => {
       const r = pickNumber(searchParams.get('radiusMiles')) ?? 15
       return clampInt(r, 1, 100)
@@ -143,7 +160,6 @@ export async function GET(req: Request) {
     const geoEnabled = lat != null && lng != null
     const origin = geoEnabled ? { lat: lat!, lng: lng! } : null
 
-    // Bounding box deltas (used in JS pre-check)
     const latDelta = geoEnabled ? milesToLatDelta(radiusMiles) : null
     const lngDelta = geoEnabled ? milesToLngDelta(radiusMiles, lat!) : null
 
@@ -158,18 +174,13 @@ export async function GET(req: Request) {
                 { businessName: { contains: q, mode: 'insensitive' } },
                 { handle: { contains: q, mode: 'insensitive' } },
                 { location: { contains: q, mode: 'insensitive' } },
-
-                // ✅ enum-safe profession match
                 ...(matchedProfessions.length ? [{ professionType: { in: matchedProfessions } }] : []),
               ],
             }
           : {}),
       },
-      take: 120,
-
-      // ✅ ProfessionalProfile has no createdAt; keep deterministic sort
+      take: 200,
       orderBy: [{ businessName: 'asc' }, { handleNormalized: 'asc' }],
-
       select: {
         id: true,
         businessName: true,
@@ -178,31 +189,49 @@ export async function GET(req: Request) {
         avatarUrl: true,
         location: true,
         timeZone: true,
+
+        // ✅ Pull ALL bookable locations w/ coordinates (not just primary)
         locations: {
-          where: { isPrimary: true },
-          take: 1,
+          where: {
+            isBookable: true,
+            lat: { not: null },
+            lng: { not: null },
+          },
+          take: 25,
           select: {
             id: true,
             formattedAddress: true,
             city: true,
             state: true,
             timeZone: true,
-            placeId: true, // ✅ correct field name
+            placeId: true,
             lat: true,
             lng: true,
+            isPrimary: true,
           },
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
         },
       },
     })
 
-    // If no geo, just return a basic list
+    // No-geo: return list (use primary if present, otherwise first bookable)
     if (!geoEnabled || !origin) {
       return jsonOk({
         ok: true,
         pros: pros.slice(0, 50).map((p) => {
-          const primary = p.locations?.[0] ?? null
-          const plat = primary?.lat != null ? Number(primary.lat as any) : null
-          const plng = primary?.lng != null ? Number(primary.lng as any) : null
+          const locs: LocationDTO[] = (p.locations ?? []).map((l) => ({
+            id: l.id,
+            formattedAddress: l.formattedAddress ?? null,
+            city: l.city ?? null,
+            state: l.state ?? null,
+            timeZone: l.timeZone ?? null,
+            placeId: l.placeId ?? null,
+            lat: toNum(l.lat),
+            lng: toNum(l.lng),
+            isPrimary: Boolean(l.isPrimary),
+          }))
+
+          const primary = locs.find((x) => x.isPrimary) ?? locs[0] ?? null
 
           const locationLabel =
             p.location ??
@@ -211,8 +240,8 @@ export async function GET(req: Request) {
           const mapsHref = buildMapsHref({
             label: p.businessName ?? null,
             formattedAddress: primary?.formattedAddress ?? null,
-            lat: plat,
-            lng: plng,
+            lat: primary?.lat ?? null,
+            lng: primary?.lng ?? null,
             placeId: primary?.placeId ?? null,
           })
 
@@ -225,58 +254,85 @@ export async function GET(req: Request) {
             locationLabel,
             distanceMiles: null,
             mapsHref,
-            primaryLocation: primary
-              ? {
-                  id: primary.id,
-                  formattedAddress: primary.formattedAddress ?? null,
-                  city: primary.city ?? null,
-                  state: primary.state ?? null,
-                  timeZone: primary.timeZone ?? null,
-                  lat: plat,
-                  lng: plng,
-                  placeId: primary.placeId ?? null,
-                }
-              : null,
+
+            // Keep both for UI flexibility
+            closestLocation: primary,
+            primaryLocation: locs.find((x) => x.isPrimary) ?? null,
           }
         }),
         services: [],
       })
     }
 
-    // Geo filter + distance compute (precise)
+    // Geo-enabled: compute MIN distance across locations
     const withDistance = pros
       .map((p) => {
-        const primary = p.locations?.[0] ?? null
-        const plat = primary?.lat != null ? Number(primary.lat as any) : null
-        const plng = primary?.lng != null ? Number(primary.lng as any) : null
+        const locs: LocationDTO[] = (p.locations ?? [])
+          .map((l) => ({
+            id: l.id,
+            formattedAddress: l.formattedAddress ?? null,
+            city: l.city ?? null,
+            state: l.state ?? null,
+            timeZone: l.timeZone ?? null,
+            placeId: l.placeId ?? null,
+            lat: toNum(l.lat),
+            lng: toNum(l.lng),
+            isPrimary: Boolean(l.isPrimary),
+          }))
+          .filter((l) => l.lat != null && l.lng != null)
 
-        if (plat == null || plng == null) return { p, primary, dist: null, plat: null, plng: null }
+        if (!locs.length) return null
 
-        // bbox pre-check in JS
-        if (latDelta != null && lngDelta != null) {
-          if (plat < origin.lat - latDelta || plat > origin.lat + latDelta) return { p, primary, dist: null, plat, plng }
-          if (plng < origin.lng - lngDelta || plng > origin.lng + lngDelta) return { p, primary, dist: null, plat, plng }
+        let best: { dist: number; loc: LocationDTO } | null = null
+
+        for (const loc of locs) {
+          const plat = loc.lat!
+          const plng = loc.lng!
+
+          // bbox pre-check
+          if (latDelta != null && lngDelta != null) {
+            if (plat < origin.lat - latDelta || plat > origin.lat + latDelta) continue
+            if (plng < origin.lng - lngDelta || plng > origin.lng + lngDelta) continue
+          }
+
+          const dist = haversineMiles(origin, { lat: plat, lng: plng })
+          if (!Number.isFinite(dist)) continue
+          if (best == null || dist < best.dist) best = { dist, loc }
         }
 
-        const dist = haversineMiles(origin, { lat: plat, lng: plng })
-        return { p, primary, dist, plat, plng }
+        if (!best) return null
+        if (best.dist > radiusMiles) return null
+
+        const primary = locs.find((x) => x.isPrimary) ?? null
+
+        return {
+          p,
+          dist: best.dist,
+          closest: best.loc,
+          primary,
+        }
       })
-      .filter((x) => x.dist != null && (x.dist as number) <= radiusMiles)
-      .sort((a, b) => (a.dist as number) - (b.dist as number))
+      .filter(Boolean)
+      .sort((a: any, b: any) => a.dist - b.dist)
       .slice(0, 50)
 
     return jsonOk({
       ok: true,
-      pros: withDistance.map(({ p, primary, dist, plat, plng }) => {
+      pros: withDistance.map((x: any) => {
+        const p = x.p as (typeof pros)[number]
+        const closest: LocationDTO = x.closest
+        const primary: LocationDTO | null = x.primary ?? null
+
         const locationLabel =
-          p.location ?? (primary?.city ? `${primary.city}${primary.state ? `, ${primary.state}` : ''}` : null)
+          p.location ??
+          (closest?.city ? `${closest.city}${closest.state ? `, ${closest.state}` : ''}` : null)
 
         const mapsHref = buildMapsHref({
           label: p.businessName ?? null,
-          formattedAddress: primary?.formattedAddress ?? null,
-          lat: plat,
-          lng: plng,
-          placeId: primary?.placeId ?? null,
+          formattedAddress: closest?.formattedAddress ?? null,
+          lat: closest?.lat ?? null,
+          lng: closest?.lng ?? null,
+          placeId: closest?.placeId ?? null,
         })
 
         return {
@@ -286,20 +342,11 @@ export async function GET(req: Request) {
           professionType: p.professionType ?? null,
           avatarUrl: p.avatarUrl ?? null,
           locationLabel,
-          distanceMiles: dist,
+          distanceMiles: x.dist,
           mapsHref,
-          primaryLocation: primary
-            ? {
-                id: primary.id,
-                formattedAddress: primary.formattedAddress ?? null,
-                city: primary.city ?? null,
-                state: primary.state ?? null,
-                timeZone: primary.timeZone ?? null,
-                lat: plat,
-                lng: plng,
-                placeId: primary.placeId ?? null,
-              }
-            : null,
+
+          closestLocation: closest,
+          primaryLocation: primary,
         }
       }),
       services: [],

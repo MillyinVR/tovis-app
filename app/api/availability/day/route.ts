@@ -575,11 +575,40 @@ export async function GET(req: Request) {
       }
 
       if (!availableDays.length) {
-        return NextResponse.json(
-          { ok: false, error: firstError ?? 'No availability found in the next 14 days.' },
-          { status: 400 },
-        )
-      }
+  return NextResponse.json({
+    ok: true,
+    mode: 'SUMMARY' as const,
+    mediaId: mediaId || null,
+    serviceId,
+    professionalId,
+    serviceName: service.name,
+    serviceCategoryName: service.category?.name ?? null,
+    locationType: effectiveLocationType,
+    locationId: locId,
+    timeZone,
+    stepMinutes,
+    leadTimeMinutes,
+    adjacencyBufferMinutes,
+    maxDaysAhead: maxAdvanceDays,
+    durationMinutes,
+    primaryPro: {
+      id: pro.id,
+      businessName: pro.businessName ?? null,
+      avatarUrl: pro.avatarUrl ?? null,
+      location: pro.location ?? null,
+      offeringId: offering.id,
+      isCreator: true as const,
+      timeZone,
+    },
+    availableDays: [],
+    otherPros: [],
+    waitlistSupported: true,
+    offering: offeringPayload,
+    // optional: expose why empty in debug
+    ...(debug ? { debug: { emptyReason: firstError ?? 'none' } } : {}),
+  })
+}
+
 
       return NextResponse.json({
         ok: true,

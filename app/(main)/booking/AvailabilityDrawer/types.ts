@@ -29,6 +29,12 @@ export type DrawerContext = {
   serviceId?: string | null
 
   /**
+   * ✅ Optional but supported.
+   * When provided, it helps the server resolve location + timezone reliably.
+   */
+  offeringId?: string | null
+
+  /**
    * Optional. If callers don't pass it, the drawer can default at runtime.
    * Must match Prisma BookingSource.
    */
@@ -73,7 +79,7 @@ export type AvailabilitySummaryResponse = {
   serviceId: string
   professionalId: string
 
-  // ✅ these are values returned by the API
+  // ✅ values returned by the API
   serviceName: string
   serviceCategoryName: string | null
 
@@ -94,7 +100,6 @@ export type AvailabilitySummaryResponse = {
 
   offering: AvailabilityOffering
 }
-
 
 export type AvailabilityDayResponse =
   | {

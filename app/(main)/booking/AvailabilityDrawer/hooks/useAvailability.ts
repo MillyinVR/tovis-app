@@ -57,7 +57,11 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
       if (inFlightKeyRef.current === key) return
 
       const now = Date.now()
-      if (now - lastRequestAtRef.current < SOFT_THROTTLE_MS) return
+      const hit = cacheRef.current.get(key)
+      const hasUsableData = Boolean(hit?.data)
+
+      if (now - lastRequestAtRef.current < SOFT_THROTTLE_MS && hasUsableData) return
+
       lastRequestAtRef.current = now
 
       abortRef.current?.abort()

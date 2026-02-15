@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import ProSessionFooterPortal from '@/app/_components/ProSessionFooter/ProSessionFooterPortal'
 import ClientSessionFooterPortal from '@/app/_components/ClientSessionFooter/ClientSessionFooterPortal'
 import AdminSessionFooterPortal from '@/app/_components/AdminSessionFooter/AdminSessionFooterPortal'
+import GuestSessionFooterPortal from '@/app/_components/GuestSessionFooter/GuestSessionFooterPortal'
 
 export type AppRole = 'PRO' | 'CLIENT' | 'ADMIN' | 'GUEST'
 
@@ -21,7 +22,6 @@ function setFooterSpace(px: number) {
 
 export default function FooterShell({ role, messagesBadge }: Props) {
   const pathname = usePathname()
-
   const hideOnAuth = pathname?.startsWith('/login') || pathname?.startsWith('/signup')
 
   useEffect(() => {
@@ -30,23 +30,11 @@ export default function FooterShell({ role, messagesBadge }: Props) {
       return
     }
 
-    if (role === 'PRO') {
-      setFooterSpace(100)
-      return
-    }
-
-    if (role === 'CLIENT') {
-      setFooterSpace(90)
-      return
-    }
-
-    if (role === 'ADMIN') {
-      // Admin footer is compact but still needs breathing room
-      setFooterSpace(92)
-      return
-    }
-
-    setFooterSpace(0)
+    if (role === 'PRO') return setFooterSpace(100)
+    if (role === 'CLIENT') return setFooterSpace(90)
+    if (role === 'ADMIN') return setFooterSpace(92)
+    // guest/footer is still a footer
+    return setFooterSpace(90)
   }, [role, hideOnAuth])
 
   if (hideOnAuth) return null
@@ -54,6 +42,5 @@ export default function FooterShell({ role, messagesBadge }: Props) {
   if (role === 'PRO') return <ProSessionFooterPortal messagesBadge={messagesBadge ?? null} />
   if (role === 'CLIENT') return <ClientSessionFooterPortal messagesBadge={messagesBadge ?? null} />
   if (role === 'ADMIN') return <AdminSessionFooterPortal />
-
-  return null
+  return <GuestSessionFooterPortal />
 }

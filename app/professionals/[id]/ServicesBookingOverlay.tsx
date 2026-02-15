@@ -35,10 +35,10 @@ export default function ServicesBookingOverlay({
       const next: DrawerContext = {
         professionalId,
         serviceId: off.serviceId,
-        offeringId: off.id, // ✅ IMPORTANT: pass offeringId so booking flow can resolve location + tz correctly
+        offeringId: off.id,
         mediaId: null,
         source: 'REQUESTED',
-      } as any
+      }
 
       setCtx(next)
       setOpen(true)
@@ -75,9 +75,7 @@ export default function ServicesBookingOverlay({
                 <div className="truncate text-[13px] font-black">{off.name}</div>
 
                 {off.description ? (
-                  <div className="mt-1 line-clamp-2 text-[12px] font-semibold text-textSecondary">
-                    {off.description}
-                  </div>
+                  <div className="mt-1 line-clamp-2 text-[12px] font-semibold text-textSecondary">{off.description}</div>
                 ) : null}
 
                 {off.pricingLines.length ? (
@@ -95,15 +93,14 @@ export default function ServicesBookingOverlay({
             </div>
 
             <div className="grid justify-items-end gap-2">
-              <div className="rounded-full bg-accentPrimary px-3 py-2 text-[12px] font-black text-bgPrimary">
-                Book
-              </div>
+              <div className="rounded-full bg-accentPrimary px-3 py-2 text-[12px] font-black text-bgPrimary">Book</div>
               <div className="text-[12px] font-semibold text-textSecondary">→</div>
             </div>
           </button>
         ))}
       </div>
 
+      {/* Render drawer only when context exists */}
       {ctx ? <AvailabilityDrawer open={open} onClose={close} context={ctx} /> : null}
     </>
   )

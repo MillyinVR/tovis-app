@@ -1,7 +1,6 @@
 // app/_components/ProSessionFooter/ProSessionFooter.tsx
 'use client'
 
-import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useProSession } from './useProSession'
 import NavItem from '../navigation/FooterNavItem'
@@ -20,40 +19,9 @@ function isActivePath(pathname: string, href: string) {
   return pathname === base || pathname.startsWith(base + '/')
 }
 
-function shouldHideOnPath(pathname: string) {
-  if (pathname.startsWith('/login') || pathname.startsWith('/signup')) return true
-  return false
-}
-
-function setFooterSpace(px: number) {
-  if (typeof document === 'undefined') return
-  document.documentElement.style.setProperty('--app-footer-space', `${Math.max(0, Math.round(px))}px`)
-}
-
 export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
   const pathname = usePathname()
-  const rootRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    const el = rootRef.current
-    if (!el) return
-
-    const update = () => {
-      const h = el.getBoundingClientRect().height
-      // add a tiny “breathing” buffer so nothing kisses the footer
-      setFooterSpace(h + 10)
-    }
-
-    update()
-
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-
-    return () => ro.disconnect()
-  }, [])
-
-  if (!pathname) return null
-  if (shouldHideOnPath(pathname)) return null
+  const path = pathname ?? ''
 
   const { mode, booking, error, centerDisabled, displayLabel, handleCenterClick } = useProSession()
 
@@ -62,12 +30,7 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
   const isSessionActive = mode === 'ACTIVE'
 
   return (
-    <div
-      ref={rootRef}
-      data-testid="pro-session-footer"
-      className="fixed inset-x-0 bottom-0 z-200"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-    >
+    <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       {error ? (
         <div className="mx-auto mb-2 w-[min(520px,92vw)] rounded-[18px] bg-toneDanger px-3 py-2 text-[12px] font-extrabold text-white">
           {error}
@@ -76,8 +39,8 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
 
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem label="Looks" href={ROUTES.looks} icon="✨" active={isActivePath(pathname, ROUTES.looks)} />
-          <NavItem label="Calendar" href={ROUTES.calendar} icon="📅" active={isActivePath(pathname, ROUTES.calendar)} />
+          <NavItem label="Looks" href={ROUTES.looks} icon="✨" active={isActivePath(path, ROUTES.looks)} />
+          <NavItem label="Calendar" href={ROUTES.calendar} icon="📅" active={isActivePath(path, ROUTES.calendar)} />
 
           <div className="relative -mt-8 flex w-22 justify-center">
             <button
@@ -105,11 +68,11 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
             label="Messages"
             href={ROUTES.messages}
             icon="💬"
-            active={isActivePath(pathname, ROUTES.messages)}
+            active={isActivePath(path, ROUTES.messages)}
             rightSlot={messagesBadge ? <BadgeDot label={messagesBadge} /> : null}
           />
 
-          <NavItem label="Profile" href={ROUTES.profile} icon="👤" active={isActivePath(pathname, ROUTES.profile)} />
+          <NavItem label="Profile" href={ROUTES.profile} icon="👤" active={isActivePath(path, ROUTES.profile)} />
         </div>
       </div>
     </div>

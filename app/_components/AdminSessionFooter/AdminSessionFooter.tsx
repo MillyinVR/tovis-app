@@ -1,3 +1,4 @@
+// app/_components/AdminSessionFooter/AdminSessionFooter.tsx
 'use client'
 
 import { usePathname } from 'next/navigation'
@@ -24,12 +25,11 @@ function isActivePath(pathname: string, href: string) {
 export default function AdminSessionFooter({ supportBadge }: Props) {
   const pathname = usePathname()
   if (!pathname) return null
-  if (!pathname.startsWith('/admin')) return null
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="tovis-glass border-t border-white/10">
-        <div className="mx-auto flex h-18 w-full max-w-1100px items-center justify-between px-4">
+        <div className="mx-auto flex h-18 w-full max-w-[1100px] items-center justify-between px-4">
           <NavItem label="Dashboard" href={ROUTES.dashboard} icon="⌂" active={isActivePath(pathname, ROUTES.dashboard)} />
           <NavItem label="Approve" href={ROUTES.approve} icon="✓" active={isActivePath(pathname, ROUTES.approve)} />
           <NavItem label="Services" href={ROUTES.services} icon="✦" active={isActivePath(pathname, ROUTES.services)} />

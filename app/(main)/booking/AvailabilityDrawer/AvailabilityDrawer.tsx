@@ -25,6 +25,7 @@ import WaitlistPanel from './components/WaitlistPanel'
 import OtherPros from './components/OtherPros'
 import StickyCTA from './components/StickyCTA'
 import DebugPanel from './components/DebugPanel'
+import DayScroller from './components/DayScroller'
 
 import { safeJson } from './utils/safeJson'
 import { redirectToLogin } from './utils/authRedirect'
@@ -36,12 +37,15 @@ import { useDebugFlag } from './hooks/useDebugFlag'
 import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
 
 /**
- * ✅ No Los Angeles fallback anywhere.
+ * ✅ No Los Angeles fallback anywhere in the UI.
  * UTC is a neutral "we have nothing" fallback.
  */
 const FALLBACK_TZ = 'UTC' as const
 
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
+
+const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
+const EMPTY_PROS: any[] = []
 
 function periodOfHour(h: number): Period {
   if (h < 12) return 'MORNING'
@@ -52,7 +56,6 @@ function periodOfHour(h: number): Period {
 function getViewerTimeZoneClient(): string {
   try {
     const raw = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-    // If browser gives junk, we fall back to UTC, not LA.
     return sanitizeTimeZone(raw, FALLBACK_TZ)
   } catch {
     return FALLBACK_TZ
@@ -106,6 +109,27 @@ function hourInTz(isoUtc: string, timeZone: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+/**
+ * YYYY-MM-DD in the given timezone (no LA fallback).
+ */
+function ymdInTz(timeZone: string): string | null {
+  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
+  const d = new Date()
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d)
+
+  const y = parts.find((p) => p.type === 'year')?.value
+  const m = parts.find((p) => p.type === 'month')?.value
+  const day = parts.find((p) => p.type === 'day')?.value
+  if (!y || !m || !day) return null
+  return `${y}-${m}-${day}`
+}
+
 function resolveBookingSource(context: DrawerContext): BookingSource {
   if (context?.source) return context.source
   if (context?.mediaId) return 'DISCOVERY'
@@ -127,8 +151,8 @@ const FALLBACK_OFFERING: AvailabilityOffering = {
 }
 
 /**
- * ✅ Appointment timezone MUST come from server summary (location tz).
- * We do NOT invent Los Angeles. We fall back to viewer tz, then UTC.
+ * Appointment tz MUST come from server (location tz) when available.
+ * Viewer tz is for hints only.
  */
 function resolveAppointmentTimeZone(args: {
   summaryTimeZone?: unknown
@@ -147,6 +171,25 @@ function resolveAppointmentTimeZone(args: {
   return FALLBACK_TZ
 }
 
+function buildDayScrollerModel(days: Array<{ date: string; slotCount: number }>, appointmentTz: string) {
+  return (days || []).map((d) => {
+    // Anchor at noon UTC so formatting doesn't jump around DST edges.
+    const anchor = new Date(`${d.date}T12:00:00.000Z`)
+
+    const top = new Intl.DateTimeFormat(undefined, {
+      timeZone: appointmentTz,
+      weekday: 'short',
+    }).format(anchor)
+
+    const bottom = new Intl.DateTimeFormat(undefined, {
+      timeZone: appointmentTz,
+      day: '2-digit',
+    }).format(anchor)
+
+    return { ymd: d.date, labelTop: top, labelBottom: bottom }
+  })
+}
+
 export default function AvailabilityDrawer({
   open,
   onClose,
@@ -159,7 +202,7 @@ export default function AvailabilityDrawer({
   const router = useRouter()
   const debug = useDebugFlag()
 
-  // viewer tz: computed once on mount; never LA.
+  // viewer tz: computed once on mount; never LA fallback.
   const [viewerTz, setViewerTz] = useState<string>(FALLBACK_TZ)
   useEffect(() => {
     setViewerTz(getViewerTimeZoneClient())
@@ -167,18 +210,14 @@ export default function AvailabilityDrawer({
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
 
-  /**
-   * Keep non-nullable. We’ll sync it to the server response *after* the new fetch completes.
-   */
   const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
 
-  // Summary refetches whenever locationType changes
-  const { loading, error, data, setError, setData } = useAvailability(open, context, locationType)
+  const { loading, error, data, setError } = useAvailability(open, context, locationType)
   const summary = isSummary(data) ? data : null
 
-  const primary = summary?.primaryPro
-  const others = summary?.otherPros ?? []
-  const days = summary?.availableDays ?? []
+  const primary = summary?.primaryPro ?? null
+  const others = summary?.otherPros ?? EMPTY_PROS
+  const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
   const allowed = useMemo(
@@ -190,6 +229,11 @@ export default function AvailabilityDrawer({
   )
 
   const [selected, setSelected] = useState<SelectedHold | null>(null)
+  const selectedHoldIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    selectedHoldIdRef.current = selected?.holdId ?? null
+  }, [selected?.holdId])
+
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [holding, setHolding] = useState(false)
 
@@ -201,15 +245,6 @@ export default function AvailabilityDrawer({
 
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } = useHoldTimer(holdUntil)
 
-  /**
-   * ✅ The appointment timezone.
-   * - Prefer server summary tz (location tz)
-   * - Then pro tz (rare fallback)
-   * - Then viewer tz
-   * - Then UTC
-   *
-   * Also: sanitize once here (no LA fallback).
-   */
   const appointmentTz = useMemo(() => {
     const resolved = resolveAppointmentTimeZone({
       summaryTimeZone: summary?.timeZone,
@@ -221,9 +256,13 @@ export default function AvailabilityDrawer({
 
   const showLocalHint = viewerTz !== appointmentTz
 
+  // Service id must exist for day calls; summary wins if present.
   const effectiveServiceId = summary?.serviceId ?? context?.serviceId ?? null
+
+  const bookingSource = resolveBookingSource(context)
+
   const canWaitlist = Boolean(summary?.waitlistSupported && context?.professionalId && effectiveServiceId)
-  const noPrimarySlots = Boolean(primary && (!primarySlots || primarySlots.length === 0))
+  const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
 
   const viewProServicesHref = primary ? `/professionals/${encodeURIComponent(primary.id)}?tab=services` : '/looks'
 
@@ -232,20 +271,39 @@ export default function AvailabilityDrawer({
     return 'Matched to this service'
   }, [effectiveServiceId])
 
-  const bookingSource = resolveBookingSource(context)
+  const primaryId = useMemo(() => {
+    return primary?.id ? String(primary.id) : context?.professionalId ? String(context.professionalId) : ''
+  }, [primary?.id, context?.professionalId])
+
+  const resolvedOfferingId = useMemo(() => {
+    // ✅ summary wins (canonical)
+    if (summary?.offering?.id) return summary.offering.id
+    // ✅ fallback to context if provided
+    return context?.offeringId ?? null
+  }, [summary?.offering?.id, context?.offeringId])
+
+  // stable key for days (prevents infinite effect loops due to new array identities)
+  const daysKey = useMemo(() => {
+    if (!days || days.length === 0) return ''
+    return days.map((d) => `${d.date}:${d.slotCount}`).join('|')
+  }, [days])
+
+  // build day scroller model (hook MUST be before any early return)
+  const dayScrollerDays = useMemo(() => buildDayScrollerModel(days, appointmentTz), [daysKey, appointmentTz])
 
   const hardResetUi = useCallback(
     async (args?: { deleteHold?: boolean }) => {
-      if (args?.deleteHold && selected?.holdId) await deleteHoldById(selected.holdId).catch(() => {})
+      const holdId = selectedHoldIdRef.current
+      if (args?.deleteHold && holdId) await deleteHoldById(holdId).catch(() => {})
       setSelected(null)
       setHoldUntil(null)
       setHolding(false)
       setError(null)
     },
-    [selected?.holdId, setError],
+    [setError],
   )
 
-  // drawer open reset
+  // Reset on open/context change
   useEffect(() => {
     if (!open) return
     setSelectedDayYMD(null)
@@ -254,18 +312,15 @@ export default function AvailabilityDrawer({
     setOtherSlots({})
     void hardResetUi({ deleteHold: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, context?.mediaId, context?.professionalId, context?.serviceId, (context as any)?.offeringId, context?.source])
+  }, [open, context?.mediaId, context?.professionalId, context?.serviceId, context?.offeringId, context?.source])
 
-  /**
-   * ✅ Sync locationType with server ONLY after fetch completes.
-   * Fixes "snapback" while refetching.
-   */
+  // Sync locationType to server after fetch completes (no snapback during refetch)
   useEffect(() => {
     if (!open) return
     if (!summary) return
     if (loading) return
     if (holding) return
-    if (selected?.holdId) return
+    if (selectedHoldIdRef.current) return
 
     const serverType = summary.locationType
     if (serverType && serverType !== locationType) {
@@ -275,9 +330,9 @@ export default function AvailabilityDrawer({
       setOtherSlots({})
       setLocationType(serverType)
     }
-  }, [open, summary, loading, holding, selected?.holdId, locationType, hardResetUi])
+  }, [open, summary, loading, holding, locationType, hardResetUi])
 
-  // if only one mode is allowed, force it
+  // If only one mode allowed, force it
   useEffect(() => {
     if (!open) return
     if (!summary) return
@@ -286,31 +341,42 @@ export default function AvailabilityDrawer({
 
     if (allowed.salon && !allowed.mobile && locationType !== 'SALON') {
       void hardResetUi({ deleteHold: true })
-      setData(null)
       setLocationType('SALON')
       setSelectedDayYMD(null)
       return
     }
     if (!allowed.salon && allowed.mobile && locationType !== 'MOBILE') {
       void hardResetUi({ deleteHold: true })
-      setData(null)
       setLocationType('MOBILE')
       setSelectedDayYMD(null)
       return
     }
-  }, [open, summary, allowed.salon, allowed.mobile, locationType, hardResetUi, setData])
+  }, [open, summary, allowed.salon, allowed.mobile, locationType, hardResetUi])
 
-  // default day
+  /**
+   * Default day selection (NO infinite loop):
+   * - Prefer summary.availableDays[0]
+   * - Else fallback = "today in appointment tz"
+   */
   useEffect(() => {
     if (!open) return
-    if (!days?.length) return
+
+    const fallback = ymdInTz(appointmentTz)
+    const first = days?.[0]?.date ?? null
 
     setSelectedDayYMD((cur) => {
-      if (!cur) return days[0].date
-      const exists = days.some((d) => d.date === cur)
-      return exists ? cur : days[0].date
+      const nextBase = first ?? fallback
+      if (!nextBase) return cur ?? null
+      if (!cur) return nextBase
+
+      if (days && days.length > 0) {
+        const exists = days.some((d) => d.date === cur)
+        return exists ? cur : nextBase
+      }
+
+      return cur
     })
-  }, [open, days])
+  }, [open, appointmentTz, daysKey])
 
   // ESC close
   useEffect(() => {
@@ -373,15 +439,21 @@ export default function AvailabilityDrawer({
 
       return Array.isArray(body.slots) ? (body.slots as string[]) : []
     },
-    [effectiveServiceId, setError, debug],
+    [effectiveServiceId, debug, setError],
   )
 
-  // load slots when day/location changes
+  const othersKey = useMemo(() => {
+    if (!others || others.length === 0) return ''
+    return others.map((p: any) => String(p.id)).join('|')
+  }, [others])
+
+  /**
+   * Load day slots whenever open + day selected + have a primaryId.
+   */
   useEffect(() => {
     if (!open) return
-    if (!summary?.ok) return
-    if (!primary?.id) return
     if (!selectedDayYMD) return
+    if (!primaryId) return
 
     let cancelled = false
 
@@ -389,14 +461,22 @@ export default function AvailabilityDrawer({
       try {
         setPrimarySlots([])
         setOtherSlots({})
-        setError(null)
+
+        if (!holding) setError(null)
 
         const [pSlots, ...oSlots] = await Promise.all([
-          fetchDaySlots({ proId: primary.id, ymd: selectedDayYMD, locationType, isPrimary: true }),
-          ...others.map(async (p) => {
-            const slots = await fetchDaySlots({ proId: p.id, ymd: selectedDayYMD, locationType, isPrimary: false })
-            return { proId: p.id, slots }
-          }),
+          fetchDaySlots({ proId: primaryId, ymd: selectedDayYMD, locationType, isPrimary: true }),
+          ...(primary?.id
+            ? others.map(async (p: any) => {
+                const slots = await fetchDaySlots({
+                  proId: String(p.id),
+                  ymd: selectedDayYMD,
+                  locationType,
+                  isPrimary: false,
+                })
+                return { proId: String(p.id), slots }
+              })
+            : []),
         ])
 
         if (cancelled) return
@@ -404,7 +484,7 @@ export default function AvailabilityDrawer({
         setPrimarySlots(pSlots)
 
         const map: Record<string, string[]> = {}
-        for (const row of oSlots) map[row.proId] = row.slots
+        for (const row of oSlots as Array<{ proId: string; slots: string[] }>) map[row.proId] = row.slots
         setOtherSlots(map)
       } catch {
         if (cancelled) return
@@ -417,12 +497,12 @@ export default function AvailabilityDrawer({
     return () => {
       cancelled = true
     }
-  }, [open, summary?.ok, primary?.id, others, selectedDayYMD, locationType, fetchDaySlots, setError])
+  }, [open, selectedDayYMD, locationType, primaryId, fetchDaySlots, holding, setError, primary?.id, othersKey])
 
   // auto-switch period if empty
   useEffect(() => {
     if (!open) return
-    if (!primarySlots?.length) return
+    if (!primarySlots || primarySlots.length === 0) return
 
     const counts = { MORNING: 0, AFTERNOON: 0, EVENING: 0 } as Record<Period, number>
     for (const iso of primarySlots) {
@@ -439,12 +519,14 @@ export default function AvailabilityDrawer({
   }, [open, primarySlots, appointmentTz, period])
 
   async function onPickSlot(proId: string, offeringId: string | null, slotISO: string) {
-    if (!offeringId) return
+    const effOfferingId = offeringId || resolvedOfferingId
+    if (!effOfferingId) return
     if (holding) return
 
     setError(null)
 
-    if (selected?.holdId) await deleteHoldById(selected.holdId).catch(() => {})
+    const existingHoldId = selectedHoldIdRef.current
+    if (existingHoldId) await deleteHoldById(existingHoldId).catch(() => {})
 
     setSelected(null)
     setHoldUntil(null)
@@ -455,7 +537,7 @@ export default function AvailabilityDrawer({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          offeringId,
+          offeringId: effOfferingId,
           scheduledFor: slotISO,
           locationType,
         }),
@@ -474,9 +556,9 @@ export default function AvailabilityDrawer({
 
       setSelected({
         proId,
-        offeringId,
+        offeringId: effOfferingId,
         slotISO: parsed.scheduledForISO,
-        proTimeZone: appointmentTz, // legacy field; value is correct appointment tz now
+        proTimeZone: appointmentTz, // legacy field; correct appointment tz now
         holdId: parsed.holdId,
       })
       setHoldUntil(parsed.holdUntilMs)
@@ -508,9 +590,12 @@ export default function AvailabilityDrawer({
 
   const selectedLine = selected?.slotISO ? fmtSelectedLine(selected.slotISO, appointmentTz) : null
 
+  // ✅ Early return is now SAFE because ALL hooks are above this line.
   if (!open || !context) return null
 
   const canRenderSummary = Boolean(summary && primary)
+  const shouldShowLoading = loading && !summary
+  const shouldShowEmpty = !error && !shouldShowLoading && (!canRenderSummary && !context?.professionalId)
 
   return (
     <DrawerShell
@@ -564,27 +649,33 @@ export default function AvailabilityDrawer({
       }
     >
       <div className="looksNoScrollbar overflow-y-auto px-4 pb-4" style={{ paddingBottom: STICKY_CTA_H + 14 }}>
-        {loading ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">Loading availability…</div>
+        {shouldShowLoading ? (
+          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+            Loading availability…
+          </div>
         ) : error ? (
           <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">{error}</div>
-        ) : !canRenderSummary ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">No availability found.</div>
+        ) : shouldShowEmpty ? (
+          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+            No availability found.
+          </div>
         ) : (
           (() => {
-            const primaryPro: ProCardType = primary as ProCardType
+            const primaryPro: ProCardType | null = canRenderSummary ? (primary as ProCardType) : null
 
             return (
               <>
-                <ProCard
-                  pro={primaryPro as any}
-                  appointmentTz={appointmentTz}
-                  viewerTz={viewerTz}
-                  statusLine={statusLine}
-                  showFallbackActions={false}
-                  viewProServicesHref={viewProServicesHref}
-                  onScrollToOtherPros={scrollToOtherPros}
-                />
+                {primaryPro ? (
+                  <ProCard
+                    pro={primaryPro as any}
+                    appointmentTz={appointmentTz}
+                    viewerTz={viewerTz}
+                    statusLine={statusLine}
+                    showFallbackActions={false}
+                    viewProServicesHref={viewProServicesHref}
+                    onScrollToOtherPros={scrollToOtherPros}
+                  />
+                ) : null}
 
                 <ServiceContextCard
                   serviceName={(summary as any)?.serviceName ?? null}
@@ -600,7 +691,6 @@ export default function AvailabilityDrawer({
                   offering={offering}
                   onChange={(t) => {
                     void hardResetUi({ deleteHold: true })
-                    setData(null)
                     setLocationType(t)
                     setSelectedDayYMD(null)
                     setPrimarySlots([])
@@ -608,24 +698,39 @@ export default function AvailabilityDrawer({
                   }}
                 />
 
+                {/* ✅ Day picker restored */}
+                {dayScrollerDays.length ? (
+                  <DayScroller
+                    days={dayScrollerDays}
+                    selectedYMD={selectedDayYMD}
+                    onSelect={(ymd) => {
+                      void hardResetUi({ deleteHold: true })
+                      setSelectedDayYMD(ymd)
+                    }}
+                  />
+                ) : null}
+
                 <SlotChips
-                  pro={primaryPro}
+                  pro={
+                    (primaryPro as any) ??
+                    ({
+                      id: primaryId,
+                      offeringId: resolvedOfferingId,
+                      timeZone: appointmentTz,
+                    } as any)
+                  }
                   appointmentTz={appointmentTz}
                   holding={holding}
                   selected={selected}
-                  days={days}
-                  selectedDayYMD={selectedDayYMD}
-                  onSelectDay={(ymd) => {
-                    void hardResetUi({ deleteHold: true })
-                    setSelectedDayYMD(ymd)
-                  }}
                   period={period}
                   onSelectPeriod={(p) => {
                     void hardResetUi({ deleteHold: true })
                     setPeriod(p)
                   }}
                   slotsForDay={primarySlots}
-                  onPick={(proId, offeringId, slotISO) => onPickSlot(proId, offeringId, slotISO)}
+                  onPick={(proId, offeringId, slotISO) => {
+                    void onPickSlot(proId, offeringId, slotISO)
+                  }}
                 />
 
                 {showLocalHint && selected?.slotISO ? (
@@ -646,16 +751,18 @@ export default function AvailabilityDrawer({
                   noPrimarySlots={noPrimarySlots}
                 />
 
-                <OtherPros
-                  others={(others || []).map((p) => ({ ...p, slots: otherSlots[p.id] || [] }))}
-                  effectiveServiceId={effectiveServiceId}
-                  viewerTz={viewerTz}
-                  appointmentTz={appointmentTz}
-                  holding={holding}
-                  selected={selected}
-                  onPick={(proId, offeringId, slotISO) => onPickSlot(proId, offeringId, slotISO)}
-                  setRef={(el) => (otherProsRef.current = el)}
-                />
+                {primaryPro ? (
+                  <OtherPros
+                    others={(others || []).map((p: any) => ({ ...p, slots: otherSlots[String(p.id)] || [] }))}
+                    effectiveServiceId={effectiveServiceId}
+                    viewerTz={viewerTz}
+                    appointmentTz={appointmentTz}
+                    holding={holding}
+                    selected={selected}
+                    onPick={(proId, offeringId, slotISO) => onPickSlot(proId, offeringId, slotISO)}
+                    setRef={(el) => (otherProsRef.current = el)}
+                  />
+                ) : null}
 
                 {debug ? (
                   <DebugPanel
