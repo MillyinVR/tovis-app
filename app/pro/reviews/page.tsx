@@ -4,7 +4,11 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import MediaPortfolioToggle from './MediaPortfolioToggle'
-import HashJumpHighlight from './HashJumpHighlight' // ✅ add this
+import HashJumpHighlight from './HashJumpHighlight'
+
+function pickNonEmptyString(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
 
 export default async function ProReviewsPage() {
   const user = await getCurrentUser()
@@ -39,6 +43,7 @@ export default async function ProReviewsPage() {
       }}
     >
       <HashJumpHighlight />
+
       <div
         style={{
           display: 'flex',
@@ -51,10 +56,7 @@ export default async function ProReviewsPage() {
         <h1 style={{ fontSize: 18, margin: 0 }}>Reviews</h1>
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <Link
-            href="/pro/profile?tab=reviews"
-            style={{ fontSize: 12, color: '#111', textDecoration: 'none' }}
-          >
+          <Link href="/pro/profile?tab=reviews" style={{ fontSize: 12, color: '#111', textDecoration: 'none' }}>
             View on Profile →
           </Link>
         </div>
@@ -76,11 +78,10 @@ export default async function ProReviewsPage() {
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           {reviews.map((rev) => {
-            const first = (rev.client?.firstName || '').trim()
-            const last = (rev.client?.lastName || '').trim()
+            const first = pickNonEmptyString(rev.client?.firstName)
+            const last = pickNonEmptyString(rev.client?.lastName)
             const clientName = `${first} ${last}`.trim() || 'Client'
             const date = new Date(rev.createdAt).toLocaleDateString()
-
             const reviewAnchor = `review-${rev.id}`
 
             return (
@@ -118,25 +119,12 @@ export default async function ProReviewsPage() {
                       {'★'.repeat(rev.rating).padEnd(5, '☆')}
                     </div>
 
-                    {rev.headline && (
-                      <div
-                        style={{
-                          marginTop: 6,
-                          fontSize: 14,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {rev.headline}
-                      </div>
-                    )}
+                    {rev.headline ? (
+                      <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600 }}>{rev.headline}</div>
+                    ) : null}
 
-                    {rev.body && (
-                      <div style={{ marginTop: 6, fontSize: 13, color: '#111' }}>
-                        {rev.body}
-                      </div>
-                    )}
+                    {rev.body ? <div style={{ marginTop: 6, fontSize: 13, color: '#111' }}>{rev.body}</div> : null}
 
-                    {/* handy for testing notification deep-links */}
                     <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       <Link
                         href={`/pro/reviews#${reviewAnchor}`}
@@ -173,16 +161,9 @@ export default async function ProReviewsPage() {
                   </div>
                 </div>
 
-                {/* Media row */}
-                {rev.mediaAssets.length > 0 && (
+                {rev.mediaAssets.length > 0 ? (
                   <div style={{ marginTop: 12 }}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: '#6b7280',
-                        marginBottom: 8,
-                      }}
-                    >
+                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
                       Photos / videos from this review
                     </div>
 
@@ -194,9 +175,10 @@ export default async function ProReviewsPage() {
                       }}
                     >
                       {rev.mediaAssets.map((m) => {
-                        const src = m.thumbUrl || m.url
+                        // ✅ src is string | undefined (never null)
+                        const src = pickNonEmptyString(m.thumbUrl) || pickNonEmptyString(m.url) || undefined
                         const isVideo = m.mediaType === 'VIDEO'
-                        
+
                         return (
                           <div
                             key={m.id}
@@ -217,19 +199,35 @@ export default async function ProReviewsPage() {
                               }}
                               title="Open"
                             >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={src}
-                                alt={m.caption || 'Review media'}
-                                style={{
-                                  width: '100%',
-                                  height: '100%',
-                                  objectFit: 'cover',
-                                  display: 'block',
-                                }}
-                              />
+                              {src ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={src}
+                                  alt={m.caption || 'Review media'}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    display: 'block',
+                                  }}
+                                />
+                              ) : (
+                                <div
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    display: 'grid',
+                                    placeItems: 'center',
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: '#6b7280',
+                                  }}
+                                >
+                                  Missing media URL
+                                </div>
+                              )}
 
-                              {isVideo && (
+                              {isVideo ? (
                                 <div
                                   style={{
                                     position: 'absolute',
@@ -244,11 +242,10 @@ export default async function ProReviewsPage() {
                                 >
                                   VIDEO
                                 </div>
-                              )}
+                              ) : null}
                             </Link>
 
                             <div style={{ padding: 10, display: 'grid', gap: 8 }}>
-                              {/* Service tags (first 2) */}
                               {m.services?.length ? (
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                   {m.services.slice(0, 2).map((t) => (
@@ -268,10 +265,7 @@ export default async function ProReviewsPage() {
                                 </div>
                               ) : null}
 
-                              <MediaPortfolioToggle
-                                mediaId={m.id}
-                                initialFeatured={m.isFeaturedInPortfolio}
-                              />
+                              <MediaPortfolioToggle mediaId={m.id} initialFeatured={Boolean(m.isFeaturedInPortfolio)} />
                             </div>
                           </div>
                         )
@@ -279,11 +273,11 @@ export default async function ProReviewsPage() {
                     </div>
 
                     <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
-                      Note: you can feature review media in your portfolio, but you can’t edit the
-                      client’s review content. Because… obviously.
+                      Note: you can feature review media in your portfolio, but you can’t edit the client’s review content.
+                      Because… obviously.
                     </div>
                   </div>
-                )}
+                ) : null}
               </article>
             )
           })}

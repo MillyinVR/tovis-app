@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+
 import ReviewsPanel from '../ReviewsPanel'
 import EditProfileButton from './EditProfileButton'
 import ShareButton from './ShareButton'
@@ -44,6 +45,10 @@ function formatClientName(input: { userEmail?: string | null; firstName?: string
   return full || 'Client'
 }
 
+function pickNonEmptyString(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
 export default async function ProPublicProfilePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
@@ -58,6 +63,8 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
     where: { id: proId },
     select: {
       id: true,
+      handle: true,
+      isPremium: true,
       businessName: true,
       bio: true,
       location: true,
@@ -72,7 +79,9 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           headline: true,
           body: true,
           createdAt: true,
+          // ✅ keep the DB-level filter (good), but TS still needs a runtime guard later
           mediaAssets: {
+            where: { url: { not: null } },
             select: { id: true, url: true, thumbUrl: true, mediaType: true, isFeaturedInPortfolio: true },
           },
           client: {
@@ -117,14 +126,28 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
   const reviewCount = pro.reviews.length
   const averageRating =
-    reviewCount > 0 ? (pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount).toFixed(1) : null
+    reviewCount > 0
+      ? (pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount).toFixed(1)
+      : null
 
+  // ✅ IMPORTANT: ReviewsPanel expects mediaAssets[].url to be string (non-null)
+  // Prisma types may still say `string | null`, so we guard + narrow here.
   const reviewsForUI = pro.reviews.map((rev) => {
     const clientName = formatClientName({
       userEmail: rev.client?.user?.email ?? null,
       firstName: rev.client?.firstName ?? null,
       lastName: rev.client?.lastName ?? null,
     })
+
+    const mediaAssetsForUI = (rev.mediaAssets || [])
+      .map((m) => ({
+        id: m.id,
+        url: typeof m.url === 'string' ? m.url.trim() : '',
+        thumbUrl: m.thumbUrl ?? null,
+        mediaType: m.mediaType,
+        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+      }))
+      .filter((m) => m.url.length > 0)
 
     return {
       id: rev.id,
@@ -133,13 +156,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
       body: rev.body ?? null,
       createdAt: new Date(rev.createdAt).toISOString(),
       clientName,
-      mediaAssets: (rev.mediaAssets || []).map((m) => ({
-        id: m.id,
-        url: m.url,
-        thumbUrl: m.thumbUrl ?? null,
-        mediaType: m.mediaType,
-        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-      })),
+      mediaAssets: mediaAssetsForUI,
     }
   })
 
@@ -205,6 +222,8 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                 location: pro.location ?? null,
                 avatarUrl: pro.avatarUrl ?? null,
                 professionType: pro.professionType ? String(pro.professionType) : null,
+                handle: pro.handle ?? null,
+                isPremium: Boolean(pro.isPremium),
               }}
             />
           </div>
@@ -217,7 +236,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          {/* ✅ “Add services” opens overlay via query param */}
           <Link
             href="/pro/profile/public-profile?tab=services&add=1"
             className="rounded-[18px] border border-white/10 bg-accentPrimary/15 px-4 py-2 text-[13px] font-black text-textPrimary hover:border-white/20"
@@ -273,9 +291,15 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
             </Link>
 
             {portfolioMedia.map((m) => {
-              const src = m.thumbUrl || m.url
+              // ✅ img src must be string | undefined (NOT null)
+              const src = pickNonEmptyString(m.thumbUrl) || pickNonEmptyString(m.url) || undefined
+
               const isVideo = m.mediaType === 'VIDEO'
               const isPrivate = m.visibility === 'PRO_CLIENT'
+
+              const serviceIds = (m.services ?? [])
+                .map((s) => pickNonEmptyString(s.serviceId))
+                .filter((id): id is string => id.length > 0)
 
               return (
                 <div
@@ -284,25 +308,25 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                   title={m.caption || 'Open'}
                 >
                   <Link href={`/media/${m.id}`} className="absolute inset-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
+                    {src ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center bg-bgPrimary/30 text-[12px] font-black text-textSecondary">
+                        Missing media URL
+                      </div>
+                    )}
                   </Link>
 
-                  <div className="pointer-events-none absolute left-2 bottom-2 flex flex-wrap gap-1.5">
+                  <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1.5">
                     {isPrivate ? (
-                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                        ONLY YOU
-                      </span>
+                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">ONLY YOU</span>
                     ) : null}
                     {m.isEligibleForLooks ? (
-                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                        LOOKS
-                      </span>
+                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">LOOKS</span>
                     ) : null}
                     {m.isFeaturedInPortfolio ? (
-                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                        PORTFOLIO
-                      </span>
+                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">PORTFOLIO</span>
                     ) : null}
                   </div>
 
@@ -321,7 +345,7 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                         visibility: m.visibility,
                         isEligibleForLooks: Boolean(m.isEligibleForLooks),
                         isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-                        serviceIds: (m.services || []).map((s) => s.serviceId).filter(Boolean),
+                        serviceIds,
                       }}
                     />
                   </div>
@@ -338,7 +362,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
       {tab === 'services' ? (
         <section className="pt-4">
-          {/* ✅ Single source of truth */}
           <ServicesManagerSection variant="section" title={null} subtitle={null} />
         </section>
       ) : null}

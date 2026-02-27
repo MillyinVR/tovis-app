@@ -15,48 +15,19 @@ function safeNextUrl(v: string | null): string | null {
 type IntentType = 'CLAIM_CARD' | 'BOOK_PRO' | 'SALON_WHITE_LABEL'
 
 function isUnclaimed(card: { claimedAt: Date | null; type: any }) {
-  // If you add UNASSIGNED to your enum, include it here.
   return !card.claimedAt || card.type === 'UNASSIGNED'
 }
 
-function buildIntentFromCard(card: {
-  type: any
-  claimedAt: Date | null
-  professionalId: string | null
-  salonSlug: string | null
-}) {
-  // 1) If unclaimed, always go through claim/signup flow
-  if (isUnclaimed(card)) {
-    return {
-      intentType: 'CLAIM_CARD' as const,
-      payloadJson: {},
-      nextUrl: '/signup', // signup UI should show role chooser when intentType=CLAIM_CARD
-    }
-  }
+async function proBookingNextUrl(professionalId: string) {
+  const pro = await prisma.professionalProfile.findUnique({
+    where: { id: professionalId },
+    select: { id: true, handleNormalized: true, isPremium: true },
+  })
 
-  // 2) Claimed cards behave by type
-  if (card.type === 'PRO_BOOKING' && card.professionalId) {
-    return {
-      intentType: 'BOOK_PRO' as const,
-      payloadJson: { professionalId: card.professionalId },
-      nextUrl: `/professionals/${card.professionalId}`,
-    }
-  }
+  if (!pro) return '/nfc/invalid'
 
-  if (card.type === 'SALON_WHITE_LABEL' && card.salonSlug) {
-    return {
-      intentType: 'SALON_WHITE_LABEL' as const,
-      payloadJson: { salonSlug: card.salonSlug },
-      nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
-    }
-  }
-
-  // 3) Anything else: treat as claim/signup (safer than silently forcing client)
-  return {
-    intentType: 'CLAIM_CARD' as const,
-    payloadJson: {},
-    nextUrl: '/signup',
-  }
+  if (pro.isPremium && pro.handleNormalized) return `/p/${pro.handleNormalized}`
+  return `/professionals/${pro.id}` // free + ugly + perfect
 }
 
 export default async function TapPage(props: {
@@ -74,23 +45,40 @@ export default async function TapPage(props: {
       type: true,
       isActive: true,
       claimedAt: true,
-      claimedByUserId: true,
       professionalId: true,
       salonSlug: true,
     },
   })
 
-  if (!card || !card.isActive) {
-    redirect('/nfc/invalid')
-  }
+  if (!card || !card.isActive) redirect('/nfc/invalid')
 
   const user = await getCurrentUser().catch(() => null)
 
-  const derived = buildIntentFromCard(card)
+  let derived: { intentType: IntentType; payloadJson: any; nextUrl: string }
+
+  // 1) Unclaimed: go claim
+  if (isUnclaimed(card)) {
+    derived = { intentType: 'CLAIM_CARD', payloadJson: {}, nextUrl: '/signup' }
+  } else if (card.type === 'PRO_BOOKING' && card.professionalId) {
+    const nextUrl = await proBookingNextUrl(card.professionalId)
+    derived = {
+      intentType: 'BOOK_PRO',
+      payloadJson: { professionalId: card.professionalId },
+      nextUrl,
+    }
+  } else if (card.type === 'SALON_WHITE_LABEL' && card.salonSlug) {
+    derived = {
+      intentType: 'SALON_WHITE_LABEL',
+      payloadJson: { salonSlug: card.salonSlug },
+      nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
+    }
+  } else {
+    derived = { intentType: 'CLAIM_CARD', payloadJson: {}, nextUrl: '/signup' }
+  }
+
   const nextUrl = nextOverride ?? derived.nextUrl
 
   const expiresAt = new Date(Date.now() + 1000 * 60 * 30) // 30 min
-
   const intent = await prisma.tapIntent.create({
     data: {
       cardId: card.id,
@@ -102,16 +90,11 @@ export default async function TapPage(props: {
     select: { id: true },
   })
 
-  // Always go through signup/login when unclaimed so we can claim atomically.
-  if (!user) {
-    redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
-  }
+  // If not logged in, always go through signup/login so we can claim/credit cleanly
+  if (!user) redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
 
-  // Logged-in user:
-  // If card is unclaimed, still send to signup/claim UX (or a dedicated /claim page).
-  if (isUnclaimed(card)) {
-    redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
-  }
+  // Logged in but card unclaimed? still go claim
+  if (isUnclaimed(card)) redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
 
   redirect(`${nextUrl}${nextUrl.includes('?') ? '&' : '?'}ti=${encodeURIComponent(intent.id)}`)
 }

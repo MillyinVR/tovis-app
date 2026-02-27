@@ -42,9 +42,7 @@ function normalizeBuckets(input: unknown): ApiBuckets {
     upcoming: asArray<BookingLike>(b.upcoming),
     pending: asArray<BookingLike>(b.pending),
     waitlist: asArray<WaitlistLike>(b.waitlist),
-    prebooked: asArray<BookingLike>(b.prebooked).length
-      ? asArray<BookingLike>(b.prebooked)
-      : asArray<BookingLike>(b.confirmed),
+    prebooked: asArray<BookingLike>(b.prebooked).length ? asArray<BookingLike>(b.prebooked) : asArray<BookingLike>(b.confirmed),
     past: asArray<BookingLike>(b.past),
   }
 }
@@ -67,19 +65,59 @@ function firstChar(s: string) {
   return (s || '').trim().charAt(0).toUpperCase()
 }
 
+function bookingSearchText(b: BookingLike) {
+  const parts = [
+    bookingTitle(b),
+    b.professional?.businessName || '',
+    bookingLocationLabel(b),
+    statusUpper(b.status),
+    sourceUpper(b.source),
+    b.display?.baseName || '',
+    b.display?.title || '',
+  ]
+  return parts.join(' ').toLowerCase()
+}
+
+function waitlistSearchText(w: WaitlistLike) {
+  const parts = [
+    w.service?.name || '',
+    w.professional?.businessName || '',
+    waitlistLocationLabel(w.professional),
+    w.notes || '',
+    'waitlist',
+  ]
+  return parts.join(' ').toLowerCase()
+}
+
+function loadStringSet(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key)
+    const arr = raw ? JSON.parse(raw) : []
+    if (Array.isArray(arr)) return new Set(arr.map((x) => String(x)))
+    return new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function saveStringSet(key: string, set: Set<string>) {
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(set)))
+  } catch {
+    // ignore
+  }
+}
+
 function HeroThumb({ title, subtitle }: { title: string; subtitle?: string | null }) {
   const a = firstChar(title)
   const b = firstChar(subtitle || '') || a
 
   return (
     <div
-      className={cx(
-        'relative h-[74px] w-[74px] shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgPrimary'
-      )}
+      className={cx('relative h-[74px] w-[74px] shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgPrimary')}
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(60px_60px_at_20%_20%,rgba(255,255,255,0.10),transparent_60%),radial-gradient(80px_80px_at_80%_70%,rgba(255,255,255,0.06),transparent_55%)]" />
       <div className="absolute inset-0 bg-surfaceGlass/30" />
-
       <div className="absolute inset-0 grid place-items-center">
         <div className="flex items-baseline gap-1">
           <span className="text-[20px] font-black tracking-tight text-textPrimary">{a}</span>
@@ -114,16 +152,9 @@ function TopTabs({
   return (
     <div className="w-full">
       <div className="mx-auto w-full max-w-xl">
-        <div
-          className={cx(
-            'relative rounded-full border border-white/10 bg-bgSecondary p-1',
-            'shadow-[0_10px_30px_rgba(0,0,0,0.35)]'
-          )}
-        >
-          {/* spec highlight */}
+        <div className={cx('relative rounded-full border border-white/10 bg-bgSecondary p-1', 'shadow-[0_10px_30px_rgba(0,0,0,0.35)]')}>
           <div className="pointer-events-none absolute inset-0 rounded-full [background:radial-gradient(700px_180px_at_30%_0%,rgba(255,255,255,0.14),transparent_60%)]" />
 
-          {/* sliding active pill */}
           <div className="pointer-events-none absolute inset-y-1 left-1 right-1">
             <div className="relative h-full">
               <div
@@ -133,13 +164,12 @@ function TopTabs({
                   'border border-white/15 bg-bgPrimary',
                   'shadow-[0_12px_35px_rgba(0,0,0,0.45)]',
                   'transition-transform duration-300 ease-out',
-                  '[box-shadow:inset_0_1px_0_rgba(255,255,255,0.10)]'
+                  '[box-shadow:inset_0_1px_0_rgba(255,255,255,0.10)]',
                 )}
               />
             </div>
           </div>
 
-          {/* tabs (centered, one row, no truncation) */}
           <div className="relative flex items-center justify-between">
             {items.map((it) => {
               const active = tab === it.k
@@ -153,13 +183,11 @@ function TopTabs({
                     'rounded-full px-3 py-2',
                     'outline-none transition',
                     'focus-visible:ring-2 focus-visible:ring-accentPrimary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-bgPrimary',
-                    // your note: dim chip border slightly + bump label opacity on inactive tabs
                     active ? 'text-textPrimary' : 'text-textPrimary/90 hover:text-textPrimary',
-                    'whitespace-nowrap text-[12px] font-black'
+                    'whitespace-nowrap text-[12px] font-black',
                   )}
                   aria-current={active ? 'page' : undefined}
                 >
-                  {/* dot */}
                   {it.dot ? (
                     <span className="relative inline-flex">
                       <span className="h-1.5 w-1.5 rounded-full bg-accentPrimary" />
@@ -167,22 +195,13 @@ function TopTabs({
                     </span>
                   ) : null}
 
-                  <span
-                    className={cx(
-                      'transition-opacity',
-                      active ? 'opacity-100' : 'opacity-90' // bumped vs previous
-                    )}
-                  >
-                    {it.label}
-                  </span>
+                  <span className={cx('transition-opacity', active ? 'opacity-100' : 'opacity-90')}>{it.label}</span>
 
                   <span
                     className={cx(
                       'inline-flex items-center justify-center rounded-full px-1.5 py-0.5',
                       'text-[11px] font-black leading-none transition',
-                      active
-                        ? 'border border-white/15 bg-bgSecondary text-textPrimary'
-                        : 'border border-white/8 bg-bgPrimary text-textPrimary/85' // dimmer border, clearer label
+                      active ? 'border border-white/15 bg-bgSecondary text-textPrimary' : 'border border-white/8 bg-bgPrimary text-textPrimary/85',
                     )}
                   >
                     {it.count > 99 ? '99+' : String(it.count)}
@@ -210,38 +229,32 @@ function SearchBar({
     <div className="mx-auto w-full max-w-xl">
       <div className="tovis-glass rounded-full border border-white/10 bg-bgSecondary px-3 py-2">
         <div className="flex items-center gap-2">
-          {/* input */}
           <input
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder="Search your bookings…"
-            className={[
+            className={cx(
               'w-full bg-transparent text-[13px] font-semibold',
               'text-textPrimary placeholder:text-textSecondary/70',
               'outline-none',
-            ].join(' ')}
+            )}
             aria-label="Search bookings"
           />
 
-          {/* clear (only when active) */}
           {value.trim() ? (
             <button
               type="button"
               onClick={onClear}
-              className={[
+              className={cx(
                 'rounded-full border border-white/10 bg-bgPrimary px-2.5 py-1',
                 'text-[11px] font-black text-textPrimary transition hover:border-white/20',
-              ].join(' ')}
+              )}
             >
               Clear
             </button>
           ) : null}
 
-          {/* search icon on the RIGHT */}
-          <span
-            className="ml-1 text-[13px] text-textSecondary/80 pointer-events-none"
-            aria-hidden
-          >
+          <span className="ml-1 pointer-events-none text-[13px] text-textSecondary/80" aria-hidden>
             ⌕
           </span>
         </div>
@@ -249,7 +262,6 @@ function SearchBar({
     </div>
   )
 }
-
 
 function BookingHeroCard({
   b,
@@ -283,7 +295,7 @@ function BookingHeroCard({
       className={cx(
         'group cursor-pointer rounded-card border border-white/10 bg-bgSecondary p-4 transition',
         'hover:border-white/20 hover:bg-surfaceGlass/40',
-        'focus-visible:ring-2 focus-visible:ring-accentPrimary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-bgPrimary'
+        'focus-visible:ring-2 focus-visible:ring-accentPrimary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-bgPrimary',
       )}
     >
       <div className="flex gap-4">
@@ -301,10 +313,7 @@ function BookingHeroCard({
           <div className="mt-2 text-[13px] text-textPrimary">
             <span
               className="font-black"
-              onClick={(e) => {
-                // allow clicking pro link without triggering card navigation
-                e.stopPropagation()
-              }}
+              onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
             >
               <ProProfileLink proId={b.professional?.id ?? null} label={proLabel} className="text-textPrimary" />
@@ -358,48 +367,93 @@ function WaitlistHeroCard({ w }: { w: WaitlistLike }) {
   )
 }
 
-function loadStringSet(key: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(key)
-    const arr = raw ? JSON.parse(raw) : []
-    if (Array.isArray(arr)) return new Set(arr.map((x) => String(x)))
-    return new Set()
-  } catch {
-    return new Set()
-  }
-}
+function ConsultationApprovalBanner({
+  approvals,
+  searchActive,
+}: {
+  approvals: BookingLike[]
+  searchActive: boolean
+}) {
+  const router = useRouter()
 
-function saveStringSet(key: string, set: Set<string>) {
-  try {
-    localStorage.setItem(key, JSON.stringify(Array.from(set)))
-  } catch {
-    // ignore
-  }
-}
+  if (!approvals.length) return null
 
-function bookingSearchText(b: BookingLike) {
-  const parts = [
-    bookingTitle(b),
-    b.professional?.businessName || '',
-    bookingLocationLabel(b),
-    statusUpper(b.status),
-    sourceUpper(b.source),
-    // optional: any display crumbs you might have
-    b.display?.baseName || '',
-    b.display?.title || '',
-  ]
-  return parts.join(' ').toLowerCase()
-}
+  const count = approvals.length
+  const first = approvals[0]
+  const firstHref = `/client/bookings/${encodeURIComponent(first.id)}?step=consult`
 
-function waitlistSearchText(w: WaitlistLike) {
-  const parts = [
-    w.service?.name || '',
-    w.professional?.businessName || '',
-    waitlistLocationLabel(w.professional),
-    w.notes || '',
-    'waitlist',
-  ]
-  return parts.join(' ').toLowerCase()
+  return (
+    <div className="mx-auto w-full max-w-xl">
+      <div
+        className={cx(
+          'rounded-card border border-white/10 p-4',
+          // “bright sign” without inventing new colors: use accentPrimary, but keep glass vibe.
+          'bg-accentPrimary text-bgPrimary',
+          'shadow-[0_18px_60px_rgba(0,0,0,0.35)]',
+        )}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-black">
+              Action required: consultation approval{count === 1 ? '' : 's'}
+            </div>
+            <div className="mt-1 text-[12px] font-semibold opacity-95">
+              {count === 1
+                ? 'Your pro sent a consultation proposal. Approve or reject to continue.'
+                : `You have ${count} consultation proposals waiting. Approve or reject each one.`}
+              {searchActive ? ' (Search is on — this banner ignores tabs.)' : ''}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(firstHref)}
+              className={cx(
+                'inline-flex items-center rounded-full border border-bgPrimary/30 bg-bgPrimary px-4 py-2',
+                'text-[12px] font-black text-textPrimary transition hover:bg-surfaceGlass',
+              )}
+            >
+              Review now →
+            </button>
+          </div>
+        </div>
+
+        {/* quick links (cap so it doesn’t become a novel) */}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {approvals.slice(0, 3).map((b) => {
+            const href = `/client/bookings/${encodeURIComponent(b.id)}?step=consult`
+            const title = bookingTitle(b)
+            const when = prettyWhen(b.scheduledFor, b.timeZone)
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => router.push(href)}
+                className={cx(
+                  'inline-flex items-center rounded-full border border-bgPrimary/30 bg-bgPrimary/15 px-3 py-1.5',
+                  'text-[11px] font-black text-bgPrimary transition hover:bg-bgPrimary/25',
+                )}
+                title="Open consultation"
+              >
+                <span className="truncate">
+                  {title} · {when}
+                </span>
+              </button>
+            )
+          })}
+
+          {approvals.length > 3 ? (
+            <span className="inline-flex items-center rounded-full border border-bgPrimary/30 bg-bgPrimary/15 px-3 py-1.5 text-[11px] font-black text-bgPrimary">
+              +{approvals.length - 3} more
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function ClientBookingsDashboard() {
@@ -465,10 +519,7 @@ export default function ClientBookingsDashboard() {
     return merged
   }, [buckets.past])
 
-  const hasUnreadAftercare = useMemo(
-    () => aftercareBookings.some((b) => Boolean(b.hasUnreadAftercare)),
-    [aftercareBookings]
-  )
+  const hasUnreadAftercare = useMemo(() => aftercareBookings.some((b) => Boolean(b.hasUnreadAftercare)), [aftercareBookings])
 
   const counts = useMemo(() => {
     return {
@@ -477,13 +528,7 @@ export default function ClientBookingsDashboard() {
       pending: buckets.pending.length,
       waitlist: buckets.waitlist.length,
     }
-  }, [
-    buckets.upcoming.length,
-    buckets.prebooked.length,
-    aftercareBookings.length,
-    buckets.pending.length,
-    buckets.waitlist.length,
-  ])
+  }, [buckets.upcoming.length, buckets.prebooked.length, aftercareBookings.length, buckets.pending.length, buckets.waitlist.length])
 
   useEffect(() => {
     if (didPickDefaultTab) return
@@ -491,10 +536,7 @@ export default function ClientBookingsDashboard() {
     setDidPickDefaultTab(true)
   }, [hasUnreadAftercare, didPickDefaultTab])
 
-  const upcomingFeed = useMemo(
-    () => [...buckets.upcoming, ...buckets.prebooked],
-    [buckets.upcoming, buckets.prebooked]
-  )
+  const upcomingFeed = useMemo(() => [...buckets.upcoming, ...buckets.prebooked], [buckets.upcoming, buckets.prebooked])
 
   const tabBookings = useMemo(() => {
     if (tab === 'upcoming') return upcomingFeed
@@ -503,28 +545,48 @@ export default function ClientBookingsDashboard() {
     return []
   }, [tab, upcomingFeed, buckets.pending, aftercareBookings])
 
+  // This is the banner driver: approvals should show regardless of selected tab.
+  const approvalBookings = useMemo(() => {
+    const all = [...upcomingFeed, ...buckets.pending, ...aftercareBookings]
+    const out: BookingLike[] = []
+    const seen = new Set<string>()
+    for (const b of all) {
+      if (!b?.id || seen.has(b.id)) continue
+      seen.add(b.id)
+      if (Boolean(b.hasPendingConsultationApproval)) out.push(b)
+    }
+
+    // Optional: keep order deterministic (earliest scheduled first)
+    out.sort((a, b) => {
+      const ta = new Date(a.scheduledFor as any).getTime()
+      const tb = new Date(b.scheduledFor as any).getTime()
+      if (!Number.isFinite(ta) && !Number.isFinite(tb)) return 0
+      if (!Number.isFinite(ta)) return 1
+      if (!Number.isFinite(tb)) return -1
+      return ta - tb
+    })
+
+    return out
+  }, [upcomingFeed, buckets.pending, aftercareBookings])
+
   // ✅ Global search across ALL buckets (not just the selected tab)
   const searchedBookings = useMemo(() => {
     if (!q) return null
 
-    const allBookings: Array<{ kind: 'booking'; item: BookingLike }> = [
-      ...upcomingFeed.map((b) => ({ kind: 'booking' as const, item: b })),
-      ...buckets.pending.map((b) => ({ kind: 'booking' as const, item: b })),
-      ...aftercareBookings.map((b) => ({ kind: 'booking' as const, item: b })),
-    ]
+    const allBookings: BookingLike[] = []
+    for (const b of [...upcomingFeed, ...buckets.pending, ...aftercareBookings]) {
+      if (b?.id) allBookings.push(b)
+    }
 
-    // de-dupe by id (since a booking could appear in multiple derived lists)
     const seen = new Set<string>()
     const filteredBookings: BookingLike[] = []
-    for (const row of allBookings) {
-      const b = row.item
+    for (const b of allBookings) {
       if (seen.has(b.id)) continue
       seen.add(b.id)
       if (bookingSearchText(b).includes(q)) filteredBookings.push(b)
     }
 
     const filteredWaitlist = buckets.waitlist.filter((w) => waitlistSearchText(w).includes(q))
-
     return { bookings: filteredBookings, waitlist: filteredWaitlist }
   }, [q, upcomingFeed, buckets.pending, aftercareBookings, buckets.waitlist])
 
@@ -541,7 +603,7 @@ export default function ClientBookingsDashboard() {
           onClick={reload}
           className={cx(
             'mt-3 inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2',
-            'text-[12px] font-black text-textPrimary transition hover:border-white/20'
+            'text-[12px] font-black text-textPrimary transition hover:border-white/20',
           )}
         >
           Retry
@@ -552,13 +614,13 @@ export default function ClientBookingsDashboard() {
 
   return (
     <section className="flex h-full flex-col gap-4">
-      {/* fixed: tabs */}
       <TopTabs tab={tab} setTab={setTab} counts={counts} hasUnreadAftercare={hasUnreadAftercare} />
 
-      {/* fixed: search (replaces helper line) */}
       <SearchBar value={search} onChange={setSearch} onClear={() => setSearch('')} />
 
-      {/* fixed: last-minute */}
+      {/* ✅ BRIGHT CONSULT APPROVAL BANNER — under search bar */}
+      <ConsultationApprovalBanner approvals={approvalBookings} searchActive={Boolean(q)} />
+
       <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="mb-2 flex items-baseline justify-between gap-3">
           <div className="text-sm font-black">Last-minute</div>
@@ -567,9 +629,7 @@ export default function ClientBookingsDashboard() {
         <LastMinuteOpenings />
       </section>
 
-      {/* scroll: hero feed ONLY */}
       <div className="min-h-0 flex-1 overflow-y-auto looksNoScrollbar pb-6">
-        {/* If searching, show global results across everything */}
         {searchedBookings ? (
           <div className="grid gap-3">
             <div className="px-0.5 text-[12px] font-semibold text-textSecondary/85">
@@ -582,12 +642,11 @@ export default function ClientBookingsDashboard() {
               const status = statusUpper(b.status)
               const recentlyApproved = recentlyApprovedIds.has(b.id)
 
-              const href =
-                b.hasPendingConsultationApproval
-                  ? `/client/bookings/${encodeURIComponent(b.id)}?step=consult`
-                  : b.hasUnreadAftercare || isCompleted(b)
-                    ? `/client/bookings/${encodeURIComponent(b.id)}?step=aftercare`
-                    : `/client/bookings/${encodeURIComponent(b.id)}?step=overview`
+              const href = b.hasPendingConsultationApproval
+                ? `/client/bookings/${encodeURIComponent(b.id)}?step=consult`
+                : b.hasUnreadAftercare || isCompleted(b)
+                  ? `/client/bookings/${encodeURIComponent(b.id)}?step=aftercare`
+                  : `/client/bookings/${encodeURIComponent(b.id)}?step=overview`
 
               let badge: React.ReactNode = null
               if (recentlyApproved) badge = <Badge label="Recently approved" variant="success" />

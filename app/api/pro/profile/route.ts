@@ -6,21 +6,87 @@ import { Prisma } from '@prisma/client'
 export const dynamic = 'force-dynamic'
 
 function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
-  if (v === undefined) return undefined
   if (typeof v !== 'string') return undefined
   const t = v.trim()
   return t ? t : undefined
 }
+
+function pickStringOrNullOrUndefined(v: unknown): string | null | undefined {
+  // undefined => don't change
+  // "" => clear to null
+  // "abc" => "abc"
+  if (v === undefined) return undefined
+  if (typeof v !== 'string') return undefined
+  const t = v.trim()
+  return t ? t : null
+}
+
+/**
+ * Vanity handle rules (DNS-safe for {handle}.tovis.me):
+ * - 3–24 chars
+ * - lowercase letters, numbers, hyphen
+ * - must start + end with letter/number
+ */
+const HANDLE_MIN = 3
+const HANDLE_MAX = 24
+
+const RESERVED_HANDLES = new Set([
+  'admin',
+  'api',
+  'www',
+  'app',
+  'support',
+  'billing',
+  'pricing',
+  'login',
+  'logout',
+  'signup',
+  'pro',
+  'pros',
+  'client',
+  'clients',
+  't',
+  'c',
+  'p',
+  'nfc',
+  'book',
+  'booking',
+  'messages',
+  'looks',
+  'professional',
+  'professionals',
+])
 
 function normalizeHandle(raw: string) {
   return raw.trim().toLowerCase()
 }
 
 function isValidHandleNormalized(h: string) {
-  if (h.length < 3 || h.length > 20) return false
-  if (!/^[a-z0-9._-]+$/.test(h)) return false
-  if (!/[a-z0-9]/.test(h)) return false
+  if (h.length < HANDLE_MIN || h.length > HANDLE_MAX) return false
+  if (!/^[a-z0-9-]+$/.test(h)) return false
+  if (!/^[a-z0-9]/.test(h)) return false
+  if (!/[a-z0-9]$/.test(h)) return false
+  // NOTE: double hyphens are allowed (keeping your previous behavior)
   return true
+}
+
+function prismaErrorToResponse(e: any) {
+  // Unique constraint
+  if (e?.code === 'P2002') {
+    return jsonFail(409, 'That handle is taken.')
+  }
+
+  // Prisma validation/known request errors
+  if (e instanceof Prisma.PrismaClientValidationError) {
+    return jsonFail(400, 'Invalid profile update payload.', { detail: e.message })
+  }
+
+  if (e instanceof Prisma.PrismaClientKnownRequestError) {
+    return jsonFail(400, 'Database rejected the update.', { code: e.code, detail: e.message })
+  }
+
+  // Fallback
+  return null
 }
 
 export async function PATCH(req: Request) {
@@ -31,18 +97,17 @@ export async function PATCH(req: Request) {
 
     const body = await req.json().catch(() => ({} as any))
 
-    // IMPORTANT:
-    // - For required string fields in Prisma, NEVER pass null.
-    // - If UI sends empty string, we treat as "no update".
     const businessName = pickNonEmptyStringOrUndefined(body.businessName)
     const bio = pickNonEmptyStringOrUndefined(body.bio)
     const location = pickNonEmptyStringOrUndefined(body.location)
     const avatarUrl = pickNonEmptyStringOrUndefined(body.avatarUrl)
 
-    const professionType = typeof body.professionType === 'string' ? body.professionType : undefined
+    // ✅ FIX: do NOT write "" into Prisma for an enum field
+    // If they leave it blank, we simply don't update it.
+    const professionType = pickNonEmptyStringOrUndefined(body.professionType)
 
     // Handle (optional)
-    // - send handle: "my_name" to set
+    // - send handle: "tori" to set
     // - send handle: "" to clear (null)
     const handleRaw = typeof body.handle === 'string' ? body.handle : undefined
     const wantsHandleUpdate = handleRaw !== undefined
@@ -54,24 +119,20 @@ export async function PATCH(req: Request) {
       const trimmed = handleRaw.trim()
 
       if (!trimmed) {
-        // clearing
         handle = null
         handleNormalized = null
       } else {
         const normalized = normalizeHandle(trimmed)
+
         if (!isValidHandleNormalized(normalized)) {
-          return jsonFail(400, 'Handle must be 3-20 chars and use only letters, numbers, ., _, or -')
+          return jsonFail(
+            400,
+            `Handle must be ${HANDLE_MIN}-${HANDLE_MAX} chars and use only letters, numbers, and hyphens.`,
+          )
         }
-
-        const existing = await prisma.professionalProfile.findFirst({
-          where: {
-            handleNormalized: normalized,
-            id: { not: proProfileId },
-          },
-          select: { id: true },
-        })
-
-        if (existing) return jsonFail(409, 'That handle is taken.')
+        if (RESERVED_HANDLES.has(normalized)) {
+          return jsonFail(400, 'That handle is reserved.')
+        }
 
         handle = normalized
         handleNormalized = normalized
@@ -87,23 +148,36 @@ export async function PATCH(req: Request) {
       ...(wantsHandleUpdate ? { handle, handleNormalized } : {}),
     }
 
-    const updated = await prisma.professionalProfile.update({
-      where: { id: proProfileId },
-      data,
-      select: {
-        id: true,
-        businessName: true,
-        handle: true,
-        bio: true,
-        location: true,
-        avatarUrl: true,
-        professionType: true,
-      },
-    })
+    try {
+      const updated = await prisma.professionalProfile.update({
+        where: { id: proProfileId },
+        data,
+        select: {
+          id: true,
+          businessName: true,
+          handle: true,
+          bio: true,
+          location: true,
+          avatarUrl: true,
+          professionType: true,
+          isPremium: true,
+        },
+      })
 
-    return jsonOk({ ok: true, profile: updated }, 200)
-  } catch (e) {
+      return jsonOk({ ok: true, profile: updated }, 200)
+    } catch (e: any) {
+      const res = prismaErrorToResponse(e)
+      if (res) return res
+      console.error('PATCH /api/pro/profile prisma error', e)
+      return jsonFail(500, 'Failed to update profile', {
+        code: e?.code ?? null,
+        message: e?.message ?? String(e),
+      })
+    }
+  } catch (e: any) {
     console.error('PATCH /api/pro/profile error', e)
-    return jsonFail(500, 'Failed to update profile')
+    return jsonFail(500, 'Failed to update profile', {
+      message: e?.message ?? String(e),
+    })
   }
 }

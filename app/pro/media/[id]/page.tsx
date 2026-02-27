@@ -1,16 +1,18 @@
-// app/media/[id]/page.tsx  (apply same changes if your failing file is app/pro/media/[id]/page.tsx)
+// app/pro/media/[id]/page.tsx
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getServerOrigin } from '@/lib/serverOrigin'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { MediaVisibility } from '@prisma/client'
 
-type PageProps = {
-  params: Promise<{ id: string }>
-}
+export const dynamic = 'force-dynamic'
+
+type PageProps = { params: Promise<{ id: string }> }
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -28,10 +30,31 @@ function formatCount(n: number) {
   return String(v)
 }
 
-export default async function PublicMediaDetailPage({ params }: PageProps) {
+async function resolveRenderableUrl(mediaId: string): Promise<string | null> {
+  const origin = (await getServerOrigin()) || ''
+  const url = origin ? `${origin}/api/media/url?id=${encodeURIComponent(mediaId)}` : `/api/media/url?id=${encodeURIComponent(mediaId)}`
+
+  const h = await headers()
+  const cookie = h.get('cookie') ?? ''
+
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: cookie ? { cookie } : undefined,
+  }).catch(() => null)
+
+  if (!res?.ok) return null
+  const data = await res.json().catch(() => ({}))
+  const u = typeof data?.url === 'string' ? data.url : null
+  return u && u.startsWith('http') ? u : null
+}
+
+export default async function ProMediaDetailPage({ params }: PageProps) {
   const { id: rawId } = await params
   const id = pickString(rawId)
   if (!id) notFound()
+
+  const viewer = await getCurrentUser().catch(() => null)
+  if (!viewer) redirect(`/login?from=${encodeURIComponent(`/pro/media/${id}`)}`)
 
   const media = await prisma.mediaAsset.findUnique({
     where: { id },
@@ -49,14 +72,30 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
     },
   })
 
-  // ✅ Only PUBLIC media is viewable on this route
-  if (!media || media.visibility !== MediaVisibility.PUBLIC) notFound()
+  if (!media) notFound()
 
-  const viewer = await getCurrentUser().catch(() => null)
   const isOwner =
     viewer?.role === 'PRO' &&
     viewer?.professionalProfile?.id &&
     viewer.professionalProfile.id === media.professionalId
+
+  // ✅ Access rules for /pro route:
+  // - PUBLIC: anyone logged in can view (or tighten if you want)
+  // - non-PUBLIC: owner only
+  if (media.visibility !== MediaVisibility.PUBLIC && !isOwner) notFound()
+
+  // ✅ Resolve a guaranteed renderable src string
+  let src: string | null = null
+
+  // If it's public and we have a stored public URL, use it
+  if (media.visibility === MediaVisibility.PUBLIC && typeof media.url === 'string' && media.url.startsWith('http')) {
+    src = media.url
+  } else {
+    // otherwise ask the server to sign / resolve it
+    src = await resolveRenderableUrl(media.id)
+  }
+
+  if (!src) notFound()
 
   const backHref = `/professionals/${media.professionalId}`
   const isVideo = media.mediaType === 'VIDEO'
@@ -83,7 +122,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
 
   return (
     <MediaFullscreenViewer
-      src={media.url}
+      src={src}
       mediaType={isVideo ? 'VIDEO' : 'IMAGE'}
       alt={media.caption || 'Media'}
       fit="contain"
@@ -123,14 +162,13 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
             </div>
           </div>
 
-          {/* ✅ Owner menu uses REAL Prisma enum */}
           {isOwner ? (
             <OwnerMediaMenu
               mediaId={media.id}
               serviceOptions={serviceOptions}
               initial={{
                 caption: media.caption ?? null,
-                visibility: media.visibility, // ✅ no casting, no fake union
+                visibility: media.visibility,
                 isEligibleForLooks: Boolean(media.isEligibleForLooks),
                 isFeaturedInPortfolio: Boolean(media.isFeaturedInPortfolio),
                 serviceIds: (media.services || []).map((s) => s.serviceId).filter(Boolean),

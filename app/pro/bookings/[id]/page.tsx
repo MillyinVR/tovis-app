@@ -7,14 +7,12 @@ import { moneyToString } from '@/lib/money'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 
-import {
-  DEFAULT_TIME_ZONE,
-  pickTimeZoneOrNull,
-  sanitizeTimeZone,
-} from '@/lib/timeZone'
+import { pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 
 export const dynamic = 'force-dynamic'
+
+const FALLBACK_TZ = 'UTC'
 
 function safeUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -32,12 +30,7 @@ function statusTone(status: unknown) {
 function StatusPill({ status }: { status: unknown }) {
   const s = safeUpper(status) || 'UNKNOWN'
   return (
-    <span
-      className={[
-        'inline-flex items-center rounded-full border bg-bgPrimary px-2 py-1 text-[11px] font-black',
-        statusTone(s),
-      ].join(' ')}
-    >
+    <span className={['inline-flex items-center rounded-full border bg-bgPrimary px-2 py-1 text-[11px] font-black', statusTone(s)].join(' ')}>
       {s}
     </span>
   )
@@ -56,9 +49,8 @@ function SectionCard({ title, subtitle, children }: { title: string; subtitle?: 
 }
 
 /**
- * Schedule timezone for a pro (used as fallback / “owner of calendar”):
+ * Schedule timezone for a pro (calendar owner):
  * Prefer primary bookable location tz, else any bookable, else pro.profile tz, else UTC.
- * Never LA fallback.
  */
 async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown): Promise<string> {
   const primary = await prisma.professionalLocation.findFirst({
@@ -81,13 +73,13 @@ async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown
   const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
   if (proTz) return proTz
 
-  return DEFAULT_TIME_ZONE
+  return FALLBACK_TZ
 }
 
 function resolveAppointmentTimeZone(bookingLocationTimeZone: unknown, scheduleTz: string) {
   const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
   if (bookingTz) return bookingTz
-  return sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
+  return sanitizeTimeZone(scheduleTz, FALLBACK_TZ)
 }
 
 export default async function ProBookingDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -139,8 +131,16 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
           ← Back to bookings
         </a>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/pro/bookings/${encodeURIComponent(booking.id)}/session`}
+            className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+          >
+            Open session
+          </a>
+
           <StatusPill status={booking.status} />
+
           <div className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2">
             <BookingActions
               bookingId={booking.id}
@@ -188,9 +188,7 @@ export default async function ProBookingDetailPage(props: { params: Promise<{ id
       <div className="grid gap-6">
         <SectionCard title="Aftercare" subtitle="Snapshot saved on the booking (if provided).">
           {(booking as any).aftercareSummary?.notes ? (
-            <div className="whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
-              {(booking as any).aftercareSummary.notes}
-            </div>
+            <div className="whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">{(booking as any).aftercareSummary.notes}</div>
           ) : (
             <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
               No aftercare notes yet.

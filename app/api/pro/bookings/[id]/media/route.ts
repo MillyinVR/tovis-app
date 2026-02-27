@@ -12,7 +12,7 @@ const CAPTION_MAX = 300
 const PATH_MAX = 2048
 const BUCKET_MAX = 128
 
-// Option A policy: session capture stays private
+// For session uploads we only accept private bucket
 const SESSION_BUCKET = 'media-private'
 const ALLOWED_BUCKETS = new Set(['media-private', 'media-public'])
 
@@ -60,12 +60,6 @@ function safeCaption(raw: unknown): string | null {
   return s.slice(0, CAPTION_MAX)
 }
 
-/**
- * Flow rules:
- * - BEFORE can be uploaded during consultation + later steps
- * - AFTER only during AFTER_PHOTOS/DONE
- * - OTHER always allowed
- */
 function canUploadPhase(sessionStep: SessionStep | null, phase: MediaPhase): boolean {
   const step = sessionStep ?? SessionStep.NONE
 
@@ -89,29 +83,40 @@ function canUploadPhase(sessionStep: SessionStep | null, phase: MediaPhase): boo
 }
 
 function mustStartWithBookingPrefix(path: string, bookingId: string) {
-  // uploader uses: bookings/<bookingId>/...
   return path.startsWith(`bookings/${bookingId}/`)
 }
 
-function toStablePublicShapedUrl(bucket: string, path: string): string {
-  // This is NOT usable for private buckets. It’s just a stable identifier you can log/store.
+/**
+ * Only returns a *public HTTP url* for public bucket. Otherwise null.
+ * This prevents storing "supabase://..." in DB and accidentally rendering it.
+ */
+function publicHttpUrl(bucket: string, path: string): string | null {
+  if (bucket !== 'media-public') return null
   const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path)
-  return data.publicUrl
+  const u = data?.publicUrl
+  return typeof u === 'string' && u.startsWith('http') ? u : null
 }
 
 async function signObjectUrl(bucket: string, path: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
-  if (error) return null
-  return data?.signedUrl ?? null
+  try {
+    const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+    if (error) return null
+    return data?.signedUrl ?? null
+  } catch {
+    return null
+  }
 }
 
+/**
+ * Used to verify the client truly uploaded the object before we write a DB row.
+ * We sign then HEAD/GET it (Supabase storage doesn't support existence checks directly in this SDK).
+ */
 async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<boolean> {
   const signed = await signObjectUrl(bucket, path)
   if (!signed) return false
 
-  // Some CDNs/storage setups dislike HEAD; try HEAD then GET fallback.
   const head = await fetch(signed, { method: 'HEAD' }).catch(() => null)
-  if (head && head.ok) return true
+  if (head?.ok) return true
   if (head && (head.status === 403 || head.status === 404)) return false
 
   const get = await fetch(signed, { method: 'GET' }).catch(() => null)
@@ -134,7 +139,7 @@ export async function GET(req: Request, ctx: Ctx) {
     })
 
     if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden')
+    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
 
     const urlObj = new URL(req.url)
     const phaseParam = urlObj.searchParams.get('phase')
@@ -156,33 +161,47 @@ export async function GET(req: Request, ctx: Ctx) {
         reviewId: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
-
-        // storage identity
         storageBucket: true,
         storagePath: true,
         thumbBucket: true,
         thumbPath: true,
-
-        // existing url fields (keep returning for compatibility)
         url: true,
         thumbUrl: true,
       },
       orderBy: { createdAt: 'desc' },
     })
 
-    // Attach signed URLs for UI rendering (especially for media-private)
     const items = await Promise.all(
       rows.map(async (m) => {
+        // Prefer signed urls for private objects. Public objects can use public URL.
         const signedUrl = await signObjectUrl(m.storageBucket, m.storagePath)
         const signedThumbUrl =
           m.thumbBucket && m.thumbPath ? await signObjectUrl(m.thumbBucket, m.thumbPath) : null
 
+        const publicUrl = publicHttpUrl(m.storageBucket, m.storagePath) ?? (typeof m.url === 'string' ? m.url : null)
+        const publicThumbUrl =
+          (m.thumbBucket && m.thumbPath ? publicHttpUrl(m.thumbBucket, m.thumbPath) : null) ??
+          (typeof m.thumbUrl === 'string' ? m.thumbUrl : null)
+
+        const renderUrl = signedUrl ?? publicUrl ?? null
+        const renderThumbUrl = signedThumbUrl ?? publicThumbUrl ?? null
+
+        /**
+         * IMPORTANT:
+         * We intentionally also set `url/thumbUrl` in the response to a safe renderable value
+         * so older UI code that still reads `.url` won’t accidentally try to render "supabase://".
+         * (This does NOT mutate DB rows — only the response.)
+         */
         return {
           ...m,
           signedUrl,
           signedThumbUrl,
+          renderUrl,
+          renderThumbUrl,
+          url: renderUrl,
+          thumbUrl: renderThumbUrl,
         }
-      })
+      }),
     )
 
     return jsonOk({ items }, 200)
@@ -217,7 +236,6 @@ export async function POST(req: Request, ctx: Ctx) {
     const storagePath = safeStoragePath(body.storagePath)
     if (!storageBucket || !storagePath) return jsonFail(400, 'Missing storageBucket/storagePath.')
 
-    // Optional thumb
     const thumbBucket = body.thumbBucket == null || body.thumbBucket === '' ? null : safeBucket(body.thumbBucket)
     const thumbPath = body.thumbPath == null || body.thumbPath === '' ? null : safeStoragePath(body.thumbPath)
 
@@ -233,7 +251,6 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const caption = safeCaption(body.caption)
 
-    // Enforce storage ownership conventions
     if (!mustStartWithBookingPrefix(storagePath, bookingId)) {
       return jsonFail(400, 'storagePath must be under bookings/<bookingId>/')
     }
@@ -241,15 +258,11 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, 'thumbPath must be under bookings/<bookingId>/')
     }
 
-    // Policy: session capture is private
-    if (storageBucket !== SESSION_BUCKET) {
-      return jsonFail(400, `Session media must upload to ${SESSION_BUCKET}.`)
-    }
-    if (thumbBucket && thumbBucket !== SESSION_BUCKET) {
-      return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
-    }
+    // Session media MUST go to private bucket
+    if (storageBucket !== SESSION_BUCKET) return jsonFail(400, `Session media must upload to ${SESSION_BUCKET}.`)
+    if (thumbBucket && thumbBucket !== SESSION_BUCKET) return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
 
-    // Strong correctness: verify objects exist
+    // Verify the object exists before writing DB row
     const mainExists = await objectExistsViaSignedUrl(storageBucket, storagePath)
     if (!mainExists) return jsonFail(400, 'Uploaded file not found in storage.')
 
@@ -271,10 +284,14 @@ export async function POST(req: Request, ctx: Ctx) {
       })
 
       if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
-      if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden' }
+      if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden.' }
 
-      if (booking.status === BookingStatus.CANCELLED) return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
-      if (booking.status === BookingStatus.PENDING) return { ok: false as const, status: 409, error: 'Media uploads require an accepted booking.' }
+      if (booking.status === BookingStatus.CANCELLED) {
+        return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
+      }
+      if (booking.status === BookingStatus.PENDING) {
+        return { ok: false as const, status: 409, error: 'Media uploads require an accepted booking.' }
+      }
       if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
         return { ok: false as const, status: 409, error: 'This booking is completed. Media uploads are locked.' }
       }
@@ -287,9 +304,10 @@ export async function POST(req: Request, ctx: Ctx) {
         }
       }
 
-      // Stable identifiers (NOT for rendering private media directly)
-      const url = toStablePublicShapedUrl(storageBucket, storagePath)
-      const thumbUrl = thumbBucket && thumbPath ? toStablePublicShapedUrl(thumbBucket, thumbPath) : null
+      // ✅ IMPORTANT: do NOT store "supabase://..." in DB.
+      // For private bucket, url/thumbUrl should be null.
+      const url = publicHttpUrl(storageBucket, storagePath) // will be null for media-private
+      const thumbUrl = thumbBucket && thumbPath ? publicHttpUrl(thumbBucket, thumbPath) : null
 
       const created = await tx.mediaAsset.create({
         data: {
@@ -298,13 +316,11 @@ export async function POST(req: Request, ctx: Ctx) {
           uploadedByUserId: user.id,
           uploadedByRole: 'PRO',
 
-          // required storage identity
           storageBucket,
           storagePath,
           thumbBucket,
           thumbPath,
 
-          // “url-shaped identifiers” (UI should use signed URLs from GET)
           url,
           thumbUrl,
 
@@ -313,9 +329,9 @@ export async function POST(req: Request, ctx: Ctx) {
           caption,
 
           visibility: MediaVisibility.PRO_CLIENT,
-
           isEligibleForLooks: false,
           isFeaturedInPortfolio: false,
+
           reviewId: null,
           reviewLocked: false,
         },
@@ -329,18 +345,41 @@ export async function POST(req: Request, ctx: Ctx) {
           reviewId: true,
           isEligibleForLooks: true,
           isFeaturedInPortfolio: true,
-
           storageBucket: true,
           storagePath: true,
           thumbBucket: true,
           thumbPath: true,
-
           url: true,
           thumbUrl: true,
         },
       })
 
-      let advancedTo: string | null = null
+      let advancedTo: SessionStep | null = null
+
+      // Progression rules:
+      // - first BEFORE media => move into SERVICE_IN_PROGRESS (from consult/before_photos)
+      if (phase === MediaPhase.BEFORE) {
+        const step = booking.sessionStep ?? SessionStep.NONE
+        const canAdvanceFrom =
+          step === SessionStep.CONSULTATION || step === SessionStep.CONSULTATION_PENDING_CLIENT || step === SessionStep.BEFORE_PHOTOS
+
+        if (canAdvanceFrom) {
+          const beforeCount = await tx.mediaAsset.count({
+            where: { bookingId: booking.id, phase: MediaPhase.BEFORE },
+          })
+
+          if (beforeCount > 0) {
+            await tx.booking.update({
+              where: { id: booking.id },
+              data: { sessionStep: SessionStep.SERVICE_IN_PROGRESS },
+              select: { id: true },
+            })
+            advancedTo = SessionStep.SERVICE_IN_PROGRESS
+          }
+        }
+      }
+
+      // - AFTER upload while in AFTER_PHOTOS => DONE
       if (phase === MediaPhase.AFTER && booking.sessionStep === SessionStep.AFTER_PHOTOS) {
         await tx.booking.update({
           where: { id: booking.id },
@@ -355,12 +394,24 @@ export async function POST(req: Request, ctx: Ctx) {
 
     if (!result.ok) return jsonFail(result.status, result.error)
 
-    // Return signed urls in the POST response too (nice UX; saves a refresh)
+    // Return signed urls for rendering (private bucket)
     const signedUrl = await signObjectUrl(result.created.storageBucket, result.created.storagePath)
     const signedThumbUrl =
       result.created.thumbBucket && result.created.thumbPath
         ? await signObjectUrl(result.created.thumbBucket, result.created.thumbPath)
         : null
+
+    const publicUrl =
+      publicHttpUrl(result.created.storageBucket, result.created.storagePath) ??
+      (typeof result.created.url === 'string' ? result.created.url : null)
+
+    const publicThumbUrl =
+      (result.created.thumbBucket && result.created.thumbPath
+        ? publicHttpUrl(result.created.thumbBucket, result.created.thumbPath)
+        : null) ?? (typeof result.created.thumbUrl === 'string' ? result.created.thumbUrl : null)
+
+    const renderUrl = signedUrl ?? publicUrl ?? null
+    const renderThumbUrl = signedThumbUrl ?? publicThumbUrl ?? null
 
     return jsonOk(
       {
@@ -368,10 +419,15 @@ export async function POST(req: Request, ctx: Ctx) {
           ...result.created,
           signedUrl,
           signedThumbUrl,
+          renderUrl,
+          renderThumbUrl,
+          // response-heal: url fields are safe to render
+          url: renderUrl,
+          thumbUrl: renderThumbUrl,
         },
         advancedTo: result.advancedTo,
       },
-      200
+      200,
     )
   } catch (e) {
     console.error('POST /api/pro/bookings/[id]/media error', e)

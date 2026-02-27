@@ -43,6 +43,9 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
   // Only PUBLIC media is viewable on this route
   if (!media || media.visibility !== 'PUBLIC') notFound()
 
+  // ✅ FIX: url can be null (schema allows it), but this page requires a renderable URL
+  if (!media.url) notFound()
+
   const viewer = await getCurrentUser().catch(() => null)
   const isOwner =
     viewer?.role === 'PRO' &&
@@ -100,15 +103,9 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
           />
         ) : null
       }
-      /**
-       * ✅ TikTok behavior:
-       * This is NOT “below the image”.
-       * This is a floating lower-third overlay that sits ABOVE the app footer.
-       */
       bottom={
         <div className="pointer-events-none">
           <div className="pointer-events-auto w-full max-w-[520px]">
-            {/* luxury “lower third” glass */}
             <div
               className={cx(
                 'rounded-[18px] border border-white/10 bg-bgPrimary/25 backdrop-blur-xl',
@@ -116,19 +113,14 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
                 'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
               )}
             >
-              {/* counts FIRST (TikTok-ish + avoids feeling like a footer) */}
               <div className="text-[12px] font-extrabold text-textSecondary">
                 {media._count.likes} likes • {media._count.comments} comments
               </div>
 
-              {/* caption */}
               {media.caption ? (
-                <div className="mt-1 text-[14px] font-black leading-snug text-textPrimary">
-                  {media.caption}
-                </div>
+                <div className="mt-1 text-[14px] font-black leading-snug text-textPrimary">{media.caption}</div>
               ) : null}
 
-              {/* tags */}
               {tags.length ? (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {tags.slice(0, 6).map((name, idx) => (

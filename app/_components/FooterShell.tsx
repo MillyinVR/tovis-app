@@ -1,7 +1,7 @@
 // app/_components/FooterShell.tsx
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { usePathname } from 'next/navigation'
 import ProSessionFooterPortal from '@/app/_components/ProSessionFooter/ProSessionFooterPortal'
 import ClientSessionFooterPortal from '@/app/_components/ClientSessionFooter/ClientSessionFooterPortal'
@@ -20,9 +20,26 @@ function setFooterSpace(px: number) {
   document.documentElement.style.setProperty('--app-footer-space', `${px}px`)
 }
 
+function inferFooterFromPath(pathname: string | null): AppRole | null {
+  if (!pathname) return null
+  if (pathname.startsWith('/admin')) return 'ADMIN'
+  if (pathname.startsWith('/pro')) return 'PRO'
+  if (pathname.startsWith('/client')) return 'CLIENT'
+  return null
+}
+
 export default function FooterShell({ role, messagesBadge }: Props) {
   const pathname = usePathname()
-  const hideOnAuth = pathname?.startsWith('/login') || pathname?.startsWith('/signup')
+
+  const hideOnAuth =
+    pathname?.startsWith('/login') ||
+    pathname?.startsWith('/signup')
+
+  // ✅ Route-first (truthy immediately), role as fallback (can lag)
+  const effectiveRole: AppRole = useMemo(() => {
+    const fromPath = inferFooterFromPath(pathname ?? null)
+    return fromPath ?? role
+  }, [pathname, role])
 
   useEffect(() => {
     if (hideOnAuth) {
@@ -30,17 +47,19 @@ export default function FooterShell({ role, messagesBadge }: Props) {
       return
     }
 
-    if (role === 'PRO') return setFooterSpace(100)
-    if (role === 'CLIENT') return setFooterSpace(90)
-    if (role === 'ADMIN') return setFooterSpace(92)
-    // guest/footer is still a footer
-    return setFooterSpace(90)
-  }, [role, hideOnAuth])
+    if (effectiveRole === 'PRO') setFooterSpace(100)
+    else if (effectiveRole === 'CLIENT') setFooterSpace(90)
+    else if (effectiveRole === 'ADMIN') setFooterSpace(92)
+    else setFooterSpace(90)
+
+    // ✅ cleanup so we never “stick” padding if component unmounts/changes fast
+    return () => setFooterSpace(0)
+  }, [effectiveRole, hideOnAuth])
 
   if (hideOnAuth) return null
 
-  if (role === 'PRO') return <ProSessionFooterPortal messagesBadge={messagesBadge ?? null} />
-  if (role === 'CLIENT') return <ClientSessionFooterPortal messagesBadge={messagesBadge ?? null} />
-  if (role === 'ADMIN') return <AdminSessionFooterPortal />
+  if (effectiveRole === 'PRO') return <ProSessionFooterPortal messagesBadge={messagesBadge ?? null} />
+  if (effectiveRole === 'CLIENT') return <ClientSessionFooterPortal messagesBadge={messagesBadge ?? null} />
+  if (effectiveRole === 'ADMIN') return <AdminSessionFooterPortal />
   return <GuestSessionFooterPortal />
 }

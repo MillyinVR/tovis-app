@@ -7,7 +7,6 @@ import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { MediaVisibility } from '@prisma/client'
 
 type Visibility = MediaVisibility
-
 type ServiceOption = { id: string; name: string }
 
 type Props = {
@@ -22,8 +21,10 @@ type Props = {
   serviceOptions: ServiceOption[]
 }
 
+const CAPTION_MAX = 300
+
 async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+  return (res.json().catch(() => ({})) as Promise<any>)
 }
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -48,6 +49,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
   const [openMenu, setOpenMenu] = useState(false)
   const [openEdit, setOpenEdit] = useState(false)
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -60,6 +62,8 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
   const [serviceQuery, setServiceQuery] = useState('')
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  const busy = saving
 
   // Close the 3-dot menu when clicking outside
   useEffect(() => {
@@ -89,26 +93,67 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     return map
   }, [serviceOptions])
 
+  const isPublicSurfaceOn = isEligibleForLooks || isFeaturedInPortfolio
+  const mustHaveService = selectedServiceIds.length > 0
+
+  // Keep state logically consistent:
+  // - If no public surfaces, visibility cannot be PUBLIC.
+  // - If user sets PUBLIC, ensure at least one surface is on.
+  useEffect(() => {
+    // If both toggles off, force private visibility
+    if (!isPublicSurfaceOn && visibility === MediaVisibility.PUBLIC) {
+      setVisibility(MediaVisibility.PRO_CLIENT)
+    }
+
+    // If they flip visibility to PUBLIC while both toggles are off, pick a sane default.
+    if (visibility === MediaVisibility.PUBLIC && !isPublicSurfaceOn) {
+      setIsFeaturedInPortfolio(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEligibleForLooks, isFeaturedInPortfolio, visibility])
+
   function toggleService(id: string) {
-    setSelectedServiceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+    setSelectedServiceIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      return uniqueStrings(next)
+    })
+    setError(null)
   }
 
   function removeService(id: string) {
     setSelectedServiceIds((prev) => prev.filter((x) => x !== id))
+    setError(null)
+  }
+
+  function closeEdit() {
+    if (busy) return
+    setOpenEdit(false)
+    setError(null)
   }
 
   async function saveEdits() {
     if (saving) return
-    setSaving(true)
     setError(null)
+
+    // Hard rule: media must always have >= 1 service tag
+    if (!mustHaveService) {
+      setError('Attach at least 1 service before saving.')
+      return
+    }
+
+    // If no public surfaces, keep it private.
+    const nextVisibility =
+      isPublicSurfaceOn ? visibility : MediaVisibility.PRO_CLIENT
+
+    setSaving(true)
 
     try {
       const res = await fetch(`/api/pro/media/${encodeURIComponent(mediaId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          caption: caption.trim() || null,
-          visibility, // ✅ Prisma enum value
+          caption: caption.trim().slice(0, CAPTION_MAX) || null,
+          visibility: nextVisibility,
           isEligibleForLooks,
           isFeaturedInPortfolio,
           serviceIds: selectedServiceIds,
@@ -151,7 +196,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     }
   }
 
-  const busy = saving
+  const canSave = !busy && mustHaveService
 
   return (
     <div ref={wrapRef} className="relative">
@@ -185,6 +230,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
             onClick={() => {
               setOpenMenu(false)
               setOpenEdit(true)
+              setError(null)
             }}
             className="block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-white/10"
           >
@@ -203,7 +249,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
       {/* Edit modal */}
       {openEdit ? (
-        <div className="fixed inset-0 z-[9999] bg-black/60" onClick={() => !busy && setOpenEdit(false)}>
+        <div className="fixed inset-0 z-[9999] bg-black/60" onClick={closeEdit}>
           <div
             className={cx(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
@@ -226,7 +272,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
               <button
                 type="button"
-                onClick={() => !busy && setOpenEdit(false)}
+                onClick={closeEdit}
                 className={cx(
                   'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
@@ -245,11 +291,11 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 {/* Caption */}
                 <Field
                   label="Caption"
-                  right={<span className="text-[11px] font-semibold text-textSecondary">{caption.trim().length}/300</span>}
+                  right={<span className="text-[11px] font-semibold text-textSecondary">{caption.trim().length}/{CAPTION_MAX}</span>}
                 >
                   <textarea
                     value={caption}
-                    onChange={(e) => setCaption(e.target.value.slice(0, 300))}
+                    onChange={(e) => setCaption(e.target.value.slice(0, CAPTION_MAX))}
                     rows={3}
                     disabled={busy}
                     className={cx(
@@ -269,7 +315,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                   <Segmented<Visibility>
                     value={visibility}
                     disabled={busy}
-                    onChange={setVisibility}
+                    onChange={(v) => {
+                      setVisibility(v)
+                      setError(null)
+                    }}
                     options={[
                       { value: MediaVisibility.PUBLIC, label: 'Public', sub: 'Visible to clients' },
                       { value: MediaVisibility.PRO_CLIENT, label: 'Client + you', sub: 'Private (not public)' },
@@ -283,7 +332,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     label="Show in Looks feed"
                     hint="Discovery feed + more exposure."
                     value={isEligibleForLooks}
-                    setValue={setIsEligibleForLooks}
+                    setValue={(v) => {
+                      setIsEligibleForLooks(v)
+                      setError(null)
+                    }}
                     disabled={busy}
                   />
                   <div className="my-2 h-px bg-white/8" />
@@ -291,7 +343,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     label="Feature in public portfolio"
                     hint="Appears on your profile grid."
                     value={isFeaturedInPortfolio}
-                    setValue={setIsFeaturedInPortfolio}
+                    setValue={(v) => {
+                      setIsFeaturedInPortfolio(v)
+                      setError(null)
+                    }}
                     disabled={busy}
                   />
                 </div>
@@ -299,6 +354,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 {/* Services */}
                 <Field
                   label="Services attached"
+                  hint="At least 1 service is required."
                   right={<span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>}
                 >
                   {selectedServiceIds.length ? (
@@ -331,8 +387,8 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                       ) : null}
                     </div>
                   ) : (
-                    <div className="rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3 text-[12px] font-semibold text-textSecondary">
-                      No services attached yet.
+                    <div className="rounded-[18px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
+                      Attach at least 1 service to save.
                     </div>
                   )}
 
@@ -403,13 +459,15 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold text-white/55">
-                  {visibility === MediaVisibility.PRO_CLIENT ? 'Private to client + you.' : 'Public visibility enabled.'}
+                  {visibility === MediaVisibility.PRO_CLIENT || !isPublicSurfaceOn
+                    ? 'Private to client + you.'
+                    : 'Public visibility enabled.'}
                 </div>
 
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => !busy && setOpenEdit(false)}
+                    onClick={closeEdit}
                     disabled={busy}
                     className={cx(
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
@@ -424,13 +482,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                   <button
                     type="button"
                     onClick={saveEdits}
-                    disabled={busy}
+                    disabled={!canSave}
                     className={cx(
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
-                      busy
+                      !canSave
                         ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                         : 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                     )}
+                    title={!mustHaveService ? 'Attach at least 1 service' : undefined}
                   >
                     {busy ? 'Saving…' : 'Save'}
                   </button>

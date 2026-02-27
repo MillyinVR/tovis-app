@@ -1,29 +1,22 @@
 // app/pro/bookings/[id]/session/page.tsx
+import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from '../ConsultationForm'
 import { moneyToFixed2String } from '@/lib/money'
+import { transitionSessionStep } from '@/lib/booking/transitions'
+import { BookingStatus, ConsultationApprovalStatus, MediaPhase, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-type SessionStep =
-  | 'NONE'
-  | 'CONSULTATION'
-  | 'CONSULTATION_PENDING_CLIENT'
-  | 'BEFORE_PHOTOS'
-  | 'SERVICE_IN_PROGRESS'
-  | 'FINISH_REVIEW'
-  | 'AFTER_PHOTOS' // ✅ treated as WRAP-UP
-  | 'DONE'
-  | string
-
+// ---------- tiny deterministic helpers ----------
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-function labelForStep(step: SessionStep) {
-  const s = upper(step || 'NONE')
+function labelForStep(step: SessionStep | string) {
+  const s = upper(step || SessionStep.NONE)
   if (s === 'NONE') return 'Not started'
   if (s === 'CONSULTATION') return 'Consultation'
   if (s === 'CONSULTATION_PENDING_CLIENT') return 'Waiting on client'
@@ -35,12 +28,8 @@ function labelForStep(step: SessionStep) {
   return s
 }
 
-function approvalTone(status: unknown) {
-  const s = upper(status)
-  if (s === 'PENDING') return 'warn'
-  if (s === 'APPROVED') return 'good'
-  if (s === 'REJECTED') return 'bad'
-  return 'neutral'
+function isTerminal(status: BookingStatus, finishedAt?: Date | null) {
+  return status === BookingStatus.CANCELLED || status === BookingStatus.COMPLETED || Boolean(finishedAt)
 }
 
 function StepPill({ step }: { step: string }) {
@@ -66,70 +55,144 @@ function Card({ children }: { children: React.ReactNode }) {
   return <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">{children}</div>
 }
 
-async function postStepChange(bookingId: string, step: SessionStep) {
-  const base = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || ''
-  const url = base
-    ? `${base}/api/pro/bookings/${encodeURIComponent(bookingId)}/session-step`
-    : `/api/pro/bookings/${encodeURIComponent(bookingId)}/session-step`
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ step }),
-    cache: 'no-store',
-  }).catch(() => null)
-
-  return res
-}
-
-function moneyString(v: unknown): string {
+function formatMoneyFromUnknown(v: unknown): string {
   if (v == null) return ''
   const s = String(v).trim()
   if (!s) return ''
-  return s.startsWith('$') ? s : s
+  if (s.startsWith('$')) return s
+  const fixed = moneyToFixed2String(v as any)
+  return fixed ? `$${fixed}` : s
 }
 
-export default async function ProBookingSessionPage(props: { params: Promise<{ id: string }> }) {
+function WaitingForClientBanner() {
+  return (
+    <section className="mt-3 rounded-card border border-white/10 tovis-glass p-4 shadow-[0_14px_48px_rgba(0,0,0,0.35)]">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-bgPrimary text-[18px]">
+          📸
+        </div>
+
+        <div className="min-w-0">
+          <div className="text-[13px] font-black text-textPrimary">While you wait…</div>
+          <div className="mt-1 text-[12px] font-semibold leading-snug text-textSecondary">
+            Tap the <span className="font-black text-textPrimary">camera</span> in the footer and take{' '}
+            <span className="font-black text-textPrimary">BEFORE</span> photos now.
+            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+              It keeps the flow clean once the client approves.
+            </div>
+          </div>
+        </div>
+
+        <div className="ml-auto shrink-0">
+          <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+            Waiting on client
+          </span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+type PageProps = { params: Promise<{ id: string }> }
+
+function bookingHubHref(bookingId: string) {
+  return `/pro/bookings/${encodeURIComponent(bookingId)}/session`
+}
+
+function bookingAftercareHref(bookingId: string) {
+  return `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`
+}
+
+/**
+ * ✅ Module-scope Server Action (required by Next)
+ */
+async function transitionAction(bookingId: string, next: SessionStep) {
+  'use server'
+
+  const u = await getCurrentUser().catch(() => null)
+  const uProId = u?.role === 'PRO' ? u.professionalProfile?.id : null
+  if (!uProId) redirect(`/login?from=${encodeURIComponent(bookingHubHref(bookingId))}`)
+
+  const b = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { id: true, professionalId: true, status: true, finishedAt: true },
+  })
+  if (!b) notFound()
+  if (b.professionalId !== uProId) redirect('/pro')
+  if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
+
+  await transitionSessionStep({ bookingId, proId: uProId, nextStep: next })
+  redirect(bookingHubHref(bookingId))
+}
+
+export default async function ProBookingSessionPage(props: PageProps) {
   const { id } = await props.params
   const bookingId = String(id || '').trim()
   if (!bookingId) notFound()
 
+  // Auth
   const user = await getCurrentUser().catch(() => null)
   const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-  if (!proId) redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+  if (!proId) redirect(`/login?from=${encodeURIComponent(bookingHubHref(bookingId))}`)
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: { service: true, client: true, consultationApproval: true },
+    select: {
+      id: true,
+      professionalId: true,
+      status: true,
+      scheduledFor: true,
+      startedAt: true,
+      finishedAt: true,
+      sessionStep: true,
+
+      service: { select: { name: true } },
+      client: { select: { firstName: true, lastName: true, user: { select: { email: true } } } },
+
+      subtotalSnapshot: true,
+      totalAmount: true,
+      consultationNotes: true,
+      consultationApproval: {
+        select: {
+          status: true,
+          proposedTotal: true,
+        },
+      },
+    },
   })
 
   if (!booking) notFound()
   if (booking.professionalId !== proId) redirect('/pro')
 
-  const bookingStatus = upper(booking.status)
-  const step = upper((booking as any).sessionStep || 'NONE') as SessionStep
+  const bookingStatus = booking.status
+  const rawStep = (booking.sessionStep ?? SessionStep.NONE) as SessionStep
+
+  const terminal = isTerminal(bookingStatus, booking.finishedAt)
+  const isCancelled = bookingStatus === BookingStatus.CANCELLED
+  const isCompleted = bookingStatus === BookingStatus.COMPLETED || Boolean(booking.finishedAt)
 
   const serviceName = booking.service?.name ?? 'Service'
-  const clientName = `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() || 'Client'
+  const clientName =
+    `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() ||
+    booking.client?.user?.email ||
+    'Client'
 
-  const approval = (booking as any).consultationApproval ?? null
-  const approvalStatus = upper(approval?.status || 'NONE')
-  const consultationApproved = approvalStatus === 'APPROVED'
+  const approvalStatus = booking.consultationApproval?.status ?? null
+  const consultApproved = approvalStatus === ConsultationApprovalStatus.APPROVED
 
   const initialPrice =
-    moneyString(approval?.proposedTotal) ||
-    (moneyToFixed2String((booking as any).totalAmount ?? null) ?? '') ||
-    (moneyToFixed2String((booking as any).subtotalSnapshot ?? null) ?? '') ||
+    formatMoneyFromUnknown(booking.consultationApproval?.proposedTotal) ||
+    formatMoneyFromUnknown(booking.totalAmount) ||
+    formatMoneyFromUnknown(booking.subtotalSnapshot) ||
     ''
 
-  const isCancelled = bookingStatus === 'CANCELLED'
-  const isCompleted = bookingStatus === 'COMPLETED'
-  const waitingOnClient = step === 'CONSULTATION_PENDING_CLIENT' && approvalStatus === 'PENDING'
-
-  // ✅ Wrap-up readiness checks (so AFTER_PHOTOS + AFTERCARE can be interchangeable)
-  const [afterCount, aftercare] = await Promise.all([
+  // Media / wrap-up
+  const [beforeCount, afterCount, aftercare] = await Promise.all([
     prisma.mediaAsset.count({
-      where: { bookingId: booking.id, phase: 'AFTER' as any, uploadedByRole: 'PRO' },
+      where: { bookingId: booking.id, phase: MediaPhase.BEFORE, uploadedByRole: 'PRO' },
+    }),
+    prisma.mediaAsset.count({
+      where: { bookingId: booking.id, phase: MediaPhase.AFTER, uploadedByRole: 'PRO' },
     }),
     prisma.aftercareSummary.findFirst({
       where: { bookingId: booking.id },
@@ -137,81 +200,73 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
     }),
   ])
 
+  const hasBeforePhoto = beforeCount > 0
   const hasAfterPhoto = afterCount > 0
   const hasAftercare = Boolean(aftercare?.id)
 
-  async function setStep(next: SessionStep) {
-    'use server'
-    const u = await getCurrentUser().catch(() => null)
-    const uProId = u?.role === 'PRO' ? u.professionalProfile?.id : null
-    if (!uProId) redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+  // keep existing "effectiveStep" gating
+  const effectiveStep: SessionStep = (() => {
+    if (bookingStatus === BookingStatus.PENDING) return SessionStep.CONSULTATION
+    if (!consultApproved) {
+      if (
+        rawStep === SessionStep.BEFORE_PHOTOS ||
+        rawStep === SessionStep.SERVICE_IN_PROGRESS ||
+        rawStep === SessionStep.FINISH_REVIEW ||
+        rawStep === SessionStep.AFTER_PHOTOS ||
+        rawStep === SessionStep.DONE
+      ) {
+        return SessionStep.CONSULTATION
+      }
+    }
+    return rawStep
+  })()
 
-    await postStepChange(bookingId, next)
-    redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
-  }
+  // actions
+  const toConsult = transitionAction.bind(null, bookingId, SessionStep.CONSULTATION)
+  const toBefore = transitionAction.bind(null, bookingId, SessionStep.BEFORE_PHOTOS)
+  const toService = transitionAction.bind(null, bookingId, SessionStep.SERVICE_IN_PROGRESS)
+  const toFinishReview = transitionAction.bind(null, bookingId, SessionStep.FINISH_REVIEW)
+  const toWrapUp = transitionAction.bind(null, bookingId, SessionStep.AFTER_PHOTOS)
 
-  async function goBeforePhotos() {
-    'use server'
-    await setStep('BEFORE_PHOTOS')
-  }
-  async function goServiceInProgress() {
-    'use server'
-    await setStep('SERVICE_IN_PROGRESS')
-  }
-  async function goFinishReview() {
-    'use server'
-    await setStep('FINISH_REVIEW')
-  }
-  async function goWrapUp() {
-    'use server'
-    // ✅ WRAP-UP step (named AFTER_PHOTOS in DB)
-    await setStep('AFTER_PHOTOS')
-  }
-
-  // ✅ Complete session only when BOTH are done (aftercare + after photo)
   async function completeSession() {
     'use server'
 
     const u = await getCurrentUser().catch(() => null)
     const uProId = u?.role === 'PRO' ? u.professionalProfile?.id : null
-    if (!uProId) redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+    if (!uProId) redirect(`/login?from=${encodeURIComponent(bookingHubHref(bookingId))}`)
 
     const b = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, professionalId: true, status: true, sessionStep: true, finishedAt: true },
+      select: { id: true, professionalId: true, status: true, finishedAt: true },
     })
     if (!b) notFound()
     if (b.professionalId !== uProId) redirect('/pro')
+    if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
 
-    const st = upper(b.status)
-    if (st === 'CANCELLED' || st === 'COMPLETED' || b.finishedAt) redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
+    const done = await transitionSessionStep({ bookingId, proId: uProId, nextStep: SessionStep.DONE })
 
-    const [countAfter, ac] = await Promise.all([
-      prisma.mediaAsset.count({ where: { bookingId, phase: 'AFTER' as any, uploadedByRole: 'PRO' } }),
-      prisma.aftercareSummary.findFirst({ where: { bookingId }, select: { id: true } }),
-    ])
+    if (done.ok) redirect(bookingAftercareHref(bookingId))
 
-    if (countAfter <= 0 || !ac?.id) {
-      redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
-    }
-
-    await prisma.booking.update({
-      where: { id: bookingId },
-      data: { sessionStep: 'DONE' as any },
-    })
-
-    // ✅ land them in aftercare so they can hit "send to client" / finalize immediately
-    redirect(`/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`)
+    await transitionSessionStep({ bookingId, proId: uProId, nextStep: SessionStep.AFTER_PHOTOS }).catch(() => null)
+    redirect(bookingHubHref(bookingId))
   }
 
-  // CTA logic
-  const showConsultForm = step === 'CONSULTATION' || step === 'NONE' || bookingStatus === 'PENDING'
-  const showWaiting = step === 'CONSULTATION_PENDING_CLIENT' && approvalStatus !== 'APPROVED'
-  const showBeforePhotos = step === 'BEFORE_PHOTOS' && consultationApproved
-  const showService = step === 'SERVICE_IN_PROGRESS'
-  const showFinishReview = step === 'FINISH_REVIEW'
-  const showWrapUp = step === 'AFTER_PHOTOS' // ✅ wrap-up
-  const showDone = step === 'DONE'
+  // rendering flags
+  const showConsult =
+    effectiveStep === SessionStep.NONE || effectiveStep === SessionStep.CONSULTATION || bookingStatus === BookingStatus.PENDING
+
+  const showWaiting =
+    effectiveStep === SessionStep.CONSULTATION_PENDING_CLIENT &&
+    approvalStatus !== ConsultationApprovalStatus.APPROVED
+
+  const showBefore = effectiveStep === SessionStep.BEFORE_PHOTOS && consultApproved
+  const showService = effectiveStep === SessionStep.SERVICE_IN_PROGRESS
+  const showFinish = effectiveStep === SessionStep.FINISH_REVIEW
+  const showWrapUp = effectiveStep === SessionStep.AFTER_PHOTOS
+  const showDone = effectiveStep === SessionStep.DONE
+
+  // ✅ Banner only in waiting step, and only if BEFORE photos not taken yet
+  const showWaitingBanner = showWaiting && !hasBeforePhoto
 
   const primaryLinkClass =
     'inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover'
@@ -222,17 +277,17 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
 
   return (
     <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
-      <a href="/pro" className={secondaryBtnClass}>
+      <Link href="/pro" className={secondaryBtnClass}>
         ← Back to dashboard
-      </a>
+      </Link>
 
       <h1 className="mt-4 text-xl font-black">Session: {serviceName}</h1>
       <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <StepPill step={labelForStep(step)} />
-        <Badge label={`Booking: ${bookingStatus || 'UNKNOWN'}`} />
-        <Badge label={`Consultation: ${approvalStatus || 'NONE'}`} />
+        <StepPill step={labelForStep(effectiveStep)} />
+        <Badge label={`Booking: ${bookingStatus}`} />
+        <Badge label={`Consultation: ${approvalStatus ?? 'NONE'}`} />
       </div>
 
       {isCancelled ? (
@@ -245,14 +300,14 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
       {isCompleted ? (
         <Card>
           <div className="text-sm font-black text-textPrimary">This booking is completed.</div>
-          <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`} className={[primaryLinkClass, 'mt-3'].join(' ')}>
+          <Link href={bookingAftercareHref(booking.id)} className={[primaryLinkClass, 'mt-3'].join(' ')}>
             View aftercare
-          </a>
+          </Link>
         </Card>
       ) : null}
 
-      {/* CONSULTATION */}
-      {showConsultForm && !isCancelled && !isCompleted ? (
+      {/* CONSULT */}
+      {showConsult && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Consultation</h2>
           <p className="mt-1 text-sm font-semibold text-textSecondary">
@@ -260,47 +315,56 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
           </p>
 
           <div className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
-            <ConsultationForm bookingId={booking.id} initialNotes={(booking as any).consultationNotes ?? ''} initialPrice={initialPrice} />
+            <ConsultationForm bookingId={booking.id} initialNotes={booking.consultationNotes ?? ''} initialPrice={initialPrice} />
 
             <div className="mt-3 text-xs font-semibold text-textSecondary">
               After you submit, it moves to <span className="font-black text-textPrimary">Waiting on client</span>.
             </div>
 
-            {bookingStatus === 'ACCEPTED' && consultationApproved ? (
-              <form action={goBeforePhotos} className="mt-4">
+            {bookingStatus === BookingStatus.ACCEPTED && consultApproved ? (
+              <form action={toBefore} className="mt-4">
                 <button type="submit" className={primaryBtnClass}>
                   Proceed to before photos
                 </button>
               </form>
+            ) : null}
+
+            {bookingStatus === BookingStatus.PENDING ? (
+              <div className="mt-4 text-xs font-semibold text-textSecondary">
+                This booking is <span className="font-black text-textPrimary">PENDING</span>. Accept it before starting the
+                session.
+              </div>
             ) : null}
           </div>
         </section>
       ) : null}
 
       {/* WAITING */}
-      {showWaiting ? (
+      {showWaiting && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Waiting on client approval</h2>
           <p className="mt-1 text-sm font-semibold text-textSecondary">
             Client hasn’t approved yet. Locked so you can’t accidentally proceed.
           </p>
 
+          {showWaitingBanner ? <WaitingForClientBanner /> : null}
+
           <Card>
             <div className="text-sm font-semibold text-textSecondary">
-              Status: <span className="font-black text-textPrimary">{approvalStatus}</span>
+              Status: <span className="font-black text-textPrimary">{approvalStatus ?? 'NONE'}</span>
             </div>
 
-            {waitingOnClient ? (
-              <div className="mt-3 text-xs font-semibold text-textSecondary">
-                (Yes, it’s “stuck” on purpose. Humans love to click buttons.)
-              </div>
-            ) : null}
+            <form action={toConsult} className="mt-3">
+              <button type="submit" className={secondaryBtnClass}>
+                Back to consult
+              </button>
+            </form>
           </Card>
         </section>
       ) : null}
 
-      {/* BEFORE PHOTOS */}
-      {showBeforePhotos ? (
+      {/* BEFORE */}
+      {showBefore && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Before photos</h2>
           <p className="mt-1 text-sm font-semibold text-textSecondary">
@@ -308,11 +372,11 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
           </p>
 
           <Card>
-            <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/session/before-photos`} className={primaryLinkClass}>
+            <Link href={bookingHubHref(booking.id) + '/before-photos'} className={primaryLinkClass}>
               Open before photos
-            </a>
+            </Link>
 
-            <form action={goServiceInProgress} className="mt-3">
+            <form action={toService} className="mt-3">
               <button type="submit" className={secondaryBtnClass}>
                 Start service
               </button>
@@ -322,13 +386,13 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
       ) : null}
 
       {/* SERVICE */}
-      {showService ? (
+      {showService && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Service in progress</h2>
           <p className="mt-1 text-sm font-semibold text-textSecondary">Do the fun part. We’ll handle the wrap-up next.</p>
 
           <Card>
-            <form action={goFinishReview}>
+            <form action={toFinishReview}>
               <button type="submit" className={primaryBtnClass}>
                 Finish service
               </button>
@@ -337,8 +401,8 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
         </section>
       ) : null}
 
-      {/* FINISH REVIEW */}
-      {showFinishReview ? (
+      {/* FINISH */}
+      {showFinish && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Wrap-up</h2>
           <p className="mt-1 text-sm font-semibold text-textSecondary">
@@ -346,7 +410,7 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
           </p>
 
           <Card>
-            <form action={goWrapUp}>
+            <form action={toWrapUp}>
               <button type="submit" className={primaryBtnClass}>
                 Go to wrap-up (aftercare + photos)
               </button>
@@ -355,31 +419,30 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
         </section>
       ) : null}
 
-      {/* WRAP-UP (AFTER_PHOTOS step) */}
-      {showWrapUp ? (
+      {/* WRAP-UP */}
+      {showWrapUp && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Wrap-up: aftercare + after photos</h2>
-          <p className="mt-1 text-sm font-semibold text-textSecondary">
-            You can do these in any order. Client can review + rebook once aftercare is sent.
-          </p>
 
           <Card>
             <div className="flex flex-wrap gap-2">
-              <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/session/after-photos`} className={primaryLinkClass}>
+              <Link href={bookingHubHref(booking.id) + '/after-photos'} className={primaryLinkClass}>
                 Open after photos
-              </a>
+              </Link>
 
-              <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`} className={secondaryBtnClass}>
+              <Link href={bookingAftercareHref(booking.id)} className={secondaryBtnClass}>
                 Open aftercare
-              </a>
+              </Link>
             </div>
 
             <div className="mt-3 grid gap-2 text-sm">
               <div className="text-textSecondary">
-                After photos: <span className="font-black text-textPrimary">{hasAfterPhoto ? `✅ (${afterCount})` : '❌ missing'}</span>
+                After photos:{' '}
+                <span className="font-black text-textPrimary">{hasAfterPhoto ? `✅ (${afterCount})` : '❌ missing'}</span>
               </div>
               <div className="text-textSecondary">
-                Aftercare: <span className="font-black text-textPrimary">{hasAftercare ? '✅ created' : '❌ missing'}</span>
+                Aftercare:{' '}
+                <span className="font-black text-textPrimary">{hasAftercare ? '✅ created' : '❌ missing'}</span>
               </div>
             </div>
 
@@ -389,39 +452,43 @@ export default async function ProBookingSessionPage(props: { params: Promise<{ i
                   type="submit"
                   className={[
                     primaryBtnClass,
-                    !(hasAfterPhoto && hasAftercare) ? 'opacity-60 cursor-not-allowed pointer-events-none' : '',
+                    !(hasAfterPhoto && hasAftercare) ? 'pointer-events-none cursor-not-allowed opacity-60' : '',
                   ].join(' ')}
                   aria-disabled={!(hasAfterPhoto && hasAftercare)}
-                  title={!(hasAfterPhoto && hasAftercare) ? 'Add at least one after photo and create aftercare first.' : 'Complete the session.'}
                 >
                   Complete session (locks step → DONE)
                 </button>
               </form>
-
-              {!(hasAfterPhoto && hasAftercare) ? (
-                <div className="mt-2 text-xs font-semibold text-textSecondary">
-                  Finish requirements first: {hasAfterPhoto ? '' : 'add an after photo'}{!hasAfterPhoto && !hasAftercare ? ' + ' : ''}{hasAftercare ? '' : 'create aftercare'}
-                </div>
-              ) : null}
             </div>
           </Card>
         </section>
       ) : null}
 
       {/* DONE */}
-      {showDone ? (
+      {showDone && !terminal ? (
         <section className="mt-6">
           <h2 className="text-lg font-black">Done</h2>
-          <p className="mt-1 text-sm font-semibold text-textSecondary">
-            Session is complete. If you haven’t sent aftercare yet, do it now so the client can check out + rebook.
-          </p>
-
           <Card>
-            <a href={`/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`} className={primaryLinkClass}>
+            <Link href={bookingAftercareHref(booking.id)} className={primaryLinkClass}>
               Open aftercare
-            </a>
+            </Link>
           </Card>
         </section>
+      ) : null}
+
+      {/* Failsafe */}
+      {!terminal && !(showConsult || showWaiting || showBefore || showService || showFinish || showWrapUp || showDone) ? (
+        <Card>
+          <div className="text-sm font-black">We couldn’t map this session state cleanly.</div>
+          <div className="mt-1 text-sm font-semibold text-textSecondary">
+            Step: <span className="font-black text-textPrimary">{String(rawStep)}</span>
+          </div>
+          <form action={toConsult} className="mt-3">
+            <button type="submit" className={primaryBtnClass}>
+              Back to consult
+            </button>
+          </form>
+        </Card>
       ) : null}
     </main>
   )

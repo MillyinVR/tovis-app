@@ -109,21 +109,13 @@ function statusMessage(statusRaw: unknown): { title: string; body: string; varia
   return { title: M.fallback.title, body: M.fallback.body, variant: 'neutral' }
 }
 
-function pillClassByVariant(variant: Exclude<StatusVariant, 'neutral'>) {
-  // Premium: keep it calm, let the accent do the talking
-  if (variant === 'warn') return 'border border-white/10 bg-surfaceGlass text-textPrimary'
-  if (variant === 'success') return 'border border-white/10 bg-surfaceGlass text-textPrimary'
-  if (variant === 'danger') return 'border border-white/10 bg-surfaceGlass text-textPrimary'
+function pillClassByVariant(_variant: Exclude<StatusVariant, 'neutral'>) {
   return 'border border-white/10 bg-surfaceGlass text-textPrimary'
 }
 
 function alertClassByVariant(variant: StatusVariant) {
-  // subtle emphasis with glass, not loud banners
-  if (variant === 'danger') return 'tovis-glass border border-white/10'
-  if (variant === 'success') return 'tovis-glass border border-white/10'
-  if (variant === 'warn') return 'tovis-glass border border-white/10'
-  if (variant === 'info') return 'tovis-glass border border-white/10'
-  return 'tovis-glass-soft border border-white/10'
+  if (variant === 'neutral') return 'tovis-glass-soft border border-white/10'
+  return 'tovis-glass border border-white/10'
 }
 
 function tabClass(active: boolean) {
@@ -161,10 +153,7 @@ function getAftercareRebookInfo(aftercare: any, timeZone: string): AftercareRebo
     const s = toDate(aftercare?.rebookWindowStart)
     const e = toDate(aftercare?.rebookWindowEnd)
     if (s && e) {
-      return {
-        mode: 'RECOMMENDED_WINDOW',
-        label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}`,
-      }
+      return { mode: 'RECOMMENDED_WINDOW', label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}` }
     }
     return { mode: 'RECOMMENDED_WINDOW', label: 'Recommended rebook window.' }
   }
@@ -201,7 +190,9 @@ function SectionCard(props: {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-black text-textPrimary">{props.title}</div>
-          {props.subtitle ? <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">{props.subtitle}</div> : null}
+          {props.subtitle ? (
+            <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">{props.subtitle}</div>
+          ) : null}
         </div>
         {props.right ? <div className="shrink-0">{props.right}</div> : null}
       </div>
@@ -219,6 +210,24 @@ function TinyMetaPill({ children }: { children: React.ReactNode }) {
   )
 }
 
+function computePendingConsultation(raw: {
+  status: unknown
+  sessionStep: unknown
+  finishedAt: Date | null
+  consultationApproval?: { status: unknown } | null
+}) {
+  const status = upper(raw.status)
+  if (status === 'CANCELLED' || status === 'COMPLETED') return false
+  if (raw.finishedAt) return false
+
+  const step = upper(raw.sessionStep)
+  if (step === 'CONSULTATION_PENDING_CLIENT') return true
+
+  const approval = upper(raw.consultationApproval?.status)
+  const PENDING_SET = new Set(['PENDING', 'PENDING_CLIENT', 'PENDING_CLIENT_APPROVAL', 'AWAITING_CLIENT', 'WAITING_CLIENT', 'SENT'])
+  return PENDING_SET.has(approval)
+}
+
 export default async function ClientBookingPage(props: {
   params: Promise<{ id: string }> | { id: string }
   searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>
@@ -230,32 +239,38 @@ export default async function ClientBookingPage(props: {
   const sp = (await Promise.resolve(props.searchParams as any).catch(() => ({}))) ?? {}
   const step = normalizeStep((sp as any)?.step)
 
-  // ✅ All auth + prisma reads live in one place now
+  // ✅ single place: auth + prisma reads
   const { user, raw, aftercare, existingReview, media } = await loadClientBookingPage(bookingId)
   const clientId = user.clientProfile?.id
   if (!clientId) redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`)
 
-  const beforeMedia = (media || []).filter((m) => String(m.phase || '').toUpperCase() === 'BEFORE')
-  const afterMedia = (media || []).filter((m) => String(m.phase || '').toUpperCase() === 'AFTER')
+  // ✅ filter media so we never pass null into href/src
+  const validMedia = (media || []).filter((m) => typeof m?.url === 'string' && m.url.trim().length > 0)
+  const beforeMedia = validMedia.filter((m) => String(m.phase || '').toUpperCase() === 'BEFORE')
+  const afterMedia = validMedia.filter((m) => String(m.phase || '').toUpperCase() === 'AFTER')
 
-  // ✅ DTO remains the single source of truth for booking core
+  const hasPendingConsultationApproval = computePendingConsultation(raw)
+
   const booking = await buildClientBookingDTO({
     booking: raw as any,
     unreadAftercare: false,
-    hasPendingConsultationApproval: false,
+    hasPendingConsultationApproval,
   })
 
-  // ✅ View model = tab gating + derived labels
   const vm = buildBookingViewModel({ step, booking, raw, aftercare })
 
   const baseHref = `/client/bookings/${encodeURIComponent(booking.id)}`
+
+  // tab gating
   if (step === 'consult' && !vm.canShowConsultTab) redirect(`${baseHref}?step=overview`)
   if (step === 'aftercare' && !vm.canShowAftercareTab) redirect(`${baseHref}?step=overview`)
 
-  // ✅ Unread aftercare badge handling (depends on aftercare id)
+  // unread aftercare badge handling
   let showUnreadAftercareBadge = false
   if (step === 'aftercare' && aftercare?.id) {
-    const unread = await (await import('@/lib/prisma')).prisma.clientNotification.findFirst({
+    const { prisma } = await import('@/lib/prisma')
+
+    const unread = await prisma.clientNotification.findFirst({
       where: {
         clientId,
         type: 'AFTERCARE',
@@ -269,7 +284,7 @@ export default async function ClientBookingPage(props: {
     showUnreadAftercareBadge = Boolean(unread)
 
     if (unread) {
-      await (await import('@/lib/prisma')).prisma.clientNotification.updateMany({
+      await prisma.clientNotification.updateMany({
         where: {
           clientId,
           type: 'AFTERCARE',
@@ -283,7 +298,7 @@ export default async function ClientBookingPage(props: {
     }
   }
 
-  // --- Render derived from DTO + VM ---
+  // derived labels
   const appointmentTz = sanitizeTimeZone(booking.timeZone, 'UTC')
   const scheduled = toDate(booking.scheduledFor)
   const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : COPY.common.unknownTime
@@ -304,7 +319,7 @@ export default async function ClientBookingPage(props: {
   const statusUpper = upper(booking.status)
   const showConsultationApproval = Boolean(vm.showConsultationApproval)
 
-  const rebookInfo = aftercare ? getAftercareRebookInfo(aftercare, appointmentTz) : { mode: 'NONE' as const, label: null }
+  const rebookInfo = aftercare ? getAftercareRebookInfo(aftercare, appointmentTz) : ({ mode: 'NONE', label: null } as const)
   const aftercareToken = aftercare ? pickToken(aftercare) : null
   const showRebookCTA = statusUpper === 'COMPLETED' && Boolean(aftercareToken)
 
@@ -320,9 +335,37 @@ export default async function ClientBookingPage(props: {
   const title = booking.display?.title || COPY.bookings.titleFallback
   const locLine = booking.locationLabel || ''
 
+  // ✅ NEW: “Consult approval mode” = simplify page hard
+  const consultApprovalMode = step === 'consult' && showConsultationApproval
+
+  // ✅ only show review at the end (you said “very end”)
+  const shouldShowReview = statusUpper === 'COMPLETED' && step === 'aftercare'
+
+  // ✅ TS fix: ReviewSection expects url: string, so drop null urls
+  const safeExistingReview =
+    existingReview && existingReview.id
+      ? {
+          id: existingReview.id,
+          rating: existingReview.rating,
+          headline: existingReview.headline,
+          body: existingReview.body,
+          mediaAssets: (existingReview.mediaAssets || [])
+            .filter((m) => typeof m.url === 'string' && m.url.trim().length > 0)
+            .map((m) => ({
+              id: m.id,
+              url: m.url as string,
+              thumbUrl: m.thumbUrl,
+              mediaType: m.mediaType,
+              createdAt: m.createdAt.toISOString(),
+              isFeaturedInPortfolio: m.isFeaturedInPortfolio,
+              isEligibleForLooks: m.isEligibleForLooks,
+            })),
+        }
+      : null
+
   return (
     <main className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">
-      {/* Top “hero” card */}
+      {/* Top recap “hero” card */}
       <section
         className={cx(
           'rounded-card border border-white/10 p-5',
@@ -351,7 +394,12 @@ export default async function ClientBookingPage(props: {
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-2">
-            <span className={cx('inline-flex items-center rounded-full px-3 py-1 text-xs font-black', pillClassByVariant(pillVariant))}>
+            <span
+              className={cx(
+                'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
+                pillClassByVariant(pillVariant),
+              )}
+            >
               {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
             </span>
 
@@ -383,109 +431,16 @@ export default async function ClientBookingPage(props: {
         )}
       </section>
 
-      {/* Included items */}
-      {booking.items.length ? (
-        <div className="mt-4">
-          <SectionCard
-            title="What’s included"
-            subtitle={booking.display?.addOnCount ? 'Includes base service + add-ons' : 'Service breakdown'}
-            right={
-              booking.display?.addOnCount ? (
-                <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
-                  {booking.display.addOnCount} add-on{booking.display.addOnCount === 1 ? '' : 's'}
-                </span>
-              ) : null
-            }
-          >
-            <div className="grid gap-2">
-              {booking.items.map((it) => {
-                const name = it.name || (it.type === 'ADD_ON' ? 'Add-on' : 'Service')
-                const price = formatMoneyFromDecimalString(it.price)
-                const dur = it.durationMinutes && it.durationMinutes > 0 ? `${it.durationMinutes} min` : null
-
-                return (
-                  <div
-                    key={it.id}
-                    className={cx(
-                      'rounded-card border border-white/10 bg-bgPrimary px-4 py-3',
-                      'shadow-[0_10px_30px_rgba(0,0,0,0.25)]',
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-[14px] font-black text-textPrimary">{name}</div>
-                          <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
-                            {it.type === 'ADD_ON' ? 'Add-on' : 'Base'}
-                          </span>
-                          {dur ? <span className="text-[11px] font-semibold text-textSecondary">· {dur}</span> : null}
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 text-[13px] font-black text-textPrimary">{price || COPY.common.emDash}</div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </SectionCard>
-        </div>
-      ) : null}
-
-      {/* Tabs */}
-      <nav className="mt-4 flex flex-wrap items-center gap-2">
-        <a href={`${baseHref}?step=overview`} className={tabClass(step === 'overview')}>
-          {COPY.bookings.tabs.overview}
-        </a>
-
-        {vm.canShowConsultTab ? (
-          <a href={`${baseHref}?step=consult`} className={tabClass(step === 'consult')}>
-            {COPY.bookings.tabs.consultation}
-          </a>
-        ) : (
-          <span
-            className={tabDisabledClass()}
-            title="Consultation becomes available after your booking is confirmed and started by your pro."
-          >
-            {COPY.bookings.tabs.consultation}
-          </span>
-        )}
-
-        {vm.canShowAftercareTab ? (
-          <a href={`${baseHref}?step=aftercare`} className={tabClass(step === 'aftercare')}>
-            {COPY.bookings.tabs.aftercare}
-          </a>
-        ) : (
-          <span className={tabDisabledClass()} title="Aftercare becomes available after your appointment is completed.">
-            {COPY.bookings.tabs.aftercare}
-          </span>
-        )}
-
-        {step === 'aftercare' && showUnreadAftercareBadge ? (
-          <span className="ml-auto inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[10px] font-black text-textPrimary">
-            {COPY.bookings.badges.new}
-          </span>
-        ) : null}
-      </nav>
-
-      {/* Status message */}
-      <section className={cx('mt-4 rounded-card p-4', alertClassByVariant(msg.variant))}>
-        <div className="text-[13px] font-black text-textPrimary">{msg.title}</div>
-        <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">{msg.body}</div>
-      </section>
-
-      {/* CONSULT */}
-      {step === 'consult' ? (
+      {/* ✅ CONSULT APPROVAL MODE (your requested “strip it down” UI) */}
+      {consultApprovalMode ? (
         <div className="mt-4">
           <SectionCard
             title={COPY.bookings.consultation.header}
             subtitle="Notes and consultation details"
             right={
-              showConsultationApproval ? (
-                <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
-                  {COPY.bookings.consultation.approvalNeeded}
-                </span>
-              ) : null
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+                {COPY.bookings.consultation.approvalNeeded}
+              </span>
             }
           >
             <div className="grid gap-3">
@@ -508,314 +463,329 @@ export default async function ClientBookingPage(props: {
                 </TinyMetaPill>
               </div>
 
-              {showConsultationApproval ? (
-                <ConsultationDecisionCard
-                  bookingId={booking.id}
-                  appointmentTz={appointmentTz}
-                  notes={consultNotes}
-                  proposedTotalLabel={proposedTotalLabel}
-                  proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
-                />
-              ) : (
-                <div className="text-[12px] font-semibold text-textSecondary">{COPY.bookings.consultation.noApprovalNeeded}</div>
-              )}
+              <ConsultationDecisionCard
+                bookingId={booking.id}
+                appointmentTz={appointmentTz}
+                notes={consultNotes}
+                proposedTotalLabel={proposedTotalLabel}
+                proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
+              />
             </div>
           </SectionCard>
         </div>
       ) : null}
 
-      {/* OVERVIEW */}
-      {step === 'overview' ? (
-        <div className="mt-4 grid gap-4">
-          {showConsultationApproval ? (
-            <SectionCard
-              title={COPY.bookings.consultation.actionNeededTitle}
-              subtitle={COPY.bookings.consultation.actionNeededBody}
-              right={
-                <a
-                  href={`${baseHref}?step=consult`}
-                  className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
-                >
-                  {COPY.bookings.consultation.actionNeededCta}
-                </a>
-              }
-            >
-              <div className="text-[12px] font-semibold text-textSecondary">
-                One quick decision and you’re done — we love efficient queens.
-              </div>
-            </SectionCard>
+      {/* Everything else only when NOT in consult-approval mode */}
+      {!consultApprovalMode ? (
+        <>
+          {/* Included items */}
+          {booking.items.length ? (
+            <div className="mt-4">
+              <SectionCard
+                title="What’s included"
+                subtitle={booking.display?.addOnCount ? 'Includes base service + add-ons' : 'Service breakdown'}
+                right={
+                  booking.display?.addOnCount ? (
+                    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+                      {booking.display.addOnCount} add-on{booking.display.addOnCount === 1 ? '' : 's'}
+                    </span>
+                  ) : null
+                }
+              >
+                <div className="grid gap-2">
+                  {booking.items.map((it) => {
+                    const name = it.name || (it.type === 'ADD_ON' ? 'Add-on' : 'Service')
+                    const price = formatMoneyFromDecimalString(it.price)
+                    const dur = it.durationMinutes && it.durationMinutes > 0 ? `${it.durationMinutes} min` : null
+
+                    return (
+                      <div
+                        key={it.id}
+                        className={cx(
+                          'rounded-card border border-white/10 bg-bgPrimary px-4 py-3',
+                          'shadow-[0_10px_30px_rgba(0,0,0,0.25)]',
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-[14px] font-black text-textPrimary">{name}</div>
+                              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
+                                {it.type === 'ADD_ON' ? 'Add-on' : 'Base'}
+                              </span>
+                              {dur ? <span className="text-[11px] font-semibold text-textSecondary">· {dur}</span> : null}
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 text-[13px] font-black text-textPrimary">{price || COPY.common.emDash}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </SectionCard>
+            </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={`/api/calendar?bookingId=${encodeURIComponent(booking.id)}`}
-              className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
-            >
-              {COPY.bookings.addToCalendar}
+          {/* Tabs */}
+          <nav className="mt-4 flex flex-wrap items-center gap-2">
+            <a href={`${baseHref}?step=overview`} className={tabClass(step === 'overview')}>
+              {COPY.bookings.tabs.overview}
             </a>
-          </div>
 
-          <BookingActions
-            bookingId={booking.id}
-            status={booking.status as any}
-            scheduledFor={scheduled ? scheduled.toISOString() : new Date().toISOString()}
-            durationMinutesSnapshot={(durationMinutes ?? null) as any}
-            appointmentTz={appointmentTz}
-          />
-        </div>
-      ) : null}
+            {vm.canShowConsultTab ? (
+              <a href={`${baseHref}?step=consult`} className={tabClass(step === 'consult')}>
+                {COPY.bookings.tabs.consultation}
+              </a>
+            ) : (
+              <span className={tabDisabledClass()} title="Consultation becomes available after your booking is confirmed and started by your pro.">
+                {COPY.bookings.tabs.consultation}
+              </span>
+            )}
 
-      {/* AFTERCARE */}
-      {step === 'aftercare' ? (
-        <section id="aftercare" className="mt-4 grid gap-4">
-          <SectionCard
-            title={COPY.bookings.aftercare.header}
-            subtitle="Photos, care notes, products, and rebook options."
-            right={showUnreadAftercareBadge ? <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill> : null}
-          >
-            <div className="grid gap-4">
-              {/* Before & After */}
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-[12px] font-black text-textPrimary">Before &amp; After</div>
-                  <div className="text-[11px] font-semibold text-textSecondary">
-                    {beforeMedia.length || afterMedia.length ? 'Swipe to view' : 'No photos attached'}
-                  </div>
-                </div>
+            {vm.canShowAftercareTab ? (
+              <a href={`${baseHref}?step=aftercare`} className={tabClass(step === 'aftercare')}>
+                {COPY.bookings.tabs.aftercare}
+              </a>
+            ) : (
+              <span className={tabDisabledClass()} title="Aftercare becomes available after your appointment is completed.">
+                {COPY.bookings.tabs.aftercare}
+              </span>
+            )}
 
-                {beforeMedia.length || afterMedia.length ? (
-                  <div className="mt-3 grid gap-3">
-                    {beforeMedia.length ? (
-                      <div>
-                        <div className="mb-2 text-[11px] font-black text-textSecondary">Before</div>
-                        <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
-                          {beforeMedia.map((m) => {
-                            const src = m.thumbUrl || m.url
-                            return (
-                              <a
-                                key={m.id}
-                                href={m.url}
-                                className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
-                                style={{ width: 128, height: 128 }}
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
-                              </a>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
+            {step === 'aftercare' && showUnreadAftercareBadge ? (
+              <span className="ml-auto inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[10px] font-black text-textPrimary">
+                {COPY.bookings.badges.new}
+              </span>
+            ) : null}
+          </nav>
 
-                    {afterMedia.length ? (
-                      <div>
-                        <div className="mb-2 text-[11px] font-black text-textSecondary">After</div>
-                        <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
-                          {afterMedia.map((m) => {
-                            const src = m.thumbUrl || m.url
-                            return (
-                              <a
-                                key={m.id}
-                                href={m.url}
-                                className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
-                                style={{ width: 128, height: 128 }}
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
-                              </a>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                    Your pro will attach photos during your appointment flow.
-                  </div>
-                )}
-              </div>
+          {/* Status message */}
+          <section className={cx('mt-4 rounded-card p-4', alertClassByVariant(msg.variant))}>
+            <div className="text-[13px] font-black text-textPrimary">{msg.title}</div>
+            <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">{msg.body}</div>
+          </section>
 
-              {/* Service */}
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-[12px] font-black text-textPrimary">Service</div>
-                  {breakdownTotalLabel ? <div className="text-[12px] font-black text-textPrimary">{breakdownTotalLabel}</div> : null}
-                </div>
-
-                {booking.items.length ? (
-                  <div className="mt-3 grid gap-2">
-                    {booking.items.map((it) => {
-                      const name = it.name || (it.type === 'ADD_ON' ? 'Add-on' : 'Service')
-                      const price = formatMoneyFromDecimalString(it.price)
-                      const dur = it.durationMinutes && it.durationMinutes > 0 ? `${it.durationMinutes} min` : null
-
-                      return (
-                        <div
-                          key={it.id}
-                          className="flex items-baseline justify-between gap-3 rounded-card border border-white/10 bg-bgSecondary px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <div className="truncate text-[13px] font-black text-textPrimary">{name}</div>
-                            <div className="text-[11px] font-semibold text-textSecondary">
-                              {it.type === 'ADD_ON' ? 'Add-on' : 'Base'}
-                              {dur ? ` · ${dur}` : ''}
-                            </div>
-                          </div>
-                          <div className="shrink-0 text-[12px] font-black text-textPrimary">{price || COPY.common.emDash}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-[12px] font-semibold text-textSecondary">No itemized breakdown available.</div>
-                )}
-              </div>
-
-              {/* Care notes */}
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                <div className="text-[12px] font-black text-textPrimary">Care notes</div>
-
-                {aftercare?.notes ? (
-                  <div className="mt-2 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">{aftercare.notes}</div>
-                ) : (
-                  <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                    {upper(booking.status) === 'COMPLETED'
-                      ? COPY.bookings.aftercare.noAftercareNotesCompleted
-                      : COPY.bookings.aftercare.noAftercareNotesPending}
-                  </div>
-                )}
-              </div>
-
-              {/* Product recs */}
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-[12px] font-black text-textPrimary">Product recommendations</div>
-                  <div className="text-[11px] font-semibold text-textSecondary">
-                    {aftercare?.recommendations?.length ? `${aftercare.recommendations.length} item(s)` : 'None yet'}
-                  </div>
-                </div>
-
-                {aftercare?.recommendations?.length ? (
-                  <div className="mt-3 grid gap-2">
-                    {aftercare.recommendations.map((r: any) => {
-                      const name = r.product?.name || r.externalName || 'Recommended product'
-                      const brand = r.product?.brand || ''
-                      const price =
-                        r.product?.retailPrice != null && Number.isFinite(Number(r.product.retailPrice))
-                          ? `$${Number(r.product.retailPrice).toFixed(2)}`
-                          : null
-
-                      const href = typeof r.externalUrl === 'string' && r.externalUrl.trim() ? r.externalUrl.trim() : null
-
-                      return (
-                        <div key={r.id} className="rounded-card border border-white/10 bg-bgSecondary p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-[13px] font-black text-textPrimary">
-                                {brand ? `${brand} · ` : ''}
-                                {name}
-                              </div>
-                              {r.note ? <div className="mt-1 text-[12px] font-semibold text-textSecondary">{r.note}</div> : null}
-                            </div>
-
-                            {price ? <div className="shrink-0 text-[12px] font-black text-textPrimary">{price}</div> : null}
-                          </div>
-
-                          {href ? (
-                            <a
-                              href={href}
-                              className="mt-2 inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1.5 text-[11px] font-black text-textPrimary hover:bg-surfaceGlass"
-                            >
-                              View product →
-                            </a>
-                          ) : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                    Your pro can add products later — you’ll be notified if they do.
-                  </div>
-                )}
-              </div>
-
-              {/* Rebook */}
-              {aftercare && (rebookInfo.label || showRebookCTA) ? (
-                <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                  <div className="text-[12px] font-black text-textPrimary">{COPY.bookings.aftercare.rebookHeader}</div>
-
-                  {rebookInfo.label ? (
-                    <div className="mt-2 text-[13px] text-textPrimary">
-                      {rebookInfo.label}
-                      <span className="text-textSecondary"> · {appointmentTz}</span>
+          {/* CONSULT (non-approval / regular consult view) */}
+          {step === 'consult' ? (
+            <div className="mt-4">
+              <SectionCard
+                title={COPY.bookings.consultation.header}
+                subtitle="Notes and consultation details"
+                right={
+                  showConsultationApproval ? (
+                    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+                      {COPY.bookings.consultation.approvalNeeded}
+                    </span>
+                  ) : null
+                }
+              >
+                <div className="grid gap-3">
+                  <div>
+                    <div className="text-[11px] font-black text-textSecondary">{COPY.bookings.consultation.notesLabel}</div>
+                    <div className="mt-1 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
+                      {consultNotes.trim() ? consultNotes : COPY.bookings.consultation.noNotes}
                     </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <TinyMetaPill>
+                      <span className="text-textSecondary">{COPY.bookings.consultation.proposedTotalLabel} </span>
+                      {proposedTotalLabel || COPY.common.notProvided}
+                    </TinyMetaPill>
+
+                    <TinyMetaPill>
+                      <span className="text-textSecondary">{COPY.bookings.consultation.timesShownIn} </span>
+                      {appointmentTz}
+                    </TinyMetaPill>
+                  </div>
+
+                  {showConsultationApproval ? (
+                    <ConsultationDecisionCard
+                      bookingId={booking.id}
+                      appointmentTz={appointmentTz}
+                      notes={consultNotes}
+                      proposedTotalLabel={proposedTotalLabel}
+                      proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
+                    />
                   ) : (
-                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                      {COPY.bookings.aftercare.noRebookRecommendation}
-                    </div>
+                    <div className="text-[12px] font-semibold text-textSecondary">{COPY.bookings.consultation.noApprovalNeeded}</div>
                   )}
-
-                  {showRebookCTA ? (
-                    <a
-                      href={`/client/rebook/${encodeURIComponent(aftercareToken as string)}`}
-                      className="mt-3 inline-flex items-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-                    >
-                      {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-                        ? COPY.bookings.aftercare.rebookCtaViewDetails
-                        : COPY.bookings.aftercare.rebookCtaNow}
-                    </a>
-                  ) : null}
-
-                  {!aftercareToken && upper(booking.status) === 'COMPLETED' ? (
-                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                      {COPY.bookings.aftercare.rebookLinkNotAvailable}
-                    </div>
-                  ) : null}
                 </div>
+              </SectionCard>
+            </div>
+          ) : null}
+
+          {/* OVERVIEW */}
+          {step === 'overview' ? (
+            <div className="mt-4 grid gap-4">
+              {showConsultationApproval ? (
+                <SectionCard
+                  title={COPY.bookings.consultation.actionNeededTitle}
+                  subtitle={COPY.bookings.consultation.actionNeededBody}
+                  right={
+                    <a
+                      href={`${baseHref}?step=consult`}
+                      className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
+                    >
+                      {COPY.bookings.consultation.actionNeededCta}
+                    </a>
+                  }
+                >
+                  <div className="text-[12px] font-semibold text-textSecondary">One quick decision and you’re done.</div>
+                </SectionCard>
               ) : null}
 
-              {/* More */}
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                <div className="text-[12px] font-black text-textPrimary">More</div>
+              <div className="flex flex-wrap gap-2">
                 <a
-                  href="/client/aftercare"
-                  className="mt-2 inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                  href={`/api/calendar?bookingId=${encodeURIComponent(booking.id)}`}
+                  className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
                 >
-                  {COPY.bookings.aftercare.viewAllAftercare}
+                  {COPY.bookings.addToCalendar}
                 </a>
               </div>
-            </div>
-          </SectionCard>
-        </section>
-      ) : null}
 
-      {/* Review */}
-      <div id="review" className="mt-6">
-        <ReviewSection
-          bookingId={booking.id}
-          existingReview={
-            existingReview
-              ? {
-                  id: existingReview.id,
-                  rating: existingReview.rating,
-                  headline: existingReview.headline,
-                  body: existingReview.body,
-                  mediaAssets: (existingReview.mediaAssets || []).map((m) => ({
-                    id: m.id,
-                    url: m.url,
-                    thumbUrl: m.thumbUrl,
-                    mediaType: m.mediaType,
-                    createdAt: m.createdAt.toISOString(),
-                    isFeaturedInPortfolio: m.isFeaturedInPortfolio,
-                    isEligibleForLooks: m.isEligibleForLooks,
-                  })),
-                }
-              : null
-          }
-        />
-      </div>
+              <BookingActions
+                bookingId={booking.id}
+                status={booking.status as any}
+                scheduledFor={scheduled ? scheduled.toISOString() : new Date().toISOString()}
+                durationMinutesSnapshot={(durationMinutes ?? null) as any}
+                appointmentTz={appointmentTz}
+              />
+            </div>
+          ) : null}
+
+          {/* AFTERCARE */}
+          {step === 'aftercare' ? (
+            <section id="aftercare" className="mt-4 grid gap-4">
+              <SectionCard
+                title={COPY.bookings.aftercare.header}
+                subtitle="Photos, care notes, products, and rebook options."
+                right={showUnreadAftercareBadge ? <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill> : null}
+              >
+                <div className="grid gap-4">
+                  {/* Before & After */}
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <div className="text-[12px] font-black text-textPrimary">Before &amp; After</div>
+                      <div className="text-[11px] font-semibold text-textSecondary">
+                        {beforeMedia.length || afterMedia.length ? 'Swipe to view' : 'No photos attached'}
+                      </div>
+                    </div>
+
+                    {beforeMedia.length || afterMedia.length ? (
+                      <div className="mt-3 grid gap-3">
+                        {beforeMedia.length ? (
+                          <div>
+                            <div className="mb-2 text-[11px] font-black text-textSecondary">Before</div>
+                            <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
+                              {beforeMedia.map((m) => {
+                                const src =
+                                  typeof m.thumbUrl === 'string' && m.thumbUrl.trim().length > 0 ? m.thumbUrl : (m.url as string)
+
+                                return (
+                                  <a
+                                    key={m.id}
+                                    href={m.url as string}
+                                    className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
+                                    style={{ width: 128, height: 128 }}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+                                  </a>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {afterMedia.length ? (
+                          <div>
+                            <div className="mb-2 text-[11px] font-black text-textSecondary">After</div>
+                            <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
+                              {afterMedia.map((m) => {
+                                const src =
+                                  typeof m.thumbUrl === 'string' && m.thumbUrl.trim().length > 0 ? m.thumbUrl : (m.url as string)
+
+                                return (
+                                  <a
+                                    key={m.id}
+                                    href={m.url as string}
+                                    className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
+                                    style={{ width: 128, height: 128 }}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+                                  </a>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                        Your pro will attach photos during your appointment flow.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Care notes */}
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="text-[12px] font-black text-textPrimary">Care notes</div>
+
+                    {aftercare?.notes ? (
+                      <div className="mt-2 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">{aftercare.notes}</div>
+                    ) : (
+                      <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                        {upper(booking.status) === 'COMPLETED'
+                          ? COPY.bookings.aftercare.noAftercareNotesCompleted
+                          : COPY.bookings.aftercare.noAftercareNotesPending}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Rebook */}
+                  {aftercare && (rebookInfo.label || showRebookCTA) ? (
+                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                      <div className="text-[12px] font-black text-textPrimary">{COPY.bookings.aftercare.rebookHeader}</div>
+
+                      {rebookInfo.label ? (
+                        <div className="mt-2 text-[13px] text-textPrimary">
+                          {rebookInfo.label}
+                          <span className="text-textSecondary"> · {appointmentTz}</span>
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                          {COPY.bookings.aftercare.noRebookRecommendation}
+                        </div>
+                      )}
+
+                      {showRebookCTA ? (
+                        <a
+                          href={`/client/rebook/${encodeURIComponent(aftercareToken as string)}`}
+                          className="mt-3 inline-flex items-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+                        >
+                          {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                            ? COPY.bookings.aftercare.rebookCtaViewDetails
+                            : COPY.bookings.aftercare.rebookCtaNow}
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </SectionCard>
+            </section>
+          ) : null}
+
+          {/* ✅ Review only at the end */}
+          {shouldShowReview ? (
+            <div id="review" className="mt-6">
+              <ReviewSection bookingId={booking.id} existingReview={safeExistingReview} />
+            </div>
+          ) : null}
+        </>
+      ) : null}
     </main>
   )
 }

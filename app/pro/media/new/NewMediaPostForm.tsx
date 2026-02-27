@@ -1,27 +1,38 @@
-// app/pro/media/new/NewMediaPostForm.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { MediaType, MediaVisibility } from '@prisma/client'
 
 type ProService = { id: string; name: string }
+
+const CAPTION_MAX = 300
+const MAX_IMAGE_MB = 25
+const MAX_VIDEO_MB = 200
 
 async function safeJson(res: Response) {
   return res.json().catch(() => ({})) as Promise<any>
 }
 
-function computeVisibility(isEligibleForLooks: boolean, isFeaturedInPortfolio: boolean) {
-  return isEligibleForLooks || isFeaturedInPortfolio ? 'PUBLIC' : 'PRIVATE'
+function bytesFromMb(mb: number) {
+  return mb * 1024 * 1024
+}
+
+function computeVisibility(isEligibleForLooks: boolean, isFeaturedInPortfolio: boolean): MediaVisibility {
+  return isEligibleForLooks || isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
+}
+
+function guessMediaType(file: File): MediaType {
+  return (file.type || '').toLowerCase().startsWith('video/') ? MediaType.VIDEO : MediaType.IMAGE
 }
 
 export default function NewMediaPostForm() {
   const router = useRouter()
 
   const [file, setFile] = useState<File | null>(null)
-
   const [caption, setCaption] = useState('')
-  const [mediaType, setMediaType] = useState<'IMAGE' | 'VIDEO'>('IMAGE')
+  const [mediaType, setMediaType] = useState<MediaType>(MediaType.IMAGE)
 
   const [services, setServices] = useState<ProService[]>([])
   const [serviceIds, setServiceIds] = useState<string[]>([])
@@ -29,12 +40,11 @@ export default function NewMediaPostForm() {
   // Defaults you had: Looks off, Portfolio on
   const [isEligibleForLooks, setIsEligibleForLooks] = useState(false)
   const [isFeaturedInPortfolio, setIsFeaturedInPortfolio] = useState(true)
-  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+  const [visibility, setVisibility] = useState<MediaVisibility>(MediaVisibility.PUBLIC)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Must pick at least one public surface (this form is for public posts)
   const isPublicSelectionValid = isEligibleForLooks || isFeaturedInPortfolio
 
   useEffect(() => {
@@ -50,9 +60,24 @@ export default function NewMediaPostForm() {
     setVisibility(computeVisibility(isEligibleForLooks, isFeaturedInPortfolio))
   }, [isEligibleForLooks, isFeaturedInPortfolio])
 
+  const maxBytes = useMemo(() => {
+    return mediaType === MediaType.VIDEO ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
+  }, [mediaType])
+
+  const fileError = useMemo(() => {
+    if (!file) return null
+    if (file.size <= 0) return 'That file looks empty.'
+    if (file.size > maxBytes) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1)
+      const limit = mediaType === MediaType.VIDEO ? MAX_VIDEO_MB : MAX_IMAGE_MB
+      return `That file is ${mb}MB — over the ${limit}MB limit.`
+    }
+    return null
+  }, [file, maxBytes, mediaType])
+
   const canSubmit = useMemo(() => {
-    return !!file && serviceIds.length >= 1 && isPublicSelectionValid && !saving
-  }, [file, serviceIds.length, isPublicSelectionValid, saving])
+    return !!file && !fileError && serviceIds.length >= 1 && isPublicSelectionValid && !saving
+  }, [file, fileError, serviceIds.length, isPublicSelectionValid, saving])
 
   function toggleService(id: string) {
     setServiceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
@@ -61,23 +86,19 @@ export default function NewMediaPostForm() {
   async function uploadSelectedFile() {
     if (!file) throw new Error('Select a file')
 
-    // This form is only for public posts. If both are off, block it.
-    const kind = isEligibleForLooks
-      ? 'LOOKS_PUBLIC'
-      : isFeaturedInPortfolio
-        ? 'PORTFOLIO_PUBLIC'
-        : null
+    // If both are off, block (this form is for public posts)
+    if (!isPublicSelectionValid) throw new Error('Select “Show in Looks” or “Show in Portfolio”.')
 
-    if (!kind) {
-      throw new Error('Select “Show in Looks” or “Show in Portfolio”.')
-    }
+    // If your backend treats both surfaces the same for storage,
+    // consider changing this to a single kind like "MEDIA_PUBLIC".
+    const kind = isEligibleForLooks ? 'LOOKS_PUBLIC' : 'PORTFOLIO_PUBLIC'
 
     const res = await fetch('/api/pro/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         kind,
-        contentType: file.type,
+        contentType: file.type || 'application/octet-stream',
         size: file.size,
       }),
     })
@@ -85,21 +106,23 @@ export default function NewMediaPostForm() {
     const data = await safeJson(res)
     if (!res.ok) throw new Error(data?.error || `Upload init failed (${res.status})`)
 
-    const bucket = String(data.bucket)
-    const path = String(data.path)
-    const token = String(data.token)
+    const storageBucket = String(data.bucket || '')
+    const storagePath = String(data.path || '')
+    const token = String(data.token || '')
     const publicUrl = data.publicUrl ? String(data.publicUrl) : null
 
-    const { error: upErr } = await supabaseBrowser.storage
-      .from(bucket)
-      .uploadToSignedUrl(path, token, file, {
-        contentType: file.type,
-        upsert: false,
-      })
+    if (!storageBucket || !storagePath || !token) {
+      throw new Error('Upload init failed (missing bucket/path/token).')
+    }
+
+    const { error: upErr } = await supabaseBrowser.storage.from(storageBucket).uploadToSignedUrl(storagePath, token, file, {
+      contentType: file.type || undefined,
+      upsert: false,
+    })
 
     if (upErr) throw new Error(upErr.message || 'Upload failed')
 
-    return { bucket, path, publicUrl }
+    return { storageBucket, storagePath, publicUrl }
   }
 
   async function submit() {
@@ -114,15 +137,15 @@ export default function NewMediaPostForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bucket: uploaded.bucket,
-          path: uploaded.path,
-          publicUrl: uploaded.publicUrl || undefined,
+          storageBucket: uploaded.storageBucket,
+          storagePath: uploaded.storagePath,
+          url: uploaded.publicUrl || undefined, // only if your API/DB stores it; otherwise remove
 
-          caption: caption.trim() || undefined,
+          caption: caption.trim().slice(0, CAPTION_MAX) || undefined,
           mediaType,
+          visibility,
           isFeaturedInPortfolio,
           isEligibleForLooks,
-          visibility,
           serviceIds,
         }),
       })
@@ -150,14 +173,14 @@ export default function NewMediaPostForm() {
             onChange={(e) => {
               const f = e.target.files?.[0] || null
               setFile(f)
-              if (f?.type?.startsWith('video/')) setMediaType('VIDEO')
-              else if (f) setMediaType('IMAGE')
+              if (f) setMediaType(guessMediaType(f))
             }}
             className="block w-full text-[13px] text-textPrimary"
           />
           <div className="text-[11px] text-textSecondary">
             Public posts (Looks/Portfolio) must live in the public bucket to render in the app.
           </div>
+          {fileError ? <div className="text-[12px] text-toneDanger">{fileError}</div> : null}
         </div>
 
         <div className="grid gap-2">
@@ -167,18 +190,22 @@ export default function NewMediaPostForm() {
             onChange={(e) => setCaption(e.target.value)}
             placeholder="What did we do here? Hair witchcraft? Nail sorcery?"
             rows={3}
+            maxLength={CAPTION_MAX}
             className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
           />
+          <div className="text-[11px] text-textSecondary">
+            {caption.trim().length}/{CAPTION_MAX}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-3">
           <select
             value={mediaType}
-            onChange={(e) => setMediaType(e.target.value as any)}
+            onChange={(e) => setMediaType(e.target.value as MediaType)}
             className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
           >
-            <option value="IMAGE">Image</option>
-            <option value="VIDEO">Video</option>
+            <option value={MediaType.IMAGE}>Image</option>
+            <option value={MediaType.VIDEO}>Video</option>
           </select>
 
           <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-3 py-3">

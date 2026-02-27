@@ -1,3 +1,4 @@
+// lib/createNfcCard.ts
 import { prisma } from '@/lib/prisma'
 import { generateShortCode } from '@/lib/nfcShortCode'
 

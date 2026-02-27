@@ -17,9 +17,11 @@ function addDays(date: Date, days: number) {
 }
 
 /**
- * Consultation approval gate:
- * If approval is pending, and booking isn't final, and session step indicates consult phase,
- * then client needs to approve/reject.
+ * Client needs to approve/reject if:
+ * - booking is not terminal
+ * - and either:
+ *   A) sessionStep says we're waiting on client
+ *   B) OR consultationApproval.status is one of the "pending client" variants
  */
 function needsConsultationApproval(b: {
   status: unknown
@@ -27,15 +29,33 @@ function needsConsultationApproval(b: {
   finishedAt: Date | null
   consultationApproval?: { status: unknown } | null
 }) {
-  const approval = upper(b.consultationApproval?.status)
-  if (approval !== 'PENDING') return false
-
   const status = upper(b.status)
   if (status === 'CANCELLED' || status === 'COMPLETED') return false
   if (b.finishedAt) return false
 
   const step = upper(b.sessionStep)
-  return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step || step === 'NONE'
+  if (step === 'CONSULTATION_PENDING_CLIENT') return true
+
+  const approval = upper(b.consultationApproval?.status)
+
+  const PENDING_APPROVAL = new Set([
+    'PENDING',
+    'PENDING_CLIENT',
+    'PENDING_CLIENT_APPROVAL',
+    'AWAITING_CLIENT',
+    'WAITING_CLIENT',
+    'NEEDS_APPROVAL',
+    'SENT',
+  ])
+
+  if (PENDING_APPROVAL.has(approval)) return true
+
+  const decided = approval === 'APPROVED' || approval === 'REJECTED'
+  const consultPhase = step === 'CONSULTATION' || step === 'CONSULTATION_PENDING_CLIENT' || step === 'NONE' || !step
+
+  if (!decided && consultPhase && approval) return true
+
+  return false
 }
 
 export async function GET() {
@@ -46,7 +66,6 @@ export async function GET() {
     const now = new Date()
     const next30 = addDays(now, 30)
 
-    // 1) Load bookings (schema-aligned selects)
     const bookings = await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
@@ -122,7 +141,6 @@ export async function GET() {
       },
     })
 
-    // 2) Unread aftercare notifications (badge support)
     const unread = await prisma.clientNotification.findMany({
       where: {
         clientId,
@@ -140,13 +158,12 @@ export async function GET() {
         .filter((x): x is string => Boolean(x)),
     )
 
-    // 3) Build DTOs (single source of truth) ✅ MUST await because buildClientBookingDTO is async now
     const dtos = await Promise.all(
       bookings.map(async (b) => {
         const hasPending = needsConsultationApproval(b)
         const unreadAftercare = unreadBookingIds.has(b.id)
 
-        return await buildClientBookingDTO({
+        return buildClientBookingDTO({
           booking: b as any,
           unreadAftercare,
           hasPendingConsultationApproval: hasPending,
@@ -154,8 +171,7 @@ export async function GET() {
       }),
     )
 
-    // 4) Waitlist (schema-aligned selects)
-    // Note: WaitlistEntry.professional is ProfessionalProfile (no city/state).
+    // waitlist
     let waitlist: any[] = []
     try {
       waitlist = await prisma.waitlistEntry.findMany({
@@ -187,42 +203,47 @@ export async function GET() {
       waitlist = []
     }
 
-    // 5) Bucket bookings
+    // buckets
     const upcoming: any[] = []
     const pending: any[] = []
     const prebooked: any[] = []
     const past: any[] = []
 
     for (const b of dtos) {
-      const when = new Date(b.scheduledFor)
-      const isFuture = when.getTime() >= now.getTime()
-      const within30 = when.getTime() < next30.getTime()
-
       const status = upper(b.status)
       const source = upper(b.source)
 
-      if (!isFuture || status === 'COMPLETED' || status === 'CANCELLED') {
+      // terminal -> past
+      if (status === 'COMPLETED' || status === 'CANCELLED') {
         past.push(b)
         continue
       }
 
+      // ✅ ALWAYS surface consult approvals as pending (even if scheduledFor is in the past)
       if (b.hasPendingConsultationApproval || status === 'PENDING') {
         pending.push(b)
         continue
       }
 
+      const when = new Date(b.scheduledFor)
+      const isFuture = when.getTime() >= now.getTime()
+      const within30 = when.getTime() < next30.getTime()
+
+      // prebooked bucket
       if (source === 'AFTERCARE' && isFuture) {
         prebooked.push(b)
         continue
       }
 
+      // accepted + near future
       if (status === 'ACCEPTED' && within30) {
         upcoming.push(b)
         continue
       }
 
-      // default: keep future accepted beyond 30 days as upcoming too
-      upcoming.push(b)
+      // everything else: if future keep in upcoming, otherwise past
+      if (isFuture) upcoming.push(b)
+      else past.push(b)
     }
 
     return NextResponse.json(
@@ -239,9 +260,6 @@ export async function GET() {
   }
 }
 
-/**
- * POST: deprecated — use POST /api/bookings
- */
 export async function POST(_req: NextRequest) {
   return NextResponse.json(
     {

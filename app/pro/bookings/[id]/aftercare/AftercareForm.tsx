@@ -12,14 +12,20 @@ type MediaPhase = 'BEFORE' | 'AFTER' | 'OTHER'
 
 type MediaItem = {
   id: string
-  url: string
-  thumbUrl: string | null
   mediaType: MediaType
   visibility: MediaVisibility
   uploadedByRole: Role | null
   reviewId: string | null
   createdAt: string
   phase: MediaPhase
+
+  // ✅ UI should use these (signed/public HTTP URLs)
+  renderUrl: string | null
+  renderThumbUrl: string | null
+
+  // Optional debug fields
+  url?: string | null
+  thumbUrl?: string | null
 }
 
 type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
@@ -33,11 +39,6 @@ type RecommendedProduct = {
 
 type Props = {
   bookingId: string
-
-  /**
-   * IANA timezone that governs meaning of datetime-local fields.
-   * This should come from booking/location/pro settings, NOT the browser.
-   */
   timeZone: string
 
   existingNotes: string
@@ -48,9 +49,11 @@ type Props = {
   existingRebookWindowEnd?: string | null
 
   existingMedia: MediaItem[]
-
   existingRecommendedProducts?: RecommendedProduct[]
 }
+
+// Keep this EXACTLY aligned with useProSession.ts
+const FORCE_EVENT = 'tovis:pro-session:force'
 
 const MAX_PRODUCTS = 10
 const PRODUCT_NAME_MAX = 80
@@ -83,6 +86,7 @@ async function safeJson(res: Response) {
 
 function errorFromResponse(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error
+  if (typeof data?.message === 'string') return data.message
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -122,8 +126,8 @@ function safeId() {
 }
 
 /**
- * Convert ISO (UTC instant) -> datetime-local string in a given IANA timezone.
- * Output format: "YYYY-MM-DDTHH:MM"
+ * ISO (UTC instant) -> datetime-local string in a given IANA timezone.
+ * Output: "YYYY-MM-DDTHH:MM"
  */
 function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): string {
   if (!iso) return ''
@@ -143,8 +147,8 @@ function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): str
 }
 
 /**
- * Convert datetime-local string (interpreted in IANA timezone) -> ISO (UTC instant).
- * Input format expected: "YYYY-MM-DDTHH:MM"
+ * datetime-local string (interpreted in IANA timezone) -> ISO (UTC instant).
+ * Input: "YYYY-MM-DDTHH:MM"
  */
 function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
   const v = (value || '').trim()
@@ -174,15 +178,12 @@ function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string
 function cardClass() {
   return 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
 }
-
 function subtleTextClass() {
   return 'text-xs font-semibold text-textSecondary'
 }
-
 function sectionTitleClass() {
   return 'text-xs font-black tracking-wide text-textPrimary'
 }
-
 function pillClass(active: boolean) {
   return [
     'inline-flex items-center rounded-full px-3 py-1 text-xs font-black transition',
@@ -190,7 +191,6 @@ function pillClass(active: boolean) {
     active ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
   ].join(' ')
 }
-
 function primaryBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
@@ -199,7 +199,6 @@ function primaryBtn(disabled: boolean) {
       : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
   ].join(' ')
 }
-
 function secondaryBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
@@ -208,14 +207,12 @@ function secondaryBtn(disabled: boolean) {
       : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
   ].join(' ')
 }
-
 function inputClass(disabled: boolean) {
   return [
     'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
     disabled ? 'opacity-60 cursor-not-allowed' : 'focus:border-white/20',
   ].join(' ')
 }
-
 function labelClass() {
   return 'block text-xs font-black text-textSecondary mb-1'
 }
@@ -241,9 +238,9 @@ export default function AftercareForm({
   const [productsError, setProductsError] = useState<string | null>(null)
 
   const [rebookMode, setRebookMode] = useState<RebookMode>('NONE')
-  const [rebookAt, setRebookAt] = useState<string>('') // datetime-local (in tz)
-  const [windowStart, setWindowStart] = useState<string>('') // datetime-local (in tz)
-  const [windowEnd, setWindowEnd] = useState<string>('') // datetime-local (in tz)
+  const [rebookAt, setRebookAt] = useState<string>('') // datetime-local in tz
+  const [windowStart, setWindowStart] = useState<string>('') // datetime-local in tz
+  const [windowEnd, setWindowEnd] = useState<string>('') // datetime-local in tz
 
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
   const [rebookDaysBefore, setRebookDaysBefore] = useState('2')
@@ -254,7 +251,7 @@ export default function AftercareForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // ✅ separate “saved” vs “sent”
+  // separate “saved” vs “sent”
   const [saved, setSaved] = useState(false)
   const [sent, setSent] = useState(false)
 
@@ -273,11 +270,12 @@ export default function AftercareForm({
 
     setRebookMode(inferred)
 
-    if (existingRebookedFor) setRebookAt(isoToDatetimeLocalInTimeZone(existingRebookedFor, tz))
-    if (existingRebookWindowStart) setWindowStart(isoToDatetimeLocalInTimeZone(existingRebookWindowStart, tz))
-    if (existingRebookWindowEnd) setWindowEnd(isoToDatetimeLocalInTimeZone(existingRebookWindowEnd, tz))
+    setRebookAt(existingRebookedFor ? isoToDatetimeLocalInTimeZone(existingRebookedFor, tz) : '')
+    setWindowStart(existingRebookWindowStart ? isoToDatetimeLocalInTimeZone(existingRebookWindowStart, tz) : '')
+    setWindowEnd(existingRebookWindowEnd ? isoToDatetimeLocalInTimeZone(existingRebookWindowEnd, tz) : '')
 
-    if (existingRebookedFor) setCreateRebookReminder(true)
+    // If a booked date exists, default reminder ON
+    setCreateRebookReminder(Boolean(existingRebookedFor))
 
     setProducts(
       (existingRecommendedProducts || []).slice(0, MAX_PRODUCTS).map((p) => ({
@@ -287,14 +285,7 @@ export default function AftercareForm({
         note: p.note || '',
       })),
     )
-  }, [
-    existingRebookMode,
-    existingRebookedFor,
-    existingRebookWindowStart,
-    existingRebookWindowEnd,
-    existingRecommendedProducts,
-    tz,
-  ])
+  }, [existingRebookMode, existingRebookedFor, existingRebookWindowStart, existingRebookWindowEnd, existingRecommendedProducts, tz])
 
   useEffect(() => {
     return () => {
@@ -316,9 +307,9 @@ export default function AftercareForm({
   const afterMedia = useMemo(() => sortedMedia.filter((m) => m.phase === 'AFTER'), [sortedMedia])
   const otherMedia = useMemo(() => sortedMedia.filter((m) => m.phase !== 'BEFORE' && m.phase !== 'AFTER'), [sortedMedia])
 
-  const hasBookedDate = Boolean(rebookAt)
-  const hasWindowStart = Boolean(windowStart)
-  const hasWindowEnd = Boolean(windowEnd)
+  const hasBookedDate = Boolean(rebookAt.trim())
+  const hasWindowStart = Boolean(windowStart.trim())
+  const hasWindowEnd = Boolean(windowEnd.trim())
 
   const windowError =
     rebookMode === 'RECOMMENDED_WINDOW' && (hasWindowStart || hasWindowEnd)
@@ -334,6 +325,7 @@ export default function AftercareForm({
         })()
       : null
 
+  // Rebook reminder only valid for single date mode
   useEffect(() => {
     if (rebookMode !== 'BOOKED_NEXT_APPOINTMENT' && createRebookReminder) setCreateRebookReminder(false)
   }, [rebookMode, createRebookReminder])
@@ -343,8 +335,9 @@ export default function AftercareForm({
   }, [rebookMode, hasBookedDate, createRebookReminder])
 
   function onChangeMode(next: RebookMode) {
-    setRebookMode(next)
     setError(null)
+    setProductsError(null)
+    setRebookMode(next)
     markDirty()
 
     if (next === 'NONE') {
@@ -354,11 +347,13 @@ export default function AftercareForm({
       setCreateRebookReminder(false)
       return
     }
+
     if (next === 'BOOKED_NEXT_APPOINTMENT') {
       setWindowStart('')
       setWindowEnd('')
       return
     }
+
     if (next === 'RECOMMENDED_WINDOW') {
       setRebookAt('')
       setCreateRebookReminder(false)
@@ -391,6 +386,7 @@ export default function AftercareForm({
       const url = p.url.trim()
       const note = pickString(p.note).trim()
 
+      // Empty row is allowed
       if (!name && !url && !note) continue
 
       if (!name) return 'Each product needs a name.'
@@ -413,9 +409,9 @@ export default function AftercareForm({
     const sanitizedProducts = products
       .map((p) => ({
         id: p.id,
-        name: p.name.trim(),
+        name: p.name.trim().slice(0, PRODUCT_NAME_MAX),
         url: p.url.trim(),
-        note: pickString(p.note).trim() || null,
+        note: pickString(p.note).trim().slice(0, PRODUCT_NOTE_MAX) || null,
       }))
       .filter((p) => p.name || p.url || p.note)
 
@@ -428,7 +424,7 @@ export default function AftercareForm({
       rebookWindowStart: rebookMode === 'RECOMMENDED_WINDOW' ? windowStartISO : null,
       rebookWindowEnd: rebookMode === 'RECOMMENDED_WINDOW' ? windowEndISO : null,
 
-      createRebookReminder: rebookMode === 'BOOKED_NEXT_APPOINTMENT' && rebookISO ? createRebookReminder : false,
+      createRebookReminder: rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !!rebookISO ? createRebookReminder : false,
       rebookReminderDaysBefore: clampInt(daysBeforeRaw, 1, 30, 2),
 
       createProductReminder,
@@ -474,6 +470,11 @@ export default function AftercareForm({
     return null
   }
 
+  function dispatchForceRefresh() {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new Event(FORCE_EVENT))
+  }
+
   async function postAftercare(sendToClient: boolean) {
     setError(null)
     setProductsError(null)
@@ -514,6 +515,8 @@ export default function AftercareForm({
       }
 
       const clientNotified = Boolean(data?.clientNotified)
+      const bookingFinished = Boolean(data?.bookingFinished)
+      const redirectTo = typeof data?.redirectTo === 'string' ? data.redirectTo : null
 
       if (clientNotified) {
         setSent(true)
@@ -524,6 +527,12 @@ export default function AftercareForm({
       }
 
       router.refresh()
+      dispatchForceRefresh()
+
+      if (sendToClient && bookingFinished && redirectTo) {
+        router.replace(redirectTo)
+        return
+      }
     } catch (err: any) {
       if (err?.name === 'AbortError') return
       console.error(err)
@@ -578,6 +587,7 @@ export default function AftercareForm({
         </div>
       ) : null}
 
+      {/* Photos */}
       <div className={cardClass()}>
         <div className={sectionTitleClass()}>Photos</div>
         <div className={subtleTextClass()}>Visible to you + the client (PRO_CLIENT). Not public.</div>
@@ -608,7 +618,9 @@ export default function AftercareForm({
       {/* Products */}
       <div className={cardClass()}>
         <div className={sectionTitleClass()}>Recommended products</div>
-        <div className={subtleTextClass()}>Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.</div>
+        <div className={subtleTextClass()}>
+          Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.
+        </div>
 
         <div className="mt-3 grid gap-3">
           {products.length === 0 ? (
@@ -631,7 +643,6 @@ export default function AftercareForm({
                       disabled={disabled}
                       maxLength={PRODUCT_NAME_MAX}
                       onChange={(e) => updateProduct(p.id, { name: e.target.value })}
-                      onInput={markDirty}
                       placeholder="e.g. Sulfate-free shampoo"
                       className={inputClass(Boolean(disabled))}
                     />
@@ -643,7 +654,6 @@ export default function AftercareForm({
                       value={p.url}
                       disabled={disabled}
                       onChange={(e) => updateProduct(p.id, { url: e.target.value })}
-                      onInput={markDirty}
                       placeholder="https://amazon.com/…"
                       className={inputClass(Boolean(disabled))}
                     />
@@ -659,7 +669,6 @@ export default function AftercareForm({
                       disabled={disabled}
                       maxLength={PRODUCT_NOTE_MAX}
                       onChange={(e) => updateProduct(p.id, { note: e.target.value })}
-                      onInput={markDirty}
                       placeholder="e.g. Use 2–3x/week to maintain shine"
                       className={inputClass(Boolean(disabled))}
                     />
@@ -887,31 +896,17 @@ export default function AftercareForm({
             </span>
           </label>
 
-          <div className="mt-2 text-xs font-semibold text-textSecondary">
-            These go into your Reminders tab so Future You remembers to check in.
-          </div>
+          <div className="mt-2 text-xs font-semibold text-textSecondary">These go into your Reminders tab so Future You remembers to check in.</div>
         </div>
 
         {error ? <div className="mt-3 text-sm font-semibold text-microAccent">{error}</div> : null}
 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            disabled={disabled || !!windowError}
-            onClick={() => postAftercare(false)}
-            className={secondaryBtn(Boolean(disabled || !!windowError))}
-            title="Save without notifying the client"
-          >
+          <button type="button" disabled={disabled || !!windowError} onClick={() => postAftercare(false)} className={secondaryBtn(Boolean(disabled || !!windowError))}>
             {loading ? 'Saving…' : 'Save draft'}
           </button>
 
-          <button
-            type="button"
-            disabled={disabled || !!windowError}
-            onClick={() => postAftercare(true)}
-            className={primaryBtn(Boolean(disabled || !!windowError))}
-            title="Notify the client that aftercare is ready"
-          >
+          <button type="button" disabled={disabled || !!windowError} onClick={() => postAftercare(true)} className={primaryBtn(Boolean(disabled || !!windowError))}>
             {loading ? 'Sending…' : 'Send to client'}
           </button>
         </div>
@@ -928,16 +923,15 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
   return (
     <div className="mt-3 grid grid-cols-3 gap-2">
       {items.map((m) => {
-        const thumb = m.thumbUrl || m.url
+        const href = m.renderUrl ?? null
+        const thumb = m.renderThumbUrl ?? m.renderUrl ?? null
+
         const isVideo = m.mediaType === 'VIDEO'
         const isProClient = m.visibility === 'PRO_CLIENT'
 
         return (
-          <a
+          <div
             key={m.id}
-            href={m.url}
-            target="_blank"
-            rel="noreferrer"
             className={[
               'relative block aspect-square overflow-hidden rounded-card bg-bgPrimary transition',
               isProClient ? 'border border-white/10' : 'border border-transparent',
@@ -945,8 +939,23 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
             ].join(' ')}
             title={isProClient ? 'Visible to pro + client' : 'Public'}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={thumb} alt="Booking media" className="h-full w-full object-cover" />
+            {thumb ? (
+              href ? (
+                <a href={href} target="_blank" rel="noreferrer" className="block h-full w-full">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={thumb} alt="Booking media" className="h-full w-full object-cover" />
+                </a>
+              ) : (
+                <div className="h-full w-full">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={thumb} alt="Booking media" className="h-full w-full object-cover" />
+                </div>
+              )
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-textSecondary">
+                Unavailable
+              </div>
+            )}
 
             {isVideo ? (
               <div className="absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
@@ -954,16 +963,10 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
               </div>
             ) : null}
 
-            {isProClient ? (
-              <div className="absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
-                PRO + CLIENT
-              </div>
-            ) : (
-              <div className="absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
-                PUBLIC
-              </div>
-            )}
-          </a>
+            <div className="absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+              {isProClient ? 'PRO + CLIENT' : 'PUBLIC'}
+            </div>
+          </div>
         )
       })}
     </div>

@@ -1,5 +1,4 @@
 // app/client/bookings/[id]/_view/buildBookingViewModel.ts
-
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { COPY } from '@/lib/copy'
 
@@ -41,39 +40,44 @@ function formatWhen(d: Date, timeZone: string) {
   }).format(d)
 }
 
-function needsConsultationApproval(raw: {
+function computePendingConsultation(raw: {
   status: unknown
   sessionStep: unknown
   finishedAt: Date | null
   consultationApproval?: { status: unknown } | null
 }) {
-  const approval = upper(raw.consultationApproval?.status)
-  if (approval !== 'PENDING') return false
-
   const status = upper(raw.status)
   if (status === 'CANCELLED' || status === 'COMPLETED') return false
   if (raw.finishedAt) return false
 
   const step = upper(raw.sessionStep)
-  return step === 'CONSULTATION_PENDING_CLIENT' || step === 'CONSULTATION' || !step || step === 'NONE'
+  if (step === 'CONSULTATION_PENDING_CLIENT') return true
+
+  const approval = upper(raw.consultationApproval?.status)
+  const PENDING_SET = new Set(['PENDING', 'PENDING_CLIENT', 'PENDING_CLIENT_APPROVAL', 'AWAITING_CLIENT', 'WAITING_CLIENT', 'SENT'])
+  return PENDING_SET.has(approval)
 }
 
 export function buildBookingViewModel(input: {
   step: StepKey
-  booking: any // ClientBookingDTO
+  booking: any // ClientBookingDTO-ish
   raw: any
   aftercare: any | null
 }) {
-  const statusUpper = upper(input.booking.status)
-  const sessionStepUpper = upper(input.booking.sessionStep)
+  const statusUpper = upper(input.booking?.status)
+  const sessionStepUpper = upper(input.booking?.sessionStep)
 
-  const appointmentTz = sanitizeTimeZone(input.booking.timeZone, 'UTC')
-  const scheduled = toDate(input.booking.scheduledFor)
+  const appointmentTz = sanitizeTimeZone(input.booking?.timeZone, 'UTC')
+  const scheduled = toDate(input.booking?.scheduledFor)
   const whenLabel = scheduled ? formatWhen(scheduled, appointmentTz) : COPY.common.unknownTime
 
-  const hasPendingConsult = needsConsultationApproval(input.raw)
+  // Prefer DTO truth, but fall back to raw if needed
+  const rawPending = computePendingConsultation(input.raw)
+  const dtoPending = Boolean(input.booking?.hasPendingConsultationApproval)
+  const pendingConsult = dtoPending || rawPending
+
   const showConsultationApproval =
-    Boolean(input.booking.hasPendingConsultationApproval ?? hasPendingConsult) &&
+    pendingConsult &&
     statusUpper !== 'CANCELLED' &&
     statusUpper !== 'COMPLETED'
 
@@ -85,18 +89,16 @@ export function buildBookingViewModel(input: {
 
   const canShowAftercareTab = statusUpper === 'COMPLETED' || Boolean(input.aftercare?.id)
 
-  // Your 4-step truth (turn this into a “progress pill” component later)
   const timeline = [
     { key: 'requested', label: 'Requested', on: statusUpper === 'PENDING' || statusUpper === 'ACCEPTED' || statusUpper === 'COMPLETED' },
     { key: 'confirmed', label: 'Confirmed', on: statusUpper === 'ACCEPTED' || statusUpper === 'COMPLETED' },
-    { key: 'consult', label: 'Consultation confirmed', on: Boolean(input.raw.consultationConfirmedAt) || statusUpper === 'COMPLETED' },
+    { key: 'consult', label: 'Consultation confirmed', on: Boolean(input.raw?.consultationConfirmedAt) || statusUpper === 'COMPLETED' },
     { key: 'completed', label: 'Completed', on: statusUpper === 'COMPLETED' },
   ] as const
 
-  // totals
-  const itemsSubtotal = (input.booking.items || []).reduce((sum: number, it: any) => sum + (Number(it.price) || 0), 0)
-  const hasItemPrices = (input.booking.items || []).some((it: any) => Number.isFinite(Number(it.price)))
-  const breakdownTotalLabel = hasItemPrices ? `$${itemsSubtotal.toFixed(2)}` : formatMoney(input.booking.subtotalSnapshot)
+  const itemsSubtotal = (input.booking?.items || []).reduce((sum: number, it: any) => sum + (Number(it.price) || 0), 0)
+  const hasItemPrices = (input.booking?.items || []).some((it: any) => Number.isFinite(Number(it.price)))
+  const breakdownTotalLabel = hasItemPrices ? `$${itemsSubtotal.toFixed(2)}` : formatMoney(input.booking?.subtotalSnapshot)
 
   return {
     appointmentTz,

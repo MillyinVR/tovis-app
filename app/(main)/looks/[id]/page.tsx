@@ -20,10 +20,12 @@ export default async function LookDetailPage({ params }: { params: Promise<{ id:
     },
   })
 
-  if (!media || media.visibility !== 'PUBLIC') notFound()
+if (!media || media.visibility !== 'PUBLIC') notFound()
 
-  const src = media.url
-  const isVideo = media.mediaType === 'VIDEO'
+if (!media.url) notFound() // ✅ url must exist for public detail page
+
+const src = media.url
+const isVideo = media.mediaType === 'VIDEO'
   const pro = media.professional
 
   return (

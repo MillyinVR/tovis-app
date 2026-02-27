@@ -24,8 +24,10 @@ type LineItem = {
   serviceId: string
   label: string
   categoryName: string | null
-  price: string
+  price: string // "12.34"
 }
+
+const FORCE_EVENT = 'tovis:pro-session:force'
 
 async function safeJson(res: Response) {
   return (await res.json().catch(() => ({}))) as any
@@ -48,6 +50,18 @@ function normalizeMoneyInput(raw: string) {
   return { value: normalized, ok: true }
 }
 
+/** Turns unknown "initial price" into a clean "12.34" string, or null. */
+function normalizeInitialPrice(v: unknown): string | null {
+  if (v == null) return null
+  const s = String(v).trim()
+  if (!s) return null
+  const parsed = normalizeMoneyInput(s)
+  if (!parsed.ok || parsed.value == null) return null
+  const n = Number(parsed.value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n.toFixed(2)
+}
+
 function sumMoneyStrings(items: Array<{ price: string }>) {
   let total = 0
   for (const it of items) {
@@ -64,8 +78,10 @@ function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16)
 }
 
-export default function ConsultationForm({ bookingId, initialNotes }: Props) {
+export default function ConsultationForm({ bookingId, initialNotes, initialPrice }: Props) {
   const router = useRouter()
+
+  const suggestedTotal = useMemo(() => normalizeInitialPrice(initialPrice), [initialPrice])
 
   const [notes, setNotes] = useState(initialNotes || '')
   const [services, setServices] = useState<ServiceOption[]>([])
@@ -128,6 +144,15 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
     const opt = services.find((s) => s.offeringId === selectedOfferingId)
     if (!opt) return setError('Select a service to add.')
 
+    // ✅ Use suggestedTotal ONLY for the first item if present.
+    // This makes initialPrice meaningful without inventing “total-only consults”.
+    const price =
+      items.length === 0 && suggestedTotal
+        ? suggestedTotal
+        : opt.defaultPrice != null
+          ? String(opt.defaultPrice.toFixed(2))
+          : ''
+
     setItems((prev) => [
       ...prev,
       {
@@ -136,7 +161,7 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
         serviceId: opt.serviceId,
         label: opt.serviceName,
         categoryName: opt.categoryName,
-        price: opt.defaultPrice != null ? String(opt.defaultPrice.toFixed(2)) : '',
+        price,
       },
     ])
   }
@@ -155,6 +180,8 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
       if (!it.offeringId || !it.serviceId) return false
       const p = normalizeMoneyInput(it.price)
       if (!p.ok || p.value == null) return false
+      const n = Number(p.value)
+      if (!Number.isFinite(n) || n <= 0) return false
     }
     return true
   }, [items])
@@ -184,7 +211,7 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
           serviceId: it.serviceId,
           label: it.label,
           categoryName: it.categoryName || null,
-          price: normalizeMoneyInput(it.price).value, // string like "12.34"
+          price: normalizeMoneyInput(it.price).value, // "12.34"
         })),
       }
 
@@ -201,8 +228,13 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
       if (!res.ok) return setError(errorFromResponse(res, data))
 
       setMessage('Sent to client for approval.')
+
+      // ✅ Refresh server components and force the sticky footer to re-fetch immediately.
       router.refresh()
-      router.push(`/pro/bookings/${encodeURIComponent(bookingId)}?step=consult`)
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(FORCE_EVENT))
+
+      // ✅ Correct navigation target: session hub
+      router.push(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
     } catch (err: any) {
       if (err?.name === 'AbortError') return
       console.error(err)
@@ -221,8 +253,17 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
       <div>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="text-[12px] font-black text-textPrimary">Services (what you’re actually doing)</div>
-          <div className="text-[12px] font-black text-textPrimary">
-            Total: <span className="text-textPrimary">{totalLabel}</span>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {suggestedTotal ? (
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textSecondary">
+                Suggested: ${suggestedTotal}
+              </span>
+            ) : null}
+
+            <div className="text-[12px] font-black text-textPrimary">
+              Total: <span className="text-textPrimary">{totalLabel}</span>
+            </div>
           </div>
         </div>
 
@@ -326,9 +367,7 @@ export default function ConsultationForm({ bookingId, initialNotes }: Props) {
           {saving ? 'Sending…' : 'Send to client for approval'}
         </button>
 
-        <span className="text-[12px] text-textSecondary">
-          Client sees line items + total and must approve before you proceed.
-        </span>
+        <span className="text-[12px] text-textSecondary">Client sees line items + total and must approve before you proceed.</span>
 
         {message ? <span className="text-[12px] font-black text-toneSuccess">{message}</span> : null}
         {error ? <span className="text-[12px] font-black text-toneDanger">{error}</span> : null}

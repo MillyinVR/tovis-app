@@ -389,6 +389,7 @@ model ProfessionalProfile {
   businessName     String?
   handle           String?
   handleNormalized String? @unique
+  isPremium        Boolean @default(false)
 
   bio       String?
   avatarUrl String?
@@ -1150,7 +1151,7 @@ model MediaAsset {
   reviewId         String?
   uploadedByUserId String?
   uploadedByRole   Role?
-  url              String
+  url              String?
   thumbUrl         String?
   mediaType        MediaType
   caption          String?

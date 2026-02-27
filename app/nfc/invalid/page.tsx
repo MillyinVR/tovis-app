@@ -1,4 +1,4 @@
-// app/t/[cardId]/page.tsx
+// app/nfc/invalid/page.tsx
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'

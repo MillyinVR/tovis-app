@@ -3,16 +3,17 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToFixed2String } from '@/lib/money'
-import {
-  sanitizeTimeZone,
-  isValidIanaTimeZone,
-  getZonedParts,
-  minutesSinceMidnightInTimeZone,
-} from '@/lib/timeZone'
+import { sanitizeTimeZone, isValidIanaTimeZone, getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 
-
 export const dynamic = 'force-dynamic'
+
+type PatchStatus = 'ACCEPTED' | 'CANCELLED'
+function normalizeStatus(v: unknown): PatchStatus | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'ACCEPTED' || s === 'CANCELLED') return s as PatchStatus
+  return null
+}
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
@@ -78,7 +79,7 @@ function parseHHMM(v?: string) {
 }
 
 function weekdayKeyFromZonedParts(z: { year: number; month: number; day: number; timeZone: string }) {
-  // Create a UTC instant from local parts (no DST safety needed; this is just for weekday labeling)
+  // UTC noon anchor avoids DST weirdness for weekday labeling
   const asUtc = new Date(Date.UTC(z.year, z.month - 1, z.day, 12, 0, 0, 0))
   const wd = new Intl.DateTimeFormat('en-US', { timeZone: z.timeZone, weekday: 'short' }).format(asUtc).toLowerCase()
   if (wd.startsWith('mon')) return 'mon'
@@ -105,35 +106,23 @@ function ensureWithinWorkingHours(args: {
   const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
   const wh = workingHours as WorkingHours
 
-  // ✅ Must start & end on the same *local* day in tz
+  // Must start & end on the same local day in tz
   const sParts = getZonedParts(scheduledStartUtc, tz)
   const eParts = getZonedParts(scheduledEndUtc, tz)
-  const sameLocalDay =
-    sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+  const sameLocalDay = sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+  if (!sameLocalDay) return { ok: false, error: 'That time is outside your working hours.' }
 
-  if (!sameLocalDay) {
-    return { ok: false, error: 'That time is outside your working hours.' }
-  }
-
-  // determine day key using the local date parts (stable)
   const dayKey = weekdayKeyFromZonedParts({ ...sParts, timeZone: tz })
   const rule = wh?.[dayKey]
-
-  if (!rule || rule.enabled === false) {
-    return { ok: false, error: 'That time is outside your working hours.' }
-  }
+  if (!rule || rule.enabled === false) return { ok: false, error: 'That time is outside your working hours.' }
 
   const startHHMM = parseHHMM(rule.start)
   const endHHMM = parseHHMM(rule.end)
-  if (!startHHMM || !endHHMM) {
-    return { ok: false, error: 'Your working hours are misconfigured.' }
-  }
+  if (!startHHMM || !endHHMM) return { ok: false, error: 'Your working hours are misconfigured.' }
 
   const windowStartMin = startHHMM.hh * 60 + startHHMM.mm
   const windowEndMin = endHHMM.hh * 60 + endHHMM.mm
-  if (windowEndMin <= windowStartMin) {
-    return { ok: false, error: 'Your working hours are misconfigured.' }
-  }
+  if (windowEndMin <= windowStartMin) return { ok: false, error: 'Your working hours are misconfigured.' }
 
   const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
   const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
@@ -146,13 +135,12 @@ function ensureWithinWorkingHours(args: {
 }
 
 /* ---------------------------------------------
-   Time zone resolution
+   Time zone helpers
    --------------------------------------------- */
 
 function normalizeTimeZoneStrict(tzRaw: unknown, fallback: string) {
   const s = typeof tzRaw === 'string' ? tzRaw.trim() : ''
   if (s && isValidIanaTimeZone(s)) return s
-  // sanitizeTimeZone handles unknowns; keep one consistent fallback
   const cleaned = sanitizeTimeZone(s, fallback) || fallback
   return isValidIanaTimeZone(cleaned) ? cleaned : fallback
 }
@@ -166,11 +154,9 @@ async function resolveBookingTimeZone(args: {
 }) {
   const fallback = args.fallback ?? 'UTC'
 
-  // 1) booking.locationTimeZone (strongest)
   const locTzDirect = typeof args.bookingLocationTimeZone === 'string' ? args.bookingLocationTimeZone.trim() : ''
   if (locTzDirect && isValidIanaTimeZone(locTzDirect)) return locTzDirect
 
-  // 2) location.timeZone
   if (args.bookingLocationId) {
     const loc = await prisma.professionalLocation.findFirst({
       where: { id: args.bookingLocationId, professionalId: args.professionalId },
@@ -180,20 +166,17 @@ async function resolveBookingTimeZone(args: {
     if (locTz && isValidIanaTimeZone(locTz)) return locTz
   }
 
-  // 3) pro.timeZone
   return normalizeTimeZoneStrict(args.proTimeZone, fallback)
 }
 
 /* ---------------------------------------------
-   Handlers
+   GET
    --------------------------------------------- */
 
 export async function GET(_req: Request, { params }: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return fail(401, 'Not authorized.')
-    }
+    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) return fail(401, 'Not authorized.')
 
     const { id } = await Promise.resolve(params)
     const bookingId = (id || '').trim()
@@ -243,9 +226,7 @@ export async function GET(_req: Request, { params }: Ctx) {
       },
     })
 
-    if (!booking || booking.professionalId !== user.professionalProfile.id) {
-      return fail(404, 'Booking not found.')
-    }
+    if (!booking || booking.professionalId !== user.professionalProfile.id) return fail(404, 'Booking not found.')
 
     const start = normalizeToMinute(new Date(booking.scheduledFor))
     if (!Number.isFinite(start.getTime())) return fail(500, 'Booking has an invalid scheduled time.')
@@ -269,17 +250,14 @@ export async function GET(_req: Request, { params }: Ctx) {
     const fullName = fn || ln ? `${fn} ${ln}`.trim() : booking.client?.user?.email || 'Client'
 
     const tzRes = await resolveApptTimeZone({
-  bookingLocationTimeZone: booking.locationTimeZone,
-  locationId: booking.locationId ?? null,
-  professionalId: booking.professionalId,
-  professionalTimeZone: booking.professional?.timeZone,
-  fallback: 'UTC',
-})
+      bookingLocationTimeZone: booking.locationTimeZone,
+      locationId: booking.locationId ?? null,
+      professionalId: booking.professionalId,
+      professionalTimeZone: booking.professional?.timeZone,
+      fallback: 'UTC',
+    })
+    const tz = tzRes.ok ? tzRes.timeZone : 'UTC'
 
-const tz = tzRes.ok ? tzRes.timeZone : 'UTC'
-
-
-    // For the pro booking editor UI: list services from active offerings
     const offerings = await prisma.professionalServiceOffering.findMany({
       where: { professionalId: user.professionalProfile.id, isActive: true },
       select: {
@@ -299,12 +277,7 @@ const tz = tzRes.ok ? tzRes.timeZone : 'UTC'
           ? o.mobileDurationMinutes ?? o.service.defaultDurationMinutes
           : o.salonDurationMinutes ?? o.service.defaultDurationMinutes
 
-      return {
-        id: String(o.service.id),
-        name: o.service.name,
-        offeringId: String(o.id),
-        durationMinutes: typeof dur === 'number' ? dur : null,
-      }
+      return { id: String(o.service.id), name: o.service.name, offeringId: String(o.id), durationMinutes: typeof dur === 'number' ? dur : null }
     })
 
     return NextResponse.json(
@@ -317,23 +290,11 @@ const tz = tzRes.ok ? tzRes.timeZone : 'UTC'
           endsAt: endsAt.toISOString(),
           locationType: booking.locationType,
           bufferMinutes: Math.max(0, bufferMinutes),
-
-          // UI expects durationMinutes
           durationMinutes,
           totalDurationMinutes: durationMinutes,
-
-          subtotalSnapshot: moneyToFixed2String(
-            booking.subtotalSnapshot ?? (computedSubtotal as any),
-          ),
-
-          client: {
-            fullName,
-            email: booking.client?.user?.email ?? null,
-            phone: booking.client?.phone ?? null,
-          },
-
+          subtotalSnapshot: moneyToFixed2String(booking.subtotalSnapshot ?? (computedSubtotal as any)),
+          client: { fullName, email: booking.client?.user?.email ?? null, phone: booking.client?.phone ?? null },
           timeZone: tz,
-
           serviceItems: items.map((i) => ({
             id: i.id,
             serviceId: i.serviceId,
@@ -354,12 +315,14 @@ const tz = tzRes.ok ? tzRes.timeZone : 'UTC'
   }
 }
 
+/* ---------------------------------------------
+   PATCH
+   --------------------------------------------- */
+
 export async function PATCH(req: Request, { params }: Ctx) {
   try {
     const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return fail(401, 'Not authorized.')
-    }
+    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) return fail(401, 'Not authorized.')
 
     const { id } = await Promise.resolve(params)
     const bookingId = (id || '').trim()
@@ -367,21 +330,25 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
     const body = await safeJsonReq(req)
 
-    // What UI can send
+    // Inputs the UI can send
+    const nextStatus = normalizeStatus(body?.status)
     const scheduledForRaw = pickString(body?.scheduledFor)
     const notifyClient = Boolean(body?.notifyClient)
 
+    // Accept both durationMinutes and totalDurationMinutes (clients vary)
     const bufferRaw = body?.bufferMinutes
-    const durationMinutesRaw = body?.durationMinutes
+    const durationMinutesRaw = body?.durationMinutes ?? body?.totalDurationMinutes
+
     const allowOutside = Boolean(body?.allowOutsideWorkingHours)
 
-    // Service items: replace-all model (simple + safe)
+    // Service items: replace-all model
     const serviceItemsRaw = Array.isArray(body?.serviceItems) ? body.serviceItems : null
 
     const wantsSomething =
-      !!scheduledForRaw || bufferRaw != null || durationMinutesRaw != null || serviceItemsRaw != null
+      nextStatus != null || !!scheduledForRaw || bufferRaw != null || durationMinutesRaw != null || serviceItemsRaw != null
 
-    if (!wantsSomething) return fail(400, 'No changes provided.')
+    // No-op should not be an error
+    if (!wantsSomething) return NextResponse.json({ ok: true, booking: null, noOp: true }, { status: 200 })
 
     let nextStart: Date | null = null
     if (scheduledForRaw) {
@@ -422,21 +389,78 @@ export async function PATCH(req: Request, { params }: Ctx) {
           locationTimeZone: true,
           professional: { select: { timeZone: true } },
 
-          serviceItems: {
-            orderBy: { sortOrder: 'asc' },
-            select: { id: true, sortOrder: true },
-          },
+          serviceItems: { orderBy: { sortOrder: 'asc' }, select: { id: true, sortOrder: true } },
         },
       })
 
-      if (!existing || existing.professionalId !== user.professionalProfile!.id) {
-        throw new Error('NOT_FOUND')
-      }
+      if (!existing || existing.professionalId !== user.professionalProfile!.id) throw new Error('NOT_FOUND')
+
+      // If already cancelled, allow idempotent cancel but block edits
       if (String(existing.status) === 'CANCELLED') {
+        if (nextStatus === 'CANCELLED') {
+          return {
+            id: existing.id,
+            scheduledFor: new Date(existing.scheduledFor).toISOString(),
+            endsAt: addMinutes(
+              new Date(existing.scheduledFor),
+              Number(existing.totalDurationMinutes ?? 60) + Math.max(0, Number(existing.bufferMinutes ?? 0)),
+            ).toISOString(),
+            bufferMinutes: Math.max(0, Number(existing.bufferMinutes ?? 0)),
+            durationMinutes: Number(existing.totalDurationMinutes ?? 60),
+            totalDurationMinutes: Number(existing.totalDurationMinutes ?? 60),
+            status: existing.status,
+            subtotalSnapshot: 0,
+            timeZone: 'UTC',
+          }
+        }
         throw new Error('CANNOT_EDIT_CANCELLED')
       }
 
-      // ✅ LOCATION truth for working-hours/timezone
+      // STATUS change: handle CANCELLED early (skip WH/conflicts)
+      if (nextStatus === 'CANCELLED') {
+        const updated = await tx.booking.update({
+          where: { id: existing.id },
+          data: {
+            status: 'CANCELLED' as any,
+            // Optional: could set finishedAt too, but your session logic only checks finishedAt null.
+            finishedAt: new Date() as any,
+          } as any,
+          select: { id: true, status: true, scheduledFor: true, bufferMinutes: true, totalDurationMinutes: true },
+        })
+
+        if (notifyClient) {
+          try {
+            await tx.clientNotification.create({
+              data: {
+                clientId: existing.clientId,
+                type: 'BOOKING_UPDATE' as any,
+                title: 'Appointment cancelled',
+                body: 'Your appointment was cancelled.',
+                bookingId: updated.id,
+                dedupeKey: `BOOKING_CANCELLED:${updated.id}:${new Date(updated.scheduledFor).toISOString()}`,
+              } as any,
+            })
+          } catch (e) {
+            console.error('Client notification failed (cancel):', e)
+          }
+        }
+
+        const dur = Number(updated.totalDurationMinutes ?? 60)
+        const buf = Math.max(0, Number(updated.bufferMinutes ?? 0))
+        return {
+          id: updated.id,
+          scheduledFor: new Date(updated.scheduledFor).toISOString(),
+          endsAt: addMinutes(new Date(updated.scheduledFor), dur + buf).toISOString(),
+          bufferMinutes: buf,
+          durationMinutes: dur,
+          totalDurationMinutes: dur,
+          status: updated.status,
+          subtotalSnapshot: 0,
+          timeZone: 'UTC',
+        }
+      }
+
+      // LOCATION truth for timezone + working-hours checks (for schedule edits)
       const loc = existing.locationId
         ? await tx.professionalLocation.findFirst({
             where: { id: existing.locationId, professionalId: existing.professionalId, isBookable: true },
@@ -444,7 +468,6 @@ export async function PATCH(req: Request, { params }: Ctx) {
           })
         : null
 
-      // booking.locationTimeZone > location.timeZone > pro.timeZone > UTC
       const tzRes = await resolveApptTimeZone({
         bookingLocationTimeZone: existing.locationTimeZone,
         location: loc ? { id: existing.locationId, timeZone: loc.timeZone } : null,
@@ -457,21 +480,18 @@ export async function PATCH(req: Request, { params }: Ctx) {
       if (!tzRes.ok) throw new Error('TIMEZONE_REQUIRED')
       const apptTz = tzRes.timeZone
 
-
-      // Replace-all serviceItems if provided (no legacy "serviceId" shortcut)
+      // Replace-all serviceItems if provided
       if (serviceItemsRaw) {
         await tx.bookingServiceItem.deleteMany({ where: { bookingId: existing.id } })
 
         let idx = 0
         for (const raw of serviceItemsRaw) {
           const serviceId = pickString(raw?.serviceId)
-          if (!serviceId) throw new Error('BAD_ITEMS')
-
           const offeringId = pickString(raw?.offeringId)
           const price = safeNumber(raw?.priceSnapshot)
           const dur = safeNumber(raw?.durationMinutesSnapshot)
 
-          if (!offeringId) throw new Error('BAD_ITEMS')
+          if (!serviceId || !offeringId) throw new Error('BAD_ITEMS')
           if (price == null || price < 0) throw new Error('BAD_ITEMS')
           if (dur == null || dur < 15 || dur > 12 * 60) throw new Error('BAD_ITEMS')
 
@@ -532,12 +552,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
           scheduledFor: { gte: windowStart, lte: windowEnd },
           NOT: { status: 'CANCELLED' as any },
         },
-        select: {
-          id: true,
-          scheduledFor: true,
-          totalDurationMinutes: true,
-          bufferMinutes: true,
-        },
+        select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true },
         take: 200,
       })
 
@@ -550,36 +565,39 @@ export async function PATCH(req: Request, { params }: Ctx) {
         const bEnd = addMinutes(bStart, bDur + bBuf)
         return overlaps(bStart, bEnd, finalStart, finalEnd)
       })
-
       if (hasConflict) throw new Error('CONFLICT')
+
+      // Apply ACCEPTED status if requested (idempotent)
+      const statusUpdate = nextStatus === 'ACCEPTED' ? { status: 'ACCEPTED' as any } : {}
 
       const updated = await tx.booking.update({
         where: { id: existing.id },
         data: {
+          ...statusUpdate,
           scheduledFor: finalStart,
           bufferMinutes: finalBuffer,
           totalDurationMinutes: finalDuration,
           subtotalSnapshot: computedSubtotal as any,
         } as any,
-        select: {
-          id: true,
-          scheduledFor: true,
-          bufferMinutes: true,
-          totalDurationMinutes: true,
-          status: true,
-        },
+        select: { id: true, scheduledFor: true, bufferMinutes: true, totalDurationMinutes: true, status: true },
       })
 
       if (notifyClient) {
         try {
+          const title = nextStatus === 'ACCEPTED' ? 'Appointment confirmed' : 'Appointment updated'
+          const bodyText =
+            nextStatus === 'ACCEPTED'
+              ? 'Your appointment has been confirmed.'
+              : 'Your appointment details were updated.'
+
           await tx.clientNotification.create({
             data: {
               clientId: existing.clientId,
               type: 'BOOKING_UPDATE' as any,
-              title: 'Appointment updated',
-              body: 'Your appointment details were updated.',
+              title,
+              body: bodyText,
               bookingId: updated.id,
-              dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}`,
+              dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
             } as any,
           })
         } catch (e) {
@@ -612,6 +630,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     if (msg === 'CONFLICT') return fail(409, 'That time is not available.')
     if (msg === 'BAD_ITEMS') return fail(400, 'Invalid service items.')
     if (msg.startsWith('WH:')) return fail(400, msg.slice(3) || 'That time is outside working hours.')
+    if (msg === 'TIMEZONE_REQUIRED') return fail(400, 'Please set your timezone before editing bookings.')
 
     console.error('PATCH /api/pro/bookings/[id] error:', e)
     return fail(500, 'Failed to update booking.')

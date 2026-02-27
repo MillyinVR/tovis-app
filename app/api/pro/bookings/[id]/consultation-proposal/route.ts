@@ -1,7 +1,8 @@
 // app/api/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { BookingStatus, SessionStep } from '@prisma/client'
+import { BookingStatus, ConsultationApprovalStatus, SessionStep } from '@prisma/client'
+import { transitionSessionStepTx } from '@/lib/booking/transitions'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,17 +61,12 @@ function parseProposedServicesJson(v: unknown): any | null {
 
 type ProposedServiceRef = { serviceId?: unknown; offeringId?: unknown }
 
-function extractServiceRefsFromProposedJson(
-  v: any,
-): Array<{ serviceId: string | null; offeringId: string | null }> {
+function extractServiceRefsFromProposedJson(v: any): Array<{ serviceId: string | null; offeringId: string | null }> {
   const out: Array<{ serviceId: string | null; offeringId: string | null }> = []
 
   const visit = (node: any) => {
     if (!node) return
-    if (Array.isArray(node)) {
-      for (const x of node) visit(x)
-      return
-    }
+    if (Array.isArray(node)) return node.forEach(visit)
     if (typeof node !== 'object') return
 
     const maybe = node as ProposedServiceRef
@@ -78,43 +74,11 @@ function extractServiceRefsFromProposedJson(
     const offeringId = typeof maybe.offeringId === 'string' && maybe.offeringId.trim() ? maybe.offeringId.trim() : null
 
     if (serviceId || offeringId) out.push({ serviceId, offeringId })
-
-    for (const k of Object.keys(node)) visit((node as any)[k])
+    Object.keys(node).forEach((k) => visit((node as any)[k]))
   }
 
   visit(v)
   return out
-}
-
-async function validateProposedServicesAreFromProOfferings(args: {
-  proId: string
-  proposedServicesJson: any
-}) {
-  const refs = extractServiceRefsFromProposedJson(args.proposedServicesJson)
-
-  if (!refs.length) {
-    return { ok: false as const, error: 'Proposal must include serviceId (and ideally offeringId) for each line item.' }
-  }
-
-  const offerings = await prisma.professionalServiceOffering.findMany({
-    where: { professionalId: args.proId, isActive: true },
-    select: { id: true, serviceId: true },
-    take: 1000,
-  })
-
-  const allowedOfferingIds = new Set(offerings.map((o) => String(o.id)))
-  const allowedServiceIds = new Set(offerings.map((o) => String(o.serviceId)))
-
-  for (const r of refs) {
-    if (r.offeringId && !allowedOfferingIds.has(r.offeringId)) {
-      return { ok: false as const, error: 'Proposal includes an offering that is not active for this pro.' }
-    }
-    if (r.serviceId && !allowedServiceIds.has(r.serviceId)) {
-      return { ok: false as const, error: 'Proposal includes a service that is not active for this pro.' }
-    }
-  }
-
-  return { ok: true as const }
 }
 
 function canProSendProposal(step: SessionStep | null) {
@@ -146,59 +110,80 @@ export async function POST(req: Request, ctx: Ctx) {
     const notesRaw = pickString(body?.notes)
     const notes = notesRaw ? notesRaw.slice(0, NOTES_MAX) : null
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        clientId: true,
-        status: true,
-        startedAt: true,
-        finishedAt: true,
-        sessionStep: true,
-      },
-    })
-
-    if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
-
-    if (booking.status === BookingStatus.CANCELLED) return jsonFail(409, 'This booking is cancelled.')
-    if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) return jsonFail(409, 'This booking is finalized.')
-
-    // ✅ Consult is intended to happen while client is present.
-    // If you want to allow proposals BEFORE start, delete this.
-    if (!booking.startedAt) return jsonFail(409, 'Start the appointment before sending a consultation proposal.')
-
-    // ✅ No legacy: only allow during consult flows
-    if (!canProSendProposal(booking.sessionStep ?? null)) {
-      return jsonFail(409, 'Booking is not in a consultation stage.')
-    }
-
-    // ✅ Validate payload matches pro offerings (prevents “weird JSON” from getting stored)
-    const valid = await validateProposedServicesAreFromProOfferings({
-      proId,
-      proposedServicesJson,
-    })
-    if (!valid.ok) return jsonFail(400, valid.error)
-
     const proposedTotalMoney = centsToMoneyString(proposedCents)
 
-    const result = await prisma.$transaction(async (tx) => {
+    const txResult = await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        select: {
+          id: true,
+          professionalId: true,
+          clientId: true,
+          status: true,
+          startedAt: true,
+          finishedAt: true,
+          sessionStep: true,
+        },
+      })
+
+      if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
+      if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden.' }
+
+      if (booking.status === BookingStatus.CANCELLED) return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
+      if (booking.status === BookingStatus.COMPLETED || booking.finishedAt)
+        return { ok: false as const, status: 409, error: 'This booking is finalized.' }
+
+      // Your intentional rule: client present
+      if (!booking.startedAt) return { ok: false as const, status: 409, error: 'Start the appointment before sending a consultation proposal.' }
+
+      if (!canProSendProposal(booking.sessionStep ?? null)) {
+        return { ok: false as const, status: 409, error: 'Booking is not in a consultation stage.' }
+      }
+
+      // Validate proposal references are from this pro's active offerings
+      const refs = extractServiceRefsFromProposedJson(proposedServicesJson)
+      if (!refs.length) {
+        return {
+          ok: false as const,
+          status: 400,
+          error: 'Proposal must include serviceId (and ideally offeringId) for each line item.',
+        }
+      }
+
+      const offerings = await tx.professionalServiceOffering.findMany({
+        where: { professionalId: proId, isActive: true },
+        select: { id: true, serviceId: true },
+        take: 1000,
+      })
+
+      const allowedOfferingIds = new Set(offerings.map((o) => String(o.id)))
+      const allowedServiceIds = new Set(offerings.map((o) => String(o.serviceId)))
+
+      for (const r of refs) {
+        if (r.offeringId && !allowedOfferingIds.has(r.offeringId)) {
+          return { ok: false as const, status: 400, error: 'Proposal includes an offering that is not active for this pro.' }
+        }
+        if (r.serviceId && !allowedServiceIds.has(r.serviceId)) {
+          return { ok: false as const, status: 400, error: 'Proposal includes a service that is not active for this pro.' }
+        }
+      }
+
+      // Upsert approval
       const approval = await tx.consultationApproval.upsert({
         where: { bookingId: booking.id },
         create: {
           bookingId: booking.id,
           clientId: booking.clientId,
           proId: booking.professionalId,
-          status: 'PENDING',
+          status: ConsultationApprovalStatus.PENDING,
           proposedServicesJson: proposedServicesJson as any,
-          proposedTotal: proposedTotalMoney as any, // Decimal string OK
+          proposedTotal: proposedTotalMoney as any,
           notes,
           approvedAt: null,
           rejectedAt: null,
         } as any,
         update: {
-          status: 'PENDING',
+          status: ConsultationApprovalStatus.PENDING,
           proposedServicesJson: proposedServicesJson as any,
           proposedTotal: proposedTotalMoney as any,
           notes,
@@ -208,11 +193,17 @@ export async function POST(req: Request, ctx: Ctx) {
         select: { id: true, status: true, proposedTotal: true, updatedAt: true },
       })
 
-      const updatedBooking = await tx.booking.update({
-        where: { id: booking.id },
-        data: { sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT },
-        select: { id: true, sessionStep: true },
+      // ✅ Canonical step transition (no direct booking.update here)
+      const stepRes = await transitionSessionStepTx(tx, {
+        bookingId: booking.id,
+        proId,
+        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
       })
+
+      if (!stepRes.ok) {
+        // keep transaction atomic: if step can't change, proposal shouldn't be stored either
+        return { ok: false as const, status: stepRes.status, error: stepRes.error, forcedStep: stepRes.forcedStep }
+      }
 
       // Best-effort notify client
       try {
@@ -230,14 +221,21 @@ export async function POST(req: Request, ctx: Ctx) {
         console.error('Client notification failed (consultation proposal):', e)
       }
 
-      return { approval, sessionStep: updatedBooking.sessionStep, proposedCents }
+      return {
+        ok: true as const,
+        approval,
+        sessionStep: stepRes.booking.sessionStep,
+        proposedCents,
+      }
     })
+
+    if (!txResult.ok) return jsonFail(txResult.status, txResult.error, txResult.forcedStep ? { forcedStep: txResult.forcedStep } : undefined)
 
     return jsonOk(
       {
-        approval: result.approval,
-        sessionStep: result.sessionStep,
-        proposedCents: result.proposedCents,
+        approval: txResult.approval,
+        sessionStep: txResult.sessionStep,
+        proposedCents: txResult.proposedCents,
       },
       200,
     )

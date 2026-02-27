@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "MediaAsset" ALTER COLUMN "url" DROP NOT NULL;

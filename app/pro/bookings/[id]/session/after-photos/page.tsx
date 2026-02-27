@@ -1,12 +1,16 @@
-// app/pro/bookings/[id]/session/after-photos/page.tsx
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
-import MediaUploader from '../MediaUploader'
 import { getServerOrigin } from '@/lib/serverOrigin'
+import { prisma } from '@/lib/prisma'
+
+import MediaUploader from '../MediaUploader'
+import MediaPreviewGrid from '../_components/MediaPreviewGrid'
+
+import { BookingStatus, MediaPhase, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,19 +18,14 @@ type ApiItem = {
   id: string
   mediaType: 'IMAGE' | 'VIDEO'
   caption: string | null
-  createdAt: string
+  createdAt: string | Date
   reviewId: string | null
-
   signedUrl: string | null
   signedThumbUrl: string | null
 }
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
-}
-
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
 function Card(props: { children: React.ReactNode; className?: string }) {
@@ -37,35 +36,22 @@ function Card(props: { children: React.ReactNode; className?: string }) {
   )
 }
 
-function safeDateString(raw: unknown, timeZone: string) {
-  try {
-    const d = new Date(String(raw))
-    if (Number.isNaN(d.getTime())) return ''
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone,
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(d)
-  } catch {
-    return ''
-  }
+function bookingHubHref(bookingId: string) {
+  return `/pro/bookings/${encodeURIComponent(bookingId)}/session`
+}
+function afterPhotosHref(bookingId: string) {
+  return `/pro/bookings/${encodeURIComponent(bookingId)}/session/after-photos`
+}
+function aftercareHref(bookingId: string) {
+  return `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`
 }
 
-/**
- * ✅ Long-term correctness:
- * - forwards cookies to API so requirePro() works
- * - supports absolute or relative base URL
- */
-async function fetchProMedia(bookingId: string, phase: 'AFTER') {
+async function fetchAfterMedia(bookingId: string): Promise<ApiItem[]> {
   const origin = (await getServerOrigin()) || ''
   const url = origin
-    ? `${origin}/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=${phase}`
-    : `/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=${phase}`
+    ? `${origin}/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=AFTER`
+    : `/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=AFTER`
 
-  // Forward auth cookies so your API can validate the pro
   const h = await headers()
   const cookie = h.get('cookie') ?? ''
 
@@ -74,10 +60,9 @@ async function fetchProMedia(bookingId: string, phase: 'AFTER') {
     headers: cookie ? { cookie } : undefined,
   }).catch(() => null)
 
-  if (!res?.ok) return [] as ApiItem[]
-
+  if (!res?.ok) return []
   const data = (await res.json().catch(() => ({}))) as any
-  return (data?.items ?? []) as ApiItem[]
+  return (Array.isArray(data?.items) ? data.items : []) as ApiItem[]
 }
 
 type PageProps = { params: Promise<{ id: string }> }
@@ -88,23 +73,38 @@ export default async function ProAfterPhotosPage(props: PageProps) {
   if (!bookingId) notFound()
 
   const user = await getCurrentUser().catch(() => null)
-  if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-    redirect(`/login?from=/pro/bookings/${encodeURIComponent(bookingId)}/session/after-photos`)
-  }
+  const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
+  if (!proId) redirect(`/login?from=${encodeURIComponent(afterPhotosHref(bookingId))}`)
 
-  const proTz = sanitizeTimeZone(user.professionalProfile.timeZone, DEFAULT_TIME_ZONE)
+  const proTz = sanitizeTimeZone(user?.professionalProfile?.timeZone, DEFAULT_TIME_ZONE)
 
-  // ✅ pull signed URLs via API (requires cookies forwarded)
-  const items = await fetchProMedia(bookingId, 'AFTER')
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { id: true, professionalId: true, status: true, startedAt: true, finishedAt: true, sessionStep: true },
+  })
+  if (!booking) notFound()
+  if (booking.professionalId !== proId) redirect('/pro')
 
+  const isCancelled = booking.status === BookingStatus.CANCELLED
+  const isCompleted = booking.status === BookingStatus.COMPLETED || Boolean(booking.finishedAt)
+  if (!booking.startedAt || isCancelled || isCompleted) redirect(bookingHubHref(bookingId))
+
+  const step = (booking.sessionStep ?? SessionStep.NONE) as SessionStep
+  if (step === SessionStep.DONE) redirect(aftercareHref(bookingId))
+
+  const allowedHere = step === SessionStep.AFTER_PHOTOS || step === SessionStep.FINISH_REVIEW
+  if (!allowedHere) redirect(bookingHubHref(bookingId))
+
+  const items = await fetchAfterMedia(bookingId)
   const canContinue = items.length > 0
+
+  const afterCount = await prisma.mediaAsset.count({
+    where: { bookingId, phase: MediaPhase.AFTER, uploadedByRole: 'PRO' },
+  })
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 text-textPrimary">
-      <Link
-        href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
-        className="text-xs font-black text-textSecondary hover:opacity-80"
-      >
+      <Link href={bookingHubHref(bookingId)} className="text-xs font-black text-textSecondary hover:opacity-80">
         ← Back to session
       </Link>
 
@@ -112,13 +112,12 @@ export default async function ProAfterPhotosPage(props: PageProps) {
 
       <Card>
         <div className="text-sm text-textSecondary">
-          Add at least one after photo to unlock aftercare. Saved{' '}
-          <span className="font-black text-textPrimary">privately</span>.
+          Add at least one after photo for wrap-up. Saved <span className="font-black text-textPrimary">privately</span>.
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Link
-            href={canContinue ? `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare` : '#'}
+            href={canContinue ? aftercareHref(bookingId) : '#'}
             aria-disabled={!canContinue}
             className={[
               'rounded-full px-4 py-2 text-xs font-black transition',
@@ -133,7 +132,7 @@ export default async function ProAfterPhotosPage(props: PageProps) {
           {!canContinue ? (
             <span className="text-xs font-semibold text-textSecondary">No after media yet. Add one to continue.</span>
           ) : (
-            <span className="text-xs font-black text-textPrimary">Unlocked.</span>
+            <span className="text-xs font-black text-textPrimary">Unlocked · {afterCount} uploaded</span>
           )}
         </div>
 
@@ -147,60 +146,7 @@ export default async function ProAfterPhotosPage(props: PageProps) {
       </section>
 
       <section className="mt-5">
-        <div className="text-sm font-black">Uploaded after media</div>
-
-        {items.length === 0 ? (
-          <div className="mt-2 text-sm text-textSecondary">None yet.</div>
-        ) : (
-          <div className="mt-3 grid gap-3">
-            {items.map((m) => {
-              const src = m.signedThumbUrl || m.signedUrl
-              const wasReleased = Boolean(m.reviewId)
-              const when = safeDateString(m.createdAt, proTz)
-
-              return (
-                <div key={m.id} className="rounded-card border border-white/10 bg-bgSecondary p-3">
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-black text-textPrimary">
-                    <span>{m.mediaType} · PRIVATE</span>
-                    {when ? <span className="font-semibold text-textSecondary">· {when}</span> : null}
-                  </div>
-
-                  {m.caption ? <div className="mt-1 text-sm text-textSecondary">{m.caption}</div> : null}
-
-                  {src ? (
-                    <div className="mt-2 overflow-hidden rounded-card border border-white/10 bg-bgPrimary">
-                      {m.mediaType === 'VIDEO' ? (
-                        // eslint-disable-next-line jsx-a11y/media-has-caption
-                        <video src={src} controls className="block h-56 w-full object-cover" />
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={src} alt="After media" className="block h-44 w-full object-cover" />
-                      )}
-                    </div>
-                  ) : (
-                    <div className="mt-2 rounded-card border border-white/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
-                      Couldn’t generate a signed URL (file missing or storage error).
-                    </div>
-                  )}
-
-                  <div className="mt-2 flex flex-wrap gap-3 text-xs font-black">
-                    {m.signedUrl ? (
-                      <a href={m.signedUrl} target="_blank" rel="noreferrer" className="text-accentPrimary hover:opacity-80">
-                        Open media
-                      </a>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-2 text-[11px] font-semibold text-textSecondary">
-                    {wasReleased
-                      ? 'Client attached this to a review (released).'
-                      : 'Stays private unless the client attaches it to a review.'}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        <MediaPreviewGrid items={items} title="Uploaded after media" />
       </section>
     </main>
   )

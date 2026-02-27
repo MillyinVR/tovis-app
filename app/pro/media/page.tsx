@@ -24,18 +24,25 @@ export default async function ProMediaPage() {
       thumbUrl: true,
       caption: true,
       isFeaturedInPortfolio: true,
-      reviewId: true, // needed for canFeature
+      reviewId: true,
     },
   })
+
+  const items = media
+    .map((m) => {
+      const src = (m.thumbUrl ?? m.url ?? '').trim()
+      return { ...m, src: src || null }
+    })
+    .filter((m) => Boolean(m.src))
+
+  const brokenCount = media.length - items.length
 
   return (
     <main className="mx-auto max-w-5xl px-4 pb-20 pt-20 font-sans">
       <div className="mb-4 flex items-end justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-[20px] font-black text-textPrimary">My media</h1>
-          <p className="mt-1 text-[13px] text-textSecondary">
-            Manage posts and choose what appears in your portfolio.
-          </p>
+          <p className="mt-1 text-[13px] text-textSecondary">Manage posts and choose what appears in your portfolio.</p>
         </div>
 
         <Link
@@ -46,17 +53,23 @@ export default async function ProMediaPage() {
         </Link>
       </div>
 
-      {media.length === 0 ? (
+      {brokenCount > 0 ? (
+        <div className="mb-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-[12px] text-textSecondary">
+          {brokenCount} item(s) missing a URL and were hidden.
+        </div>
+      ) : null}
+
+      {items.length === 0 ? (
         <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
           No media yet.
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {media.map((m) => (
+          {items.map((m) => (
             <MediaTile
               key={m.id}
               id={m.id}
-              src={m.thumbUrl || m.url}
+              src={m.src!}
               caption={m.caption}
               isFeaturedInPortfolio={Boolean(m.isFeaturedInPortfolio)}
             />

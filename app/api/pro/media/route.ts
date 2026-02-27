@@ -1,12 +1,11 @@
 // app/api/pro/media/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
+import { MediaType, MediaVisibility } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type StorageBucket = 'media-public' | 'media-private'
-type MediaType = 'IMAGE' | 'VIDEO'
-type MediaVisibility = 'PUBLIC' | 'PRIVATE'
 
 type CreateMediaBody = {
   bucket?: unknown
@@ -32,13 +31,26 @@ function isPublicBucket(b: StorageBucket) {
   return b === 'media-public'
 }
 
+/**
+ * Prisma truth:
+ * - PUBLIC
+ * - PRO_CLIENT (this is your "private" equivalent)
+ */
 function computeVisibility(isEligibleForLooks: boolean, isFeaturedInPortfolio: boolean): MediaVisibility {
-  return isEligibleForLooks || isFeaturedInPortfolio ? 'PUBLIC' : 'PRIVATE'
+  return isEligibleForLooks || isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
 }
 
 function parseMediaType(v: unknown): MediaType {
   const s = upper(v)
-  return s === 'VIDEO' ? 'VIDEO' : 'IMAGE'
+  return s === 'VIDEO' ? MediaType.VIDEO : MediaType.IMAGE
+}
+
+function pickStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v
+    .map((x) => pickString(x)) // likely string | null
+    .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    .map((x) => x.trim())
 }
 
 export async function POST(req: Request) {
@@ -66,9 +78,14 @@ export async function POST(req: Request) {
       return jsonFail(400, 'Missing publicUrl for public upload.')
     }
 
-    const url = isPublicBucket(bucket) ? publicUrl : `supabase://${bucket}/${path}`
+    // url column stores:
+    // - public http url for public bucket
+    // - supabase://bucket/path placeholder for private (resolved via signed url API)
+    const url = isPublicBucket(bucket) ? publicUrl! : `supabase://${bucket}/${path}`
 
-    const thumbBucket = thumbBucketRaw && isStorageBucket(thumbBucketRaw) ? thumbBucketRaw : null
+    const thumbBucket: StorageBucket | null =
+      thumbBucketRaw && isStorageBucket(thumbBucketRaw) ? thumbBucketRaw : null
+
     const thumbUrl =
       thumbBucket && thumbPath
         ? isPublicBucket(thumbBucket) && thumbPublicUrl
@@ -82,23 +99,17 @@ export async function POST(req: Request) {
     const isEligibleForLooks = Boolean(body.isEligibleForLooks)
     const isFeaturedInPortfolio = Boolean(body.isFeaturedInPortfolio)
 
-    // NOTE: for booking media we forced PRIVATE in another route.
-    // This route is for portfolio/looks media; keep derived visibility.
-    const visibility: MediaVisibility = computeVisibility(isEligibleForLooks, isFeaturedInPortfolio)
+    // Derived visibility (Prisma enum)
+    const visibility = computeVisibility(isEligibleForLooks, isFeaturedInPortfolio)
 
-    const serviceIds: string[] = Array.isArray(body.serviceIds)
-      ? (body.serviceIds as unknown[])
-          .map((x) => pickString(x))
-          .filter((x): x is string => Boolean(x))
-      : []
-
+    const serviceIds = pickStringArray(body.serviceIds)
     if (serviceIds.length === 0) return jsonFail(400, 'Select at least one service tag.')
 
+    // Validate service IDs belong to active services
     const services = await prisma.service.findMany({
       where: { id: { in: serviceIds }, isActive: true },
       select: { id: true },
     })
-
     if (services.length !== serviceIds.length) {
       return jsonFail(400, 'One or more serviceIds are invalid.')
     }
@@ -110,9 +121,9 @@ export async function POST(req: Request) {
         url,
         thumbUrl,
 
-        caption: caption ?? null,
-        mediaType: mediaType as any,
-        visibility: visibility as any,
+        caption: caption || null,
+        mediaType,
+        visibility,
 
         isFeaturedInPortfolio,
         isEligibleForLooks,
@@ -128,7 +139,7 @@ export async function POST(req: Request) {
             skipDuplicates: true,
           },
         },
-      } as any,
+      },
       include: {
         services: { include: { service: true } },
       },

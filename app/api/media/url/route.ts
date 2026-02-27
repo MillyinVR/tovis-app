@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { MediaVisibility } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,8 +27,8 @@ export async function GET(req: Request) {
 
     if (!media) return jsonFail(404, 'Not found.')
 
-    // ✅ Only short-circuit if PUBLIC
-    if (media.visibility === 'PUBLIC' && typeof media.url === 'string' && media.url.startsWith('http')) {
+    // ✅ Prisma enum (no strings)
+    if (media.visibility === MediaVisibility.PUBLIC && typeof media.url === 'string' && media.url.startsWith('http')) {
       return jsonOk({ url: media.url })
     }
 
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
     const isOwnerPro = user.role === 'PRO' && user.professionalProfile?.id === media.professionalId
 
     // For now: only owner pro can view non-PUBLIC
-    if (media.visibility !== 'PUBLIC' && !isOwnerPro) return jsonFail(403, 'Forbidden.')
+    if (media.visibility !== MediaVisibility.PUBLIC && !isOwnerPro) return jsonFail(403, 'Forbidden.')
 
     const bucket = pickString(media.storageBucket)
     const path = pickString(media.storagePath)

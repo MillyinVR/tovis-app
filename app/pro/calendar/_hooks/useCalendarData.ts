@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import type {
-  BlockRow,
   BookingDetails,
   CalendarEvent,
   CalendarStats,
@@ -40,6 +39,17 @@ import {
 type Args = { view: ViewMode; currentDate: Date }
 type LocationType = 'SALON' | 'MOBILE'
 
+/** must match ProSessionFooter/useProSession.ts */
+const PRO_SESSION_FORCE_EVENT = 'tovis:pro-session:force'
+
+function forceProFooterRefresh() {
+  try {
+    window.dispatchEvent(new Event(PRO_SESSION_FORCE_EVENT))
+  } catch {
+    // ignore
+  }
+}
+
 function pickLocationType(canSalon: boolean, canMobile: boolean, preferred?: LocationType): LocationType {
   if (preferred && ((preferred === 'SALON' && canSalon) || (preferred === 'MOBILE' && canMobile))) return preferred
   if (canSalon) return 'SALON'
@@ -70,7 +80,6 @@ function toTimeInputValueInTimeZone(dateUtc: Date, tz: string) {
  * View range in UTC, anchored to TZ day boundaries (strict).
  *
  * IMPORTANT:
- * - Week start MUST match the UI visibleDays construction.
  * - Your UI uses MONDAY-first weeks (Mon..Sun).
  *
  * - Day:   [start of day, +1 day)
@@ -86,14 +95,13 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     return { from, to }
   }
 
-  // Week start: Monday-first (Mon=0..Sun=6)
+  const mapMon: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
+
+  // Week start: Monday-first
   if (v === 'week') {
     const p = getZonedParts(focusUtc, safeTz)
-
     const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(focusUtc)
-    const mapMon: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
     const dow = mapMon[weekdayShort] ?? 0
-
     const weekStartDay = p.day - dow
 
     const from = zonedTimeToUtc({
@@ -110,21 +118,20 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     return { from, to }
   }
 
-  // Month grid: find local first-of-month in TZ, then go to Monday of that week, then 42 days.
+  // Month grid: go to Monday of the week containing the 1st, then 42 days
   const p = getZonedParts(focusUtc, safeTz)
 
   const firstOfMonthUtc = zonedTimeToUtc({
     year: p.year,
     month: p.month,
     day: 1,
-    hour: 12, // noon to avoid DST edge weirdness when deriving weekday
+    hour: 12, // noon avoids DST edge weirdness when deriving weekday
     minute: 0,
     second: 0,
     timeZone: safeTz,
   })
 
   const firstWeekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(firstOfMonthUtc)
-  const mapMon: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
   const firstDow = mapMon[firstWeekdayShort] ?? 0
 
   const firstParts = getZonedParts(firstOfMonthUtc, safeTz)
@@ -190,7 +197,10 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [reschedTime, setReschedTime] = useState<string>('')
   const [notifyClient, setNotifyClient] = useState(true)
   const [savingReschedule, setSavingReschedule] = useState(false)
+
+  // UI-only for now (server no longer supports patching serviceId directly)
   const [selectedServiceId, setSelectedServiceId] = useState<string>('')
+
   const [durationMinutes, setDurationMinutes] = useState<number>(60)
   const [allowOutsideHours, setAllowOutsideHours] = useState(false)
 
@@ -275,6 +285,36 @@ export function useCalendarData({ view, currentDate }: Args) {
     return computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
   }
 
+  // ✅ For pro drag/resize confirm: determine if the pending booking time is outside working hours.
+  function isPendingChangeOutsideWorkingHours(change: PendingChange): boolean {
+    if (change.entityType !== 'booking') return false
+
+    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+
+    const originalDur = eventDurationMinutes(change.original)
+    const nextStartIso = change.kind === 'move' ? change.nextStartIso : change.original.startsAt
+    const nextDurMinutes =
+      change.kind === 'resize' ? Number(change.nextTotalDurationMinutes || originalDur) : Number(originalDur)
+
+    const startUtc = new Date(nextStartIso)
+    if (!Number.isFinite(startUtc.getTime())) return false
+
+    const p = getZonedParts(startUtc, tz)
+    const startMinutes = p.hour * 60 + p.minute
+    const dur = roundTo15(nextDurMinutes)
+    const endMinutes = startMinutes + dur
+
+    const dayAnchor = anchorDayLocalNoon(p.year, p.month, p.day)
+
+    return isOutsideWorkingHours({
+      day: dayAnchor,
+      startMinutes,
+      endMinutes,
+      workingHours: workingHoursActive,
+      timeZone: tz,
+    })
+  }
+
   async function loadServicesOnce() {
     if (servicesLoaded) return
     try {
@@ -325,14 +365,12 @@ export function useCalendarData({ view, currentDate }: Args) {
       setLoading(true)
       setError(null)
 
-      // We start with whatever tz we currently have (initially UTC).
-      // If the API returns a different valid tz, we’ll refetch once so range aligns to pro tz.
+      // Start with current tz guess (initially UTC)
       const tzGuess = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
       async function fetchCalendarFor(tzForRange: string) {
         const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, tzForRange)
 
-        // DEV sanity check (remove later if you want)
         if (process.env.NODE_ENV !== 'production') {
           // eslint-disable-next-line no-console
           console.log('[Calendar range]', { view, tzForRange, from: from.toISOString(), to: to.toISOString() })
@@ -343,7 +381,7 @@ export function useCalendarData({ view, currentDate }: Args) {
           { cache: 'no-store' },
         )
         const data = await safeJson(res)
-        return { res, data, from, to }
+        return { res, data }
       }
 
       // 1) fetch using current tz guess
@@ -357,15 +395,12 @@ export function useCalendarData({ view, currentDate }: Args) {
 
       const apiTzRaw = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
       const apiTzValid = isValidIanaTimeZone(apiTzRaw)
-
-      // ✅ strict: never fall back to browser tz
       const nextTz = apiTzValid ? apiTzRaw : DEFAULT_TIME_ZONE
 
       // 2) if API gives a different valid tz, refetch ONCE so range boundaries are correct
       if (apiTzValid && nextTz !== tzGuess) {
         const second = await fetchCalendarFor(nextTz)
         if (seq !== loadSeqRef.current) return
-
         if (second.res.ok) {
           res = second.res
           data = second.data
@@ -378,6 +413,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       setNeedsTimeZoneSetup(needsSetup)
 
       if (!apiTzValid) {
+        // eslint-disable-next-line no-console
         console.warn('[Calendar] API timezone missing/invalid; forcing UTC until pro sets timezone.', { apiTzRaw })
       }
 
@@ -404,17 +440,15 @@ export function useCalendarData({ view, currentDate }: Args) {
         setManagement({ todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
       }
 
-      // ✅ Calendar API returns BOTH bookings + blocks in data.events
-      // ✅ Should include past/present/future within the requested view range, excluding cancelled.
+      // Events (bookings + blocks)
       const apiEvents = (Array.isArray(data?.events) ? data.events : []) as CalendarEvent[]
 
-      // 3) working hours for BOTH types (so DayColumn can show both overlays)
+      // working hours for BOTH types
       const [nextSalon, nextMobile] = await Promise.all([loadWorkingHoursFor('SALON'), loadWorkingHoursFor('MOBILE')])
       if (seq !== loadSeqRef.current) return
       setWorkingHoursSalon(nextSalon)
       setWorkingHoursMobile(nextMobile)
 
-      // 4) sort + set
       const nextEvents = [...apiEvents].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
       setEvents(nextEvents)
     } catch (e) {
@@ -487,6 +521,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
       await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
       await loadCalendar()
+      forceProFooterRefresh()
     } catch (e: any) {
       console.error(e)
       setError(e?.message || 'Could not block full day.')
@@ -497,7 +532,6 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   function openCreateBlockNow() {
-    // ✅ Round up in the calendar TZ, not browser local.
     const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
     const nowUtc = new Date()
     const p = getZonedParts(nowUtc, tz)
@@ -516,7 +550,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     setEditBlockOpen(true)
   }
 
-  // ✅ OPTION B: approve/deny directly from the ManagementModal by booking id
   async function setBookingStatusById(args: { bookingId: string; status: 'ACCEPTED' | 'CANCELLED' }) {
     const { bookingId, status } = args
     if (!bookingId) return
@@ -538,9 +571,24 @@ export function useCalendarData({ view, currentDate }: Args) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, notifyClient: true }),
       })
+
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to update booking.')
+
+      if (!res.ok) {
+        const msg = String(data?.error || data?.message || 'Failed to update booking.')
+
+        // No-op is not an error
+        if (msg.toLowerCase().includes('no changes provided')) {
+          await loadCalendar()
+          forceProFooterRefresh()
+          return
+        }
+
+        throw new Error(msg)
+      }
+
       await loadCalendar()
+      forceProFooterRefresh()
     } catch (e: any) {
       console.error(e)
       setManagementActionError(e?.message || 'Failed to update booking.')
@@ -584,7 +632,6 @@ export function useCalendarData({ view, currentDate }: Args) {
       const b = data?.booking as BookingDetails
       setBooking(b)
 
-      // ✅ Fill inputs in CALENDAR TZ (strict), not browser local.
       const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
       const start = new Date(b.scheduledFor)
       setReschedDate(toDateInputValueInTimeZone(start, tz))
@@ -594,6 +641,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       const svcList = (Array.isArray(data?.services) ? data.services : services) as ServiceOption[]
       if (svcList?.length) setServices(svcList)
 
+      // UI only (server no longer supports changing serviceId with this PATCH)
       setSelectedServiceId(b.serviceId || '')
       setDurationMinutes(Number(b.totalDurationMinutes || 60))
     } catch (e: any) {
@@ -677,10 +725,11 @@ export function useCalendarData({ view, currentDate }: Args) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scheduledFor: nextStart.toISOString(),
-          totalDurationMinutes: snappedDur,
-          serviceId: selectedServiceId || null,
+          // ✅ API expects durationMinutes (NOT totalDurationMinutes)
+          durationMinutes: snappedDur,
           notifyClient,
           allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
+          // NOTE: service changes require serviceItems replace-all; we do not send serviceId here.
         }),
       })
       const data = await safeJson(res)
@@ -688,6 +737,7 @@ export function useCalendarData({ view, currentDate }: Args) {
 
       closeBooking()
       await loadCalendar()
+      forceProFooterRefresh()
     } catch (e: any) {
       console.error(e)
       setBookingError(e?.message || 'Failed to save changes.')
@@ -710,6 +760,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       if (!res.ok) throw new Error(data?.error || 'Failed to approve booking.')
       closeBooking()
       await loadCalendar()
+      forceProFooterRefresh()
     } catch (e: any) {
       setBookingError(e?.message || 'Failed to approve booking.')
     } finally {
@@ -731,6 +782,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       if (!res.ok) throw new Error(data?.error || 'Failed to deny booking.')
       closeBooking()
       await loadCalendar()
+      forceProFooterRefresh()
     } catch (e: any) {
       setBookingError(e?.message || 'Failed to deny booking.')
     } finally {
@@ -773,8 +825,17 @@ export function useCalendarData({ view, currentDate }: Args) {
     try {
       if (pendingChange.entityType === 'booking') {
         const payload: any = { notifyClient: true }
-        if (pendingChange.kind === 'resize') payload.totalDurationMinutes = pendingChange.nextTotalDurationMinutes
-        else payload.scheduledFor = pendingChange.nextStartIso
+
+        if (pendingChange.kind === 'resize') {
+          // ✅ API expects durationMinutes
+          payload.durationMinutes = pendingChange.nextTotalDurationMinutes
+        } else {
+          payload.scheduledFor = pendingChange.nextStartIso
+        }
+
+        if (isPendingChangeOutsideWorkingHours(pendingChange)) {
+          payload.allowOutsideWorkingHours = true
+        }
 
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(pendingChange.apiId)}`, {
           method: 'PATCH',
@@ -807,6 +868,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       setConfirmOpen(false)
       setPendingChange(null)
       await loadCalendar()
+      forceProFooterRefresh()
     } catch (e: any) {
       console.error(e)
       rollbackPending()
@@ -912,7 +974,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     const y = e.clientY - s.columnTop
     const endMinutes = snapMinutes(y / PX_PER_MINUTE)
     const rawDur = endMinutes - s.startMinutes
-
     const dur = Math.max(SNAP_MINUTES, roundTo15(rawDur))
 
     const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
@@ -996,6 +1057,11 @@ export function useCalendarData({ view, currentDate }: Args) {
     confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen,
   )
 
+  const pendingOutsideWorkingHours = useMemo(() => {
+    if (!pendingChange) return false
+    return isPendingChangeOutsideWorkingHours(pendingChange)
+  }, [pendingChange, workingHoursActive, timeZone, events])
+
   return {
     view,
     currentDate,
@@ -1011,7 +1077,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     activeLocationType,
     setActiveLocationType,
 
-    // ✅ hours: both + active
     workingHoursSalon,
     setWorkingHoursSalon,
     workingHoursMobile,
@@ -1080,7 +1145,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     approveBooking,
     denyBooking,
 
-    // ✅ for ManagementModal Option B
     approveBookingById,
     denyBookingById,
     managementActionBusyId,
@@ -1094,6 +1158,8 @@ export function useCalendarData({ view, currentDate }: Args) {
     applyingChange,
     cancelConfirm,
     applyConfirm,
+
+    pendingOutsideWorkingHours,
 
     ui: {
       suppressClickRef,

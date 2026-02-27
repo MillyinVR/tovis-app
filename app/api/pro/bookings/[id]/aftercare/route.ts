@@ -3,7 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { BookingStatus, AftercareRebookMode, ReminderType, ClientNotificationType, SessionStep } from '@prisma/client'
+import {
+  BookingStatus,
+  AftercareRebookMode,
+  ReminderType,
+  ClientNotificationType,
+  SessionStep,
+  MediaPhase,
+} from '@prisma/client'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -154,7 +161,8 @@ function resolveAftercareTimeZone(args: { bookingLocationTimeZone?: unknown; pro
 }
 
 function formatDateTimeInTimeZone(date: Date, timeZone: string) {
-  const tz = resolveAftercareTimeZone({ bookingLocationTimeZone: timeZone })
+  // timeZone passed here should already be resolved; do NOT re-resolve it (that caused confusion before).
+  const tz = timeZone && isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
   return new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     weekday: 'short',
@@ -299,16 +307,14 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (booking.professionalId !== proId) return jsonError('Forbidden.', 403)
 
     if (booking.status === BookingStatus.CANCELLED) return jsonError('This booking is cancelled.', 409)
-    if (booking.status === BookingStatus.PENDING) return jsonError('Aftercare can’t be posted until the booking is confirmed.', 409)
-
-    if (!sessionStepEligible(booking.sessionStep)) {
-      return jsonError(
-        `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`,
-        409,
-      )
+    if (booking.status === BookingStatus.PENDING) {
+      return jsonError('Aftercare can’t be posted until the booking is confirmed.', 409)
     }
 
-    // timezone used for reminder copy (booking tz > pro tz > UTC)
+    if (!sessionStepEligible(booking.sessionStep)) {
+      return jsonError(`Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`, 409)
+    }
+
     const aftercareTimeZone = resolveAftercareTimeZone({
       bookingLocationTimeZone: booking.locationTimeZone,
       professionalTimeZone: booking.professional?.timeZone,
@@ -316,7 +322,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     // debug only: client tz doesn't override truth
     const clientTz = typeof body.timeZone === 'string' ? body.timeZone.trim() : ''
-    const clientTzOk = clientTz ? isValidIanaTimeZone(clientTz) : false
+    const clientTimeZoneReceived = clientTz && isValidIanaTimeZone(clientTz) ? clientTz : null
 
     // Normalize rebook fields (clear unrelated)
     let normalizedMode: AftercareRebookMode = requestedMode
@@ -341,6 +347,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Ensure aftercare has a stable public token.
       const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
 
       const aftercare = await tx.aftercareSummary.upsert({
@@ -372,10 +379,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         },
       })
 
-      // Replace recommendations
-      await tx.productRecommendation.deleteMany({
-        where: { aftercareSummaryId: aftercare.id },
-      })
+      // Replace recommendations (simple + predictable)
+      await tx.productRecommendation.deleteMany({ where: { aftercareSummaryId: aftercare.id } })
 
       const products = normalizedProducts as Array<{ name: string; url: string; note: string | null }>
       if (products.length) {
@@ -390,7 +395,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         })
       }
 
-      // ✅ Only notify client when pro explicitly sends
+      // ✅ Notify client ONLY when explicitly sending
       let clientNotified = false
       if (sendToClient) {
         const notifKey = makeClientNotifDedupeKey(booking.id)
@@ -432,12 +437,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         clientNotified = true
       }
 
+      // ✅ Reminders
       let remindersTouched = 0
 
       const clientName = `${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
       const serviceName = (booking.service?.name ?? 'service').trim()
 
-      // Rebook reminder
+      // Rebook reminder (only meaningful if we have a base date)
       const rebookKey = makeReminderDedupeKey(booking.id, 'REBOOK')
       const rebookDue = computeRebookReminderDueAt({
         mode: normalizedMode,
@@ -446,7 +452,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         daysBefore: rebookReminderDaysBefore,
       })
 
-      if (createRebookReminder && rebookDue) {
+      // If mode is NONE, we should not keep a rebook reminder around.
+      if (createRebookReminder && rebookDue && normalizedMode !== AftercareRebookMode.NONE) {
         const title = clientName ? `Rebook: ${clientName}` : 'Rebook reminder'
 
         const bodyText =
@@ -524,7 +531,29 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         remindersTouched += del.count
       }
 
-      return { aftercare, remindersTouched, clientNotified }
+      // ✅ FINALIZE BOOKING when sending to client (idempotent + consistent)
+      let bookingFinished = false
+      let bookingNow: { status: BookingStatus; sessionStep: SessionStep | null; finishedAt: Date | null } | null = null
+
+      if (sendToClient) {
+        const now = new Date()
+
+        // Always enforce DONE/COMPLETED/finishedAt when sending.
+        // This is the "footer truth" that prevents /api/pro/session from seeing it as ACTIVE.
+        bookingNow = await tx.booking.update({
+          where: { id: booking.id },
+          data: {
+            status: BookingStatus.COMPLETED,
+            sessionStep: SessionStep.DONE,
+            finishedAt: booking.finishedAt ?? now,
+          },
+          select: { status: true, sessionStep: true, finishedAt: true },
+        })
+
+        bookingFinished = true
+      }
+
+      return { aftercare, remindersTouched, clientNotified, bookingFinished, bookingNow }
     })
 
     return NextResponse.json(
@@ -541,7 +570,12 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         rebookWindowEnd: result.aftercare.rebookWindowEnd ? result.aftercare.rebookWindowEnd.toISOString() : null,
 
         timeZoneUsed: aftercareTimeZone,
-        clientTimeZoneReceived: clientTzOk ? clientTz : null,
+        clientTimeZoneReceived,
+
+        // ✅ new fields for the UI
+        bookingFinished: result.bookingFinished,
+        booking: result.bookingNow ? { ...result.bookingNow, finishedAt: result.bookingNow.finishedAt?.toISOString() ?? null } : null,
+        redirectTo: result.bookingFinished ? '/pro/calendar' : null,
       },
       { status: 200 },
     )

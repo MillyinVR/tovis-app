@@ -1,11 +1,19 @@
 // app/_components/ProSessionFooter/useProSession.ts
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import type { ProSessionPayload, SessionBooking, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
 
 type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
+
+export const FORCE_EVENT = 'tovis:pro-session:force'
+
+// Tuning knobs
+const POLL_MS = 60_000
+const SOFT_THROTTLE_MS = 10_000
+
+const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/'
@@ -55,19 +63,51 @@ function normalizeMode(v: unknown): UiSessionMode {
 function normalizeAction(v: unknown): UiSessionCenterAction {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
   if (s === 'START') return 'START'
-  if (s === 'FINISH') return 'FINISH'
   if (s === 'NAVIGATE') return 'NAVIGATE'
   if (s === 'CAPTURE_BEFORE') return 'CAPTURE_BEFORE'
   if (s === 'CAPTURE_AFTER') return 'CAPTURE_AFTER'
+  if (s === 'FINISH') return 'FINISH'
   return 'NONE'
 }
 
-const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
+type LoadOpts = { silent?: boolean; force?: boolean }
 
-// Tuning knobs
-const POLL_MS = 60_000
-const SOFT_THROTTLE_MS = 10_000
-const ROUTE_THROTTLE_MS = 1500
+function bookingRoot(bookingId: string) {
+  return `/pro/bookings/${encodeURIComponent(bookingId)}`
+}
+
+function bookingSessionHub(bookingId: string) {
+  return `${bookingRoot(bookingId)}/session`
+}
+
+/**
+ * Center can be clicked if:
+ * - not busy, AND
+ * - action is not NONE, AND
+ * - requirements are met for that action
+ *
+ * NOTE: we intentionally do NOT gate by `mode`.
+ * The server is the canonical source of truth.
+ */
+function canClickCenter(args: {
+  actionLoading: 'start' | 'nav' | null
+  action: UiSessionCenterAction
+  href: string | null
+  bookingId: string | null
+}) {
+  const { actionLoading, action, href, bookingId } = args
+
+  if (actionLoading) return false
+  if (action === 'NONE') return false
+
+  if (action === 'START' || action === 'FINISH') return Boolean(bookingId)
+
+  if (action === 'NAVIGATE' || action === 'CAPTURE_BEFORE' || action === 'CAPTURE_AFTER') {
+    return Boolean(href || bookingId)
+  }
+
+  return false
+}
 
 export function useProSession() {
   const router = useRouter()
@@ -78,106 +118,108 @@ export function useProSession() {
   const [center, setCenter] = useState<CenterState>(DEFAULT_CENTER)
 
   const [loading, setLoading] = useState(false)
-  const [actionLoading, setActionLoading] = useState<'start' | 'finish' | 'nav' | null>(null)
+  const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Request control
+  // Concurrency + freshness
   const inFlightRef = useRef<AbortController | null>(null)
-  const inFlightPromiseRef = useRef<Promise<void> | null>(null)
-  const redirectedRef = useRef(false)
-
-  const lastLoadAtRef = useRef<number>(0)
   const reqIdRef = useRef(0)
-
+  const lastLoadAtRef = useRef<number>(0)
+  const redirectedRef = useRef(false)
   const visibilityDebounceRef = useRef<number | null>(null)
 
-  const isReadyOrActive = mode === 'UPCOMING' || mode === 'ACTIVE'
+  const bookingId = booking?.id ? String(booking.id) : null
 
   const centerDisabled = useMemo(() => {
-    return !booking || loading || !!actionLoading || !isReadyOrActive || center.action === 'NONE'
-  }, [booking, loading, actionLoading, isReadyOrActive, center.action])
+    return !canClickCenter({
+      actionLoading,
+      action: center.action,
+      href: center.href,
+      bookingId,
+    })
+  }, [actionLoading, center.action, center.href, bookingId])
+
+  const applyIdle = useCallback((opts?: LoadOpts, res?: Response, data?: any) => {
+    setMode('IDLE')
+    setBooking(null)
+    setCenter(DEFAULT_CENTER)
+    if (!opts?.silent && res) setError(errorFromResponse(res, data))
+  }, [])
 
   const loadSession = useCallback(
-    async (opts?: { silent?: boolean; force?: boolean }) => {
+    async (opts?: LoadOpts): Promise<ProSessionPayload | null> => {
       const now = Date.now()
 
-      // Soft throttle: if we just loaded recently and we're not forcing, skip.
       if (!opts?.force && now - (lastLoadAtRef.current || 0) < SOFT_THROTTLE_MS) {
-        return
+        return null
       }
-
-      // Dedupe: if a load is already running and we aren't forcing, reuse it.
-      if (inFlightPromiseRef.current && !opts?.force) return inFlightPromiseRef.current
 
       if (opts?.force) {
         inFlightRef.current?.abort()
         inFlightRef.current = null
-        inFlightPromiseRef.current = null
       }
 
       const controller = new AbortController()
       inFlightRef.current = controller
 
       const myReqId = ++reqIdRef.current
+      lastLoadAtRef.current = now
 
       if (!opts?.silent) {
         setLoading(true)
         setError(null)
       }
 
-      const promise = (async () => {
-        try {
-          const res = await fetch('/api/pro/session', {
-            method: 'GET',
-            cache: 'no-store',
-            signal: controller.signal,
-          })
+      try {
+        const res = await fetch('/api/pro/session', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal,
+        })
 
-          if (res.status === 401) {
-            if (!redirectedRef.current) {
-              redirectedRef.current = true
-              redirectToLogin(router, 'pro-session')
-            }
-            return
+        if (reqIdRef.current !== myReqId) return null
+
+        if (res.status === 401) {
+          if (!redirectedRef.current) {
+            redirectedRef.current = true
+            redirectToLogin(router, 'pro-session')
           }
-
-          redirectedRef.current = false
-          const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean }
-
-          if (!res.ok || data?.ok !== true) {
-            setMode('IDLE')
-            setBooking(null)
-            setCenter(DEFAULT_CENTER)
-            if (!opts?.silent) setError(errorFromResponse(res, data))
-            return
-          }
-
-          setMode(normalizeMode(data.mode))
-          setBooking((data.booking as SessionBooking) ?? null)
-
-          const c = data.center as any
-          const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
-          const action = normalizeAction(c?.action)
-          const href = isSafeInternalHref(c?.href) ? c.href : null
-
-          setCenter({ label, action, href })
-        } catch (err: any) {
-          if (err?.name === 'AbortError') return
-          if (!opts?.silent) setError('Network error loading session.')
-        } finally {
-          if (reqIdRef.current === myReqId) {
-            if (inFlightRef.current === controller) inFlightRef.current = null
-            inFlightPromiseRef.current = null
-            if (!opts?.silent) setLoading(false)
-          }
+          return null
         }
-      })()
 
-      inFlightPromiseRef.current = promise
-      lastLoadAtRef.current = now
-      return promise
+        redirectedRef.current = false
+
+        const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean }
+
+        if (!res.ok || data?.ok !== true) {
+          applyIdle(opts, res, data)
+          return null
+        }
+
+        const payload = data as ProSessionPayload
+
+        setMode(normalizeMode(payload.mode))
+        setBooking((payload.booking as SessionBooking) ?? null)
+
+        const c: any = payload.center ?? {}
+        const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
+        const action = normalizeAction(c?.action)
+        const href = isSafeInternalHref(c?.href) ? (c.href as string) : null
+        setCenter({ label, action, href })
+
+        return payload
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return null
+        if (!opts?.silent) setError('Network error loading session.')
+        return null
+      } finally {
+        if (reqIdRef.current === myReqId) {
+          if (inFlightRef.current === controller) inFlightRef.current = null
+          if (!opts?.silent) setLoading(false)
+        }
+      }
     },
-    [router],
+    [applyIdle, router],
   )
 
   // Initial load + polling (visible only)
@@ -202,7 +244,7 @@ export function useProSession() {
       if (visibilityDebounceRef.current) window.clearTimeout(visibilityDebounceRef.current)
       visibilityDebounceRef.current = window.setTimeout(() => {
         if (document.visibilityState === 'visible') {
-          void loadSession({ silent: true })
+          void loadSession({ silent: true, force: true })
           startPolling()
         } else {
           stopPolling()
@@ -211,7 +253,7 @@ export function useProSession() {
     }
 
     void loadSession({ silent: false, force: true })
-    scheduleVisibilityLoad()
+    startPolling()
 
     document.addEventListener('visibilitychange', scheduleVisibilityLoad)
     window.addEventListener('focus', scheduleVisibilityLoad)
@@ -223,76 +265,85 @@ export function useProSession() {
       window.removeEventListener('focus', scheduleVisibilityLoad)
       inFlightRef.current?.abort()
       inFlightRef.current = null
-      inFlightPromiseRef.current = null
     }
   }, [loadSession])
 
-  // Route change refresh (throttled)
+  // Route change refresh (forced) — portal footers don’t unmount
   useEffect(() => {
-    const now = Date.now()
-    const elapsed = now - (lastLoadAtRef.current || 0)
-    if (elapsed < ROUTE_THROTTLE_MS) return
-    void loadSession({ silent: true })
+    void loadSession({ silent: true, force: true })
   }, [pathname, loadSession])
 
+  // External force refresh (aftercare send, etc.)
+  useEffect(() => {
+    const onForce = () => void loadSession({ silent: true, force: true })
+    window.addEventListener(FORCE_EVENT, onForce)
+    return () => window.removeEventListener(FORCE_EVENT, onForce)
+  }, [loadSession])
+
   async function handleCenterClick() {
-    if (!booking || centerDisabled) return
+    if (centerDisabled) return
     setError(null)
 
-    const bookingId = booking.id
-    const fallbackBookingRoot = `/pro/bookings/${encodeURIComponent(bookingId)}`
+    const fallbackHub = bookingId ? bookingSessionHub(bookingId) : '/pro/bookings'
 
     try {
       if (center.action === 'START') {
+        if (!bookingId) return
         setActionLoading('start')
 
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
 
         const data = await safeJson(res)
-        if (!res.ok) throw new Error(errorFromResponse(res, data))
+        if (!res.ok) {
+          setError(errorFromResponse(res, data))
+          await loadSession({ silent: true, force: true })
+          return
+        }
 
-        await loadSession({ silent: true, force: true })
+        const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
+        const fresh = await loadSession({ silent: true, force: true })
+        const freshHref = isSafeInternalHref((fresh as any)?.center?.href) ? ((fresh as any).center.href as string) : null
 
-        const target = center.href ?? `${fallbackBookingRoot}?step=consult`
+        const target = nextHref ?? freshHref ?? fallbackHub
         if (target === currentPathWithQuery()) router.refresh()
         else router.push(target)
-
         return
       }
 
       if (center.action === 'FINISH') {
-        setActionLoading('finish')
+        if (!bookingId) return
+        setActionLoading('nav')
 
         const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/finish`, { method: 'POST' })
         if (res.status === 401) return redirectToLogin(router, 'pro-finish')
 
         const data = await safeJson(res)
-        if (!res.ok) throw new Error(errorFromResponse(res, data))
-
-        const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
-        await loadSession({ silent: true, force: true })
-
-        const target = nextHref ?? `${fallbackBookingRoot}/session/after-photos`
-
-        if (target === currentPathWithQuery()) {
-          const afterCount = typeof data?.afterCount === 'number' ? data.afterCount : null
-          setError(afterCount === 0 ? 'Add at least one after photo to continue to aftercare.' : 'Nothing to advance right now.')
-          router.refresh()
+        if (!res.ok) {
+          setError(errorFromResponse(res, data))
+          await loadSession({ silent: true, force: true })
           return
         }
 
-        router.push(target)
+        const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
+        const fresh = await loadSession({ silent: true, force: true })
+        const freshHref = isSafeInternalHref((fresh as any)?.center?.href) ? ((fresh as any).center.href as string) : null
+
+        const target = nextHref ?? freshHref ?? fallbackHub
+        if (target === currentPathWithQuery()) router.refresh()
+        else router.push(target)
         return
       }
 
       if (center.action === 'NAVIGATE' || center.action === 'CAPTURE_BEFORE' || center.action === 'CAPTURE_AFTER') {
         setActionLoading('nav')
-        const target = center.href ?? fallbackBookingRoot
+        const target = isSafeInternalHref(center.href) ? center.href! : fallbackHub
         if (target === currentPathWithQuery()) router.refresh()
         else router.push(target)
         return
       }
+
+      router.push(fallbackHub)
     } catch (err: any) {
       setError(err?.message || 'Something went wrong.')
     } finally {
@@ -300,14 +351,7 @@ export function useProSession() {
     }
   }
 
-  const displayLabel =
-    actionLoading === 'start'
-      ? 'Starting…'
-      : actionLoading === 'finish'
-        ? 'Finishing…'
-        : actionLoading === 'nav'
-          ? 'Opening…'
-          : center.label
+  const displayLabel = actionLoading === 'start' ? 'Starting…' : actionLoading === 'nav' ? 'Opening…' : center.label
 
   return {
     pathname,
@@ -321,5 +365,6 @@ export function useProSession() {
     centerDisabled,
     displayLabel,
     handleCenterClick,
+    FORCE_EVENT,
   }
 }

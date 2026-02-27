@@ -1,34 +1,31 @@
 // app/(main)/looks/_components/LookMedia.tsx
-
 'use client'
 
 import type { FeedItem } from './lookTypes'
+import MediaFill from '@/app/_components/media/MediaFill'
 
 export default function LookMedia({ item, isActive }: { item: FeedItem; isActive: boolean }) {
-  if (item.mediaType === 'IMAGE') {
-    // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <img
-        src={item.url}
-        alt={item.caption || 'Look'}
-        draggable={false}
-        className="block h-full w-full object-cover"
-        loading="lazy"
-        decoding="async"
-      />
-    )
-  }
+  const mediaType = item.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'
 
   return (
-    <video
+    <MediaFill
       src={item.url}
-      muted
-      loop
-      playsInline
-      controls
-      preload="metadata"
-      className="block h-full w-full object-cover"
-      data-active={isActive ? '1' : '0'}
+      mediaType={mediaType}
+      alt={item.caption || 'Look'}
+      fit="cover"
+      videoProps={{
+        muted: true,
+        loop: true,
+        playsInline: true,
+        controls: true,
+        preload: 'metadata',
+        'data-active': isActive ? '1' : '0',
+      }}
+      imgProps={{
+        loading: 'lazy',
+        decoding: 'async',
+        draggable: false,
+      }}
     />
   )
 }

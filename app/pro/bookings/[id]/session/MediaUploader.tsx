@@ -1,105 +1,59 @@
 // app/pro/bookings/[id]/session/MediaUploader.tsx
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import MediaFill from '@/app/_components/media/MediaFill'
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
-
 type UploadState = 'IDLE' | 'UPLOADING' | 'SAVING'
 
 const MAX_IMAGE_MB = 25
 const MAX_VIDEO_MB = 200
 const CAPTION_MAX = 300
 
+type SignedUploadResponse = {
+  ok: true
+  kind: string
+  bucket: string
+  path: string
+  token: string
+  signedUrl?: string | null
+  publicUrl?: string | null
+  isPublic?: boolean
+  cacheBuster?: number
+}
+
 async function safeJson(res: Response) {
   return (await res.json().catch(() => ({}))) as any
 }
 
 function errorFrom(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message
+  if (typeof data?.error === 'string' && data.error.trim()) return data.error
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
 }
 
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
-function extFromFile(file: File) {
-  const name = (file.name || '').trim()
-  const i = name.lastIndexOf('.')
-  if (i === -1) return null
-  const ext = name.slice(i + 1).toLowerCase()
-  return ext || null
-}
-
 function guessMediaType(file: File): MediaType {
   const t = (file.type || '').toLowerCase()
-  if (t.startsWith('video/')) return 'VIDEO'
-  return 'IMAGE'
+  return t.startsWith('video/') ? 'VIDEO' : 'IMAGE'
 }
 
 function bytesFromMb(mb: number) {
   return mb * 1024 * 1024
 }
 
-function safeFileNameStem(file: File) {
-  const base = (file.name || 'upload').replace(/\.[^/.]+$/, '')
-  return base
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 40) || 'upload'
-}
-
-function makeObjectPath(opts: {
-  bookingId: string
-  phase: Phase
-  mediaType: MediaType
-  originalExt: string | null
-  fileStem: string
-}) {
-  const ext =
-    opts.originalExt ||
-    (opts.mediaType === 'VIDEO' ? 'mp4' : 'jpg') // best-effort default
-
-  const now = new Date()
-  const yyyy = String(now.getUTCFullYear())
-  const mm = String(now.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(now.getUTCDate()).padStart(2, '0')
-  const ts = String(now.getTime())
-
-  // Example:
-  // bookings/<bookingId>/after/2026/02/08/170742...-blowout.jpg
-  return [
-    'bookings',
-    opts.bookingId,
-    opts.phase.toLowerCase(),
-    yyyy,
-    mm,
-    dd,
-    `${ts}-${opts.fileStem}.${ext}`,
-  ].join('/')
-}
-
-async function createLocalPreview(file: File): Promise<string | null> {
-  try {
-    return URL.createObjectURL(file)
-  } catch {
-    return null
-  }
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ')
 }
 
 /**
  * Optional: create an image thumbnail client-side.
- * We keep it disabled by default to avoid adding fragility.
- * Later we can enable this and upload to thumbBucket/thumbPath.
+ * Disabled by default to avoid fragility.
  */
 async function maybeCreateImageThumb(_file: File): Promise<Blob | null> {
   return null
@@ -117,10 +71,20 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
   const [message, setMessage] = useState<string | null>(null)
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-
   const abortRef = useRef<AbortController | null>(null)
 
   const disabled = status !== 'IDLE'
+
+  // Clean up preview URL on unmount or when it changes
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        try {
+          URL.revokeObjectURL(previewUrl)
+        } catch {}
+      }
+    }
+  }, [previewUrl])
 
   const maxBytes = useMemo(() => {
     return mediaType === 'VIDEO' ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
@@ -152,15 +116,21 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
 
     setFile(next)
 
-    if (!next) return
+    if (!next) {
+      setMediaType('IMAGE')
+      return
+    }
 
-    // auto-detect type
+    // ✅ lock mediaType to what the file actually is
     const inferred = guessMediaType(next)
     setMediaType(inferred)
 
-    // preview for images/videos
-    const p = await createLocalPreview(next)
-    setPreviewUrl(p)
+    try {
+      const p = URL.createObjectURL(next)
+      setPreviewUrl(p)
+    } catch {
+      setPreviewUrl(null)
+    }
   }
 
   async function submit() {
@@ -173,73 +143,82 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
 
     const cap = caption.trim().slice(0, CAPTION_MAX) || null
     const mt: MediaType = mediaType
-    const bucket = 'media-private' // session capture is private by policy
 
     try {
       setStatus('UPLOADING')
 
-      const path = makeObjectPath({
-        bookingId,
-        phase,
-        mediaType: mt,
-        originalExt: extFromFile(file),
-        fileStem: safeFileNameStem(file),
+      // 1) Ask server for a signed upload token (booking-scoped, private)
+      const signRes = await fetch('/api/pro/uploads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          kind: 'CONSULT_PRIVATE',
+          bookingId,
+          phase, // BEFORE/AFTER/OTHER
+          contentType: file.type || 'application/octet-stream',
+          size: file.size,
+        }),
       })
 
-      // Upload main file
-      const uploadRes = await supabaseBrowser.storage.from(bucket).upload(path, file, {
+      const signData = (await safeJson(signRes)) as Partial<SignedUploadResponse>
+      if (!signRes.ok) {
+        setError(errorFrom(signRes, signData))
+        setStatus('IDLE')
+        return
+      }
+
+      const bucket = String(signData.bucket || '')
+      const path = String(signData.path || '')
+      const token = String(signData.token || '')
+
+      if (!bucket || !path || !token) {
+        setError('Upload signing failed (missing bucket/path/token).')
+        setStatus('IDLE')
+        return
+      }
+
+      // 2) Upload to Supabase using the signed token (avoids Storage RLS issues)
+      const uploadRes = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
         upsert: false,
         contentType: file.type || undefined,
       })
 
       if (uploadRes.error) {
-        // If file already exists, user probably double-clicked.
-        const msg = uploadRes.error.message || 'Upload failed.'
-        setError(msg)
+        setError(uploadRes.error.message || 'Upload failed.')
         setStatus('IDLE')
         return
       }
 
-      // Optional thumb for images (currently disabled)
+      // Optional thumb for images (still disabled)
       let thumbBucket: string | null = null
       let thumbPath: string | null = null
 
       if (mt === 'IMAGE') {
         const thumbBlob = await maybeCreateImageThumb(file)
         if (thumbBlob) {
-          thumbBucket = bucket
-          thumbPath = path.replace(/(\.[a-z0-9]+)$/i, '') + '-thumb.jpg'
-
-          const thumbRes = await supabaseBrowser.storage.from(thumbBucket).upload(thumbPath, thumbBlob, {
-            upsert: false,
-            contentType: 'image/jpeg',
-          })
-
-          if (thumbRes.error) {
-            // Thumb failure should not block main upload; just omit thumb fields.
-            thumbBucket = null
-            thumbPath = null
-          }
+          // If you enable thumbs later, you should request a second signed token
+          // for the thumb path instead of uploading directly.
+          thumbBucket = null
+          thumbPath = null
         }
       }
 
       setStatus('SAVING')
 
+      // 3) Save DB record (server route verifies ownership + flow rules)
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/media`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          // ✅ canonical storage identity (Prisma requires these)
           storageBucket: bucket,
           storagePath: path,
           thumbBucket,
           thumbPath,
-
-          // ✅ metadata
           caption: cap,
-          mediaType: upper(mt),
-          phase: upper(phase),
+          mediaType: mt, // ✅ already correct union
+          phase, // ✅ already correct union
         }),
       })
 
@@ -295,7 +274,6 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
       </div>
 
       <div className="mt-3 grid gap-3">
-        {/* File picker */}
         <div>
           <label className="mb-1 block text-xs font-black text-textSecondary">File</label>
           <input
@@ -308,28 +286,41 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
           <div className="mt-2 text-[11px] font-semibold text-textSecondary">{hint}</div>
         </div>
 
-        {/* Preview */}
         {previewUrl ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary p-2">
-            {mediaType === 'VIDEO' ? (
-              // eslint-disable-next-line jsx-a11y/media-has-caption
-              <video src={previewUrl} controls className="block h-56 w-full rounded-card object-cover" />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={previewUrl} alt="Preview" className="block h-56 w-full rounded-card object-cover" />
-            )}
+            {/* ✅ Consistent sizing everywhere: 9:16 frame + MediaFill */}
+            <div className="relative w-full overflow-hidden rounded-card border border-white/10 bg-black aspect-[9/16]">
+              <MediaFill
+                src={previewUrl}
+                mediaType={mediaType}
+                alt="Preview"
+                fit="cover"
+                className="absolute inset-0 h-full w-full"
+                videoProps={{
+                  controls: true,
+                  playsInline: true,
+                  preload: 'metadata',
+                  muted: false,
+                }}
+                imgProps={{
+                  draggable: false,
+                  loading: 'eager',
+                  decoding: 'async',
+                }}
+              />
+            </div>
           </div>
         ) : null}
 
-        {/* Type (override) */}
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-xs font-black text-textSecondary">Type</label>
             <select
               value={mediaType}
               onChange={(e) => setMediaType(e.target.value as MediaType)}
-              disabled={disabled}
-              className={select}
+              disabled={disabled || Boolean(file)} // ✅ lock once chosen
+              className={cx(select, Boolean(file) ? 'opacity-70' : '')}
+              title={file ? 'Type is inferred from the selected file.' : undefined}
             >
               <option value="IMAGE">Image</option>
               <option value="VIDEO">Video</option>
@@ -341,7 +332,6 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
           </div>
         </div>
 
-        {/* Caption */}
         <div>
           <label className="mb-1 block text-xs font-black text-textSecondary">Caption (optional)</label>
           <input
@@ -357,7 +347,6 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={submit} disabled={!canSubmit || disabled} className={btn}>
             {status === 'UPLOADING' ? 'Uploading…' : status === 'SAVING' ? 'Saving…' : 'Upload'}
