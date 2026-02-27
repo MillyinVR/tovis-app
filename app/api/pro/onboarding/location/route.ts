@@ -11,10 +11,10 @@ type Body = {
   placeId?: unknown // required for SALON/SUITE
   locationName?: unknown // optional override label
   postalCode?: unknown // required for MOBILE (US zip)
-  radiusKm?: unknown // required for MOBILE
+  radiusMiles?: unknown // required for MOBILE (miles)
   sessionToken?: unknown // optional pass-through for Places billing/session
 
-  // ✅ NEW: controls whether the created location becomes primary
+  // controls whether the created location becomes primary
   makePrimary?: unknown // boolean, defaults true
 }
 
@@ -176,12 +176,12 @@ export async function POST(req: Request) {
     const mode = normalizeMode(body.mode)
     if (!mode) return jsonFail(400, 'Missing or invalid mode.', { code: 'INVALID_MODE' })
 
-    // ✅ NEW: default to true so existing callers behave the same
+    // default to true so existing callers behave the same
     const makePrimary = pickBool(body.makePrimary) ?? true
 
     const workingHours = defaultWorkingHours()
 
-    // ✅ Only clear old primary IF we are making this new one primary
+    // Only clear old primary IF we are making this new one primary
     if (makePrimary) {
       await prisma.professionalLocation.updateMany({
         where: { professionalId: proId, isPrimary: true },
@@ -236,7 +236,7 @@ export async function POST(req: Request) {
           timeZone: tz,
           // If they switch away from mobile, clear mobile config
           mobileBasePostalCode: null,
-          mobileRadiusKm: null,
+          mobileRadiusMiles: null,
         },
         select: { id: true },
       })
@@ -246,12 +246,12 @@ export async function POST(req: Request) {
 
     // MOBILE
     const postalCode = pickString(body.postalCode)
-    const radiusKm = pickInt(body.radiusKm)
+    const radiusMiles = pickInt(body.radiusMiles)
 
     if (!postalCode) return jsonFail(400, 'Missing postalCode.', { code: 'MISSING_POSTAL' })
 
-    if (!radiusKm || radiusKm < 1 || radiusKm > 200) {
-      return jsonFail(400, 'Invalid radiusKm.', { code: 'INVALID_RADIUS' })
+    if (!radiusMiles || radiusMiles < 1 || radiusMiles > 200) {
+      return jsonFail(400, 'Invalid radiusMiles.', { code: 'INVALID_RADIUS' })
     }
 
     const geo = await googleGeocodePostal(postalCode)
@@ -288,7 +288,7 @@ export async function POST(req: Request) {
       where: { id: proId },
       data: {
         mobileBasePostalCode: geo.postalCode || postalCode,
-        mobileRadiusKm: radiusKm,
+        mobileRadiusMiles: radiusMiles,
         timeZone: tz,
       },
       select: { id: true },
