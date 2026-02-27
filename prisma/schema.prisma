@@ -52,6 +52,9 @@ enum ProfessionType {
   BARBER
   ESTHETICIAN
   MANICURIST
+  HAIRSTYLIST
+  ELECTROLOGIST
+
   MASSAGE_THERAPIST
   MAKEUP_ARTIST
 }
@@ -423,6 +426,12 @@ model ProfessionalProfile {
   verificationStatus VerificationStatus     @default(PENDING)
   verificationDocs   VerificationDocument[]
 
+  // License verification metadata (new)
+  licenseVerifiedAt      DateTime?
+  licenseVerifiedSource  String?   // "CA_DCA_BREEZE" now, later "MICROBILT", etc.
+  licenseStatusCode      String?   // e.g. "CURRENT", whatever DCA returns
+  licenseRawJson         Json?     // snapshot for audit/debug/demo (optional but powerful)
+  
   // Social/engagement (unchanged)
   favorites       ProfessionalFavorite[] @relation("ProFavorites")
   intentEvents    ClientIntentEvent[]
