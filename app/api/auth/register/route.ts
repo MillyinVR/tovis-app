@@ -75,13 +75,13 @@ type RegisterBody = {
   // ✅ PRO optional
   businessName?: unknown
 
-  // ✅ PRO: required (per your flow)
+  // ✅ PRO required (per flow)
   professionType?: unknown
 
-  // ✅ handle optional (null until upgrade)
+  // ✅ handle optional
   handle?: unknown
 
-  // ✅ Mobile: API/UI uses miles; DB stores km (schema: mobileRadiusKm)
+  // ✅ Mobile: miles (DB stores miles)
   mobileRadiusMiles?: unknown
 
   // ✅ License inputs (required only for CA BBC professions)
@@ -190,12 +190,13 @@ function normalizeHandleInput(raw: string) {
     .slice(0, 24)
 }
 
-/**
- * UI uses miles. DB stores km (schema uses mobileRadiusKm).
- * Convert miles -> km, rounded to nearest int.
- */
-function milesToKmInt(miles: number) {
-  return Math.round(miles * 1.609344)
+/** Accept number or string, return finite number or null */
+function parseNumber(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  const s = pickString(v)
+  if (!s) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
 }
 
 /**
@@ -210,11 +211,7 @@ async function sendPhoneVerificationSms(args: { to: string; code: string }) {
   const client = Twilio(accountSid, authToken)
   const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
 
-  const msg = await client.messages.create({
-    to: args.to,
-    from,
-    body,
-  })
+  const msg = await client.messages.create({ to: args.to, from, body })
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[phone-verification] twilio sent', { sid: msg.sid, to: args.to, from })
@@ -266,22 +263,8 @@ function requiresCaBbcLicense(p: ProfessionType) {
 ========================================================= */
 
 type CaVerifyResult =
-  | {
-      ok: true
-      verified: true
-      statusCode: string | null
-      expDate: string | null
-      raw: any
-      source: 'CA_DCA_BREEZE'
-    }
-  | {
-      ok: true
-      verified: false
-      statusCode: string | null
-      expDate: string | null
-      raw: any
-      source: 'CA_DCA_BREEZE'
-    }
+  | { ok: true; verified: true; statusCode: string | null; expDate: string | null; raw: any; source: 'CA_DCA_BREEZE' }
+  | { ok: true; verified: false; statusCode: string | null; expDate: string | null; raw: any; source: 'CA_DCA_BREEZE' }
   | { ok: false; error: string }
 
 let cachedTypeMap: Record<string, string> | null = null
@@ -457,18 +440,17 @@ export async function POST(request: Request) {
       }
     }
 
-    // ✅ PRO: mobile radius only required if PRO_MOBILE (API uses miles)
-    let mobileRadiusKm: number | null = null
+    // ✅ PRO: mobile radius only required if PRO_MOBILE (miles)
+    let mobileRadiusMiles: number | null = null
     if (role === 'PRO' && signupLocation.kind === 'PRO_MOBILE') {
-      const milesRaw = pickString(body.mobileRadiusMiles)
-      const miles = milesRaw ? Number(milesRaw) : NaN
-      if (!Number.isFinite(miles)) {
+      const miles = parseNumber(body.mobileRadiusMiles)
+      if (miles == null) {
         return jsonFail(400, 'Mobile radius (miles) is required for mobile pros.', { code: 'MOBILE_RADIUS_REQUIRED' })
       }
       if (miles < 1 || miles > 200) {
         return jsonFail(400, 'Please enter a mobile radius between 1 and 200 miles.', { code: 'MOBILE_RADIUS_RANGE' })
       }
-      mobileRadiusKm = milesToKmInt(miles)
+      mobileRadiusMiles = Math.round(miles)
     }
 
     // ✅ License verification (CA-only for now)
@@ -601,9 +583,9 @@ export async function POST(request: Request) {
                     licenseStatusCode: licenseStatusCodeToStore,
                     licenseRawJson: licenseRawJsonToStore,
 
-                    // mobile travel settings
+                    // mobile travel settings (MILES)
                     mobileBasePostalCode: signupLocation.kind === 'PRO_MOBILE' ? signupLocation.postalCode : null,
-                    mobileRadiusKm: signupLocation.kind === 'PRO_MOBILE' ? mobileRadiusKm : null,
+                    mobileRadiusMiles: signupLocation.kind === 'PRO_MOBILE' ? mobileRadiusMiles : null,
 
                     locations: {
                       create:

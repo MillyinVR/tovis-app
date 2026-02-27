@@ -405,7 +405,7 @@ model ProfessionalProfile {
   timeZone String? @db.VarChar(64)
 
   // Mobile travel settings (NOT calendar math)
-  mobileRadiusKm       Int?
+  mobileRadiusMiles       Int?
   mobileBasePostalCode String?
 
   // Relationships
