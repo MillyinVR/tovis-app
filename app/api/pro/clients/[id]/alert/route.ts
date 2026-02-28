@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { id } = await context.params

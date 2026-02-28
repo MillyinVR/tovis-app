@@ -14,7 +14,7 @@ function normalizeEmail(v: unknown) {
 export async function POST(request: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
 
     const body = (await request.json().catch(() => ({}))) as any
 

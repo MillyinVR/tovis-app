@@ -1,5 +1,6 @@
 // app/admin/page.tsx
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 
 export const dynamic = 'force-dynamic'
@@ -51,10 +52,7 @@ function Card({
 
       <div className="mt-1 inline-flex items-center gap-2 text-xs font-black text-accentPrimary">
         <span>{cta}</span>
-        <span
-          aria-hidden="true"
-          className="inline-block transition-transform duration-200 group-hover:translate-x-0.5"
-        >
+        <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-0.5">
           →
         </span>
       </div>
@@ -83,28 +81,29 @@ function Section({
 }
 
 export default async function AdminHomePage() {
+  // ✅ Consistent with other admin pages: require auth/permissions object
   const info = await getAdminUiPerms()
-  const perms = info?.perms
+  if (!info) redirect('/login?from=/admin')
+
+  const perms = info.perms
 
   const canSeeAny =
-    Boolean(perms?.canReviewPros) ||
-    Boolean(perms?.canManageCatalog) ||
-    Boolean(perms?.canManagePermissions) ||
-    Boolean(perms?.canViewLogs)
+    Boolean(perms.canReviewPros) ||
+    Boolean(perms.canManageCatalog) ||
+    Boolean(perms.canManagePermissions) ||
+    Boolean(perms.canViewLogs)
 
   return (
     <div className="grid gap-5">
       <div className="grid gap-1">
         <h1 className="text-xl font-extrabold">Admin Dashboard</h1>
         <p className="text-sm text-textSecondary">
-          Approve pros, manage services/categories, and keep the platform from turning into a dumpster fire with push notifications.
+          Approve pros, manage services/categories, and keep the platform from turning into a dumpster fire with push
+          notifications.
         </p>
       </div>
 
-      <Section
-        title="Operations"
-        subtitle="The stuff that makes the real world work: cards, attribution, and onboarding flows."
-      >
+      <Section title="Operations" subtitle="The stuff that makes the real world work: cards, attribution, and onboarding flows.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Card
             title="NFC Cards"
@@ -116,12 +115,9 @@ export default async function AdminHomePage() {
         </div>
       </Section>
 
-      <Section
-        title="Core admin tools"
-        subtitle="Platform control panels. Use wisely. Or at least use them with supervision."
-      >
+      <Section title="Core admin tools" subtitle="Platform control panels. Use wisely. Or at least use them with supervision.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {perms?.canReviewPros ? (
+          {perms.canReviewPros ? (
             <Card
               title="Professionals queue"
               desc="Review applications, approve/decline, flag for changes, suspend if needed."
@@ -130,14 +126,9 @@ export default async function AdminHomePage() {
             />
           ) : null}
 
-          {perms?.canManageCatalog ? (
+          {perms.canManageCatalog ? (
             <>
-              <Card
-                title="Services"
-                desc="Curate service definitions and guardrails."
-                href="/admin/services"
-                cta="Manage services"
-              />
+              <Card title="Services" desc="Curate service definitions and guardrails." href="/admin/services" cta="Manage services" />
               <Card
                 title="Categories"
                 desc="Control taxonomy so discovery stays sane."
@@ -147,22 +138,12 @@ export default async function AdminHomePage() {
             </>
           ) : null}
 
-          {perms?.canManagePermissions ? (
-            <Card
-              title="Permissions"
-              desc="Scope what admins can do."
-              href="/admin/permissions"
-              cta="Manage permissions"
-            />
+          {perms.canManagePermissions ? (
+            <Card title="Permissions" desc="Scope what admins can do." href="/admin/permissions" cta="Manage permissions" />
           ) : null}
 
-          {perms?.canViewLogs ? (
-            <Card
-              title="Logs"
-              desc="Audit trail for admin actions."
-              href="/admin/logs"
-              cta="View logs"
-            />
+          {perms.canViewLogs ? (
+            <Card title="Logs" desc="Audit trail for admin actions." href="/admin/logs" cta="View logs" />
           ) : null}
 
           {!canSeeAny ? (

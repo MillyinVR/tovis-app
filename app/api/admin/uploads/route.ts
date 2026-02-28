@@ -1,4 +1,4 @@
-// app/api/admin/uploads/route.ts
+// app/api/admin/uploads/route.ts 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -42,22 +42,17 @@ async function cleanupOldServiceDefaultImages(args: { bucket: string; serviceId:
 }
 
 async function requireSupportScope(args: { adminUserId: string; serviceId: string }) {
-  const ok = await hasAdminPermission({
+  return hasAdminPermission({
     adminUserId: args.adminUserId,
     allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
     scope: { serviceId: args.serviceId },
   })
-  return ok
 }
 
 function buildPublicUrl(args: { base: string; bucket: string; path: string }) {
   return `${args.base}/storage/v1/object/public/${args.bucket}/${args.path}`
 }
 
-/**
- * Confirm the object exists (best effort).
- * We list the folder and check for an exact filename match.
- */
 async function objectExists(args: { bucket: string; path: string }) {
   const parts = args.path.split('/')
   const file = parts.pop() || ''
@@ -79,14 +74,14 @@ type FinalizeBody = {
   serviceId: string
   publicUrl: string
   cacheBuster?: number
-  // optional: helps server verify existence
   path?: string
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] as any })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const body = (await req.json().catch(() => null)) as InitBody | FinalizeBody | null
     if (!body) return jsonFail(400, 'Invalid JSON')
@@ -98,7 +93,7 @@ export async function POST(req: NextRequest) {
       const serviceId = pickString(body.serviceId)
       const rawUrl = pickString(body.publicUrl)
       const cacheBuster = typeof body.cacheBuster === 'number' ? body.cacheBuster : null
-      const path = pickString((body as any).path)
+      const path = pickString(body.path)
 
       if (!serviceId) return jsonFail(400, 'Missing serviceId')
       if (!rawUrl) return jsonFail(400, 'Missing publicUrl')
@@ -109,15 +104,10 @@ export async function POST(req: NextRequest) {
       const cleaned = safeUrl(rawUrl)
       if (!cleaned) return jsonFail(400, 'Invalid publicUrl')
 
-      // optional existence check (best effort)
       const bucket = 'media-public'
       if (path) {
-        const exists = await objectExists({ bucket, path })
-        if (!exists) {
-          // Don’t brick the workflow for transient consistency, but be honest.
-          // If you prefer strict behavior, change to return jsonFail(400,...)
-          // For now: allow persist and let the client refresh later.
-        }
+        await objectExists({ bucket, path }).catch(() => false)
+        // best-effort: we don't block finalize on eventual consistency
       }
 
       const finalUrl = cacheBuster ? `${cleaned}${cleaned.includes('?') ? '&' : '?'}v=${cacheBuster}` : cleaned
@@ -164,10 +154,8 @@ export async function POST(req: NextRequest) {
 
     const path = `service/default/${serviceId}/default.${ext}`
 
-    // best-effort cleanup to avoid extension drift
     await cleanupOldServiceDefaultImages({ bucket, serviceId })
 
-    // create signed upload url (prefer upsert)
     const tryUpsert = await supabaseAdmin.storage
       .from(bucket)
       .createSignedUploadUrl(path, { upsert: true })
@@ -179,7 +167,7 @@ export async function POST(req: NextRequest) {
       token = (tryUpsert as any).data.token
     } else {
       const fallback = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path)
-      if (fallback?.error) return jsonFail(500, fallback.error.message || 'Failed to create signed upload URL')
+      if ((fallback as any)?.error) return jsonFail(500, (fallback as any).error.message || 'Failed to create signed upload URL')
       token = (fallback as any)?.data?.token ?? null
     }
 

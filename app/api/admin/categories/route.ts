@@ -26,8 +26,9 @@ function slugifyLoose(s: string) {
 
 export async function GET() {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const ok = await requireSupport(user.id)
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -47,25 +48,25 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const ok = await requireSupport(user.id)
     if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const form = await req.formData()
 
-    // ✅ pickString returns string | null in your codebase
     const name = (pickString(form.get('name')) ?? '').trim()
     const slugRaw = (pickString(form.get('slug')) ?? '').trim()
     const parentIdRaw = (pickString(form.get('parentId')) ?? '').trim()
 
     if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
 
-    const slug = slugifyLoose(slugRaw)
+    // if slug isn't provided, derive from name (nice UX)
+    const slug = slugifyLoose(slugRaw || name)
     if (!slug) return NextResponse.json({ error: 'Missing/invalid slug' }, { status: 400 })
 
-    // ✅ empty string -> null
     const parentId: string | null = parentIdRaw ? parentIdRaw : null
 
     if (parentId) {

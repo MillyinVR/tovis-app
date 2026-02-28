@@ -1,33 +1,41 @@
 // app/api/_utils/auth/requirePro.ts
 import { NextResponse } from 'next/server'
-import type { Role } from '@prisma/client'
 import { requireUser } from './requireUser'
+import { getCurrentUser } from '@/lib/currentUser'
+import { Role } from '@prisma/client'
 
-export async function requirePro() {
-  const { user, res } = await requireUser({ roles: ['PRO'] as Role[] })
-  if (res) {
-    return {
-      user: null as any,
-      professionalId: null as any,
-      proId: null as any,
-      res,
-    }
-  }
+type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
 
-  const professionalId = user.professionalProfile?.id ?? null
+export type RequireProOk = {
+  ok: true
+  user: CurrentUser
+  professionalId: string
+  proId: string // alias
+}
+
+export type RequireProFail = {
+  ok: false
+  res: NextResponse
+}
+
+export type RequireProResult = RequireProOk | RequireProFail
+
+export async function requirePro(): Promise<RequireProResult> {
+  const auth = await requireUser({ roles: [Role.PRO] })
+  if (!auth.ok) return auth
+
+  const professionalId = auth.user.professionalProfile?.id
   if (!professionalId) {
     return {
-      user: null as any,
-      professionalId: null as any,
-      proId: null as any,
-      res: NextResponse.json({ error: 'Only professionals can perform this action.' }, { status: 403 }),
+      ok: false,
+      res: NextResponse.json({ ok: false, error: 'Only professionals can perform this action.' }, { status: 403 }),
     }
   }
 
   return {
-    user,
+    ok: true,
+    user: auth.user,
     professionalId,
-    proId: professionalId, // ✅ alias for cleaner calling code
-    res: null as any,
+    proId: professionalId,
   }
 }

@@ -21,8 +21,9 @@ function trimId(v: unknown): string {
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const perm = await requireAdminPermission({
       adminUserId: user.id,
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // Idempotent UX: deleting something that’s already gone still “works”
     if (!existing) {
-      return NextResponse.redirect(new URL('/admin/permissions', req.url))
+      return NextResponse.redirect(new URL('/admin/permissions', req.url), { status: 303 })
     }
 
     await prisma.adminPermission.delete({ where: { id: permissionId } })
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       })
       .catch(() => null)
 
-    return NextResponse.redirect(new URL('/admin/permissions', req.url))
+    return NextResponse.redirect(new URL('/admin/permissions', req.url), { status: 303 })
   } catch (e) {
     console.error('POST /api/admin/permissions/[id] error', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

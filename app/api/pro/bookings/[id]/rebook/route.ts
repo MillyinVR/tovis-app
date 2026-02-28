@@ -1,8 +1,13 @@
 // app/api/pro/bookings/[id]/rebook/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requirePro } from '@/app/api/_utils'
-import { Prisma } from '@prisma/client'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  AftercareRebookMode,
+  BookingSource,
+  BookingStatus,
+  Prisma,
+  ServiceLocationType,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,10 +22,6 @@ type Body = {
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function pickString(v: unknown) {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 function parseISODate(v: unknown): Date | null {
   const s = pickString(v)
   if (!s) return null
@@ -32,11 +33,31 @@ function isMode(x: unknown): x is RebookMode {
   return x === 'BOOK' || x === 'RECOMMEND_WINDOW' || x === 'CLEAR'
 }
 
-function badRequest(msg: string) {
-  return NextResponse.json({ error: msg }, { status: 400 })
+function mustLocationType(v: ServiceLocationType): ServiceLocationType {
+  // this is already typed, but keeping a guard-style function makes intent explicit
+  if (v === ServiceLocationType.SALON) return v
+  if (v === ServiceLocationType.MOBILE) return v
+  // if schema ever expands, this will force you to handle it
+  throw new Error(`Unsupported ServiceLocationType: ${String(v)}`)
 }
 
-const bookingSelect = {
+function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (Array.isArray(value)) {
+    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, Prisma.InputJsonValue | null> = {}
+    for (const [key, item] of Object.entries(value)) {
+      if (item === undefined) continue
+      out[key] = item === null ? null : toInputJsonValue(item)
+    }
+    return out
+  }
+  throw new Error('Unsupported JSON snapshot value.')
+}
+
+const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
   status: true,
   clientId: true,
@@ -59,85 +80,92 @@ const bookingSelect = {
       priceSnapshot: true,
       durationMinutesSnapshot: true,
       sortOrder: true,
+      itemType: true,
+      parentItemId: true,
     },
   },
-} satisfies Prisma.BookingSelect
+})
 
 type BookingPayload = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proId = auth.professionalId
 
-    const { id: originalBookingId } = await Promise.resolve(ctx.params)
-    if (!originalBookingId?.trim()) return badRequest('Missing booking id.')
+    const params = await Promise.resolve(ctx.params)
+    const originalBookingId = pickString(params?.id)
+    if (!originalBookingId) return jsonFail(400, 'Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as Body
     const modeRaw = body.mode ?? 'BOOK'
     const mode: RebookMode = isMode(modeRaw) ? modeRaw : 'BOOK'
 
-    const booking = (await prisma.booking.findUnique({
+    const booking: BookingPayload | null = await prisma.booking.findUnique({
       where: { id: originalBookingId },
       select: bookingSelect,
-    })) as BookingPayload | null
+    })
 
-    if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 })
-    if (booking.professionalId !== proId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-    const bookingId: string = booking.id
-
-    if (String(booking.status) !== 'COMPLETED') {
-      return NextResponse.json({ error: 'Only COMPLETED bookings can be rebooked.' }, { status: 409 })
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
+    if (booking.status !== BookingStatus.COMPLETED) {
+      return jsonFail(409, 'Only COMPLETED bookings can be rebooked.')
     }
 
-    // ✅ CLEAR mode
+    const bookingId = booking.id
+
+    // ---- CLEAR ----
     if (mode === 'CLEAR') {
       const aftercare = await prisma.aftercareSummary.upsert({
         where: { bookingId },
         create: {
           bookingId,
-          rebookMode: 'NONE' as any,
+          rebookMode: AftercareRebookMode.NONE,
           rebookedFor: null,
           rebookWindowStart: null,
           rebookWindowEnd: null,
-        } as any,
+        },
         update: {
-          rebookMode: 'NONE' as any,
+          rebookMode: AftercareRebookMode.NONE,
           rebookedFor: null,
           rebookWindowStart: null,
           rebookWindowEnd: null,
-        } as any,
-        select: { id: true },
+        },
+        select: { id: true, rebookMode: true },
       })
 
-      return NextResponse.json({ ok: true, mode, aftercareId: aftercare.id }, { status: 200 })
+      return jsonOk({ mode, aftercareId: aftercare.id, rebookMode: aftercare.rebookMode }, 200)
     }
 
-    // ✅ RECOMMEND_WINDOW mode
+    // ---- RECOMMEND_WINDOW ----
     if (mode === 'RECOMMEND_WINDOW') {
       const windowStart = parseISODate(body.windowStart)
       const windowEnd = parseISODate(body.windowEnd)
 
-      if (!windowStart || !windowEnd) return badRequest('windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.')
-      if (windowEnd <= windowStart) return badRequest('windowEnd must be after windowStart.')
+      if (!windowStart || !windowEnd) {
+        return jsonFail(
+          400,
+          'windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.',
+        )
+      }
+      if (windowEnd <= windowStart) return jsonFail(400, 'windowEnd must be after windowStart.')
 
       const aftercare = await prisma.aftercareSummary.upsert({
         where: { bookingId },
         create: {
           bookingId,
-          rebookMode: 'RECOMMENDED_WINDOW' as any,
+          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
           rebookWindowStart: windowStart,
           rebookWindowEnd: windowEnd,
           rebookedFor: null,
-        } as any,
+        },
         update: {
-          rebookMode: 'RECOMMENDED_WINDOW' as any,
+          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
           rebookWindowStart: windowStart,
           rebookWindowEnd: windowEnd,
           rebookedFor: null,
-        } as any,
+        },
         select: {
           id: true,
           rebookMode: true,
@@ -147,25 +175,43 @@ export async function POST(req: Request, ctx: Ctx) {
         },
       })
 
-      return NextResponse.json({ ok: true, mode, aftercare }, { status: 200 })
+      return jsonOk({ mode, aftercare }, 200)
     }
 
-    // ✅ BOOK mode
+    // ---- BOOK ----
     const scheduledFor = parseISODate(body.scheduledFor)
-    if (!scheduledFor) return badRequest('scheduledFor is required (ISO string) for BOOK mode.')
+    if (!scheduledFor) return jsonFail(400, 'scheduledFor is required (ISO string) for BOOK mode.')
 
     const now = new Date()
-    if (scheduledFor.getTime() < now.getTime() - 60_000) return badRequest('scheduledFor must be in the future.')
+    if (scheduledFor.getTime() < now.getTime() + 60_000) {
+      return jsonFail(400, 'scheduledFor must be at least 1 minute in the future.')
+    }
 
     const items = booking.serviceItems ?? []
     const primary = items[0] ?? null
     if (!primary?.serviceId || !primary?.offeringId) {
-      return NextResponse.json({ error: 'This booking has no service items to rebook.' }, { status: 409 })
+      return jsonFail(409, 'This booking has no service items to rebook.')
     }
 
-    const z = new Prisma.Decimal(0)
-    const subtotal = items.reduce((sum, i) => sum.plus(i.priceSnapshot ?? z), new Prisma.Decimal(0))
-    const duration = items.reduce((sum, i) => sum + Number(i.durationMinutesSnapshot ?? 0), 0)
+    const locationType = mustLocationType(booking.locationType)
+
+    // JSON + snapshots: use undefined (Prisma-safe) instead of null
+    const locationAddressSnapshot =
+      booking.locationAddressSnapshot == null ? undefined : toInputJsonValue(booking.locationAddressSnapshot)
+
+    const locationLatSnapshot = booking.locationLatSnapshot ?? undefined
+    const locationLngSnapshot = booking.locationLngSnapshot ?? undefined
+    const locationTimeZone = booking.locationTimeZone ?? undefined
+
+    const zero = new Prisma.Decimal(0)
+    const subtotal = items.reduce(
+      (sum, i) => sum.plus(i.priceSnapshot ?? zero),
+      new Prisma.Decimal(0),
+    )
+    const duration = items.reduce(
+      (sum, i) => sum + Number(i.durationMinutesSnapshot ?? 0),
+      0,
+    )
 
     const created = await prisma.$transaction(async (tx) => {
       const nextBooking = await tx.booking.create({
@@ -173,40 +219,44 @@ export async function POST(req: Request, ctx: Ctx) {
           clientId: booking.clientId,
           professionalId: booking.professionalId,
 
-          // ✅ required
+          // required base service
           serviceId: primary.serviceId,
           offeringId: primary.offeringId,
 
           scheduledFor,
-          status: 'ACCEPTED' as any,
-          locationType: booking.locationType as any,
+          status: BookingStatus.ACCEPTED,
 
-          // ✅ required by schema
+          locationType,
           locationId: booking.locationId,
-          locationTimeZone: booking.locationTimeZone ?? null,
-          locationAddressSnapshot: booking.locationAddressSnapshot ?? undefined,
-          locationLatSnapshot: booking.locationLatSnapshot ?? undefined,
-          locationLngSnapshot: booking.locationLngSnapshot ?? undefined,
 
-          // ✅ pricing + duration truth
+          locationTimeZone,
+          locationAddressSnapshot,
+          locationLatSnapshot,
+          locationLngSnapshot,
+
           subtotalSnapshot: subtotal,
           totalDurationMinutes: Math.max(15, Math.round(duration || 60)),
           bufferMinutes: Math.max(0, Number(booking.bufferMinutes ?? 0)),
 
-          source: 'AFTERCARE' as any,
+          source: BookingSource.AFTERCARE,
           rebookOfBookingId: bookingId,
 
-          // ✅ copy items (no legacy)
+          // copy items
           serviceItems: {
             create: items.map((i) => ({
               serviceId: i.serviceId,
               offeringId: i.offeringId,
-              priceSnapshot: i.priceSnapshot ?? z,
-              durationMinutesSnapshot: Math.max(15, Math.round(Number(i.durationMinutesSnapshot ?? 60))),
+              itemType: i.itemType,
+              parentItemId: i.parentItemId,
+              priceSnapshot: i.priceSnapshot ?? zero,
+              durationMinutesSnapshot: Math.max(
+                15,
+                Math.round(Number(i.durationMinutesSnapshot ?? 60)),
+              ),
               sortOrder: Number.isFinite(Number(i.sortOrder)) ? Number(i.sortOrder) : 0,
             })),
           },
-        } as any,
+        },
         select: { id: true, scheduledFor: true, status: true },
       })
 
@@ -214,29 +264,26 @@ export async function POST(req: Request, ctx: Ctx) {
         where: { bookingId },
         create: {
           bookingId,
-          rebookMode: 'BOOKED_NEXT_APPOINTMENT' as any,
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
           rebookedFor: scheduledFor,
           rebookWindowStart: null,
           rebookWindowEnd: null,
-        } as any,
+        },
         update: {
-          rebookMode: 'BOOKED_NEXT_APPOINTMENT' as any,
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
           rebookedFor: scheduledFor,
           rebookWindowStart: null,
           rebookWindowEnd: null,
-        } as any,
+        },
         select: { id: true, rebookMode: true, rebookedFor: true },
       })
 
       return { nextBooking, aftercare }
     })
 
-    return NextResponse.json(
-      { ok: true, mode, nextBookingId: created.nextBooking.id, aftercare: created.aftercare },
-      { status: 201 },
-    )
+    return jsonOk({ mode, nextBookingId: created.nextBooking.id, aftercare: created.aftercare }, 201)
   } catch (e) {
     console.error('POST /api/pro/bookings/[id]/rebook error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

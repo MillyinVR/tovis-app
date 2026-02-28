@@ -1,7 +1,7 @@
 // app/api/holds/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType } from '@prisma/client'
+import { Prisma, type ServiceLocationType, BookingStatus } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import { getZonedParts, minutesSinceMidnightInTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
@@ -58,8 +58,12 @@ function pickDurationMinutes(args: {
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
 type WorkingHours = Record<string, WorkingHoursDay>
 
-function getWeekdayKeyInTimeZone(dateUtc: Date, timeZone: string): keyof WorkingHours {
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(dateUtc).toLowerCase()
+function getWeekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof WorkingHours {
+  const tz = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
+    .format(dateUtc)
+    .toLowerCase()
+
   if (weekday.startsWith('mon')) return 'mon'
   if (weekday.startsWith('tue')) return 'tue'
   if (weekday.startsWith('wed')) return 'wed'
@@ -93,7 +97,7 @@ function ensureWithinWorkingHours(args: {
     return { ok: false, error: 'This professional has not set working hours yet.' }
   }
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
   const wh = workingHours as WorkingHours
 
   const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, tz)
@@ -145,7 +149,7 @@ function addDaysToYMD(year: number, month: number, day: number, daysToAdd: numbe
  * This is used to bound booking conflict queries reliably.
  */
 function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: string }) {
-  const tz = sanitizeTimeZone(args.timeZone, 'UTC')
+  const tz = sanitizeTimeZone(args.timeZone, 'UTC') || 'UTC'
   const parts = getZonedParts(args.instantUtc, tz)
 
   const dayStartUtc = zonedTimeToUtc({
@@ -175,7 +179,7 @@ function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: strin
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
     const body = (await req.json().catch(() => ({}))) as CreateHoldBody
@@ -183,7 +187,7 @@ export async function POST(req: NextRequest) {
     const offeringId = pickString(body.offeringId)
     const requestedLocationId = pickString(body.locationId)
     const locationType = normalizeLocationType(body.locationType)
-    const scheduledForRaw = typeof body.scheduledFor === 'string' ? body.scheduledFor : null
+    const scheduledForRaw = typeof body.scheduledFor === 'string' ? body.scheduledFor.trim() : null
 
     if (!offeringId || !scheduledForRaw || !locationType) {
       return jsonFail(400, 'Missing offeringId, scheduledFor, or locationType.')
@@ -258,7 +262,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const apptTz = tzRes.timeZone
+      const apptTz = sanitizeTimeZone(tzRes.timeZone, 'UTC') || 'UTC'
 
       // enforce working-hours in LOCATION timezone
       const whCheck = ensureWithinWorkingHours({
@@ -325,7 +329,7 @@ export async function POST(req: NextRequest) {
           locationId: loc.id,
           locationType,
           scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
-          status: { in: ['PENDING', 'ACCEPTED'] },
+          status: { in: [BookingStatus.PENDING, BookingStatus.ACCEPTED] },
         },
         select: {
           scheduledFor: true,
@@ -348,6 +352,10 @@ export async function POST(req: NextRequest) {
 
       const expiresAt = addMinutes(now, HOLD_MINUTES)
 
+      const addressSnapshot: Prisma.InputJsonValue | undefined = loc.formattedAddress
+        ? { formattedAddress: loc.formattedAddress }
+        : undefined
+
       const hold = await tx.bookingHold.create({
         data: {
           offeringId: offering.id,
@@ -360,7 +368,7 @@ export async function POST(req: NextRequest) {
           locationId: loc.id,
           locationTimeZone: apptTz,
 
-          locationAddressSnapshot: loc.formattedAddress ? { formattedAddress: loc.formattedAddress } : undefined,
+          locationAddressSnapshot: addressSnapshot,
           locationLatSnapshot: typeof loc.lat === 'number' ? loc.lat : undefined,
           locationLngSnapshot: typeof loc.lng === 'number' ? loc.lng : undefined,
         },
@@ -378,7 +386,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (!result.ok) return jsonFail(result.status, result.error)
-    return jsonOk({ ok: true, hold: result.hold }, result.status)
+    return jsonOk({ hold: result.hold }, result.status)
   } catch (e) {
     console.error('POST /api/holds error', e)
     return jsonFail(500, 'Failed to create hold.')

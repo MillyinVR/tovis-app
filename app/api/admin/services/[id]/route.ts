@@ -80,8 +80,9 @@ function formHasAny(form: FormData, keys: string[]) {
 }
 
 async function handleUpdate(req: NextRequest, ctx: Ctx) {
-  const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-  if (res) return res
+  const auth = await requireUser({ roles: ['ADMIN'] })
+  if (!auth.ok) return auth.res
+  const user = auth.user
 
   const { id } = await getParams(ctx)
   const serviceId = trimId(id)
@@ -231,12 +232,11 @@ async function patchFromForm(args: PatchArgs) {
 
   // isActive can be part of partial updates too (only if present + parseable)
   if (form.has('isActive')) {
-    const isActive =
-      pickBool(form.get('isActive')) ?? (parseBoolish(pickString(form.get('isActive'))) ?? null)
+    const isActive = pickBool(form.get('isActive')) ?? (parseBoolish(pickString(form.get('isActive'))) ?? null)
     if (isActive !== null) update.isActive = isActive
   }
 
-  // defaultImageUrl (allow clear) — THIS is your upload fix
+  // defaultImageUrl (allow clear)
   if (form.has('defaultImageUrl')) {
     const raw = (pickString(form.get('defaultImageUrl')) ?? '').trim()
 
@@ -272,7 +272,9 @@ async function patchFromForm(args: PatchArgs) {
         serviceId: svc.id,
         categoryId: destCategoryId ?? svc.categoryId,
         action: 'SERVICE_UPDATED',
-        note: update.name ?? (Object.keys(update).length === 1 && update.defaultImageUrl !== undefined ? 'defaultImageUrl' : '(partial update)'),
+        note:
+          update.name ??
+          (Object.keys(update).length === 1 && update.defaultImageUrl !== undefined ? 'defaultImageUrl' : '(partial update)'),
       },
     })
     .catch(() => null)

@@ -25,16 +25,18 @@ function normalizeProfessionTypes(values: FormDataEntryValue[]): ProfessionType[
 
   for (const v of values) {
     const s = String(v).trim()
-    if (allowed.has(s as any)) out.push(s as ProfessionType)
+    if (allowed.has(s as ProfessionType)) out.push(s as ProfessionType)
   }
 
+  // de-dupe while preserving order
   return Array.from(new Set(out))
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const { id } = await getParams(ctx)
     const serviceId = trimId(id)
@@ -55,7 +57,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const form = await req.formData()
 
-    const stateCode = pickStateCode(form.get('stateCode')) // should return null or 'CA'
+    // should return null or something like 'CA'
+    const stateCode = pickStateCode(form.get('stateCode'))
     const professionTypes = normalizeProfessionTypes(form.getAll('professionType'))
 
     await prisma.$transaction(async (tx) => {

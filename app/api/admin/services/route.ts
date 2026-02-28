@@ -1,3 +1,4 @@
+// app/api/admin/services/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -6,6 +7,7 @@ import { hasAdminPermission } from '@/lib/adminPermissions'
 import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
 import { parseMoney } from '@/lib/money'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,21 +19,24 @@ async function requireSupport(userId: string) {
 }
 
 function wantsJson(req: NextRequest) {
-  // Explicit query param wins
   const url = new URL(req.url)
   if (url.searchParams.get('format') === 'json') return true
 
-  // Then accept header (fetch callers typically set this)
   const accept = req.headers.get('accept') || ''
   if (accept.includes('application/json')) return true
 
   return false
 }
 
+function isPositiveInt(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
+}
+
 export async function GET() {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const ok = await requireSupport(user.id)
     if (!ok) return jsonFail(403, 'Forbidden')
@@ -62,8 +67,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const ok = await requireSupport(user.id)
     if (!ok) return jsonFail(403, 'Forbidden')
@@ -75,7 +81,6 @@ export async function POST(req: NextRequest) {
     const name = (pickString(form.get('name')) ?? '').trim()
     const categoryId = (pickString(form.get('categoryId')) ?? '').trim()
 
-    // Note: keep your default, but allow empty to become default
     const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes')) ?? 60
     const minPriceRaw = (pickString(form.get('minPrice')) ?? '').trim()
 
@@ -83,14 +88,18 @@ export async function POST(req: NextRequest) {
     const description = (pickString(form.get('description')) ?? '').trim()
 
     const defaultImageUrlRaw = (pickString(form.get('defaultImageUrl')) ?? '').trim()
-    const defaultImageUrl = defaultImageUrlRaw || null
+    const defaultImageUrl = defaultImageUrlRaw ? defaultImageUrlRaw : null
 
     const isAddOnEligible = pickBool(form.get('isAddOnEligible')) ?? false
     const addOnGroupRaw = (pickString(form.get('addOnGroup')) ?? '').trim()
-    const addOnGroup = addOnGroupRaw || null
+    const addOnGroup = addOnGroupRaw ? addOnGroupRaw : null
 
     if (!name || !categoryId) {
       return jsonFail(400, 'Missing name or categoryId.')
+    }
+
+    if (!isPositiveInt(defaultDurationMinutes)) {
+      return jsonFail(400, 'Invalid defaultDurationMinutes')
     }
 
     // Scope check: must be allowed in this category
@@ -101,8 +110,8 @@ export async function POST(req: NextRequest) {
     })
     if (!okCategory) return jsonFail(403, 'Forbidden')
 
-    // Parse money: allow blank -> 0, otherwise validate format
-    let minPrice
+    // ✅ Prisma Decimal, not number
+    let minPrice: Prisma.Decimal
     try {
       minPrice = parseMoney(minPriceRaw || '0')
     } catch {
@@ -137,13 +146,10 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => null)
 
-    // ✅ JSON mode for wizard / fetch callers
     if (wantsJson(req)) {
-      // Keep response minimal + stable for clients
       return jsonOk({ id: String(created.id), name: created.name }, 200)
     }
 
-    // ✅ Default behavior unchanged (PRG redirect)
     return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(String(created.id))}`, req.url), {
       status: 303,
     })

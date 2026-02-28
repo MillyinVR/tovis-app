@@ -9,7 +9,7 @@ type Params = { params: Promise<{ id: string }> }
 export async function PATCH(req: Request, props: Params) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { id } = await props.params

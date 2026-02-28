@@ -92,7 +92,7 @@ function prismaErrorToResponse(e: any) {
 export async function PATCH(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proProfileId = auth.professionalId
 
     const body = await req.json().catch(() => ({} as any))

@@ -15,13 +15,18 @@ async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
 }
 
+function trimId(v: unknown) {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const { id } = await getParams(ctx)
-    const categoryId = typeof id === 'string' ? id.trim() : ''
+    const categoryId = trimId(id)
     if (!categoryId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
     const perm = await requireAdminPermission({
@@ -35,13 +40,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const method = pickMethod(form.get('_method'))
     if (method !== 'PATCH') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
 
-    const isActiveRaw = pickString(form.get('isActive'))
+    // HTML forms send strings. We only accept explicit true/false.
+    const isActiveRaw = pickString(form.get('isActive'))?.toLowerCase() ?? ''
+    if (isActiveRaw !== 'true' && isActiveRaw !== 'false') {
+      return NextResponse.json({ error: 'Invalid isActive (expected true/false)' }, { status: 400 })
+    }
     const isActive = isActiveRaw === 'true'
 
     const updated = await prisma.serviceCategory.update({
       where: { id: categoryId },
       data: { isActive },
-      select: { id: true, name: true, slug: true },
+      select: { id: true, name: true, slug: true, isActive: true },
     })
 
     await prisma.adminActionLog
@@ -50,12 +59,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           adminUserId: user.id,
           categoryId: updated.id,
           action: 'CATEGORY_TOGGLED',
-          note: `${updated.name} (${updated.slug}) -> ${isActive ? 'ENABLED' : 'DISABLED'}`,
+          note: `${updated.name} (${updated.slug}) -> ${updated.isActive ? 'ENABLED' : 'DISABLED'}`,
         },
       })
       .catch(() => null)
 
-    // ✅ 303 for form navigation
+    // ✅ 303 for form navigation (PRG pattern)
     return NextResponse.redirect(new URL('/admin/categories', req.url), { status: 303 })
   } catch (e) {
     console.error('POST /api/admin/categories/[id] error', e)

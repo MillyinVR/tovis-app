@@ -461,23 +461,46 @@ export async function GET(req: Request) {
     if (!service) return NextResponse.json({ ok: false, error: 'Service not found' }, { status: 404 })
     if (!offering) return NextResponse.json({ ok: false, error: 'Offering not found' }, { status: 404 })
 
-    const effectiveLocationType =
-      pickEffectiveLocationType({
-        requested: requestedLocationType,
-        offersInSalon: Boolean(offering.offersInSalon),
-        offersMobile: Boolean(offering.offersMobile),
-      }) ?? null
+    let effectiveLocationType =
+  pickEffectiveLocationType({
+    requested: requestedLocationType,
+    offersInSalon: Boolean(offering.offersInSalon),
+    offersMobile: Boolean(offering.offersMobile),
+  }) ?? null
 
-    if (!effectiveLocationType) {
-      return NextResponse.json({ ok: false, error: 'This service is not bookable.' }, { status: 400 })
+if (!effectiveLocationType) {
+  return NextResponse.json({ ok: false, error: 'This service is not bookable.' }, { status: 400 })
+}
+
+let loc = await pickBookableLocation({
+  professionalId,
+  requestedLocationId,
+  locationType: effectiveLocationType,
+})
+
+// 🔥 fallback if client requested the wrong mode
+if (!loc) {
+  const canTryMobile = effectiveLocationType === 'SALON' && Boolean(offering.offersMobile)
+  const canTrySalon = effectiveLocationType === 'MOBILE' && Boolean(offering.offersInSalon)
+
+  if (canTryMobile) {
+    const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: 'MOBILE' })
+    if (alt) {
+      loc = alt
+      effectiveLocationType = 'MOBILE'
     }
+  } else if (canTrySalon) {
+    const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: 'SALON' })
+    if (alt) {
+      loc = alt
+      effectiveLocationType = 'SALON'
+    }
+  }
+}
 
-    const loc = await pickBookableLocation({
-      professionalId,
-      requestedLocationId,
-      locationType: effectiveLocationType,
-    })
-    if (!loc) return NextResponse.json({ ok: false, error: 'No bookable location found.' }, { status: 400 })
+if (!loc) {
+  return NextResponse.json({ ok: false, error: 'No bookable location found.' }, { status: 400 })
+}
 
     const locAny = loc as any
     const locId = String(locAny.id || '').trim()

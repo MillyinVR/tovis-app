@@ -1,14 +1,14 @@
 // app/api/client/openings/route.ts
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType } from '@prisma/client'
+import { OpeningStatus, ServiceLocationType } from '@prisma/client'
 import { requireClient, pickString, upper, jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = upper(v)
-  if (s === 'SALON') return 'SALON'
-  if (s === 'MOBILE') return 'MOBILE'
+  if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
+  if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
   return null
 }
 
@@ -18,26 +18,25 @@ function pickEffectiveLocationType(args: {
   offersMobile: boolean
 }): ServiceLocationType | null {
   const { requested, offersInSalon, offersMobile } = args
-  if (requested === 'SALON' && offersInSalon) return 'SALON'
-  if (requested === 'MOBILE' && offersMobile) return 'MOBILE'
-  if (offersInSalon) return 'SALON'
-  if (offersMobile) return 'MOBILE'
+  if (requested === ServiceLocationType.SALON && offersInSalon) return ServiceLocationType.SALON
+  if (requested === ServiceLocationType.MOBILE && offersMobile) return ServiceLocationType.MOBILE
+  if (offersInSalon) return ServiceLocationType.SALON
+  if (offersMobile) return ServiceLocationType.MOBILE
   return null
 }
 
-function pickModeFields(
-  offering: {
-    salonPriceStartingAt: any | null
-    salonDurationMinutes: number | null
-    mobilePriceStartingAt: any | null
-    mobileDurationMinutes: number | null
-  },
-  locationType: ServiceLocationType,
-) {
+type OfferingModeFields = {
+  salonPriceStartingAt: unknown | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: unknown | null
+  mobileDurationMinutes: number | null
+}
+
+function pickModeFields(offering: OfferingModeFields, locationType: ServiceLocationType) {
   const priceStartingAt =
-    locationType === 'MOBILE' ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+    locationType === ServiceLocationType.MOBILE ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
   const durationMinutes =
-    locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+    locationType === ServiceLocationType.MOBILE ? offering.mobileDurationMinutes : offering.salonDurationMinutes
 
   return {
     priceStartingAt: priceStartingAt ?? null,
@@ -45,10 +44,7 @@ function pickModeFields(
   }
 }
 
-function pickConservativeDuration(offering: {
-  salonDurationMinutes: number | null
-  mobileDurationMinutes: number | null
-}) {
+function pickConservativeDuration(offering: { salonDurationMinutes: number | null; mobileDurationMinutes: number | null }) {
   const a = Number(offering.salonDurationMinutes ?? 0)
   const b = Number(offering.mobileDurationMinutes ?? 0)
   const m = Math.max(a, b)
@@ -58,7 +54,7 @@ function pickConservativeDuration(offering: {
 export async function GET(req: Request) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
     const { searchParams } = new URL(req.url)
@@ -72,7 +68,7 @@ export async function GET(req: Request) {
         clientId,
         bookedAt: null,
         opening: {
-          status: 'ACTIVE',
+          status: OpeningStatus.ACTIVE,
           ...(serviceId ? { serviceId } : {}),
           ...(professionalId ? { professionalId } : {}),
         },
@@ -123,18 +119,17 @@ export async function GET(req: Request) {
         const off = o.offering
         const pro = o.professional
 
-        let effectiveLocationType: ServiceLocationType | null = null
-        if (off) {
-          effectiveLocationType = pickEffectiveLocationType({
-            requested: requestedLocationType,
-            offersInSalon: Boolean(off.offersInSalon),
-            offersMobile: Boolean(off.offersMobile),
-          })
-        } else {
-          effectiveLocationType = requestedLocationType
-        }
+        const effectiveLocationType: ServiceLocationType | null = off
+          ? pickEffectiveLocationType({
+              requested: requestedLocationType,
+              offersInSalon: Boolean(off.offersInSalon),
+              offersMobile: Boolean(off.offersMobile),
+            })
+          : requestedLocationType
 
-        let priceStartingAt: any | null = null
+        // We keep price as unknown|null because Prisma Decimal serializes cleanly
+        // through NextResponse.json, and we don’t want any casts here.
+        let priceStartingAt: unknown | null = null
         let durationMinutes: number | null = null
 
         if (off && effectiveLocationType) {
@@ -190,9 +185,9 @@ export async function GET(req: Request) {
           },
         }
       })
-      .filter(Boolean)
+      .filter((x): x is NonNullable<typeof x> => Boolean(x))
 
-    return jsonOk({ ok: true, notifications: normalized })
+    return jsonOk({ notifications: normalized })
   } catch (e) {
     console.error('GET /api/client/openings error', e)
     return jsonFail(500, 'Failed to load openings.')

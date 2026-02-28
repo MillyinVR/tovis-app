@@ -4,6 +4,13 @@ import { jsonFail, jsonOk, pickString, requireUser } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
+type Params = { id: string }
+type Ctx = { params: Params | Promise<Params> }
+
+async function getParams(ctx: Ctx): Promise<Params> {
+  return await Promise.resolve(ctx.params)
+}
+
 async function requirePublicEligibleLook(id: string) {
   const media = await prisma.mediaAsset.findUnique({
     where: { id },
@@ -17,14 +24,14 @@ async function requirePublicEligibleLook(id: string) {
   return media
 }
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireUser()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const user = auth.user
 
-    const raw = await params
-    const id = pickString(raw?.id)
+    const { id: rawId } = await getParams(ctx)
+    const id = pickString(rawId)
     if (!id) return jsonFail(400, 'Missing media id.')
 
     const ok = await requirePublicEligibleLook(id)
@@ -38,21 +45,21 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     }
 
     const likeCount = await prisma.mediaLike.count({ where: { mediaId: id } })
-    return jsonOk({ ok: true, liked: true, likeCount }, 200)
+    return jsonOk({ liked: true, likeCount }, 200)
   } catch (e) {
     console.error('POST /api/looks/[id]/like error', e)
     return jsonFail(500, 'Couldn’t update your like. Try again.')
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireUser()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const user = auth.user
 
-    const raw = await params
-    const id = pickString(raw?.id)
+    const { id: rawId } = await getParams(ctx)
+    const id = pickString(rawId)
     if (!id) return jsonFail(400, 'Missing media id.')
 
     const ok = await requirePublicEligibleLook(id)
@@ -61,7 +68,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     await prisma.mediaLike.deleteMany({ where: { mediaId: id, userId: user.id } })
 
     const likeCount = await prisma.mediaLike.count({ where: { mediaId: id } })
-    return jsonOk({ ok: true, liked: false, likeCount }, 200)
+    return jsonOk({ liked: false, likeCount }, 200)
   } catch (e) {
     console.error('DELETE /api/looks/[id]/like error', e)
     return jsonFail(500, 'Couldn’t update your like. Try again.')

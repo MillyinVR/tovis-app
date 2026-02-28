@@ -12,12 +12,12 @@ function mergeHeaders(base: HeadersLike, extra: HeadersLike) {
   return out
 }
 
-export function jsonOk<T extends Record<string, unknown>>(data: T = {} as T, init?: number | ResponseInit) {
+export function jsonOk<T extends Record<string, unknown>>(data?: T, init?: number | ResponseInit) {
   const status = typeof init === 'number' ? init : init?.status
   const headersIn = typeof init === 'object' ? init.headers : undefined
 
   // Never allow callers to override `ok`
-  const { ok: _ignored, ...rest } = (data || {}) as Record<string, unknown>
+  const { ok: _ignored, ...rest } = data ?? ({} as Record<string, unknown>)
 
   const headers = mergeHeaders({ 'Cache-Control': 'no-store' }, headersIn)
 
@@ -26,7 +26,7 @@ export function jsonOk<T extends Record<string, unknown>>(data: T = {} as T, ini
 
 export function jsonFail(status: number, error: string, extra?: Record<string, unknown>, init?: ResponseInit) {
   // Never allow callers to override `ok` / `error`
-  const { ok: _ignoredOk, error: _ignoredErr, ...rest } = (extra || {}) as Record<string, unknown>
+  const { ok: _ignoredOk, error: _ignoredErr, ...rest } = extra ?? {}
 
   const headers = mergeHeaders({ 'Cache-Control': 'no-store' }, init?.headers)
 

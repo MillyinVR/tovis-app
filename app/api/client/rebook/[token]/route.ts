@@ -1,7 +1,8 @@
 // app/api/client/rebook/[token]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireClient, pickString, upper, jsonFail, jsonOk } from '@/app/api/_utils'
+import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
+import { AftercareRebookMode, BookingSource, BookingStatus, Prisma, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,13 +12,29 @@ function isValidDate(d: Date) {
   return d instanceof Date && !Number.isNaN(d.getTime())
 }
 
+function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (Array.isArray(value)) {
+    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, Prisma.InputJsonValue | null> = {}
+    for (const [key, item] of Object.entries(value)) {
+      if (item === undefined) continue
+      out[key] = item === null ? null : toInputJsonValue(item)
+    }
+    return out
+  }
+  throw new Error('Unsupported JSON snapshot value.')
+}
+
 export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { token: rawToken } = await Promise.resolve(ctx.params as any)
+    const { token: rawToken } = await Promise.resolve(ctx.params)
     const token = pickString(rawToken)
     if (!token) return jsonFail(400, 'Missing token.')
 
@@ -59,7 +76,6 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     if (aftercare.booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
     return jsonOk({
-      ok: true,
       aftercare: {
         id: aftercare.id,
         bookingId: aftercare.bookingId,
@@ -92,10 +108,10 @@ type PostBody = { scheduledFor: string }
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { token: rawToken } = await Promise.resolve(ctx.params as any)
+    const { token: rawToken } = await Promise.resolve(ctx.params)
     const token = pickString(rawToken)
     if (!token) return jsonFail(400, 'Missing token.')
 
@@ -145,8 +161,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (aftercare.booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
     // enforce recommended window if enabled
-    const mode = upper(aftercare.rebookMode)
-    if (mode === 'RECOMMENDED_WINDOW') {
+    if (aftercare.rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
       const s = aftercare.rebookWindowStart
       const e = aftercare.rebookWindowEnd
       if (s && e) {
@@ -158,40 +173,47 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     const created = await prisma.$transaction(async (tx) => {
-      const b = aftercare.booking!
+      const b = aftercare.booking
+      if (!b) {
+        throw new Error('Rebook link is missing booking context.')
+      }
+
+      const locationAddressSnapshot =
+        b.locationAddressSnapshot == null ? undefined : toInputJsonValue(b.locationAddressSnapshot)
+      const locationLatSnapshot = b.locationLatSnapshot ?? undefined
+      const locationLngSnapshot = b.locationLngSnapshot ?? undefined
 
       const newBooking = await tx.booking.create({
         data: {
           clientId,
           professionalId: b.professionalId,
           serviceId: b.serviceId,
-          offeringId: b.offeringId ?? null,
+          offeringId: b.offeringId ?? undefined,
 
           scheduledFor,
-          status: 'PENDING',
-          source: 'AFTERCARE',
+          status: BookingStatus.PENDING,
+          source: BookingSource.AFTERCARE,
 
           locationType: b.locationType,
           locationId: b.locationId,
 
-          locationTimeZone: b.locationTimeZone ?? null,
-          locationAddressSnapshot: (b.locationAddressSnapshot ?? null) as any,
-          locationLatSnapshot: b.locationLatSnapshot ?? null,
-          locationLngSnapshot: b.locationLngSnapshot ?? null,
-
-          clientTimeZoneAtBooking: b.clientTimeZoneAtBooking ?? null,
+          locationTimeZone: b.locationTimeZone ?? undefined,
+          locationAddressSnapshot,
+          locationLatSnapshot,
+          locationLngSnapshot,
+          clientTimeZoneAtBooking: b.clientTimeZoneAtBooking ?? undefined,
 
           subtotalSnapshot: b.subtotalSnapshot,
-          totalAmount: b.totalAmount ?? null,
-          depositAmount: b.depositAmount ?? null,
-          tipAmount: b.tipAmount ?? null,
-          taxAmount: b.taxAmount ?? null,
-          discountAmount: b.discountAmount ?? null,
+          totalAmount: b.totalAmount ?? undefined,
+          depositAmount: b.depositAmount ?? undefined,
+          tipAmount: b.tipAmount ?? undefined,
+          taxAmount: b.taxAmount ?? undefined,
+          discountAmount: b.discountAmount ?? undefined,
 
           totalDurationMinutes: b.totalDurationMinutes,
           bufferMinutes: b.bufferMinutes ?? 0,
 
-          sessionStep: 'NONE',
+          sessionStep: SessionStep.NONE,
         },
         select: { id: true, status: true, scheduledFor: true },
       })
@@ -199,7 +221,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       await tx.aftercareSummary.update({
         where: { id: aftercare.id },
         data: {
-          rebookMode: 'BOOKED_NEXT_APPOINTMENT',
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
           rebookedFor: scheduledFor,
         },
       })
@@ -207,9 +229,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return newBooking
     })
 
-    return NextResponse.json(
-      { ok: true, booking: { id: created.id, status: created.status, scheduledFor: created.scheduledFor.toISOString() } },
-      { status: 201 },
+    return jsonOk(
+      {
+        booking: {
+          id: created.id,
+          status: created.status,
+          scheduledFor: created.scheduledFor.toISOString(),
+        },
+      },
+      201,
     )
   } catch (e) {
     console.error('POST /api/client/rebook/[token] error:', e)

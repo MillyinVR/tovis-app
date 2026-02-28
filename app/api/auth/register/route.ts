@@ -6,10 +6,17 @@ import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
 import crypto from 'crypto'
 import Twilio from 'twilio'
-import type { ProfessionType } from '@prisma/client'
+import {
+  type ProfessionType,
+  VerificationDocumentType,
+  VerificationStatus,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
+/* =========================================================
+   Debug (optional) — consider removing in prod
+========================================================= */
 console.log(
   '[register] DATABASE_URL host =',
   (() => {
@@ -72,21 +79,18 @@ type RegisterBody = {
   tapIntentId?: unknown
   signupLocation?: unknown
 
-  // ✅ PRO optional
+  // pro fields
   businessName?: unknown
-
-  // ✅ PRO required (per flow)
   professionType?: unknown
-
-  // ✅ handle optional
   handle?: unknown
-
-  // ✅ Mobile: miles (DB stores miles)
   mobileRadiusMiles?: unknown
 
-  // ✅ License inputs (required only for CA BBC professions)
+  // license fields
   licenseState?: unknown
   licenseNumber?: unknown
+
+  // ✅ Manual fallback (upload ref/url)
+  licenseDocumentUrl?: unknown
 }
 
 /* =========================================================
@@ -145,7 +149,12 @@ function isLocationPayload(v: any): v is SignupLocation {
   }
 
   if (v.kind === 'PRO_MOBILE' || v.kind === 'CLIENT_ZIP') {
-    return typeof v.postalCode === 'string' && typeof v.lat === 'number' && typeof v.lng === 'number' && typeof v.timeZoneId === 'string'
+    return (
+      typeof v.postalCode === 'string' &&
+      typeof v.lat === 'number' &&
+      typeof v.lng === 'number' &&
+      typeof v.timeZoneId === 'string'
+    )
   }
 
   return false
@@ -184,10 +193,7 @@ function normalizeLicenseNumber(v: unknown) {
 }
 
 function normalizeHandleInput(raw: string) {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '')
-    .slice(0, 24)
+  return raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
 
 /** Accept number or string, return finite number or null */
@@ -197,6 +203,43 @@ function parseNumber(v: unknown): number | null {
   if (!s) return null
   const n = Number(s)
   return Number.isFinite(n) ? n : null
+}
+
+/**
+ * supabase://<bucket>/<path>
+ */
+function parseSupabaseRef(input: string): { bucket: string; path: string } | null {
+  const s = input.trim()
+  if (!s.startsWith('supabase://')) return null
+  const rest = s.slice('supabase://'.length)
+  const idx = rest.indexOf('/')
+  if (idx <= 0) return null
+  const bucket = rest.slice(0, idx).trim()
+  const path = rest.slice(idx + 1).trim()
+  if (!bucket || !path) return null
+  return { bucket, path }
+}
+
+function looksLikeLicenseDocRef(s: string) {
+  if (!s) return false
+  if (s.startsWith('http://') || s.startsWith('https://')) return true
+  if (s.startsWith('supabase://')) return Boolean(parseSupabaseRef(s))
+  if (s.startsWith('/')) return true
+  return false
+}
+
+/**
+ * ✅ Build the create payload for VerificationDocument using REAL enums
+ * and fields that exist on your model.
+ */
+function createManualLicenseDocData(urlOrRef: string) {
+  return {
+    type: VerificationDocumentType.LICENSE,
+    label: 'License (manual review)',
+    // Your model supports both imageUrl and url; use url to be generic
+    url: urlOrRef,
+    status: VerificationStatus.PENDING,
+  }
 }
 
 /**
@@ -228,7 +271,6 @@ function isPrismaUniqueError(err: any) {
    Profession rules
 ========================================================= */
 
-// Full dropdown set (matches your Prisma enum)
 const ALL_PROFESSIONS: ProfessionType[] = [
   'COSMETOLOGIST',
   'BARBER',
@@ -244,7 +286,6 @@ function isAnyProfessionType(v: string): v is ProfessionType {
   return (ALL_PROFESSIONS as string[]).includes(v)
 }
 
-// CA Board of Barbering & Cosmetology professions that require DCA/BreEZe license verification
 const CA_BBC_LICENSE_REQUIRED: ProfessionType[] = [
   'COSMETOLOGIST',
   'BARBER',
@@ -380,8 +421,6 @@ export async function POST(request: Request) {
 
     const firstName = pickString(body.firstName)
     const lastName = pickString(body.lastName)
-
-    // ✅ required for ALL users
     const phone = cleanPhone(body.phone)
 
     const tapIntentId = pickString(body.tapIntentId)
@@ -399,7 +438,7 @@ export async function POST(request: Request) {
       return jsonFail(400, 'Phone number is required.', { code: 'PHONE_REQUIRED' })
     }
 
-    // 🔒 Location enforcement
+    // location enforcement
     if (role === 'PRO') {
       if (!signupLocation || (signupLocation.kind !== 'PRO_SALON' && signupLocation.kind !== 'PRO_MOBILE')) {
         return jsonFail(400, 'Please confirm your work location.', { code: 'PRO_LOCATION_REQUIRED' })
@@ -415,7 +454,7 @@ export async function POST(request: Request) {
       return jsonFail(400, 'Unable to determine a valid time zone.', { code: 'TIMEZONE_REQUIRED' })
     }
 
-    // ✅ PRO: required profession
+    // pro profession
     const professionRaw = pickUpper(body.professionType)
     let profession: ProfessionType | null = null
     if (role === 'PRO') {
@@ -424,37 +463,30 @@ export async function POST(request: Request) {
       profession = professionRaw as ProfessionType
     }
 
-    // ✅ PRO: business name optional
+    // business name
     const businessNameRaw = pickString(body.businessName)
     const businessName = role === 'PRO' ? (businessNameRaw?.trim() ? businessNameRaw.trim() : null) : null
 
-    // ✅ PRO: handle optional (null until upgrade)
+    // handle
     const handleRaw = pickString(body.handle)
     let handleToStore: string | null = null
     let normalizedHandle: string | null = null
     if (role === 'PRO' && handleRaw?.trim()) {
       handleToStore = handleRaw.trim()
       normalizedHandle = normalizeHandleInput(handleToStore)
-      if (!normalizedHandle) {
-        return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
-      }
+      if (!normalizedHandle) return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
     }
 
-    // ✅ PRO: mobile radius only required if PRO_MOBILE (miles)
+    // mobile radius
     let mobileRadiusMiles: number | null = null
     if (role === 'PRO' && signupLocation.kind === 'PRO_MOBILE') {
       const miles = parseNumber(body.mobileRadiusMiles)
-      if (miles == null) {
-        return jsonFail(400, 'Mobile radius (miles) is required for mobile pros.', { code: 'MOBILE_RADIUS_REQUIRED' })
-      }
-      if (miles < 1 || miles > 200) {
-        return jsonFail(400, 'Please enter a mobile radius between 1 and 200 miles.', { code: 'MOBILE_RADIUS_RANGE' })
-      }
+      if (miles == null) return jsonFail(400, 'Mobile radius (miles) is required for mobile pros.', { code: 'MOBILE_RADIUS_REQUIRED' })
+      if (miles < 1 || miles > 200) return jsonFail(400, 'Please enter a mobile radius between 1 and 200 miles.', { code: 'MOBILE_RADIUS_RANGE' })
       mobileRadiusMiles = Math.round(miles)
     }
 
-    // ✅ License verification (CA-only for now)
-    // Only required for CA BBC professions. Makeup artists (and others) remain PENDING.
+    // license verification + manual fallback
     let verificationStatus: 'PENDING' | 'APPROVED' = 'PENDING'
     let licenseVerified = false
     let licenseStateToStore: string | null = null
@@ -464,56 +496,72 @@ export async function POST(request: Request) {
     let licenseVerifiedSourceToStore: string | null = null
     let licenseStatusCodeToStore: string | null = null
     let licenseRawJsonToStore: any = null
+    let manualLicenseDocUrl: string | null = null
 
-    if (role === 'PRO' && profession) {
-      if (requiresCaBbcLicense(profession)) {
-        const licenseState = pickUpper(body.licenseState)
-        const licenseNumber = normalizeLicenseNumber(body.licenseNumber)
+    if (role === 'PRO' && profession && requiresCaBbcLicense(profession)) {
+      const licenseState = pickUpper(body.licenseState)
+      const licenseNumber = normalizeLicenseNumber(body.licenseNumber)
 
-        if (!licenseState || !licenseNumber) {
-          return jsonFail(400, 'CA license state and number are required for this profession.', { code: 'LICENSE_REQUIRED' })
-        }
+      if (!licenseState || !licenseNumber) {
+        return jsonFail(400, 'CA license state and number are required for this profession.', { code: 'LICENSE_REQUIRED' })
+      }
+      if (licenseState !== 'CA') {
+        return jsonFail(400, 'Only California licenses are supported right now.', { code: 'LICENSE_STATE_UNSUPPORTED' })
+      }
 
-        if (licenseState !== 'CA') {
-          return jsonFail(400, 'Only California licenses are supported right now.', { code: 'LICENSE_STATE_UNSUPPORTED' })
-        }
+      // always store these
+      licenseStateToStore = 'CA'
+      licenseNumberToStore = licenseNumber
 
-        const v = await verifyCaBbcLicense({ professionType: profession, licenseNumber })
-        if (!v.ok) return jsonFail(500, v.error, { code: 'LICENSE_VERIFY_ERROR' })
+      const v = await verifyCaBbcLicense({ professionType: profession, licenseNumber })
 
-        if (!v.verified) {
-          return jsonFail(400, 'License could not be verified as CURRENT.', {
-            code: 'LICENSE_NOT_VERIFIED',
-            statusCode: v.statusCode ?? null,
-          })
-        }
-
+      if (v.ok && v.verified) {
         verificationStatus = 'APPROVED'
         licenseVerified = true
-        licenseStateToStore = 'CA'
-        licenseNumberToStore = licenseNumber
         licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
         licenseVerifiedAtToStore = new Date()
         licenseVerifiedSourceToStore = v.source
         licenseStatusCodeToStore = v.statusCode ?? null
         licenseRawJsonToStore = v.raw ?? null
+      } else if (v.ok && !v.verified) {
+        // DCA responded but not current/no match -> hard fail
+        return jsonFail(400, 'License could not be verified as CURRENT.', {
+          code: 'LICENSE_NOT_VERIFIED',
+          statusCode: v.statusCode ?? null,
+        })
       } else {
-        // Makeup artists (and other non-CA-BBC) = no DCA check here
+        // DCA unavailable -> allow manual fallback
+        const docUrl = pickString(body.licenseDocumentUrl)
+
+        if (!docUrl || !looksLikeLicenseDocRef(docUrl)) {
+          return jsonFail(
+            400,
+            'License verification is unavailable. Please upload a photo of your license for admin review.',
+            { code: 'LICENSE_MANUAL_REQUIRED' },
+          )
+        }
+
+        const ref = parseSupabaseRef(docUrl)
+        if (ref && ref.bucket !== 'media-private') {
+          return jsonFail(400, 'Invalid license document (must be private upload).', { code: 'LICENSE_DOC_INVALID' })
+        }
+
         verificationStatus = 'PENDING'
         licenseVerified = false
+        manualLicenseDocUrl = docUrl
+        licenseRawJsonToStore = { note: 'Manual fallback: DCA unavailable', error: v.error ?? null }
       }
     }
 
-    // ✅ Enforce unique email + phone (fast pre-check)
+    // unique email + phone
     const existing = await prisma.user.findFirst({
       where: { OR: [{ email }, { phone }] },
       select: { email: true, phone: true },
     })
-
     if (existing?.email === email) return jsonFail(400, 'Email already in use.', { code: 'EMAIL_IN_USE' })
     if (existing?.phone === phone) return jsonFail(400, 'Phone number already in use.', { code: 'PHONE_IN_USE' })
 
-    // ✅ Handle uniqueness only if user provided one
+    // handle uniqueness
     if (role === 'PRO' && normalizedHandle) {
       const handleTaken = await prisma.professionalProfile.findFirst({
         where: { handleNormalized: normalizedHandle },
@@ -553,37 +601,28 @@ export async function POST(request: Request) {
                     lastName,
                     phone,
                     phoneVerifiedAt: null,
-
-                    // fallback timezone (booking math should prefer location.timeZone)
                     timeZone: finalTimeZone,
 
                     bio: '',
                     location: '',
 
-                    // ✅ optional
                     businessName,
-
-                    // ✅ optional (null until upgrade)
                     handle: handleToStore,
                     handleNormalized: normalizedHandle,
 
-                    // ✅ required for PRO
                     professionType: profession,
 
-                    // ✅ license fields populated only for CA BBC verified professions
                     licenseNumber: licenseNumberToStore,
                     licenseState: licenseStateToStore,
                     licenseExpiry: licenseExpiryToStore,
                     licenseVerified,
                     verificationStatus,
 
-                    // ✅ metadata fields you said you added
                     licenseVerifiedAt: licenseVerifiedAtToStore,
                     licenseVerifiedSource: licenseVerifiedSourceToStore,
                     licenseStatusCode: licenseStatusCodeToStore,
                     licenseRawJson: licenseRawJsonToStore,
 
-                    // mobile travel settings (MILES)
                     mobileBasePostalCode: signupLocation.kind === 'PRO_MOBILE' ? signupLocation.postalCode : null,
                     mobileRadiusMiles: signupLocation.kind === 'PRO_MOBILE' ? mobileRadiusMiles : null,
 
@@ -591,7 +630,6 @@ export async function POST(request: Request) {
                       create:
                         signupLocation.kind === 'PRO_SALON'
                           ? {
-                              // ✅ per your request: store as SALON even if it's a suite
                               type: 'SALON',
                               name: signupLocation.name ?? null,
                               isPrimary: true,
@@ -628,6 +666,12 @@ export async function POST(request: Request) {
                               workingHours: defaultWorkingHours(),
                             },
                     },
+
+                    verificationDocs: manualLicenseDocUrl
+                      ? {
+                          create: createManualLicenseDocData(manualLicenseDocUrl),
+                        }
+                      : undefined,
                   },
                 }
               : undefined,
@@ -635,7 +679,6 @@ export async function POST(request: Request) {
         select: { id: true, email: true, role: true, phone: true },
       })
 
-      // invalidate old unused codes
       await tx.phoneVerification.updateMany({
         where: { userId: user.id, usedAt: null },
         data: { usedAt: new Date() },
@@ -653,7 +696,7 @@ export async function POST(request: Request) {
       return { user, code }
     })
 
-    // ✅ Send SMS AFTER tx success
+    // send SMS (best effort)
     try {
       await sendPhoneVerificationSms({ to: user.phone!, code })
     } catch (smsErr) {
@@ -702,6 +745,7 @@ export async function POST(request: Request) {
       return jsonFail(500, 'SMS provider is not configured.', { code: 'SMS_NOT_CONFIGURED' })
     }
 
+    // guard
     if (msg.includes('DCA API is not configured') || msg.includes('Could not resolve DCA licType codes')) {
       console.error('[license-verification] dca config error', err)
       return jsonFail(500, 'License verification is not configured.', { code: 'LICENSE_VERIFY_CONFIG' })

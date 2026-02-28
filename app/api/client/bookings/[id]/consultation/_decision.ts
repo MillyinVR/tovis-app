@@ -7,9 +7,8 @@ import {
   requireClient,
   enforceRateLimit,
   rateLimitIdentity,
-  upper,
 } from '@/app/api/_utils'
-import { ConsultationApprovalStatus } from '@prisma/client'
+import { ConsultationApprovalStatus, NotificationType } from '@prisma/client'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
 export type ConsultationDecisionCtx = { params: { id: string } | Promise<{ id: string }> }
@@ -32,11 +31,11 @@ function decisionToStatus(action: ConsultationDecisionAction): ConsultationAppro
 export async function handleConsultationDecision(action: ConsultationDecisionAction, ctx: ConsultationDecisionCtx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId, user } = auth
 
-    const { id } = await Promise.resolve(ctx.params as any)
-    const bookingId = pickString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     // 🔒 Rate limit (best-effort): if Upstash goes down, do NOT break approvals.
@@ -81,8 +80,7 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
     const approval = booking.consultationApproval
     if (!approval?.id) return jsonFail(409, 'No consultation proposal found for this booking yet.')
 
-    const statusUpper = upper(approval.status)
-    if (statusUpper !== 'PENDING') {
+    if (approval.status !== ConsultationApprovalStatus.PENDING) {
       // Idempotent behavior: if they click again, just return current state.
       return jsonOk({
         bookingId,
@@ -126,7 +124,7 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
       try {
         await tx.notification.create({
           data: {
-            type: 'BOOKING_UPDATE',
+            type: NotificationType.BOOKING_UPDATE,
             professionalId: booking.professionalId,
             actorUserId: user.id,
             bookingId,
@@ -136,7 +134,6 @@ export async function handleConsultationDecision(action: ConsultationDecisionAct
                 ? 'Client approved your consultation proposal.'
                 : 'Client rejected your consultation proposal.',
             href: `/pro/bookings/${bookingId}?step=consult`,
-            // dedupe key that won’t explode if user double-clicks
             dedupeKey: `CONSULT_DECISION:${bookingId}:${action}`,
           },
         })

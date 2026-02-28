@@ -6,23 +6,15 @@ import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { upper } from '@/app/api/_utils/strings'
 import { jsonFail } from '@/app/api/_utils/responses'
 
-import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
+import { ClientNotificationType, WaitlistStatus, type Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function addDays(date: Date, days: number) {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
+function addDaysUtc(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
 
-/**
- * Client needs to approve/reject if:
- * - booking is not terminal
- * - and either:
- *   A) sessionStep says we're waiting on client
- *   B) OR consultationApproval.status is one of the "pending client" variants
- */
 function needsConsultationApproval(b: {
   status: unknown
   sessionStep: unknown
@@ -58,37 +50,132 @@ function needsConsultationApproval(b: {
   return false
 }
 
+// ✅ EXACTLY matches buildClientBookingDTO's expected select
+const bookingSelect = {
+  id: true,
+  status: true,
+  source: true,
+  sessionStep: true,
+  scheduledFor: true,
+  finishedAt: true,
+
+  subtotalSnapshot: true,
+  totalDurationMinutes: true,
+  bufferMinutes: true,
+
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+
+  service: { select: { id: true, name: true } },
+
+  professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
+
+  location: {
+    select: {
+      id: true,
+      name: true,
+      formattedAddress: true,
+      city: true,
+      state: true,
+      timeZone: true,
+    },
+  },
+
+  consultationNotes: true,
+  consultationPrice: true,
+  consultationConfirmedAt: true,
+
+  consultationApproval: {
+    select: {
+      status: true,
+      proposedServicesJson: true,
+      proposedTotal: true,
+      notes: true,
+      approvedAt: true,
+      rejectedAt: true,
+    },
+  },
+
+  serviceItems: {
+    select: {
+      id: true,
+      itemType: true,
+      parentItemId: true,
+      sortOrder: true,
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+      serviceId: true,
+      service: { select: { name: true } },
+    },
+    orderBy: { sortOrder: 'asc' as const },
+  },
+} satisfies Prisma.BookingSelect
+
+type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+
 export async function GET() {
   try {
-    const { clientId, res } = await requireClient()
-    if (res) return res
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
+    const clientId = auth.clientId
 
     const now = new Date()
-    const next30 = addDays(now, 30)
+    const next30 = addDaysUtc(now, 30)
 
-    const bookings = await prisma.booking.findMany({
+    const bookings: BookingRow[] = await prisma.booking.findMany({
       where: { clientId },
       orderBy: { scheduledFor: 'asc' },
       take: 300,
+      select: bookingSelect,
+    })
+
+    const unread = await prisma.clientNotification.findMany({
+      where: {
+        clientId,
+        type: ClientNotificationType.AFTERCARE,
+        readAt: null,
+        bookingId: { not: null },
+      },
+      select: { bookingId: true },
+      take: 1000,
+    })
+
+    const unreadBookingIds = new Set(
+      unread
+        .map((n) => n.bookingId)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+    )
+
+    const dtos: ClientBookingDTO[] = await Promise.all(
+      bookings.map(async (b) => {
+        const hasPending = needsConsultationApproval(b)
+        const unreadAftercare = unreadBookingIds.has(b.id)
+
+        return buildClientBookingDTO({
+          booking: b,
+          unreadAftercare,
+          hasPendingConsultationApproval: hasPending,
+        })
+      }),
+    )
+
+    // waitlist (typed)
+    const waitlist = await prisma.waitlistEntry.findMany({
+      where: { clientId, status: WaitlistStatus.ACTIVE },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
       select: {
         id: true,
+        createdAt: true,
+        notes: true,
+        preferredStart: true,
+        preferredEnd: true,
+        preferredTimeBucket: true,
+        mediaId: true,
         status: true,
-        source: true,
-        sessionStep: true,
-        scheduledFor: true,
-        finishedAt: true,
-
-        subtotalSnapshot: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-
-        locationType: true,
-        locationId: true,
-        locationTimeZone: true,
-        locationAddressSnapshot: true,
-
         service: { select: { id: true, name: true } },
-
         professional: {
           select: {
             id: true,
@@ -97,129 +184,24 @@ export async function GET() {
             timeZone: true,
           },
         },
-
-        location: {
-          select: {
-            id: true,
-            name: true,
-            formattedAddress: true,
-            city: true,
-            state: true,
-            timeZone: true,
-          },
-        },
-
-        serviceItems: {
-          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-          take: 80,
-          select: {
-            id: true,
-            itemType: true,
-            parentItemId: true,
-            sortOrder: true,
-            durationMinutesSnapshot: true,
-            priceSnapshot: true,
-            serviceId: true,
-            service: { select: { name: true } },
-          },
-        },
-
-        consultationNotes: true,
-        consultationPrice: true,
-        consultationConfirmedAt: true,
-
-        consultationApproval: {
-          select: {
-            status: true,
-            proposedServicesJson: true,
-            proposedTotal: true,
-            notes: true,
-            approvedAt: true,
-            rejectedAt: true,
-          },
-        },
       },
     })
 
-    const unread = await prisma.clientNotification.findMany({
-      where: {
-        clientId,
-        type: 'AFTERCARE',
-        readAt: null,
-        bookingId: { not: null },
-      } as any,
-      select: { bookingId: true },
-      take: 1000,
-    })
-
-    const unreadBookingIds = new Set(
-      unread
-        .map((n: { bookingId: string | null }) => (typeof n.bookingId === 'string' ? n.bookingId : null))
-        .filter((x): x is string => Boolean(x)),
-    )
-
-    const dtos = await Promise.all(
-      bookings.map(async (b) => {
-        const hasPending = needsConsultationApproval(b)
-        const unreadAftercare = unreadBookingIds.has(b.id)
-
-        return buildClientBookingDTO({
-          booking: b as any,
-          unreadAftercare,
-          hasPendingConsultationApproval: hasPending,
-        })
-      }),
-    )
-
-    // waitlist
-    let waitlist: any[] = []
-    try {
-      waitlist = await prisma.waitlistEntry.findMany({
-        where: { clientId, status: 'ACTIVE' },
-        orderBy: { createdAt: 'desc' },
-        take: 200,
-        select: {
-          id: true,
-          createdAt: true,
-          notes: true,
-          preferredStart: true,
-          preferredEnd: true,
-          preferredTimeBucket: true,
-          mediaId: true,
-          status: true,
-          service: { select: { id: true, name: true } },
-          professional: {
-            select: {
-              id: true,
-              businessName: true,
-              location: true,
-              timeZone: true,
-            },
-          },
-        },
-      })
-    } catch (e) {
-      console.error('GET /api/client/bookings waitlist error:', e)
-      waitlist = []
-    }
-
     // buckets
-    const upcoming: any[] = []
-    const pending: any[] = []
-    const prebooked: any[] = []
-    const past: any[] = []
+    const upcoming: ClientBookingDTO[] = []
+    const pending: ClientBookingDTO[] = []
+    const prebooked: ClientBookingDTO[] = []
+    const past: ClientBookingDTO[] = []
 
     for (const b of dtos) {
       const status = upper(b.status)
       const source = upper(b.source)
 
-      // terminal -> past
       if (status === 'COMPLETED' || status === 'CANCELLED') {
         past.push(b)
         continue
       }
 
-      // ✅ ALWAYS surface consult approvals as pending (even if scheduledFor is in the past)
       if (b.hasPendingConsultationApproval || status === 'PENDING') {
         pending.push(b)
         continue
@@ -229,19 +211,16 @@ export async function GET() {
       const isFuture = when.getTime() >= now.getTime()
       const within30 = when.getTime() < next30.getTime()
 
-      // prebooked bucket
       if (source === 'AFTERCARE' && isFuture) {
         prebooked.push(b)
         continue
       }
 
-      // accepted + near future
       if (status === 'ACCEPTED' && within30) {
         upcoming.push(b)
         continue
       }
 
-      // everything else: if future keep in upcoming, otherwise past
       if (isFuture) upcoming.push(b)
       else past.push(b)
     }

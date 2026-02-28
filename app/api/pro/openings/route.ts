@@ -66,7 +66,7 @@ function parseOpeningStatus(v: unknown): OpeningStatus | null {
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { searchParams } = new URL(req.url)
@@ -128,7 +128,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const body = (await req.json().catch(() => ({}))) as CreateOpeningBody
@@ -286,7 +286,7 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const body = (await req.json().catch(() => ({}))) as PatchOpeningBody

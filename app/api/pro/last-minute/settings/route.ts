@@ -31,7 +31,7 @@ function moneyFixed2OrNull(v: unknown): string | null {
 export async function GET() {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
 
     const professionalId = normalizeProId(auth)
     if (!professionalId) return jsonFail(401, 'Unauthorized.')
@@ -56,7 +56,7 @@ export async function GET() {
 export async function PATCH(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
 
     const professionalId = normalizeProId(auth)
     if (!professionalId) return jsonFail(401, 'Unauthorized.')

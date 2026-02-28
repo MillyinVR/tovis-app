@@ -3,10 +3,15 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
 import { requirePro } from '@/app/api/_utils'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function toDto(svc: any) {
+type ServiceWithCategory = Prisma.ServiceGetPayload<{
+  include: { category: true }
+}>
+
+function toDto(svc: ServiceWithCategory) {
   return {
     id: svc.id,
     name: svc.name,
@@ -22,7 +27,7 @@ function toDto(svc: any) {
 export async function GET() {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
 
     // ✅ Current schema: no professionType/licenseState on professionalProfile
     // So we can’t filter by ServicePermission reliably.
@@ -37,6 +42,6 @@ export async function GET() {
     return NextResponse.json(services.map(toDto), { status: 200 })
   } catch (error) {
     console.error('Allowed services error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 })
   }
 }

@@ -138,13 +138,12 @@ export default function NewMediaPostForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          storageBucket: uploaded.storageBucket,
-          storagePath: uploaded.storagePath,
-          url: uploaded.publicUrl || undefined, // only if your API/DB stores it; otherwise remove
+          bucket: uploaded.storageBucket,
+          path: uploaded.storagePath,
+          publicUrl: uploaded.publicUrl ?? undefined, // only meaningful for public bucket
 
           caption: caption.trim().slice(0, CAPTION_MAX) || undefined,
           mediaType,
-          visibility,
           isFeaturedInPortfolio,
           isEligibleForLooks,
           serviceIds,

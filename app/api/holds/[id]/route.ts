@@ -4,7 +4,7 @@ import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
+type Ctx = { params: Promise<{ id: string }> | { id: string } }
 
 function isExpired(expiresAt: Date) {
   return expiresAt.getTime() <= Date.now()
@@ -13,11 +13,11 @@ function isExpired(expiresAt: Date) {
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { id: rawId } = await Promise.resolve(ctx.params as any)
-    const id = pickString(rawId)
+    const params = await Promise.resolve(ctx.params)
+    const id = pickString(params?.id)
     if (!id) return jsonFail(400, 'Missing hold id.')
 
     const hold = await prisma.bookingHold.findUnique({
@@ -42,15 +42,12 @@ export async function GET(_req: Request, ctx: Ctx) {
     if (!hold) return jsonFail(404, 'Hold not found.')
     if (hold.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    const expired = isExpired(hold.expiresAt)
-
     return jsonOk({
-      ok: true,
       hold: {
         id: hold.id,
         scheduledFor: hold.scheduledFor.toISOString(),
         expiresAt: hold.expiresAt.toISOString(),
-        expired,
+        expired: isExpired(hold.expiresAt),
 
         professionalId: hold.professionalId,
         offeringId: hold.offeringId,
@@ -72,19 +69,19 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { id: rawId } = await Promise.resolve(ctx.params as any)
-    const id = pickString(rawId)
+    const params = await Promise.resolve(ctx.params)
+    const id = pickString(params?.id)
     if (!id) return jsonFail(400, 'Missing hold id.')
 
-    // idempotent delete: do not leak existence
+    // Idempotent delete: do not leak existence
     const result = await prisma.bookingHold.deleteMany({
       where: { id, clientId },
     })
 
-    return jsonOk({ ok: true, deleted: result.count > 0 }, 200)
+    return jsonOk({ deleted: result.count > 0 }, 200)
   } catch (e) {
     console.error('DELETE /api/holds/[id] error', e)
     return jsonFail(500, 'Failed to release hold.')

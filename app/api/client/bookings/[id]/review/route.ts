@@ -1,7 +1,7 @@
 // app/api/client/bookings/[id]/review/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import type { MediaType, MediaVisibility, Role } from '@prisma/client'
+import { MediaType, MediaVisibility, Role } from '@prisma/client'
 import {
   requireClient,
   pickString,
@@ -39,7 +39,7 @@ type IncomingMediaItem = {
 }
 
 function isMediaType(x: unknown): x is MediaType {
-  return x === 'IMAGE' || x === 'VIDEO'
+  return x === MediaType.IMAGE || x === MediaType.VIDEO
 }
 
 function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
@@ -57,7 +57,7 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
     const thumbUrl = thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
     if (thumbUrlRaw && !thumbUrl) continue
 
-    const mediaType: MediaType = isMediaType(obj.mediaType) ? obj.mediaType : 'IMAGE'
+    const mediaType: MediaType = isMediaType(obj.mediaType) ? obj.mediaType : MediaType.IMAGE
 
     items.push({
       url,
@@ -83,7 +83,7 @@ function enforceClientMediaCaps(items: IncomingMediaItem[]) {
   let images = 0
   let videos = 0
   for (const m of items) {
-    if (m.mediaType === 'VIDEO') videos++
+    if (m.mediaType === MediaType.VIDEO) videos++
     else images++
   }
 
@@ -96,15 +96,14 @@ function enforceClientMediaCaps(items: IncomingMediaItem[]) {
  * Review media visibility rule:
  * - Anything attached to a review is PUBLIC (client opted in by attaching/uploading).
  *
- * If your schema still uses PRIVATE/PUBLIC only, this should be PUBLIC.
- * If you later add PRO_CLIENT, that's for booking/aftercare-only media, not review media.
+ * PRO_CLIENT is for booking/aftercare-only media, not review media.
  */
-const REVIEW_MEDIA_VISIBILITY = 'PUBLIC' as MediaVisibility
+const REVIEW_MEDIA_VISIBILITY = MediaVisibility.PUBLIC
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { user, clientId } = auth
 
     const { id } = await ctx.params
@@ -142,10 +141,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     })
 
     if (existing) {
-      return NextResponse.json(
-        { ok: false, error: 'Review already exists for this booking.', reviewId: existing.id },
-        { status: 409 },
-      )
+      return jsonFail(409, 'Review already exists for this booking.', { reviewId: existing.id })
     }
 
     // Validate pointers before transaction (fast fail)
@@ -155,7 +151,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return { ...m, ...ptrs }
     })
 
-    const created = await prisma.$transaction(async (tx) => {
+    const fullReview = await prisma.$transaction(async (tx) => {
       // Only allow attaching PRO-uploaded booking media that isn't already attached/locked into a review
       const attachables = attachedMediaIds.length
         ? await tx.mediaAsset.findMany({
@@ -163,7 +159,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
               id: { in: attachedMediaIds },
               bookingId: booking.id,
               professionalId: booking.professionalId,
-              uploadedByRole: 'PRO',
+              uploadedByRole: Role.PRO,
               reviewId: null,
             },
             select: { id: true },
@@ -171,7 +167,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         : []
 
       if (attachedMediaIds.length && attachables.length !== attachedMediaIds.length) {
-        return { ok: false as const, status: 400, error: 'One or more selected images are not available to attach.' }
+        throw new Error('ATTACH_INVALID')
       }
 
       const review = await tx.review.create({
@@ -214,7 +210,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
             visibility: REVIEW_MEDIA_VISIBILITY,
             uploadedByUserId: user.id,
-            uploadedByRole: 'CLIENT' as Role,
+            uploadedByRole: Role.CLIENT,
 
             isFeaturedInPortfolio: false,
             isEligibleForLooks: false,
@@ -252,20 +248,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         },
       })
 
-      return { ok: true as const, review: full }
+      return full
     })
 
-    if (!created.ok) {
-      return NextResponse.json({ ok: false, error: created.error }, { status: created.status })
+    if (!fullReview) return jsonFail(500, 'Internal server error')
+
+    return jsonOk({ review: fullReview }, 201)
+  } catch (e: unknown) {
+    const message =
+      e && typeof e === 'object' && 'message' in e ? String((e as { message?: unknown }).message || '') : ''
+
+    if (message === 'ATTACH_INVALID') {
+      return jsonFail(400, 'One or more selected images are not available to attach.')
     }
 
-    return NextResponse.json({ ok: true, review: created.review }, { status: 201 })
-  } catch (e: any) {
     console.error('POST /api/client/bookings/[id]/review error', e)
-    const msg =
-      typeof e?.message === 'string' && e.message.includes('storage')
-        ? e.message
-        : 'Internal server error'
+
+    const msg = message && message.includes('storage') ? message : 'Internal server error'
     return jsonFail(500, msg)
   }
 }

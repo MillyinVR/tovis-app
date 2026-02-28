@@ -1,6 +1,6 @@
 // app/api/pro/bookings/route.ts
 import { prisma } from '@/lib/prisma'
-import { Prisma, type ServiceLocationType } from '@prisma/client'
+import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
@@ -26,12 +26,12 @@ function snap15(n: number) {
 
 function normalizeLocationType(v: unknown): ServiceLocationType {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
-  return s === 'MOBILE' ? 'MOBILE' : 'SALON'
+  return s === 'MOBILE' ? ServiceLocationType.MOBILE : ServiceLocationType.SALON
 }
 
 function toStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return []
-  return (v as unknown[])
+  return v
     .map((x) => (typeof x === 'string' ? x : x == null ? '' : String(x)))
     .map((s) => s.trim())
     .filter(Boolean)
@@ -61,7 +61,10 @@ function moneyToCents(v: unknown): number {
   if (v == null) return 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.max(0, Math.round(v * 100)) : 0
   if (typeof v === 'string') return moneyStringToCents(v)
-  const s = (v as any)?.toString?.()
+
+  // Prisma Decimal-like: try toString()
+  const maybe = v as { toString?: () => string }
+  const s = typeof maybe?.toString === 'function' ? maybe.toString() : ''
   return typeof s === 'string' ? moneyStringToCents(s) : 0
 }
 
@@ -77,13 +80,33 @@ function durationOrDefault(totalDurationMinutes: unknown) {
   return Number.isFinite(n) && n > 0 ? n : 60
 }
 
+function decimalToNumber(v: unknown): number | undefined {
+  if (v == null) return undefined
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
+  const maybe = v as { toString?: () => string }
+  const s = typeof maybe?.toString === 'function' ? maybe.toString() : ''
+  const n = Number(s)
+  return Number.isFinite(n) ? n : undefined
+}
+
+type Body = {
+  clientId?: unknown
+  scheduledFor?: unknown
+  internalNotes?: unknown
+  locationId?: unknown
+  locationType?: unknown
+  serviceIds?: unknown
+  bufferMinutes?: unknown
+  totalDurationMinutes?: unknown
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const body = (await req.json().catch(() => ({}))) as any
+    const body = (await req.json().catch(() => ({}))) as Body
 
     const clientId = pickString(body?.clientId)
     const scheduledForRaw = pickString(body?.scheduledFor)
@@ -112,7 +135,7 @@ export async function POST(req: Request) {
       return snap15(n)
     })()
 
-    // ✅ Location is REQUIRED by schema; also gives timezone + snapshots
+    // Location is REQUIRED by schema; also gives timezone + snapshots
     const loc = await prisma.professionalLocation.findFirst({
       where: { id: locationId, professionalId, isBookable: true },
       select: {
@@ -160,13 +183,13 @@ export async function POST(req: Request) {
       const svc = serviceById.get(sid)
 
       const durRaw =
-        locationType === 'MOBILE'
+        locationType === ServiceLocationType.MOBILE
           ? Number(off.mobileDurationMinutes ?? svc?.defaultDurationMinutes ?? 0)
           : Number(off.salonDurationMinutes ?? svc?.defaultDurationMinutes ?? 0)
 
       const durationMinutesSnapshot = clampInt(snap15(Number(durRaw || 0)), 15, 12 * 60)
 
-      const priceRaw = locationType === 'MOBILE' ? off.mobilePriceStartingAt : off.salonPriceStartingAt
+      const priceRaw = locationType === ServiceLocationType.MOBILE ? off.mobilePriceStartingAt : off.salonPriceStartingAt
       const priceCents = moneyToCents(priceRaw)
 
       return {
@@ -198,14 +221,14 @@ export async function POST(req: Request) {
       where: {
         professionalId,
         scheduledFor: { gte: windowStart, lte: windowEnd },
-        NOT: { status: 'CANCELLED' as any },
+        NOT: { status: BookingStatus.CANCELLED },
       },
       select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
       take: 200,
     })
 
     const hasConflict = others.some((b) => {
-      if (String(b.status ?? '').toUpperCase() === 'CANCELLED') return false
+      if (b.status === BookingStatus.CANCELLED) return false
       const bDur = durationOrDefault(b.totalDurationMinutes)
       const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
       const bStart = normalizeToMinute(new Date(b.scheduledFor))
@@ -214,35 +237,43 @@ export async function POST(req: Request) {
     })
     if (hasConflict) return jsonFail(409, 'That time is not available.')
 
-    const subtotalMoney = centsToMoneyString(computedSubtotalCents)
-    const primaryItem = items[0] // guaranteed (we required >=1)
+    const primaryItem = items[0] // guaranteed
+
+    // Snapshots
+    const locationAddressSnapshot: Prisma.InputJsonValue | undefined =
+      loc.formattedAddress && loc.formattedAddress.trim()
+        ? ({ formattedAddress: loc.formattedAddress.trim() } satisfies Prisma.InputJsonObject)
+        : undefined
+
+    const locationLatSnapshot = decimalToNumber(loc.lat)
+    const locationLngSnapshot = decimalToNumber(loc.lng)
 
     const created = await prisma.booking.create({
       data: {
         professionalId,
         clientId,
 
-        // ✅ schema requires serviceId
+        // schema requires serviceId
         serviceId: primaryItem.serviceId,
         offeringId: primaryItem.offeringId,
 
         scheduledFor: scheduledStart,
-        status: 'ACCEPTED' as any,
+        status: BookingStatus.ACCEPTED,
         locationType,
 
-        // ✅ schema requires locationId
+        // schema requires locationId
         locationId: loc.id,
         locationTimeZone: loc.timeZone ?? null,
-        locationAddressSnapshot: loc.formattedAddress ? ({ formattedAddress: loc.formattedAddress } as any) : undefined,
-        locationLatSnapshot: typeof loc.lat === 'number' ? loc.lat : undefined,
-        locationLngSnapshot: typeof loc.lng === 'number' ? loc.lng : undefined,
+        locationAddressSnapshot,
+        locationLatSnapshot,
+        locationLngSnapshot,
 
         internalNotes: internalNotes ?? null,
         bufferMinutes,
         totalDurationMinutes,
 
-        // ✅ Booking-level truth
-        subtotalSnapshot: new Prisma.Decimal(subtotalMoney),
+        // Booking-level truth
+        subtotalSnapshot: new Prisma.Decimal(centsToMoneyString(computedSubtotalCents)),
 
         serviceItems: {
           create: items.map((i) => ({
@@ -277,7 +308,7 @@ export async function POST(req: Request) {
     return jsonOk(
       {
         booking: {
-          id: String(created.id),
+          id: created.id,
           scheduledFor: new Date(created.scheduledFor).toISOString(),
           endsAt: endsAt.toISOString(),
           totalDurationMinutes: Number(created.totalDurationMinutes ?? totalDurationMinutes),
@@ -290,9 +321,10 @@ export async function POST(req: Request) {
       },
       200,
     )
-  } catch (e: any) {
+  } catch (e) {
     console.error('POST /api/pro/bookings error', e)
-    const msg = typeof e?.message === 'string' && e.message.trim() ? e.message : 'Failed to create booking.'
-    return jsonFail(500, msg, process.env.NODE_ENV !== 'production' ? { name: e?.name, code: e?.code } : undefined)
+    const err = e as { message?: unknown; name?: unknown; code?: unknown }
+    const msg = typeof err?.message === 'string' && err.message.trim() ? err.message : 'Failed to create booking.'
+    return jsonFail(500, msg, process.env.NODE_ENV !== 'production' ? { name: err?.name, code: err?.code } : undefined)
   }
 }

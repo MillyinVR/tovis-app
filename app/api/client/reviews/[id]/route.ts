@@ -44,7 +44,7 @@ function normalizeText(
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
     const { id } = await context.params
@@ -92,7 +92,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     })
 
     return jsonOk({ review: updated })
-  } catch (e) {
+  } catch (e: unknown) {
     console.error('PATCH /api/client/reviews/[id] error', e)
     return jsonFail(500, 'Internal server error')
   }
@@ -101,7 +101,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
     const { id } = await context.params
@@ -136,7 +136,7 @@ export async function DELETE(_req: NextRequest, context: { params: Promise<{ id:
     })
 
     return jsonOk({})
-  } catch (e) {
+  } catch (e: unknown) {
     console.error('DELETE /api/client/reviews/[id] error', e)
     return jsonFail(500, 'Internal server error')
   }

@@ -14,7 +14,7 @@ function toDateOrNull(v: unknown) {
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const body = (await req.json().catch(() => ({}))) as any
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { searchParams } = new URL(req.url)

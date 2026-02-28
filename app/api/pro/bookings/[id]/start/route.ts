@@ -30,11 +30,11 @@ function sessionHubHref(bookingId: string) {
 export async function POST(_request: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proId = auth.professionalId
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
@@ -86,7 +86,7 @@ export async function POST(_request: Request, ctx: Ctx) {
             sessionStep: booking.sessionStep,
           }
 
-      return jsonOk({ ok: true, booking: healed, nextHref }, 200)
+      return jsonOk({ booking: healed, nextHref }, 200)
     }
 
     // ✅ Only enforce start window for first-time start
@@ -101,7 +101,7 @@ export async function POST(_request: Request, ctx: Ctx) {
       select: { id: true, status: true, startedAt: true, finishedAt: true, sessionStep: true },
     })
 
-    return jsonOk({ ok: true, booking: updated, nextHref }, 200)
+    return jsonOk({ booking: updated, nextHref }, 200)
   } catch (e) {
     console.error('POST /api/pro/bookings/[id]/start error', e)
     return jsonFail(500, 'Internal server error')

@@ -1,29 +1,41 @@
-// app/api/_utils/requireUser.ts
+// app/api/_utils/auth/requireUser.ts
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/currentUser'
-import type { Role } from '@prisma/client'
+import { Role } from '@prisma/client'
 
 type RequireUserOptions = {
-  roles?: Role[] // allowed roles; if omitted, any logged-in user is allowed
+  roles?: readonly Role[] // allowed roles; if omitted, any logged-in user is allowed
 }
 
-export async function requireUser(opts: RequireUserOptions = {}) {
+export type RequireUserOk = {
+  ok: true
+  user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
+}
+
+export type RequireUserFail = {
+  ok: false
+  res: NextResponse
+}
+
+export type RequireUserResult = RequireUserOk | RequireUserFail
+
+export async function requireUser(opts: RequireUserOptions = {}): Promise<RequireUserResult> {
   const user = await getCurrentUser().catch(() => null)
 
   if (!user) {
     return {
-      user: null as any,
-      res: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+      ok: false,
+      res: NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 }),
     }
   }
 
   const roles = opts.roles?.length ? opts.roles : null
-  if (roles && !roles.includes(user.role as Role)) {
+  if (roles && !roles.includes(user.role)) {
     return {
-      user: null as any,
-      res: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+      ok: false,
+      res: NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 }),
     }
   }
 
-  return { user, res: null as any }
+  return { ok: true, user }
 }

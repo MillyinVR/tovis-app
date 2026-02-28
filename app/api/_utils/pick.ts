@@ -67,13 +67,22 @@ export function pickStateCode(v: unknown): string | null {
 /**
  * Pick an enum value from unknown input.
  * Provide allowed values as a readonly array.
+ *
+ * Behavior:
+ * - matches exact value
+ * - or matches case-insensitively (useful when clients send lowercase)
+ * - returns the canonical value from `allowed`
  */
 export function pickEnum<T extends string>(v: unknown, allowed: readonly T[]): T | null {
   const s = pickString(v)
   if (!s) return null
+
+  // exact match first (fast path)
+  const exact = allowed.find((a) => a === s)
+  if (exact) return exact
+
   const up = s.toUpperCase()
-  // allowed might not be uppercase; compare both ways
-  const hit = allowed.find((a) => a === (up as any) || a === (s as any))
+  const hit = allowed.find((a) => a.toUpperCase() === up)
   return hit ?? null
 }
 

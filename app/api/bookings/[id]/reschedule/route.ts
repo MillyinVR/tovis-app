@@ -1,7 +1,7 @@
 // app/api/bookings/[id]/reschedule/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType } from '@prisma/client'
+import type { ServiceLocationType, BookingStatus } from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 import {
@@ -65,10 +65,11 @@ function weekdayKeyFromUtcInstant(dateUtc: Date, timeZoneRaw: string): keyof Wor
   const timeZone = sanitizeTimeZone(timeZoneRaw, DEFAULT_TIME_ZONE)
   const p = getZonedParts(dateUtc, timeZone)
 
-  // Use a stable mid-day anchor to determine weekday in that timezone.
-  // (Avoids oddities around midnight transitions.)
+  // stable mid-day anchor => avoids midnight weirdness
   const noonLocalAsUtc = new Date(Date.UTC(p.year, p.month - 1, p.day, 12, 0, 0))
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(noonLocalAsUtc).toLowerCase()
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+    .format(noonLocalAsUtc)
+    .toLowerCase()
 
   if (weekday.startsWith('mon')) return 'mon'
   if (weekday.startsWith('tue')) return 'tue'
@@ -133,15 +134,16 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
 
 function fail(status: number, code: string, error: string, details?: any) {
   const dev = process.env.NODE_ENV !== 'production'
-  return NextResponse.json(dev && details != null ? { ok: false, code, error, details } : { ok: false, code, error }, {
-    status,
-  })
+  return NextResponse.json(
+    dev && details != null ? { ok: false, code, error, details } : { ok: false, code, error },
+    { status },
+  )
 }
 
 export async function POST(req: Request, { params }: Ctx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const clientId = auth.clientId
 
     const { id } = await Promise.resolve(params)
@@ -233,15 +235,12 @@ export async function POST(req: Request, { params }: Ctx) {
 
       if (!loc) return { ok: false as const, status: 409, error: 'This location is no longer available.' }
 
-      // ✅ Timezone truth: LOCATION timezone must be valid.
-      // No Los Angeles “helpfulness”. If missing, fail.
       const tzRes = await resolveApptTimeZone({
         location: { id: loc.id, timeZone: loc.timeZone },
         professionalId: booking.professionalId,
         fallback: DEFAULT_TIME_ZONE,
         requireValid: true,
       })
-
       if (!tzRes.ok) return { ok: false as const, status: 409, error: 'This location is missing a valid timezone.' }
       const apptTz = tzRes.timeZone
 
@@ -252,7 +251,6 @@ export async function POST(req: Request, { params }: Ctx) {
         return { ok: false as const, status: 400, error: 'Hold time is invalid. Please pick a new slot.' }
       }
 
-      // a tiny grace window is fine, but don’t allow actual past
       if (newStart.getTime() < now.getTime() - 60_000) {
         return { ok: false as const, status: 400, error: 'That time is in the past.' }
       }
@@ -267,17 +265,19 @@ export async function POST(req: Request, { params }: Ctx) {
       })
       if (!whCheck.ok) return { ok: false as const, status: 400, error: whCheck.error }
 
-      // Conflict check (simple window)
+      // conflict check within +/- 24h
       const windowStart = addMinutes(newStart, -24 * 60)
       const windowEnd = addMinutes(newStart, 24 * 60)
+
+      // If your BookingStatus enum differs, update these two values accordingly.
+      const ACTIVE_STATUSES: BookingStatus[] = ['PENDING', 'ACCEPTED'] as unknown as BookingStatus[]
 
       const others = await tx.booking.findMany({
         where: {
           professionalId: booking.professionalId,
           id: { not: booking.id },
-          status: { in: ['PENDING', 'ACCEPTED'] as any },
+          status: { in: ACTIVE_STATUSES },
           scheduledFor: { gte: windowStart, lte: windowEnd },
-          NOT: { status: 'CANCELLED' as any },
         },
         select: {
           id: true,
@@ -314,15 +314,14 @@ export async function POST(req: Request, { params }: Ctx) {
           scheduledFor: newStart,
           locationType,
           bufferMinutes,
-
           locationId: loc.id,
           locationTimeZone: apptTz,
 
-          // snapshots (keep minimal + stable)
+          // snapshots (stable + minimal)
           locationAddressSnapshot: loc.formattedAddress ? ({ formattedAddress: loc.formattedAddress } as any) : undefined,
           locationLatSnapshot: typeof loc.lat === 'number' ? loc.lat : undefined,
           locationLngSnapshot: typeof loc.lng === 'number' ? loc.lng : undefined,
-        } as any,
+        },
         select: {
           id: true,
           status: true,

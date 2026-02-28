@@ -1,20 +1,21 @@
 // app/api/pro/bookings/[id]/media/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { BookingStatus, MediaPhase, MediaType, MediaVisibility, SessionStep } from '@prisma/client'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { BookingStatus, MediaPhase, MediaType, MediaVisibility, Role, SessionStep } from '@prisma/client'
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { BUCKETS } from '@/lib/storageBuckets'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
+type StorageBucket = (typeof BUCKETS)[keyof typeof BUCKETS]
 
 const CAPTION_MAX = 300
 const PATH_MAX = 2048
 const BUCKET_MAX = 128
 
-// For session uploads we only accept private bucket
-const SESSION_BUCKET = 'media-private'
-const ALLOWED_BUCKETS = new Set(['media-private', 'media-public'])
+// Session uploads must go to private bucket
+const SESSION_BUCKET = BUCKETS.mediaPrivate
 
 const SIGNED_URL_TTL_SECONDS = 60 * 10 // 10 minutes
 
@@ -37,12 +38,21 @@ function parseMediaType(v: unknown): MediaType | null {
   return null
 }
 
-function safeBucket(raw: unknown): string | null {
+function isPublicBucket(bucket: string): bucket is typeof BUCKETS.mediaPublic {
+  return bucket === BUCKETS.mediaPublic
+}
+
+function isPrivateBucket(bucket: string): bucket is typeof BUCKETS.mediaPrivate {
+  return bucket === BUCKETS.mediaPrivate
+}
+
+function safeBucket(raw: unknown): StorageBucket | null {
   const s = pickString(raw)
   if (!s) return null
   if (s.length > BUCKET_MAX) return null
-  if (!ALLOWED_BUCKETS.has(s)) return null
-  return s
+  if (s === BUCKETS.mediaPrivate) return BUCKETS.mediaPrivate
+  if (s === BUCKETS.mediaPublic) return BUCKETS.mediaPublic
+  return null
 }
 
 function safeStoragePath(raw: unknown): string | null {
@@ -58,6 +68,10 @@ function safeCaption(raw: unknown): string | null {
   const s = pickString(raw)
   if (!s) return null
   return s.slice(0, CAPTION_MAX)
+}
+
+function safeHttpUrl(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.startsWith('http') ? raw : null
 }
 
 function canUploadPhase(sessionStep: SessionStep | null, phase: MediaPhase): boolean {
@@ -87,19 +101,21 @@ function mustStartWithBookingPrefix(path: string, bookingId: string) {
 }
 
 /**
- * Only returns a *public HTTP url* for public bucket. Otherwise null.
- * This prevents storing "supabase://..." in DB and accidentally rendering it.
+ * Only returns a public HTTP url for the PUBLIC bucket. Otherwise null.
+ * Prevents storing non-renderable "supabase://..." or private object urls in DB.
  */
 function publicHttpUrl(bucket: string, path: string): string | null {
-  if (bucket !== 'media-public') return null
-  const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path)
+  if (!isPublicBucket(bucket)) return null
+  const admin = getSupabaseAdmin()
+  const { data } = admin.storage.from(bucket).getPublicUrl(path)
   const u = data?.publicUrl
   return typeof u === 'string' && u.startsWith('http') ? u : null
 }
 
 async function signObjectUrl(bucket: string, path: string): Promise<string | null> {
   try {
-    const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+    const admin = getSupabaseAdmin()
+    const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
     if (error) return null
     return data?.signedUrl ?? null
   } catch {
@@ -108,8 +124,8 @@ async function signObjectUrl(bucket: string, path: string): Promise<string | nul
 }
 
 /**
- * Used to verify the client truly uploaded the object before we write a DB row.
- * We sign then HEAD/GET it (Supabase storage doesn't support existence checks directly in this SDK).
+ * Verify object exists before writing DB row.
+ * We sign then HEAD/GET it.
  */
 async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<boolean> {
   const signed = await signObjectUrl(bucket, path)
@@ -126,11 +142,12 @@ async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<b
 export async function GET(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
+
     const proId = auth.professionalId
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
@@ -173,25 +190,24 @@ export async function GET(req: Request, ctx: Ctx) {
 
     const items = await Promise.all(
       rows.map(async (m) => {
-        // Prefer signed urls for private objects. Public objects can use public URL.
-        const signedUrl = await signObjectUrl(m.storageBucket, m.storagePath)
+        // Prefer signed urls for private objects. Public objects use getPublicUrl.
+        const signedUrl = isPrivateBucket(m.storageBucket) ? await signObjectUrl(m.storageBucket, m.storagePath) : null
         const signedThumbUrl =
-          m.thumbBucket && m.thumbPath ? await signObjectUrl(m.thumbBucket, m.thumbPath) : null
+          m.thumbBucket && m.thumbPath && isPrivateBucket(m.thumbBucket)
+            ? await signObjectUrl(m.thumbBucket, m.thumbPath)
+            : null
 
-        const publicUrl = publicHttpUrl(m.storageBucket, m.storagePath) ?? (typeof m.url === 'string' ? m.url : null)
+        const publicUrl =
+          publicHttpUrl(m.storageBucket, m.storagePath) ??
+          (isPublicBucket(m.storageBucket) ? safeHttpUrl(m.url) : null)
         const publicThumbUrl =
           (m.thumbBucket && m.thumbPath ? publicHttpUrl(m.thumbBucket, m.thumbPath) : null) ??
-          (typeof m.thumbUrl === 'string' ? m.thumbUrl : null)
+          (m.thumbBucket && isPublicBucket(m.thumbBucket) ? safeHttpUrl(m.thumbUrl) : null)
 
         const renderUrl = signedUrl ?? publicUrl ?? null
         const renderThumbUrl = signedThumbUrl ?? publicThumbUrl ?? null
 
-        /**
-         * IMPORTANT:
-         * We intentionally also set `url/thumbUrl` in the response to a safe renderable value
-         * so older UI code that still reads `.url` won’t accidentally try to render "supabase://".
-         * (This does NOT mutate DB rows — only the response.)
-         */
+        // response-only healing: url fields are render-safe
         return {
           ...m,
           signedUrl,
@@ -214,12 +230,13 @@ export async function GET(req: Request, ctx: Ctx) {
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
+
     const proId = auth.professionalId
     const user = auth.user
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as {
@@ -252,10 +269,10 @@ export async function POST(req: Request, ctx: Ctx) {
     const caption = safeCaption(body.caption)
 
     if (!mustStartWithBookingPrefix(storagePath, bookingId)) {
-      return jsonFail(400, 'storagePath must be under bookings/<bookingId>/')
+      return jsonFail(400, 'storagePath must be under bookings/<bookingId>/.')
     }
     if (thumbPath && !mustStartWithBookingPrefix(thumbPath, bookingId)) {
-      return jsonFail(400, 'thumbPath must be under bookings/<bookingId>/')
+      return jsonFail(400, 'thumbPath must be under bookings/<bookingId>/.')
     }
 
     // Session media MUST go to private bucket
@@ -300,13 +317,12 @@ export async function POST(req: Request, ctx: Ctx) {
         return {
           ok: false as const,
           status: 409,
-          error: `You can’t upload ${phase} media at session step: ${String(booking.sessionStep || SessionStep.NONE)}.`,
+          error: `You can’t upload ${phase} media at session step: ${String(booking.sessionStep ?? SessionStep.NONE)}.`,
         }
       }
 
-      // ✅ IMPORTANT: do NOT store "supabase://..." in DB.
       // For private bucket, url/thumbUrl should be null.
-      const url = publicHttpUrl(storageBucket, storagePath) // will be null for media-private
+      const url = publicHttpUrl(storageBucket, storagePath) // always null for media-private
       const thumbUrl = thumbBucket && thumbPath ? publicHttpUrl(thumbBucket, thumbPath) : null
 
       const created = await tx.mediaAsset.create({
@@ -314,7 +330,7 @@ export async function POST(req: Request, ctx: Ctx) {
           professionalId: booking.professionalId,
           bookingId: booking.id,
           uploadedByUserId: user.id,
-          uploadedByRole: 'PRO',
+          uploadedByRole: Role.PRO,
 
           storageBucket,
           storagePath,
@@ -356,12 +372,13 @@ export async function POST(req: Request, ctx: Ctx) {
 
       let advancedTo: SessionStep | null = null
 
-      // Progression rules:
-      // - first BEFORE media => move into SERVICE_IN_PROGRESS (from consult/before_photos)
+      // first BEFORE media -> SERVICE_IN_PROGRESS (from consult/before_photos)
       if (phase === MediaPhase.BEFORE) {
         const step = booking.sessionStep ?? SessionStep.NONE
         const canAdvanceFrom =
-          step === SessionStep.CONSULTATION || step === SessionStep.CONSULTATION_PENDING_CLIENT || step === SessionStep.BEFORE_PHOTOS
+          step === SessionStep.CONSULTATION ||
+          step === SessionStep.CONSULTATION_PENDING_CLIENT ||
+          step === SessionStep.BEFORE_PHOTOS
 
         if (canAdvanceFrom) {
           const beforeCount = await tx.mediaAsset.count({
@@ -379,7 +396,7 @@ export async function POST(req: Request, ctx: Ctx) {
         }
       }
 
-      // - AFTER upload while in AFTER_PHOTOS => DONE
+      // AFTER upload while in AFTER_PHOTOS -> DONE
       if (phase === MediaPhase.AFTER && booking.sessionStep === SessionStep.AFTER_PHOTOS) {
         await tx.booking.update({
           where: { id: booking.id },
@@ -395,20 +412,27 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!result.ok) return jsonFail(result.status, result.error)
 
     // Return signed urls for rendering (private bucket)
-    const signedUrl = await signObjectUrl(result.created.storageBucket, result.created.storagePath)
+    const signedUrl = isPrivateBucket(result.created.storageBucket)
+      ? await signObjectUrl(result.created.storageBucket, result.created.storagePath)
+      : null
     const signedThumbUrl =
       result.created.thumbBucket && result.created.thumbPath
-        ? await signObjectUrl(result.created.thumbBucket, result.created.thumbPath)
+        ? isPrivateBucket(result.created.thumbBucket)
+          ? await signObjectUrl(result.created.thumbBucket, result.created.thumbPath)
+          : null
         : null
 
     const publicUrl =
       publicHttpUrl(result.created.storageBucket, result.created.storagePath) ??
-      (typeof result.created.url === 'string' ? result.created.url : null)
+      (isPublicBucket(result.created.storageBucket) ? safeHttpUrl(result.created.url) : null)
 
     const publicThumbUrl =
       (result.created.thumbBucket && result.created.thumbPath
         ? publicHttpUrl(result.created.thumbBucket, result.created.thumbPath)
-        : null) ?? (typeof result.created.thumbUrl === 'string' ? result.created.thumbUrl : null)
+        : null) ??
+      (result.created.thumbBucket && isPublicBucket(result.created.thumbBucket)
+        ? safeHttpUrl(result.created.thumbUrl)
+        : null)
 
     const renderUrl = signedUrl ?? publicUrl ?? null
     const renderThumbUrl = signedThumbUrl ?? publicThumbUrl ?? null

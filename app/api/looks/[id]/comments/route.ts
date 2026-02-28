@@ -4,6 +4,13 @@ import { jsonFail, jsonOk, pickInt, pickString, requireUser } from '@/app/api/_u
 
 export const dynamic = 'force-dynamic'
 
+type Params = { id: string }
+type Ctx = { params: Params | Promise<Params> }
+
+async function getParams(ctx: Ctx): Promise<Params> {
+  return await Promise.resolve(ctx.params)
+}
+
 async function requirePublicEligibleLook(id: string) {
   const media = await prisma.mediaAsset.findUnique({
     where: { id },
@@ -29,10 +36,10 @@ function normalizeUser(u: {
   return { id: String(u.id), displayName, avatarUrl }
 }
 
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: Ctx) {
   try {
-    const raw = await params
-    const id = pickString(raw?.id)
+    const { id: rawId } = await getParams(ctx)
+    const id = pickString(rawId)
     if (!id) return jsonFail(400, 'Missing media id.', { code: 'MISSING_MEDIA_ID' })
 
     const ok = await requirePublicEligibleLook(id)
@@ -77,14 +84,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requireUser()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const user = auth.user
 
-    const raw = await params
-    const id = pickString(raw?.id)
+    const { id: rawId } = await getParams(ctx)
+    const id = pickString(rawId)
     if (!id) return jsonFail(400, 'Missing media id.', { code: 'MISSING_MEDIA_ID' })
 
     const ok = await requirePublicEligibleLook(id)

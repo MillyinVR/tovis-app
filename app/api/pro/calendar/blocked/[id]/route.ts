@@ -4,7 +4,13 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: Promise<{ id: string }> }
+type Ctx = { params: { id: string } | Promise<{ id: string }> }
+
+type PatchBody = {
+  startsAt?: unknown
+  endsAt?: unknown
+  note?: unknown
+}
 
 function toDateOrNull(v: unknown) {
   const s = pickString(v)
@@ -17,14 +23,18 @@ function minutesBetween(a: Date, b: Date) {
   return Math.round((b.getTime() - a.getTime()) / 60_000)
 }
 
+async function getBlockId(ctx: Ctx): Promise<string | null> {
+  const params = await Promise.resolve(ctx.params)
+  return pickString(params?.id)
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await ctx.params
-    const blockId = pickString(id)
+    const blockId = await getBlockId(ctx)
     if (!blockId) return jsonFail(400, 'Missing block id.')
 
     const block = await prisma.calendarBlock.findFirst({
@@ -37,7 +47,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     return jsonOk(
       {
         block: {
-          id: String(block.id),
+          id: block.id,
           startsAt: block.startsAt.toISOString(),
           endsAt: block.endsAt.toISOString(),
           note: block.note ?? null,
@@ -55,14 +65,13 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await ctx.params
-    const blockId = pickString(id)
+    const blockId = await getBlockId(ctx)
     if (!blockId) return jsonFail(400, 'Missing block id.')
 
-    const body = (await req.json().catch(() => ({}))) as any
+    const body = (await req.json().catch(() => ({}))) as PatchBody
 
     const startsAt = toDateOrNull(body?.startsAt)
     const endsAt = toDateOrNull(body?.endsAt)
@@ -76,12 +85,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Block must be between 15 minutes and 24 hours.')
     }
 
+    // Ensure it exists + belongs to this pro
     const existing = await prisma.calendarBlock.findFirst({
       where: { id: blockId, professionalId },
       select: { id: true },
     })
     if (!existing) return jsonFail(404, 'Not found.')
 
+    // Overlap check (same pro)
     const conflict = await prisma.calendarBlock.findFirst({
       where: {
         professionalId,
@@ -93,6 +104,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     })
     if (conflict) return jsonFail(409, 'That time overlaps an existing block.')
 
+    // Update (still safe because we already proved ownership)
     const updated = await prisma.calendarBlock.update({
       where: { id: blockId },
       data: { startsAt, endsAt, note: note ?? null },
@@ -102,7 +114,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     return jsonOk(
       {
         block: {
-          id: String(updated.id),
+          id: updated.id,
           startsAt: updated.startsAt.toISOString(),
           endsAt: updated.endsAt.toISOString(),
           note: updated.note ?? null,
@@ -120,11 +132,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await ctx.params
-    const blockId = pickString(id)
+    const blockId = await getBlockId(ctx)
     if (!blockId) return jsonFail(400, 'Missing block id.')
 
     const existing = await prisma.calendarBlock.findFirst({

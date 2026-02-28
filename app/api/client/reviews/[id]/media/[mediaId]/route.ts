@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
+import { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +13,7 @@ type RouteContext = {
 export async function DELETE(_req: NextRequest, { params }: RouteContext) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { user, clientId } = auth
 
     const raw = await params
@@ -44,7 +45,11 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
     // 404 to avoid leaking existence
     if (!media) return jsonFail(404, 'Media not found.')
 
-    if (media.reviewId !== reviewId || media.uploadedByUserId !== user.id || media.uploadedByRole !== 'CLIENT') {
+    if (
+      media.reviewId !== reviewId ||
+      media.uploadedByUserId !== user.id ||
+      media.uploadedByRole !== Role.CLIENT
+    ) {
       return jsonFail(404, 'Media not found.')
     }
 

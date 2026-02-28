@@ -9,23 +9,28 @@ type Ctx = ConsultationDecisionCtx & {
   params: Promise<{ id: string }> | { id: string }
 }
 
-async function requireOwnership(bookingId: string, clientId: string) {
+type OwnershipOk = { ok: true }
+type OwnershipFail = { ok: false; res: ReturnType<typeof jsonFail> }
+type OwnershipResult = OwnershipOk | OwnershipFail
+
+async function requireOwnership(bookingId: string, clientId: string): Promise<OwnershipResult> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: { id: true, clientId: true },
   })
-  if (!booking) return { ok: false as const, res: jsonFail(404, 'Booking not found.') }
-  if (booking.clientId !== clientId) return { ok: false as const, res: jsonFail(403, 'Forbidden.') }
-  return { ok: true as const }
+
+  if (!booking) return { ok: false, res: jsonFail(404, 'Booking not found.') }
+  if (booking.clientId !== clientId) return { ok: false, res: jsonFail(403, 'Forbidden.') }
+  return { ok: true }
 }
 
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { id: rawId } = await Promise.resolve(ctx.params as any)
+    const { id: rawId } = await Promise.resolve(ctx.params)
     const bookingId = pickString(rawId)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
@@ -66,7 +71,9 @@ export async function POST(req: Request, ctx: Ctx) {
     if (a !== 'APPROVE' && a !== 'REJECT') return jsonFail(400, 'Invalid action.')
 
     const action: ConsultationDecisionAction = a === 'APPROVE' ? 'APPROVE' : 'REJECT'
-    return handleConsultationDecision(action, ctx as ConsultationDecisionCtx)
+
+    // ✅ no boundary cast needed
+    return handleConsultationDecision(action, ctx)
   } catch (e) {
     console.error('POST /api/client/bookings/[id]/consultation error', e)
     return jsonFail(500, 'Internal server error')

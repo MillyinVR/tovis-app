@@ -3,27 +3,31 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { MediaVisibility } from '@prisma/client'
+import { BUCKETS } from '@/lib/storageBuckets'
 
 export const dynamic = 'force-dynamic'
 
 type Props = { params: Promise<{ id: string }> }
-
-type MediaVisibility = 'PUBLIC' | 'PRIVATE'
-type StorageBucket = 'media-public' | 'media-private'
+type StorageBucket = (typeof BUCKETS)[keyof typeof BUCKETS]
 
 function computeVisibility(isFeaturedInPortfolio: boolean, isEligibleForLooks: boolean): MediaVisibility {
-  return isFeaturedInPortfolio || isEligibleForLooks ? 'PUBLIC' : 'PRIVATE'
+  return isFeaturedInPortfolio || isEligibleForLooks ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
 }
 
 function publicUrlFor(bucket: StorageBucket, path: string) {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL
-  if (!base) return null
-  // for Supabase public bucket access
-  return `${base}/storage/v1/object/public/${bucket}/${path}`
+  const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path)
+  const url = data?.publicUrl
+  return typeof url === 'string' && url.startsWith('http') ? url : null
 }
 
 function isStorageBucket(v: unknown): v is StorageBucket {
-  return v === 'media-public' || v === 'media-private'
+  return v === BUCKETS.mediaPublic || v === BUCKETS.mediaPrivate
+}
+
+function errorMessage(e: unknown) {
+  if (e instanceof Error && e.message) return e.message
+  return 'Internal server error'
 }
 
 async function loadOwnedMedia(mediaId: string, professionalId: string) {
@@ -48,22 +52,21 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
 
 async function promoteIfNeeded(media: { storageBucket: string | null; storagePath: string | null }) {
   if (!isStorageBucket(media.storageBucket)) return null
-  if (media.storageBucket !== 'media-private') return null
+  if (media.storageBucket !== BUCKETS.mediaPrivate) return null
   if (!media.storagePath) return null
 
-  const fromBucket: StorageBucket = 'media-private'
-  const toBucket: StorageBucket = 'media-public'
+  const fromBucket: StorageBucket = BUCKETS.mediaPrivate
+  const toBucket: StorageBucket = BUCKETS.mediaPublic
 
   const fromPath = media.storagePath
   const toPath = `promoted/${fromPath}`
 
   // Copy private -> public
-  const copyRes = await supabaseAdmin.storage.from(fromBucket).copy(fromPath, `${toBucket}/${toPath}`)
-  const copyErr: any = (copyRes as any)?.error
+  const { error: copyErr } = await supabaseAdmin.storage.from(fromBucket).copy(fromPath, `${toBucket}/${toPath}`)
   if (copyErr) throw new Error(copyErr.message || 'Failed to promote media')
 
   const url = publicUrlFor(toBucket, toPath)
-  if (!url) throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL')
+  if (!url) throw new Error('Failed to compute public URL for promoted media.')
 
   // Optional cleanup: don’t hard-fail if remove fails
   await supabaseAdmin.storage.from(fromBucket).remove([fromPath]).catch(() => null)
@@ -74,7 +77,7 @@ async function promoteIfNeeded(media: { storageBucket: string | null; storagePat
 export async function POST(_req: NextRequest, props: Props) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { id: rawId } = await props.params
@@ -89,19 +92,21 @@ export async function POST(_req: NextRequest, props: Props) {
       storagePath: owned.media.storagePath,
     })
 
+    const updateData = {
+      isFeaturedInPortfolio: true,
+      visibility: computeVisibility(true, owned.media.isEligibleForLooks),
+      ...(promoted
+        ? {
+            storageBucket: promoted.bucket,
+            storagePath: promoted.path,
+            url: promoted.url,
+          }
+        : {}),
+    }
+
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
-      data: {
-        isFeaturedInPortfolio: true,
-        visibility: computeVisibility(true, owned.media.isEligibleForLooks),
-        ...(promoted
-          ? {
-              storageBucket: promoted.bucket,
-              storagePath: promoted.path,
-              url: promoted.url,
-            }
-          : {}),
-      } as any,
+      data: updateData,
       select: {
         id: true,
         isFeaturedInPortfolio: true,
@@ -116,14 +121,14 @@ export async function POST(_req: NextRequest, props: Props) {
     return jsonOk({ media: updated }, 200)
   } catch (e) {
     console.error('POST /api/pro/media/[id]/portfolio error', e)
-    return jsonFail(500, (e as any)?.message || 'Internal server error')
+    return jsonFail(500, errorMessage(e))
   }
 }
 
 export async function DELETE(_req: NextRequest, props: Props) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { id: rawId } = await props.params
@@ -138,7 +143,7 @@ export async function DELETE(_req: NextRequest, props: Props) {
       data: {
         isFeaturedInPortfolio: false,
         visibility: computeVisibility(false, owned.media.isEligibleForLooks),
-      } as any,
+      },
       select: { id: true, isFeaturedInPortfolio: true, isEligibleForLooks: true, visibility: true },
     })
 

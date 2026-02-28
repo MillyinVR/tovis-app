@@ -121,7 +121,7 @@ function centerFrom(args: {
 export async function GET() {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proId = auth.professionalId
 
     const now = new Date()

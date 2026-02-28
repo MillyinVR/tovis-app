@@ -92,7 +92,7 @@ enum MediaType {
 
 enum MediaVisibility {
   PUBLIC
-  PRO_CLIENT   // visible to pro + client only (booking/aftercare world)
+  PRO_CLIENT // visible to pro + client only (booking/aftercare world)
 }
 
 enum WaitlistStatus {
@@ -149,6 +149,9 @@ enum ClientNotificationType {
   BOOKING
   AFTERCARE
   LAST_MINUTE
+  BOOKING_CANCELLED
+  BOOKING_CONFIRMED
+  BOOKING_RESCHEDULED
 }
 
 enum SessionStep {
@@ -199,6 +202,7 @@ enum BookingServiceItemType {
 enum NotificationType {
   BOOKING_REQUEST
   BOOKING_UPDATE
+  BOOKING_CANCELLED
   REVIEW
 }
 
@@ -332,8 +336,9 @@ model User {
 
   phoneVerifications PhoneVerification[]
 
-  supportTicketsCreated SupportTicket[] @relation("SupportTicketCreatedBy")
-  supportTicketsHandled SupportTicket[] @relation("SupportTicketHandledBy")
+  supportTicketsCreated SupportTicket[]        @relation("SupportTicketCreatedBy")
+  supportTicketsHandled SupportTicket[]        @relation("SupportTicketHandledBy")
+  verificationDocuments VerificationDocument[]
 }
 
 model PhoneVerification {
@@ -405,7 +410,7 @@ model ProfessionalProfile {
   timeZone String? @db.VarChar(64)
 
   // Mobile travel settings (NOT calendar math)
-  mobileRadiusMiles       Int?
+  mobileRadiusMiles    Int?
   mobileBasePostalCode String?
 
   // Relationships
@@ -427,11 +432,11 @@ model ProfessionalProfile {
   verificationDocs   VerificationDocument[]
 
   // License verification metadata (new)
-  licenseVerifiedAt      DateTime?
-  licenseVerifiedSource  String?   // "CA_DCA_BREEZE" now, later "MICROBILT", etc.
-  licenseStatusCode      String?   // e.g. "CURRENT", whatever DCA returns
-  licenseRawJson         Json?     // snapshot for audit/debug/demo (optional but powerful)
-  
+  licenseVerifiedAt     DateTime?
+  licenseVerifiedSource String? // "CA_DCA_BREEZE" now, later "MICROBILT", etc.
+  licenseStatusCode     String? // e.g. "CURRENT", whatever DCA returns
+  licenseRawJson        Json? // snapshot for audit/debug/demo (optional but powerful)
+
   // Social/engagement (unchanged)
   favorites       ProfessionalFavorite[] @relation("ProFavorites")
   intentEvents    ClientIntentEvent[]
@@ -1049,7 +1054,16 @@ model VerificationDocument {
   status         VerificationStatus       @default(PENDING)
   adminNote      String?
 
+  // ✅ ADD THESE
+  reviewedByAdminId String?
+  reviewedByAdmin   User?   @relation(fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+
+  // ✅ ADD INDEXES (admin queue will thank you)
+  @@index([professionalId, createdAt])
+  @@index([status, createdAt])
+  @@index([type, status, createdAt])
 }
 
 // ✅ Pro-to-pro shared feedback about a client.

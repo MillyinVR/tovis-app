@@ -1,7 +1,13 @@
 // app/api/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { BookingStatus, ConsultationApprovalStatus, SessionStep } from '@prisma/client'
+import {
+  BookingStatus,
+  ConsultationApprovalStatus,
+  SessionStep,
+  ClientNotificationType,
+  Prisma,
+} from '@prisma/client'
 import { transitionSessionStepTx } from '@/lib/booking/transitions'
 
 export const dynamic = 'force-dynamic'
@@ -10,9 +16,22 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 const NOTES_MAX = 2000
 
-function moneyStringToCents(raw: string): number | null {
-  const cleaned = raw.replace(/\$/g, '').replace(/,/g, '').trim()
+function isNonEmptyString(x: unknown): x is string {
+  return typeof x === 'string' && x.trim().length > 0
+}
+
+function parseMoneyToCents(v: unknown): number | null {
+  if (v == null) return null
+
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v) || v < 0) return null
+    return Math.round(v * 100)
+  }
+
+  if (typeof v !== 'string') return null
+  const cleaned = v.replace(/\$/g, '').replace(/,/g, '').trim()
   if (!cleaned) return null
+
   const m = /^(\d+)(?:\.(\d{0,}))?$/.exec(cleaned)
   if (!m) return null
 
@@ -20,61 +39,63 @@ function moneyStringToCents(raw: string): number | null {
   let frac = (m[2] || '').slice(0, 2)
   while (frac.length < 2) frac += '0'
 
-  const cents = Number(whole) * 100 + Number(frac || '0')
+  const cents = Number(whole) * 100 + Number(frac)
   if (!Number.isFinite(cents) || cents < 0) return null
   return cents
 }
 
-function parseMoneyToCents(v: unknown): number | null {
-  if (v == null || v === '') return null
-  if (typeof v === 'number') {
-    if (!Number.isFinite(v) || v < 0) return null
-    return Math.round(v * 100)
-  }
-  if (typeof v === 'string') return moneyStringToCents(v)
-  const s = (v as any)?.toString?.()
-  return typeof s === 'string' ? moneyStringToCents(s) : null
+function centsToDecimalDollars(cents: number): Prisma.Decimal {
+  // Decimal dollars, e.g. 1234 cents => 12.34
+  return new Prisma.Decimal(cents).div(100)
 }
 
-function centsToMoneyString(cents: number): string {
-  const c = Math.max(0, Math.trunc(cents))
-  const dollars = Math.trunc(c / 100)
-  const rem = c % 100
-  return `${dollars}.${String(rem).padStart(2, '0')}`
-}
-
-function parseProposedServicesJson(v: unknown): any | null {
+function parseProposedServicesJson(v: unknown): Prisma.InputJsonValue | null {
   if (v == null) return null
-  if (typeof v === 'object') return v
+
   if (typeof v === 'string') {
     const s = v.trim()
     if (!s) return null
     try {
-      const parsed = JSON.parse(s)
-      return parsed && typeof parsed === 'object' ? parsed : null
+      const parsed: unknown = JSON.parse(s)
+      // Prisma JSON can be object/array/primitive — but we require "object-ish" for proposals
+      if (parsed && typeof parsed === 'object') return parsed as Prisma.InputJsonValue
+      return null
     } catch {
       return null
     }
   }
+
+  if (v && typeof v === 'object') {
+    return v as Prisma.InputJsonValue
+  }
+
   return null
 }
 
 type ProposedServiceRef = { serviceId?: unknown; offeringId?: unknown }
 
-function extractServiceRefsFromProposedJson(v: any): Array<{ serviceId: string | null; offeringId: string | null }> {
+function extractServiceRefsFromProposedJson(
+  v: unknown,
+): Array<{ serviceId: string | null; offeringId: string | null }> {
   const out: Array<{ serviceId: string | null; offeringId: string | null }> = []
 
-  const visit = (node: any) => {
+  const visit = (node: unknown) => {
     if (!node) return
-    if (Array.isArray(node)) return node.forEach(visit)
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item)
+      return
+    }
     if (typeof node !== 'object') return
 
-    const maybe = node as ProposedServiceRef
-    const serviceId = typeof maybe.serviceId === 'string' && maybe.serviceId.trim() ? maybe.serviceId.trim() : null
-    const offeringId = typeof maybe.offeringId === 'string' && maybe.offeringId.trim() ? maybe.offeringId.trim() : null
+    const obj = node as Record<string, unknown>
+
+    const maybe = obj as ProposedServiceRef
+    const serviceId = isNonEmptyString(maybe.serviceId) ? maybe.serviceId.trim() : null
+    const offeringId = isNonEmptyString(maybe.offeringId) ? maybe.offeringId.trim() : null
 
     if (serviceId || offeringId) out.push({ serviceId, offeringId })
-    Object.keys(node).forEach((k) => visit((node as any)[k]))
+
+    for (const k of Object.keys(obj)) visit(obj[k])
   }
 
   visit(v)
@@ -88,11 +109,11 @@ function canProSendProposal(step: SessionStep | null) {
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proId = auth.professionalId
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as {
@@ -110,7 +131,7 @@ export async function POST(req: Request, ctx: Ctx) {
     const notesRaw = pickString(body?.notes)
     const notes = notesRaw ? notesRaw.slice(0, NOTES_MAX) : null
 
-    const proposedTotalMoney = centsToMoneyString(proposedCents)
+    const proposedTotal = centsToDecimalDollars(proposedCents)
 
     const txResult = await prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -129,18 +150,24 @@ export async function POST(req: Request, ctx: Ctx) {
       if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
       if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden.' }
 
-      if (booking.status === BookingStatus.CANCELLED) return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
+      if (booking.status === BookingStatus.CANCELLED)
+        return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
       if (booking.status === BookingStatus.COMPLETED || booking.finishedAt)
         return { ok: false as const, status: 409, error: 'This booking is finalized.' }
 
-      // Your intentional rule: client present
-      if (!booking.startedAt) return { ok: false as const, status: 409, error: 'Start the appointment before sending a consultation proposal.' }
+      if (!booking.startedAt) {
+        return {
+          ok: false as const,
+          status: 409,
+          error: 'Start the appointment before sending a consultation proposal.',
+        }
+      }
 
       if (!canProSendProposal(booking.sessionStep ?? null)) {
         return { ok: false as const, status: 409, error: 'Booking is not in a consultation stage.' }
       }
 
-      // Validate proposal references are from this pro's active offerings
+      // Validate references exist in this pro's active offerings
       const refs = extractServiceRefsFromProposedJson(proposedServicesJson)
       if (!refs.length) {
         return {
@@ -156,19 +183,26 @@ export async function POST(req: Request, ctx: Ctx) {
         take: 1000,
       })
 
-      const allowedOfferingIds = new Set(offerings.map((o) => String(o.id)))
-      const allowedServiceIds = new Set(offerings.map((o) => String(o.serviceId)))
+      const allowedOfferingIds = new Set(offerings.map((o) => o.id))
+      const allowedServiceIds = new Set(offerings.map((o) => o.serviceId))
 
       for (const r of refs) {
         if (r.offeringId && !allowedOfferingIds.has(r.offeringId)) {
-          return { ok: false as const, status: 400, error: 'Proposal includes an offering that is not active for this pro.' }
+          return {
+            ok: false as const,
+            status: 400,
+            error: 'Proposal includes an offering that is not active for this pro.',
+          }
         }
         if (r.serviceId && !allowedServiceIds.has(r.serviceId)) {
-          return { ok: false as const, status: 400, error: 'Proposal includes a service that is not active for this pro.' }
+          return {
+            ok: false as const,
+            status: 400,
+            error: 'Proposal includes a service that is not active for this pro.',
+          }
         }
       }
 
-      // Upsert approval
       const approval = await tx.consultationApproval.upsert({
         where: { bookingId: booking.id },
         create: {
@@ -176,24 +210,23 @@ export async function POST(req: Request, ctx: Ctx) {
           clientId: booking.clientId,
           proId: booking.professionalId,
           status: ConsultationApprovalStatus.PENDING,
-          proposedServicesJson: proposedServicesJson as any,
-          proposedTotal: proposedTotalMoney as any,
+          proposedServicesJson,
+          proposedTotal,
           notes,
           approvedAt: null,
           rejectedAt: null,
-        } as any,
+        },
         update: {
           status: ConsultationApprovalStatus.PENDING,
-          proposedServicesJson: proposedServicesJson as any,
-          proposedTotal: proposedTotalMoney as any,
+          proposedServicesJson,
+          proposedTotal,
           notes,
           approvedAt: null,
           rejectedAt: null,
-        } as any,
+        },
         select: { id: true, status: true, proposedTotal: true, updatedAt: true },
       })
 
-      // ✅ Canonical step transition (no direct booking.update here)
       const stepRes = await transitionSessionStepTx(tx, {
         bookingId: booking.id,
         proId,
@@ -201,8 +234,12 @@ export async function POST(req: Request, ctx: Ctx) {
       })
 
       if (!stepRes.ok) {
-        // keep transaction atomic: if step can't change, proposal shouldn't be stored either
-        return { ok: false as const, status: stepRes.status, error: stepRes.error, forcedStep: stepRes.forcedStep }
+        return {
+          ok: false as const,
+          status: stepRes.status,
+          error: stepRes.error,
+          forcedStep: stepRes.forcedStep,
+        }
       }
 
       // Best-effort notify client
@@ -210,12 +247,12 @@ export async function POST(req: Request, ctx: Ctx) {
         await tx.clientNotification.create({
           data: {
             clientId: booking.clientId,
-            type: 'BOOKING' as any,
+            type: ClientNotificationType.BOOKING,
             title: 'Consultation proposal ready',
             body: 'Your professional sent an updated service total for approval.',
             bookingId: booking.id,
             dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
-          } as any,
+          },
         })
       } catch (e) {
         console.error('Client notification failed (consultation proposal):', e)
@@ -229,7 +266,13 @@ export async function POST(req: Request, ctx: Ctx) {
       }
     })
 
-    if (!txResult.ok) return jsonFail(txResult.status, txResult.error, txResult.forcedStep ? { forcedStep: txResult.forcedStep } : undefined)
+    if (!txResult.ok) {
+      return jsonFail(
+        txResult.status,
+        txResult.error,
+        txResult.forcedStep ? { forcedStep: txResult.forcedStep } : undefined,
+      )
+    }
 
     return jsonOk(
       {
@@ -239,7 +282,7 @@ export async function POST(req: Request, ctx: Ctx) {
       },
       200,
     )
-  } catch (e: any) {
+  } catch (e) {
     console.error('POST /api/pro/bookings/[id]/consultation-proposal error', e)
     return jsonFail(500, 'Internal server error')
   }

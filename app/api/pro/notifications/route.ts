@@ -12,7 +12,7 @@ function asInt(v: unknown, fallback: number) {
 
 export async function GET(req: Request) {
   const auth = await requirePro()
-  if (auth.res) return auth.res
+  if (!auth.ok) return auth.res
   const professionalId = auth.professionalId
 
   const url = new URL(req.url)

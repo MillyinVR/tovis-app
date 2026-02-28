@@ -1,6 +1,7 @@
+// app/admin/professionals/[id]/page.tsx
 import AdminGuard from '../../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
-import { AdminPermissionRole } from '@prisma/client'
+import { AdminPermissionRole, ProfessionalLocationType } from '@prisma/client'
 import AdminProActions from './AdminProActions'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
@@ -29,12 +30,45 @@ function fmtUtcDateTime(d: Date) {
   }).format(d)
 }
 
+function formatLocationLabel(loc: {
+  type: ProfessionalLocationType
+  name: string | null
+  formattedAddress: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+} | null) {
+  if (!loc) return 'No location yet'
+
+  const mode =
+    loc.type === ProfessionalLocationType.SALON
+      ? 'Salon'
+      : loc.type === ProfessionalLocationType.SUITE
+        ? 'Suite'
+        : loc.type === ProfessionalLocationType.MOBILE_BASE
+          ? 'Mobile'
+          : String(loc.type)
+
+  // Prefer formattedAddress, else fall back to city/state, else just mode
+  const where =
+    loc.formattedAddress?.trim() ||
+    [loc.city?.trim(), loc.state?.trim()].filter(Boolean).join(', ') ||
+    loc.postalCode?.trim() ||
+    ''
+
+  const named = loc.name?.trim()
+  if (named && where) return `${named} · ${where} · ${mode}`
+  if (named) return `${named} · ${mode}`
+  if (where) return `${where} · ${mode}`
+  return mode
+}
+
 export default async function AdminProfessionalDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>
+  params: { id: string }
 }) {
-  const { id } = await params
+  const { id } = params
 
   const pro = await prisma.professionalProfile.findUnique({
     where: { id },
@@ -42,14 +76,41 @@ export default async function AdminProfessionalDetailPage({
       id: true,
       businessName: true,
       bio: true,
-      location: true,
       professionType: true,
+
       licenseState: true,
       licenseNumber: true,
       licenseExpiry: true,
       licenseVerified: true,
       verificationStatus: true,
+
       user: { select: { email: true } },
+
+      // ✅ NEW location system
+      locations: {
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          type: true,
+          name: true,
+          isPrimary: true,
+          isBookable: true,
+
+          formattedAddress: true,
+          city: true,
+          state: true,
+          postalCode: true,
+          countryCode: true,
+          placeId: true,
+
+          lat: true,
+          lng: true,
+          timeZone: true,
+          createdAt: true,
+        },
+        take: 50,
+      },
+
       verificationDocs: {
         orderBy: { createdAt: 'desc' },
         select: {
@@ -91,7 +152,9 @@ export default async function AdminProfessionalDetailPage({
   const proName = pro.businessName || 'Unnamed business'
   const email = pro.user?.email || 'No email'
   const profession = pro.professionType || 'Unknown'
-  const location = pro.location || 'No location'
+
+  const primaryLoc = pro.locations.find((l) => l.isPrimary) ?? pro.locations[0] ?? null
+  const locationLabel = formatLocationLabel(primaryLoc)
 
   const licenseLine = (() => {
     const state = pro.licenseState || '??'
@@ -119,15 +182,22 @@ export default async function AdminProfessionalDetailPage({
                 <div className={`${hint} mt-1`}>{email}</div>
 
                 <div className={`${hint} mt-2`}>
-                  {profession} · {location}
+                  {profession} · {locationLabel}
                 </div>
 
                 <div className={`${hint} mt-1`}>{licenseLine}</div>
+
+                {primaryLoc ? (
+                  <div className={`${hint} mt-1`}>
+                    Location type:{' '}
+                    <span className="font-black text-textPrimary">{String(primaryLoc.type)}</span>
+                    {primaryLoc.isBookable ? <span className="ml-2 opacity-80">· bookable</span> : null}
+                    {primaryLoc.timeZone ? <span className="ml-2 opacity-80">· {primaryLoc.timeZone}</span> : null}
+                  </div>
+                ) : null}
               </div>
 
-              {/* IMPORTANT:
-                  Keep mutations in client component so auth cookies are included.
-                  Server actions calling /api/* will bite you later. */}
+              {/* Keep mutations in client component so auth cookies are included. */}
               <AdminProActions
                 professionalId={proId}
                 currentStatus={pro.verificationStatus}
@@ -136,18 +206,46 @@ export default async function AdminProfessionalDetailPage({
             </div>
 
             {pro.bio ? (
-              <div className="mt-3 text-[13px] leading-relaxed text-textPrimary/90 whitespace-pre-wrap">
+              <div className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-textPrimary/90">
                 {pro.bio}
               </div>
             ) : null}
 
             <div className={`${hint} mt-3`}>
               Current: <span className="font-black text-textPrimary">{pro.verificationStatus}</span> · License
-              verified:{' '}
-              <span className="font-black text-textPrimary">{String(pro.licenseVerified)}</span>
+              verified: <span className="font-black text-textPrimary">{String(pro.licenseVerified)}</span>
               <span className="ml-2 opacity-80">· Times shown in UTC</span>
             </div>
           </section>
+
+          {/* OPTIONAL: LOCATIONS LIST (handy for debugging / future UI)
+              Delete this section if you don’t want it. */}
+          {pro.locations.length ? (
+            <section className={card}>
+              <div className="text-[14px] font-black text-textPrimary">Locations</div>
+              <div className={`${hint} mt-1`}>Primary first.</div>
+
+              <div className="mt-4 grid gap-2">
+                {pro.locations.map((l) => (
+                  <div key={l.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-3">
+                      <div className="text-[13px] font-black text-textPrimary">
+                        {formatLocationLabel(l)}
+                        {l.isPrimary ? <span className="ml-2 text-[12px] font-semibold text-accentPrimary">(Primary)</span> : null}
+                      </div>
+                      <div className={hint}>{fmtUtcDateTime(new Date(l.createdAt))}</div>
+                    </div>
+
+                    <div className={`${hint} mt-2`}>
+                      Type: <span className="font-black text-textPrimary">{String(l.type)}</span>
+                      {' · '}
+                      Bookable: <span className="font-black text-textPrimary">{String(l.isBookable)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {/* VERIFICATION DOCS */}
           <section className={card}>
@@ -163,16 +261,11 @@ export default async function AdminProfessionalDetailPage({
                   const created = fmtUtcDateTime(new Date(d.createdAt))
 
                   return (
-                    <div
-                      key={d.id}
-                      className="rounded-card border border-white/10 bg-bgPrimary p-3"
-                    >
+                    <div key={d.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
                       <div className="flex flex-wrap items-baseline justify-between gap-3">
                         <div className="text-[13px] font-black text-textPrimary">
                           {d.type}{' '}
-                          <span className="text-[12px] font-semibold text-textSecondary">
-                            ({d.status})
-                          </span>
+                          <span className="text-[12px] font-semibold text-textSecondary">({d.status})</span>
                         </div>
                         <div className={hint}>{created}</div>
                       </div>

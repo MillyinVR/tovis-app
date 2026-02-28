@@ -1,7 +1,7 @@
 // app/api/client/reviews/[id]/media/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import type { MediaType, MediaVisibility, Role } from '@prisma/client'
+import { MediaVisibility, Role, type MediaType } from '@prisma/client'
 import { requireClient, pickString, jsonFail, safeUrl, resolveStoragePointers, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
@@ -74,10 +74,14 @@ function enforceCaps(items: IncomingMediaItem[]) {
   return null
 }
 
+function errMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { user, clientId } = auth
 
     const { id } = await context.params
@@ -114,7 +118,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
 
     // Optional: enforce total media cap INCLUDING what’s already attached
     const existingCount = await prisma.mediaAsset.count({
-      where: { reviewId: review.id, uploadedByRole: 'CLIENT' },
+      where: { reviewId: review.id, uploadedByRole: Role.CLIENT },
     })
     if (existingCount + resolved.length > MAX_TOTAL) {
       return jsonFail(400, `This review already has ${existingCount} upload(s). Max is ${MAX_TOTAL}.`)
@@ -126,16 +130,16 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
           tx.mediaAsset.create({
             data: {
               professionalId: review.professionalId,
-              bookingId: review.bookingId!,
+              bookingId: review.bookingId,
               reviewId: review.id,
 
               url: m.url,
               thumbUrl: m.thumbUrl ?? null,
               mediaType: m.mediaType,
 
-              visibility: 'PUBLIC' as MediaVisibility,
+              visibility: MediaVisibility.PUBLIC,
               uploadedByUserId: user.id,
-              uploadedByRole: 'CLIENT' as Role,
+              uploadedByRole: Role.CLIENT,
 
               isFeaturedInPortfolio: false,
               isEligibleForLooks: false,
@@ -171,16 +175,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return { rows, updated }
     })
 
-    return NextResponse.json(
-      { ok: true, createdCount: created.rows.length, created: created.rows, review: created.updated },
-      { status: 201 },
+    return jsonOk(
+      {
+        createdCount: created.rows.length,
+        created: created.rows,
+        review: created.updated,
+      },
+      201,
     )
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('POST /api/client/reviews/[id]/media error', e)
-    const msg =
-      typeof e?.message === 'string' && (e.message.includes('Media') || e.message.includes('storage'))
-        ? e.message
+    const msg = errMessage(e)
+    const safe =
+      msg.includes('Media') || msg.includes('storage')
+        ? msg
         : 'Internal server error'
-    return jsonFail(500, msg)
+    return jsonFail(500, safe)
   }
 }

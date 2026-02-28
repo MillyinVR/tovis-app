@@ -3,19 +3,23 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
+import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type Body = {
   mode?: unknown // 'SALON' | 'SUITE' | 'MOBILE'
-  placeId?: unknown // required for SALON/SUITE
-  locationName?: unknown // optional override label
-  postalCode?: unknown // required for MOBILE (US zip)
-  radiusMiles?: unknown // required for MOBILE (miles)
-  sessionToken?: unknown // optional pass-through for Places billing/session
+  placeId?: unknown
+  locationName?: unknown
+  postalCode?: unknown
+  radiusMiles?: unknown
+  sessionToken?: unknown
+  makePrimary?: unknown
+}
 
-  // controls whether the created location becomes primary
-  makePrimary?: unknown // boolean, defaults true
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function normalizeMode(v: unknown): 'SALON' | 'SUITE' | 'MOBILE' | null {
@@ -39,10 +43,17 @@ function pickBool(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null
 }
 
-function componentMap(addressComponents: any[]) {
+type AddressComponent = {
+  types?: unknown
+  long_name?: unknown
+  short_name?: unknown
+}
+
+function componentMap(addressComponents: unknown) {
   const out: Record<string, string> = {}
-  for (const c of addressComponents || []) {
-    const types: string[] = Array.isArray(c?.types) ? c.types : []
+  const arr = Array.isArray(addressComponents) ? (addressComponents as AddressComponent[]) : []
+  for (const c of arr) {
+    const types = Array.isArray(c?.types) ? c.types.filter((t): t is string => typeof t === 'string') : []
     const longName = typeof c?.long_name === 'string' ? c.long_name : ''
     const shortName = typeof c?.short_name === 'string' ? c.short_name : ''
     for (const t of types) out[t] = shortName || longName
@@ -79,23 +90,25 @@ async function googlePlaceDetails(placeId: string, sessionToken?: string | null)
     cache: 'no-store',
   })
 
-  const data = await safeJson<any>(res)
+  const data = await safeJson<unknown>(res)
   if (!res.ok) throw new Error('Google request failed.')
 
-  const status = String(data?.status ?? '')
-  if (status !== 'OK') throw new Error(data?.error_message || `Google status: ${status}`)
+  if (!isRecord(data)) throw new Error('Google response malformed.')
+  const status = String(data.status ?? '')
+  if (status !== 'OK') throw new Error(String(data.error_message ?? `Google status: ${status}`))
 
-  const r = data?.result ?? {}
-  const loc = r?.geometry?.location ?? {}
-  const lat = typeof loc?.lat === 'number' ? loc.lat : null
-  const lng = typeof loc?.lng === 'number' ? loc.lng : null
+  const r = isRecord(data.result) ? data.result : {}
+  const loc = isRecord(r.geometry) && isRecord(r.geometry.location) ? r.geometry.location : {}
 
-  const cm = componentMap(Array.isArray(r?.address_components) ? r.address_components : [])
+  const lat = typeof loc.lat === 'number' ? loc.lat : null
+  const lng = typeof loc.lng === 'number' ? loc.lng : null
+
+  const cm = componentMap(r.address_components)
 
   return {
-    placeId: String(r?.place_id ?? placeId),
-    name: typeof r?.name === 'string' ? r.name : null,
-    formattedAddress: typeof r?.formatted_address === 'string' ? r.formatted_address : null,
+    placeId: typeof r.place_id === 'string' ? r.place_id : placeId,
+    name: typeof r.name === 'string' ? r.name : null,
+    formattedAddress: typeof r.formatted_address === 'string' ? r.formatted_address : null,
     lat,
     lng,
     city: cm.locality || cm.postal_town || cm.sublocality || null,
@@ -117,14 +130,18 @@ async function googleTimeZone(lat: number, lng: number) {
     cache: 'no-store',
   })
 
-  const data = await safeJson<any>(res)
+  const data = await safeJson<unknown>(res)
   if (!res.ok) throw new Error('Google request failed.')
+  if (!isRecord(data)) throw new Error('Google response malformed.')
 
-  const status = String(data?.status ?? '')
-  if (status !== 'OK') throw new Error(data?.errorMessage || data?.error_message || `Google status: ${status}`)
+  const status = String(data.status ?? '')
+  if (status !== 'OK') {
+    throw new Error(String(data.errorMessage ?? data.error_message ?? `Google status: ${status}`))
+  }
 
-  const tz = typeof data?.timeZoneId === 'string' ? data.timeZoneId : null
+  const tz = typeof data.timeZoneId === 'string' ? data.timeZoneId : null
   if (!tz) throw new Error('No timeZoneId returned.')
+  if (!isValidIanaTimeZone(tz)) throw new Error('Returned timeZoneId is not a valid IANA timezone.')
   return tz
 }
 
@@ -140,20 +157,24 @@ async function googleGeocodePostal(postalCode: string) {
     cache: 'no-store',
   })
 
-  const data = await safeJson<any>(res)
+  const data = await safeJson<unknown>(res)
   if (!res.ok) throw new Error('Google request failed.')
+  if (!isRecord(data)) throw new Error('Google response malformed.')
 
-  const status = String(data?.status ?? '')
-  if (status !== 'OK') throw new Error(data?.error_message || `Google status: ${status}`)
+  const status = String(data.status ?? '')
+  if (status !== 'OK') throw new Error(String(data.error_message ?? `Google status: ${status}`))
 
-  const first = Array.isArray(data?.results) ? data.results[0] : null
+  const first =
+    Array.isArray(data.results) && isRecord(data.results[0]) ? (data.results[0] as Record<string, unknown>) : null
   if (!first) throw new Error('No results found.')
 
-  const loc = first?.geometry?.location ?? {}
-  const lat = typeof loc?.lat === 'number' ? loc.lat : null
-  const lng = typeof loc?.lng === 'number' ? loc.lng : null
+  const geom = isRecord(first.geometry) ? first.geometry : {}
+  const loc = isRecord(geom.location) ? geom.location : {}
 
-  const cm = componentMap(Array.isArray(first?.address_components) ? first.address_components : [])
+  const lat = typeof loc.lat === 'number' ? loc.lat : null
+  const lng = typeof loc.lng === 'number' ? loc.lng : null
+
+  const cm = componentMap(first.address_components)
 
   return {
     lat,
@@ -168,26 +189,20 @@ async function googleGeocodePostal(postalCode: string) {
 export async function POST(req: Request) {
   try {
     const gate = await requirePro()
-    if (gate.res) return gate.res
-
+    if (!gate.ok) return gate.res
     const proId = gate.proId
 
-    const body = (await req.json().catch(() => ({}))) as Body
+    const raw: unknown = await req.json().catch(() => ({}))
+    const body: Body = isRecord(raw) ? (raw as Body) : {}
+
     const mode = normalizeMode(body.mode)
     if (!mode) return jsonFail(400, 'Missing or invalid mode.', { code: 'INVALID_MODE' })
 
-    // default to true so existing callers behave the same
     const makePrimary = pickBool(body.makePrimary) ?? true
-
     const workingHours = defaultWorkingHours()
 
-    // Only clear old primary IF we are making this new one primary
-    if (makePrimary) {
-      await prisma.professionalLocation.updateMany({
-        where: { professionalId: proId, isPrimary: true },
-        data: { isPrimary: false },
-      })
-    }
+    // Prisma-validated type for `type`
+    type LocationType = Prisma.ProfessionalLocationCreateInput['type']
 
     if (mode === 'SALON' || mode === 'SUITE') {
       const placeId = pickString(body.placeId)
@@ -203,45 +218,55 @@ export async function POST(req: Request) {
       const tz = await googleTimeZone(loc.lat, loc.lng)
 
       const nameOverride = pickString(body.locationName)
-      const locationType = mode === 'SALON' ? 'SALON' : 'SUITE'
 
-      const created = await prisma.professionalLocation.create({
-        data: {
-          professionalId: proId,
-          type: locationType as any,
-          name: nameOverride || loc.name || null,
-          isPrimary: makePrimary,
-          isBookable: true,
+      const locationType: LocationType = (mode === 'SALON' ? 'SALON' : 'SUITE') satisfies LocationType
 
-          formattedAddress: loc.formattedAddress,
-          city: loc.city,
-          state: loc.state,
-          postalCode: loc.postalCode,
-          countryCode: loc.countryCode,
-          placeId: loc.placeId,
+      const created = await prisma.$transaction(async (tx) => {
+        if (makePrimary) {
+          await tx.professionalLocation.updateMany({
+            where: { professionalId: proId, isPrimary: true },
+            data: { isPrimary: false },
+          })
+        }
 
-          lat: loc.lat,
-          lng: loc.lng,
+        const created = await tx.professionalLocation.create({
+          data: {
+            professionalId: proId,
+            type: locationType,
+            name: nameOverride || loc.name || null,
+            isPrimary: makePrimary,
+            isBookable: true,
 
-          timeZone: tz,
-          workingHours,
-        },
-        select: { id: true, type: true, timeZone: true, isPrimary: true },
+            formattedAddress: loc.formattedAddress,
+            city: loc.city,
+            state: loc.state,
+            postalCode: loc.postalCode,
+            countryCode: loc.countryCode,
+            placeId: loc.placeId,
+
+            lat: loc.lat,
+            lng: loc.lng,
+
+            timeZone: tz,
+            workingHours,
+          },
+          select: { id: true, type: true, timeZone: true, isPrimary: true },
+        })
+
+        await tx.professionalProfile.update({
+          where: { id: proId },
+          data: {
+            timeZone: tz,
+            mobileBasePostalCode: null,
+            mobileRadiusMiles: null,
+          },
+          select: { id: true },
+        })
+
+        return created
       })
 
-      // Keep pro fallback timezone updated (always)
-      await prisma.professionalProfile.update({
-        where: { id: proId },
-        data: {
-          timeZone: tz,
-          // If they switch away from mobile, clear mobile config
-          mobileBasePostalCode: null,
-          mobileRadiusMiles: null,
-        },
-        select: { id: true },
-      })
-
-      return jsonOk({ ok: true, location: created })
+      return jsonOk({ location: created })
     }
 
     // MOBILE
@@ -262,41 +287,55 @@ export async function POST(req: Request) {
 
     const tz = await googleTimeZone(geo.lat, geo.lng)
 
-    const created = await prisma.professionalLocation.create({
-      data: {
-        professionalId: proId,
-        type: 'MOBILE_BASE',
-        name: 'Mobile base',
-        isPrimary: makePrimary,
-        isBookable: true,
+    const mobileType: LocationType = 'MOBILE_BASE' satisfies LocationType
 
-        city: geo.city,
-        state: geo.state,
-        postalCode: geo.postalCode || postalCode,
-        countryCode: geo.countryCode,
+    const created = await prisma.$transaction(async (tx) => {
+      if (makePrimary) {
+        await tx.professionalLocation.updateMany({
+          where: { professionalId: proId, isPrimary: true },
+          data: { isPrimary: false },
+        })
+      }
 
-        lat: geo.lat,
-        lng: geo.lng,
+      const created = await tx.professionalLocation.create({
+        data: {
+          professionalId: proId,
+          type: mobileType,
+          name: 'Mobile base',
+          isPrimary: makePrimary,
+          isBookable: true,
 
-        timeZone: tz,
-        workingHours,
-      },
-      select: { id: true, type: true, timeZone: true, isPrimary: true },
+          city: geo.city,
+          state: geo.state,
+          postalCode: geo.postalCode || postalCode,
+          countryCode: geo.countryCode,
+
+          lat: geo.lat,
+          lng: geo.lng,
+
+          timeZone: tz,
+          workingHours,
+        },
+        select: { id: true, type: true, timeZone: true, isPrimary: true },
+      })
+
+      await tx.professionalProfile.update({
+        where: { id: proId },
+        data: {
+          mobileBasePostalCode: geo.postalCode || postalCode,
+          mobileRadiusMiles: radiusMiles,
+          timeZone: tz,
+        },
+        select: { id: true },
+      })
+
+      return created
     })
 
-    await prisma.professionalProfile.update({
-      where: { id: proId },
-      data: {
-        mobileBasePostalCode: geo.postalCode || postalCode,
-        mobileRadiusMiles: radiusMiles,
-        timeZone: tz,
-      },
-      select: { id: true },
-    })
-
-    return jsonOk({ ok: true, location: created })
-  } catch (e: any) {
+    return jsonOk({ location: created })
+  } catch (e: unknown) {
     console.error('POST /api/pro/onboarding/location error', e)
-    return jsonFail(500, e?.message || 'Internal error', { code: 'INTERNAL' })
+    const msg = e instanceof Error ? e.message : 'Internal error'
+    return jsonFail(500, msg, { code: 'INTERNAL' })
   }
 }

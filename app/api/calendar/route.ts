@@ -7,6 +7,7 @@ import { pickString } from '@/app/api/_utils/pick'
 import { normalizeEmail } from '@/app/api/_utils/email'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail } from '@/app/api/_utils/responses'
+import type { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -80,7 +81,6 @@ function requireBookingTimeZone(raw: unknown): { ok: true; timeZone: string } | 
 }
 
 function looksLikeRealLocation(s: string) {
-  // not perfect — just blocks obvious junk like "N/A", "Online", empty, etc.
   const v = s.trim()
   if (!v) return false
   const up = v.toUpperCase()
@@ -96,7 +96,7 @@ function requireSalonLocation(args: {
 }): { ok: true; location: string | null } | { ok: false; error: string } {
   const type = typeof args.locationType === 'string' ? args.locationType.trim().toUpperCase() : ''
 
-  // MOBILE: location line is optional (client-specific address may exist elsewhere)
+  // MOBILE (and anything not SALON): location line optional
   if (type !== 'SALON') {
     const addr = pickFormattedAddress(args.locationAddressSnapshot)
     if (addr) return { ok: true, location: addr }
@@ -121,14 +121,17 @@ function requireSalonLocation(args: {
   }
 }
 
+function isAllowedRole(role: Role) {
+  return role === 'CLIENT' || role === 'PRO' || role === 'ADMIN'
+}
+
 export async function GET(req: Request) {
   try {
-    const { user, res } = await requireUser()
-    if (res) return res
+    const auth = await requireUser()
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
-    const role = String(user?.role || '').toUpperCase()
-    const allowed = role === 'CLIENT' || role === 'PRO' || role === 'ADMIN'
-    if (!allowed) return jsonFail(403, 'Forbidden')
+    if (!isAllowedRole(user.role)) return jsonFail(403, 'Forbidden')
 
     const { searchParams } = new URL(req.url)
     const bookingId = pickString(searchParams.get('bookingId'))
@@ -144,7 +147,7 @@ export async function GET(req: Request) {
         scheduledFor: true,
         totalDurationMinutes: true,
 
-        locationType: true, // ✅ needed for strict SALON behavior
+        locationType: true,
         locationTimeZone: true,
         locationAddressSnapshot: true,
 
@@ -171,7 +174,7 @@ export async function GET(req: Request) {
 
     const isClient = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
     const isPro = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
-    const isAdmin = role === 'ADMIN'
+    const isAdmin = user.role === 'ADMIN'
     if (!isAdmin && !isClient && !isPro) return jsonFail(403, 'Forbidden')
 
     const startUtc = new Date(booking.scheduledFor)
@@ -180,12 +183,10 @@ export async function GET(req: Request) {
     const durationMinutes = clampDurationMinutes(booking.totalDurationMinutes, 60)
     const endUtc = new Date(startUtc.getTime() + durationMinutes * 60_000)
 
-    // ✅ strict timezone (LOCATION truth)
     const tzRes = requireBookingTimeZone(booking.locationTimeZone)
     if (!tzRes.ok) return jsonFail(409, tzRes.error)
     const appointmentTz = tzRes.timeZone
 
-    // ✅ strict SALON location requirement
     const locRes = requireSalonLocation({
       locationType: booking.locationType,
       locationAddressSnapshot: booking.locationAddressSnapshot,

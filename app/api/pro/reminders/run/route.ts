@@ -78,7 +78,7 @@ function computeTomorrowWindowUtc(nowUtc: Date, scheduleTz: string) {
 export async function POST() {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const pro = await prisma.professionalProfile.findUnique({

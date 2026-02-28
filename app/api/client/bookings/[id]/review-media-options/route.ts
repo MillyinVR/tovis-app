@@ -1,24 +1,23 @@
 // app/api/client/bookings/[id]/review-media-options/route.ts
 import { prisma } from '@/lib/prisma'
-import { requireClient, pickString, jsonFail, jsonOk, upper } from '@/app/api/_utils'
-import { MediaType, MediaVisibility } from '@prisma/client'
+import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
+import { MediaType, MediaVisibility, MediaPhase, Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 // For “select appointment photos to add to review”, it’s clearer to show:
 // BEFORE → AFTER → OTHER, then newest first within each group.
-const PHASE_RANK: Record<string, number> = {
-  BEFORE: 0,
-  AFTER: 1,
-  OTHER: 2,
+const PHASE_RANK: Record<MediaPhase, number> = {
+  [MediaPhase.BEFORE]: 0,
+  [MediaPhase.AFTER]: 1,
+  [MediaPhase.OTHER]: 2,
 }
 
-function phaseRank(v: unknown) {
-  const s = upper(v)
-  return PHASE_RANK[s] ?? 9
+function phaseRank(v: MediaPhase) {
+  return PHASE_RANK[v] ?? 9
 }
 
-function sortKey(a: { phase: unknown; createdAt: Date }, b: { phase: unknown; createdAt: Date }) {
+function sortKey(a: { phase: MediaPhase; createdAt: Date }, b: { phase: MediaPhase; createdAt: Date }) {
   const pr = phaseRank(a.phase) - phaseRank(b.phase)
   if (pr !== 0) return pr
   return b.createdAt.getTime() - a.createdAt.getTime()
@@ -27,7 +26,7 @@ function sortKey(a: { phase: unknown; createdAt: Date }, b: { phase: unknown; cr
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireClient()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const { clientId } = auth
 
     const { id } = await ctx.params
@@ -63,7 +62,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         reviewId: null,
         visibility: MediaVisibility.PRO_CLIENT,
         mediaType: { in: [MediaType.IMAGE, MediaType.VIDEO] },
-        uploadedByRole: { in: ['PRO', 'CLIENT'] },
+        uploadedByRole: { in: [Role.PRO, Role.CLIENT] },
       },
       select: {
         id: true,

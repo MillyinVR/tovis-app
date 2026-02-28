@@ -100,11 +100,6 @@ export default async function AdminPermissionsPage() {
     )
   }
 
-  /**
-   * ✅ Location update:
-   * Instead of ProfessionalProfile.location (legacy string),
-   * we label pros using their PRIMARY ProfessionalLocation.
-   */
   const [users, permissions, professionals, services, categories] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, email: true, role: true },

@@ -16,11 +16,11 @@ function parseStep(v: unknown): SessionStep | null {
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proId = auth.professionalId
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as { step?: unknown }
@@ -34,7 +34,7 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(result.status, result.error, { forcedStep: result.forcedStep ?? null })
     }
 
-    return jsonOk({ ok: true, booking: result.booking }, 200)
+    return jsonOk({ booking: result.booking }, 200)
   } catch (e) {
     console.error('POST /api/pro/bookings/[id]/session-step error', e)
     return jsonFail(500, 'Internal server error')

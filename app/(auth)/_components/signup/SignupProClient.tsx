@@ -2,7 +2,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
 
@@ -123,12 +123,14 @@ function normalizeHandleInput(raw: string) {
     .slice(0, 24)
 }
 
-// ✅ MATCH YOUR PRISMA ENUM (based on the schema you pasted)
+// ✅ MATCH YOUR PRISMA ENUM (from the schema you pasted)
 type ProfessionType =
   | 'COSMETOLOGIST'
   | 'BARBER'
   | 'ESTHETICIAN'
   | 'MANICURIST'
+  | 'HAIRSTYLIST'
+  | 'ELECTROLOGIST'
   | 'MASSAGE_THERAPIST'
   | 'MAKEUP_ARTIST'
 
@@ -138,7 +140,9 @@ function requiresCaBbcLicense(professionType: ProfessionType) {
     professionType === 'COSMETOLOGIST' ||
     professionType === 'BARBER' ||
     professionType === 'ESTHETICIAN' ||
-    professionType === 'MANICURIST'
+    professionType === 'MANICURIST' ||
+    professionType === 'HAIRSTYLIST' ||
+    professionType === 'ELECTROLOGIST'
   )
 }
 
@@ -243,6 +247,56 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   return tz
 }
 
+/**
+ * Uses your existing signed upload API:
+ *   POST /api/pro/uploads  (JSON)
+ * Then uploads via PUT to returned signedUrl.
+ *
+ * Returns an internal reference string we can store:
+ *   supabase://<bucket>/<path>
+ */
+async function uploadVerifyPrivateImage(file: File): Promise<string> {
+  // 1) ask server for signed upload URL (requires pro auth cookie)
+  const metaRes = await fetch('/api/pro/uploads', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'VERIFY_PRIVATE',
+      contentType: file.type || 'application/octet-stream',
+      size: file.size,
+    }),
+  })
+  const meta = await safeJson(metaRes)
+  if (!metaRes.ok || !meta?.ok) {
+    throw new Error(meta?.error || 'Could not start upload.')
+  }
+
+  const signedUrl = typeof meta?.signedUrl === 'string' ? meta.signedUrl : null
+  const bucket = typeof meta?.bucket === 'string' ? meta.bucket : null
+  const path = typeof meta?.path === 'string' ? meta.path : null
+
+  if (!signedUrl || !bucket || !path) {
+    throw new Error('Upload initialization missing signedUrl/bucket/path.')
+  }
+
+  // 2) upload the file to Supabase via signed URL
+  const putRes = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+    },
+    body: file,
+  })
+
+  if (!putRes.ok) {
+    const txt = await putRes.text().catch(() => '')
+    throw new Error(txt || 'Upload failed while sending file.')
+  }
+
+  // 3) return a reference the server/admin can resolve later
+  return `supabase://${bucket}/${path}`
+}
+
 export default function SignupProClient() {
   const router = useRouter()
   const sp = useSearchParams()
@@ -271,6 +325,12 @@ export default function SignupProClient() {
   // CA license (only required for CA BBC professions)
   const [licenseState] = useState<'CA'>('CA')
   const [licenseNumber, setLicenseNumber] = useState('')
+
+  // ✅ manual fallback upload state
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [licenseDocumentUrl, setLicenseDocumentUrl] = useState<string | null>(null)
+  const [licenseUploadRequired, setLicenseUploadRequired] = useState(false)
+  const [licenseUploading, setLicenseUploading] = useState(false)
 
   // stable per page load
   const sessionToken = useMemo(
@@ -313,7 +373,6 @@ export default function SignupProClient() {
     setError(null)
     setConfirmed(null)
 
-    // MOBILE: no autocomplete dropdown, just text
     if (proMode === 'MOBILE') {
       setLocQuery(input)
       setLocPredictions([])
@@ -409,6 +468,33 @@ export default function SignupProClient() {
     }
   }
 
+  async function onPickLicenseFile(file: File | null) {
+    if (!file) return
+    setError(null)
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file (jpg, png, etc.).')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Please choose an image under 8MB.')
+      return
+    }
+
+    setLicenseUploading(true)
+    try {
+      const ref = await uploadVerifyPrivateImage(file)
+      setLicenseDocumentUrl(ref)
+      setLicenseUploadRequired(false)
+    } catch (e: any) {
+      setLicenseDocumentUrl(null)
+      setLicenseUploadRequired(true)
+      setError(e?.message || 'Could not upload license image.')
+    } finally {
+      setLicenseUploading(false)
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return
@@ -432,6 +518,10 @@ export default function SignupProClient() {
 
     if (needsLicense && !licenseNumber.trim()) {
       return setError('License number is required for this profession.')
+    }
+
+    if (needsLicense && licenseUploadRequired && !licenseDocumentUrl) {
+      return setError('Please upload a photo of your license so we can verify you.')
     }
 
     const signupLocation =
@@ -474,19 +564,18 @@ export default function SignupProClient() {
           phone: sanitizePhone(phone),
           tapIntentId: ti ?? undefined,
 
-          // optional
           businessName: businessName.trim() ? businessName.trim() : undefined,
           handle: handle.trim() ? normalizeHandleInput(handle.trim()) : undefined,
 
-          // required
           professionType,
 
-          // mobile (miles, number)
           mobileRadiusMiles: proMode === 'MOBILE' ? Number(mobileRadiusMiles) : undefined,
 
-          // CA license: only send when required
           licenseState: needsLicense ? licenseState : undefined,
           licenseNumber: needsLicense ? licenseNumber.trim().toUpperCase() : undefined,
+
+          // ✅ send private storage ref if present
+          licenseDocumentUrl: needsLicense && licenseDocumentUrl ? licenseDocumentUrl : undefined,
 
           signupLocation,
         }),
@@ -494,6 +583,12 @@ export default function SignupProClient() {
 
       const data = await safeJson(res)
       if (!res.ok) {
+        if (data?.code === 'LICENSE_MANUAL_REQUIRED') {
+          setLicenseUploadRequired(true)
+          setError(data?.error || 'Please upload a photo of your license for admin review.')
+          return
+        }
+
         setError(data?.error || 'Signup failed.')
         return
       }
@@ -524,7 +619,9 @@ export default function SignupProClient() {
     password.trim() &&
     isLocationConfirmed() &&
     (!needsLicense || licenseNumber.trim()) &&
-    (proMode !== 'MOBILE' || (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200))
+    (proMode !== 'MOBILE' || (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200)) &&
+    (!needsLicense || !licenseUploadRequired || Boolean(licenseDocumentUrl)) &&
+    !licenseUploading
 
   return (
     <AuthShell title="Create Pro Account" subtitle="Run your business from your phone — set up takes minutes.">
@@ -538,12 +635,19 @@ export default function SignupProClient() {
               const next = e.target.value as ProfessionType
               setProfessionType(next)
               setError(null)
+
+              // reset manual upload state when profession changes
+              setLicenseUploadRequired(false)
+              setLicenseDocumentUrl(null)
+              if (fileInputRef.current) fileInputRef.current.value = ''
             }}
           >
             <option value="COSMETOLOGIST">Cosmetologist</option>
             <option value="BARBER">Barber</option>
             <option value="ESTHETICIAN">Esthetician</option>
             <option value="MANICURIST">Manicurist</option>
+            <option value="HAIRSTYLIST">Hairstylist</option>
+            <option value="ELECTROLOGIST">Electrologist</option>
             <option value="MASSAGE_THERAPIST">Massage therapist</option>
             <option value="MAKEUP_ARTIST">Makeup artist</option>
           </Select>
@@ -610,7 +714,6 @@ export default function SignupProClient() {
               inputMode={proMode === 'MOBILE' ? 'numeric' : 'text'}
             />
 
-            {/* Suggestions (salon/suite only) */}
             {proMode === 'SALON' && locPredictions.length > 0 ? (
               <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-card border border-surfaceGlass/12 bg-bgPrimary/60 tovis-glass-soft">
                 <div className="max-h-64 overflow-auto p-1">
@@ -666,13 +769,7 @@ export default function SignupProClient() {
               <FieldLabel>Mobile radius (miles)</FieldLabel>
               <span className="text-xs font-black text-textSecondary/80">Required</span>
             </div>
-            <Input
-              value={mobileRadiusMiles}
-              onChange={(e) => setMobileRadiusMiles(e.target.value)}
-              inputMode="numeric"
-              placeholder="e.g. 15"
-              required
-            />
+            <Input value={mobileRadiusMiles} onChange={(e) => setMobileRadiusMiles(e.target.value)} inputMode="numeric" placeholder="e.g. 15" required />
             <HelpText>How far you travel from your base ZIP.</HelpText>
           </label>
         ) : null}
@@ -698,11 +795,61 @@ export default function SignupProClient() {
                 <FieldLabel>License number</FieldLabel>
                 <Input
                   value={licenseNumber}
-                  onChange={(e) => setLicenseNumber(e.target.value)}
+                  onChange={(e) => {
+                    setLicenseNumber(e.target.value)
+                    setError(null)
+                  }}
                   placeholder="e.g. 123456"
                   autoCapitalize="characters"
                 />
               </label>
+            </div>
+
+            {/* Manual fallback upload */}
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <FieldLabel>License photo (for admin review)</FieldLabel>
+                {licenseUploadRequired ? (
+                  <span className="text-xs font-black text-toneWarn">Required right now</span>
+                ) : (
+                  <span className="text-xs font-black text-textSecondary/70">Optional</span>
+                )}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => onPickLicenseFile(e.target.files?.[0] ?? null)}
+                  className="block w-full text-xs text-textSecondary file:mr-3 file:rounded-full file:border file:border-surfaceGlass/14 file:bg-bgPrimary/25 file:px-3 file:py-1.5 file:text-xs file:font-black file:text-textPrimary hover:file:bg-bgPrimary/30"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={licenseUploading}
+                  className={cx(
+                    'inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-black transition',
+                    'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
+                    'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
+                    'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
+                    licenseUploading && 'cursor-not-allowed opacity-60',
+                  )}
+                >
+                  {licenseUploading ? 'Uploading…' : licenseDocumentUrl ? 'Replace' : 'Choose file'}
+                </button>
+              </div>
+
+              {licenseDocumentUrl ? (
+                <div className="rounded-card border border-accentPrimary/20 bg-accentPrimary/10 px-3 py-2 text-xs text-textPrimary">
+                  Uploaded ✔️ We’ll send this to admin if automatic verification is unavailable.
+                </div>
+              ) : (
+                <HelpText>
+                  If automatic verification can’t run, we’ll ask for a photo. (Yes, this is annoying. No, I didn’t design the government.)
+                </HelpText>
+              )}
             </div>
           </div>
         ) : null}
@@ -725,12 +872,7 @@ export default function SignupProClient() {
         {/* Optional business */}
         <label className="grid gap-1.5">
           <FieldLabel>Business name (optional)</FieldLabel>
-          <Input
-            value={businessName}
-            onChange={(e) => setBusinessName(e.target.value)}
-            placeholder="e.g. Salon De Tovis"
-            autoComplete="organization"
-          />
+          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Salon De Tovis" autoComplete="organization" />
           <HelpText>You can add this later — we won’t block signup.</HelpText>
         </label>
 
@@ -758,14 +900,7 @@ export default function SignupProClient() {
             <FieldLabel>Phone</FieldLabel>
             <span className="text-xs font-black text-textSecondary/80">Required</span>
           </div>
-          <Input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="+1 (___) ___-____"
-            required
-          />
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="+1 (___) ___-____" required />
         </label>
 
         {/* Email */}
@@ -788,7 +923,7 @@ export default function SignupProClient() {
 
         <div className="grid gap-2 pt-1">
           <PrimaryButton loading={loading} disabled={!canSubmit}>
-            {loading ? 'Creating…' : 'Create Pro Account'}
+            {loading ? 'Creating…' : licenseUploading ? 'Uploading…' : 'Create Pro Account'}
           </PrimaryButton>
 
           <SecondaryLinkButton href={loginHref}>Sign in</SecondaryLinkButton>

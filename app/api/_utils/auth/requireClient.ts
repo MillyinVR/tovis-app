@@ -1,39 +1,35 @@
 // app/api/_utils/auth/requireClient.ts
 import { NextResponse } from 'next/server'
-import type { Role } from '@prisma/client'
 import { requireUser } from './requireUser'
+import { getCurrentUser } from '@/lib/currentUser'
+import { Role } from '@prisma/client'
 
-type RequireClientOk = {
-  user: NonNullable<Awaited<ReturnType<typeof requireUser>>['user']>
+type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
+
+export type RequireClientOk = {
+  ok: true
+  user: CurrentUser
   clientId: string
-  res: null
 }
 
-type RequireClientFail = {
-  user: null
-  clientId: null
+export type RequireClientFail = {
+  ok: false
   res: NextResponse
 }
 
-export async function requireClient(): Promise<RequireClientOk | RequireClientFail> {
-  const { user, res } = await requireUser({ roles: ['CLIENT'] as Role[] })
+export type RequireClientResult = RequireClientOk | RequireClientFail
 
-  if (res || !user) {
-    return {
-      user: null,
-      clientId: null,
-      res: res ?? NextResponse.json({ ok: false, error: 'Unauthorized.' }, { status: 401 }),
-    }
-  }
+export async function requireClient(): Promise<RequireClientResult> {
+  const auth = await requireUser({ roles: [Role.CLIENT] })
+  if (!auth.ok) return auth
 
-  const clientId = user.clientProfile?.id ?? null
+  const clientId = auth.user.clientProfile?.id
   if (!clientId) {
     return {
-      user: null,
-      clientId: null,
+      ok: false,
       res: NextResponse.json({ ok: false, error: 'Only clients can perform this action.' }, { status: 403 }),
     }
   }
 
-  return { user, clientId, res: null }
+  return { ok: true, user: auth.user, clientId }
 }

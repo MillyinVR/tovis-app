@@ -69,11 +69,6 @@ export function prettyWhen(v: unknown, timeZone?: string | null) {
   }).format(d)
 }
 
-/**
- * Booking location label:
- * Prefer server-computed booking.locationLabel (it can use formattedAddress snapshot).
- * Fallback to ProfessionalProfile.location if needed.
- */
 export function bookingLocationLabel(b: BookingLike | null | undefined) {
   if (!b) return ''
   if (typeof b.locationLabel === 'string' && b.locationLabel.trim()) return b.locationLabel.trim()
@@ -82,10 +77,7 @@ export function bookingLocationLabel(b: BookingLike | null | undefined) {
   return typeof proLoc === 'string' && proLoc.trim() ? proLoc.trim() : ''
 }
 
-/**
- * Waitlist location label (no booking snapshot available):
- * Use ProfessionalProfile.location only.
- */
+
 export function waitlistLocationLabel(p: WaitlistLike['professional'] | null | undefined) {
   const loc = p?.location
   return typeof loc === 'string' && loc.trim() ? loc.trim() : ''

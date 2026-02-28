@@ -3,28 +3,29 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickString } from '@/app/api/_utils/pick'
+import type { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
+type Params = { id: string }
+type Ctx = { params: Params | Promise<Params> }
 
-function isAdmin(user: any) {
-  return user?.role === 'ADMIN'
+function isAdminRole(role: Role) {
+  return role === 'ADMIN'
 }
 
-export async function POST(_req: Request, { params }: Ctx) {
+export async function POST(_req: Request, ctx: Ctx) {
   try {
-    const { user, res } = await requireUser()
-    if (res) return res
+    // ✅ logged-in + must be one of CLIENT/PRO/ADMIN
+    const auth = await requireUser({ roles: ['CLIENT', 'PRO', 'ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
-    const { id } = await Promise.resolve(params)
+    const { id } = await Promise.resolve(ctx.params)
     const bookingId = pickString(id)
-    if (!bookingId) return NextResponse.json({ ok: false, error: 'Missing booking id' }, { status: 400 })
-
-    // only allow CLIENT/PRO/ADMIN to proceed
-    const role = String(user?.role || '').toUpperCase()
-    const allowedRole = role === 'CLIENT' || role === 'PRO' || role === 'ADMIN'
-    if (!allowedRole) return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+    if (!bookingId) {
+      return NextResponse.json({ ok: false, error: 'Missing booking id' }, { status: 400 })
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -35,22 +36,31 @@ export async function POST(_req: Request, { params }: Ctx) {
         professionalId: true,
       },
     })
-    if (!booking) return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 })
+    if (!booking) {
+      return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 })
+    }
 
     const clientId = user.clientProfile?.id ?? null
     const proId = user.professionalProfile?.id ?? null
 
     const isOwnerClient = Boolean(clientId && booking.clientId === clientId)
     const isOwnerPro = Boolean(proId && booking.professionalId === proId)
+    const isAdmin = isAdminRole(user.role)
 
-    if (!isAdmin(user) && !isOwnerClient && !isOwnerPro) {
+    // ✅ Must be admin OR owner (client/pro)
+    if (!isAdmin && !isOwnerClient && !isOwnerPro) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
     }
 
+    // ✅ business rules
     if (booking.status === 'COMPLETED') {
-      return NextResponse.json({ ok: false, error: 'Completed bookings cannot be cancelled.' }, { status: 409 })
+      return NextResponse.json(
+        { ok: false, error: 'Completed bookings cannot be cancelled.' },
+        { status: 409 },
+      )
     }
 
+    // ✅ idempotent success
     if (booking.status === 'CANCELLED') {
       return NextResponse.json({ ok: true, id: booking.id, status: booking.status }, { status: 200 })
     }

@@ -13,7 +13,7 @@ const BODY_MAX = 4000
 export async function POST(req: Request, context: Ctx) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const { id } = await Promise.resolve((context as any).params)

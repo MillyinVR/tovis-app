@@ -37,27 +37,34 @@ type UploadKind =
 
 type BookingPhase = 'BEFORE' | 'AFTER' | 'OTHER'
 
+type UploadBody = {
+  kind?: unknown
+  contentType?: unknown
+  size?: unknown
+  serviceId?: unknown
+  bookingId?: unknown
+  phase?: unknown
+}
+
 function parseKind(v: unknown): UploadKind | null {
   const s = upper(v)
-  switch (s) {
-    case 'LOOKS_PUBLIC':
-    case 'PORTFOLIO_PUBLIC':
-    case 'REVIEW_PUBLIC':
-    case 'AVATAR_PUBLIC':
-    case 'SERVICE_IMAGE_PUBLIC':
-    case 'DM_PRIVATE':
-    case 'AFTERCARE_PRIVATE':
-    case 'VERIFY_PRIVATE':
-    case 'CONSULT_PRIVATE':
-      return s as UploadKind
-    default:
-      return null
-  }
+  if (s === 'LOOKS_PUBLIC') return 'LOOKS_PUBLIC'
+  if (s === 'PORTFOLIO_PUBLIC') return 'PORTFOLIO_PUBLIC'
+  if (s === 'REVIEW_PUBLIC') return 'REVIEW_PUBLIC'
+  if (s === 'AVATAR_PUBLIC') return 'AVATAR_PUBLIC'
+  if (s === 'SERVICE_IMAGE_PUBLIC') return 'SERVICE_IMAGE_PUBLIC'
+  if (s === 'DM_PRIVATE') return 'DM_PRIVATE'
+  if (s === 'AFTERCARE_PRIVATE') return 'AFTERCARE_PRIVATE'
+  if (s === 'VERIFY_PRIVATE') return 'VERIFY_PRIVATE'
+  if (s === 'CONSULT_PRIVATE') return 'CONSULT_PRIVATE'
+  return null
 }
 
 function parsePhase(v: unknown): BookingPhase | null {
   const s = upper(v)
-  if (s === 'BEFORE' || s === 'AFTER' || s === 'OTHER') return s
+  if (s === 'BEFORE') return 'BEFORE'
+  if (s === 'AFTER') return 'AFTER'
+  if (s === 'OTHER') return 'OTHER'
   return null
 }
 
@@ -77,11 +84,7 @@ function shouldUpsert(kind: UploadKind) {
   return kind === 'AVATAR_PUBLIC' || kind === 'SERVICE_IMAGE_PUBLIC'
 }
 
-function buildBookingScopedPath(opts: {
-  bookingId: string
-  phase: BookingPhase
-  contentType: string
-}) {
+function buildBookingScopedPath(opts: { bookingId: string; phase: BookingPhase; contentType: string }) {
   const ext = guessExtFromType(opts.contentType)
   const now = new Date()
   const yyyy = String(now.getUTCFullYear())
@@ -91,15 +94,7 @@ function buildBookingScopedPath(opts: {
   const rand = Math.random().toString(16).slice(2)
 
   // bookings/<bookingId>/<phase>/YYYY/MM/DD/<ts>_<rand>.<ext>
-  return [
-    'bookings',
-    opts.bookingId,
-    opts.phase.toLowerCase(),
-    yyyy,
-    mm,
-    dd,
-    `${ts}_${rand}.${ext}`,
-  ].join('/')
+  return ['bookings', opts.bookingId, opts.phase.toLowerCase(), yyyy, mm, dd, `${ts}_${rand}.${ext}`].join('/')
 }
 
 function buildPath(opts: {
@@ -138,25 +133,35 @@ function buildPath(opts: {
   return `pro/${proId}/${kind.toLowerCase()}/${ym}/${Date.now()}_${rand}.${ext}`
 }
 
+function readErrorMeta(err: unknown): { name?: string; statusCode?: unknown; message?: string } {
+  if (!err || typeof err !== 'object') return {}
+  const rec = err as Record<string, unknown>
+  return {
+    name: typeof rec.name === 'string' ? rec.name : undefined,
+    statusCode: rec.statusCode,
+    message: typeof rec.message === 'string' ? rec.message : undefined,
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const proId = auth.professionalId
 
     const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
     if (!base) return jsonFail(500, 'NEXT_PUBLIC_SUPABASE_URL missing')
 
-    const body = await req.json().catch(() => ({} as any))
+    const body = (await req.json().catch(() => ({}))) as UploadBody
 
-    const kind = parseKind(body?.kind)
+    const kind = parseKind(body.kind)
     if (!kind) return jsonFail(400, 'Invalid kind')
 
-    const contentType = trimOrEmpty(body?.contentType)
-    const size = typeof body?.size === 'number' ? body.size : null
-    const serviceId = trimOrEmpty(body?.serviceId)
-    const bookingId = trimOrEmpty(body?.bookingId)
-    const phase = body?.phase != null ? parsePhase(body.phase) : null
+    const contentType = trimOrEmpty(body.contentType)
+    const size = typeof body.size === 'number' ? body.size : null
+    const serviceId = trimOrEmpty(body.serviceId)
+    const bookingId = trimOrEmpty(body.bookingId)
+    const phase = body.phase != null ? parsePhase(body.phase) : null
 
     if (!contentType) return jsonFail(400, 'Missing contentType')
 
@@ -198,8 +203,9 @@ export async function POST(req: Request) {
         bookingId: bookingId || undefined,
         phase: phase || undefined,
       })
-    } catch (err: any) {
-      return jsonFail(400, err?.message || 'Invalid upload parameters')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Invalid upload parameters'
+      return jsonFail(400, msg)
     }
 
     const admin = getSupabaseAdmin()
@@ -208,13 +214,24 @@ export async function POST(req: Request) {
     const { data, error } = await admin.storage.from(bucket).createSignedUploadUrl(path, { upsert })
 
     if (error) {
-      return jsonFail(500, error.message || 'Failed to create signed upload URL', {
+      const meta = readErrorMeta(error)
+      return jsonFail(500, meta.message || 'Failed to create signed upload URL', {
         supabase: {
-          message: error.message,
-          name: (error as any).name,
-          statusCode: (error as any).statusCode,
+          message: meta.message,
+          name: meta.name,
+          statusCode: meta.statusCode,
         },
-        debug: { bucket, path, kind, contentType, size, serviceId: serviceId || null, bookingId: bookingId || null, phase: phase || null, upsert },
+        debug: {
+          bucket,
+          path,
+          kind,
+          contentType,
+          size,
+          serviceId: serviceId || null,
+          bookingId: bookingId || null,
+          phase: phase || null,
+          upsert,
+        },
       })
     }
 
@@ -224,24 +241,25 @@ export async function POST(req: Request) {
       })
     }
 
+    const signedUrl = typeof (data as Record<string, unknown>).signedUrl === 'string' ? (data as Record<string, unknown>).signedUrl : null
     const publicUrl = isPublic ? `${base}/storage/v1/object/public/${bucket}/${path}` : null
 
     return jsonOk(
       {
-        ok: true,
         kind,
         bucket,
         path,
         token: data.token,
-        signedUrl: (data as any).signedUrl ?? null,
+        signedUrl,
         publicUrl,
         isPublic,
         cacheBuster: Date.now(),
       },
       200,
     )
-  } catch (e: any) {
+  } catch (e) {
     console.error('POST /api/pro/uploads error', e)
-    return jsonFail(500, e?.message || 'Internal server error')
+    const msg = e instanceof Error ? e.message : 'Internal server error'
+    return jsonFail(500, msg)
   }
 }

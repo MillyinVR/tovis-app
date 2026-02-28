@@ -8,7 +8,7 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 export async function POST(_req: Request, ctx: Ctx) {
   const auth = await requirePro()
-  if (auth.res) return auth.res
+  if (!auth.ok) return auth.res
   const professionalId = auth.professionalId
 
   const { id } = await Promise.resolve(ctx.params)

@@ -2,9 +2,54 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isValidIanaTimeZone, sanitizeTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
-import type { ProfessionalLocationType, BookingStatus } from '@prisma/client'
+import { BookingStatus, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+
+type EventStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'WAITLIST' | 'CANCELLED' | 'UNKNOWN' | 'BLOCKED'
+type BookingEventStatus = Exclude<EventStatus, 'BLOCKED'>
+
+type CalendarServiceItem = {
+  id: string
+  name: string | null
+  durationMinutes: number
+  price: unknown | null
+  sortOrder: number
+}
+
+type BookingEvent = {
+  id: string
+  kind: 'BOOKING'
+  startsAt: string
+  endsAt: string
+  title: string
+  clientName: string
+  status: Exclude<EventStatus, 'BLOCKED'>
+  locationType: ServiceLocationType
+  locationId: string
+  durationMinutes: number
+  details: {
+    serviceName: string
+    bufferMinutes: number
+    serviceItems: CalendarServiceItem[]
+  }
+}
+
+type BlockEvent = {
+  id: string
+  kind: 'BLOCK'
+  startsAt: string
+  endsAt: string
+  title: string
+  clientName: 'Personal'
+  status: 'BLOCKED'
+  locationType: null
+  locationId: string | null
+  durationMinutes: number
+  details: { note: string | null }
+}
+
+type CalendarEvent = BookingEvent | BlockEvent
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
@@ -26,11 +71,11 @@ function hoursRounded(minutes: number) {
 }
 
 function locationSupportsSalon(type: ProfessionalLocationType) {
-  return type === 'SALON' || type === 'SUITE'
+  return type === ProfessionalLocationType.SALON || type === ProfessionalLocationType.SUITE
 }
 
 function locationSupportsMobile(type: ProfessionalLocationType) {
-  return type === 'MOBILE_BASE'
+  return type === ProfessionalLocationType.MOBILE_BASE
 }
 
 function toDateOrNull(v: unknown) {
@@ -40,10 +85,19 @@ function toDateOrNull(v: unknown) {
   return Number.isFinite(d.getTime()) ? d : null
 }
 
+function normalizeBookingStatus(status: BookingStatus | null | undefined): BookingEventStatus {
+  if (status === BookingStatus.PENDING) return 'PENDING'
+  if (status === BookingStatus.ACCEPTED) return 'ACCEPTED'
+  if (status === BookingStatus.COMPLETED) return 'COMPLETED'
+  if (status === BookingStatus.WAITLIST) return 'WAITLIST'
+  if (status === BookingStatus.CANCELLED) return 'CANCELLED'
+  return 'UNKNOWN'
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
-    if (auth.res) return auth.res
+    if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
     const proProfile = await prisma.professionalProfile.findUnique({
@@ -74,17 +128,15 @@ export async function GET(req: Request) {
     const proTz = sanitizeTimeZone(tzRaw, 'UTC')
     const needsTimeZoneSetup = !tzValid
 
-    // ✅ IMPORTANT: range comes from client
     const url = new URL(req.url)
     const now = new Date()
 
     const defaultFrom = startOfDayUtcInTimeZone(now, proTz)
-    const defaultToExclusive = addDaysUtc(defaultFrom, 90) // a safer default than 60
+    const defaultToExclusive = addDaysUtc(defaultFrom, 90)
 
     const from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
     const toExclusive = toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
 
-    // guardrails (avoid insane queries)
     const maxSpanDays = 370
     const spanDays = Math.ceil((toExclusive.getTime() - from.getTime()) / (24 * 60 * 60_000))
     const safeToExclusive =
@@ -94,7 +146,7 @@ export async function GET(req: Request) {
       where: {
         professionalId,
         scheduledFor: { gte: from, lt: safeToExclusive },
-        NOT: { status: 'CANCELLED' satisfies BookingStatus },
+        NOT: { status: BookingStatus.CANCELLED },
       },
       select: {
         id: true,
@@ -128,13 +180,13 @@ export async function GET(req: Request) {
       take: 1200,
     })
 
-    const bookingEvents = bookings.map((b) => {
+    const bookingEvents: BookingEvent[] = bookings.map((b) => {
       const start = new Date(b.scheduledFor)
       const baseDuration = clampInt(b.totalDurationMinutes, 60, 15, 12 * 60)
       const buffer = clampInt(b.bufferMinutes, 0, 0, 180)
       const end = addMinutes(start, baseDuration + buffer)
 
-      const status = String(b.status || '').toUpperCase()
+      const status = normalizeBookingStatus(b.status)
 
       const firstItemName =
         Array.isArray(b.serviceItems) && b.serviceItems.length
@@ -148,46 +200,48 @@ export async function GET(req: Request) {
       const email = String(b.client?.user?.email || '').trim()
       const clientName = fn || ln ? `${fn} ${ln}`.trim() : email || 'Client'
 
+      const serviceItems: CalendarServiceItem[] = Array.isArray(b.serviceItems)
+        ? b.serviceItems.map((si) => ({
+            id: String(si.id),
+            name: String(si.service?.name || '').trim() || null,
+            durationMinutes: clampInt(si.durationMinutesSnapshot, 0, 0, 12 * 60),
+            price: si.priceSnapshot ?? null,
+            sortOrder: Number(si.sortOrder ?? 0),
+          }))
+        : []
+
       return {
         id: String(b.id),
-        kind: 'BOOKING' as const,
+        kind: 'BOOKING',
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
         title: serviceName,
         clientName,
-        status: status as any,
-        locationType: b.locationType ?? null,
-        locationId: b.locationId ?? null,
+        status,
+        locationType: b.locationType, // ✅ strongly typed now
+        locationId: b.locationId, // ✅ required by schema
         durationMinutes: baseDuration,
         details: {
           serviceName,
           bufferMinutes: buffer,
-          serviceItems: Array.isArray(b.serviceItems)
-            ? b.serviceItems.map((si) => ({
-                id: String(si.id),
-                name: String(si.service?.name || '').trim() || null,
-                durationMinutes: clampInt(si.durationMinutesSnapshot, 0, 0, 12 * 60),
-                price: si.priceSnapshot ?? null,
-                sortOrder: Number(si.sortOrder ?? 0),
-              }))
-            : [],
+          serviceItems,
         },
       }
     })
 
-    const blockEvents = blocks.map((bl) => {
+    const blockEvents: BlockEvent[] = blocks.map((bl) => {
       const start = new Date(bl.startsAt)
       const end = new Date(bl.endsAt)
       const title = bl.note?.trim() ? bl.note.trim() : 'Blocked time'
 
       return {
         id: `block_${String(bl.id)}`,
-        kind: 'BLOCK' as const,
+        kind: 'BLOCK',
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
         title,
         clientName: 'Personal',
-        status: 'BLOCKED' as const,
+        status: 'BLOCKED',
         locationType: null,
         locationId: bl.locationId ?? null,
         durationMinutes: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000)),
@@ -195,11 +249,10 @@ export async function GET(req: Request) {
       }
     })
 
-    const events = [...bookingEvents, ...blockEvents].sort(
+    const events: CalendarEvent[] = [...bookingEvents, ...blockEvents].sort(
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     )
 
-    // stats/management still “today” based on proTz
     const todayStart = startOfDayUtcInTimeZone(now, proTz)
     const todayEndExclusive = addDaysUtc(todayStart, 1)
 
@@ -209,25 +262,21 @@ export async function GET(req: Request) {
     }
 
     const todaysBookingsEvents = bookingEvents.filter((e) => {
-      const s = String(e.status || '').toUpperCase()
-      return isToday(e.startsAt) && (s === 'ACCEPTED' || s === 'COMPLETED')
+      return isToday(e.startsAt) && (e.status === 'ACCEPTED' || e.status === 'COMPLETED')
     })
 
     const pendingRequestEvents = bookingEvents.filter((e) => {
-      const s = String(e.status || '').toUpperCase()
-      return s === 'PENDING' && new Date(e.startsAt).getTime() >= now.getTime()
+      return e.status === 'PENDING' && new Date(e.startsAt).getTime() >= now.getTime()
     })
 
-    const waitlistTodayEvents = bookingEvents.filter(
-      (e) => isToday(e.startsAt) && String(e.status || '').toUpperCase() === 'WAITLIST',
-    )
+    const waitlistTodayEvents = bookingEvents.filter((e) => isToday(e.startsAt) && e.status === 'WAITLIST')
 
     const blockedTodayEvents = blockEvents.filter((e) => isToday(e.startsAt))
     const blockedMinutesToday = blockedTodayEvents.reduce((acc, e) => acc + (e.durationMinutes || 0), 0)
 
     const stats = {
       todaysBookings: todaysBookingsEvents.length,
-      availableHours: null,
+      availableHours: null as number | null,
       pendingRequests: pendingRequestEvents.length,
       blockedHours: blockedMinutesToday ? hoursRounded(blockedMinutesToday) : 0,
     }

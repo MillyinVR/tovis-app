@@ -9,17 +9,23 @@ import { pickString, pickMethod } from '@/app/api/_utils/pick'
 export const dynamic = 'force-dynamic'
 
 function normalizeRole(v: string | null): AdminPermissionRole | null {
-  const s = (v ?? '').toUpperCase()
+  const s = (v ?? '').trim().toUpperCase()
   if (s === 'SUPER_ADMIN') return AdminPermissionRole.SUPER_ADMIN
   if (s === 'SUPPORT') return AdminPermissionRole.SUPPORT
   if (s === 'REVIEWER') return AdminPermissionRole.REVIEWER
   return null
 }
 
+function trimOrNull(v: string | null): string | null {
+  const s = (v ?? '').trim()
+  return s ? s : null
+}
+
 export async function GET() {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const ok = await hasAdminPermission({
       adminUserId: user.id,
@@ -85,8 +91,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, res } = await requireUser({ roles: ['ADMIN'] as any })
-    if (res) return res
+    const auth = await requireUser({ roles: ['ADMIN'] })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const ok = await hasAdminPermission({
       adminUserId: user.id,
@@ -98,21 +105,24 @@ export async function POST(req: NextRequest) {
     const method = pickMethod(form.get('_method')) ?? 'POST'
     if (method !== 'POST') return NextResponse.json({ error: 'Unsupported operation.' }, { status: 400 })
 
-    const adminUserId = pickString(form.get('adminUserId'))
+    const adminUserId = trimOrNull(pickString(form.get('adminUserId')))
     const role = normalizeRole(pickString(form.get('role')))
-    const professionalId = pickString(form.get('professionalId'))
-    const serviceId = pickString(form.get('serviceId'))
-    const categoryId = pickString(form.get('categoryId'))
 
-    if (!adminUserId || !role) return NextResponse.json({ error: 'Missing adminUserId/role' }, { status: 400 })
+    const professionalId = trimOrNull(pickString(form.get('professionalId')))
+    const serviceId = trimOrNull(pickString(form.get('serviceId')))
+    const categoryId = trimOrNull(pickString(form.get('categoryId')))
+
+    if (!adminUserId || !role) {
+      return NextResponse.json({ error: 'Missing adminUserId/role' }, { status: 400 })
+    }
 
     const created = await prisma.adminPermission.create({
       data: {
         adminUserId,
         role,
-        professionalId: professionalId ?? null,
-        serviceId: serviceId ?? null,
-        categoryId: categoryId ?? null,
+        professionalId,
+        serviceId,
+        categoryId,
       },
       select: { id: true },
     })
@@ -127,7 +137,8 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => null)
 
-    return NextResponse.redirect(new URL('/admin/permissions', req.url))
+    // ✅ 303 prevents “resubmit form” issues on refresh/back
+    return NextResponse.redirect(new URL('/admin/permissions', req.url), { status: 303 })
   } catch (e: any) {
     const msg = typeof e?.message === 'string' ? e.message : 'Internal server error'
     console.error('POST /api/admin/permissions error', e)
