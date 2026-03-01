@@ -1,6 +1,7 @@
 // app/_components/GuestSessionFooter/GuestSessionFooter.tsx
 'use client'
 
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import NavItem from '../navigation/FooterNavItem'
 
@@ -18,8 +19,8 @@ function isActivePath(pathname: string, href: string) {
 }
 
 export default function GuestSessionFooter() {
-  const pathname = usePathname()
-  if (!pathname) return null
+  // If pathname is temporarily null during hydration, still render (don’t disappear).
+  const pathname = usePathname() ?? ''
 
   const homeActive = isActivePath(pathname, ROUTES.home)
   const searchActive = isActivePath(pathname, ROUTES.search)
@@ -27,16 +28,16 @@ export default function GuestSessionFooter() {
   const loginActive = isActivePath(pathname, ROUTES.login) || isActivePath(pathname, ROUTES.signup)
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    // pt-8 accounts for the center button being pulled up with -mt-8
+    <div className="w-full pt-8" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
           <NavItem label="Home" href={ROUTES.home} icon="🏠" active={homeActive} />
-
           <NavItem label="Search" href={ROUTES.search} icon="🗺️" active={searchActive} />
 
           {/* Center CTA: Looks */}
           <div className="relative -mt-8 flex w-22 justify-center">
-            <a
+            <Link
               href={ROUTES.looks}
               className={[
                 'tovis-glass',
@@ -51,11 +52,10 @@ export default function GuestSessionFooter() {
               aria-label="Looks"
             >
               <span className="leading-none">Looks</span>
-            </a>
+            </Link>
           </div>
 
           <NavItem label="Log in" href={ROUTES.login} icon="🔑" active={loginActive} />
-
           <NavItem label="Sign up" href={ROUTES.signup} icon="✨" active={isActivePath(pathname, ROUTES.signup)} />
         </div>
       </div>

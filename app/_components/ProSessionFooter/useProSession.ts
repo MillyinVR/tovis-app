@@ -3,7 +3,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import type { ProSessionPayload, SessionBooking, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
+import type {
+  ProSessionPayload,
+  SessionBooking,
+  StepKey,
+  UiSessionCenterAction,
+  UiSessionMode,
+} from '@/lib/proSession/types'
 
 type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
 
@@ -12,8 +18,29 @@ export const FORCE_EVENT = 'tovis:pro-session:force'
 // Tuning knobs
 const POLL_MS = 60_000
 const SOFT_THROTTLE_MS = 10_000
+const FETCH_TIMEOUT_MS = 8_000
+const VISIBILITY_DEBOUNCE_MS = 200
 
 const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null
+}
+
+function getString(x: unknown): string | null {
+  return typeof x === 'string' ? x : null
+}
+
+function getStringProp(obj: unknown, key: string): string | null {
+  if (!isRecord(obj)) return null
+  return getString(obj[key])
+}
+
+function getBoolProp(obj: unknown, key: string): boolean | null {
+  if (!isRecord(obj)) return null
+  const v = obj[key]
+  return typeof v === 'boolean' ? v : null
+}
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/'
@@ -39,13 +66,20 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+async function safeJson(res: Response): Promise<unknown | null> {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
 }
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
-  if (typeof data?.message === 'string') return data.message
+function errorFromResponse(res: Response, data: unknown) {
+  const e = getStringProp(data, 'error')
+  if (e) return e
+  const m = getStringProp(data, 'message')
+  if (m) return m
+
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   if (res.status === 404) return 'Not found.'
@@ -68,6 +102,47 @@ function normalizeAction(v: unknown): UiSessionCenterAction {
   if (s === 'CAPTURE_AFTER') return 'CAPTURE_AFTER'
   if (s === 'FINISH') return 'FINISH'
   return 'NONE'
+}
+
+function normalizeStepKey(v: unknown): StepKey | null {
+  const s = typeof v === 'string' ? v.trim().toLowerCase() : ''
+  if (s === 'consult') return 'consult'
+  if (s === 'session') return 'session'
+  if (s === 'aftercare') return 'aftercare'
+  return null
+}
+
+function parseBooking(v: unknown): SessionBooking | null {
+  if (!isRecord(v)) return null
+  const id = getString(v.id)
+  if (!id || !id.trim()) return null
+
+  const serviceName = getString(v.serviceName) ?? undefined
+  const clientName = getString(v.clientName) ?? undefined
+  const scheduledFor = getString(v.scheduledFor)
+  const sessionStep = getString(v.sessionStep)
+
+  return {
+    id: id.trim(),
+    serviceName: serviceName?.trim() || undefined,
+    clientName: clientName?.trim() || undefined,
+    scheduledFor: scheduledFor?.trim() || null,
+    sessionStep: sessionStep?.trim() || null,
+  }
+}
+
+function parseCenter(v: unknown): CenterState {
+  if (!isRecord(v)) return DEFAULT_CENTER
+
+  const labelRaw = getString(v.label)
+  const label = labelRaw && labelRaw.trim() ? labelRaw.trim() : 'Start'
+
+  const action = normalizeAction(v.action)
+
+  const hrefRaw = v.href
+  const href = isSafeInternalHref(hrefRaw) ? hrefRaw : null
+
+  return { label, action, href }
 }
 
 type LoadOpts = { silent?: boolean; force?: boolean }
@@ -96,7 +171,6 @@ function canClickCenter(args: {
   bookingId: string | null
 }) {
   const { actionLoading, action, href, bookingId } = args
-
   if (actionLoading) return false
   if (action === 'NONE') return false
 
@@ -109,12 +183,18 @@ function canClickCenter(args: {
   return false
 }
 
+function nextHrefFromStartFinish(data: unknown): string | null {
+  const href = getStringProp(data, 'nextHref')
+  return isSafeInternalHref(href) ? href : null
+}
+
 export function useProSession() {
   const router = useRouter()
   const pathname = usePathname()
 
   const [mode, setMode] = useState<UiSessionMode>('IDLE')
   const [booking, setBooking] = useState<SessionBooking | null>(null)
+  const [targetStep, setTargetStep] = useState<StepKey | null>(null)
   const [center, setCenter] = useState<CenterState>(DEFAULT_CENTER)
 
   const [loading, setLoading] = useState(false)
@@ -126,7 +206,11 @@ export function useProSession() {
   const reqIdRef = useRef(0)
   const lastLoadAtRef = useRef<number>(0)
   const redirectedRef = useRef(false)
-  const visibilityDebounceRef = useRef<number | null>(null)
+
+  // Scheduling
+  const pollTimerRef = useRef<number | null>(null)
+  const visTimerRef = useRef<number | null>(null)
+  const didInitRef = useRef(false)
 
   const bookingId = booking?.id ? String(booking.id) : null
 
@@ -139,12 +223,33 @@ export function useProSession() {
     })
   }, [actionLoading, center.action, center.href, bookingId])
 
-  const applyIdle = useCallback((opts?: LoadOpts, res?: Response, data?: any) => {
+  const applyIdle = useCallback((opts?: LoadOpts, res?: Response, data?: unknown) => {
     setMode('IDLE')
     setBooking(null)
+    setTargetStep(null)
     setCenter(DEFAULT_CENTER)
     if (!opts?.silent && res) setError(errorFromResponse(res, data))
   }, [])
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current == null) return
+    window.clearTimeout(pollTimerRef.current)
+    pollTimerRef.current = null
+  }, [])
+
+  const scheduleNextPoll = useCallback(
+    (loadSessionFn: (opts?: LoadOpts) => Promise<ProSessionPayload | null>) => {
+      stopPolling()
+      // small jitter prevents all clients hitting at exactly the same time
+      const jitter = Math.floor(Math.random() * 1500)
+      pollTimerRef.current = window.setTimeout(() => {
+        if (document.visibilityState !== 'visible') return
+        void loadSessionFn({ silent: true })
+        scheduleNextPoll(loadSessionFn)
+      }, POLL_MS + jitter)
+    },
+    [stopPolling],
+  )
 
   const loadSession = useCallback(
     async (opts?: LoadOpts): Promise<ProSessionPayload | null> => {
@@ -170,6 +275,8 @@ export function useProSession() {
         setError(null)
       }
 
+      const timeoutId = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
       try {
         const res = await fetch('/api/pro/session', {
           method: 'GET',
@@ -177,6 +284,7 @@ export function useProSession() {
           signal: controller.signal,
         })
 
+        // stale response guard
         if (reqIdRef.current !== myReqId) return null
 
         if (res.status === 401) {
@@ -189,30 +297,42 @@ export function useProSession() {
 
         redirectedRef.current = false
 
-        const data = (await safeJson(res)) as Partial<ProSessionPayload> & { ok?: boolean }
+        const data = await safeJson(res)
 
-        if (!res.ok || data?.ok !== true) {
+        const ok = getBoolProp(data, 'ok') === true
+        if (!res.ok || !ok) {
           applyIdle(opts, res, data)
           return null
         }
 
-        const payload = data as ProSessionPayload
+        // Parse payload safely into canonical UI types
+        const nextMode = normalizeMode(isRecord(data) ? data.mode : null)
 
-        setMode(normalizeMode(payload.mode))
-        setBooking((payload.booking as SessionBooking) ?? null)
+        const nextBooking = parseBooking(isRecord(data) ? data.booking : null)
+        const nextTarget = normalizeStepKey(isRecord(data) ? data.targetStep : null)
+        const nextCenter = parseCenter(isRecord(data) ? data.center : null)
 
-        const c: any = payload.center ?? {}
-        const label = typeof c?.label === 'string' && c.label.trim() ? c.label.trim() : 'Start'
-        const action = normalizeAction(c?.action)
-        const href = isSafeInternalHref(c?.href) ? (c.href as string) : null
-        setCenter({ label, action, href })
+        setMode(nextMode)
+        setBooking(nextBooking)
+        setTargetStep(nextTarget)
+        setCenter(nextCenter)
+
+        const payload: ProSessionPayload = {
+          ok: true,
+          mode: nextMode,
+          booking: nextBooking,
+          targetStep: nextTarget,
+          center: nextCenter,
+        }
 
         return payload
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return null
+      } catch (err: unknown) {
+        // Abort is expected during force refresh / route changes
+        if (err instanceof DOMException && err.name === 'AbortError') return null
         if (!opts?.silent) setError('Network error loading session.')
         return null
       } finally {
+        window.clearTimeout(timeoutId)
         if (reqIdRef.current === myReqId) {
           if (inFlightRef.current === controller) inFlightRef.current = null
           if (!opts?.silent) setLoading(false)
@@ -222,56 +342,45 @@ export function useProSession() {
     [applyIdle, router],
   )
 
-  // Initial load + polling (visible only)
+  // Initial load + visibility/focus management + polling (visible only)
   useEffect(() => {
-    let pollId: number | null = null
+    didInitRef.current = true
 
-    const startPolling = () => {
-      if (pollId != null) return
-      pollId = window.setInterval(() => {
-        if (document.visibilityState !== 'visible') return
-        void loadSession({ silent: true })
-      }, POLL_MS)
-    }
-
-    const stopPolling = () => {
-      if (pollId == null) return
-      window.clearInterval(pollId)
-      pollId = null
-    }
-
-    const scheduleVisibilityLoad = () => {
-      if (visibilityDebounceRef.current) window.clearTimeout(visibilityDebounceRef.current)
-      visibilityDebounceRef.current = window.setTimeout(() => {
+    const onVisibility = () => {
+      if (visTimerRef.current) window.clearTimeout(visTimerRef.current)
+      visTimerRef.current = window.setTimeout(() => {
         if (document.visibilityState === 'visible') {
           void loadSession({ silent: true, force: true })
-          startPolling()
+          scheduleNextPoll(loadSession)
         } else {
           stopPolling()
         }
-      }, 200)
+      }, VISIBILITY_DEBOUNCE_MS)
     }
 
+    // initial load (non-silent) and start polling if visible
     void loadSession({ silent: false, force: true })
-    startPolling()
+    if (document.visibilityState === 'visible') scheduleNextPoll(loadSession)
 
-    document.addEventListener('visibilitychange', scheduleVisibilityLoad)
-    window.addEventListener('focus', scheduleVisibilityLoad)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
 
     return () => {
       stopPolling()
-      if (visibilityDebounceRef.current) window.clearTimeout(visibilityDebounceRef.current)
-      document.removeEventListener('visibilitychange', scheduleVisibilityLoad)
-      window.removeEventListener('focus', scheduleVisibilityLoad)
+      if (visTimerRef.current) window.clearTimeout(visTimerRef.current)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
       inFlightRef.current?.abort()
       inFlightRef.current = null
     }
-  }, [loadSession])
+  }, [loadSession, scheduleNextPoll, stopPolling])
 
   // Route change refresh (forced) — portal footers don’t unmount
   useEffect(() => {
+    if (!didInitRef.current) return
     void loadSession({ silent: true, force: true })
-  }, [pathname, loadSession])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
 
   // External force refresh (aftercare send, etc.)
   useEffect(() => {
@@ -280,7 +389,7 @@ export function useProSession() {
     return () => window.removeEventListener(FORCE_EVENT, onForce)
   }, [loadSession])
 
-  async function handleCenterClick() {
+  const handleCenterClick = useCallback(async () => {
     if (centerDisabled) return
     setError(null)
 
@@ -301,9 +410,9 @@ export function useProSession() {
           return
         }
 
-        const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
+        const nextHref = nextHrefFromStartFinish(data)
         const fresh = await loadSession({ silent: true, force: true })
-        const freshHref = isSafeInternalHref((fresh as any)?.center?.href) ? ((fresh as any).center.href as string) : null
+        const freshHref = fresh?.center?.href ?? null
 
         const target = nextHref ?? freshHref ?? fallbackHub
         if (target === currentPathWithQuery()) router.refresh()
@@ -325,9 +434,9 @@ export function useProSession() {
           return
         }
 
-        const nextHref = isSafeInternalHref(data?.nextHref) ? (data.nextHref as string) : null
+        const nextHref = nextHrefFromStartFinish(data)
         const fresh = await loadSession({ silent: true, force: true })
-        const freshHref = isSafeInternalHref((fresh as any)?.center?.href) ? ((fresh as any).center.href as string) : null
+        const freshHref = fresh?.center?.href ?? null
 
         const target = nextHref ?? freshHref ?? fallbackHub
         if (target === currentPathWithQuery()) router.refresh()
@@ -337,26 +446,32 @@ export function useProSession() {
 
       if (center.action === 'NAVIGATE' || center.action === 'CAPTURE_BEFORE' || center.action === 'CAPTURE_AFTER') {
         setActionLoading('nav')
-        const target = isSafeInternalHref(center.href) ? center.href! : fallbackHub
+        const target = isSafeInternalHref(center.href) ? center.href : fallbackHub
         if (target === currentPathWithQuery()) router.refresh()
         else router.push(target)
         return
       }
 
       router.push(fallbackHub)
-    } catch (err: any) {
-      setError(err?.message || 'Something went wrong.')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Something went wrong.'
+      setError(msg)
     } finally {
       setActionLoading(null)
     }
-  }
+  }, [bookingId, center.action, center.href, centerDisabled, loadSession, router])
 
-  const displayLabel = actionLoading === 'start' ? 'Starting…' : actionLoading === 'nav' ? 'Opening…' : center.label
+  const displayLabel = useMemo(() => {
+    if (actionLoading === 'start') return 'Starting…'
+    if (actionLoading === 'nav') return 'Opening…'
+    return center.label
+  }, [actionLoading, center.label])
 
   return {
     pathname,
     mode,
     booking,
+    targetStep,
     center,
     loading,
     actionLoading,

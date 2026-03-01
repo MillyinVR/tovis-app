@@ -19,6 +19,7 @@ export default function NavItem({
   return (
     <Link
       href={href}
+      aria-current={active ? 'page' : undefined}
       className={[
         'flex w-18 flex-col items-center justify-center gap-1',
         'text-[11px] font-extrabold',
@@ -27,7 +28,9 @@ export default function NavItem({
       ].join(' ')}
     >
       <div className="relative">
-        <span className={['text-[18px]', active ? '' : 'opacity-80'].join(' ')}>{icon}</span>
+        <span aria-hidden="true" className={['text-[18px]', active ? '' : 'opacity-80'].join(' ')}>
+          {icon}
+        </span>
         {rightSlot ? <span className="absolute -right-2 -top-2">{rightSlot}</span> : null}
       </div>
 

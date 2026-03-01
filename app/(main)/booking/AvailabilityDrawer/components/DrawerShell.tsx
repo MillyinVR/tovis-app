@@ -1,9 +1,8 @@
 // app/(main)/booking/AvailabilityDrawer/components/DrawerShell.tsx
-
 'use client'
 
 import { createPortal } from 'react-dom'
-import { FOOTER_HEIGHT, SHEET_MAX_W, SHEET_SIDE_PAD } from '../constants'
+import { SHEET_MAX_W, SHEET_SIDE_PAD } from '../constants'
 
 export default function DrawerShell({
   open,
@@ -19,13 +18,11 @@ export default function DrawerShell({
   footer: React.ReactNode
 }) {
   if (!open) return null
+  if (typeof document === 'undefined') return null
 
   const overlayRootStyle: React.CSSProperties = {
     position: 'fixed',
-    left: 0,
-    top: 0,
-    width: '100vw',
-    height: '100dvh',
+    inset: 0,
     zIndex: 2147483647,
     transform: 'none',
   }
@@ -38,13 +35,16 @@ export default function DrawerShell({
     WebkitBackdropFilter: 'blur(4px)',
   }
 
+  // ✅ Use dynamic footer space (measured by FooterShell) so we never overlap the nav footer.
+  const bottomOffset = 'var(--app-footer-space, 0px)'
+
   const sheetWrapStyle: React.CSSProperties = {
     position: 'absolute',
     left: '50%',
     transform: 'translateX(-50%)',
-    bottom: FOOTER_HEIGHT,
+    bottom: bottomOffset,
     width: `min(${SHEET_MAX_W}px, calc(100vw - ${SHEET_SIDE_PAD * 2}px))`,
-    height: `calc(100dvh - ${FOOTER_HEIGHT}px - 14px)`,
+    height: `calc(100dvh - ${bottomOffset} - 14px)`,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     overflow: 'hidden',
@@ -66,17 +66,6 @@ export default function DrawerShell({
         {header}
         {children}
         {footer}
-        <style jsx global>{`
-          .looksNoScrollbar {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-          }
-          .looksNoScrollbar::-webkit-scrollbar {
-            display: none;
-            width: 0;
-            height: 0;
-          }
-        `}</style>
       </div>
     </div>
   )

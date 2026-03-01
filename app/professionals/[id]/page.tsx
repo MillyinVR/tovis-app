@@ -117,7 +117,7 @@ export default async function PublicProfessionalProfilePage({
           </div>
         </div>
 
-        {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
+      
       </main>
     )
   }
@@ -330,8 +330,6 @@ export default async function PublicProfessionalProfilePage({
           )}
         </section>
       ) : null}
-
-      {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
     </main>
   )
 }

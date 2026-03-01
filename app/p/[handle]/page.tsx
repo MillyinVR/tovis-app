@@ -57,8 +57,6 @@ export default async function VanityProfilePage({ params }: { params: Promise<{ 
             We’re verifying the professional’s license and details. Check back soon.
           </div>
         </div>
-
-        {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
       </main>
     )
   }
@@ -111,7 +109,6 @@ export default async function VanityProfilePage({ params }: { params: Promise<{ 
         </div>
       </section>
 
-      {viewer?.role === 'PRO' ? <ProSessionFooter /> : null}
     </main>
   )
 }

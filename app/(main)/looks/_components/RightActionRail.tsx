@@ -10,9 +10,9 @@ function clamp(n: number, min: number, max: number) {
 }
 
 function formatCount(n: number) {
-  const v = clamp(n, 0, 999999)
-  if (v >= 100000) return `${Math.round(v / 1000)}K`
-  if (v >= 10000) return `${(v / 1000).toFixed(1)}K`
+  const v = clamp(n, 0, 999_999)
+  if (v >= 100_000) return `${Math.round(v / 1000)}K`
+  if (v >= 10_000) return `${(v / 1000).toFixed(1)}K`
   return String(v)
 }
 
@@ -25,6 +25,11 @@ type ProMini = {
 const GAP = 18
 const AVATAR_SIZE = 56
 const ICON_SIZE = 24
+
+function initialLetter(name: string | null) {
+  const s = (name || '').trim()
+  return (s ? s.slice(0, 1) : 'P').toUpperCase()
+}
 
 export default function RightActionRail({
   pro,
@@ -63,6 +68,7 @@ export default function RightActionRail({
     hideZero?: boolean
   }) {
     const showCount = typeof count === 'number' && (!hideZero || count > 0)
+    const formatted = showCount && typeof count === 'number' ? formatCount(count) : null
 
     return (
       <button
@@ -70,8 +76,12 @@ export default function RightActionRail({
         onClick={onClick}
         aria-label={ariaLabel}
         title={ariaLabel}
-        style={{ all: 'unset' as any }}
-        className="grid cursor-pointer justify-items-center gap-1 text-center transition-transform active:scale-95 md:hover:scale-[1.03]"
+        className={[
+          // “unset” without casting
+          'appearance-none border-0 bg-transparent p-0 m-0',
+          'grid cursor-pointer justify-items-center gap-1 text-center',
+          'transition-transform active:scale-95 md:hover:scale-[1.03]',
+        ].join(' ')}
       >
         <div
           className="grid place-items-center"
@@ -83,15 +93,15 @@ export default function RightActionRail({
           {icon}
         </div>
 
-        {showCount ? (
+        {formatted ? (
           <div
             className="w-full text-center text-[12px] font-extrabold tracking-wide text-white/95"
             style={{ textShadow: '0 2px 10px rgba(0,0,0,0.9)' }}
           >
-            {formatCount(count!)}
+            {formatted}
           </div>
         ) : (
-          <div className="h-14px" />
+          <div className="h-[14px]" />
         )}
       </button>
     )
@@ -99,15 +109,14 @@ export default function RightActionRail({
 
   return (
     <div
-      className="absolute z-80 select-none"
+      className="absolute z-[80] select-none"
       style={{ right, bottom, display: 'grid', gap: GAP, justifyItems: 'center' }}
     >
       {pro?.id ? (
         <Link
           href={`/professionals/${encodeURIComponent(pro.id)}`}
           aria-label="View professional profile"
-          className="grid justify-items-center"
-          style={{ textDecoration: 'none' }}
+          className="grid justify-items-center no-underline"
         >
           <div className="relative transition-transform active:scale-95 md:hover:scale-[1.03]">
             <div
@@ -132,12 +141,13 @@ export default function RightActionRail({
                 />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[18px] font-black text-white">
-                  {(pro.businessName || 'P').slice(0, 1).toUpperCase()}
+                  {initialLetter(pro.businessName)}
                 </div>
               )}
             </div>
 
             <div
+              aria-hidden="true"
               className="absolute left-1/2 grid place-items-center rounded-full font-black"
               style={{
                 width: 22,
@@ -167,7 +177,11 @@ export default function RightActionRail({
         />
       )}
 
-      <IconButton ariaLabel="Check availability" onClick={onOpenAvailability} icon={<CalendarDays size={ICON_SIZE} className="text-white" />} />
+      <IconButton
+        ariaLabel="Check availability"
+        onClick={onOpenAvailability}
+        icon={<CalendarDays size={ICON_SIZE} className="text-white" />}
+      />
 
       <IconButton
         ariaLabel={viewerLiked ? 'Unlike' : 'Like'}
@@ -187,7 +201,13 @@ export default function RightActionRail({
         }
       />
 
-      <IconButton ariaLabel="Open comments" onClick={onOpenComments} count={commentCount} hideZero icon={<MessageCircle size={ICON_SIZE} className="text-white" />} />
+      <IconButton
+        ariaLabel="Open comments"
+        onClick={onOpenComments}
+        count={commentCount}
+        hideZero
+        icon={<MessageCircle size={ICON_SIZE} className="text-white" />}
+      />
 
       <IconButton ariaLabel="Share" onClick={onShare} icon={<Share2 size={ICON_SIZE} className="text-white" />} />
     </div>

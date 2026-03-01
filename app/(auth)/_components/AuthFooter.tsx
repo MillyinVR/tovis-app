@@ -1,4 +1,4 @@
-// app/_components/auth/AuthFooter.tsx
+// app/(auth)/_components/AuthFooter.tsx
 import Link from 'next/link'
 
 export default function AuthFooter() {

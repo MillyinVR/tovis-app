@@ -9,15 +9,8 @@ import '@/lib/brand/brand.css'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
 import RoleFooter from '@/app/_components/RoleFooter'
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-})
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-})
+const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
+const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] })
 
 export const dynamic = 'force-dynamic'
 
@@ -27,34 +20,43 @@ export const metadata: Metadata = {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // 🔒 Keep request-bound so role/footer logic never caches incorrectly
   cookies()
 
   return (
     <html lang="en" suppressHydrationWarning>
-     <body className={`${geistSans.variable} ${geistMono.variable}`}>
-  <BrandProvider>
-    <div style={{ paddingBottom: 'var(--app-footer-space, 0px)' }}>
-      {children}
-    </div>
-  </BrandProvider>
+      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        <BrandProvider>
+          {/* Content padding so it never hides under footer */}
+          <div style={{ paddingBottom: 'calc(var(--app-footer-space, 0px) + env(safe-area-inset-bottom))' }}>
+            {children}
+          </div>
 
-  {/* STATIC footer portal root — never removed */}
-  <div
-    id="tovis-client-footer-root"
-    style={{
-      position: 'fixed',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      width: '100%',
-      zIndex: 999999,
-      pointerEvents: 'none',
-    }}
-  />
+          {/* ✅ Always-present portal host + mount */}
+          <div
+            id="tovis-footer-host"
+            style={{
+              position: 'fixed',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100%',
+              zIndex: 999999,
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              id="tovis-footer-mount"
+              style={{
+                width: '100%',
+                pointerEvents: 'auto',
+              }}
+            />
+          </div>
 
-  <RoleFooter />
-</body>
+          {/* ✅ Footer chooser (renders FooterShell) */}
+          <RoleFooter />
+        </BrandProvider>
+      </body>
     </html>
   )
 }

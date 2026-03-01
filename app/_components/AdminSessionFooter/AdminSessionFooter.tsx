@@ -17,17 +17,16 @@ const ROUTES = {
 } as const
 
 function isActivePath(pathname: string, href: string) {
-  // special-case /admin so it doesn't stay active for all subroutes
   if (href === '/admin') return pathname === '/admin'
   return pathname === href || pathname.startsWith(href + '/')
 }
 
 export default function AdminSessionFooter({ supportBadge }: Props) {
-  const pathname = usePathname()
-  if (!pathname) return null
+  // If pathname is temporarily null during hydration, still render (don’t disappear).
+  const pathname = usePathname() ?? ''
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-200" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div className="w-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-[1100px] items-center justify-between px-4">
           <NavItem label="Dashboard" href={ROUTES.dashboard} icon="⌂" active={isActivePath(pathname, ROUTES.dashboard)} />
