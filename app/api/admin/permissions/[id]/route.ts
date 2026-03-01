@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { jsonFail } from '@/app/api/_utils'
 import { pickMethod } from '@/app/api/_utils/pick'
-import { AdminPermissionRole } from '@prisma/client'
+import { AdminPermissionRole, Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ function trimId(v: unknown): string {
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const auth = await requireUser({ roles: ['ADMIN'] })
+    const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
@@ -33,11 +34,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const { id } = await getParams(ctx)
     const permissionId = trimId(id)
-    if (!permissionId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    if (!permissionId) return jsonFail(400, 'Missing id')
 
     const form = await req.formData()
     const method = pickMethod(form.get('_method'))
-    if (method !== 'DELETE') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
+    if (method !== 'DELETE') return jsonFail(400, 'Unsupported')
 
     const existing = await prisma.adminPermission.findUnique({
       where: { id: permissionId },
@@ -70,8 +71,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       .catch(() => null)
 
     return NextResponse.redirect(new URL('/admin/permissions', req.url), { status: 303 })
-  } catch (e) {
-    console.error('POST /api/admin/permissions/[id] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (err: unknown) {
+    console.error('POST /api/admin/permissions/[id] error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
 }

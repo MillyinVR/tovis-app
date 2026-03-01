@@ -1,6 +1,6 @@
 // app/api/_utils/auth/requirePro.ts
-import { NextResponse } from 'next/server'
 import { requireUser } from './requireUser'
+import { jsonFail } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
 import { Role } from '@prisma/client'
 
@@ -15,21 +15,19 @@ export type RequireProOk = {
 
 export type RequireProFail = {
   ok: false
-  res: NextResponse
+  res: Response
 }
 
 export type RequireProResult = RequireProOk | RequireProFail
 
 export async function requirePro(): Promise<RequireProResult> {
   const auth = await requireUser({ roles: [Role.PRO] })
-  if (!auth.ok) return auth
+  if (!auth.ok) return auth // same union shape; Response is compatible
 
   const professionalId = auth.user.professionalProfile?.id
   if (!professionalId) {
-    return {
-      ok: false,
-      res: NextResponse.json({ ok: false, error: 'Only professionals can perform this action.' }, { status: 403 }),
-    }
+    // Authenticated but missing a pro profile -> still forbidden
+    return { ok: false, res: jsonFail(403, 'Only professionals can perform this action.') }
   }
 
   return {

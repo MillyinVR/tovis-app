@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { jsonFail } from '@/app/api/_utils'
 import { pickMethod, pickString } from '@/app/api/_utils/pick'
-import { AdminPermissionRole } from '@prisma/client'
+import { AdminPermissionRole, Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,13 +22,13 @@ function trimId(v: unknown) {
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const auth = await requireUser({ roles: ['ADMIN'] })
+    const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
     const { id } = await getParams(ctx)
     const categoryId = trimId(id)
-    if (!categoryId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    if (!categoryId) return jsonFail(400, 'Missing id')
 
     const perm = await requireAdminPermission({
       adminUserId: user.id,
@@ -38,12 +39,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const form = await req.formData()
     const method = pickMethod(form.get('_method'))
-    if (method !== 'PATCH') return NextResponse.json({ error: 'Unsupported' }, { status: 400 })
+    if (method !== 'PATCH') return jsonFail(400, 'Unsupported')
 
     // HTML forms send strings. We only accept explicit true/false.
     const isActiveRaw = pickString(form.get('isActive'))?.toLowerCase() ?? ''
     if (isActiveRaw !== 'true' && isActiveRaw !== 'false') {
-      return NextResponse.json({ error: 'Invalid isActive (expected true/false)' }, { status: 400 })
+      return jsonFail(400, 'Invalid isActive (expected true/false)')
     }
     const isActive = isActiveRaw === 'true'
 
@@ -66,8 +67,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // ✅ 303 for form navigation (PRG pattern)
     return NextResponse.redirect(new URL('/admin/categories', req.url), { status: 303 })
-  } catch (e) {
-    console.error('POST /api/admin/categories/[id] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (err: unknown) {
+    console.error('POST /api/admin/categories/[id] error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
 }

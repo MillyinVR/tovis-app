@@ -1,10 +1,11 @@
 // app/api/admin/professionals/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickBool, pickString } from '@/app/api/_utils/pick'
-import { AdminPermissionRole, VerificationStatus } from '@prisma/client'
+import { AdminPermissionRole, Role, VerificationStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,10 @@ function trimId(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null
+}
+
 function normalizeStatus(v: unknown): VerificationStatus | null {
   const s = pickString(v)?.trim().toUpperCase()
   if (!s) return null
@@ -31,17 +36,26 @@ function normalizeStatus(v: unknown): VerificationStatus | null {
   return null
 }
 
+async function readJsonBody(req: NextRequest): Promise<Record<string, unknown> | null> {
+  const ct = req.headers.get('content-type') ?? ''
+  if (ct && !ct.includes('application/json')) return null
+  try {
+    const parsed: unknown = await req.json()
+    return isRecord(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
-    const auth = await requireUser({ roles: ['ADMIN'] })
+    const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
     const { id } = await getParams(ctx)
     const professionalId = trimId(id)
-    if (!professionalId) {
-      return NextResponse.json({ error: 'Missing professional id.' }, { status: 400 })
-    }
+    if (!professionalId) return jsonFail(400, 'Missing professional id.')
 
     const perm = await requireAdminPermission({
       adminUserId: user.id,
@@ -51,27 +65,20 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (!perm.ok) return perm.res
 
     // Optional but helpful: reject totally wrong content types
-    const ct = req.headers.get('content-type') || ''
-    if (ct && !ct.includes('application/json')) {
-      return NextResponse.json({ error: 'Content-Type must be application/json.' }, { status: 415 })
-    }
+    const body = await readJsonBody(req)
+    if (body === null) return jsonFail(415, 'Content-Type must be application/json.')
 
-    const body = await req.json().catch(() => ({} as any))
-
-    const rawStatus = pickString(body?.verificationStatus)
+    const rawStatus = pickString(body.verificationStatus)
     const status = normalizeStatus(rawStatus)
-    const licenseVerified = pickBool(body?.licenseVerified)
+    const licenseVerified = pickBool(body.licenseVerified)
 
     // If they sent a non-empty status string but it’s invalid, reject (don’t silently ignore)
     if (rawStatus && !status) {
-      return NextResponse.json(
-        { error: 'Invalid verificationStatus. Use PENDING, APPROVED, REJECTED, or NEEDS_INFO.' },
-        { status: 400 },
-      )
+      return jsonFail(400, 'Invalid verificationStatus. Use PENDING, APPROVED, REJECTED, or NEEDS_INFO.')
     }
 
     if (status == null && licenseVerified == null) {
-      return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 })
+      return jsonFail(400, 'Nothing to update.')
     }
 
     // Nice: fail with 404 instead of throwing a Prisma error
@@ -79,9 +86,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       where: { id: professionalId },
       select: { id: true },
     })
-    if (!exists) {
-      return NextResponse.json({ error: 'Professional not found.' }, { status: 404 })
-    }
+    if (!exists) return jsonFail(404, 'Professional not found.')
 
     const updated = await prisma.professionalProfile.update({
       where: { id: professionalId },
@@ -104,9 +109,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       })
       .catch(() => null)
 
-    return NextResponse.json({ ok: true, professional: updated }, { status: 200 })
-  } catch (e) {
-    console.error('PATCH /api/admin/professionals/[id] error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonOk({ professional: updated })
+  } catch (err: unknown) {
+    console.error('PATCH /api/admin/professionals/[id] error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
 }

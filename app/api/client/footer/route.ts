@@ -1,32 +1,39 @@
 // app/api/client/footer/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { Role, ClientNotificationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function clampSmallCount(n: number) {
+function clampSmallCount(n: number): string | null {
   if (!Number.isFinite(n) || n <= 0) return null
   return n > 99 ? '99+' : String(n)
 }
 
 export async function GET() {
-  const user = await getCurrentUser().catch(() => null)
+  try {
+    const user = await getCurrentUser()
+    if (!user || user.role !== Role.CLIENT || !user.clientProfile?.id) {
+      return jsonFail(401, 'Unauthorized')
+    }
 
-  if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+    const unreadAftercareCount = await prisma.clientNotification.count({
+      where: {
+        clientId: user.clientProfile.id,
+        type: ClientNotificationType.AFTERCARE,
+        readAt: null,
+      },
+    })
+
+    const inboxBadge = clampSmallCount(unreadAftercareCount)
+
+    // Prefer omission over null (cleaner contract), but still stable for callers:
+    // if you already have UI expecting null, change this back to `jsonOk({ inboxBadge })`.
+    return inboxBadge ? jsonOk({ inboxBadge }) : jsonOk({})
+  } catch (err: unknown) {
+    console.error('GET /api/client/footer error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
-
-  const unreadAftercareCount = await prisma.clientNotification.count({
-    where: {
-      clientId: user.clientProfile.id,
-      type: 'AFTERCARE',
-      readAt: null,
-    } as any,
-  })
-
-  return NextResponse.json({
-    ok: true,
-    inboxBadge: clampSmallCount(unreadAftercareCount),
-  })
 }

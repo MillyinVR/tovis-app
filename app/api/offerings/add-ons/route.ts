@@ -1,24 +1,26 @@
 // app/api/offerings/add-ons/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function pickOne(v: string | string[] | null) {
-  if (!v) return ''
-  return Array.isArray(v) ? (v[0] ?? '') : v
+type LocationTypeKey = 'SALON' | 'MOBILE'
+
+function cleanParam(v: string | null): string | null {
+  const s = (v ?? '').trim()
+  return s.length ? s : null
 }
 
-function normalizeLocationType(v: string) {
-  const s = (v || '').trim().toUpperCase()
-  if (s === 'SALON') return 'SALON' as const
-  if (s === 'MOBILE') return 'MOBILE' as const
+function parseLocationType(v: string | null): LocationTypeKey | null {
+  const s = (v ?? '').trim().toUpperCase()
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
   return null
 }
 
-function toServiceLocationType(v: 'SALON' | 'MOBILE'): ServiceLocationType {
+function toPrismaLocationType(v: LocationTypeKey): ServiceLocationType {
   return v === 'SALON' ? ServiceLocationType.SALON : ServiceLocationType.MOBILE
 }
 
@@ -26,15 +28,13 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
 
-    const offeringId = pickOne(url.searchParams.get('offeringId'))
-    const locationTypeRaw = pickOne(url.searchParams.get('locationType'))
-    const locationType = normalizeLocationType(locationTypeRaw)
+    const offeringId = cleanParam(url.searchParams.get('offeringId'))
+    const locationType = parseLocationType(url.searchParams.get('locationType'))
 
     if (!offeringId || !locationType) {
-      return NextResponse.json({ ok: false, error: 'Missing offeringId or locationType' }, { status: 400 })
+      return jsonFail(400, 'Missing or invalid offeringId or locationType')
     }
 
-    // Load offering + service + professional so UI can show context
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
       select: {
@@ -47,10 +47,10 @@ export async function GET(req: Request) {
     })
 
     if (!offering || !offering.isActive) {
-      return NextResponse.json({ ok: false, error: 'Offering not found' }, { status: 404 })
+      return jsonFail(404, 'Offering not found')
     }
 
-    const locEnum = toServiceLocationType(locationType)
+    const locEnum = toPrismaLocationType(locationType)
 
     const addOnLinks = await prisma.offeringAddOn.findMany({
       where: {
@@ -76,7 +76,6 @@ export async function GET(req: Request) {
 
     const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
 
-    // Resolve per-pro pricing/duration for add-on services if the pro has offerings for them
     const proOfferings = addOnServiceIds.length
       ? await prisma.professionalServiceOffering.findMany({
           where: {
@@ -99,13 +98,16 @@ export async function GET(req: Request) {
 
     const addOns = addOnLinks.map((x) => {
       const svc = x.addOnService
-      const proOff = byServiceId.get(svc.id) || null
+      const proOff = byServiceId.get(svc.id) ?? null
 
-      const minutes =
+      const minutesRaw =
         x.durationOverrideMinutes ??
         (locationType === 'SALON' ? proOff?.salonDurationMinutes : proOff?.mobileDurationMinutes) ??
         svc.defaultDurationMinutes ??
         0
+
+      const minutes = Number(minutesRaw)
+      const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 0
 
       const priceDec =
         x.priceOverride ??
@@ -115,35 +117,32 @@ export async function GET(req: Request) {
       const price = moneyToString(priceDec) ?? '0.00'
 
       return {
-        id: String(x.id), // ✅ OfferingAddOn.id (submit this)
-        serviceId: String(svc.id),
+        id: x.id, // OfferingAddOn.id ✅
+        serviceId: svc.id,
         title: svc.name,
         group: svc.addOnGroup ?? null,
         sortOrder: x.sortOrder,
         isRecommended: Boolean(x.isRecommended),
-        minutes: Number(minutes) || 0,
+        minutes: safeMinutes,
         price, // "25.00"
       }
     })
 
-    return NextResponse.json(
-      {
-        ok: true,
-        offeringId: offering.id,
-        locationType,
-        offering: {
-          id: offering.id,
-          service: offering.service ? { id: offering.service.id, name: offering.service.name } : null,
-          professional: offering.professional
-            ? { id: offering.professional.id, businessName: offering.professional.businessName ?? null }
-            : null,
-        },
-        addOns,
+    return jsonOk({
+      offeringId: offering.id,
+      locationType,
+      offering: {
+        id: offering.id,
+        service: offering.service ? { id: offering.service.id, name: offering.service.name } : null,
+        professional: offering.professional
+          ? { id: offering.professional.id, businessName: offering.professional.businessName ?? null }
+          : null,
       },
-      { status: 200 },
-    )
-  } catch (e) {
-    console.error('GET /api/offerings/add-ons error', e)
-    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 })
+      addOns,
+    })
+  } catch (err: unknown) {
+    console.error('GET /api/offerings/add-ons error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
 }

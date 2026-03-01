@@ -1,6 +1,15 @@
 // app/(main)/booking/AvailabilityDrawer/types.ts
 
 /**
+ * Single source of truth for API envelopes (type-level).
+ * Matches jsonOk/jsonFail:
+ * - success: { ok: true, ... }
+ * - failure: { ok: false, error: string, ... }
+ */
+export type ApiOk<T extends object> = { ok: true } & T
+export type ApiFail<T extends object = {}> = { ok: false; error: string } & T
+
+/**
  * Booking source attribution.
  * Must stay stable because it becomes analytics + business logic.
  *
@@ -49,6 +58,12 @@ export type AvailabilityReason =
   | 'SERVICE_NOT_OFFERED'
   | 'NO_BOOKABLE_MODE'
 
+/**
+ * Money serialized over JSON should be string (e.g. "25.00").
+ * Keep as string to avoid Decimal leaks into client code.
+ */
+export type MoneyString = string
+
 export type ProCard = {
   id: string
   businessName: string | null
@@ -68,12 +83,15 @@ export type AvailabilityOffering = {
   offersMobile: boolean
   salonDurationMinutes: number | null
   mobileDurationMinutes: number | null
-  salonPriceStartingAt: unknown | null
-  mobilePriceStartingAt: unknown | null
+  salonPriceStartingAt: MoneyString | null
+  mobilePriceStartingAt: MoneyString | null
 }
 
-export type AvailabilitySummaryResponse = {
-  ok: true
+/** ---------------------------
+ * Availability: SUMMARY mode
+ * -------------------------- */
+
+export type AvailabilitySummaryOk = ApiOk<{
   mode: 'SUMMARY'
   mediaId: string | null
   serviceId: string
@@ -99,33 +117,49 @@ export type AvailabilitySummaryResponse = {
   waitlistSupported: boolean
 
   offering: AvailabilityOffering
-}
+}>
 
-export type AvailabilityDayResponse =
-  | {
-      ok: true
-      mode: 'DAY'
-      professionalId: string
-      serviceId: string
-      locationType: ServiceLocationType
-      date: string
+export type AvailabilitySummaryFail = ApiFail<{
+  // Optional context that can help the client message correctly
+  timeZone?: string
+  locationId?: string
+}>
 
-      locationId: string
-      timeZone: string
-      stepMinutes: number
-      leadTimeMinutes: number
-      adjacencyBufferMinutes: number
-      maxDaysAhead: number
+export type AvailabilitySummaryResponse = AvailabilitySummaryOk | AvailabilitySummaryFail
 
-      durationMinutes: number
-      dayStartUtc: string
-      dayEndExclusiveUtc: string
-      slots: string[]
+/** ---------------------------
+ * Availability: DAY mode
+ * -------------------------- */
 
-      // ✅ server adds this (safe extra field)
-      offering?: AvailabilityOffering
-    }
-  | { ok: false; error: string; timeZone?: string; locationId?: string }
+export type AvailabilityDayOk = ApiOk<{
+  mode: 'DAY'
+  professionalId: string
+  serviceId: string
+  locationType: ServiceLocationType
+  date: string
+
+  locationId: string
+  timeZone: string
+  stepMinutes: number
+  leadTimeMinutes: number
+  adjacencyBufferMinutes: number
+  maxDaysAhead: number
+
+  durationMinutes: number
+  dayStartUtc: string
+  dayEndExclusiveUtc: string
+  slots: string[]
+
+  // ✅ server adds this (safe extra field)
+  offering?: AvailabilityOffering
+}>
+
+export type AvailabilityDayFail = ApiFail<{
+  timeZone?: string
+  locationId?: string
+}>
+
+export type AvailabilityDayResponse = AvailabilityDayOk | AvailabilityDayFail
 
 export type HoldParsed = {
   holdId: string

@@ -1,7 +1,7 @@
-// app/api/_utils/requireAdminPermission.ts
-import { NextResponse } from 'next/server'
+// app/api/_utils/auth/requireAdminPermission.ts
 import type { AdminPermissionRole } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/adminPermissions'
+import { jsonFail } from '@/app/api/_utils'
 
 type Scope = {
   professionalId?: string
@@ -9,20 +9,30 @@ type Scope = {
   categoryId?: string
 }
 
+export type RequireAdminPermissionOk = { ok: true }
+
+export type RequireAdminPermissionFail = {
+  ok: false
+  res: Response
+}
+
+export type RequireAdminPermissionResult = RequireAdminPermissionOk | RequireAdminPermissionFail
+
 export async function requireAdminPermission(args: {
   adminUserId: string
-  allowedRoles: AdminPermissionRole[]
+  allowedRoles: readonly AdminPermissionRole[]
   scope?: Scope
-}) {
-  const ok = await hasAdminPermission({
+}): Promise<RequireAdminPermissionResult> {
+  const allowed = await hasAdminPermission({
     adminUserId: args.adminUserId,
-    allowedRoles: args.allowedRoles,
+    allowedRoles: [...args.allowedRoles],
     scope: args.scope,
   })
 
-  if (!ok) {
-    return { ok: false, res: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  if (!allowed) {
+    // ✅ single source of truth for envelope + error message
+    return { ok: false, res: jsonFail(403, 'Forbidden') }
   }
 
-  return { ok: true, res: null as any }
+  return { ok: true }
 }

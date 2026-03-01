@@ -4,6 +4,8 @@ import type { ServiceLocationType, ProfessionalLocationType, Prisma } from '@pri
 import { TtlCache, stableKey } from '@/lib/cache/ttlCache'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
+export type BookableLocation = PickedLocation
+
 type PickBookableLocationArgs = {
   professionalId: string
   requestedLocationId?: string | null
@@ -94,6 +96,7 @@ export async function pickBookableLocation(args: PickBookableLocationArgs): Prom
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     select,
   })
+
 
   if (!isUsableLocation(best)) return null
 

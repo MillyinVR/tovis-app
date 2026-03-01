@@ -1,10 +1,11 @@
 // app/api/availability/day/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType } from '@prisma/client'
+import { ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
-import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
+import type { BookableLocation } from '@/lib/booking/pickLocation'
+import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
 import { pickString } from '@/app/api/_utils/pick'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,8 +40,8 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
-  if (s === 'SALON') return 'SALON'
-  if (s === 'MOBILE') return 'MOBILE'
+  if (s === 'SALON') return ServiceLocationType.SALON
+  if (s === 'MOBILE') return ServiceLocationType.MOBILE
   return null
 }
 
@@ -97,17 +98,6 @@ function ymdToString(ymd: { year: number; month: number; day: number }) {
   return `${ymd.year}-${mm}-${dd}`
 }
 
-/**
- * ✅ STRICT timezone selection
- * We require a valid IANA timezone on the LOCATION.
- * If not present, booking/availability must fail (too dangerous otherwise).
- */
-function requireLocationTimeZone(locTz: unknown) {
-  const s = typeof locTz === 'string' ? locTz.trim() : ''
-  if (!s || !isValidIanaTimeZone(s)) return null
-  return s
-}
-
 function getDayKeyFromYMD(args: { year: number; month: number; day: number; timeZone: string }) {
   const timeZone = sanitizeTimeZone(args.timeZone, 'UTC')
 
@@ -136,7 +126,7 @@ function pickModeDurationMinutes(
   offering: { salonDurationMinutes: number | null; mobileDurationMinutes: number | null },
   locationType: ServiceLocationType,
 ) {
-  const d = locationType === 'MOBILE' ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+  const d = locationType === ServiceLocationType.MOBILE ? offering.mobileDurationMinutes : offering.salonDurationMinutes
   const n = Number(d ?? 0)
   const base = Number.isFinite(n) && n > 0 ? n : 60
   return clampInt(base, 15, 12 * 60)
@@ -148,10 +138,10 @@ function pickEffectiveLocationType(args: {
   offersMobile: boolean
 }): ServiceLocationType | null {
   const { requested, offersInSalon, offersMobile } = args
-  if (requested === 'SALON' && offersInSalon) return 'SALON'
-  if (requested === 'MOBILE' && offersMobile) return 'MOBILE'
-  if (offersInSalon) return 'SALON'
-  if (offersMobile) return 'MOBILE'
+  if (requested === ServiceLocationType.SALON && offersInSalon) return ServiceLocationType.SALON
+  if (requested === ServiceLocationType.MOBILE && offersMobile) return ServiceLocationType.MOBILE
+  if (offersInSalon) return ServiceLocationType.SALON
+  if (offersMobile) return ServiceLocationType.MOBILE
   return null
 }
 
@@ -212,7 +202,8 @@ async function loadBusyIntervals(args: {
   durationMinutes: number
   adjacencyBufferMinutes: number
 }) {
-  const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, durationMinutes, adjacencyBufferMinutes } = args
+  const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, durationMinutes, adjacencyBufferMinutes } =
+    args
 
   const [bookings, holds, blocks] = await Promise.all([
     prisma.booking.findMany({
@@ -295,8 +286,8 @@ async function computeDaySlotsFast(args: {
   busy: BusyInterval[]
   debug?: boolean
 }): Promise<
-  | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: any }
-  | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: any }
+  | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
+  | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
 > {
   const {
     dateYMD,
@@ -431,13 +422,13 @@ export async function GET(req: Request) {
       null
 
     if (!professionalId || !serviceId) {
-      return NextResponse.json({ ok: false, error: 'Missing professionalId or serviceId.' }, { status: 400 })
+      return jsonFail(400, 'Missing professionalId or serviceId.')
     }
 
     const [pro, service, offering] = await Promise.all([
       prisma.professionalProfile.findUnique({
         where: { id: professionalId },
-        select: { id: true, businessName: true, avatarUrl: true, location: true, timeZone: true },
+        select: { id: true, businessName: true, avatarUrl: true, location: true },
       }),
       prisma.service.findUnique({
         where: { id: serviceId },
@@ -457,84 +448,77 @@ export async function GET(req: Request) {
       }),
     ])
 
-    if (!pro) return NextResponse.json({ ok: false, error: 'Professional not found' }, { status: 404 })
-    if (!service) return NextResponse.json({ ok: false, error: 'Service not found' }, { status: 404 })
-    if (!offering) return NextResponse.json({ ok: false, error: 'Offering not found' }, { status: 404 })
+    if (!pro) return jsonFail(404, 'Professional not found')
+    if (!service) return jsonFail(404, 'Service not found')
+    if (!offering) return jsonFail(404, 'Offering not found')
 
     let effectiveLocationType =
-  pickEffectiveLocationType({
-    requested: requestedLocationType,
-    offersInSalon: Boolean(offering.offersInSalon),
-    offersMobile: Boolean(offering.offersMobile),
-  }) ?? null
+      pickEffectiveLocationType({
+        requested: requestedLocationType,
+        offersInSalon: Boolean(offering.offersInSalon),
+        offersMobile: Boolean(offering.offersMobile),
+      }) ?? null
 
-if (!effectiveLocationType) {
-  return NextResponse.json({ ok: false, error: 'This service is not bookable.' }, { status: 400 })
-}
-
-let loc = await pickBookableLocation({
-  professionalId,
-  requestedLocationId,
-  locationType: effectiveLocationType,
-})
-
-// 🔥 fallback if client requested the wrong mode
-if (!loc) {
-  const canTryMobile = effectiveLocationType === 'SALON' && Boolean(offering.offersMobile)
-  const canTrySalon = effectiveLocationType === 'MOBILE' && Boolean(offering.offersInSalon)
-
-  if (canTryMobile) {
-    const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: 'MOBILE' })
-    if (alt) {
-      loc = alt
-      effectiveLocationType = 'MOBILE'
-    }
-  } else if (canTrySalon) {
-    const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: 'SALON' })
-    if (alt) {
-      loc = alt
-      effectiveLocationType = 'SALON'
-    }
-  }
-}
-
-if (!loc) {
-  return NextResponse.json({ ok: false, error: 'No bookable location found.' }, { status: 400 })
-}
-
-    const locAny = loc as any
-    const locId = String(locAny.id || '').trim()
-    if (!locId) return NextResponse.json({ ok: false, error: 'Bookable location is missing id.' }, { status: 500 })
-
-    const timeZone = requireLocationTimeZone(locAny.timeZone)
-    if (!timeZone) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'This professional must set a valid timezone for their bookable location before they can accept appointments.',
-        },
-        { status: 409 },
-      )
+    if (!effectiveLocationType) {
+      return jsonFail(400, 'This service is not bookable.')
     }
 
-    const defaultStepMinutes = normalizeStepMinutes(locAny.stepMinutes, 30)
+    // Choose a bookable location (typed, already validated timezone + workingHours shape)
+    let loc: BookableLocation | null = await pickBookableLocation({
+      professionalId,
+      requestedLocationId,
+      locationType: effectiveLocationType,
+    })
+
+    // Fallback if the client requested the wrong booking mode
+    if (!loc) {
+      const canTryMobile = effectiveLocationType === ServiceLocationType.SALON && Boolean(offering.offersMobile)
+      const canTrySalon = effectiveLocationType === ServiceLocationType.MOBILE && Boolean(offering.offersInSalon)
+
+      if (canTryMobile) {
+        const alt = await pickBookableLocation({
+          professionalId,
+          requestedLocationId: null,
+          locationType: ServiceLocationType.MOBILE,
+        })
+        if (alt) {
+          loc = alt
+          effectiveLocationType = ServiceLocationType.MOBILE
+        }
+      } else if (canTrySalon) {
+        const alt = await pickBookableLocation({
+          professionalId,
+          requestedLocationId: null,
+          locationType: ServiceLocationType.SALON,
+        })
+        if (alt) {
+          loc = alt
+          effectiveLocationType = ServiceLocationType.SALON
+        }
+      }
+    }
+
+    if (!loc) {
+      return jsonFail(400, 'No bookable location found.')
+    }
+
+    const locId = loc.id
+    const timeZone = sanitizeTimeZone(loc.timeZone, 'UTC')
+    const workingHours = loc.workingHours
+
+    const defaultStepMinutes = normalizeStepMinutes(loc.stepMinutes, 30)
     const stepMinutes = debug && stepRaw ? normalizeStepMinutes(stepRaw, defaultStepMinutes) : defaultStepMinutes
 
-    const defaultLead = clampInt(Number(locAny.advanceNoticeMinutes ?? 10), 0, 240)
+    const defaultLead = clampInt(Number(loc.advanceNoticeMinutes ?? 10), 0, 240)
     const leadTimeMinutes = leadRaw ? clampInt(toInt(leadRaw, defaultLead), 0, 240) : defaultLead
 
-    const adjacencyBufferMinutes = clampInt(Number(locAny.bufferMinutes ?? 10), 0, 120)
-    const maxAdvanceDays = clampInt(Number(locAny.maxDaysAhead ?? 365), 1, 365)
+    const adjacencyBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 10), 0, 120)
+    const maxAdvanceDays = clampInt(Number(loc.maxDaysAhead ?? 365), 1, 365)
 
     const durationMinutes = pickModeDurationMinutes(
       { salonDurationMinutes: offering.salonDurationMinutes, mobileDurationMinutes: offering.mobileDurationMinutes },
       effectiveLocationType,
     )
-
-    const nowUtc = new Date()
-    const nowParts = getZonedParts(nowUtc, timeZone)
-    const todayYMD = { year: nowParts.year, month: nowParts.month, day: nowParts.day }
 
     const offeringPayload = {
       id: offering.id,
@@ -546,14 +530,14 @@ if (!loc) {
       mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
     }
 
-    const workingHours = locAny.workingHours ?? null
+    const nowUtc = new Date()
+    const nowParts = getZonedParts(nowUtc, timeZone)
+    const todayYMD = { year: nowParts.year, month: nowParts.month, day: nowParts.day }
 
     // SUMMARY MODE
     if (!dateStr) {
       const daysAhead = Math.min(14, maxAdvanceDays)
-      const ymds = Array.from({ length: daysAhead }, (_, i) =>
-        addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i),
-      )
+      const ymds = Array.from({ length: daysAhead }, (_, i) => addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i))
 
       const firstBounds = computeDayBoundsUtc(ymds[0], timeZone)
       const lastBounds = computeDayBoundsUtc(ymds[ymds.length - 1], timeZone)
@@ -597,44 +581,7 @@ if (!loc) {
         if (result.slots.length) availableDays.push({ date: ymdToString(ymd), slotCount: result.slots.length })
       }
 
-      if (!availableDays.length) {
-  return NextResponse.json({
-    ok: true,
-    mode: 'SUMMARY' as const,
-    mediaId: mediaId || null,
-    serviceId,
-    professionalId,
-    serviceName: service.name,
-    serviceCategoryName: service.category?.name ?? null,
-    locationType: effectiveLocationType,
-    locationId: locId,
-    timeZone,
-    stepMinutes,
-    leadTimeMinutes,
-    adjacencyBufferMinutes,
-    maxDaysAhead: maxAdvanceDays,
-    durationMinutes,
-    primaryPro: {
-      id: pro.id,
-      businessName: pro.businessName ?? null,
-      avatarUrl: pro.avatarUrl ?? null,
-      location: pro.location ?? null,
-      offeringId: offering.id,
-      isCreator: true as const,
-      timeZone,
-    },
-    availableDays: [],
-    otherPros: [],
-    waitlistSupported: true,
-    offering: offeringPayload,
-    // optional: expose why empty in debug
-    ...(debug ? { debug: { emptyReason: firstError ?? 'none' } } : {}),
-  })
-}
-
-
-      return NextResponse.json({
-        ok: true,
+      return jsonOk({
         mode: 'SUMMARY' as const,
         mediaId: mediaId || null,
         serviceId,
@@ -665,24 +612,20 @@ if (!loc) {
 
         availableDays,
         otherPros: [],
-
         waitlistSupported: true,
         offering: offeringPayload,
+
+        ...(debug && !availableDays.length ? { debug: { emptyReason: firstError ?? 'none' } } : {}),
       })
     }
 
     // DAY MODE
     const ymd = parseYYYYMMDD(dateStr)
-    if (!ymd) return NextResponse.json({ ok: false, error: 'Invalid date. Use YYYY-MM-DD.' }, { status: 400 })
+    if (!ymd) return jsonFail(400, 'Invalid date. Use YYYY-MM-DD.')
 
     const dayDiff = ymdSerial(ymd) - ymdSerial(todayYMD)
-    if (dayDiff < 0) return NextResponse.json({ ok: false, error: 'Date is in the past.' }, { status: 400 })
-    if (dayDiff > maxAdvanceDays) {
-      return NextResponse.json(
-        { ok: false, error: `You can book up to ${maxAdvanceDays} days in advance.` },
-        { status: 400 },
-      )
-    }
+    if (dayDiff < 0) return jsonFail(400, 'Date is in the past.')
+    if (dayDiff > maxAdvanceDays) return jsonFail(400, `You can book up to ${maxAdvanceDays} days in advance.`)
 
     const bounds = computeDayBoundsUtc(ymd, timeZone)
     const windowStartUtc = addMinutes(bounds.dayStartUtc, -24 * 60)
@@ -713,24 +656,18 @@ if (!loc) {
     })
 
     if (!result.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: result.error,
-          locationId: locId,
-          timeZone,
-          stepMinutes,
-          leadTimeMinutes,
-          adjacencyBufferMinutes,
-          maxDaysAhead: maxAdvanceDays,
-          ...(debug ? { debug: result.debug } : {}),
-        },
-        { status: 400 },
-      )
+      return jsonFail(400, result.error, {
+        locationId: locId,
+        timeZone,
+        stepMinutes,
+        leadTimeMinutes,
+        adjacencyBufferMinutes,
+        maxDaysAhead: maxAdvanceDays,
+        ...(debug ? { debug: result.debug } : {}),
+      })
     }
 
-    return NextResponse.json({
-      ok: true,
+    return jsonOk({
       mode: 'DAY' as const,
       professionalId,
       serviceId,
@@ -752,8 +689,8 @@ if (!loc) {
       offering: offeringPayload,
       ...(debug ? { debug: result.debug } : {}),
     })
-  } catch (e) {
-    console.error('GET /api/availability/day error', e)
-    return NextResponse.json({ ok: false, error: 'Failed to load availability' }, { status: 500 })
+  } catch (err: unknown) {
+    console.error('GET /api/availability/day error', err)
+    return jsonFail(500, 'Failed to load availability')
   }
 }

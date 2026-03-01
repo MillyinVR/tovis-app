@@ -2,18 +2,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { AdminPermissionRole } from '@prisma/client'
-import { hasAdminPermission } from '@/lib/adminPermissions'
+import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickString } from '@/app/api/_utils/pick'
+import { AdminPermissionRole, Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-async function requireSupport(userId: string) {
-  return hasAdminPermission({
-    adminUserId: userId,
-    allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
-  })
-}
 
 function slugifyLoose(s: string) {
   return s
@@ -26,12 +20,15 @@ function slugifyLoose(s: string) {
 
 export async function GET() {
   try {
-    const auth = await requireUser({ roles: ['ADMIN'] })
+    const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const ok = await requireSupport(user.id)
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const perm = await requireAdminPermission({
+      adminUserId: user.id,
+      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+    })
+    if (!perm.ok) return perm.res
 
     const categories = await prisma.serviceCategory.findMany({
       orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
@@ -39,21 +36,25 @@ export async function GET() {
       take: 2000,
     })
 
-    return NextResponse.json({ ok: true, categories }, { status: 200 })
-  } catch (e) {
-    console.error('GET /api/admin/categories error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonOk({ categories })
+  } catch (err: unknown) {
+    console.error('GET /api/admin/categories error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await requireUser({ roles: ['ADMIN'] })
+    const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const ok = await requireSupport(user.id)
-    if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const perm = await requireAdminPermission({
+      adminUserId: user.id,
+      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+    })
+    if (!perm.ok) return perm.res
 
     const form = await req.formData()
 
@@ -61,11 +62,11 @@ export async function POST(req: NextRequest) {
     const slugRaw = (pickString(form.get('slug')) ?? '').trim()
     const parentIdRaw = (pickString(form.get('parentId')) ?? '').trim()
 
-    if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
+    if (!name) return jsonFail(400, 'Missing name')
 
     // if slug isn't provided, derive from name (nice UX)
     const slug = slugifyLoose(slugRaw || name)
-    if (!slug) return NextResponse.json({ error: 'Missing/invalid slug' }, { status: 400 })
+    if (!slug) return jsonFail(400, 'Missing/invalid slug')
 
     const parentId: string | null = parentIdRaw ? parentIdRaw : null
 
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
         where: { id: parentId },
         select: { id: true },
       })
-      if (!parent) return NextResponse.json({ error: 'Parent category not found' }, { status: 400 })
+      if (!parent) return jsonFail(400, 'Parent category not found')
     }
 
     const created = await prisma.serviceCategory.create({
@@ -94,8 +95,9 @@ export async function POST(req: NextRequest) {
       .catch(() => null)
 
     return NextResponse.redirect(new URL('/admin/categories', req.url), { status: 303 })
-  } catch (e) {
-    console.error('POST /api/admin/categories error', e)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (err: unknown) {
+    console.error('POST /api/admin/categories error', err)
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    return jsonFail(500, message)
   }
 }

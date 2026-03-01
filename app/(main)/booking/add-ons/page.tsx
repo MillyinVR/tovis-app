@@ -19,15 +19,26 @@ type AddOnDTO = {
   isRecommended: boolean
 }
 
-type AddOnsApiResponse = {
-  ok: boolean
+// ✅ Discriminated union aligned with jsonOk/jsonFail outputs
+type AddOnsApiOk = {
+  ok: true
+  addOns?: AddOnDTO[]
   offeringId?: string
   locationType?: ServiceLocationType
-  addOns?: AddOnDTO[]
-  error?: string
 }
 
+type AddOnsApiFail = {
+  ok: false
+  error: string
+}
+
+type AddOnsApiResponse = AddOnsApiOk | AddOnsApiFail
+
 type AddOnsDTOResult = { ok: true; addOns: AddOnDTO[] } | { ok: false; error: string }
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null
+}
 
 function pickOne(v: string | string[] | undefined | null) {
   if (!v) return null
@@ -60,6 +71,37 @@ async function getRequestOrigin() {
   return `${proto}://${host}`
 }
 
+function parseAddOnsApiResponse(x: unknown): AddOnsApiResponse | null {
+  if (!isRecord(x)) return null
+  const ok = x.ok
+  if (ok === true) {
+    const addOnsRaw = x.addOns
+    return {
+      ok: true,
+      offeringId: typeof x.offeringId === 'string' ? x.offeringId : undefined,
+      locationType: x.locationType === 'MOBILE' || x.locationType === 'SALON' ? x.locationType : undefined,
+      addOns: Array.isArray(addOnsRaw) ? (addOnsRaw as AddOnDTO[]) : undefined,
+    }
+  }
+  if (ok === false) {
+    const error = typeof x.error === 'string' ? x.error.trim() : ''
+    if (!error) return null
+    return { ok: false, error }
+  }
+  return null
+}
+
+async function safeJson(res: Response): Promise<AddOnsApiResponse | null> {
+  const ct = res.headers.get('content-type') ?? ''
+  if (!ct.includes('application/json')) return null
+  try {
+    const parsed: unknown = await res.json()
+    return parseAddOnsApiResponse(parsed)
+  } catch {
+    return null
+  }
+}
+
 async function fetchAddOns(args: { offeringId: string; locationType: ServiceLocationType }): Promise<AddOnsDTOResult> {
   const qs = new URLSearchParams({ offeringId: args.offeringId, locationType: args.locationType })
 
@@ -68,19 +110,30 @@ async function fetchAddOns(args: { offeringId: string; locationType: ServiceLoca
 
   let res: Response
   try {
-    res = await fetch(url, { cache: 'no-store' })
-  } catch (e) {
-    console.error('fetchAddOns network error:', e)
+    res = await fetch(url, {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    })
+  } catch (err: unknown) {
+    console.error('fetchAddOns network error:', err)
     return { ok: false, error: 'Network error loading add-ons.' }
   }
 
-  const body = (await res.json().catch(() => ({}))) as AddOnsApiResponse
+  const body = await safeJson(res)
 
-  if (!res.ok || body?.ok !== true) {
-    return { ok: false, error: body?.error || `Failed to load add-ons (${res.status}).` }
+  // Non-2xx or malformed JSON
+  if (!res.ok) {
+    if (body && body.ok === false) return { ok: false, error: body.error }
+    return { ok: false, error: `Failed to load add-ons (${res.status}).` }
   }
 
-  return { ok: true, addOns: Array.isArray(body.addOns) ? body.addOns : [] }
+  // 2xx but still not an ok:true payload (shouldn’t happen, but don’t trust it blindly)
+  if (!body || body.ok !== true) {
+    return { ok: false, error: 'Failed to load add-ons.' }
+  }
+
+  const addOns = Array.isArray(body.addOns) ? body.addOns : []
+  return { ok: true, addOns }
 }
 
 export default async function BookingAddOnsPage({

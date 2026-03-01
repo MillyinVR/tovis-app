@@ -1,6 +1,6 @@
 // app/api/_utils/auth/requireClient.ts
-import { NextResponse } from 'next/server'
 import { requireUser } from './requireUser'
+import { jsonFail } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
 import { Role } from '@prisma/client'
 
@@ -14,21 +14,19 @@ export type RequireClientOk = {
 
 export type RequireClientFail = {
   ok: false
-  res: NextResponse
+  res: Response
 }
 
 export type RequireClientResult = RequireClientOk | RequireClientFail
 
 export async function requireClient(): Promise<RequireClientResult> {
   const auth = await requireUser({ roles: [Role.CLIENT] })
-  if (!auth.ok) return auth
+  if (!auth.ok) return auth // Response-based fail shape stays consistent
 
   const clientId = auth.user.clientProfile?.id
   if (!clientId) {
-    return {
-      ok: false,
-      res: NextResponse.json({ ok: false, error: 'Only clients can perform this action.' }, { status: 403 }),
-    }
+    // Authenticated but missing a client profile -> forbidden
+    return { ok: false, res: jsonFail(403, 'Only clients can perform this action.') }
   }
 
   return { ok: true, user: auth.user, clientId }

@@ -136,8 +136,15 @@ function resolveBookingSource(context: DrawerContext): BookingSource {
   return 'REQUESTED'
 }
 
-function isSummary(data: unknown): data is AvailabilitySummaryResponse {
-  return Boolean(data && typeof data === 'object' && (data as any).ok === true && (data as any).mode === 'SUMMARY')
+type AvailabilitySummaryOk = Extract<AvailabilitySummaryResponse, { ok: true; mode: 'SUMMARY' }>
+
+function isSummary(data: unknown): data is AvailabilitySummaryOk {
+  return Boolean(
+    data &&
+      typeof data === 'object' &&
+      (data as any).ok === true &&
+      (data as any).mode === 'SUMMARY',
+  )
 }
 
 const FALLBACK_OFFERING: AvailabilityOffering = {
