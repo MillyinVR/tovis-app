@@ -22,12 +22,10 @@ function clampPct(n: number) {
 }
 
 function isWithinBlockedRange(scheduledFor: Date, startAt: Date, endAt: Date) {
-  // block is [startAt, endAt)
   return scheduledFor >= startAt && scheduledFor < endAt
 }
 
 function weekdayIndexInTimeZone(d: Date, timeZone: string): number {
-  // Returns 0..6 where 0=Sun ... 6=Sat
   const tz = sanitizeTimeZone(timeZone, 'UTC')
   const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(d)
   switch (wd) {
@@ -75,6 +73,7 @@ export async function computeLastMinuteDiscount(args: {
   serviceId: string
   scheduledFor: Date
   basePrice: number
+  timeZone: string // ✅ required truth
 }): Promise<PriceResult> {
   const { professionalId, serviceId, scheduledFor } = args
   const basePrice = Number(args.basePrice)
@@ -83,26 +82,17 @@ export async function computeLastMinuteDiscount(args: {
     return { discountAmount: 0, discountedPrice: 0, appliedPct: 0, window: null, reason: 'Invalid base price' }
   }
 
-  const [settings, pro] = await Promise.all([
-    prisma.lastMinuteSettings.findUnique({
-      where: { professionalId },
-      include: { serviceRules: true, blocks: true },
-    }),
-    prisma.professionalProfile.findUnique({
-      where: { id: professionalId },
-      select: { timeZone: true },
-    }),
-  ])
+  const settings = await prisma.lastMinuteSettings.findUnique({
+    where: { professionalId },
+    include: { serviceRules: true, blocks: true },
+  })
 
-  // If you ever allow last-minute for multi-location, replace this with the service/location tz.
-  const timeZone = sanitizeTimeZone(pro?.timeZone ?? 'UTC', 'UTC')
+  const timeZone = sanitizeTimeZone(args.timeZone, 'UTC')
 
-  // Last-minute off entirely
   if (!settings?.enabled) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: null }
   }
 
-  // On, but discounts off
   if (!settings.discountsEnabled) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: null }
   }
@@ -113,8 +103,7 @@ export async function computeLastMinuteDiscount(args: {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Past time' }
   }
 
-  // Day disables (in PRO timezone)
-  const day = weekdayIndexInTimeZone(scheduledFor, timeZone) // 0 Sun ... 6 Sat
+  const day = weekdayIndexInTimeZone(scheduledFor, timeZone)
   const dayDisabled =
     (day === 1 && settings.disableMon) ||
     (day === 2 && settings.disableTue) ||
@@ -128,34 +117,24 @@ export async function computeLastMinuteDiscount(args: {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Day disabled' }
   }
 
-  // Blocked ranges (instants, UTC-safe)
-  const isBlocked = settings.blocks.some((b) => {
-    const startAt = b.startAt instanceof Date ? b.startAt : new Date(b.startAt as any)
-    const endAt = b.endAt instanceof Date ? b.endAt : new Date(b.endAt as any)
-    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return false
-    return isWithinBlockedRange(scheduledFor, startAt, endAt)
-  })
-
+  const isBlocked = settings.blocks.some((b) => isWithinBlockedRange(scheduledFor, b.startAt, b.endAt))
   if (isBlocked) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Blocked slot' }
   }
 
-  // Service rule: must be enabled
   const rule = settings.serviceRules.find((r) => r.serviceId === serviceId)
   if (rule && rule.enabled === false) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Service disabled' }
   }
 
-  // Min price checks (service overrides global)
-  const globalMin = settings.minPrice != null ? Number(settings.minPrice) : null
-  const serviceMin = rule?.minPrice != null ? Number(rule.minPrice) : null
+  const globalMin = settings.minPrice != null ? Number(settings.minPrice.toString()) : null
+  const serviceMin = rule?.minPrice != null ? Number(rule.minPrice.toString()) : null
   const minRequired = serviceMin ?? globalMin
 
   if (minRequired != null && Number.isFinite(minRequired) && basePrice < minRequired) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: 'Below min price' }
   }
 
-  // Windows
   const hours = ms / (1000 * 60 * 60)
   const sameDayPct = clampPct(settings.windowSameDayPct)
   const within24Pct = clampPct(settings.window24hPct)
@@ -163,7 +142,6 @@ export async function computeLastMinuteDiscount(args: {
   let pct = 0
   let window: LastMinuteWindow = null
 
-  // SAME_DAY must be based on PRO timezone day boundary
   if (sameDayInTimeZone(scheduledFor, now, timeZone)) {
     pct = sameDayPct
     window = pct > 0 ? 'SAME_DAY' : null
@@ -172,7 +150,7 @@ export async function computeLastMinuteDiscount(args: {
     window = pct > 0 ? 'WITHIN_24H' : null
   }
 
-  if (!pct || pct <= 0 || !window) {
+  if (!pct || !window) {
     return { discountAmount: 0, discountedPrice: basePrice, appliedPct: 0, window: null, reason: null }
   }
 

@@ -2,6 +2,8 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { OpeningStatus } from '@prisma/client'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,15 +11,34 @@ function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.trunc(n)))
 }
 
-function weekdayKey(d: Date) {
-  const day = d.getDay()
-  if (day === 0) return 'disableSun'
-  if (day === 1) return 'disableMon'
-  if (day === 2) return 'disableTue'
-  if (day === 3) return 'disableWed'
-  if (day === 4) return 'disableThu'
-  if (day === 5) return 'disableFri'
-  return 'disableSat'
+type DisableKey =
+  | 'disableMon'
+  | 'disableTue'
+  | 'disableWed'
+  | 'disableThu'
+  | 'disableFri'
+  | 'disableSat'
+  | 'disableSun'
+
+function weekdayDisableKeyInTimeZone(d: Date, timeZone: string): DisableKey {
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(d)
+  switch (wd) {
+    case 'Sun':
+      return 'disableSun'
+    case 'Mon':
+      return 'disableMon'
+    case 'Tue':
+      return 'disableTue'
+    case 'Wed':
+      return 'disableWed'
+    case 'Thu':
+      return 'disableThu'
+    case 'Fri':
+      return 'disableFri'
+    default:
+      return 'disableSat'
+  }
 }
 
 export async function GET(req: Request) {
@@ -50,14 +71,13 @@ export async function GET(req: Request) {
 
     const rows = await prisma.lastMinuteOpening.findMany({
       where: {
-        status: 'ACTIVE',
+        status: OpeningStatus.ACTIVE,
         startAt: { gte: now, lte: horizon },
         professional: { lastMinuteSettings: { is: { enabled: true } } },
-        // if offering is attached, require it active
         OR: [{ offeringId: null }, { offering: { is: { isActive: true } } }],
       },
       orderBy: { startAt: 'asc' },
-      take: take * 2,
+      take: take * 2, // grab extra so filtering doesn’t starve the list
       select: {
         id: true,
         startAt: true,
@@ -66,7 +86,20 @@ export async function GET(req: Request) {
         note: true,
         offeringId: true,
         serviceId: true,
+
+        // ✅ single source of truth fields
+        timeZone: true,
+        locationType: true,
+        locationId: true,
+
         service: { select: { name: true } },
+        location: {
+          select: {
+            city: true,
+            state: true,
+            formattedAddress: true,
+          },
+        },
         professional: {
           select: {
             id: true,
@@ -74,8 +107,7 @@ export async function GET(req: Request) {
             handle: true,
             avatarUrl: true,
             professionType: true,
-            location: true, // ✅ from ProfessionalProfile
-            timeZone: true,
+            location: true, // display string
             lastMinuteSettings: {
               select: {
                 disableMon: true,
@@ -87,49 +119,48 @@ export async function GET(req: Request) {
                 disableSun: true,
               },
             },
-            // ✅ also pull primary location details (city/state exist here)
-            locations: {
-              where: { isPrimary: true },
-              take: 1,
-              select: { city: true, state: true, formattedAddress: true },
-            },
           },
         },
       },
     })
 
+    // Filter out openings that fall on a disabled weekday (evaluated in the OPENING timezone)
     const filtered = rows.filter((o) => {
-      const s = o.professional?.lastMinuteSettings
+      const s = o.professional.lastMinuteSettings
       if (!s) return true
-      const key = weekdayKey(new Date(o.startAt))
-      return !(s as any)[key]
+      const key = weekdayDisableKeyInTimeZone(o.startAt, o.timeZone)
+      return !s[key]
     })
 
-    const openings = filtered.slice(0, take).map((o) => {
-      const primaryLoc = o.professional.locations?.[0] ?? null
-      return {
-        id: o.id,
-        startAt: o.startAt,
-        endAt: o.endAt ?? null,
-        discountPct: o.discountPct ?? null,
-        note: o.note ?? null,
-        offeringId: o.offeringId ?? null,
-        serviceId: o.serviceId ?? null,
-        serviceName: o.service?.name ?? null,
-        professional: {
-          id: o.professional.id,
-          businessName: o.professional.businessName ?? null,
-          handle: o.professional.handle ?? null,
-          avatarUrl: o.professional.avatarUrl ?? null,
-          professionType: o.professional.professionType ?? null,
-          timeZone: o.professional.timeZone ?? null,
-          location: o.professional.location ?? null, // display string
-          city: primaryLoc?.city ?? null,
-          state: primaryLoc?.state ?? null,
-          formattedAddress: primaryLoc?.formattedAddress ?? null,
-        },
-      }
-    })
+    const openings = filtered.slice(0, take).map((o) => ({
+      id: o.id,
+      startAt: o.startAt.toISOString(),
+      endAt: o.endAt ? o.endAt.toISOString() : null,
+      discountPct: o.discountPct ?? null,
+      note: o.note ?? null,
+      offeringId: o.offeringId ?? null,
+      serviceId: o.serviceId ?? null,
+      serviceName: o.service?.name ?? null,
+
+      // ✅ truth
+      timeZone: o.timeZone,
+      locationType: o.locationType,
+      locationId: o.locationId,
+
+      professional: {
+        id: o.professional.id,
+        businessName: o.professional.businessName ?? null,
+        handle: o.professional.handle ?? null,
+        avatarUrl: o.professional.avatarUrl ?? null,
+        professionType: o.professional.professionType ?? null,
+        location: o.professional.location ?? null,
+      },
+
+      // ✅ truth location (from ProfessionalLocation)
+      city: o.location.city ?? null,
+      state: o.location.state ?? null,
+      formattedAddress: o.location.formattedAddress ?? null,
+    }))
 
     return jsonOk({ openings })
   } catch (e) {

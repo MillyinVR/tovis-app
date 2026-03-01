@@ -1,35 +1,58 @@
 // app/api/pro/last-minute/rules/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { moneyToFixed2String } from '@/lib/money'
+import { isMoneyString, parseMoney } from '@/lib/money'
+import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function normalizeProId(auth: any): string | null {
-  const id =
-    (typeof auth?.professionalId === 'string' && auth.professionalId.trim()) ||
-    (typeof auth?.proId === 'string' && auth.proId.trim()) ||
-    null
-  return id ? id.trim() : null
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-function moneyFixed2OrNull(v: unknown): string | null {
-  if (v === null || v === undefined) return null
-  if (typeof v === 'string' || typeof v === 'number') return moneyToFixed2String(v)
-  return moneyToFixed2String(v as any)
+async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
+  const raw: unknown = await req.json().catch(() => ({}))
+  return isRecord(raw) ? raw : {}
+}
+
+function hasOwn(obj: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function readBool(obj: Record<string, unknown>, key: string): boolean | undefined {
+  const v = obj[key]
+  return typeof v === 'boolean' ? v : undefined
+}
+
+function readMinPricePatch(obj: Record<string, unknown>): { ok: true; value: Prisma.Decimal | null } | { ok: false; error: string } | null {
+  if (!hasOwn(obj, 'minPrice')) return null
+
+  const v = obj.minPrice
+  if (v === null) return { ok: true, value: null }
+
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (!s || !isMoneyString(s)) return { ok: false, error: 'minPrice must be like 80 or 79.99 (or null).' }
+    return { ok: true, value: parseMoney(s) }
+  }
+
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return { ok: false, error: 'minPrice must be like 80 or 79.99 (or null).' }
+    return { ok: true, value: parseMoney(v) }
+  }
+
+  return { ok: false, error: 'minPrice must be like 80 or 79.99 (or null).' }
 }
 
 export async function PATCH(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
 
-    const professionalId = normalizeProId(auth)
-    if (!professionalId) return jsonFail(401, 'Unauthorized.')
+    const body = await readJsonObject(req)
 
-    const body = (await req.json().catch(() => ({}))) as any
-
-    const serviceId = pickString(body?.serviceId)
+    const serviceId = pickString(body.serviceId)
     if (!serviceId) return jsonFail(400, 'Missing serviceId.')
 
     const settings = await prisma.lastMinuteSettings.upsert({
@@ -39,31 +62,25 @@ export async function PATCH(req: Request) {
       select: { id: true },
     })
 
-    const enabled = typeof body?.enabled === 'boolean' ? body.enabled : undefined
+    const enabled = readBool(body, 'enabled')
+    const minPricePatch = readMinPricePatch(body)
+    if (minPricePatch && !minPricePatch.ok) return jsonFail(400, minPricePatch.error)
 
-    let minPrice: string | null | undefined = undefined
-    if (Object.prototype.hasOwnProperty.call(body, 'minPrice')) {
-      if (body.minPrice === null) {
-        minPrice = null
-      } else {
-        const fixed = moneyFixed2OrNull(body.minPrice)
-        if (fixed == null) return jsonFail(400, 'minPrice must be like 80 or 79.99 (or null).')
-        minPrice = fixed
-      }
+    const createData: Prisma.LastMinuteServiceRuleCreateInput = {
+      settings: { connect: { id: settings.id } },
+      service: { connect: { id: serviceId } },
+      enabled: enabled ?? true,
+      minPrice: minPricePatch ? minPricePatch.value : null,
     }
+
+    const updateData: Prisma.LastMinuteServiceRuleUpdateInput = {}
+    if (enabled !== undefined) updateData.enabled = enabled
+    if (minPricePatch) updateData.minPrice = minPricePatch.value
 
     const rule = await prisma.lastMinuteServiceRule.upsert({
       where: { settingsId_serviceId: { settingsId: settings.id, serviceId } },
-      create: {
-        settingsId: settings.id,
-        serviceId,
-        enabled: enabled ?? true,
-        minPrice: minPrice ?? null,
-      } as any,
-      update: {
-        ...(enabled === undefined ? {} : { enabled }),
-        ...(minPrice === undefined ? {} : { minPrice }),
-      } as any,
+      create: createData,
+      update: updateData,
     })
 
     return jsonOk({ rule }, 200)

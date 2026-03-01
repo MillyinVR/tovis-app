@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { CopyButton } from './_components/CopyButton'
 import { formatShortCode, generateShortCode } from '@/lib/nfcShortCode'
 import type { NfcCardType } from '@prisma/client'
+import type { ReadonlyHeaders } from 'next/dist/server/web/spec-extension/adapters/headers'
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>
 
@@ -18,7 +19,7 @@ function isAbsoluteBaseUrl(input: string) {
   }
 }
 
-function getBaseUrlFromHeaders(h: { get(name: string): string | null }) {
+function getBaseUrlFromHeaders(h: ReadonlyHeaders) {
   const env =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_URL ||
@@ -257,7 +258,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
         </div>
 
         <div className="mt-4 overflow-x-auto rounded-xl border border-neutral-200">
-          <table className="min-w-[980px] w-full border-collapse text-sm">
+          <table className="min-w-245 w-full border-collapse text-sm">
             <thead className="bg-neutral-50 text-left">
               <tr>
                 <th className="px-3 py-3 font-semibold text-neutral-700">Short code</th>

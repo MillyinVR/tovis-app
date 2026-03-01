@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { SupportTicketStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,8 +25,17 @@ function pickStr(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
 
+function parseSupportTicketStatus(v: unknown): SupportTicketStatus | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'OPEN') return SupportTicketStatus.OPEN
+  if (s === 'IN_PROGRESS') return SupportTicketStatus.IN_PROGRESS
+  if (s === 'CLOSED') return SupportTicketStatus.CLOSED
+  return null
+}
+
 export default async function AdminSupportTicketPage(req: Ctx) {
-  const admin = await requireAdmin()
+  await requireAdmin()
+
   const { id } = await getParams(req)
   const ticketId = pickStr(id)
   if (!ticketId) redirect('/admin/support')
@@ -47,16 +57,19 @@ export default async function AdminSupportTicketPage(req: Ctx) {
 
   async function setStatus(formData: FormData) {
     'use server'
+
     const admin = await getCurrentUser().catch(() => null)
     if (!admin || admin.role !== 'ADMIN') redirect('/forbidden')
 
-    const next = String(formData.get('status') ?? '').toUpperCase()
-    if (next !== 'OPEN' && next !== 'IN_PROGRESS' && next !== 'CLOSED') redirect('/admin/support')
+    const nextRaw = String(formData.get('status') ?? '').toUpperCase()
+    if (nextRaw !== 'OPEN' && nextRaw !== 'IN_PROGRESS' && nextRaw !== 'CLOSED') redirect('/admin/support')
+
+    const next = nextRaw as SupportTicketStatus
 
     await prisma.supportTicket.update({
       where: { id: ticketId },
       data: {
-        status: next as any,
+        status: next,
         handledByAdminId: admin.id,
         handledAt: new Date(),
       },

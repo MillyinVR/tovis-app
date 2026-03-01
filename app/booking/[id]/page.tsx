@@ -97,13 +97,6 @@ function decimalToNumber(v: unknown): number | null {
   return null
 }
 
-/**
- * ✅ Receipt display timezone truth:
- * 1) booking.locationTimeZone (snapshot)
- * 2) booking.location.timeZone (booked location)
- * 3) pro.timeZone
- * 4) UTC
- */
 function resolveReceiptTimeZone(args: {
   bookingLocationTimeZone: unknown
   bookedLocationTimeZone: unknown

@@ -1,40 +1,36 @@
 // app/api/pro/last-minute/settings/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { moneyToFixed2String } from '@/lib/money'
+import { Prisma } from '@prisma/client'
+import { parseMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
-function normalizeProId(auth: any): string | null {
-  const id =
-    (typeof auth?.professionalId === 'string' && auth.professionalId.trim()) ||
-    (typeof auth?.proId === 'string' && auth.proId.trim()) ||
-    null
-  return id ? id.trim() : null
-}
-
-function clampPct(v: unknown) {
-  const n = Number(v)
+function clampPct(v: unknown): number | null {
+  const n = typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN
   if (!Number.isFinite(n)) return null
   const x = Math.trunc(n)
   return Math.min(50, Math.max(0, x))
 }
 
-function moneyFixed2OrNull(v: unknown): string | null {
-  if (v === null || v === undefined) return null
-  if (typeof v === 'string' || typeof v === 'number') return moneyToFixed2String(v)
-  // Prisma.Decimal could be here on server; moneyToFixed2String supports it (MoneyInput includes Prisma.Decimal)
-  // but we can't type-narrow without importing Prisma here, so just attempt via "any".
-  return moneyToFixed2String(v as any)
-}
+const DAY_FLAGS = [
+  'disableMon',
+  'disableTue',
+  'disableWed',
+  'disableThu',
+  'disableFri',
+  'disableSat',
+  'disableSun',
+] as const
+
+type DayFlag = (typeof DAY_FLAGS)[number]
 
 export async function GET() {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const professionalId = normalizeProId(auth)
-    if (!professionalId) return jsonFail(401, 'Unauthorized.')
+    const professionalId = auth.professionalId
 
     const settings = await prisma.lastMinuteSettings.upsert({
       where: { professionalId },
@@ -58,50 +54,66 @@ export async function PATCH(req: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const professionalId = normalizeProId(auth)
-    if (!professionalId) return jsonFail(401, 'Unauthorized.')
+    const professionalId = auth.professionalId
+    const body: unknown = await req.json().catch(() => ({}))
 
-    const body = (await req.json().catch(() => ({}))) as any
-    const patch: Record<string, any> = {}
+    // ✅ Separate objects so Prisma UpdateInput unions never leak into CreateInput.
+    const updateData: Prisma.LastMinuteSettingsUpdateInput = {}
+    const createData: Prisma.LastMinuteSettingsUncheckedCreateInput = { professionalId }
 
-    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
-    if (typeof body.discountsEnabled === 'boolean') patch.discountsEnabled = body.discountsEnabled
+    if (typeof (body as { enabled?: unknown }).enabled === 'boolean') {
+      const enabled = (body as { enabled: boolean }).enabled
+      updateData.enabled = enabled
+      createData.enabled = enabled
+    }
 
-    const sameDay = clampPct(body.windowSameDayPct)
-    if (sameDay != null) patch.windowSameDayPct = sameDay
+    if (typeof (body as { discountsEnabled?: unknown }).discountsEnabled === 'boolean') {
+      const discountsEnabled = (body as { discountsEnabled: boolean }).discountsEnabled
+      updateData.discountsEnabled = discountsEnabled
+      createData.discountsEnabled = discountsEnabled
+    }
 
-    const h24 = clampPct(body.window24hPct)
-    if (h24 != null) patch.window24hPct = h24
+    const sameDayPct = clampPct((body as { windowSameDayPct?: unknown }).windowSameDayPct)
+    if (sameDayPct != null) {
+      updateData.windowSameDayPct = sameDayPct
+      createData.windowSameDayPct = sameDayPct
+    }
 
-    // ✅ Money parsing lives in lib/money.ts
+    const within24Pct = clampPct((body as { window24hPct?: unknown }).window24hPct)
+    if (within24Pct != null) {
+      updateData.window24hPct = within24Pct
+      createData.window24hPct = within24Pct
+    }
+
+    // ✅ minPrice: accept null or money-ish; store as Prisma.Decimal
     if (Object.prototype.hasOwnProperty.call(body, 'minPrice')) {
-      if (body.minPrice === null) {
-        patch.minPrice = null
+      const raw = (body as { minPrice?: unknown }).minPrice
+      if (raw === null) {
+        updateData.minPrice = null
+        createData.minPrice = null
       } else {
-        const fixed = moneyFixed2OrNull(body.minPrice)
-        if (fixed == null) return jsonFail(400, 'minPrice must be like 80 or 79.99 (or null).')
-        patch.minPrice = fixed
+        try {
+          const dec: Prisma.Decimal = parseMoney(raw)
+          updateData.minPrice = dec
+          createData.minPrice = dec
+        } catch {
+          return jsonFail(400, 'minPrice must be like 80 or 79.99 (or null).')
+        }
       }
     }
 
-    const dayFlags = [
-      'disableMon',
-      'disableTue',
-      'disableWed',
-      'disableThu',
-      'disableFri',
-      'disableSat',
-      'disableSun',
-    ] as const
-
-    for (const k of dayFlags) {
-      if (typeof body[k] === 'boolean') patch[k] = body[k]
+    for (const k of DAY_FLAGS) {
+      const v = (body as Record<DayFlag, unknown>)[k]
+      if (typeof v === 'boolean') {
+        updateData[k] = v
+        createData[k] = v
+      }
     }
 
     const settings = await prisma.lastMinuteSettings.upsert({
       where: { professionalId },
-      create: { professionalId, ...patch },
-      update: patch,
+      create: createData,
+      update: updateData,
       include: {
         serviceRules: true,
         blocks: { orderBy: { startAt: 'asc' } },

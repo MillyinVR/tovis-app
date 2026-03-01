@@ -146,10 +146,7 @@ function makeClientNotifDedupeKey(bookingId: string) {
   return `client_aftercare:${bookingId}`
 }
 
-/**
- * Appointment/aftercare timezone for DISPLAY ONLY:
- * booking.locationTimeZone > pro.timeZone > UTC
- */
+
 function resolveAftercareTimeZone(args: { bookingLocationTimeZone?: unknown; professionalTimeZone?: unknown }) {
   const bookingTz = typeof args.bookingLocationTimeZone === 'string' ? args.bookingLocationTimeZone.trim() : ''
   if (bookingTz && isValidIanaTimeZone(bookingTz)) return bookingTz

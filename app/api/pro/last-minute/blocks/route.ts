@@ -4,6 +4,10 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function toDateOrNull(v: unknown) {
   const s = pickString(v)
   if (!s) return null
@@ -17,10 +21,12 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const body = (await req.json().catch(() => ({}))) as any
-    const startAt = toDateOrNull(body?.startAt)
-    const endAt = toDateOrNull(body?.endAt)
-    const reason = pickString(body?.reason)
+    const raw = (await req.json().catch(() => null)) as unknown
+    const body = isRecord(raw) ? raw : {}
+
+    const startAt = toDateOrNull(body.startAt)
+    const endAt = toDateOrNull(body.endAt)
+    const reason = pickString(body.reason)
 
     if (!startAt || !endAt) return jsonFail(400, 'Invalid start/end.')
     if (startAt >= endAt) return jsonFail(400, 'Block end must be after start.')
@@ -53,7 +59,7 @@ export async function POST(req: Request) {
     return jsonOk(
       {
         block: {
-          id: String(block.id),
+          id: block.id,
           startAt: block.startAt.toISOString(),
           endAt: block.endAt.toISOString(),
           reason: block.reason ?? null,

@@ -90,7 +90,7 @@ export async function GET(req: Request) {
                 businessName: true,
                 avatarUrl: true,
                 location: true,
-                timeZone: true,
+                timeZone: true, // display only
               },
             },
             service: { select: { id: true, name: true } },
@@ -127,8 +127,6 @@ export async function GET(req: Request) {
             })
           : requestedLocationType
 
-        // We keep price as unknown|null because Prisma Decimal serializes cleanly
-        // through NextResponse.json, and we don’t want any casts here.
         let priceStartingAt: unknown | null = null
         let durationMinutes: number | null = null
 
@@ -144,17 +142,17 @@ export async function GET(req: Request) {
         return {
           id: n.id,
           tier: n.tier,
-          sentAt: n.sentAt,
-          deliveredAt: n.deliveredAt,
-          openedAt: n.openedAt,
-          clickedAt: n.clickedAt,
-          bookedAt: n.bookedAt,
+          sentAt: n.sentAt.toISOString(),
+          deliveredAt: n.deliveredAt ? n.deliveredAt.toISOString() : null,
+          openedAt: n.openedAt ? n.openedAt.toISOString() : null,
+          clickedAt: n.clickedAt ? n.clickedAt.toISOString() : null,
+          bookedAt: n.bookedAt ? n.bookedAt.toISOString() : null,
 
           opening: {
             id: o.id,
             status: o.status,
-            startAt: o.startAt,
-            endAt: o.endAt ?? null,
+            startAt: o.startAt.toISOString(),
+            endAt: o.endAt ? o.endAt.toISOString() : null,
             discountPct: o.discountPct ?? null,
             note: o.note ?? null,
 
@@ -185,7 +183,7 @@ export async function GET(req: Request) {
           },
         }
       })
-      .filter((x): x is NonNullable<typeof x> => Boolean(x))
+      .filter((x): x is NonNullable<typeof x> => x !== null)
 
     return jsonOk({ notifications: normalized })
   } catch (e) {

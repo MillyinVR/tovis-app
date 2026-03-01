@@ -1,17 +1,19 @@
 // app/api/pro/last-minute/route.ts
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType } from '@prisma/client'
+import type { ServiceLocationType, Prisma } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
-import { moneyToFixed2String } from '@/lib/money'
+import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
+import { parseMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
-function normalizeProId(auth: any): string | null {
-  const id =
-    (typeof auth?.professionalId === 'string' && auth.professionalId.trim()) ||
-    (typeof auth?.proId === 'string' && auth.proId.trim()) ||
-    null
-  return id ? id.trim() : null
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
+  const raw: unknown = await req.json().catch(() => ({}))
+  return isRecord(raw) ? raw : {}
 }
 
 function normalizeLocationType(v: unknown): ServiceLocationType {
@@ -19,51 +21,23 @@ function normalizeLocationType(v: unknown): ServiceLocationType {
   return s === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
-function decimalishToNumber(v: unknown): number | null {
-  const fixed = moneyToFixed2String(v as any)
-  if (!fixed) return null
-  const n = Number(fixed)
-  return Number.isFinite(n) ? n : null
-}
-
-function pickBasePrice(args: {
-  locationType: ServiceLocationType
-  offering: { salonPriceStartingAt: unknown | null; mobilePriceStartingAt: unknown | null }
-  serviceMinPrice: unknown
-}) {
-  const offeringPrice =
-    args.locationType === 'MOBILE'
-      ? decimalishToNumber(args.offering.mobilePriceStartingAt)
-      : decimalishToNumber(args.offering.salonPriceStartingAt)
-
-  if (offeringPrice != null) return offeringPrice
-
-  const serviceMin = decimalishToNumber(args.serviceMinPrice)
-  return serviceMin != null ? serviceMin : 0
-}
-
-// Fallback if you haven’t wired the real one yet.
-async function computeLastMinuteDiscount(_args: {
-  professionalId: string
-  serviceId: string
-  startAt: Date
-  basePrice: number
-}) {
-  return { discountPct: 0, discountAmount: 0 }
+function pickBasePriceFromBooking(booking: { subtotalSnapshot: Prisma.Decimal }): number {
+  // subtotalSnapshot is Decimal(10,2) in your schema
+  const n = Number(booking.subtotalSnapshot.toString())
+  return Number.isFinite(n) ? n : 0
 }
 
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
 
-    const professionalId = normalizeProId(auth)
-    if (!professionalId) return jsonFail(401, 'Unauthorized.')
+    const body = await readJsonObject(req)
 
-    const body = (await req.json().catch(() => ({}))) as any
-    const bookingId = pickString(body?.bookingId)
-    const offeringIdOverride = pickString(body?.offeringId)
-    const locationTypeFallback = normalizeLocationType(body?.locationType)
+    const bookingId = pickString(body.bookingId)
+    const offeringIdOverride = pickString(body.offeringId)
+    const locationTypeFallback = normalizeLocationType(body.locationType)
 
     if (!bookingId) return jsonFail(400, 'Missing bookingId.')
 
@@ -76,7 +50,9 @@ export async function POST(req: Request) {
         offeringId: true,
         scheduledFor: true,
         locationType: true,
-        status: true,
+        locationTimeZone: true,
+        subtotalSnapshot: true,
+        discountAmount: true,
       },
     })
 
@@ -84,7 +60,7 @@ export async function POST(req: Request) {
       return jsonFail(404, 'Booking not found.')
     }
 
-    const effectiveLocationType: ServiceLocationType = (booking.locationType as any) ?? locationTypeFallback
+    const effectiveLocationType: ServiceLocationType = booking.locationType ?? locationTypeFallback
 
     const offeringId = booking.offeringId ?? offeringIdOverride
     if (!offeringId) return jsonFail(400, 'Missing offeringId (booking has no offeringId).')
@@ -97,9 +73,6 @@ export async function POST(req: Request) {
         serviceId: true,
         offersInSalon: true,
         offersMobile: true,
-        salonPriceStartingAt: true,
-        mobilePriceStartingAt: true,
-        service: { select: { minPrice: true } },
       },
     })
 
@@ -112,32 +85,41 @@ export async function POST(req: Request) {
       return jsonFail(400, 'This offering is not available as mobile.')
     }
 
-    const basePrice = pickBasePrice({
-      locationType: effectiveLocationType,
-      offering: {
-        salonPriceStartingAt: offering.salonPriceStartingAt,
-        mobilePriceStartingAt: offering.mobilePriceStartingAt,
-      },
-      serviceMinPrice: offering.service.minPrice,
-    })
+    // ✅ Pricing truth for discount is based on booking snapshot (immutable)
+    const basePrice = pickBasePriceFromBooking(booking)
+
+    // ✅ Timezone truth should come from booking.locationTimeZone (snapshot) if present.
+    // If null, computeLastMinuteDiscount will still work but SAME_DAY boundaries may be “UTC-ish”.
+    const tz = typeof booking.locationTimeZone === 'string' ? booking.locationTimeZone.trim() : ''
+    const timeZone = tz || 'UTC'
 
     const discount = await computeLastMinuteDiscount({
       professionalId: offering.professionalId,
       serviceId: offering.serviceId,
-      startAt: booking.scheduledFor,
+      scheduledFor: booking.scheduledFor,
       basePrice,
+      timeZone,
     })
+
+    // ✅ discountAmount stored as Decimal? per schema
+    const discountAmountDecimal = parseMoney(discount.discountAmount)
 
     await prisma.booking.update({
       where: { id: booking.id },
       data: {
-        // Keep as-is; your schema may be Float or Decimal. If Decimal, prisma can usually coerce numeric.
-        discountAmount: discount.discountAmount ? discount.discountAmount : undefined,
-      } as any,
+        discountAmount: discountAmountDecimal,
+      },
       select: { id: true },
     })
 
-    return jsonOk({ bookingId: booking.id, basePrice, discount }, 200)
+    return jsonOk(
+      {
+        bookingId: booking.id,
+        basePrice,
+        discount,
+      },
+      200,
+    )
   } catch (e) {
     console.error('POST /api/pro/last-minute error', e)
     return jsonFail(500, 'Internal server error')

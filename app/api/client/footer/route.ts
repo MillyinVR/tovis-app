@@ -13,7 +13,7 @@ function clampSmallCount(n: number): string | null {
 
 export async function GET() {
   try {
-    const user = await getCurrentUser()
+    const user = await getCurrentUser().catch(() => null)
     if (!user || user.role !== Role.CLIENT || !user.clientProfile?.id) {
       return jsonFail(401, 'Unauthorized')
     }
@@ -27,9 +27,6 @@ export async function GET() {
     })
 
     const inboxBadge = clampSmallCount(unreadAftercareCount)
-
-    // Prefer omission over null (cleaner contract), but still stable for callers:
-    // if you already have UI expecting null, change this back to `jsonOk({ inboxBadge })`.
     return inboxBadge ? jsonOk({ inboxBadge }) : jsonOk({})
   } catch (err: unknown) {
     console.error('GET /api/client/footer error', err)
