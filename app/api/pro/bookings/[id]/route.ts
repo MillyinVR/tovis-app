@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToFixed2String } from '@/lib/money'
 import { sanitizeTimeZone, isValidIanaTimeZone, getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import { BookingStatus, ClientNotificationType, Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -170,6 +171,33 @@ async function resolveBookingTimeZone(args: {
 }
 
 /* ---------------------------------------------
+   Client notification helper
+   FIX #1: tx is Prisma.TransactionClient (not PrismaClient)
+   --------------------------------------------- */
+
+async function createClientNotification(args: {
+  tx: Prisma.TransactionClient
+  clientId: string
+  bookingId: string
+  type: ClientNotificationType
+  title: string
+  body: string
+  dedupeKey: string
+}) {
+  const { tx, clientId, bookingId, type, title, body, dedupeKey } = args
+  await tx.clientNotification.create({
+    data: {
+      clientId,
+      bookingId,
+      type,
+      title,
+      body,
+      dedupeKey,
+    },
+  })
+}
+
+/* ---------------------------------------------
    GET
    --------------------------------------------- */
 
@@ -277,7 +305,12 @@ export async function GET(_req: Request, { params }: Ctx) {
           ? o.mobileDurationMinutes ?? o.service.defaultDurationMinutes
           : o.salonDurationMinutes ?? o.service.defaultDurationMinutes
 
-      return { id: String(o.service.id), name: o.service.name, offeringId: String(o.id), durationMinutes: typeof dur === 'number' ? dur : null }
+      return {
+        id: String(o.service.id),
+        name: o.service.name,
+        offeringId: String(o.id),
+        durationMinutes: typeof dur === 'number' ? dur : null,
+      }
     })
 
     return NextResponse.json(
@@ -292,7 +325,7 @@ export async function GET(_req: Request, { params }: Ctx) {
           bufferMinutes: Math.max(0, bufferMinutes),
           durationMinutes,
           totalDurationMinutes: durationMinutes,
-          subtotalSnapshot: moneyToFixed2String(booking.subtotalSnapshot ?? (computedSubtotal as any)),
+          subtotalSnapshot: moneyToFixed2String(booking.subtotalSnapshot ?? computedSubtotal),
           client: { fullName, email: booking.client?.user?.email ?? null, phone: booking.client?.phone ?? null },
           timeZone: tz,
           serviceItems: items.map((i) => ({
@@ -396,7 +429,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
       if (!existing || existing.professionalId !== user.professionalProfile!.id) throw new Error('NOT_FOUND')
 
       // If already cancelled, allow idempotent cancel but block edits
-      if (String(existing.status) === 'CANCELLED') {
+      if (existing.status === BookingStatus.CANCELLED) {
         if (nextStatus === 'CANCELLED') {
           return {
             id: existing.id,
@@ -421,24 +454,22 @@ export async function PATCH(req: Request, { params }: Ctx) {
         const updated = await tx.booking.update({
           where: { id: existing.id },
           data: {
-            status: 'CANCELLED' as any,
-            // Optional: could set finishedAt too, but your session logic only checks finishedAt null.
-            finishedAt: new Date() as any,
-          } as any,
+            status: BookingStatus.CANCELLED,
+            finishedAt: new Date(),
+          },
           select: { id: true, status: true, scheduledFor: true, bufferMinutes: true, totalDurationMinutes: true },
         })
 
         if (notifyClient) {
           try {
-            await tx.clientNotification.create({
-              data: {
-                clientId: existing.clientId,
-                type: 'BOOKING_UPDATE' as any,
-                title: 'Appointment cancelled',
-                body: 'Your appointment was cancelled.',
-                bookingId: updated.id,
-                dedupeKey: `BOOKING_CANCELLED:${updated.id}:${new Date(updated.scheduledFor).toISOString()}`,
-              } as any,
+            await createClientNotification({
+              tx,
+              clientId: existing.clientId,
+              bookingId: updated.id,
+              type: ClientNotificationType.BOOKING_CANCELLED,
+              title: 'Appointment cancelled',
+              body: 'Your appointment was cancelled.',
+              dedupeKey: `BOOKING_CANCELLED:${updated.id}:${new Date(updated.scheduledFor).toISOString()}`,
             })
           } catch (e) {
             console.error('Client notification failed (cancel):', e)
@@ -506,7 +537,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
               bookingId: existing.id,
               serviceId,
               offeringId,
-              priceSnapshot: price as any,
+              priceSnapshot: price,
               durationMinutesSnapshot: clamp(snap15(dur), 15, 12 * 60),
               sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Number(raw.sortOrder) : idx,
             },
@@ -550,13 +581,13 @@ export async function PATCH(req: Request, { params }: Ctx) {
           professionalId: existing.professionalId,
           id: { not: existing.id },
           scheduledFor: { gte: windowStart, lte: windowEnd },
-          NOT: { status: 'CANCELLED' as any },
+          NOT: { status: BookingStatus.CANCELLED },
         },
         select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true },
         take: 200,
       })
 
-      const hasConflict = others.some((b: any) => {
+      const hasConflict = others.some((b) => {
         const bDur = Number(b.totalDurationMinutes ?? 0) > 0 ? Number(b.totalDurationMinutes) : 60
         const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
         if (!Number.isFinite(bDur) || bDur <= 0) return false
@@ -568,7 +599,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
       if (hasConflict) throw new Error('CONFLICT')
 
       // Apply ACCEPTED status if requested (idempotent)
-      const statusUpdate = nextStatus === 'ACCEPTED' ? { status: 'ACCEPTED' as any } : {}
+      const statusUpdate = nextStatus === 'ACCEPTED' ? { status: BookingStatus.ACCEPTED } : {}
 
       const updated = await tx.booking.update({
         where: { id: existing.id },
@@ -577,28 +608,28 @@ export async function PATCH(req: Request, { params }: Ctx) {
           scheduledFor: finalStart,
           bufferMinutes: finalBuffer,
           totalDurationMinutes: finalDuration,
-          subtotalSnapshot: computedSubtotal as any,
-        } as any,
+          subtotalSnapshot: computedSubtotal,
+        },
         select: { id: true, scheduledFor: true, bufferMinutes: true, totalDurationMinutes: true, status: true },
       })
 
       if (notifyClient) {
         try {
-          const title = nextStatus === 'ACCEPTED' ? 'Appointment confirmed' : 'Appointment updated'
-          const bodyText =
-            nextStatus === 'ACCEPTED'
-              ? 'Your appointment has been confirmed.'
-              : 'Your appointment details were updated.'
+          const isConfirm = nextStatus === 'ACCEPTED'
+          const title = isConfirm ? 'Appointment confirmed' : 'Appointment updated'
+          const bodyText = isConfirm ? 'Your appointment has been confirmed.' : 'Your appointment details were updated.'
 
-          await tx.clientNotification.create({
-            data: {
-              clientId: existing.clientId,
-              type: 'BOOKING_UPDATE' as any,
-              title,
-              body: bodyText,
-              bookingId: updated.id,
-              dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
-            } as any,
+          // FIX #2: use real enum values (no BOOKING_UPDATED)
+          const type = isConfirm ? ClientNotificationType.BOOKING_CONFIRMED : ClientNotificationType.BOOKING_RESCHEDULED
+
+          await createClientNotification({
+            tx,
+            clientId: existing.clientId,
+            bookingId: updated.id,
+            type,
+            title,
+            body: bodyText,
+            dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
           })
         } catch (e) {
           console.error('Client notification failed (booking update):', e)
