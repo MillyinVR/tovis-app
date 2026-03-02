@@ -13,20 +13,12 @@ import RightActionRail from './RightActionRail'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
 import type { FeedItem, UiCategory, UiComment } from './lookTypes'
 
-type LooksCategoriesResponse = {
-  categories?: Array<Partial<UiCategory> | null>
-}
-
-type ViewerLocation = {
-  label: string
-  placeId: string | null
-  lat: number
-  lng: number
-  radiusMiles: number
-  updatedAtMs: number
-}
-
-const STORAGE_KEY = 'tovis.viewerLocation.v1'
+import {
+  loadViewerLocation,
+  subscribeViewerLocation,
+  viewerLocationToDrawerContextFields,
+  type ViewerLocation,
+} from '@/lib/viewerLocation'
 
 const ALL_TAB: UiCategory = { name: 'The Looks', slug: 'all' }
 
@@ -36,15 +28,6 @@ function isRecord(x: unknown): x is Record<string, unknown> {
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null
-}
-
-function pickNumber(x: unknown): number | null {
-  return typeof x === 'number' && Number.isFinite(x) ? x : null
-}
-
-function clampInt(n: number, min: number, max: number) {
-  const x = Math.trunc(n)
-  return Math.min(Math.max(x, min), max)
 }
 
 function currentPathWithQuery() {
@@ -90,9 +73,8 @@ function parseCategories(raw: unknown): UiCategory[] {
 
 /**
  * NOTE:
- * The /api/looks contract is internal and already matches FeedItem.
- * We keep runtime validation minimal and avoid `any`.
- * This is a *local, justified* assertion at a module boundary.
+ * /api/looks is internal and already matches FeedItem.
+ * This is a local, justified boundary assertion.
  */
 function parseFeedItems(raw: unknown): FeedItem[] {
   if (!isRecord(raw)) return []
@@ -129,36 +111,6 @@ const FUTURE_SELF_LINES = ['Wake up ready.', 'Low-maintenance glow.', 'Future-yo
 const FOOTER_HEIGHT = UI_SIZES.footerHeight
 const RIGHT_RAIL_BOTTOM = UI_SIZES.footerHeight + UI_SIZES.rightRailBottomOffset
 
-function loadViewerLocation(): ViewerLocation | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    if (!isRecord(parsed)) return null
-
-    const label = pickString(parsed.label)
-    const lat = pickNumber(parsed.lat)
-    const lng = pickNumber(parsed.lng)
-    const radiusMiles = pickNumber(parsed.radiusMiles)
-    const updatedAtMs = pickNumber(parsed.updatedAtMs)
-    const placeId = parsed.placeId == null ? null : pickString(parsed.placeId)
-
-    if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return null
-
-    return {
-      label,
-      lat,
-      lng,
-      radiusMiles: clampInt(radiusMiles, 5, 50),
-      updatedAtMs,
-      placeId: placeId ?? null,
-    }
-  } catch {
-    return null
-  }
-}
-
 function getNavigatorShare() {
   if (typeof navigator === 'undefined') return null
   const n: unknown = navigator
@@ -174,21 +126,17 @@ export default function LooksFeed() {
   const [loading, setLoading] = useState(true)
   const [feedError, setFeedError] = useState<string | null>(null)
 
-  // categories
   const [cats, setCats] = useState<UiCategory[]>([ALL_TAB])
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>(ALL_TAB.slug)
 
-  // top bar props (strings only)
   const categoriesForTopBar = useMemo(() => cats.map((c) => c.name), [cats])
   const activeCategoryName = useMemo(
     () => cats.find((c) => c.slug === activeCategorySlug)?.name ?? ALL_TAB.name,
     [cats, activeCategorySlug],
   )
 
-  // search
   const [query, setQuery] = useState('')
 
-  // comments
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
   const [comments, setComments] = useState<UiComment[]>([])
   const [commentsLoading, setCommentsLoading] = useState(false)
@@ -196,54 +144,22 @@ export default function LooksFeed() {
   const [commentError, setCommentError] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
 
-  // likes + double tap tracking
   const likeInFlight = useRef<Record<string, boolean>>({})
   const lastTapRef = useRef<Record<string, number>>({})
 
-  // feed viewport
   const feedScrollRef = useRef<HTMLDivElement | null>(null)
 
-  // availability drawer
   const [availabilityOpen, setAvailabilityOpen] = useState(false)
   const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(null)
 
-  // active slide index (for future autoplay)
   const [activeIndex, setActiveIndex] = useState(0)
 
-  // viewer location (from SearchClient persistence)
+  // ✅ viewer location (single source of truth)
   const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
 
   useEffect(() => {
     setViewerLoc(loadViewerLocation())
-
-    const onEvt = (e: Event) => {
-      const ce = e as CustomEvent<unknown>
-      const d = ce.detail
-      if (d == null) {
-        setViewerLoc(null)
-        return
-      }
-      if (!isRecord(d)) return
-      const label = pickString(d.label)
-      const lat = pickNumber(d.lat)
-      const lng = pickNumber(d.lng)
-      const radiusMiles = pickNumber(d.radiusMiles)
-      const updatedAtMs = pickNumber(d.updatedAtMs)
-      const placeId = d.placeId == null ? null : pickString(d.placeId)
-
-      if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return
-      setViewerLoc({
-        label,
-        lat,
-        lng,
-        radiusMiles: clampInt(radiusMiles, 5, 50),
-        updatedAtMs,
-        placeId: placeId ?? null,
-      })
-    }
-
-    window.addEventListener('tovis:viewerLocation', onEvt as EventListener)
-    return () => window.removeEventListener('tovis:viewerLocation', onEvt as EventListener)
+    return subscribeViewerLocation(setViewerLoc)
   }, [])
 
   const redirectToLogin = useCallback(
@@ -319,7 +235,6 @@ export default function LooksFeed() {
     snapToIndex(0)
   }
 
-  // IntersectionObserver: active slide
   useEffect(() => {
     const el = feedScrollRef.current
     if (!el) return
@@ -387,28 +302,18 @@ export default function LooksFeed() {
           return
         }
 
-        const serverLiked =
-          isRecord(raw) && typeof raw.liked === 'boolean'
-            ? raw.liked
-            : !beforeLiked
-
+        const serverLiked = isRecord(raw) && typeof raw.liked === 'boolean' ? raw.liked : !beforeLiked
         const serverCount =
           isRecord(raw) && typeof raw.likeCount === 'number'
             ? raw.likeCount
-            : isRecord(raw) && typeof raw.likes === 'number'
-              ? raw.likes
-              : isRecord(raw) && isRecord(raw._count) && typeof raw._count.likes === 'number'
-                ? raw._count.likes
-                : undefined
+            : isRecord(raw) && isRecord(raw._count) && typeof raw._count.likes === 'number'
+              ? raw._count.likes
+              : undefined
 
         setItems((prev) =>
           prev.map((m) =>
             m.id === mediaId
-              ? {
-                  ...m,
-                  viewerLiked: serverLiked,
-                  _count: { ...m._count, likes: typeof serverCount === 'number' ? serverCount : m._count.likes },
-                }
+              ? { ...m, viewerLiked: serverLiked, _count: { ...m._count, likes: typeof serverCount === 'number' ? serverCount : m._count.likes } }
               : m,
           ),
         )
@@ -486,9 +391,7 @@ export default function LooksFeed() {
 
     setComments((prev) => [optimistic, ...prev])
     setCommentText('')
-    setItems((prev) =>
-      prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: m._count.comments + 1 } } : m)),
-    )
+    setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: m._count.comments + 1 } } : m)))
 
     try {
       const res = await fetch(`/api/looks/${mediaId}/comments`, {
@@ -501,26 +404,14 @@ export default function LooksFeed() {
 
       if (isGuestBlocked(res.status)) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
-        setItems((prev) =>
-          prev.map((m) =>
-            m.id === mediaId
-              ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } }
-              : m,
-          ),
-        )
+        setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)))
         redirectToLogin('comment')
         return
       }
 
       if (!res.ok) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
-        setItems((prev) =>
-          prev.map((m) =>
-            m.id === mediaId
-              ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } }
-              : m,
-          ),
-        )
+        setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)))
         const msg = isRecord(raw) ? pickString(raw.error) : null
         setCommentError(msg ?? 'Failed to post comment')
         return
@@ -529,13 +420,7 @@ export default function LooksFeed() {
       await openCommentsDrawer(mediaId)
     } catch (e: unknown) {
       setComments((prev) => prev.filter((c) => c.id !== tempId))
-      setItems((prev) =>
-        prev.map((m) =>
-          m.id === mediaId
-            ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } }
-            : m,
-        ),
-      )
+      setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)))
       setCommentError(e instanceof Error ? e.message : 'Failed to post comment')
     } finally {
       setPosting(false)
@@ -544,53 +429,26 @@ export default function LooksFeed() {
 
   const closeAvailability = useCallback(() => {
     setAvailabilityOpen(false)
-    // let drawer animate closed before clearing context
     window.setTimeout(() => setDrawerCtx(null), 150)
   }, [])
 
-  function readViewerLocFromStorage():
-  | { lat: number; lng: number; radiusMiles: number | null; placeId: string | null }
-  | null {
-  try {
-    if (typeof window === 'undefined') return null
-    const raw = window.localStorage.getItem('tovis.viewerLocation')
-    if (!raw) return null
-    const j = JSON.parse(raw) as { lat?: unknown; lng?: unknown; radiusMiles?: unknown; placeId?: unknown }
-    const lat = typeof j.lat === 'number' && Number.isFinite(j.lat) ? j.lat : null
-    const lng = typeof j.lng === 'number' && Number.isFinite(j.lng) ? j.lng : null
-    if (lat == null || lng == null) return null
-    const radiusMiles = typeof j.radiusMiles === 'number' && Number.isFinite(j.radiusMiles) ? j.radiusMiles : null
-    const placeId = typeof j.placeId === 'string' && j.placeId.trim() ? j.placeId.trim() : null
-    return { lat, lng, radiusMiles, placeId }
-  } catch {
-    return null
-  }
-}
+  const openAvailabilityFor = useCallback(
+    (item: FeedItem) => {
+      if (!item.professional?.id) return
 
-function openAvailabilityFor(item: FeedItem) {
-  if (!item.professional?.id) return
+      const ctx: AvailabilityDrawerContext = {
+        mediaId: item.id,
+        professionalId: item.professional.id,
+        serviceId: item.serviceId ?? null,
+        source: 'DISCOVERY',
+        ...viewerLocationToDrawerContextFields(viewerLoc),
+      }
 
-  const viewer = readViewerLocFromStorage()
-
-  const ctx: AvailabilityDrawerContext = {
-    mediaId: item.id,
-    professionalId: item.professional.id,
-    serviceId: item.serviceId ?? null,
-    source: 'DISCOVERY',
-
-    ...(viewer
-      ? {
-          viewerLat: viewer.lat,
-          viewerLng: viewer.lng,
-          viewerRadiusMiles: viewer.radiusMiles,
-          viewerPlaceId: viewer.placeId,
-        }
-      : {}),
-  }
-
-  setDrawerCtx(ctx)
-  setAvailabilityOpen(true)
-}
+      setDrawerCtx(ctx)
+      setAvailabilityOpen(true)
+    },
+    [viewerLoc],
+  )
 
   const shareLook = useCallback(async (item: FeedItem) => {
     if (typeof window === 'undefined') return
@@ -599,11 +457,7 @@ function openAvailabilityFor(item: FeedItem) {
     try {
       const share = getNavigatorShare()
       if (share) {
-        await share({
-          title: 'TOVIS Look',
-          text: item.caption ? item.caption.slice(0, 120) : undefined,
-          url,
-        })
+        await share({ title: 'TOVIS Look', text: item.caption ? item.caption.slice(0, 120) : undefined, url })
         return
       }
 
@@ -618,7 +472,6 @@ function openAvailabilityFor(item: FeedItem) {
     }
   }, [])
 
-  // Branding copy
   if (loading) return <div className="p-3 text-textSecondary">Loading Looks…</div>
   if (feedError) return <div className="p-3 text-toneDanger">{feedError}</div>
   if (!items.length) return <div className="p-3 text-textSecondary">No Looks yet. This is where the glow-ups will live.</div>
@@ -627,10 +480,7 @@ function openAvailabilityFor(item: FeedItem) {
 
   return (
     <>
-      <div
-        className="bg-bgPrimary"
-        style={{ height: FEED_VIEWPORT_HEIGHT, width: '100%', overflow: 'hidden', position: 'relative' }}
-      >
+      <div className="bg-bgPrimary" style={{ height: FEED_VIEWPORT_HEIGHT, width: '100%', overflow: 'hidden', position: 'relative' }}>
         <LooksTopBar
           categories={categoriesForTopBar}
           activeCategory={activeCategoryName}
@@ -639,11 +489,7 @@ function openAvailabilityFor(item: FeedItem) {
           setQuery={setQuery}
         />
 
-        <div
-          ref={feedScrollRef}
-          className="looksNoScrollbar h-full overflow-y-auto overscroll-contain"
-          style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}
-        >
+        <div ref={feedScrollRef} className="looksNoScrollbar h-full overflow-y-auto overscroll-contain" style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}>
           {items.map((m, idx) => {
             const signal = BOOKING_SIGNALS[hashStringToIndex(m.id, BOOKING_SIGNALS.length)]
             const futureSelf = FUTURE_SELF_LINES[hashStringToIndex(m.id + '_future', FUTURE_SELF_LINES.length)]
@@ -651,11 +497,7 @@ function openAvailabilityFor(item: FeedItem) {
 
             const rightRail = (
               <RightActionRail
-                pro={
-                  m.professional
-                    ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null }
-                    : null
-                }
+                pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null } : null}
                 viewerLiked={m.viewerLiked}
                 likeCount={m._count.likes}
                 commentCount={m._count.comments}

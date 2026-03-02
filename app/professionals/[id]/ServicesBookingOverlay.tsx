@@ -4,6 +4,7 @@
 import * as React from 'react'
 import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer'
 import type { DrawerContext } from '@/app/(main)/booking/AvailabilityDrawer/types'
+import { loadViewerLocation, viewerLocationToDrawerContextFields } from '@/lib/viewerLocation'
 
 type UiOffering = {
   id: string // offeringId
@@ -26,18 +27,20 @@ export default function ServicesBookingOverlay({
 
   const close = React.useCallback(() => {
     setOpen(false)
-    // let drawer animate closed before nuking context (prevents UI flicker in some drawers)
     window.setTimeout(() => setCtx(null), 150)
   }, [])
 
   const openForOffering = React.useCallback(
     (off: UiOffering) => {
+      const viewer = loadViewerLocation()
+
       const next: DrawerContext = {
         professionalId,
         serviceId: off.serviceId,
         offeringId: off.id,
         mediaId: null,
         source: 'REQUESTED',
+        ...viewerLocationToDrawerContextFields(viewer),
       }
 
       setCtx(next)
@@ -100,7 +103,6 @@ export default function ServicesBookingOverlay({
         ))}
       </div>
 
-      {/* Render drawer only when context exists */}
       {ctx ? <AvailabilityDrawer open={open} onClose={close} context={ctx} /> : null}
     </>
   )

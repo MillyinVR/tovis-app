@@ -1,8 +1,20 @@
 // app/(main)/search/SearchClient.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { Search, MapPin, X, LocateFixed } from 'lucide-react'
+import Link from 'next/link'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LocateFixed, MapPin, Search, X } from 'lucide-react'
+
+import {
+  VIEWER_RADIUS_DEFAULT_MILES,
+  VIEWER_RADIUS_MAX_MILES,
+  VIEWER_RADIUS_MIN_MILES,
+  clearViewerLocation,
+  loadViewerLocation,
+  setViewerLocation,
+  subscribeViewerLocation,
+  type ViewerLocation,
+} from '@/lib/viewerLocation'
 
 type Tab = 'PROS' | 'SERVICES'
 
@@ -38,17 +50,6 @@ type PlacePrediction = {
   mainText: string
   secondaryText: string
 }
-
-type ViewerLocation = {
-  label: string
-  placeId: string | null
-  lat: number
-  lng: number
-  radiusMiles: number
-  updatedAtMs: number
-}
-
-const STORAGE_KEY = 'tovis.viewerLocation.v1'
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
@@ -89,15 +90,10 @@ function parsePredictions(raw: unknown): PlacePrediction[] {
     if (!isRecord(p)) continue
     const placeId = pickString(p.placeId)
     const description = pickString(p.description)
-    const mainText = pickString(p.mainText)
-    const secondaryText = pickString(p.secondaryText)
+    const mainText = pickString(p.mainText) ?? (description ? description.split(',')[0]?.trim() : null)
+    const secondaryText = pickString(p.secondaryText) ?? ''
     if (!placeId || !description || !mainText) continue
-    out.push({
-      placeId,
-      description,
-      mainText,
-      secondaryText: secondaryText ?? '',
-    })
+    out.push({ placeId, description, mainText, secondaryText })
   }
   return out
 }
@@ -129,20 +125,20 @@ function parseSearchResult(raw: unknown): SearchResult {
       const id = pickString(row.id)
       if (!id) continue
 
-      const primaryLocRaw = row.primaryLocation
       let primaryLocation: SearchResult['pros'][number]['primaryLocation'] = null
-      if (isRecord(primaryLocRaw)) {
-        const plId = pickString(primaryLocRaw.id)
+      const pl = row.primaryLocation
+      if (isRecord(pl)) {
+        const plId = pickString(pl.id)
         if (plId) {
           primaryLocation = {
             id: plId,
-            formattedAddress: pickString(primaryLocRaw.formattedAddress),
-            city: pickString(primaryLocRaw.city),
-            state: pickString(primaryLocRaw.state),
-            timeZone: pickString(primaryLocRaw.timeZone),
-            lat: pickNumber(primaryLocRaw.lat),
-            lng: pickNumber(primaryLocRaw.lng),
-            placeId: pickString(primaryLocRaw.placeId),
+            formattedAddress: pickString(pl.formattedAddress),
+            city: pickString(pl.city),
+            state: pickString(pl.state),
+            timeZone: pickString(pl.timeZone),
+            lat: pickNumber(pl.lat),
+            lng: pickNumber(pl.lng),
+            placeId: pickString(pl.placeId),
           }
         }
       }
@@ -187,57 +183,11 @@ function buildDirectionsHref(args: { placeId?: string | null; lat?: number | nul
   return null
 }
 
-function saveViewerLocation(v: ViewerLocation | null) {
-  if (typeof window === 'undefined') return
-  try {
-    if (!v) {
-      window.localStorage.removeItem(STORAGE_KEY)
-      window.dispatchEvent(new CustomEvent('tovis:viewerLocation', { detail: null }))
-      return
-    }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(v))
-    window.dispatchEvent(new CustomEvent('tovis:viewerLocation', { detail: v }))
-  } catch {
-    // ignore
-  }
-}
-
-function loadViewerLocation(): ViewerLocation | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    if (!isRecord(parsed)) return null
-
-    const label = pickString(parsed.label)
-    const lat = pickNumber(parsed.lat)
-    const lng = pickNumber(parsed.lng)
-    const radiusMiles = pickNumber(parsed.radiusMiles)
-    const updatedAtMs = pickNumber(parsed.updatedAtMs)
-    const placeId = parsed.placeId == null ? null : pickString(parsed.placeId)
-
-    if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return null
-
-    return {
-      label,
-      lat,
-      lng,
-      radiusMiles: clampInt(radiusMiles, 5, 50),
-      updatedAtMs,
-      placeId: placeId ?? null,
-    }
-  } catch {
-    return null
-  }
-}
-
 function canUseGeolocation() {
   return typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
 }
 
 function getSessionToken() {
-  // Safe client-only UUID-ish token
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   } catch {
@@ -252,20 +202,16 @@ export default function SearchClient() {
   // query text
   const [q, setQ] = useState('')
 
-  // location search (google autocomplete)
+  // viewer location (canonical, from /lib/viewerLocation)
+  const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
+  const [radiusMiles, setRadiusMiles] = useState<number>(VIEWER_RADIUS_DEFAULT_MILES)
+
+  // location panel + autocomplete
   const [locOpen, setLocOpen] = useState(false)
   const [locQuery, setLocQuery] = useState('')
   const [predictions, setPredictions] = useState<PlacePrediction[]>([])
   const [predLoading, setPredLoading] = useState(false)
   const [locError, setLocError] = useState<string | null>(null)
-
-  // selected location (lat/lng bias)
-  const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null)
-  const [selectedLat, setSelectedLat] = useState<number | null>(null)
-  const [selectedLng, setSelectedLng] = useState<number | null>(null)
-
-  const [radiusMiles, setRadiusMiles] = useState(15)
 
   // results
   const [loading, setLoading] = useState(false)
@@ -275,35 +221,30 @@ export default function SearchClient() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const predAbortRef = useRef<AbortController | null>(null)
   const searchAbortRef = useRef<AbortController | null>(null)
+  const placesSessionTokenRef = useRef<string | null>(null)
 
-  // Hydrate saved location on mount
+  // hydrate + subscribe to changes (cross-tab + other screens)
   useEffect(() => {
-    const saved = loadViewerLocation()
-    if (!saved) return
-    setSelectedLabel(saved.label)
-    setSelectedPlaceId(saved.placeId)
-    setSelectedLat(saved.lat)
-    setSelectedLng(saved.lng)
-    setRadiusMiles(clampInt(saved.radiusMiles, 5, 50))
+    const initial = loadViewerLocation()
+    setViewerLoc(initial)
+    if (initial) setRadiusMiles(clampInt(initial.radiusMiles, VIEWER_RADIUS_MIN_MILES, VIEWER_RADIUS_MAX_MILES))
+
+    return subscribeViewerLocation((v) => {
+      setViewerLoc(v)
+      if (v) setRadiusMiles(clampInt(v.radiusMiles, VIEWER_RADIUS_MIN_MILES, VIEWER_RADIUS_MAX_MILES))
+    })
   }, [])
 
-  // Persist viewer location whenever it changes (including radius)
+  // keep session token stable while location panel is open
   useEffect(() => {
-    if (selectedLat == null || selectedLng == null || !selectedLabel) {
-      saveViewerLocation(null)
+    if (!locOpen) {
+      placesSessionTokenRef.current = null
       return
     }
-    saveViewerLocation({
-      label: selectedLabel,
-      placeId: selectedPlaceId,
-      lat: selectedLat,
-      lng: selectedLng,
-      radiusMiles: clampInt(radiusMiles, 5, 50),
-      updatedAtMs: Date.now(),
-    })
-  }, [selectedLabel, selectedPlaceId, selectedLat, selectedLng, radiusMiles])
+    placesSessionTokenRef.current = getSessionToken()
+  }, [locOpen])
 
-  // Close location panel on Escape
+  // close location panel on Escape
   useEffect(() => {
     if (!locOpen) return
     const onKey = (e: KeyboardEvent) => {
@@ -355,15 +296,16 @@ export default function SearchClient() {
         const controller = new AbortController()
         predAbortRef.current = controller
 
-        const sessionToken = getSessionToken()
+        const sessionToken = placesSessionTokenRef.current ?? getSessionToken()
 
-        const qs = new URLSearchParams({
-          input,
-          sessionToken,
-          ...(selectedLat != null && selectedLng != null
-            ? { lat: String(selectedLat), lng: String(selectedLng), radiusMeters: String(Math.round(radiusMiles * 1609.34)) }
-            : {}),
-        })
+        const qs = new URLSearchParams({ input, sessionToken })
+
+        // optional bias: current viewerLoc if present
+        if (viewerLoc) {
+          qs.set('lat', String(viewerLoc.lat))
+          qs.set('lng', String(viewerLoc.lng))
+          qs.set('radiusMeters', String(Math.round(radiusMiles * 1609.34)))
+        }
 
         const res = await fetch(`/api/google/places/autocomplete?${qs.toString()}`, {
           cache: 'no-store',
@@ -387,58 +329,61 @@ export default function SearchClient() {
       }
     }, 180)
 
-    return () => {
-      clearPredDebounce()
-    }
-  }, [locOpen, locQuery, radiusMiles, selectedLat, selectedLng, clearPredDebounce, clearPredRequest])
+    return () => clearPredDebounce()
+  }, [locOpen, locQuery, viewerLoc, radiusMiles, clearPredDebounce, clearPredRequest])
 
-  async function choosePrediction(p: PlacePrediction) {
-    try {
-      setPredLoading(true)
-      setLocError(null)
+  const choosePrediction = useCallback(
+    async (p: PlacePrediction) => {
+      try {
+        setPredLoading(true)
+        setLocError(null)
 
-      const sessionToken = getSessionToken()
-      const res = await fetch(
-        `/api/google/places/details?placeId=${encodeURIComponent(p.placeId)}&sessionToken=${encodeURIComponent(sessionToken)}`,
-        { cache: 'no-store', headers: { Accept: 'application/json' } },
-      )
+        const sessionToken = placesSessionTokenRef.current ?? getSessionToken()
 
-      const raw = await safeJson(res)
-      if (!res.ok) {
-        const msg = isRecord(raw) ? pickString(raw.error) : null
-        throw new Error(msg || 'Failed to load place details')
+        const res = await fetch(
+          `/api/google/places/details?placeId=${encodeURIComponent(p.placeId)}&sessionToken=${encodeURIComponent(sessionToken)}`,
+          { cache: 'no-store', headers: { Accept: 'application/json' } },
+        )
+
+        const raw = await safeJson(res)
+        if (!res.ok) {
+          const msg = isRecord(raw) ? pickString(raw.error) : null
+          throw new Error(msg || 'Failed to load place details')
+        }
+
+        const place = parsePlaceDetails(raw)
+        if (!place) throw new Error('Place details malformed.')
+
+        // canonical write (storage + event)
+        setViewerLocation({
+          label: p.description,
+          placeId: place.placeId,
+          lat: place.lat,
+          lng: place.lng,
+          radiusMiles,
+        })
+
+        // ✅ hard-close the panel + suggestions
+        setLocOpen(false)
+        setLocQuery('')
+        setPredictions([])
+      } catch (e: unknown) {
+        setLocError(e instanceof Error ? e.message : 'Failed to load place details.')
+      } finally {
+        setPredLoading(false)
       }
+    },
+    [radiusMiles],
+  )
 
-      const place = parsePlaceDetails(raw)
-      if (!place) throw new Error('Place details malformed.')
-
-      setSelectedLabel(p.description)
-      setSelectedPlaceId(place.placeId)
-      setSelectedLat(place.lat)
-      setSelectedLng(place.lng)
-
-      // ✅ hard-close the panel + suggestions
-      setLocOpen(false)
-      setLocQuery('')
-      setPredictions([])
-    } catch (e: unknown) {
-      setLocError(e instanceof Error ? e.message : 'Failed to load place details.')
-    } finally {
-      setPredLoading(false)
-    }
-  }
-
-  function clearLocation() {
-    setSelectedLabel(null)
-    setSelectedPlaceId(null)
-    setSelectedLat(null)
-    setSelectedLng(null)
+  const clearLocation = useCallback(() => {
+    clearViewerLocation()
     setLocQuery('')
     setPredictions([])
     setLocError(null)
-  }
+  }, [])
 
-  async function useMyLocation() {
+  const useMyLocation = useCallback(() => {
     if (!canUseGeolocation()) {
       setLocError('Geolocation is not available on this device/browser.')
       return
@@ -452,10 +397,14 @@ export default function SearchClient() {
         const lat = pos.coords.latitude
         const lng = pos.coords.longitude
 
-        setSelectedLat(lat)
-        setSelectedLng(lng)
-        setSelectedPlaceId(null)
-        setSelectedLabel('Current location')
+        setViewerLocation({
+          label: 'Current location',
+          placeId: null,
+          lat,
+          lng,
+          radiusMiles,
+        })
+
         setLocOpen(false)
         setLocQuery('')
         setPredictions([])
@@ -467,10 +416,29 @@ export default function SearchClient() {
       },
       { enableHighAccuracy: false, maximumAge: 60_000, timeout: 10_000 },
     )
-  }
+  }, [radiusMiles])
+
+  // update radius (and persist if we have a location)
+  const onRadiusChange = useCallback(
+    (next: number) => {
+      const r = clampInt(next, VIEWER_RADIUS_MIN_MILES, VIEWER_RADIUS_MAX_MILES)
+      setRadiusMiles(r)
+
+      if (viewerLoc) {
+        setViewerLocation({
+          label: viewerLoc.label,
+          placeId: viewerLoc.placeId,
+          lat: viewerLoc.lat,
+          lng: viewerLoc.lng,
+          radiusMiles: r,
+        })
+      }
+    },
+    [viewerLoc],
+  )
 
   // --- search API ---
-  const canSearch = useMemo(() => q.trim().length > 0 || (selectedLat != null && selectedLng != null), [q, selectedLat, selectedLng])
+  const canSearch = useMemo(() => q.trim().length > 0 || Boolean(viewerLoc), [q, viewerLoc])
 
   useEffect(() => {
     if (!canSearch) {
@@ -493,11 +461,11 @@ export default function SearchClient() {
         const qs = new URLSearchParams()
         if (q.trim()) qs.set('q', q.trim())
         qs.set('tab', tab)
-        qs.set('radiusMiles', String(clampInt(radiusMiles, 5, 50)))
+        qs.set('radiusMiles', String(clampInt(radiusMiles, VIEWER_RADIUS_MIN_MILES, VIEWER_RADIUS_MAX_MILES)))
 
-        if (selectedLat != null && selectedLng != null) {
-          qs.set('lat', String(selectedLat))
-          qs.set('lng', String(selectedLng))
+        if (viewerLoc) {
+          qs.set('lat', String(viewerLoc.lat))
+          qs.set('lng', String(viewerLoc.lng))
         }
 
         const res = await fetch(`/api/search?${qs.toString()}`, {
@@ -523,14 +491,13 @@ export default function SearchClient() {
     }, 220)
 
     return () => clearTimeout(handle)
-  }, [canSearch, q, tab, selectedLat, selectedLng, radiusMiles, clearSearchRequest])
+  }, [canSearch, q, tab, viewerLoc, radiusMiles, clearSearchRequest])
 
   const locationButtonLabel = useMemo(() => {
-    if (!selectedLabel) return 'Choose location'
-    // keep it compact
-    const s = selectedLabel.trim()
+    if (!viewerLoc?.label) return 'Choose location'
+    const s = viewerLoc.label.trim()
     return s.length > 22 ? `${s.slice(0, 22)}…` : s
-  }, [selectedLabel])
+  }, [viewerLoc?.label])
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 text-textPrimary">
@@ -605,7 +572,7 @@ export default function SearchClient() {
               {locationButtonLabel}
             </button>
 
-            {selectedLabel ? (
+            {viewerLoc ? (
               <button
                 type="button"
                 onClick={clearLocation}
@@ -647,6 +614,12 @@ export default function SearchClient() {
                 placeholder="City, neighborhood, or address"
                 className="w-full bg-transparent text-[13px] font-semibold text-textPrimary outline-none placeholder:text-textSecondary"
                 autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && predictions[0] && !predLoading) {
+                    e.preventDefault()
+                    void choosePrediction(predictions[0])
+                  }
+                }}
               />
               {predLoading ? <div className="text-[11px] font-bold text-textSecondary">…</div> : null}
             </div>
@@ -657,11 +630,11 @@ export default function SearchClient() {
               </div>
               <input
                 type="range"
-                min={5}
-                max={50}
+                min={VIEWER_RADIUS_MIN_MILES}
+                max={VIEWER_RADIUS_MAX_MILES}
                 step={5}
                 value={radiusMiles}
-                onChange={(e) => setRadiusMiles(clampInt(Number(e.target.value), 5, 50))}
+                onChange={(e) => onRadiusChange(Number(e.target.value))}
                 className="w-40"
               />
             </div>
@@ -674,7 +647,7 @@ export default function SearchClient() {
                   <button
                     key={p.placeId}
                     type="button"
-                    onClick={() => choosePrediction(p)}
+                    onClick={() => void choosePrediction(p)}
                     className="rounded-card border border-white/10 bg-bgSecondary p-3 text-left hover:bg-white/5"
                   >
                     <div className="text-[13px] font-black text-textPrimary">{p.mainText || p.description}</div>
@@ -711,13 +684,13 @@ export default function SearchClient() {
                   return (
                     <div key={p.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3">
                       <div className="flex items-start justify-between gap-3">
-                        <a href={href} className="min-w-0">
+                        <Link href={href} className="min-w-0">
                           <div className="truncate text-[14px] font-black text-textPrimary">{p.businessName || 'Professional'}</div>
                           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
                             {(p.professionType || 'Beauty professional') + ' • ' + loc}
                             {dist ? <span className="text-textSecondary"> • {dist}</span> : null}
                           </div>
-                        </a>
+                        </Link>
 
                         <div className="flex items-center gap-2">
                           {directions ? (
@@ -730,12 +703,12 @@ export default function SearchClient() {
                               Directions
                             </a>
                           ) : null}
-                          <a
+                          <Link
                             href={href}
                             className="rounded-full bg-accentPrimary px-3 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
                           >
                             View
-                          </a>
+                          </Link>
                         </div>
                       </div>
                     </div>
