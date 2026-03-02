@@ -1,5 +1,4 @@
 // app/(main)/booking/AvailabilityDrawer/components/WaitlistPanel.tsx
-
 'use client'
 
 import * as React from 'react'
@@ -9,6 +8,58 @@ import type { DrawerContext } from '../types'
 import { toISOFromDatetimeLocalInTimeZone } from '@/lib/bookingTime'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
+function pickString(x: unknown): string | null {
+  return typeof x === 'string' && x.trim() ? x.trim() : null
+}
+
+function pickApiError(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  return pickString(raw.error)
+}
+
+type WaitlistEntryDTO = {
+  id: string
+  status: string
+  professionalId: string
+  serviceId: string
+  mediaId: string | null
+  preferredStart: string
+  preferredEnd: string
+  preferredTimeBucket: string | null
+}
+
+function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | null {
+  if (!isRecord(raw) || raw.ok !== true) return null
+  const entry = raw.entry
+  if (!isRecord(entry)) return null
+
+  const id = pickString(entry.id)
+  const status = pickString(entry.status)
+  const professionalId = pickString(entry.professionalId)
+  const serviceId = pickString(entry.serviceId)
+
+  // Dates come back as ISO strings via NextResponse.json
+  const preferredStart = pickString(entry.preferredStart)
+  const preferredEnd = pickString(entry.preferredEnd)
+
+  const mediaId = entry.mediaId === null ? null : pickString(entry.mediaId)
+  if (entry.mediaId !== null && mediaId == null) return null
+
+  const preferredTimeBucket = entry.preferredTimeBucket === null ? null : pickString(entry.preferredTimeBucket)
+  if (entry.preferredTimeBucket !== null && preferredTimeBucket == null) return null
+
+  if (!id || !status || !professionalId || !serviceId || !preferredStart || !preferredEnd) return null
+
+  return {
+    ok: true,
+    entry: { id, status, professionalId, serviceId, mediaId, preferredStart, preferredEnd, preferredTimeBucket },
+  }
+}
 
 export default function WaitlistPanel({
   canWaitlist,
@@ -36,8 +87,6 @@ export default function WaitlistPanel({
   if (!canWaitlist) return null
 
   async function submit() {
-    if (!context) return
-
     if (!effectiveServiceId) {
       setOk(false)
       setMsg('This look is missing a service link, so waitlist can’t be created yet.')
@@ -54,32 +103,41 @@ export default function WaitlistPanel({
 
       const res = await fetch('/api/waitlist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           professionalId: context.professionalId,
           serviceId: effectiveServiceId,
-          mediaId: context.mediaId,
+          mediaId: context.mediaId ?? null,
           desiredFor: desiredISO,
           flexibilityMinutes: flexMinutes,
-          notes: notes?.trim() || null,
+          notes: notes.trim() || null,
         }),
       })
 
-      const body = await safeJson(res)
+      const raw = await safeJson(res)
 
       if (res.status === 401) {
         redirectToLogin(router, 'waitlist')
         return
       }
 
-      if (!res.ok) throw new Error(body?.error || `Waitlist failed (${res.status}).`)
+      if (!res.ok) {
+        // Nice, specific UX for the common cases your API throws
+        if (res.status === 409) {
+          throw new Error(pickApiError(raw) ?? 'You already have an active waitlist request for this pro/service.')
+        }
+        throw new Error(pickApiError(raw) ?? `Waitlist failed (${res.status}).`)
+      }
+
+      const parsed = parseWaitlistOk(raw)
+      if (!parsed) throw new Error('Waitlist failed (unexpected response).')
 
       setOk(true)
       setMsg('You’re on the waitlist. We’ll notify you if something opens up.')
       setOpen(false)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setOk(false)
-      setMsg(e?.message || 'Failed to join waitlist.')
+      setMsg(e instanceof Error ? e.message : 'Failed to join waitlist.')
     } finally {
       setPosting(false)
     }

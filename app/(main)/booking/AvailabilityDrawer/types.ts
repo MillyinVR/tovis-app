@@ -1,53 +1,22 @@
 // app/(main)/booking/AvailabilityDrawer/types.ts
 
-/**
- * Single source of truth for API envelopes (type-level).
- * Matches jsonOk/jsonFail:
- * - success: { ok: true, ... }
- * - failure: { ok: false, error: string, ... }
- */
 export type ApiOk<T extends object> = { ok: true } & T
 export type ApiFail<T extends object = {}> = { ok: false; error: string } & T
-
-/**
- * Booking source attribution.
- * Must stay stable because it becomes analytics + business logic.
- *
- * NOTE: This intentionally matches Prisma enum BookingSource.
- */
 export type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 
-/**
- * Context passed into AvailabilityDrawer.
- * IMPORTANT: Make your React state nullable (DrawerContext | null),
- * but do NOT embed null into the type itself.
- */
 export type DrawerContext = {
   professionalId: string
-
-  /**
-   * If launched from a Look, this will exist.
-   * If launched from pro profile/services list, this can be null/undefined.
-   */
   mediaId?: string | null
-
-  /**
-   * Service to look up availability for.
-   * Optional to keep compatibility with older callers.
-   */
   serviceId?: string | null
-
-  /**
-   * ✅ Optional but supported.
-   * When provided, it helps the server resolve location + timezone reliably.
-   */
   offeringId?: string | null
-
-  /**
-   * Optional. If callers don't pass it, the drawer can default at runtime.
-   * Must match Prisma BookingSource.
-   */
   source?: BookingSource
+
+  // ✅ optional viewer location (for "other pros near you")
+  viewerLat?: number | null
+  viewerLng?: number | null
+  viewerRadiusMiles?: number | null
+  viewerPlaceId?: string | null
+  viewerLocationLabel?: string | null
 }
 
 export type ServiceLocationType = 'SALON' | 'MOBILE'
@@ -57,13 +26,7 @@ export type AvailabilityReason =
   | 'MISSING_SERVICE'
   | 'SERVICE_NOT_OFFERED'
   | 'NO_BOOKABLE_MODE'
-
-/**
- * Money serialized over JSON should be string (e.g. "25.00").
- * Keep as string to avoid Decimal leaks into client code.
- */
 export type MoneyString = string
-
 export type ProCard = {
   id: string
   businessName: string | null
@@ -73,9 +36,21 @@ export type ProCard = {
   timeZone?: string | null
   isCreator?: boolean
 
-  // slots are day-specific now, not global
+  // ✅ bookable location used for availability math
+  locationId?: string | null
+
+  // optional, nice for future UI
+  distanceMiles?: number | null
+
   slots?: string[]
 }
+export type AvailabilityOtherPro = ProCard & {
+  offeringId: string
+  locationId: string
+  timeZone: string
+  distanceMiles?: number | null
+}
+
 
 export type AvailabilityOffering = {
   id: string
@@ -90,6 +65,7 @@ export type AvailabilityOffering = {
 /** ---------------------------
  * Availability: SUMMARY mode
  * -------------------------- */
+
 
 export type AvailabilitySummaryOk = ApiOk<{
   mode: 'SUMMARY'
@@ -113,7 +89,7 @@ export type AvailabilitySummaryOk = ApiOk<{
 
   primaryPro: ProCard & { offeringId: string; isCreator: true; timeZone: string }
   availableDays: Array<{ date: string; slotCount: number }>
-  otherPros: Array<ProCard & { offeringId: string }>
+  otherPros: AvailabilityOtherPro[]
   waitlistSupported: boolean
 
   offering: AvailabilityOffering

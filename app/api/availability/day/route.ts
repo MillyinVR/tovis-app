@@ -1,9 +1,9 @@
 // app/api/availability/day/route.ts
 import { prisma } from '@/lib/prisma'
-import { ServiceLocationType } from '@prisma/client'
+import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import type { BookableLocation } from '@/lib/booking/pickLocation'
-import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
+import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone } from '@/lib/timeZone'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 
@@ -23,6 +23,11 @@ function clampInt(n: number, min: number, max: number) {
   return Math.min(Math.max(x, min), max)
 }
 
+function clampFloat(n: number, min: number, max: number) {
+  if (!Number.isFinite(n)) return min
+  return Math.min(Math.max(n, min), max)
+}
+
 function addMinutes(d: Date, minutes: number) {
   return new Date(d.getTime() + minutes * 60_000)
 }
@@ -36,6 +41,10 @@ function normalizeToMinute(d: Date) {
 /** existingStart < requestedEnd AND requestedStart < existingEnd */
 function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && bStart < aEnd
+}
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
@@ -400,6 +409,225 @@ async function computeDaySlotsFast(args: {
   return { ok: true, slots, dayStartUtc, dayEndExclusiveUtc, debug: debug ? { timeZone, dayKey } : undefined }
 }
 
+function decimalToNumber(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (v && typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
+    const n = (v as { toNumber: () => number }).toNumber()
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+function toDecimal(n: number): Prisma.Decimal {
+  // Prisma Decimal constructor accepts string/number; using string avoids float quirks in TS inference.
+  return new Prisma.Decimal(String(n))
+}
+
+function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 3958.7613
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+
+  const sin1 = Math.sin(dLat / 2)
+  const sin2 = Math.sin(dLng / 2)
+
+  const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+function boundsForRadiusMiles(centerLat: number, centerLng: number, radiusMiles: number) {
+  const latDelta = radiusMiles / 69
+  const cos = Math.max(0.2, Math.cos((centerLat * Math.PI) / 180))
+  const lngDelta = radiusMiles / (69 * cos)
+
+  const minLat = clampFloat(centerLat - latDelta, -90, 90)
+  const maxLat = clampFloat(centerLat + latDelta, -90, 90)
+  const minLng = clampFloat(centerLng - lngDelta, -180, 180)
+  const maxLng = clampFloat(centerLng + lngDelta, -180, 180)
+
+  return { minLat, maxLat, minLng, maxLng }
+}
+
+function allowedProfessionalTypes(locationType: ServiceLocationType): ProfessionalLocationType[] {
+  return locationType === ServiceLocationType.MOBILE
+    ? [ProfessionalLocationType.MOBILE_BASE]
+    : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
+}
+
+function parseFloatParam(v: string | null) {
+  if (!v) return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+type OtherProRow = {
+  id: string
+  businessName: string | null
+  avatarUrl: string | null
+  location: string | null
+  offeringId: string
+  timeZone: string
+  locationId: string
+  distanceMiles: number
+}
+
+async function loadOtherProsNearby(args: {
+  centerLat: number
+  centerLng: number
+  radiusMiles: number
+  serviceId: string
+  locationType: ServiceLocationType
+  excludeProfessionalId: string
+  limit: number
+}): Promise<OtherProRow[]> {
+  const { centerLat, centerLng, radiusMiles, serviceId, locationType, excludeProfessionalId, limit } = args
+  const bounds = boundsForRadiusMiles(centerLat, centerLng, radiusMiles)
+  const allowedTypes = allowedProfessionalTypes(locationType)
+
+  const candidateLocs = await prisma.professionalLocation.findMany({
+    where: {
+      isBookable: true,
+      professionalId: { not: excludeProfessionalId },
+      type: { in: allowedTypes },
+      timeZone: { not: null },
+      // workingHours is required in schema but keep a defensive filter for older rows/migrations
+      workingHours: { not: Prisma.JsonNull },
+      lat: { not: null, gte: toDecimal(bounds.minLat), lte: toDecimal(bounds.maxLat) },
+      lng: { not: null, gte: toDecimal(bounds.minLng), lte: toDecimal(bounds.maxLng) },
+    },
+    select: {
+      id: true,
+      professionalId: true,
+      timeZone: true,
+      workingHours: true,
+      lat: true,
+      lng: true,
+      city: true,
+      formattedAddress: true,
+      isPrimary: true,
+      createdAt: true,
+    },
+    take: 800,
+  })
+
+  const center = { lat: centerLat, lng: centerLng }
+
+  // Pick best location per pro = closest distance (tie-break isPrimary then createdAt)
+  const bestByPro = new Map<
+    string,
+    { locationId: string; timeZone: string; distanceMiles: number; isPrimary: boolean; createdAt: Date; city: string | null; formattedAddress: string | null }
+  >()
+
+  for (const l of candidateLocs) {
+    const lat = decimalToNumber(l.lat)
+    const lng = decimalToNumber(l.lng)
+    if (lat == null || lng == null) continue
+
+    const tz = typeof l.timeZone === 'string' ? l.timeZone.trim() : ''
+    if (!tz || !isValidIanaTimeZone(tz)) continue
+
+    if (!l.workingHours || !isRecord(l.workingHours)) continue
+
+    const d = haversineMiles(center, { lat, lng })
+    if (d > radiusMiles) continue
+
+    const prev = bestByPro.get(l.professionalId)
+    if (!prev) {
+      bestByPro.set(l.professionalId, {
+        locationId: l.id,
+        timeZone: tz,
+        distanceMiles: d,
+        isPrimary: Boolean(l.isPrimary),
+        createdAt: l.createdAt,
+        city: l.city ?? null,
+        formattedAddress: l.formattedAddress ?? null,
+      })
+      continue
+    }
+
+    const better =
+      d < prev.distanceMiles ||
+      (Math.abs(d - prev.distanceMiles) < 1e-9 && Boolean(l.isPrimary) && !prev.isPrimary) ||
+      (Math.abs(d - prev.distanceMiles) < 1e-9 && Boolean(l.isPrimary) === prev.isPrimary && l.createdAt < prev.createdAt)
+
+    if (better) {
+      bestByPro.set(l.professionalId, {
+        locationId: l.id,
+        timeZone: tz,
+        distanceMiles: d,
+        isPrimary: Boolean(l.isPrimary),
+        createdAt: l.createdAt,
+        city: l.city ?? null,
+        formattedAddress: l.formattedAddress ?? null,
+      })
+    }
+  }
+
+  const proIds = Array.from(bestByPro.keys())
+  if (!proIds.length) return []
+
+  // Find offerings for the same service + mode
+  const offeringRows = await prisma.professionalServiceOffering.findMany({
+    where: {
+      professionalId: { in: proIds },
+      serviceId,
+      isActive: true,
+      ...(locationType === ServiceLocationType.MOBILE ? { offersMobile: true } : { offersInSalon: true }),
+    },
+    select: {
+      id: true,
+      professionalId: true,
+      professional: { select: { id: true, businessName: true, avatarUrl: true, location: true } },
+    },
+    take: 2000,
+  })
+
+  const offeringByPro = new Map<
+    string,
+    { offeringId: string; businessName: string | null; avatarUrl: string | null; proLocation: string | null }
+  >()
+
+  for (const o of offeringRows) {
+    offeringByPro.set(o.professionalId, {
+      offeringId: o.id,
+      businessName: o.professional.businessName ?? null,
+      avatarUrl: o.professional.avatarUrl ?? null,
+      proLocation: o.professional.location ?? null,
+    })
+  }
+
+  // Build output sorted by distance
+  const out: OtherProRow[] = []
+  for (const proId of proIds) {
+    const best = bestByPro.get(proId)
+    const off = offeringByPro.get(proId)
+    if (!best || !off) continue
+
+    const locationLabel =
+      (off.proLocation && off.proLocation.trim()) ||
+      (best.city && best.city.trim()) ||
+      (best.formattedAddress && best.formattedAddress.trim()) ||
+      null
+
+    out.push({
+      id: proId,
+      businessName: off.businessName,
+      avatarUrl: off.avatarUrl,
+      location: locationLabel,
+      offeringId: off.offeringId,
+      timeZone: best.timeZone,
+      locationId: best.locationId,
+      distanceMiles: Math.round(best.distanceMiles * 10) / 10,
+    })
+  }
+
+  out.sort((a, b) => a.distanceMiles - b.distanceMiles)
+  return out.slice(0, Math.max(0, limit))
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
@@ -420,6 +648,12 @@ export async function GET(req: Request) {
       pickString(searchParams.get('leadTimeMinutes')) ||
       pickString(searchParams.get('lead')) ||
       null
+
+    // viewer location (optional; used only for SUMMARY otherPros)
+    const viewerLat = parseFloatParam(searchParams.get('viewerLat'))
+    const viewerLng = parseFloatParam(searchParams.get('viewerLng'))
+    const radiusMilesRaw = parseFloatParam(searchParams.get('radiusMiles'))
+    const radiusMiles = clampFloat(radiusMilesRaw ?? 15, 5, 50)
 
     if (!professionalId || !serviceId) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
@@ -537,7 +771,9 @@ export async function GET(req: Request) {
     // SUMMARY MODE
     if (!dateStr) {
       const daysAhead = Math.min(14, maxAdvanceDays)
-      const ymds = Array.from({ length: daysAhead }, (_, i) => addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i))
+      const ymds = Array.from({ length: daysAhead }, (_, i) =>
+        addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i),
+      )
 
       const firstBounds = computeDayBoundsUtc(ymds[0], timeZone)
       const lastBounds = computeDayBoundsUtc(ymds[ymds.length - 1], timeZone)
@@ -581,6 +817,26 @@ export async function GET(req: Request) {
         if (result.slots.length) availableDays.push({ date: ymdToString(ymd), slotCount: result.slots.length })
       }
 
+      // ✅ Other pros near viewer (or fallback to this pro's bookable location coordinates)
+      const fallbackLat = decimalToNumber(loc.lat)
+      const fallbackLng = decimalToNumber(loc.lng)
+      const hasViewer = typeof viewerLat === 'number' && typeof viewerLng === 'number'
+      const centerLat = hasViewer ? viewerLat! : fallbackLat
+      const centerLng = hasViewer ? viewerLng! : fallbackLng
+
+      const otherPros =
+        centerLat != null && centerLng != null
+          ? await loadOtherProsNearby({
+              centerLat,
+              centerLng,
+              radiusMiles,
+              serviceId,
+              locationType: effectiveLocationType,
+              excludeProfessionalId: professionalId,
+              limit: 6,
+            })
+          : []
+
       return jsonOk({
         mode: 'SUMMARY' as const,
         mediaId: mediaId || null,
@@ -608,14 +864,24 @@ export async function GET(req: Request) {
           offeringId: offering.id,
           isCreator: true as const,
           timeZone,
+          locationId: locId, // safe extra field for client convenience
         },
 
         availableDays,
-        otherPros: [],
+        otherPros,
         waitlistSupported: true,
         offering: offeringPayload,
 
-        ...(debug && !availableDays.length ? { debug: { emptyReason: firstError ?? 'none' } } : {}),
+        ...(debug
+          ? {
+              debug: {
+                emptyReason: !availableDays.length ? firstError ?? 'none' : null,
+                otherProsCount: otherPros.length,
+                center: centerLat != null && centerLng != null ? { lat: centerLat, lng: centerLng, radiusMiles } : null,
+                usedViewerCenter: Boolean(hasViewer),
+              },
+            }
+          : {}),
       })
     }
 

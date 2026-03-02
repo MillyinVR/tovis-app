@@ -1,5 +1,4 @@
 // app/(main)/booking/AvailabilityDrawer/components/ProCard.tsx
-
 'use client'
 
 import Link from 'next/link'
@@ -22,6 +21,8 @@ export default function ProCard({
   viewProServicesHref: string
   onScrollToOtherPros: () => void
 }) {
+  const name = pro.businessName?.trim() || 'Professional'
+  const showCreator = pro.isCreator === true
   const showLocalHint = Boolean(viewerTz && viewerTz !== appointmentTz)
 
   return (
@@ -30,19 +31,24 @@ export default function ProCard({
         <div className="h-12 w-12 overflow-hidden rounded-full bg-white/10">
           {pro.avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={pro.avatarUrl} alt="" className="h-full w-full object-cover" />
+            <img src={pro.avatarUrl} alt={`${name} avatar`} className="h-full w-full object-cover" />
           ) : null}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Link href={`/professionals/${pro.id}`} className="truncate text-[15px] font-black text-textPrimary">
-              {pro.businessName || 'Professional'}
+            <Link
+              href={`/professionals/${encodeURIComponent(pro.id)}`}
+              className="truncate text-[15px] font-black text-textPrimary"
+            >
+              {name}
             </Link>
 
-            <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/35 px-2 py-1 text-[11px] font-black text-textPrimary">
-              ⭐ Creator
-            </span>
+            {showCreator ? (
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/35 px-2 py-1 text-[11px] font-black text-textPrimary">
+                ⭐ Creator
+              </span>
+            ) : null}
           </div>
 
           <div className="mt-1 text-[12px] font-semibold text-textSecondary">{pro.location ? pro.location : ' '}</div>

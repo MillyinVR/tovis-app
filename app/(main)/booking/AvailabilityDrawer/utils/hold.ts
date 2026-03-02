@@ -1,32 +1,60 @@
 // app/(main)/booking/AvailabilityDrawer/utils/hold.ts
 import type { HoldParsed, ServiceLocationType } from '../types'
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null
+}
+
+function pickString(x: unknown): string | null {
+  return typeof x === 'string' && x.trim() ? x.trim() : null
+}
+
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  const s = pickString(v)?.toUpperCase() ?? ''
   if (s === 'SALON') return 'SALON'
   if (s === 'MOBILE') return 'MOBILE'
   return null
 }
 
-export function parseHoldResponse(data: any): HoldParsed {
-  const hold = data?.hold
-  const holdId = typeof hold?.id === 'string' ? hold.id.trim() : ''
-  const expiresAtIso = typeof hold?.expiresAt === 'string' ? hold.expiresAt.trim() : ''
-  const scheduledForISO = typeof hold?.scheduledFor === 'string' ? hold.scheduledFor.trim() : ''
-  const loc = normalizeLocationType(hold?.locationType)
+/**
+ * Parses POST /api/holds response:
+ * jsonOk({ hold: { id, scheduledFor, expiresAt, locationType, ... } }, status)
+ */
+export function parseHoldResponse(data: unknown): HoldParsed {
+  if (!isRecord(data) || data.ok !== true) {
+    throw new Error('Hold response malformed.')
+  }
 
-  const holdUntilMs = expiresAtIso ? new Date(expiresAtIso).getTime() : NaN
-  const scheduledMs = scheduledForISO ? new Date(scheduledForISO).getTime() : NaN
+  const holdRaw = (data as Record<string, unknown>).hold
+  if (!isRecord(holdRaw)) {
+    throw new Error('Hold response missing hold.')
+  }
 
-  if (!holdId || !expiresAtIso || !scheduledForISO || !Number.isFinite(holdUntilMs) || !Number.isFinite(scheduledMs)) {
+  const holdId = pickString(holdRaw.id)
+  const expiresAtIso = pickString(holdRaw.expiresAt)
+  const scheduledForISO = pickString(holdRaw.scheduledFor)
+  const loc = normalizeLocationType(holdRaw.locationType)
+
+  if (!holdId || !expiresAtIso || !scheduledForISO) {
     throw new Error('Hold response missing fields.')
+  }
+
+  const holdUntilMs = new Date(expiresAtIso).getTime()
+  const scheduledMs = new Date(scheduledForISO).getTime()
+
+  if (!Number.isFinite(holdUntilMs) || !Number.isFinite(scheduledMs)) {
+    throw new Error('Hold response has invalid dates.')
   }
 
   return { holdId, holdUntilMs, scheduledForISO, locationType: loc }
 }
 
 export async function deleteHoldById(holdId: string) {
-  const id = String(holdId || '').trim()
+  const id = (holdId || '').trim()
   if (!id) return
-  await fetch(`/api/holds/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
+  try {
+    await fetch(`/api/holds/${encodeURIComponent(id)}`, { method: 'DELETE', cache: 'no-store' })
+  } catch {
+    // intentionally swallow; delete is best-effort
+  }
 }

@@ -3,10 +3,23 @@
 
 import type { AvailabilityOffering, ServiceLocationType } from '../types'
 
-function formatMoney(v: unknown) {
-  if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(0)}`
-  if (typeof v === 'string' && v.trim()) return v.trim()
-  return null
+function formatUsdMoneyString(raw: string | null | undefined): string | null {
+  const s = (raw ?? '').trim()
+  if (!s) return null
+
+  // Expect money strings like "25", "25.0", "25.00"
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null
+
+  const n = Number(s)
+  if (!Number.isFinite(n)) return null
+
+  const hasCents = !/\.00$/.test(s)
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(n)
 }
 
 function formatDuration(min: number | null | undefined) {
@@ -35,7 +48,7 @@ export default function ServiceContextCard({
     locationType === 'MOBILE' ? offering.mobilePriceStartingAt ?? null : offering.salonPriceStartingAt ?? null
 
   const durationLabel = formatDuration(duration)
-  const priceLabel = formatMoney(startingAt)
+  const priceLabel = formatUsdMoneyString(startingAt)
 
   const title = serviceName?.trim() || 'Service'
   const category = categoryName?.trim() || null

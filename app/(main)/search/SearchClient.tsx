@@ -1,8 +1,8 @@
 // app/(main)/search/SearchClient.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, MapPin, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Search, MapPin, X, LocateFixed } from 'lucide-react'
 
 type Tab = 'PROS' | 'SERVICES'
 
@@ -39,12 +39,138 @@ type PlacePrediction = {
   secondaryText: string
 }
 
+type ViewerLocation = {
+  label: string
+  placeId: string | null
+  lat: number
+  lng: number
+  radiusMiles: number
+  updatedAtMs: number
+}
+
+const STORAGE_KEY = 'tovis.viewerLocation.v1'
+
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
+function pickString(x: unknown): string | null {
+  return typeof x === 'string' && x.trim() ? x.trim() : null
+}
+
+function pickNumber(x: unknown): number | null {
+  return typeof x === 'number' && Number.isFinite(x) ? x : null
+}
+
+function clampInt(n: number, min: number, max: number) {
+  const x = Math.trunc(n)
+  return Math.min(Math.max(x, min), max)
+}
+
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+
+function parsePredictions(raw: unknown): PlacePrediction[] {
+  if (!isRecord(raw)) return []
+  const preds = raw.predictions
+  if (!Array.isArray(preds)) return []
+
+  const out: PlacePrediction[] = []
+  for (const p of preds) {
+    if (!isRecord(p)) continue
+    const placeId = pickString(p.placeId)
+    const description = pickString(p.description)
+    const mainText = pickString(p.mainText)
+    const secondaryText = pickString(p.secondaryText)
+    if (!placeId || !description || !mainText) continue
+    out.push({
+      placeId,
+      description,
+      mainText,
+      secondaryText: secondaryText ?? '',
+    })
+  }
+  return out
+}
+
+function parsePlaceDetails(raw: unknown): { placeId: string; lat: number; lng: number } | null {
+  if (!isRecord(raw)) return null
+  const place = raw.place
+  if (!isRecord(place)) return null
+
+  const placeId = pickString(place.placeId)
+  const lat = pickNumber(place.lat)
+  const lng = pickNumber(place.lng)
+
+  if (!placeId || lat == null || lng == null) return null
+  return { placeId, lat, lng }
+}
+
+function parseSearchResult(raw: unknown): SearchResult {
+  const empty: SearchResult = { pros: [], services: [] }
+  if (!isRecord(raw)) return empty
+
+  const prosRaw = raw.pros
+  const servicesRaw = raw.services
+
+  const pros: SearchResult['pros'] = []
+  if (Array.isArray(prosRaw)) {
+    for (const row of prosRaw) {
+      if (!isRecord(row)) continue
+      const id = pickString(row.id)
+      if (!id) continue
+
+      const primaryLocRaw = row.primaryLocation
+      let primaryLocation: SearchResult['pros'][number]['primaryLocation'] = null
+      if (isRecord(primaryLocRaw)) {
+        const plId = pickString(primaryLocRaw.id)
+        if (plId) {
+          primaryLocation = {
+            id: plId,
+            formattedAddress: pickString(primaryLocRaw.formattedAddress),
+            city: pickString(primaryLocRaw.city),
+            state: pickString(primaryLocRaw.state),
+            timeZone: pickString(primaryLocRaw.timeZone),
+            lat: pickNumber(primaryLocRaw.lat),
+            lng: pickNumber(primaryLocRaw.lng),
+            placeId: pickString(primaryLocRaw.placeId),
+          }
+        }
+      }
+
+      pros.push({
+        id,
+        businessName: pickString(row.businessName),
+        professionType: pickString(row.professionType),
+        avatarUrl: pickString(row.avatarUrl),
+        locationLabel: pickString(row.locationLabel),
+        distanceMiles: pickNumber(row.distanceMiles),
+        primaryLocation,
+      })
+    }
+  }
+
+  const services: SearchResult['services'] = []
+  if (Array.isArray(servicesRaw)) {
+    for (const row of servicesRaw) {
+      if (!isRecord(row)) continue
+      const id = pickString(row.id)
+      const name = pickString(row.name)
+      if (!id || !name) continue
+      services.push({ id, name, categoryName: pickString(row.categoryName) })
+    }
+  }
+
+  return { pros, services }
 }
 
 function buildDirectionsHref(args: { placeId?: string | null; lat?: number | null; lng?: number | null; address?: string | null }) {
@@ -61,6 +187,65 @@ function buildDirectionsHref(args: { placeId?: string | null; lat?: number | nul
   return null
 }
 
+function saveViewerLocation(v: ViewerLocation | null) {
+  if (typeof window === 'undefined') return
+  try {
+    if (!v) {
+      window.localStorage.removeItem(STORAGE_KEY)
+      window.dispatchEvent(new CustomEvent('tovis:viewerLocation', { detail: null }))
+      return
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(v))
+    window.dispatchEvent(new CustomEvent('tovis:viewerLocation', { detail: v }))
+  } catch {
+    // ignore
+  }
+}
+
+function loadViewerLocation(): ViewerLocation | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return null
+
+    const label = pickString(parsed.label)
+    const lat = pickNumber(parsed.lat)
+    const lng = pickNumber(parsed.lng)
+    const radiusMiles = pickNumber(parsed.radiusMiles)
+    const updatedAtMs = pickNumber(parsed.updatedAtMs)
+    const placeId = parsed.placeId == null ? null : pickString(parsed.placeId)
+
+    if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return null
+
+    return {
+      label,
+      lat,
+      lng,
+      radiusMiles: clampInt(radiusMiles, 5, 50),
+      updatedAtMs,
+      placeId: placeId ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function canUseGeolocation() {
+  return typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
+}
+
+function getSessionToken() {
+  // Safe client-only UUID-ish token
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  } catch {
+    // ignore
+  }
+  return String(Date.now())
+}
+
 export default function SearchClient() {
   const [tab, setTab] = useState<Tab>('PROS')
 
@@ -72,6 +257,7 @@ export default function SearchClient() {
   const [locQuery, setLocQuery] = useState('')
   const [predictions, setPredictions] = useState<PlacePrediction[]>([])
   const [predLoading, setPredLoading] = useState(false)
+  const [locError, setLocError] = useState<string | null>(null)
 
   // selected location (lat/lng bias)
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
@@ -86,73 +272,157 @@ export default function SearchClient() {
   const [err, setErr] = useState<string | null>(null)
   const [data, setData] = useState<SearchResult>({ pros: [], services: [] })
 
-  const debounceRef = useRef<any>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const predAbortRef = useRef<AbortController | null>(null)
+  const searchAbortRef = useRef<AbortController | null>(null)
+
+  // Hydrate saved location on mount
+  useEffect(() => {
+    const saved = loadViewerLocation()
+    if (!saved) return
+    setSelectedLabel(saved.label)
+    setSelectedPlaceId(saved.placeId)
+    setSelectedLat(saved.lat)
+    setSelectedLng(saved.lng)
+    setRadiusMiles(clampInt(saved.radiusMiles, 5, 50))
+  }, [])
+
+  // Persist viewer location whenever it changes (including radius)
+  useEffect(() => {
+    if (selectedLat == null || selectedLng == null || !selectedLabel) {
+      saveViewerLocation(null)
+      return
+    }
+    saveViewerLocation({
+      label: selectedLabel,
+      placeId: selectedPlaceId,
+      lat: selectedLat,
+      lng: selectedLng,
+      radiusMiles: clampInt(radiusMiles, 5, 50),
+      updatedAtMs: Date.now(),
+    })
+  }, [selectedLabel, selectedPlaceId, selectedLat, selectedLng, radiusMiles])
+
+  // Close location panel on Escape
+  useEffect(() => {
+    if (!locOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLocOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [locOpen])
+
+  const clearPredDebounce = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
+  }, [])
+
+  const clearPredRequest = useCallback(() => {
+    predAbortRef.current?.abort()
+    predAbortRef.current = null
+  }, [])
+
+  const clearSearchRequest = useCallback(() => {
+    searchAbortRef.current?.abort()
+    searchAbortRef.current = null
+  }, [])
 
   // --- location autocomplete ---
   useEffect(() => {
     if (!locOpen) return
 
     const input = locQuery.trim()
+    setLocError(null)
+
     if (!input) {
+      clearPredDebounce()
+      clearPredRequest()
       setPredictions([])
+      setPredLoading(false)
       return
     }
 
-    if (debounceRef.current) clearTimeout(debounceRef.current)
+    clearPredDebounce()
+
     debounceRef.current = setTimeout(async () => {
       try {
         setPredLoading(true)
-        const sessionToken = crypto?.randomUUID?.() ?? String(Date.now())
+        clearPredRequest()
+
+        const controller = new AbortController()
+        predAbortRef.current = controller
+
+        const sessionToken = getSessionToken()
 
         const qs = new URLSearchParams({
           input,
           sessionToken,
-          // optional bias if we already have a selection
           ...(selectedLat != null && selectedLng != null
             ? { lat: String(selectedLat), lng: String(selectedLng), radiusMeters: String(Math.round(radiusMiles * 1609.34)) }
             : {}),
         })
 
-        const res = await fetch(`/api/google/places/autocomplete?${qs.toString()}`, { cache: 'no-store' })
-        const j = await safeJson(res)
-        if (!res.ok) throw new Error(j?.error || 'Failed to load suggestions')
+        const res = await fetch(`/api/google/places/autocomplete?${qs.toString()}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        })
 
-        setPredictions(Array.isArray(j?.predictions) ? j.predictions : [])
-      } catch {
+        const raw = await safeJson(res)
+        if (!res.ok) {
+          const msg = isRecord(raw) ? pickString(raw.error) : null
+          throw new Error(msg || 'Failed to load suggestions')
+        }
+
+        setPredictions(parsePredictions(raw))
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === 'AbortError') return
         setPredictions([])
+        setLocError(e instanceof Error ? e.message : 'Failed to load suggestions')
       } finally {
         setPredLoading(false)
       }
     }, 180)
 
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+      clearPredDebounce()
     }
-  }, [locOpen, locQuery, radiusMiles, selectedLat, selectedLng])
+  }, [locOpen, locQuery, radiusMiles, selectedLat, selectedLng, clearPredDebounce, clearPredRequest])
 
   async function choosePrediction(p: PlacePrediction) {
     try {
       setPredLoading(true)
+      setLocError(null)
 
-      const sessionToken = crypto?.randomUUID?.() ?? String(Date.now())
-      const res = await fetch(`/api/google/places/details?placeId=${encodeURIComponent(p.placeId)}&sessionToken=${encodeURIComponent(sessionToken)}`, {
-        cache: 'no-store',
-      })
-      const j = await safeJson(res)
-      if (!res.ok) throw new Error(j?.error || 'Failed to load place details')
+      const sessionToken = getSessionToken()
+      const res = await fetch(
+        `/api/google/places/details?placeId=${encodeURIComponent(p.placeId)}&sessionToken=${encodeURIComponent(sessionToken)}`,
+        { cache: 'no-store', headers: { Accept: 'application/json' } },
+      )
 
-      const place = j?.place
-      const lat = typeof place?.lat === 'number' ? place.lat : null
-      const lng = typeof place?.lng === 'number' ? place.lng : null
+      const raw = await safeJson(res)
+      if (!res.ok) {
+        const msg = isRecord(raw) ? pickString(raw.error) : null
+        throw new Error(msg || 'Failed to load place details')
+      }
+
+      const place = parsePlaceDetails(raw)
+      if (!place) throw new Error('Place details malformed.')
 
       setSelectedLabel(p.description)
-      setSelectedPlaceId(String(place?.placeId || p.placeId))
-      setSelectedLat(lat)
-      setSelectedLng(lng)
+      setSelectedPlaceId(place.placeId)
+      setSelectedLat(place.lat)
+      setSelectedLng(place.lng)
 
+      // ✅ hard-close the panel + suggestions
       setLocOpen(false)
       setLocQuery('')
       setPredictions([])
+    } catch (e: unknown) {
+      setLocError(e instanceof Error ? e.message : 'Failed to load place details.')
     } finally {
       setPredLoading(false)
     }
@@ -163,6 +433,40 @@ export default function SearchClient() {
     setSelectedPlaceId(null)
     setSelectedLat(null)
     setSelectedLng(null)
+    setLocQuery('')
+    setPredictions([])
+    setLocError(null)
+  }
+
+  async function useMyLocation() {
+    if (!canUseGeolocation()) {
+      setLocError('Geolocation is not available on this device/browser.')
+      return
+    }
+
+    setLocError(null)
+    setPredLoading(true)
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+
+        setSelectedLat(lat)
+        setSelectedLng(lng)
+        setSelectedPlaceId(null)
+        setSelectedLabel('Current location')
+        setLocOpen(false)
+        setLocQuery('')
+        setPredictions([])
+        setPredLoading(false)
+      },
+      () => {
+        setLocError('Could not access your location. Check browser permissions.')
+        setPredLoading(false)
+      },
+      { enableHighAccuracy: false, maximumAge: 60_000, timeout: 10_000 },
+    )
   }
 
   // --- search API ---
@@ -170,8 +474,10 @@ export default function SearchClient() {
 
   useEffect(() => {
     if (!canSearch) {
+      clearSearchRequest()
       setData({ pros: [], services: [] })
       setErr(null)
+      setLoading(false)
       return
     }
 
@@ -180,26 +486,36 @@ export default function SearchClient() {
         setLoading(true)
         setErr(null)
 
+        clearSearchRequest()
+        const controller = new AbortController()
+        searchAbortRef.current = controller
+
         const qs = new URLSearchParams()
         if (q.trim()) qs.set('q', q.trim())
         qs.set('tab', tab)
-        qs.set('radiusMiles', String(radiusMiles))
+        qs.set('radiusMiles', String(clampInt(radiusMiles, 5, 50)))
 
         if (selectedLat != null && selectedLng != null) {
           qs.set('lat', String(selectedLat))
           qs.set('lng', String(selectedLng))
         }
 
-        const res = await fetch(`/api/search?${qs.toString()}`, { cache: 'no-store' })
-        const j = await safeJson(res)
-        if (!res.ok) throw new Error(j?.error || 'Search failed.')
-
-        setData({
-          pros: Array.isArray(j?.pros) ? j.pros : [],
-          services: Array.isArray(j?.services) ? j.services : [],
+        const res = await fetch(`/api/search?${qs.toString()}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
         })
-      } catch (e: any) {
-        setErr(e?.message || 'Search failed.')
+
+        const raw = await safeJson(res)
+        if (!res.ok) {
+          const msg = isRecord(raw) ? pickString(raw.error) : null
+          throw new Error(msg || 'Search failed.')
+        }
+
+        setData(parseSearchResult(raw))
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === 'AbortError') return
+        setErr(e instanceof Error ? e.message : 'Search failed.')
         setData({ pros: [], services: [] })
       } finally {
         setLoading(false)
@@ -207,7 +523,14 @@ export default function SearchClient() {
     }, 220)
 
     return () => clearTimeout(handle)
-  }, [canSearch, q, tab, selectedLat, selectedLng, radiusMiles])
+  }, [canSearch, q, tab, selectedLat, selectedLng, radiusMiles, clearSearchRequest])
+
+  const locationButtonLabel = useMemo(() => {
+    if (!selectedLabel) return 'Choose location'
+    // keep it compact
+    const s = selectedLabel.trim()
+    return s.length > 22 ? `${s.slice(0, 22)}…` : s
+  }, [selectedLabel])
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 text-textPrimary">
@@ -275,9 +598,11 @@ export default function SearchClient() {
               type="button"
               onClick={() => setLocOpen((v) => !v)}
               className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-bgPrimary/20 px-4 py-3 text-[12px] font-black text-textPrimary hover:bg-white/5"
+              aria-expanded={locOpen}
+              aria-controls="search-location-panel"
             >
               <MapPin size={16} className="opacity-80" />
-              {selectedLabel ? 'Location set' : 'Choose location'}
+              {locationButtonLabel}
             </button>
 
             {selectedLabel ? (
@@ -296,8 +621,23 @@ export default function SearchClient() {
 
         {/* Location dropdown */}
         {locOpen ? (
-          <div className="mt-3 rounded-card border border-white/10 bg-bgPrimary/20 p-3">
-            <div className="text-[12px] font-black text-textPrimary">Search near</div>
+          <div id="search-location-panel" className="mt-3 rounded-card border border-white/10 bg-bgPrimary/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[12px] font-black text-textPrimary">Search near</div>
+
+              <button
+                type="button"
+                onClick={useMyLocation}
+                className={cx(
+                  'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[12px] font-black transition',
+                  'border-white/10 bg-bgSecondary text-textPrimary hover:bg-white/5',
+                )}
+                title="Use your current location"
+              >
+                <LocateFixed size={14} className="opacity-80" />
+                Use my location
+              </button>
+            </div>
 
             <div className="mt-2 flex items-center gap-2 rounded-full border border-white/10 bg-bgSecondary px-4 py-3">
               <Search size={16} className="opacity-80" />
@@ -321,10 +661,12 @@ export default function SearchClient() {
                 max={50}
                 step={5}
                 value={radiusMiles}
-                onChange={(e) => setRadiusMiles(Number(e.target.value))}
+                onChange={(e) => setRadiusMiles(clampInt(Number(e.target.value), 5, 50))}
                 className="w-40"
               />
             </div>
+
+            {locError ? <div className="mt-2 text-[12px] font-semibold text-toneDanger">{locError}</div> : null}
 
             <div className="mt-3 grid gap-2">
               {predictions.length ? (
@@ -340,9 +682,7 @@ export default function SearchClient() {
                   </button>
                 ))
               ) : (
-                <div className="text-[12px] font-semibold text-textSecondary">
-                  Start typing a city or address.
-                </div>
+                <div className="text-[12px] font-semibold text-textSecondary">Start typing a city or address.</div>
               )}
             </div>
           </div>

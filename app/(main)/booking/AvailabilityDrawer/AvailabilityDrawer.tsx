@@ -1,18 +1,17 @@
 // app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
 'use client'
 
-import { useMemo, useRef, useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import type {
+  AvailabilityDayResponse,
+  AvailabilityOffering,
+  AvailabilitySummaryResponse,
+  BookingSource,
   DrawerContext,
   SelectedHold,
   ServiceLocationType,
-  AvailabilityDayResponse,
-  BookingSource,
-  AvailabilitySummaryResponse,
-  AvailabilityOffering,
-  ProCard as ProCardType,
 } from './types'
 
 import { STICKY_CTA_H } from './constants'
@@ -34,7 +33,7 @@ import { useAvailability } from './hooks/useAvailability'
 import { useHoldTimer } from './hooks/useHoldTimer'
 import { useDebugFlag } from './hooks/useDebugFlag'
 
-import { sanitizeTimeZone, isValidIanaTimeZone } from '@/lib/timeZone'
+import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
 /**
  * ✅ No Los Angeles fallback anywhere in the UI.
@@ -45,7 +44,16 @@ const FALLBACK_TZ = 'UTC' as const
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
-const EMPTY_PROS: any[] = []
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+}
+
+function pickErrorMessage(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  const e = raw.error
+  return typeof e === 'string' && e.trim() ? e.trim() : null
+}
 
 function periodOfHour(h: number): Period {
   if (h < 12) return 'MORNING'
@@ -131,20 +139,14 @@ function ymdInTz(timeZone: string): string | null {
 }
 
 function resolveBookingSource(context: DrawerContext): BookingSource {
-  if (context?.source) return context.source
-  if (context?.mediaId) return 'DISCOVERY'
+  if (context.source) return context.source
+  if (context.mediaId) return 'DISCOVERY'
   return 'REQUESTED'
 }
 
 type AvailabilitySummaryOk = Extract<AvailabilitySummaryResponse, { ok: true; mode: 'SUMMARY' }>
-
-function isSummary(data: unknown): data is AvailabilitySummaryOk {
-  return Boolean(
-    data &&
-      typeof data === 'object' &&
-      (data as any).ok === true &&
-      (data as any).mode === 'SUMMARY',
-  )
+function isSummary(data: AvailabilitySummaryResponse | null): data is AvailabilitySummaryOk {
+  return Boolean(data && data.ok === true && data.mode === 'SUMMARY')
 }
 
 const FALLBACK_OFFERING: AvailabilityOffering = {
@@ -197,15 +199,20 @@ function buildDayScrollerModel(days: Array<{ date: string; slotCount: number }>,
   })
 }
 
-export default function AvailabilityDrawer({
-  open,
-  onClose,
-  context,
-}: {
-  open: boolean
-  onClose: () => void
-  context: DrawerContext
-}) {
+function parseDaySlots(raw: unknown): { ok: true; slots: string[] } | { ok: false; error?: string } {
+  if (!isRecord(raw)) return { ok: false }
+  if (raw.ok === false) return { ok: false, error: pickErrorMessage(raw) ?? undefined }
+  if (raw.ok !== true) return { ok: false }
+  if (raw.mode !== 'DAY') return { ok: false, error: 'Unexpected availability response.' }
+
+  const slots = raw.slots
+  if (!Array.isArray(slots) || !slots.every((s) => typeof s === 'string')) return { ok: false, error: 'Slots malformed.' }
+  return { ok: true, slots: slots.slice() }
+}
+
+export default function AvailabilityDrawer(props: { open: boolean; onClose: () => void; context: DrawerContext }) {
+  const { open, onClose, context } = props
+
   const router = useRouter()
   const debug = useDebugFlag()
 
@@ -223,7 +230,7 @@ export default function AvailabilityDrawer({
   const summary = isSummary(data) ? data : null
 
   const primary = summary?.primaryPro ?? null
-  const others = summary?.otherPros ?? EMPTY_PROS
+  const others = summary?.otherPros ?? []
   const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
@@ -263,12 +270,11 @@ export default function AvailabilityDrawer({
 
   const showLocalHint = viewerTz !== appointmentTz
 
-  // Service id must exist for day calls; summary wins if present.
-  const effectiveServiceId = summary?.serviceId ?? context?.serviceId ?? null
-
+  // Service id must exist for calls; summary wins if present.
+  const effectiveServiceId = summary?.serviceId ?? context.serviceId ?? null
   const bookingSource = resolveBookingSource(context)
 
-  const canWaitlist = Boolean(summary?.waitlistSupported && context?.professionalId && effectiveServiceId)
+  const canWaitlist = Boolean(summary?.waitlistSupported && context.professionalId && effectiveServiceId)
   const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
 
   const viewProServicesHref = primary ? `/professionals/${encodeURIComponent(primary.id)}?tab=services` : '/looks'
@@ -278,16 +284,21 @@ export default function AvailabilityDrawer({
     return 'Matched to this service'
   }, [effectiveServiceId])
 
-  const primaryId = useMemo(() => {
-    return primary?.id ? String(primary.id) : context?.professionalId ? String(context.professionalId) : ''
-  }, [primary?.id, context?.professionalId])
-
   const resolvedOfferingId = useMemo(() => {
     // ✅ summary wins (canonical)
     if (summary?.offering?.id) return summary.offering.id
     // ✅ fallback to context if provided
-    return context?.offeringId ?? null
-  }, [summary?.offering?.id, context?.offeringId])
+    return context.offeringId ?? null
+  }, [summary?.offering?.id, context.offeringId])
+
+  // ✅ per-pro locationId (primary uses summary.locationId)
+  const locationIdByPro = useMemo(() => {
+    const map: Record<string, string> = {}
+    if (!summary) return map
+    map[summary.primaryPro.id] = summary.locationId
+    for (const p of summary.otherPros) map[p.id] = p.locationId
+    return map
+  }, [summary])
 
   // stable key for days (prevents infinite effect loops due to new array identities)
   const daysKey = useMemo(() => {
@@ -319,7 +330,7 @@ export default function AvailabilityDrawer({
     setOtherSlots({})
     void hardResetUi({ deleteHold: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, context?.mediaId, context?.professionalId, context?.serviceId, context?.offeringId, context?.source])
+  }, [open, context.mediaId, context.professionalId, context.serviceId, context.offeringId, context.source])
 
   // Sync locationType to server after fetch completes (no snapback during refetch)
   useEffect(() => {
@@ -420,7 +431,7 @@ export default function AvailabilityDrawer({
   }
 
   const fetchDaySlots = useCallback(
-    async (args: { proId: string; ymd: string; locationType: ServiceLocationType; isPrimary: boolean }) => {
+    async (args: { proId: string; ymd: string; locationType: ServiceLocationType; locationId: string; isPrimary: boolean }) => {
       if (!effectiveServiceId) return []
 
       const qs = new URLSearchParams({
@@ -428,39 +439,44 @@ export default function AvailabilityDrawer({
         serviceId: effectiveServiceId,
         date: args.ymd,
         locationType: args.locationType,
+        locationId: args.locationId,
       })
 
       if (debug) qs.set('debug', '1')
 
       const res = await fetch(`/api/availability/day?${qs.toString()}`, { method: 'GET', cache: 'no-store' })
-      const body = (await safeJson(res)) as AvailabilityDayResponse | any
+      const raw = await safeJson(res)
 
       if (res.status === 401) return []
-      if (!res.ok || !body?.ok) {
+
+      if (!res.ok) {
         if (args.isPrimary) {
-          const msg = typeof body?.error === 'string' ? body.error : `Couldn’t load times (${res.status}).`
+          const msg = pickErrorMessage(raw) ?? `Couldn’t load times (${res.status}).`
           setError(msg)
         }
         return []
       }
 
-      return Array.isArray(body.slots) ? (body.slots as string[]) : []
+      const parsed = parseDaySlots(raw)
+      if (!parsed.ok) {
+        if (args.isPrimary) setError(parsed.error ?? 'Couldn’t load times.')
+        return []
+      }
+
+      return parsed.slots
     },
     [effectiveServiceId, debug, setError],
   )
 
-  const othersKey = useMemo(() => {
-    if (!others || others.length === 0) return ''
-    return others.map((p: any) => String(p.id)).join('|')
-  }, [others])
+  const othersKey = useMemo(() => (others.length ? others.map((p) => p.id).join('|') : ''), [others])
 
   /**
-   * Load day slots whenever open + day selected + have a primaryId.
+   * Load day slots whenever open + day selected + have summary (we need per-pro locationId truth).
    */
   useEffect(() => {
     if (!open) return
+    if (!summary) return
     if (!selectedDayYMD) return
-    if (!primaryId) return
 
     let cancelled = false
 
@@ -468,22 +484,23 @@ export default function AvailabilityDrawer({
       try {
         setPrimarySlots([])
         setOtherSlots({})
-
         if (!holding) setError(null)
 
+        const primaryLocationId = summary.locationId
+        const primaryId = summary.primaryPro.id
+
         const [pSlots, ...oSlots] = await Promise.all([
-          fetchDaySlots({ proId: primaryId, ymd: selectedDayYMD, locationType, isPrimary: true }),
-          ...(primary?.id
-            ? others.map(async (p: any) => {
-                const slots = await fetchDaySlots({
-                  proId: String(p.id),
-                  ymd: selectedDayYMD,
-                  locationType,
-                  isPrimary: false,
-                })
-                return { proId: String(p.id), slots }
-              })
-            : []),
+          fetchDaySlots({ proId: primaryId, ymd: selectedDayYMD, locationType, locationId: primaryLocationId, isPrimary: true }),
+          ...others.map(async (p) => {
+            const slots = await fetchDaySlots({
+              proId: p.id,
+              ymd: selectedDayYMD,
+              locationType,
+              locationId: p.locationId,
+              isPrimary: false,
+            })
+            return { proId: p.id, slots }
+          }),
         ])
 
         if (cancelled) return
@@ -491,7 +508,7 @@ export default function AvailabilityDrawer({
         setPrimarySlots(pSlots)
 
         const map: Record<string, string[]> = {}
-        for (const row of oSlots as Array<{ proId: string; slots: string[] }>) map[row.proId] = row.slots
+        for (const row of oSlots) map[row.proId] = row.slots
         setOtherSlots(map)
       } catch {
         if (cancelled) return
@@ -504,14 +521,14 @@ export default function AvailabilityDrawer({
     return () => {
       cancelled = true
     }
-  }, [open, selectedDayYMD, locationType, primaryId, fetchDaySlots, holding, setError, primary?.id, othersKey])
+  }, [open, summary, selectedDayYMD, locationType, fetchDaySlots, holding, setError, othersKey])
 
   // auto-switch period if empty
   useEffect(() => {
     if (!open) return
-    if (!primarySlots || primarySlots.length === 0) return
+    if (!primarySlots.length) return
 
-    const counts = { MORNING: 0, AFTERNOON: 0, EVENING: 0 } as Record<Period, number>
+    const counts: Record<Period, number> = { MORNING: 0, AFTERNOON: 0, EVENING: 0 }
     for (const iso of primarySlots) {
       const h = hourInTz(iso, appointmentTz)
       if (h == null) continue
@@ -530,6 +547,12 @@ export default function AvailabilityDrawer({
     if (!effOfferingId) return
     if (holding) return
 
+    const locationId = locationIdByPro[proId]
+    if (!locationId) {
+      setError('Missing booking location for that pro. Please try again.')
+      return
+    }
+
     setError(null)
 
     const existingHoldId = selectedHoldIdRef.current
@@ -542,37 +565,42 @@ export default function AvailabilityDrawer({
     try {
       const res = await fetch('/api/holds', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           offeringId: effOfferingId,
           scheduledFor: slotISO,
           locationType,
+          locationId,
         }),
       })
 
-      const body = await safeJson(res)
+      const raw = await safeJson(res)
 
       if (res.status === 401) {
         redirectToLogin(router, 'hold')
         return
       }
 
-      if (!res.ok || !body?.ok) throw new Error(body?.error || `Hold failed (${res.status}).`)
+      if (!res.ok) {
+        const msg = pickErrorMessage(raw) ?? `Hold failed (${res.status}).`
+        throw new Error(msg)
+      }
 
-      const parsed = parseHoldResponse(body)
+      const parsed = parseHoldResponse(raw)
 
       setSelected({
         proId,
         offeringId: effOfferingId,
         slotISO: parsed.scheduledForISO,
-        proTimeZone: appointmentTz, // legacy field; correct appointment tz now
+        proTimeZone: appointmentTz, // legacy field; appointment tz truth is location tz
         holdId: parsed.holdId,
       })
       setHoldUntil(parsed.holdUntilMs)
 
       if (parsed.locationType) setLocationType(parsed.locationType)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to hold that time. Try another slot.')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to hold that time. Try another slot.'
+      setError(msg)
     } finally {
       setHolding(false)
     }
@@ -589,7 +617,7 @@ export default function AvailabilityDrawer({
       source: bookingSource,
     })
 
-    if (context?.mediaId) qs.set('mediaId', context.mediaId)
+    if (context.mediaId) qs.set('mediaId', context.mediaId)
 
     onClose()
     router.push(`/booking/add-ons?${qs.toString()}`)
@@ -597,12 +625,12 @@ export default function AvailabilityDrawer({
 
   const selectedLine = selected?.slotISO ? fmtSelectedLine(selected.slotISO, appointmentTz) : null
 
-  // ✅ Early return is now SAFE because ALL hooks are above this line.
-  if (!open || !context) return null
+  // ✅ Early return safe (all hooks above)
+  if (!open) return null
 
   const canRenderSummary = Boolean(summary && primary)
   const shouldShowLoading = loading && !summary
-  const shouldShowEmpty = !error && !shouldShowLoading && (!canRenderSummary && !context?.professionalId)
+  const shouldShowEmpty = !error && !shouldShowLoading && !canRenderSummary
 
   return (
     <DrawerShell
@@ -646,154 +674,126 @@ export default function AvailabilityDrawer({
           </div>
         </>
       }
-      footer={
-        <StickyCTA
-          canContinue={Boolean(selected?.holdId && holdUntil)}
-          loading={holding}
-          onContinue={onContinue}
-          selectedLine={selectedLine}
-        />
-      }
+      footer={<StickyCTA canContinue={Boolean(selected?.holdId && holdUntil)} loading={holding} onContinue={onContinue} selectedLine={selectedLine} />}
     >
       <div className="looksNoScrollbar overflow-y-auto px-4 pb-4" style={{ paddingBottom: STICKY_CTA_H + 14 }}>
         {shouldShowLoading ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-            Loading availability…
-          </div>
+          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">Loading availability…</div>
         ) : error ? (
           <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">{error}</div>
         ) : shouldShowEmpty ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-            No availability found.
-          </div>
-        ) : (
-          (() => {
-            const primaryPro: ProCardType | null = canRenderSummary ? (primary as ProCardType) : null
+          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">No availability found.</div>
+        ) : summary && primary ? (
+          <>
+            <ProCard
+              pro={primary}
+              appointmentTz={appointmentTz}
+              viewerTz={viewerTz}
+              statusLine={statusLine}
+              showFallbackActions={false}
+              viewProServicesHref={viewProServicesHref}
+              onScrollToOtherPros={scrollToOtherPros}
+            />
 
-            return (
-              <>
-                {primaryPro ? (
-                  <ProCard
-                    pro={primaryPro as any}
-                    appointmentTz={appointmentTz}
-                    viewerTz={viewerTz}
-                    statusLine={statusLine}
-                    showFallbackActions={false}
-                    viewProServicesHref={viewProServicesHref}
-                    onScrollToOtherPros={scrollToOtherPros}
-                  />
-                ) : null}
+            <ServiceContextCard
+              serviceName={summary.serviceName ?? null}
+              categoryName={summary.serviceCategoryName ?? null}
+              offering={offering}
+              locationType={locationType}
+            />
 
-                <ServiceContextCard
-                  serviceName={(summary as any)?.serviceName ?? null}
-                  categoryName={(summary as any)?.serviceCategoryName ?? null}
-                  offering={offering}
-                  locationType={locationType}
-                />
+            <AppointmentTypeToggle
+              value={locationType}
+              disabled={holding}
+              allowed={allowed}
+              offering={offering}
+              onChange={(t) => {
+                void hardResetUi({ deleteHold: true })
+                setLocationType(t)
+                setSelectedDayYMD(null)
+                setPrimarySlots([])
+                setOtherSlots({})
+              }}
+            />
 
-                <AppointmentTypeToggle
-                  value={locationType}
-                  disabled={holding}
-                  allowed={allowed}
-                  offering={offering}
-                  onChange={(t) => {
-                    void hardResetUi({ deleteHold: true })
-                    setLocationType(t)
-                    setSelectedDayYMD(null)
-                    setPrimarySlots([])
-                    setOtherSlots({})
-                  }}
-                />
+            {dayScrollerDays.length ? (
+              <DayScroller
+                days={dayScrollerDays}
+                selectedYMD={selectedDayYMD}
+                onSelect={(ymd) => {
+                  void hardResetUi({ deleteHold: true })
+                  setSelectedDayYMD(ymd)
+                }}
+              />
+            ) : null}
 
-                {/* ✅ Day picker restored */}
-                {dayScrollerDays.length ? (
-                  <DayScroller
-                    days={dayScrollerDays}
-                    selectedYMD={selectedDayYMD}
-                    onSelect={(ymd) => {
-                      void hardResetUi({ deleteHold: true })
-                      setSelectedDayYMD(ymd)
-                    }}
-                  />
-                ) : null}
+            <SlotChips
+              pro={primary}
+              appointmentTz={appointmentTz}
+              holding={holding}
+              selected={selected}
+              period={period}
+              onSelectPeriod={(p) => {
+                void hardResetUi({ deleteHold: true })
+                setPeriod(p)
+              }}
+              slotsForDay={primarySlots}
+              onPick={(proId, offeringId, slotISO) => {
+                void onPickSlot(proId, offeringId, slotISO)
+              }}
+            />
 
-                <SlotChips
-                  pro={
-                    (primaryPro as any) ??
-                    ({
-                      id: primaryId,
-                      offeringId: resolvedOfferingId,
-                      timeZone: appointmentTz,
-                    } as any)
-                  }
-                  appointmentTz={appointmentTz}
-                  holding={holding}
-                  selected={selected}
-                  period={period}
-                  onSelectPeriod={(p) => {
-                    void hardResetUi({ deleteHold: true })
-                    setPeriod(p)
-                  }}
-                  slotsForDay={primarySlots}
-                  onPick={(proId, offeringId, slotISO) => {
-                    void onPickSlot(proId, offeringId, slotISO)
-                  }}
-                />
+            {showLocalHint && selected?.slotISO ? (
+              <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
+                You’re booking <span className="font-black text-textPrimary">{appointmentTz}</span> time.
+                <span className="ml-2">
+                  Your local time: <span className="font-black text-textPrimary">{fmtInTz(selected.slotISO, viewerTz)}</span>
+                </span>
+              </div>
+            ) : null}
 
-                {showLocalHint && selected?.slotISO ? (
-                  <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
-                    You’re booking <span className="font-black text-textPrimary">{appointmentTz}</span> time.
-                    <span className="ml-2">
-                      Your local time:{' '}
-                      <span className="font-black text-textPrimary">{fmtInTz(selected.slotISO, viewerTz)}</span>
-                    </span>
-                  </div>
-                ) : null}
+            <WaitlistPanel
+              canWaitlist={canWaitlist}
+              appointmentTz={appointmentTz}
+              context={context}
+              effectiveServiceId={effectiveServiceId}
+              noPrimarySlots={noPrimarySlots}
+            />
 
-                <WaitlistPanel
-                  canWaitlist={canWaitlist}
-                  appointmentTz={appointmentTz}
-                  context={context}
-                  effectiveServiceId={effectiveServiceId}
-                  noPrimarySlots={noPrimarySlots}
-                />
+            <OtherPros
+              others={others.map((p) => ({ ...p, slots: otherSlots[p.id] ?? [] }))}
+              effectiveServiceId={effectiveServiceId}
+              viewerTz={viewerTz}
+              appointmentTz={appointmentTz}
+              holding={holding}
+              selected={selected}
+              onPick={(proId, offeringId, slotISO) => onPickSlot(proId, offeringId, slotISO)}
+              setRef={(el) => {
+                otherProsRef.current = el
+              }}
+            />
 
-                {primaryPro ? (
-                  <OtherPros
-                    others={(others || []).map((p: any) => ({ ...p, slots: otherSlots[String(p.id)] || [] }))}
-                    effectiveServiceId={effectiveServiceId}
-                    viewerTz={viewerTz}
-                    appointmentTz={appointmentTz}
-                    holding={holding}
-                    selected={selected}
-                    onPick={(proId, offeringId, slotISO) => onPickSlot(proId, offeringId, slotISO)}
-                    setRef={(el) => (otherProsRef.current = el)}
-                  />
-                ) : null}
-
-                {debug ? (
-                  <DebugPanel
-                    payload={{
-                      bookingSource,
-                      appointmentTz,
-                      viewerTz,
-                      selected,
-                      holdUntil,
-                      locationType,
-                      effectiveServiceId,
-                      selectedDayYMD,
-                      period,
-                      primarySlotsCount: primarySlots.length,
-                      offering,
-                      allowed,
-                      raw: data,
-                    }}
-                  />
-                ) : null}
-              </>
-            )
-          })()
-        )}
+            {debug ? (
+              <DebugPanel
+                payload={{
+                  bookingSource,
+                  appointmentTz,
+                  viewerTz,
+                  selected,
+                  holdUntil,
+                  locationType,
+                  effectiveServiceId,
+                  selectedDayYMD,
+                  period,
+                  primarySlotsCount: primarySlots.length,
+                  offering,
+                  allowed,
+                  raw: data,
+                }}
+              />
+            ) : null}
+          </>
+        ) : null}
       </div>
     </DrawerShell>
   )

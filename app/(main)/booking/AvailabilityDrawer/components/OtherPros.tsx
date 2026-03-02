@@ -1,5 +1,4 @@
 // app/(main)/booking/AvailabilityDrawer/components/OtherPros.tsx
-
 'use client'
 
 import Link from 'next/link'
@@ -34,8 +33,10 @@ export default function OtherPros({
       {others.length ? (
         <div className="mt-3 grid gap-3">
           {others.map((p) => {
-            const pTz = p.timeZone || appointmentTz
+            const name = p.businessName?.trim() || 'Professional'
+            const pTz = p.timeZone?.trim() ? p.timeZone.trim() : appointmentTz
             const showPtzHint = Boolean(viewerTz && viewerTz !== pTz)
+            const slots = Array.isArray(p.slots) ? p.slots : []
 
             return (
               <div key={p.id} className="rounded-card border border-white/10 bg-bgPrimary/25 p-3">
@@ -43,16 +44,16 @@ export default function OtherPros({
                   <div className="h-10 w-10 overflow-hidden rounded-full bg-white/10">
                     {p.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.avatarUrl} alt="" className="h-full w-full object-cover" />
+                      <img src={p.avatarUrl} alt={`${name} avatar`} className="h-full w-full object-cover" />
                     ) : null}
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <Link
-                      href={`/professionals/${p.id}`}
+                      href={`/professionals/${encodeURIComponent(p.id)}`}
                       className="block truncate text-[13px] font-black text-textPrimary"
                     >
-                      {p.businessName || 'Professional'}
+                      {name}
                     </Link>
 
                     {p.location ? (
@@ -67,21 +68,23 @@ export default function OtherPros({
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {(p.slots || []).slice(0, 4).map((iso) => {
+                  {slots.slice(0, 4).map((iso) => {
                     const isSelected = selected?.proId === p.id && selected?.slotISO === iso
+                    const disabled = !p.offeringId || holding
+
                     return (
                       <button
                         key={iso}
                         type="button"
-                        onClick={() => onPick(p.id, p.offeringId, iso)}
-                        disabled={!p.offeringId || holding}
+                        onClick={() => onPick(p.id, p.offeringId ?? null, iso)}
+                        disabled={disabled}
                         className={[
                           'h-10 rounded-full border px-3 text-[13px] font-black transition',
                           'border-white/10',
                           isSelected
                             ? 'bg-accentPrimary text-bgPrimary'
                             : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
-                          !p.offeringId || holding ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+                          disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
                         ].join(' ')}
                         title={formatSlotFullLabel(iso, pTz)}
                       >

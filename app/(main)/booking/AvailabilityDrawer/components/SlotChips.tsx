@@ -1,6 +1,7 @@
 // app/(main)/booking/AvailabilityDrawer/components/SlotChips.tsx
 'use client'
 
+import { useMemo } from 'react'
 import type { ProCard, SelectedHold } from '../types'
 import { getHourInTimeZone, formatSlotLabel, formatSlotFullLabel } from '@/lib/bookingTime'
 
@@ -35,20 +36,15 @@ export default function SlotChips({
 }) {
   const allSlots = Array.isArray(slotsForDay) ? slotsForDay : []
 
-  const slotsByPeriod = {
-    MORNING: allSlots.filter((iso) => {
+  const slotsByPeriod = useMemo(() => {
+    const out: Record<Period, string[]> = { MORNING: [], AFTERNOON: [], EVENING: [] }
+    for (const iso of allSlots) {
       const h = getHourInTimeZone(iso, appointmentTz)
-      return h != null && periodOfHour(h) === 'MORNING'
-    }),
-    AFTERNOON: allSlots.filter((iso) => {
-      const h = getHourInTimeZone(iso, appointmentTz)
-      return h != null && periodOfHour(h) === 'AFTERNOON'
-    }),
-    EVENING: allSlots.filter((iso) => {
-      const h = getHourInTimeZone(iso, appointmentTz)
-      return h != null && periodOfHour(h) === 'EVENING'
-    }),
-  } as const
+      if (h == null) continue
+      out[periodOfHour(h)].push(iso)
+    }
+    return out
+  }, [allSlots, appointmentTz])
 
   const periodDisabled = {
     MORNING: slotsByPeriod.MORNING.length === 0,
@@ -57,6 +53,7 @@ export default function SlotChips({
   } as const
 
   const visibleSlots = slotsByPeriod[period]
+  const offeringId = pro.offeringId ?? null
 
   return (
     <div className="tovis-glass-soft mb-3 rounded-card p-4">
@@ -80,8 +77,7 @@ export default function SlotChips({
               key={p}
               type="button"
               onClick={() => {
-                if (disabled) return
-                if (active) return
+                if (disabled || active) return
                 onSelectPeriod(p)
               }}
               disabled={disabled}
@@ -104,13 +100,13 @@ export default function SlotChips({
         {visibleSlots.length ? (
           visibleSlots.map((iso) => {
             const isSelected = selected?.proId === pro.id && selected?.slotISO === iso
-            const disabled = !pro.offeringId || holding
+            const disabled = !offeringId || holding
 
             return (
               <button
                 key={iso}
                 type="button"
-                onClick={() => onPick(pro.id, pro.offeringId ?? null, iso)}
+                onClick={() => onPick(pro.id, offeringId, iso)}
                 disabled={disabled}
                 className={[
                   'h-10 rounded-full border px-3 text-[13px] font-black transition',

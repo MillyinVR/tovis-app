@@ -17,7 +17,35 @@ type LooksCategoriesResponse = {
   categories?: Array<Partial<UiCategory> | null>
 }
 
+type ViewerLocation = {
+  label: string
+  placeId: string | null
+  lat: number
+  lng: number
+  radiusMiles: number
+  updatedAtMs: number
+}
+
+const STORAGE_KEY = 'tovis.viewerLocation.v1'
+
 const ALL_TAB: UiCategory = { name: 'The Looks', slug: 'all' }
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
+function pickString(x: unknown): string | null {
+  return typeof x === 'string' && x.trim() ? x.trim() : null
+}
+
+function pickNumber(x: unknown): number | null {
+  return typeof x === 'number' && Number.isFinite(x) ? x : null
+}
+
+function clampInt(n: number, min: number, max: number) {
+  const x = Math.trunc(n)
+  return Math.min(Math.max(x, min), max)
+}
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/looks'
@@ -32,8 +60,52 @@ function sanitizeFrom(from: string) {
   return trimmed
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+
+function parseCategories(raw: unknown): UiCategory[] {
+  if (!isRecord(raw)) return [ALL_TAB]
+  const arr = raw.categories
+  if (!Array.isArray(arr)) return [ALL_TAB]
+
+  const normalized: UiCategory[] = arr
+    .filter((c): c is Partial<UiCategory> => Boolean(c && typeof c === 'object'))
+    .map((c) => ({
+      name: typeof c.name === 'string' ? c.name.trim() : '',
+      slug: typeof c.slug === 'string' ? c.slug.trim() : '',
+    }))
+    .filter((c) => c.name.length > 0 && c.slug.length > 0)
+    .filter((c) => c.name.toLowerCase() !== 'for you' && c.slug.toLowerCase() !== 'for-you')
+
+  const map = new Map<string, UiCategory>()
+  for (const c of normalized) map.set(c.slug, c)
+
+  return [ALL_TAB, ...Array.from(map.values())]
+}
+
+/**
+ * NOTE:
+ * The /api/looks contract is internal and already matches FeedItem.
+ * We keep runtime validation minimal and avoid `any`.
+ * This is a *local, justified* assertion at a module boundary.
+ */
+function parseFeedItems(raw: unknown): FeedItem[] {
+  if (!isRecord(raw)) return []
+  const items = raw.items
+  if (!Array.isArray(items)) return []
+  return items as unknown as FeedItem[]
+}
+
+function parseComments(raw: unknown): UiComment[] {
+  if (!isRecord(raw)) return []
+  const comments = raw.comments
+  if (!Array.isArray(comments)) return []
+  return comments as unknown as UiComment[]
 }
 
 /** Small deterministic “random” so signals don’t flicker on re-render */
@@ -56,6 +128,44 @@ const FUTURE_SELF_LINES = ['Wake up ready.', 'Low-maintenance glow.', 'Future-yo
 
 const FOOTER_HEIGHT = UI_SIZES.footerHeight
 const RIGHT_RAIL_BOTTOM = UI_SIZES.footerHeight + UI_SIZES.rightRailBottomOffset
+
+function loadViewerLocation(): ViewerLocation | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return null
+
+    const label = pickString(parsed.label)
+    const lat = pickNumber(parsed.lat)
+    const lng = pickNumber(parsed.lng)
+    const radiusMiles = pickNumber(parsed.radiusMiles)
+    const updatedAtMs = pickNumber(parsed.updatedAtMs)
+    const placeId = parsed.placeId == null ? null : pickString(parsed.placeId)
+
+    if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return null
+
+    return {
+      label,
+      lat,
+      lng,
+      radiusMiles: clampInt(radiusMiles, 5, 50),
+      updatedAtMs,
+      placeId: placeId ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function getNavigatorShare() {
+  if (typeof navigator === 'undefined') return null
+  const n: unknown = navigator
+  if (!isRecord(n)) return null
+  const share = n.share
+  return typeof share === 'function' ? (share as (data: ShareData) => Promise<void>) : null
+}
 
 export default function LooksFeed() {
   const router = useRouter()
@@ -100,6 +210,42 @@ export default function LooksFeed() {
   // active slide index (for future autoplay)
   const [activeIndex, setActiveIndex] = useState(0)
 
+  // viewer location (from SearchClient persistence)
+  const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
+
+  useEffect(() => {
+    setViewerLoc(loadViewerLocation())
+
+    const onEvt = (e: Event) => {
+      const ce = e as CustomEvent<unknown>
+      const d = ce.detail
+      if (d == null) {
+        setViewerLoc(null)
+        return
+      }
+      if (!isRecord(d)) return
+      const label = pickString(d.label)
+      const lat = pickNumber(d.lat)
+      const lng = pickNumber(d.lng)
+      const radiusMiles = pickNumber(d.radiusMiles)
+      const updatedAtMs = pickNumber(d.updatedAtMs)
+      const placeId = d.placeId == null ? null : pickString(d.placeId)
+
+      if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return
+      setViewerLoc({
+        label,
+        lat,
+        lng,
+        radiusMiles: clampInt(radiusMiles, 5, 50),
+        updatedAtMs,
+        placeId: placeId ?? null,
+      })
+    }
+
+    window.addEventListener('tovis:viewerLocation', onEvt as EventListener)
+    return () => window.removeEventListener('tovis:viewerLocation', onEvt as EventListener)
+  }, [])
+
   const redirectToLogin = useCallback(
     (reason: string) => {
       const from = sanitizeFrom(currentPathWithQuery())
@@ -122,27 +268,12 @@ export default function LooksFeed() {
 
   const loadCategories = useCallback(async () => {
     try {
-      const res = await fetch('/api/looks/categories', { cache: 'no-store' })
-      const raw = (await safeJson(res)) as LooksCategoriesResponse
+      const res = await fetch('/api/looks/categories', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const raw = await safeJson(res)
+      if (!res.ok) throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load categories' : 'Failed to load categories')
 
-      const fromServer = Array.isArray(raw?.categories) ? raw.categories : []
-
-      const normalized: UiCategory[] = fromServer
-        .filter((c): c is Partial<UiCategory> => Boolean(c))
-        .map((c) => ({
-          name: typeof c.name === 'string' ? c.name.trim() : '',
-          slug: typeof c.slug === 'string' ? c.slug.trim() : '',
-        }))
-        .filter((c) => c.name.length > 0 && c.slug.length > 0)
-        .filter((c) => c.name.toLowerCase() !== 'for you' && c.slug.toLowerCase() !== 'for-you')
-
-      // de-dupe by slug
-      const map = new Map<string, UiCategory>()
-      for (const c of normalized) map.set(c.slug, c)
-
-      const next: UiCategory[] = [ALL_TAB, ...Array.from(map.values())]
+      const next = parseCategories(raw)
       setCats(next)
-
       setActiveCategorySlug((cur) => (next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug))
     } catch {
       setCats([ALL_TAB])
@@ -157,20 +288,17 @@ export default function LooksFeed() {
     try {
       const qs = new URLSearchParams()
       qs.set('limit', '24')
-
-      // ✅ IMPORTANT: send category SLUG (API will filter by slug)
       if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) qs.set('category', activeCategorySlug)
       if (query.trim()) qs.set('q', query.trim())
 
-      const res = await fetch(`/api/looks?${qs.toString()}`, { cache: 'no-store' })
-      const data = await safeJson(res)
+      const res = await fetch(`/api/looks?${qs.toString()}`, { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const raw = await safeJson(res)
 
-      if (!res.ok) throw new Error(data?.error || 'Failed to load looks')
+      if (!res.ok) throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load looks' : 'Failed to load looks')
 
-      const next = Array.isArray(data.items) ? (data.items as FeedItem[]) : []
-      setItems(next)
-    } catch (e: any) {
-      setFeedError(e?.message || 'Failed to load looks')
+      setItems(parseFeedItems(raw))
+    } catch (e: unknown) {
+      setFeedError(e instanceof Error ? e.message : 'Failed to load looks')
       setItems([])
     } finally {
       setLoading(false)
@@ -238,7 +366,7 @@ export default function LooksFeed() {
 
       try {
         const res = await fetch(`/api/looks/${mediaId}/like`, { method: beforeLiked ? 'DELETE' : 'POST' })
-        const data = await safeJson(res)
+        const raw = await safeJson(res)
 
         if (isGuestBlocked(res.status)) {
           setItems((prev) =>
@@ -259,14 +387,18 @@ export default function LooksFeed() {
           return
         }
 
-        const serverLiked = typeof data?.liked === 'boolean' ? data.liked : !beforeLiked
+        const serverLiked =
+          isRecord(raw) && typeof raw.liked === 'boolean'
+            ? raw.liked
+            : !beforeLiked
+
         const serverCount =
-          typeof data?.likeCount === 'number'
-            ? data.likeCount
-            : typeof data?.likes === 'number'
-              ? data.likes
-              : typeof data?._count?.likes === 'number'
-                ? data._count.likes
+          isRecord(raw) && typeof raw.likeCount === 'number'
+            ? raw.likeCount
+            : isRecord(raw) && typeof raw.likes === 'number'
+              ? raw.likes
+              : isRecord(raw) && isRecord(raw._count) && typeof raw._count.likes === 'number'
+                ? raw._count.likes
                 : undefined
 
         setItems((prev) =>
@@ -316,8 +448,8 @@ export default function LooksFeed() {
     setCommentsLoading(true)
 
     try {
-      const res = await fetch(`/api/looks/${mediaId}/comments`, { cache: 'no-store' })
-      const data = await safeJson(res)
+      const res = await fetch(`/api/looks/${mediaId}/comments`, { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const raw = await safeJson(res)
 
       if (isGuestBlocked(res.status)) {
         setOpenCommentsFor(null)
@@ -325,10 +457,10 @@ export default function LooksFeed() {
         return
       }
 
-      if (!res.ok) throw new Error(data?.error || 'Failed to load comments')
-      setComments(Array.isArray(data.comments) ? data.comments : [])
-    } catch (e: any) {
-      setCommentError(e?.message || 'Failed to load comments')
+      if (!res.ok) throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load comments' : 'Failed to load comments')
+      setComments(parseComments(raw))
+    } catch (e: unknown) {
+      setCommentError(e instanceof Error ? e.message : 'Failed to load comments')
     } finally {
       setCommentsLoading(false)
     }
@@ -361,11 +493,11 @@ export default function LooksFeed() {
     try {
       const res = await fetch(`/api/looks/${mediaId}/comments`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ body }),
       })
 
-      const data = await safeJson(res)
+      const raw = await safeJson(res)
 
       if (isGuestBlocked(res.status)) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
@@ -389,12 +521,13 @@ export default function LooksFeed() {
               : m,
           ),
         )
-        setCommentError(data?.error || 'Failed to post comment')
+        const msg = isRecord(raw) ? pickString(raw.error) : null
+        setCommentError(msg ?? 'Failed to post comment')
         return
       }
 
       await openCommentsDrawer(mediaId)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setComments((prev) => prev.filter((c) => c.id !== tempId))
       setItems((prev) =>
         prev.map((m) =>
@@ -403,34 +536,70 @@ export default function LooksFeed() {
             : m,
         ),
       )
-      setCommentError(e?.message || 'Failed to post comment')
+      setCommentError(e instanceof Error ? e.message : 'Failed to post comment')
     } finally {
       setPosting(false)
     }
   }
 
-  function openAvailabilityFor(item: FeedItem) {
-    if (!item.professional?.id) return
+  const closeAvailability = useCallback(() => {
+    setAvailabilityOpen(false)
+    // let drawer animate closed before clearing context
+    window.setTimeout(() => setDrawerCtx(null), 150)
+  }, [])
 
-    const ctx: AvailabilityDrawerContext = {
-      mediaId: item.id,
-      professionalId: item.professional.id,
-      serviceId: item.serviceId ?? null,
-      source: 'DISCOVERY',
-    }
-
-    setDrawerCtx(ctx)
-    setAvailabilityOpen(true)
+  function readViewerLocFromStorage():
+  | { lat: number; lng: number; radiusMiles: number | null; placeId: string | null }
+  | null {
+  try {
+    if (typeof window === 'undefined') return null
+    const raw = window.localStorage.getItem('tovis.viewerLocation')
+    if (!raw) return null
+    const j = JSON.parse(raw) as { lat?: unknown; lng?: unknown; radiusMiles?: unknown; placeId?: unknown }
+    const lat = typeof j.lat === 'number' && Number.isFinite(j.lat) ? j.lat : null
+    const lng = typeof j.lng === 'number' && Number.isFinite(j.lng) ? j.lng : null
+    if (lat == null || lng == null) return null
+    const radiusMiles = typeof j.radiusMiles === 'number' && Number.isFinite(j.radiusMiles) ? j.radiusMiles : null
+    const placeId = typeof j.placeId === 'string' && j.placeId.trim() ? j.placeId.trim() : null
+    return { lat, lng, radiusMiles, placeId }
+  } catch {
+    return null
   }
+}
+
+function openAvailabilityFor(item: FeedItem) {
+  if (!item.professional?.id) return
+
+  const viewer = readViewerLocFromStorage()
+
+  const ctx: AvailabilityDrawerContext = {
+    mediaId: item.id,
+    professionalId: item.professional.id,
+    serviceId: item.serviceId ?? null,
+    source: 'DISCOVERY',
+
+    ...(viewer
+      ? {
+          viewerLat: viewer.lat,
+          viewerLng: viewer.lng,
+          viewerRadiusMiles: viewer.radiusMiles,
+          viewerPlaceId: viewer.placeId,
+        }
+      : {}),
+  }
+
+  setDrawerCtx(ctx)
+  setAvailabilityOpen(true)
+}
 
   const shareLook = useCallback(async (item: FeedItem) => {
     if (typeof window === 'undefined') return
     const url = `${window.location.origin}/looks?m=${encodeURIComponent(item.id)}`
 
     try {
-      const nav: any = navigator
-      if (nav?.share) {
-        await nav.share({
+      const share = getNavigatorShare()
+      if (share) {
+        await share({
           title: 'TOVIS Look',
           text: item.caption ? item.caption.slice(0, 120) : undefined,
           url,
@@ -449,7 +618,7 @@ export default function LooksFeed() {
     }
   }, [])
 
-  // ✅ Branding copy
+  // Branding copy
   if (loading) return <div className="p-3 text-textSecondary">Loading Looks…</div>
   if (feedError) return <div className="p-3 text-toneDanger">{feedError}</div>
   if (!items.length) return <div className="p-3 text-textSecondary">No Looks yet. This is where the glow-ups will live.</div>
@@ -458,7 +627,10 @@ export default function LooksFeed() {
 
   return (
     <>
-      <div className="bg-bgPrimary" style={{ height: FEED_VIEWPORT_HEIGHT, width: '100%', overflow: 'hidden', position: 'relative' }}>
+      <div
+        className="bg-bgPrimary"
+        style={{ height: FEED_VIEWPORT_HEIGHT, width: '100%', overflow: 'hidden', position: 'relative' }}
+      >
         <LooksTopBar
           categories={categoriesForTopBar}
           activeCategory={activeCategoryName}
@@ -479,7 +651,11 @@ export default function LooksFeed() {
 
             const rightRail = (
               <RightActionRail
-                pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null } : null}
+                pro={
+                  m.professional
+                    ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null }
+                    : null
+                }
                 viewerLiked={m.viewerLiked}
                 likeCount={m._count.likes}
                 commentCount={m._count.comments}
@@ -512,7 +688,7 @@ export default function LooksFeed() {
         </div>
       </div>
 
-      {drawerCtx ? <AvailabilityDrawer open={availabilityOpen} onClose={() => setAvailabilityOpen(false)} context={drawerCtx} /> : null}
+      {drawerCtx ? <AvailabilityDrawer open={availabilityOpen} onClose={closeAvailability} context={drawerCtx} /> : null}
 
       <CommentsDrawer
         open={Boolean(openCommentsFor)}
