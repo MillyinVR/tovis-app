@@ -2,47 +2,49 @@
 'use client'
 
 import type React from 'react'
-import { eventChipClasses } from '../../_utils/statusStyles'
 import type { CalendarEvent, EntityType } from '../../_types'
+import { eventCardClasses } from '../../_utils/statusStyles'
 
-type Props = {
-  ev: CalendarEvent
-  isBlocked: boolean
-  apiId: string | null
+type BeginResizeArgs = {
   entityType: EntityType
-  topPx: number
-  heightPx: number
-  timeLabel: string
-  compact: boolean
-  micro: boolean
-
-  suppressClickRef: React.MutableRefObject<boolean>
-  onClickEvent: (id: string) => void
-  onDragStart: (ev: CalendarEvent, e: React.DragEvent<HTMLDivElement>) => void
-  onBeginResize: (args: {
-    entityType: EntityType
-    eventId: string
-    apiId: string
-    day: Date
-    startMinutes: number
-    originalDuration: number
-    columnTop: number
-  }) => void
-
+  eventId: string
+  apiId: string
   day: Date
   startMinutes: number
   originalDuration: number
   columnTop: number
 }
 
-function primaryText(ev: CalendarEvent, isBlocked: boolean) {
-  if (isBlocked) return 'Blocked'
+type Props = {
+  ev: CalendarEvent
+  entityType: EntityType
+  apiId: string | null
+
+  topPx: number
+  heightPx: number
+  timeLabel: string
+  compact: boolean
+  micro: boolean
+
+  day: Date
+  startMinutes: number
+  originalDuration: number
+  columnTop: number
+
+  suppressClickRef: React.MutableRefObject<boolean>
+  onClickEvent: (id: string) => void
+  onDragStart: (ev: CalendarEvent, e: React.DragEvent<HTMLDivElement>) => void
+  onBeginResize: (args: BeginResizeArgs) => void
+}
+
+function primaryText(ev: CalendarEvent) {
+  if (ev.kind === 'BLOCK') return 'Blocked'
   const name = (ev.clientName || '').trim()
   return name || 'Client'
 }
 
-function secondaryText(ev: CalendarEvent, isBlocked: boolean) {
-  if (isBlocked) return (ev.note || ev.clientName || 'Personal time').toString()
+function secondaryText(ev: CalendarEvent) {
+  if (ev.kind === 'BLOCK') return (ev.note || ev.title || 'Personal time').toString()
   const svc = (ev.title || '').trim()
   return svc || 'Appointment'
 }
@@ -59,25 +61,25 @@ function accentFromStatus(status?: string | null, isBlocked?: boolean) {
 export function EventCard(props: Props) {
   const {
     ev,
-    isBlocked,
-    apiId,
     entityType,
+    apiId,
     topPx,
     heightPx,
     timeLabel,
     compact,
     micro,
-    suppressClickRef,
-    onClickEvent,
-    onDragStart,
-    onBeginResize,
     day,
     startMinutes,
     originalDuration,
     columnTop,
+    suppressClickRef,
+    onClickEvent,
+    onDragStart,
+    onBeginResize,
   } = props
 
-  const chip = eventChipClasses({ status: ev.status ?? null, isBlocked })
+  const isBlocked = ev.kind === 'BLOCK'
+  const card = eventCardClasses({ status: ev.status ?? null, isBlocked })
   const accent = accentFromStatus(ev.status ?? null, isBlocked)
 
   return (
@@ -96,11 +98,11 @@ export function EventCard(props: Props) {
         'shadow-xl shadow-black/35',
         'ring-1 ring-white/10',
         'transition-transform duration-150 md:hover:scale-[1.01] active:scale-[0.995]',
-        chip.bg,
-        chip.border,
-        chip.ring || '',
+        card.border,
+        card.ring || '',
       ].join(' ')}
       style={{ top: topPx, height: heightPx }}
+      title={isBlocked ? 'Drag to move, drag bottom to resize. Click to edit.' : 'Drag to move, drag bottom to resize.'}
     >
       {/* Accent strip */}
       <div className={['absolute inset-y-0 left-0 w-1.5', accent].join(' ')} />
@@ -122,7 +124,7 @@ export function EventCard(props: Props) {
               overflow: 'hidden',
             }}
           >
-            {primaryText(ev, isBlocked)}
+            {primaryText(ev)}
           </div>
 
           {!micro && (
@@ -145,12 +147,10 @@ export function EventCard(props: Props) {
               overflow: 'hidden',
             }}
           >
-            {secondaryText(ev, isBlocked)}
+            {secondaryText(ev)}
           </div>
         ) : (
-          <div className="mt-0.5 truncate text-[11px] font-medium text-textPrimary/85">
-            {secondaryText(ev, isBlocked)}
-          </div>
+          <div className="mt-0.5 truncate text-[11px] font-medium text-textPrimary/85">{secondaryText(ev)}</div>
         )}
 
         {micro && <div className="mt-0.5 truncate text-[10px] font-semibold text-white/80">{timeLabel}</div>}

@@ -8,6 +8,7 @@ import { COPY } from '@/lib/copy'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { AftercareRebookMode, ClientNotificationType, ConsultationApprovalStatus, Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,21 +38,6 @@ function formatDateInTz(d: Date, timeZone: string) {
   })
 }
 
-type InboxRow = {
-  id: string
-  title: string | null
-  body: string | null
-  readAt: Date | null
-  createdAt: Date
-  bookingId: string | null
-  aftercareId: string | null
-  booking: any | null
-  aftercare: {
-    rebookMode: string | null
-    rebookedFor: Date | null
-  } | null
-}
-
 function SmallPill({ label }: { label: string }) {
   return (
     <span className="ml-2 inline-flex items-center rounded-full border border-accentPrimary/35 bg-accentPrimary/12 px-2 py-0.5 text-[10px] font-black tracking-wide text-accentPrimary">
@@ -60,113 +46,111 @@ function SmallPill({ label }: { label: string }) {
   )
 }
 
+// ✅ Booking shape must match ClientBookingRow expectations from buildClientBookingDTO
+const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
+  id: true,
+  status: true,
+  source: true,
+  sessionStep: true,
+  scheduledFor: true,
+  finishedAt: true,
+
+  subtotalSnapshot: true,
+  totalDurationMinutes: true,
+  bufferMinutes: true,
+
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+
+  service: { select: { id: true, name: true } },
+
+  professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
+
+  location: {
+    select: {
+      id: true,
+      name: true,
+      formattedAddress: true,
+      city: true,
+      state: true,
+      timeZone: true,
+    },
+  },
+
+  serviceItems: {
+    orderBy: { sortOrder: 'asc' },
+    take: 80,
+    select: {
+      id: true,
+      itemType: true,
+      parentItemId: true,
+      sortOrder: true,
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+      serviceId: true,
+      service: { select: { name: true } },
+    },
+  },
+
+  consultationNotes: true,
+  consultationPrice: true,
+  consultationConfirmedAt: true,
+  consultationApproval: {
+    select: {
+      status: true,
+      proposedServicesJson: true,
+      proposedTotal: true,
+      notes: true,
+      approvedAt: true,
+      rejectedAt: true,
+    },
+  },
+})
+
+const inboxSelect = Prisma.validator<Prisma.ClientNotificationSelect>()({
+  id: true,
+  title: true,
+  body: true,
+  readAt: true,
+  createdAt: true,
+  bookingId: true,
+  aftercareId: true,
+  booking: { select: bookingSelect },
+  aftercare: { select: { rebookMode: true, rebookedFor: true } },
+})
+
+type InboxItem = Prisma.ClientNotificationGetPayload<{ select: typeof inboxSelect }>
+
 export default async function ClientAftercareInboxPage() {
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
     redirect('/login?from=/client/aftercare')
   }
 
-  const items = (await prisma.clientNotification.findMany({
+  const items: InboxItem[] = await prisma.clientNotification.findMany({
     where: {
       clientId: user.clientProfile.id,
-      type: 'AFTERCARE',
-    } as any,
+      type: ClientNotificationType.AFTERCARE,
+    },
     orderBy: { createdAt: 'desc' },
     take: 300,
-    select: {
-      id: true,
-      title: true,
-      body: true,
-      readAt: true,
-      createdAt: true,
-      bookingId: true,
-      aftercareId: true,
-      booking: {
-        select: {
-          // ✅ minimum select to build ClientBookingDTO truthfully
-          id: true,
-          status: true,
-          source: true,
-          sessionStep: true,
-          scheduledFor: true,
-          finishedAt: true,
+    select: inboxSelect,
+  })
 
-          subtotalSnapshot: true,
-          totalDurationMinutes: true,
-          bufferMinutes: true,
-
-          locationType: true,
-          locationId: true,
-          locationTimeZone: true,
-          locationAddressSnapshot: true,
-
-          service: { select: { id: true, name: true } },
-
-          // ✅ keep timeZone here because dto resolver accepts professionalTimeZone
-          professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
-
-          location: {
-            select: {
-              id: true,
-              name: true,
-              formattedAddress: true,
-              city: true,
-              state: true,
-              timeZone: true,
-            },
-          },
-
-          serviceItems: {
-            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-            take: 80,
-            select: {
-              id: true,
-              itemType: true,
-              parentItemId: true,
-              sortOrder: true,
-              durationMinutesSnapshot: true,
-              priceSnapshot: true,
-              serviceId: true,
-              service: { select: { name: true } },
-            },
-          },
-
-          consultationNotes: true,
-          consultationPrice: true,
-          consultationConfirmedAt: true,
-          consultationApproval: {
-            select: {
-              status: true,
-              proposedServicesJson: true,
-              proposedTotal: true,
-              notes: true,
-              approvedAt: true,
-              rejectedAt: true,
-            },
-          },
-        },
-      },
-      aftercare: {
-        select: {
-          rebookMode: true,
-          rebookedFor: true,
-        },
-      },
-    },
-  })) as InboxRow[]
-
-  // ✅ DTOs must be awaited (buildClientBookingDTO is async)
   const rows = await Promise.all(
     items.map(async (n) => {
       const raw = n.booking
 
       let dto: ClientBookingDTO | null = null
       if (raw) {
+        const hasPendingConsultationApproval = raw.consultationApproval?.status === ConsultationApprovalStatus.PENDING
         try {
           dto = await buildClientBookingDTO({
-            booking: raw as any,
-            unreadAftercare: false,
-            hasPendingConsultationApproval: false,
+            booking: raw,
+            unreadAftercare: !n.readAt,
+            hasPendingConsultationApproval,
           })
         } catch {
           dto = null
@@ -202,16 +186,14 @@ export default async function ClientAftercareInboxPage() {
               COPY.aftercareInbox.proFallback,
             )
 
-            // ✅ DTO timezone truth (already resolved via TimeZoneTruth)
-            // If dto missing, fall back to DEFAULT_TIME_ZONE only (no LA guessing here).
             const tz = sanitizeTimeZone(dto?.timeZone, DEFAULT_TIME_ZONE)
 
             const date = toDate(dto?.scheduledFor ?? raw?.scheduledFor)
             const dateLabel = date ? formatDateInTz(date, tz) : ''
 
-            const mode = String(n.aftercare?.rebookMode || '').trim().toUpperCase()
+            const mode = n.aftercare?.rebookMode ?? null
             const hint =
-              mode === 'RECOMMENDED_WINDOW'
+              mode === AftercareRebookMode.RECOMMENDED_WINDOW
                 ? COPY.aftercareInbox.hintRecommendedWindow
                 : n.aftercare?.rebookedFor
                   ? COPY.aftercareInbox.hintRecommendedDate

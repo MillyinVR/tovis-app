@@ -59,16 +59,12 @@ function prettyServiceTitle(title?: string | null) {
 }
 
 /**
- * Booking events have clean id, blocks have "block_<id>".
+ * ✅ Booking events have clean id, blocks are discriminated by `kind`.
  * This guarantees approve/deny/message never accidentally uses a block id.
  */
 function bookingIdFor(ev: CalendarEvent): string | null {
-  const raw = String((ev as any)?.bookingId || (ev as any)?.apiId || ev.id || '').trim()
-  if (!raw) return null
-  if (raw.startsWith('block_')) return null
-  return raw.replace(/^booking[_:]/, '').trim()
+  return ev.kind === 'BOOKING' ? ev.id : null
 }
-
 function buttonBase() {
   return 'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass focus:outline-none focus:ring-2 focus:ring-white/15'
 }
@@ -114,8 +110,8 @@ export function ManagementModal(props: {
     // Premium touch: in Pending, keep true pending at top if statuses vary
     if (activeKey === 'pendingRequests') {
       copy.sort((a, b) => {
-        const as = String((a as any)?.status || '').toUpperCase()
-        const bs = String((b as any)?.status || '').toUpperCase()
+        const as = String(a.status || '').toUpperCase()
+        const bs = String(b.status || '').toUpperCase()
 
         const aPri = as === 'PENDING' ? 0 : 1
         const bPri = bs === 'PENDING' ? 0 : 1
@@ -293,8 +289,9 @@ export function ManagementModal(props: {
                           </div>
 
                           <div className="mt-1 truncate text-[12px] font-semibold text-textSecondary">
-                            {isBlock ? ev.clientName || (ev as any)?.note || 'Personal time' : clientName || 'Client'} •{' '}
-                            {timeLabel}
+                            {isBlock
+                              ? `${ev.kind === 'BLOCK' ? (ev.note?.trim() || 'Personal time') : 'Personal time'} • ${timeLabel}`
+                              : `${clientName || 'Client'} • ${timeLabel}`}
                           </div>
                         </div>
                       </div>

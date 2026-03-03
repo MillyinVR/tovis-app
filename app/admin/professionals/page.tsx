@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
-import { ProfessionalLocationType } from '@prisma/client'
+import { ProfessionalLocationType, VerificationStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,18 +47,24 @@ function formatLocationLabel(loc: {
     ''
 
   const mode =
-  loc?.type === ProfessionalLocationType.SALON
-    ? 'Salon'
-    : loc?.type === ProfessionalLocationType.SUITE
-      ? 'Suite'
-      : loc?.type === ProfessionalLocationType.MOBILE_BASE
-        ? 'Mobile'
-        : loc?.type
-          ? String(loc.type)
-          : null
+    loc.type === ProfessionalLocationType.SALON
+      ? 'Salon'
+      : loc.type === ProfessionalLocationType.SUITE
+        ? 'Suite'
+        : loc.type === ProfessionalLocationType.MOBILE_BASE
+          ? 'Mobile'
+          : String(loc.type)
 
-  if (where) return `${where} · ${mode}`
-  return mode || 'Location set'
+  return where ? `${where} · ${mode}` : mode || 'Location set'
+}
+
+function parseVerificationStatus(raw: unknown): VerificationStatus {
+  const s = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
+  if (s === VerificationStatus.PENDING) return VerificationStatus.PENDING
+  if (s === VerificationStatus.APPROVED) return VerificationStatus.APPROVED
+  if (s === VerificationStatus.REJECTED) return VerificationStatus.REJECTED
+  if (s === VerificationStatus.NEEDS_INFO) return VerificationStatus.NEEDS_INFO
+  return VerificationStatus.PENDING
 }
 
 export default async function AdminProfessionalsPage({
@@ -71,10 +77,7 @@ export default async function AdminProfessionalsPage({
   if (!info.perms.canReviewPros) redirect('/admin')
 
   const sp = await searchParams
-  const status = (sp.status || 'PENDING').toUpperCase()
-
-  const allowed = new Set(['PENDING', 'APPROVED', 'REJECTED'])
-  const verificationStatus = allowed.has(status) ? (status as any) : 'PENDING'
+  const verificationStatus = parseVerificationStatus(sp.status)
 
   const pros = await prisma.professionalProfile.findMany({
     where: { verificationStatus },
@@ -124,16 +127,25 @@ export default async function AdminProfessionalsPage({
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
-            <Tab href="/admin/professionals?status=PENDING" label="Pending" active={verificationStatus === 'PENDING'} />
+            <Tab
+              href="/admin/professionals?status=PENDING"
+              label="Pending"
+              active={verificationStatus === VerificationStatus.PENDING}
+            />
+            <Tab
+              href="/admin/professionals?status=NEEDS_INFO"
+              label="Needs info"
+              active={verificationStatus === VerificationStatus.NEEDS_INFO}
+            />
             <Tab
               href="/admin/professionals?status=APPROVED"
               label="Approved"
-              active={verificationStatus === 'APPROVED'}
+              active={verificationStatus === VerificationStatus.APPROVED}
             />
             <Tab
               href="/admin/professionals?status=REJECTED"
               label="Rejected"
-              active={verificationStatus === 'REJECTED'}
+              active={verificationStatus === VerificationStatus.REJECTED}
             />
           </div>
         </div>
@@ -168,12 +180,7 @@ export default async function AdminProfessionalsPage({
 
                         <div className="text-xs text-textSecondary">
                           License: {p.licenseState || '??'} {p.licenseNumber || '—'}
-                          {p.licenseExpiry ? (
-                            <span>
-                              {' '}
-                              · Exp {new Date(p.licenseExpiry).toLocaleDateString()}
-                            </span>
-                          ) : null}
+                          {p.licenseExpiry ? <span> · Exp {new Date(p.licenseExpiry).toLocaleDateString()}</span> : null}
                         </div>
                       </div>
 

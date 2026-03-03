@@ -4,9 +4,16 @@ import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+type JsonObject = Record<string, unknown>
+
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
 
 function sha256(input: string) {
   return crypto.createHash('sha256').update(input).digest('hex')
@@ -17,19 +24,9 @@ function generateSmsCode() {
   return String(n).padStart(6, '0')
 }
 
-/**
- * Compatible with both:
- * - cookies(): ReadonlyRequestCookies
- * - cookies(): Promise<ReadonlyRequestCookies>
- */
-async function readCookies() {
-  const c = cookies() as any
-  return typeof c?.then === 'function' ? await c : c
-}
-
 async function getUserIdFromCookie(): Promise<string | null> {
-  const cookieStore = await readCookies()
-  const token = cookieStore.get('tovis_token')?.value
+  const cookieStore = await cookies()
+  const token = cookieStore.get('tovis_token')?.value ?? null
   if (!token) return null
   const payload = verifyToken(token)
   return payload?.userId ?? null
@@ -41,7 +38,15 @@ function envOrThrow(key: string) {
   return v
 }
 
-async function sendTwilioSms(args: { to: string; body: string }) {
+async function safeJsonUnknown(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+async function sendTwilioSms(args: { to: string; body: string }): Promise<{ sid: string | null }> {
   const sid = envOrThrow('TWILIO_ACCOUNT_SID')
   const auth = envOrThrow('TWILIO_AUTH_TOKEN')
   const from = envOrThrow('TWILIO_FROM_NUMBER')
@@ -64,17 +69,25 @@ async function sendTwilioSms(args: { to: string; body: string }) {
     cache: 'no-store',
   })
 
-  const data = await res.json().catch(() => ({} as any))
+  const data: unknown = await safeJsonUnknown(res)
 
   if (!res.ok) {
-    // Twilio typically returns: code, message, more_info, status
-    const msg = typeof data?.message === 'string' ? data.message : 'SMS send failed.'
-    const code = data?.code ? ` (Twilio code ${data.code})` : ''
-    const status = data?.status ? ` status=${data.status}` : ` status=${res.status}`
+    const msg =
+      isRecord(data) && typeof data.message === 'string' ? data.message : 'SMS send failed.'
+    const code =
+      isRecord(data) && (typeof data.code === 'number' || typeof data.code === 'string')
+        ? ` (Twilio code ${String(data.code)})`
+        : ''
+    const status =
+      isRecord(data) && (typeof data.status === 'number' || typeof data.status === 'string')
+        ? ` status=${String(data.status)}`
+        : ` status=${res.status}`
+
     throw new Error(`${msg}${code}${status}`)
   }
 
-  return data
+  const twilioSid = isRecord(data) && typeof data.sid === 'string' ? data.sid : null
+  return { sid: twilioSid }
 }
 
 /**
@@ -109,7 +122,9 @@ export async function POST(request: Request) {
     const userId = await getUserIdFromCookie()
     if (!userId) return jsonFail(401, 'Not authenticated.', { code: 'UNAUTHENTICATED' })
 
-    const body = (await request.json().catch(() => ({}))) as { phone?: unknown }
+    const raw: unknown = await request.json().catch(() => ({}))
+    const body: JsonObject = isRecord(raw) ? raw : {}
+
     const phoneOverride = pickString(body.phone)?.trim() || null
 
     const user = await prisma.user.findUnique({
@@ -118,7 +133,7 @@ export async function POST(request: Request) {
     })
 
     if (!user) return jsonFail(404, 'User not found.', { code: 'USER_NOT_FOUND' })
-    if (user.phoneVerifiedAt) return jsonOk({ ok: true, alreadyVerified: true }, 200)
+    if (user.phoneVerifiedAt) return jsonOk({ alreadyVerified: true }, 200)
 
     const phone = (phoneOverride || user.phone || '').trim()
     if (!phone) return jsonFail(400, 'Phone number missing.', { code: 'PHONE_REQUIRED' })
@@ -135,9 +150,9 @@ export async function POST(request: Request) {
 
     const code = generateSmsCode()
     const codeHash = sha256(code)
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 10) // 10 minutes
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 10)
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.phoneVerification.updateMany({
         where: { userId, usedAt: null },
         data: { usedAt: new Date() },
@@ -154,14 +169,15 @@ export async function POST(request: Request) {
     })
 
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[phone/send] sent', { to: phone, sid: twilio?.sid })
+      console.log('[phone/send] sent', { to: phone, sid: twilio.sid })
     } else {
-      console.log('[phone/send] sent', { sid: twilio?.sid })
+      console.log('[phone/send] sent', { sid: twilio.sid })
     }
 
-    return jsonOk({ ok: true }, 200)
-  } catch (err: any) {
-    console.error('[phone/send] error', err?.message || err)
+    return jsonOk({}, 200)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Internal server error'
+    console.error('[phone/send] error', msg)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

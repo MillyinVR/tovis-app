@@ -3,29 +3,33 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
+import { safeJson } from './_utils/http'
+
+type DayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
+const DAY_KEYS: DayKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 
 type WorkingHoursJson =
-  | {
-      [key: string]: { enabled: boolean; start: string; end: string }
-    }
+  | Record<DayKey, { enabled: boolean; start: string; end: string }>
   | null
 
 type ClientLite = { id: string; fullName: string; email: string | null; phone: string | null }
 type ServiceLite = { id: string; name: string; durationMinutes?: number | null }
 
-const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-const SNAP_MINUTES = 15
+type LocationType = 'SALON' | 'MOBILE'
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-function snapMinutes(mins: number) {
-  return Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES
+function snapToStep(mins: number, stepMinutes: number) {
+  const step = clamp(Math.trunc(stepMinutes || 15), 5, 60)
+  return Math.round(mins / step) * step
 }
 
-function roundToSnapMinutes(mins: number) {
-  return clamp(snapMinutes(mins), SNAP_MINUTES, 12 * 60)
+function roundDurationToStep(mins: number, stepMinutes: number) {
+  const step = clamp(Math.trunc(stepMinutes || 15), 5, 60)
+  const snapped = snapToStep(mins, step)
+  return clamp(snapped, step, 12 * 60)
 }
 
 function parseHHMM(hhmm: string) {
@@ -51,10 +55,56 @@ function toTimeInputValueFromParts(parts: { hour: number; minute: number }) {
   return `${hh}:${mm}`
 }
 
-function getWorkingWindowForDayKey(dayKey: (typeof DAY_KEYS)[number], workingHours: WorkingHoursJson) {
+/* -----------------------------
+   Safe runtime parsing (no any)
+------------------------------ */
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+}
+
+function getString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function getNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function errorFrom(data: unknown, fallback: string) {
+  if (!isRecord(data)) return fallback
+  return getString(data.error) ?? getString(data.message) ?? fallback
+}
+
+function coerceClients(data: unknown): { recent: ClientLite[]; other: ClientLite[] } {
+  if (!isRecord(data)) return { recent: [], other: [] }
+
+  const recentRaw = data.prioritized ?? data.recentClients
+  const otherRaw = data.others ?? data.otherClients
+
+  const recentArr = Array.isArray(recentRaw) ? recentRaw : []
+  const otherArr = Array.isArray(otherRaw) ? otherRaw : []
+
+  const parseClient = (v: unknown): ClientLite | null => {
+    if (!isRecord(v)) return null
+    const id = getString(v.id)
+    if (!id) return null
+    const fullName = getString(v.fullName) ?? 'Client'
+    const email = getString(v.email)
+    const phone = getString(v.phone)
+    return { id, fullName, email, phone }
+  }
+
+  return {
+    recent: recentArr.map(parseClient).filter((x): x is ClientLite => Boolean(x)),
+    other: otherArr.map(parseClient).filter((x): x is ClientLite => Boolean(x)),
+  }
+}
+
+function getWorkingWindowForDayKey(dayKey: DayKey, workingHours: WorkingHoursJson) {
   if (!workingHours) return null
-  const cfg = (workingHours as any)[dayKey]
-  if (!cfg || !cfg.enabled || !cfg.start || !cfg.end) return null
+  const cfg = workingHours[dayKey]
+  if (!cfg || !cfg.enabled) return null
 
   const start = parseHHMM(String(cfg.start))
   const end = parseHHMM(String(cfg.end))
@@ -66,42 +116,57 @@ function getWorkingWindowForDayKey(dayKey: (typeof DAY_KEYS)[number], workingHou
   return { startMinutes, endMinutes }
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
-
-function coerceClients(data: any): { recent: ClientLite[]; other: ClientLite[] } {
-  const recent = (data?.prioritized || data?.recentClients || []) as ClientLite[]
-  const other = (data?.others || data?.otherClients || []) as ClientLite[]
-  return { recent: Array.isArray(recent) ? recent : [], other: Array.isArray(other) ? other : [] }
-}
-
 export default function CreateBookingModal(props: {
   open: boolean
   onClose: () => void
   workingHours: WorkingHoursJson
   initialStart: Date // UTC instant you clicked (or “now”)
-  timeZone: string // ✅ pro timezone (IANA) (may be empty before setup)
+  timeZone: string // pro/location timezone (IANA) (may be empty before setup)
   services?: ServiceLite[]
+
+  // ✅ REQUIRED by Prisma booking model
+  locationId: string
+  locationType: LocationType
+  locationLabel?: string | null
+
+  // ✅ calendar step minutes (prefer location.stepMinutes)
+  stepMinutes?: number
+
   onCreated: (ev: {
     id: string
     startsAt: string
     endsAt: string
     title: string
     clientName: string
-    status: any
+    status: unknown
     durationMinutes?: number
   }) => void
 }) {
-  const { open, onClose, workingHours, initialStart, onCreated, services: servicesProp } = props
+  const {
+    open,
+    onClose,
+    workingHours,
+    initialStart,
+    onCreated,
+    services: servicesProp,
+    locationId,
+    locationType,
+    locationLabel,
+    stepMinutes,
+  } = props
 
   // ✅ Never default to LA. Use DEFAULT_TIME_ZONE when missing/invalid.
   const tz = useMemo(() => sanitizeTimeZone(props.timeZone, DEFAULT_TIME_ZONE), [props.timeZone])
 
+  const step = useMemo(() => {
+    const n = Number(stepMinutes ?? 15)
+    return Number.isFinite(n) ? clamp(Math.trunc(n), 5, 60) : 15
+  }, [stepMinutes])
+
   const init = useMemo(() => {
     // UTC instant -> wall clock parts in tz -> snap minutes
     const p = getZonedParts(initialStart, tz)
-    const snapped = snapMinutes(p.hour * 60 + p.minute)
+    const snapped = snapToStep(p.hour * 60 + p.minute, step)
     const hour = clamp(Math.floor(snapped / 60), 0, 23)
     const minute = clamp(snapped % 60, 0, 59)
 
@@ -109,7 +174,7 @@ export default function CreateBookingModal(props: {
       date: toDateInputValueFromParts({ year: p.year, month: p.month, day: p.day }),
       time: toTimeInputValueFromParts({ hour, minute }),
     }
-  }, [initialStart, tz])
+  }, [initialStart, tz, step])
 
   const [clientQuery, setClientQuery] = useState('')
   const [recentClients, setRecentClients] = useState<ClientLite[]>([])
@@ -125,13 +190,13 @@ export default function CreateBookingModal(props: {
   const [internalNotes, setInternalNotes] = useState('')
   const [bufferMinutes, setBufferMinutes] = useState(0)
 
+  const [allowOutsideHours, setAllowOutsideHours] = useState(false)
+
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const inputRef = useRef<HTMLInputElement | null>(null)
   const debounceRef = useRef<number | null>(null)
-
-  // race-cancel for search
   const lastSearchIdRef = useRef(0)
 
   function close() {
@@ -152,6 +217,7 @@ export default function CreateBookingModal(props: {
     setSelectedServiceIds([])
     setInternalNotes('')
     setBufferMinutes(0)
+    setAllowOutsideHours(false)
 
     setDateStr(init.date)
     setTimeStr(init.time)
@@ -163,15 +229,28 @@ export default function CreateBookingModal(props: {
       ;(async () => {
         try {
           const res = await fetch('/api/pro/services', { cache: 'no-store' })
-          const data = await safeJson(res)
+          const data: unknown = await safeJson(res)
           if (!res.ok) {
-            console.log('Load services failed:', res.status, data)
             setServices([])
             return
           }
-          setServices(Array.isArray(data?.services) ? data.services : [])
-        } catch (e) {
-          console.log('Load services threw:', e)
+
+          if (isRecord(data) && Array.isArray(data.services)) {
+            const parsed = data.services
+              .filter((v) => isRecord(v) && typeof v.id === 'string' && typeof v.name === 'string')
+              .map((v) => {
+                const r = v as Record<string, unknown>
+                return {
+                  id: String(r.id),
+                  name: String(r.name),
+                  durationMinutes: typeof r.durationMinutes === 'number' ? r.durationMinutes : null,
+                } satisfies ServiceLite
+              })
+            setServices(parsed)
+          } else {
+            setServices([])
+          }
+        } catch {
           setServices([])
         }
       })()
@@ -187,7 +266,6 @@ export default function CreateBookingModal(props: {
 
     const q = clientQuery.trim()
     if (!q) {
-      // clear search results
       lastSearchIdRef.current += 1
       setRecentClients([])
       setOtherClients([])
@@ -201,21 +279,16 @@ export default function CreateBookingModal(props: {
 
       try {
         const res = await fetch(`/api/pro/clients/search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
-        const data = await safeJson(res)
+        const data: unknown = await safeJson(res)
 
         if (mySearchId !== lastSearchIdRef.current) return
-
-        if (!res.ok) {
-          console.log('Client search failed:', res.status, data)
-          throw new Error(data?.error || 'Search failed.')
-        }
+        if (!res.ok) throw new Error(errorFrom(data, 'Search failed.'))
 
         const { recent, other } = coerceClients(data)
         setRecentClients(recent)
         setOtherClients(other)
-      } catch (e: any) {
+      } catch {
         if (mySearchId !== lastSearchIdRef.current) return
-        console.log('Client search error:', e)
         setRecentClients([])
         setOtherClients([])
       } finally {
@@ -236,8 +309,8 @@ export default function CreateBookingModal(props: {
   const computedDuration = useMemo(() => {
     const sum = selectedServices.reduce((acc, s) => acc + (Number(s.durationMinutes ?? 0) || 0), 0)
     const base = sum > 0 ? sum : 60
-    return roundToSnapMinutes(base)
-  }, [selectedServices])
+    return roundDurationToStep(base, step)
+  }, [selectedServices, step])
 
   const wallClock = useMemo(() => {
     const [yyyy, mm, dd] = (dateStr || '').split('-').map((x) => Number(x))
@@ -249,27 +322,25 @@ export default function CreateBookingModal(props: {
   const outsideHours = useMemo(() => {
     if (!wallClock) return false
 
-    // wall clock -> UTC instant (validity + weekday calc)
-    const startUtc = zonedTimeToUtc({
+    // Use NOON for weekday derivation (DST-safe)
+    const noonUtc = zonedTimeToUtc({
       year: wallClock.year,
       month: wallClock.month,
       day: wallClock.day,
-      hour: wallClock.hour,
-      minute: wallClock.minute,
+      hour: 12,
+      minute: 0,
       second: 0,
       timeZone: tz,
     })
+    if (!Number.isFinite(noonUtc.getTime())) return true
 
-    if (!Number.isFinite(startUtc.getTime())) return true
-
-    // Determine weekday in TZ for this instant (matches the selected wall-clock day)
     const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
-      .format(startUtc)
+      .format(noonUtc)
       .slice(0, 3)
       .toLowerCase()
 
     const dayKey = (DAY_KEYS as readonly string[]).includes(weekdayShort)
-      ? (weekdayShort as (typeof DAY_KEYS)[number])
+      ? (weekdayShort as DayKey)
       : null
     if (!dayKey) return true
 
@@ -277,14 +348,30 @@ export default function CreateBookingModal(props: {
     if (!window) return true
 
     const startM = wallClock.hour * 60 + wallClock.minute
-    const endM = startM + computedDuration + (Number(bufferMinutes) || 0)
+    const buf = clamp(Number(bufferMinutes) || 0, 0, 180)
+    const endM = startM + computedDuration + buf
 
     return startM < window.startMinutes || endM > window.endMinutes
   }, [wallClock, workingHours, computedDuration, bufferMinutes, tz])
 
+  const canSubmit = useMemo(() => {
+    if (saving) return false
+    if (!locationId) return false
+    if (!selectedClient) return false
+    if (!wallClock) return false
+    if (!selectedServiceIds.length) return false
+    // outside hours is allowed, but must be explicitly acknowledged
+    if (outsideHours && !allowOutsideHours) return false
+    return true
+  }, [saving, locationId, selectedClient, wallClock, selectedServiceIds.length, outsideHours, allowOutsideHours])
+
   async function createBooking() {
     if (saving) return
 
+    if (!locationId) {
+      setErr('Select a location first.')
+      return
+    }
     if (!selectedClient) {
       setErr('Select a client.')
       return
@@ -295,6 +382,10 @@ export default function CreateBookingModal(props: {
     }
     if (!selectedServiceIds.length) {
       setErr('Select at least one service.')
+      return
+    }
+    if (outsideHours && !allowOutsideHours) {
+      setErr('This time is outside working hours. Check “Schedule anyway” to confirm.')
       return
     }
 
@@ -311,16 +402,25 @@ export default function CreateBookingModal(props: {
         second: 0,
         timeZone: tz,
       })
-
       if (!Number.isFinite(startUtc.getTime())) throw new Error('Invalid start time.')
+
+      const buf = clamp(Number(bufferMinutes) || 0, 0, 180)
 
       const payload = {
         clientId: selectedClient.id,
         scheduledFor: startUtc.toISOString(),
+
+        // ✅ REQUIRED by schema + conflict checks
+        locationId,
+        locationType,
+
         serviceIds: selectedServiceIds,
         totalDurationMinutes: computedDuration,
-        bufferMinutes: Number(bufferMinutes) || 0,
+        bufferMinutes: buf,
         internalNotes: internalNotes.trim() ? internalNotes.trim() : null,
+
+        // ✅ Explicit pro-only override. Server can ignore if not implemented yet.
+        allowOutsideWorkingHours: outsideHours ? true : false,
       }
 
       const res = await fetch('/api/pro/bookings', {
@@ -329,33 +429,30 @@ export default function CreateBookingModal(props: {
         body: JSON.stringify(payload),
       })
 
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
+      if (!res.ok) throw new Error(errorFrom(data, 'Failed to create booking.'))
 
-      if (!res.ok) {
-        console.log('Create booking failed:', res.status, data, payload)
-        throw new Error(data?.error || 'Failed to create booking.')
-      }
+      const rec = isRecord(data) ? data : null
+      const booking = rec && isRecord(rec.booking) ? (rec.booking as Record<string, unknown>) : null
 
-      const b = data?.booking
-      if (!b?.id) {
-        console.log('Create booking bad response:', data)
-        throw new Error('Server did not return booking.id')
-      }
+      if (!booking) throw new Error('Malformed response: missing booking.') // ✅ add this
+
+      const id = getString(booking.id) // ✅ now booking is non-null
+      if (!id) throw new Error('Server did not return booking.id')
 
       onCreated({
-        id: String(b.id),
-        startsAt: b.scheduledFor,
-        endsAt: b.endsAt,
-        title: b.serviceName || 'Appointment',
-        clientName: b.clientName || selectedClient.fullName,
-        status: b.status || 'ACCEPTED',
-        durationMinutes: Number(b.totalDurationMinutes ?? computedDuration),
+        id,
+        startsAt: getString(booking.scheduledFor) ?? startUtc.toISOString(),
+        endsAt: getString(booking.endsAt) ?? startUtc.toISOString(),
+        title: getString(booking.serviceName) ?? 'Appointment',
+        clientName: getString(booking.clientName) ?? selectedClient.fullName,
+        status: booking.status ?? 'ACCEPTED',
+        durationMinutes: getNumber(booking.totalDurationMinutes) ?? computedDuration,
       })
-
       close()
-    } catch (e: any) {
-      console.error(e)
-      setErr(e?.message || 'Failed to create booking.')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to create booking.'
+      setErr(msg)
     } finally {
       setSaving(false)
     }
@@ -366,7 +463,7 @@ export default function CreateBookingModal(props: {
   return (
     <div className="fixed inset-0 z-1300 flex items-center justify-center bg-black/50 p-4" onClick={close}>
       <div
-        className="w-full max-w-720px overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
+  className="w-full max-w-720px overflow-hidden rounded-2xl border border-white/12 bg-black/30 shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -384,19 +481,38 @@ export default function CreateBookingModal(props: {
         </div>
 
         <div className="p-4">
+          {/* Location context (trust signal) */}
+          <div className="mb-3 rounded-2xl border border-white/10 bg-bgSecondary/30 p-3 text-xs text-textSecondary">
+            <div>
+              Location: <span className="font-semibold text-textPrimary">{locationLabel || locationId}</span>
+            </div>
+            <div className="mt-1">
+              Mode: <span className="font-semibold text-textPrimary">{locationType}</span> • TZ:{' '}
+              <span className="font-semibold text-textPrimary">{tz}</span> • Step:{' '}
+              <span className="font-semibold text-textPrimary">{step} min</span>
+            </div>
+          </div>
+
           {outsideHours && (
             <div className="mb-3 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
               <div className="font-extrabold">Outside working hours</div>
               <div className="mt-1 text-textSecondary">
-                You can still schedule this manually, but clients can’t book this time slot.
+                Pros can schedule outside working hours. Clients will not be able to book this time.
               </div>
-              <div className="mt-2 text-xs text-textSecondary">
-                Timezone: <span className="font-semibold text-textPrimary">{tz}</span>
-              </div>
+
+              <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-textPrimary">
+                <input
+                  type="checkbox"
+                  checked={allowOutsideHours}
+                  onChange={(e) => setAllowOutsideHours(e.target.checked)}
+                  disabled={saving}
+                />
+                Schedule anyway
+              </label>
             </div>
           )}
 
-          {err && <div className="mb-2 text-sm text-toneDanger">{err}</div>}
+          {err && <div className="mb-2 text-sm font-semibold text-toneDanger">{err}</div>}
 
           {/* Client search */}
           <div className="mb-4">
@@ -422,6 +538,7 @@ export default function CreateBookingModal(props: {
                   type="button"
                   onClick={() => setSelectedClient(null)}
                   className="ml-2 rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-semibold hover:bg-bgSecondary/70"
+                  disabled={saving}
                 >
                   Clear
                 </button>
@@ -442,6 +559,7 @@ export default function CreateBookingModal(props: {
                           type="button"
                           onClick={() => setSelectedClient(c)}
                           className="rounded-2xl border border-white/10 bg-bgPrimary p-3 text-left hover:bg-bgSecondary/30"
+                          disabled={saving}
                         >
                           <div className="text-sm font-extrabold text-textPrimary">{c.fullName}</div>
                           <div className="text-xs text-textSecondary">{c.email || c.phone || ''}</div>
@@ -461,6 +579,7 @@ export default function CreateBookingModal(props: {
                           type="button"
                           onClick={() => setSelectedClient(c)}
                           className="rounded-2xl border border-white/10 bg-bgPrimary p-3 text-left hover:bg-bgSecondary/30"
+                          disabled={saving}
                         >
                           <div className="text-sm font-extrabold text-textPrimary">{c.fullName}</div>
                           <div className="text-xs text-textSecondary">{c.email || c.phone || ''}</div>
@@ -482,16 +601,18 @@ export default function CreateBookingModal(props: {
                 value={dateStr}
                 onChange={(e) => setDateStr(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
+                disabled={saving}
               />
             </div>
             <div>
               <div className="mb-1 text-xs text-textSecondary">Time</div>
               <input
                 type="time"
-                step={SNAP_MINUTES * 60}
+                step={step * 60}
                 value={timeStr}
                 onChange={(e) => setTimeStr(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
+                disabled={saving}
               />
             </div>
           </div>
@@ -521,6 +642,7 @@ export default function CreateBookingModal(props: {
                             e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id),
                           )
                         }}
+                        disabled={saving}
                       />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-extrabold text-textPrimary">{s.name}</div>
@@ -549,6 +671,7 @@ export default function CreateBookingModal(props: {
                 value={bufferMinutes}
                 onChange={(e) => setBufferMinutes(Number(e.target.value))}
                 className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
+                disabled={saving}
               />
             </div>
             <div>
@@ -558,6 +681,7 @@ export default function CreateBookingModal(props: {
                 onChange={(e) => setInternalNotes(e.target.value)}
                 placeholder="Notes the client never sees…"
                 className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm"
+                disabled={saving}
               />
             </div>
           </div>
@@ -574,7 +698,7 @@ export default function CreateBookingModal(props: {
             <button
               type="button"
               onClick={() => void createBooking()}
-              disabled={saving}
+              disabled={!canSubmit}
               className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold hover:bg-bgSecondary/70 disabled:opacity-70"
             >
               {saving ? 'Saving…' : 'Create booking'}

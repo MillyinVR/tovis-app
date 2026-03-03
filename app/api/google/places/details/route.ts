@@ -4,14 +4,25 @@ import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
+type JsonObject = Record<string, unknown>
+
 function normalizePlaceResourceName(raw: string) {
   const s = raw.trim()
   if (!s) return null
   return s.startsWith('places/') ? s : `places/${s}`
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
+function isRecord(x: unknown): x is JsonObject {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
+function pickText(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function pickNullableText(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : ''
+  return s ? s : null
 }
 
 function componentMapFromAddressComponents(addressComponents: unknown) {
@@ -20,14 +31,22 @@ function componentMapFromAddressComponents(addressComponents: unknown) {
 
   for (const c of addressComponents) {
     if (!isRecord(c)) continue
-    const types = Array.isArray(c.types) ? c.types.filter((t) => typeof t === 'string') : []
-    const longName = typeof c.longText === 'string' ? c.longText : ''
-    const shortName = typeof c.shortText === 'string' ? c.shortText : ''
+
+    const typesRaw = c.types
+    const types = Array.isArray(typesRaw) ? typesRaw.filter((t): t is string => typeof t === 'string') : []
+
+    const longName = pickText(c.longText)
+    const shortName = pickText(c.shortText)
+    const value = (shortName || longName).trim()
+    if (!value) continue
+
     for (const t of types) {
-      if (!t) continue
-      out[t] = shortName || longName
+      const key = (t || '').trim()
+      if (!key) continue
+      out[key] = value
     }
   }
+
   return out
 }
 
@@ -44,6 +63,24 @@ function parseViewport(v: unknown): { north: number; south: number; east: number
 
   if (south == null || west == null || north == null || east == null) return null
   return { north, south, east, west }
+}
+
+function readDisplayNameText(displayName: unknown): string | null {
+  // Places API v1 usually returns a LocalizedText object like { text, languageCode }
+  if (typeof displayName === 'string') return displayName.trim() || null
+  if (!isRecord(displayName)) return null
+  const t = displayName.text
+  return typeof t === 'string' ? (t.trim() || null) : null
+}
+
+function isAbortError(e: unknown) {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'name' in e &&
+    typeof (e as { name: unknown }).name === 'string' &&
+    (e as { name: string }).name === 'AbortError'
+  )
 }
 
 export async function GET(req: Request) {
@@ -94,13 +131,8 @@ export async function GET(req: Request) {
 
     const viewport = parseViewport(data.viewport)
 
-    const formattedAddress = typeof data.formattedAddress === 'string' ? data.formattedAddress : null
-    const nameText =
-      isRecord(data.displayName) && typeof (data.displayName as any).text === 'string'
-        ? ((data.displayName as any).text as string)
-        : typeof data.displayName === 'string'
-          ? data.displayName
-          : null
+    const formattedAddress = pickNullableText(data.formattedAddress)
+    const nameText = readDisplayNameText(data.displayName)
 
     const cm = componentMapFromAddressComponents(data.addressComponents)
 
@@ -117,7 +149,7 @@ export async function GET(req: Request) {
     const postalCode = cm.postal_code || null
     const countryCode = cm.country || null
 
-    const types = Array.isArray(data.types) ? data.types.filter((x) => typeof x === 'string') : []
+    const types = Array.isArray(data.types) ? data.types.filter((x): x is string => typeof x === 'string') : []
 
     return jsonOk({
       place: {
@@ -137,7 +169,7 @@ export async function GET(req: Request) {
       },
     })
   } catch (e: unknown) {
-    const msg = e instanceof DOMException && e.name === 'AbortError' ? 'Google request timed out.' : e instanceof Error ? e.message : 'Internal error'
+    const msg = isAbortError(e) ? 'Google request timed out.' : e instanceof Error ? e.message : 'Internal error'
     console.error('GET /api/google/places/details error', e)
     return jsonFail(500, msg)
   }

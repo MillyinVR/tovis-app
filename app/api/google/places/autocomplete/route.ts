@@ -4,13 +4,37 @@ import { getGoogleMapsKey, fetchWithTimeout, safeJson, clampGoogleRadiusMeters }
 
 export const dynamic = 'force-dynamic'
 
+type Kind = 'ADDRESS' | 'AREA' | 'ANY'
+
+type JsonObject = Record<string, unknown>
+
+type Prediction = {
+  placeId: string
+  description: string
+  mainText: string
+  secondaryText: string
+  types: string[]
+  distanceMeters: number | null
+}
+
+function isRecord(x: unknown): x is JsonObject {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
 function pickNumber(v: string | null) {
   if (!v) return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
 }
 
-type Kind = 'ADDRESS' | 'AREA' | 'ANY'
+function pickText(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function pickTextOrEmpty(obj: unknown, key: string): string {
+  if (!isRecord(obj)) return ''
+  return pickText(obj[key])
+}
 
 function normalizeKind(v: string | null): Kind {
   const s = (v || '').trim().toUpperCase()
@@ -26,9 +50,9 @@ function isUsZip(input: string) {
 }
 
 function normalizeCountryCode(raw: string | null): string {
-  const s = (raw || '').trim().toLowerCase().replace(/[^a-z]/g, '')
-  // ccTLD/ISO-ish 2-letter. If invalid, default US.
-  return s.length === 2 ? s : 'us'
+  const cleaned = (raw || '').trim().toUpperCase().replace(/[^A-Z]/g, '')
+  // ISO-ish 2-letter. If invalid, default US.
+  return cleaned.length === 2 ? cleaned : 'US'
 }
 
 function includedPrimaryTypesFor(kind: Kind, zipLike: boolean): string[] | undefined {
@@ -46,12 +70,72 @@ function includedPrimaryTypesFor(kind: Kind, zipLike: boolean): string[] | undef
   return ['locality', 'administrative_area_level_1', 'neighborhood', 'sublocality', 'postal_code']
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
+function readSuggestionsArray(data: unknown): unknown[] {
+  if (!isRecord(data)) return []
+  const s = data['suggestions']
+  return Array.isArray(s) ? s : []
 }
 
-function pickText(v: unknown): string {
-  return typeof v === 'string' ? v : ''
+function readPlacePrediction(suggestion: unknown): JsonObject | null {
+  if (!isRecord(suggestion)) return null
+  const pp = suggestion['placePrediction']
+  return isRecord(pp) ? pp : null
+}
+
+function readStructuredFormat(pp: JsonObject): JsonObject | null {
+  const sf = pp['structuredFormat']
+  return isRecord(sf) ? sf : null
+}
+
+function readTextObj(pp: JsonObject): JsonObject | null {
+  const t = pp['text']
+  return isRecord(t) ? t : null
+}
+
+function readTypes(pp: JsonObject): string[] {
+  const raw = pp['types']
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string')
+}
+
+function readDistanceMeters(pp: JsonObject): number | null {
+  const v = pp['distanceMeters']
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function parsePrediction(pp: JsonObject): Prediction | null {
+  const placeId = pickText(pp['placeId']).trim()
+  if (!placeId) return null
+
+  const sf = readStructuredFormat(pp)
+  const mainText = sf ? pickTextOrEmpty(sf['mainText'], 'text') : ''
+  const secondaryText = sf ? pickTextOrEmpty(sf['secondaryText'], 'text') : ''
+
+  const textObj = readTextObj(pp)
+  const description =
+    (textObj ? pickText(textObj['text']) : '').trim() ||
+    [mainText, secondaryText].filter(Boolean).join(', ').trim()
+
+  if (!description) return null
+
+  return {
+    placeId,
+    description,
+    mainText,
+    secondaryText,
+    types: readTypes(pp),
+    distanceMeters: readDistanceMeters(pp),
+  }
+}
+
+function isAbortError(e: unknown) {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'name' in e &&
+    typeof (e as { name: unknown }).name === 'string' &&
+    (e as { name: string }).name === 'AbortError'
+  )
 }
 
 export async function GET(req: Request) {
@@ -126,37 +210,17 @@ export async function GET(req: Request) {
     const data = await safeJson<unknown>(res)
     if (!res.ok) return jsonFail(502, 'Google request failed.', { details: data })
 
-    const suggestions = isRecord(data) && Array.isArray((data as any).suggestions) ? ((data as any).suggestions as unknown[]) : []
+    const suggestions = readSuggestionsArray(data)
 
     const predictions = suggestions
-      .map((s) => (isRecord(s) ? (s as any).placePrediction : null))
-      .filter((p): p is Record<string, unknown> => isRecord(p))
-      .map((p) => {
-        const placeId = pickText(p.placeId)
-        const sf = isRecord(p.structuredFormat) ? (p.structuredFormat as any) : null
-        const mainText = sf && isRecord(sf.mainText) ? pickText(sf.mainText.text) : ''
-        const secondaryText = sf && isRecord(sf.secondaryText) ? pickText(sf.secondaryText.text) : ''
-
-        const textObj = isRecord(p.text) ? (p.text as any) : null
-        const description = pickText(textObj?.text) || [mainText, secondaryText].filter(Boolean).join(', ')
-
-        const typesArr = Array.isArray(p.types) ? p.types.filter((x) => typeof x === 'string') : []
-        const distanceMeters = typeof (p as any).distanceMeters === 'number' ? ((p as any).distanceMeters as number) : null
-
-        return {
-          placeId,
-          description,
-          mainText,
-          secondaryText,
-          types: typesArr,
-          distanceMeters,
-        }
-      })
-      .filter((p) => p.placeId && p.description)
+      .map(readPlacePrediction)
+      .filter((pp): pp is JsonObject => Boolean(pp))
+      .map(parsePrediction)
+      .filter((p): p is Prediction => Boolean(p))
 
     return jsonOk({ kind, predictions })
   } catch (e: unknown) {
-    const msg = e instanceof DOMException && e.name === 'AbortError' ? 'Google request timed out.' : e instanceof Error ? e.message : 'Internal error'
+    const msg = isAbortError(e) ? 'Google request timed out.' : e instanceof Error ? e.message : 'Internal error'
     console.error('GET /api/google/places/autocomplete error', e)
     return jsonFail(500, msg)
   }

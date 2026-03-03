@@ -1,33 +1,18 @@
 // app/api/pro/offerings/[id]/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
-import { Prisma } from '@prisma/client'
-import type { ProfessionalLocationType } from '@prisma/client'
+import { Prisma, ProfessionalLocationType } from '@prisma/client'
+import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { parseMoney, moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: Promise<{ id: string }> }
 
-type PatchBody = {
-  description?: string | null
-  customImageUrl?: string | null
+type JsonObject = Record<string, unknown>
 
-  offersInSalon?: boolean
-  offersMobile?: boolean
-
-  salonPriceStartingAt?: string | null
-  salonDurationMinutes?: number | null
-
-  mobilePriceStartingAt?: string | null
-  mobileDurationMinutes?: number | null
-
-  isActive?: boolean
-}
-
-function jsonError(message: string, status: number, extra?: Record<string, unknown>) {
-  return NextResponse.json({ ok: false, error: message, ...(extra ?? {}) }, { status })
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function trimId(v: unknown) {
@@ -39,6 +24,8 @@ function isPositiveInt(n: unknown): n is number {
 }
 
 function trimOrNull(v: unknown): string | null | undefined {
+  // undefined => not provided / invalid type
+  // null => explicit clear
   if (v === null) return null
   if (v === undefined) return undefined
   if (typeof v !== 'string') return undefined
@@ -46,13 +33,31 @@ function trimOrNull(v: unknown): string | null | undefined {
   return t ? t : null
 }
 
+function pickBoolean(v: unknown): boolean | undefined {
+  return typeof v === 'boolean' ? v : undefined
+}
+
+function pickNullablePriceString(v: unknown): string | null | undefined {
+  if (v === null) return null
+  if (v === undefined) return undefined
+  if (typeof v !== 'string') return undefined
+  return v
+}
+
+function pickNullablePositiveInt(v: unknown): number | null | undefined {
+  if (v === null) return null
+  if (v === undefined) return undefined
+  if (!isPositiveInt(v)) return undefined
+  return v
+}
+
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 type WorkingHoursDay = { enabled: boolean; start: string; end: string }
 type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
 
-function defaultWorkingHours(): WorkingHoursObj {
+function defaultWorkingHours(): Prisma.JsonObject {
   const make = (enabled: boolean): WorkingHoursDay => ({ enabled, start: '09:00', end: '17:00' })
-  return {
+  const v: WorkingHoursObj = {
     mon: make(true),
     tue: make(true),
     wed: make(true),
@@ -61,6 +66,7 @@ function defaultWorkingHours(): WorkingHoursObj {
     sat: make(false),
     sun: make(false),
   }
+  return v
 }
 
 function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon' | 'Mobile') {
@@ -81,7 +87,7 @@ function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon'
   return dec
 }
 
-async function ensureBookableLocationsForOffering(args: {
+async function ensureLocationsForOffering(args: {
   tx: Prisma.TransactionClient
   professionalId: string
   ensureSalon: boolean
@@ -90,12 +96,12 @@ async function ensureBookableLocationsForOffering(args: {
   const { tx, professionalId, ensureSalon, ensureMobile } = args
 
   const neededTypes: ProfessionalLocationType[] = []
-  if (ensureSalon) neededTypes.push('SALON')
-  if (ensureMobile) neededTypes.push('MOBILE_BASE')
+  if (ensureSalon) neededTypes.push(ProfessionalLocationType.SALON)
+  if (ensureMobile) neededTypes.push(ProfessionalLocationType.MOBILE_BASE)
   if (!neededTypes.length) return
 
   const existing = await tx.professionalLocation.findMany({
-    where: { professionalId, type: { in: neededTypes as any } },
+    where: { professionalId, type: { in: neededTypes } },
     select: { id: true, type: true },
     take: 50,
   })
@@ -108,65 +114,63 @@ async function ensureBookableLocationsForOffering(args: {
     const totalCount = await tx.professionalLocation.count({ where: { professionalId } })
     const shouldBePrimary = totalCount === 0
 
-    const name = type === 'MOBILE_BASE' ? 'Mobile' : 'Salon'
-
     await tx.professionalLocation.create({
-  data: {
-    professionalId,
-    type,
-    name: type === 'MOBILE_BASE' ? 'Set mobile base' : 'Set salon address',
-    isPrimary: false,
-    isBookable: false,
-    timeZone: null,
-    workingHours: defaultWorkingHours() as unknown as Prisma.InputJsonValue,
-  },
-  select: { id: true },
-})
-
+      data: {
+        professionalId,
+        type,
+        name: type === ProfessionalLocationType.MOBILE_BASE ? 'Set mobile base' : 'Set salon address',
+        isPrimary: shouldBePrimary,
+        isBookable: false,
+        timeZone: null,
+        workingHours: defaultWorkingHours(),
+      },
+      select: { id: true },
+    })
   }
 }
 
-// Optional: GET one offering (not required by your UI right now, but useful)
+// Optional: GET one offering (handy for debugging)
 export async function GET(_request: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    const profId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!profId) return jsonError('Unauthorized', 401)
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
 
     const { id } = await ctx.params
     const offeringId = trimId(id)
-    if (!offeringId) return jsonError('Missing offering id.', 400)
+    if (!offeringId) return jsonFail(400, 'Missing offering id.')
 
     const offering = await prisma.professionalServiceOffering.findFirst({
-      where: { id: offeringId, professionalId: profId, isActive: true },
+      where: { id: offeringId, professionalId, isActive: true },
       include: { service: { include: { category: true } } },
     })
 
-    if (!offering) return jsonError('Not found.', 404)
+    if (!offering) return jsonFail(404, 'Not found.')
 
-    return NextResponse.json({ ok: true, offering }, { status: 200 })
+    return jsonOk({ offering }, 200)
   } catch (error) {
     console.error('GET /api/pro/offerings/[id] error', error)
-    return jsonError('Internal server error.', 500)
+    return jsonFail(500, 'Internal server error.')
   }
 }
 
 export async function PATCH(request: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    const profId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!profId) return jsonError('Unauthorized', 401)
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
 
     const { id } = await ctx.params
     const offeringId = trimId(id)
-    if (!offeringId) return jsonError('Missing offering id.', 400)
+    if (!offeringId) return jsonFail(400, 'Missing offering id.')
 
-    const body = (await request.json().catch(() => null)) as PatchBody | null
-    if (!body) return jsonError('Invalid JSON body.', 400)
+    const raw: unknown = await request.json().catch(() => null)
+    if (!isRecord(raw)) return jsonFail(400, 'Invalid JSON body.')
+    const body = raw
 
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.professionalServiceOffering.findFirst({
-        where: { id: offeringId, professionalId: profId },
+        where: { id: offeringId, professionalId },
         include: {
           service: {
             select: {
@@ -178,18 +182,38 @@ export async function PATCH(request: Request, ctx: Ctx) {
         },
       })
 
-
       if (!existing) return { kind: 'NOT_FOUND' as const }
 
+      // Read booleans (if present)
+      const offersInSalonIn = Object.prototype.hasOwnProperty.call(body, 'offersInSalon')
+        ? pickBoolean(body.offersInSalon)
+        : undefined
+      const offersMobileIn = Object.prototype.hasOwnProperty.call(body, 'offersMobile')
+        ? pickBoolean(body.offersMobile)
+        : undefined
+
+      if (Object.prototype.hasOwnProperty.call(body, 'offersInSalon') && offersInSalonIn === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'offersInSalon must be boolean.' }
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'offersMobile') && offersMobileIn === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'offersMobile must be boolean.' }
+      }
+
       const nextOffersInSalon =
-        typeof body.offersInSalon === 'boolean' ? body.offersInSalon : Boolean(existing.offersInSalon)
+        typeof offersInSalonIn === 'boolean' ? offersInSalonIn : Boolean(existing.offersInSalon)
       const nextOffersMobile =
-        typeof body.offersMobile === 'boolean' ? body.offersMobile : Boolean(existing.offersMobile)
+        typeof offersMobileIn === 'boolean' ? offersMobileIn : Boolean(existing.offersMobile)
+
       const serviceOk = Boolean(existing.service.isActive && existing.service.category?.isActive)
 
+      // If upstream service/category disabled, only allow deactivation.
       if (!serviceOk) {
-        // allow only deactivation
-        if (body.isActive === false) {
+        const isActiveIn = Object.prototype.hasOwnProperty.call(body, 'isActive') ? pickBoolean(body.isActive) : undefined
+        if (Object.prototype.hasOwnProperty.call(body, 'isActive') && isActiveIn === undefined) {
+          return { kind: 'ERROR' as const, status: 400, msg: 'isActive must be boolean.' }
+        }
+
+        if (isActiveIn === false) {
           const saved = await tx.professionalServiceOffering.update({
             where: { id: existing.id },
             data: { isActive: false },
@@ -205,14 +229,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
         return { kind: 'ERROR' as const, status: 400, msg: 'Enable at least Salon or Mobile.' }
       }
 
-      // if toggling a mode ON, ensure a location row exists
-      const ensureSalon = body.offersInSalon === true && existing.offersInSalon === false
-      const ensureMobile = body.offersMobile === true && existing.offersMobile === false
-
+      // If toggling a mode ON, ensure a placeholder location exists
+      const ensureSalon = offersInSalonIn === true && existing.offersInSalon === false
+      const ensureMobile = offersMobileIn === true && existing.offersMobile === false
       if (ensureSalon || ensureMobile) {
-        await ensureBookableLocationsForOffering({
+        await ensureLocationsForOffering({
           tx,
-          professionalId: profId,
+          professionalId,
           ensureSalon,
           ensureMobile,
         })
@@ -220,50 +243,86 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
       const data: Prisma.ProfessionalServiceOfferingUpdateInput = {}
 
-      const desc = trimOrNull(body.description)
+      // simple fields
+      const desc = Object.prototype.hasOwnProperty.call(body, 'description') ? trimOrNull(body.description) : undefined
+      if (Object.prototype.hasOwnProperty.call(body, 'description') && desc === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'description must be string or null.' }
+      }
       if (desc !== undefined) data.description = desc
 
-      const img = trimOrNull(body.customImageUrl)
+      const img = Object.prototype.hasOwnProperty.call(body, 'customImageUrl') ? trimOrNull(body.customImageUrl) : undefined
+      if (Object.prototype.hasOwnProperty.call(body, 'customImageUrl') && img === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'customImageUrl must be string or null.' }
+      }
       if (img !== undefined) data.customImageUrl = img
 
-      if (typeof body.offersInSalon === 'boolean') data.offersInSalon = nextOffersInSalon
-      if (typeof body.offersMobile === 'boolean') data.offersMobile = nextOffersMobile
+      if (typeof offersInSalonIn === 'boolean') data.offersInSalon = nextOffersInSalon
+      if (typeof offersMobileIn === 'boolean') data.offersMobile = nextOffersMobile
+
+      // read price/duration inputs (if present)
+      const salonPriceIn = Object.prototype.hasOwnProperty.call(body, 'salonPriceStartingAt')
+        ? pickNullablePriceString(body.salonPriceStartingAt)
+        : undefined
+      const salonDurIn = Object.prototype.hasOwnProperty.call(body, 'salonDurationMinutes')
+        ? pickNullablePositiveInt(body.salonDurationMinutes)
+        : undefined
+
+      const mobilePriceIn = Object.prototype.hasOwnProperty.call(body, 'mobilePriceStartingAt')
+        ? pickNullablePriceString(body.mobilePriceStartingAt)
+        : undefined
+      const mobileDurIn = Object.prototype.hasOwnProperty.call(body, 'mobileDurationMinutes')
+        ? pickNullablePositiveInt(body.mobileDurationMinutes)
+        : undefined
+
+      if (Object.prototype.hasOwnProperty.call(body, 'salonPriceStartingAt') && salonPriceIn === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'salonPriceStartingAt must be string or null.' }
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'salonDurationMinutes') && salonDurIn === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'Invalid salonDurationMinutes.' }
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'mobilePriceStartingAt') && mobilePriceIn === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'mobilePriceStartingAt must be string or null.' }
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'mobileDurationMinutes') && mobileDurIn === undefined) {
+        return { kind: 'ERROR' as const, status: 400, msg: 'Invalid mobileDurationMinutes.' }
+      }
 
       // ---- SALON ----
+      let patchSalonDur: number | undefined
+      let patchSalonPrice: Prisma.Decimal | undefined
+
       if (!nextOffersInSalon) {
         data.salonPriceStartingAt = null
         data.salonDurationMinutes = null
       } else {
-        if (body.salonDurationMinutes !== undefined) {
-          if (body.salonDurationMinutes === null) {
+        if (salonDurIn !== undefined) {
+          if (salonDurIn === null) {
             return { kind: 'ERROR' as const, status: 400, msg: 'salonDurationMinutes cannot be null when Salon is enabled.' }
           }
-          if (!isPositiveInt(body.salonDurationMinutes)) {
-            return { kind: 'ERROR' as const, status: 400, msg: 'Invalid salonDurationMinutes.' }
-          }
-          data.salonDurationMinutes = body.salonDurationMinutes
+          patchSalonDur = salonDurIn
+          data.salonDurationMinutes = patchSalonDur
         }
 
-        if (body.salonPriceStartingAt !== undefined) {
-          if (body.salonPriceStartingAt === null) {
+        if (salonPriceIn !== undefined) {
+          if (salonPriceIn === null) {
             return { kind: 'ERROR' as const, status: 400, msg: 'salonPriceStartingAt cannot be null when Salon is enabled.' }
           }
           try {
-            data.salonPriceStartingAt = parsePriceOrThrow(body.salonPriceStartingAt, existing.service.minPrice, 'Salon')
-          } catch (e: any) {
+            patchSalonPrice = parsePriceOrThrow(salonPriceIn, existing.service.minPrice, 'Salon')
+            data.salonPriceStartingAt = patchSalonPrice
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Invalid salon price.'
             return {
               kind: 'ERROR' as const,
               status: 400,
-              msg: e?.message || 'Invalid salon price.',
+              msg,
               extra: { minPrice: moneyToString(existing.service.minPrice) ?? '0.00' },
             }
           }
         }
 
-        const finalSalonDuration =
-          (data.salonDurationMinutes as number | undefined) ?? existing.salonDurationMinutes
-        const finalSalonPrice =
-          (data.salonPriceStartingAt as Prisma.Decimal | null | undefined) ?? existing.salonPriceStartingAt
+        const finalSalonDuration = patchSalonDur ?? existing.salonDurationMinutes
+        const finalSalonPrice = patchSalonPrice ?? existing.salonPriceStartingAt
 
         if (!isPositiveInt(finalSalonDuration)) {
           return { kind: 'ERROR' as const, status: 400, msg: 'Salon is enabled but salonDurationMinutes is missing/invalid.' }
@@ -274,40 +333,41 @@ export async function PATCH(request: Request, ctx: Ctx) {
       }
 
       // ---- MOBILE ----
+      let patchMobileDur: number | undefined
+      let patchMobilePrice: Prisma.Decimal | undefined
+
       if (!nextOffersMobile) {
         data.mobilePriceStartingAt = null
         data.mobileDurationMinutes = null
       } else {
-        if (body.mobileDurationMinutes !== undefined) {
-          if (body.mobileDurationMinutes === null) {
+        if (mobileDurIn !== undefined) {
+          if (mobileDurIn === null) {
             return { kind: 'ERROR' as const, status: 400, msg: 'mobileDurationMinutes cannot be null when Mobile is enabled.' }
           }
-          if (!isPositiveInt(body.mobileDurationMinutes)) {
-            return { kind: 'ERROR' as const, status: 400, msg: 'Invalid mobileDurationMinutes.' }
-          }
-          data.mobileDurationMinutes = body.mobileDurationMinutes
+          patchMobileDur = mobileDurIn
+          data.mobileDurationMinutes = patchMobileDur
         }
 
-        if (body.mobilePriceStartingAt !== undefined) {
-          if (body.mobilePriceStartingAt === null) {
+        if (mobilePriceIn !== undefined) {
+          if (mobilePriceIn === null) {
             return { kind: 'ERROR' as const, status: 400, msg: 'mobilePriceStartingAt cannot be null when Mobile is enabled.' }
           }
           try {
-            data.mobilePriceStartingAt = parsePriceOrThrow(body.mobilePriceStartingAt, existing.service.minPrice, 'Mobile')
-          } catch (e: any) {
+            patchMobilePrice = parsePriceOrThrow(mobilePriceIn, existing.service.minPrice, 'Mobile')
+            data.mobilePriceStartingAt = patchMobilePrice
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Invalid mobile price.'
             return {
               kind: 'ERROR' as const,
               status: 400,
-              msg: e?.message || 'Invalid mobile price.',
+              msg,
               extra: { minPrice: moneyToString(existing.service.minPrice) ?? '0.00' },
             }
           }
         }
 
-        const finalMobileDuration =
-          (data.mobileDurationMinutes as number | undefined) ?? existing.mobileDurationMinutes
-        const finalMobilePrice =
-          (data.mobilePriceStartingAt as Prisma.Decimal | null | undefined) ?? existing.mobilePriceStartingAt
+        const finalMobileDuration = patchMobileDur ?? existing.mobileDurationMinutes
+        const finalMobilePrice = patchMobilePrice ?? existing.mobilePriceStartingAt
 
         if (!isPositiveInt(finalMobileDuration)) {
           return { kind: 'ERROR' as const, status: 400, msg: 'Mobile is enabled but mobileDurationMinutes is missing/invalid.' }
@@ -317,9 +377,15 @@ export async function PATCH(request: Request, ctx: Ctx) {
         }
       }
 
-      if (typeof body.isActive === 'boolean') data.isActive = body.isActive
+      // isActive
+      if (Object.prototype.hasOwnProperty.call(body, 'isActive')) {
+        const v = pickBoolean(body.isActive)
+        if (v === undefined) return { kind: 'ERROR' as const, status: 400, msg: 'isActive must be boolean.' }
+        data.isActive = v
+      }
 
       if (Object.keys(data).length === 0) {
+        // no changes
         return { kind: 'OK' as const, offering: existing }
       }
 
@@ -332,40 +398,40 @@ export async function PATCH(request: Request, ctx: Ctx) {
       return { kind: 'OK' as const, offering: saved }
     })
 
-    if (result.kind === 'NOT_FOUND') return jsonError('Not found.', 404)
-    if (result.kind === 'ERROR') return jsonError(result.msg, result.status, (result as any).extra)
+    if (result.kind === 'NOT_FOUND') return jsonFail(404, 'Not found.')
+    if (result.kind === 'ERROR') return jsonFail(result.status, result.msg, result.extra)
 
-    return NextResponse.json({ ok: true, offering: result.offering }, { status: 200 })
+    return jsonOk({ offering: result.offering }, 200)
   } catch (error) {
     console.error('PATCH /api/pro/offerings/[id] error', error)
-    return jsonError('Internal server error.', 500)
+    return jsonFail(500, 'Internal server error.')
   }
 }
 
 export async function DELETE(_request: Request, ctx: Ctx) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    const profId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!profId) return jsonError('Unauthorized', 401)
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
 
     const { id } = await ctx.params
     const offeringId = trimId(id)
-    if (!offeringId) return jsonError('Missing offering id.', 400)
+    if (!offeringId) return jsonFail(400, 'Missing offering id.')
 
     const existing = await prisma.professionalServiceOffering.findFirst({
-      where: { id: offeringId, professionalId: profId },
+      where: { id: offeringId, professionalId },
       select: { id: true },
     })
-    if (!existing) return jsonError('Not found.', 404)
+    if (!existing) return jsonFail(404, 'Not found.')
 
     await prisma.professionalServiceOffering.update({
       where: { id: existing.id },
       data: { isActive: false },
     })
 
-    return NextResponse.json({ ok: true }, { status: 200 })
+    return jsonOk({}, 200)
   } catch (error) {
     console.error('DELETE /api/pro/offerings/[id] error', error)
-    return jsonError('Internal server error.', 500)
+    return jsonFail(500, 'Internal server error.')
   }
 }

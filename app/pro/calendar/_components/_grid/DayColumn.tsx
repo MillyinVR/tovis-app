@@ -1,7 +1,7 @@
 // app/pro/calendar/_components/_grid/DayColumn.tsx
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import type React from 'react'
 import type { DragEvent } from 'react'
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
@@ -13,20 +13,16 @@ import {
   isBlockedEvent,
   snapMinutes,
 } from '../../_utils/calendarMath'
-import { eventAccentBgClassName, eventCardClassName } from '../../_utils/statusStyles'
 import { useDayEvents } from './useDayEvents'
+import { EventCard } from './EventCard'
 
 type LocationType = 'SALON' | 'MOBILE'
-type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
-type WorkingHours = Record<string, WorkingHoursDay>
-
 type Window = { startMinutes: number; endMinutes: number }
 
 const MIDDAY_MS = 12 * 60 * 60 * 1000
 const TOTAL_MINUTES = 24 * 60
 
 function stableYmdForVisibleDay(d: Date, timeZone: string) {
-  // anchor at noon to avoid edge weirdness around midnight + DST
   return ymdInTimeZone(new Date(d.getTime() + MIDDAY_MS), timeZone)
 }
 
@@ -34,8 +30,7 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-function parseHHMM(v?: string) {
-  if (!v || typeof v !== 'string') return null
+function parseHHMM(v: string) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
   if (!m) return null
   const hh = Number(m[1])
@@ -46,7 +41,7 @@ function parseHHMM(v?: string) {
   return { hh, mm }
 }
 
-function weekdayKeyInTimeZone(date: Date, timeZone: string): keyof WorkingHours {
+function weekdayKeyInTimeZone(date: Date, timeZone: string) {
   const safe = new Date(date.getTime() + MIDDAY_MS)
   const wd = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(safe).toLowerCase()
   if (wd.startsWith('mon')) return 'mon'
@@ -59,11 +54,10 @@ function weekdayKeyInTimeZone(date: Date, timeZone: string): keyof WorkingHours 
 }
 
 function getWorkingWindowForDateInTimeZone(day: Date, workingHours: WorkingHoursJson, timeZone: string): Window | null {
-  if (!workingHours || typeof workingHours !== 'object') return null
-  const wh = workingHours as unknown as WorkingHours
+  if (!workingHours) return null
 
   const key = weekdayKeyInTimeZone(day, timeZone)
-  const rule = wh?.[key]
+  const rule = workingHours[key]
   if (!rule || rule.enabled === false) return null
 
   const s = parseHHMM(rule.start)
@@ -77,10 +71,6 @@ function getWorkingWindowForDateInTimeZone(day: Date, workingHours: WorkingHours
   return { startMinutes, endMinutes }
 }
 
-/**
- * Merge overlapping/adjacent working windows into a minimal set of segments.
- * This is what lets us correctly dim the “gap between” SALON and MOBILE windows.
- */
 function mergeWindows(windows: Window[]): Window[] {
   const list = windows
     .map((w) => ({
@@ -96,8 +86,6 @@ function mergeWindows(windows: Window[]): Window[] {
   for (let i = 1; i < list.length; i++) {
     const prev = out[out.length - 1]
     const cur = list[i]
-
-    // overlap or touch
     if (cur.startMinutes <= prev.endMinutes) {
       prev.endMinutes = Math.max(prev.endMinutes, cur.endMinutes)
     } else {
@@ -107,14 +95,8 @@ function mergeWindows(windows: Window[]): Window[] {
   return out
 }
 
-/**
- * When an event ends exactly at 00:00 and we render the previous day,
- * minutesSinceMidnightInTimeZone(end) returns 0, but we want 24:00 for that day.
- */
 function endMinutesForDay(args: { dayYmd: string; end: Date; timeZone: string }) {
   const { dayYmd, end, timeZone } = args
-
-  // inclusive day for end (subtract 1ms)
   const endYmdInclusive = ymdInTimeZone(new Date(end.getTime() - 1), timeZone)
   if (dayYmd !== endYmdInclusive) return null
 
@@ -125,16 +107,12 @@ function endMinutesForDay(args: { dayYmd: string; end: Date; timeZone: string })
   return minutes
 }
 
-function primaryText(ev: CalendarEvent) {
-  if (isBlockedEvent(ev)) return 'Blocked'
-  const name = (ev.clientName || '').trim()
-  return name || 'Client'
-}
-
-function secondaryText(ev: CalendarEvent) {
-  if (isBlockedEvent(ev)) return (ev.note || ev.clientName || 'Personal time').toString()
-  const svc = (ev.title || '').trim()
-  return svc || 'Appointment'
+function formatTimeLabelFromMinutes(mins: number) {
+  const hh = Math.floor(mins / 60)
+  const mm = mins % 60
+  const h12 = ((hh + 11) % 12) + 1
+  const ampm = hh >= 12 ? 'PM' : 'AM'
+  return `${h12}:${String(mm).padStart(2, '0')} ${ampm}`
 }
 
 export function DayColumn(props: {
@@ -201,40 +179,37 @@ export function DayColumn(props: {
   const zebraWash = dayIdx % 2 === 1 ? 'bg-white/2' : 'bg-transparent'
   const leftBorder = dayIdx === 0 ? 'border-l-0' : 'border-l border-white/10'
 
-  // ✅ ONE non-working color everywhere
   const outsideDim = 'bg-black/55'
 
-  // ✅ Salon styling (gold)
   const salonFill = 'bg-amber-300/22'
   const salonEdge = 'border-amber-200/70'
   const salonSheen = 'bg-gradient-to-b from-white/10 via-transparent to-transparent'
 
-  // ✅ Mobile styling (teal)
   const mobileFill = 'bg-teal-400/18'
   const mobileEdge = 'border-teal-200/70'
   const mobileSheen = 'bg-gradient-to-r from-white/10 via-transparent to-transparent'
 
-  // slight “active mode” emphasis without hiding the other
   const salonEdgeBoost = activeLocationType === 'SALON' ? 'border-amber-200/85' : salonEdge
   const mobileEdgeBoost = activeLocationType === 'MOBILE' ? 'border-teal-200/85' : mobileEdge
 
   function eventDurationMinutes(ev: CalendarEvent) {
-    if (Number.isFinite(ev.durationMinutes) && (ev.durationMinutes as number) > 0) {
-      return Math.max(15, ev.durationMinutes as number)
+    if (typeof ev.durationMinutes === 'number' && Number.isFinite(ev.durationMinutes) && ev.durationMinutes > 0) {
+      return Math.max(15, ev.durationMinutes)
     }
     return Math.max(15, computeDurationMinutesFromIso(ev.startsAt, ev.endsAt))
   }
 
   const dayEvents = useDayEvents({ day, timeZone, events })
-
+  const containerRef = useRef<HTMLDivElement | null>(null)
   return (
     <div
+      ref={containerRef}
       data-cal-col="1"
       className={['relative min-w-0', leftBorder].join(' ')}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault()
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+        const rect = e.currentTarget.getBoundingClientRect()
         void onDropOnDayColumn(day, e.clientY, rect.top)
       }}
       onMouseDown={(e) => {
@@ -242,18 +217,16 @@ export function DayColumn(props: {
         if (suppressClickRef.current) return
         if (e.button !== 0) return
 
-        const el = e.target as HTMLElement
-        if (el.closest('[data-cal-event="1"]')) return
+        const target = e.target instanceof HTMLElement ? e.target : null
+        if (target && target.closest('[data-cal-event="1"]')) return
 
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+        const rect = e.currentTarget.getBoundingClientRect()
         onCreateForClick(day, e.clientY, rect.top)
       }}
     >
       <div className="relative" style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}>
         <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/10" />
-
         <div className={['pointer-events-none absolute inset-0', zebraWash].join(' ')} />
-
         {isToday ? <div className="pointer-events-none absolute inset-0 bg-accentPrimary/8" /> : null}
 
         {/* grid lines */}
@@ -261,12 +234,7 @@ export function DayColumn(props: {
           const minute = i * 15
           const isHour = minute % 60 === 0
           const isHalf = minute % 30 === 0
-
-          const lineClass = isHour
-            ? 'border-t border-white/12'
-            : isHalf
-              ? 'border-t border-white/7'
-              : 'border-t border-white/5'
+          const lineClass = isHour ? 'border-t border-white/12' : isHalf ? 'border-t border-white/7' : 'border-t border-white/5'
 
           return (
             <div
@@ -283,12 +251,11 @@ export function DayColumn(props: {
           )
         })}
 
-        {/* ====== NON-WORKING OVERLAY (single consistent color) ====== */}
+        {/* Non-working overlay */}
         {!dayEnabled ? (
           <div className={['pointer-events-none absolute inset-0', outsideDim].join(' ')} />
         ) : (
           <>
-            {/* dim before first segment */}
             {mergedWorking[0].startMinutes > 0 ? (
               <div
                 className={['pointer-events-none absolute left-0 right-0', outsideDim].join(' ')}
@@ -296,9 +263,8 @@ export function DayColumn(props: {
               />
             ) : null}
 
-            {/* dim between segments */}
             {mergedWorking.length > 1
-              ? mergedWorking.slice(0, -1).map((seg: Window, idx: number) => {
+              ? mergedWorking.slice(0, -1).map((seg, idx) => {
                   const next = mergedWorking[idx + 1]
                   const gap = next.startMinutes - seg.endMinutes
                   if (gap <= 0) return null
@@ -306,16 +272,12 @@ export function DayColumn(props: {
                     <div
                       key={`gap-${idx}`}
                       className={['pointer-events-none absolute left-0 right-0', outsideDim].join(' ')}
-                      style={{
-                        top: seg.endMinutes * PX_PER_MINUTE,
-                        height: gap * PX_PER_MINUTE,
-                      }}
+                      style={{ top: seg.endMinutes * PX_PER_MINUTE, height: gap * PX_PER_MINUTE }}
                     />
                   )
                 })
               : null}
 
-            {/* dim after last segment */}
             {mergedWorking[mergedWorking.length - 1].endMinutes < TOTAL_MINUTES ? (
               <div
                 className={['pointer-events-none absolute left-0 right-0', outsideDim].join(' ')}
@@ -328,7 +290,7 @@ export function DayColumn(props: {
           </>
         )}
 
-        {/* ====== WORKING WINDOWS (always show both if present) ====== */}
+        {/* Working windows */}
         {salonWindow ? (
           <div
             className="pointer-events-none absolute left-0 right-0"
@@ -360,122 +322,64 @@ export function DayColumn(props: {
         ) : null}
 
         {/* events */}
-        {dayEvents.map((ev) => {
+        {dayEvents.map((ev: CalendarEvent) => {
           const isBlock = isBlockedEvent(ev)
           const entityType: EntityType = isBlock ? 'block' : 'booking'
           const apiId = isBlock ? extractBlockId(ev) : ev.id
 
-          const dur = eventDurationMinutes(ev)
+          const dur =
+            typeof ev.durationMinutes === 'number' && Number.isFinite(ev.durationMinutes) && ev.durationMinutes > 0
+              ? Math.max(15, ev.durationMinutes)
+              : Math.max(15, computeDurationMinutesFromIso(ev.startsAt, ev.endsAt))
+
           const evStart = new Date(ev.startsAt)
           const evEnd = new Date(ev.endsAt)
 
           const startYmd = ymdInTimeZone(evStart, timeZone)
           const endYmdInclusive = ymdInTimeZone(new Date(evEnd.getTime() - 1), timeZone)
 
-          const startMinutes = dayYmd === startYmd ? minutesSinceMidnightInTimeZone(evStart, timeZone) : 0
-          const maybeEndMinutes = endMinutesForDay({ dayYmd, end: evEnd, timeZone })
-          const endMinutes = dayYmd === endYmdInclusive ? (maybeEndMinutes ?? TOTAL_MINUTES) : TOTAL_MINUTES
+          const startMinutesRaw = dayYmd === startYmd ? minutesSinceMidnightInTimeZone(evStart, timeZone) : 0
+          const endMinutesRaw = dayYmd === endYmdInclusive ? minutesSinceMidnightInTimeZone(evEnd, timeZone) : 24 * 60
 
-          const safeEndMinutes =
-            endMinutes <= startMinutes ? clamp(startMinutes + dur, startMinutes + 15, TOTAL_MINUTES) : endMinutes
+          const startMinutes = snapMinutes(startMinutesRaw)
+          const safeEndMinutes = Math.max(startMinutes + 15, Math.min(24 * 60, endMinutesRaw <= startMinutesRaw ? startMinutesRaw + dur : endMinutesRaw))
+          const heightMinutes = Math.max(15, safeEndMinutes - startMinutes)
 
-          const heightMinutes = clamp(safeEndMinutes - startMinutes, 15, TOTAL_MINUTES)
-          const topMinutes = clamp(snapMinutes(startMinutes), 0, TOTAL_MINUTES - 15)
-
-          const topPx = topMinutes * PX_PER_MINUTE
+          const topPx = startMinutes * PX_PER_MINUTE
           const heightPx = heightMinutes * PX_PER_MINUTE
 
           const micro = heightPx < 28
           const compact = heightPx < 52
 
-          const cardCls = eventCardClassName({ status: ev.status ?? null, isBlocked: isBlock })
-          const accent = eventAccentBgClassName({ status: ev.status ?? null, isBlocked: isBlock })
+          const timeLabel = new Intl.DateTimeFormat('en-US', {
+            timeZone,
+            hour: 'numeric',
+            minute: '2-digit',
+          }).format(evStart)
+
+          const rect = containerRef.current?.getBoundingClientRect()
+          const columnTop = rect?.top ?? 0
 
           return (
-            <div
+            <EventCard
               key={ev.id}
-              data-cal-event="1"
-              draggable={Boolean(apiId)}
-              onDragStart={(e) => onDragStart(ev, e)}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => {
-                if (suppressClickRef.current) return
-                onClickEvent(ev.id)
-              }}
-              className={[
-                'absolute z-20 left-0.5 right-0.5 overflow-hidden',
-                'rounded-lg border',
-                'shadow-md shadow-black/20',
-                'ring-1 ring-white/10',
-                'backdrop-blur-[10px]',
-                'transition-transform duration-150 md:hover:scale-[1.01] active:scale-[0.995]',
-                cardCls,
-              ].join(' ')}
-              style={{ top: topPx, height: heightPx }}
-              title={isBlock ? 'Drag to move, drag bottom to resize. Click to edit.' : 'Drag to move, drag bottom to resize.'}
-            >
-              <div className="pointer-events-none absolute inset-0 bg-bgPrimary/85" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-white/5" />
-              <div className={['absolute inset-y-0 left-0 w-1', accent].join(' ')} />
-
-              <div className={['relative h-full pl-2 pr-1.5', micro ? 'py-1' : 'py-1.5'].join(' ')}>
-                <div
-                  className={[
-                    'font-semibold text-textPrimary',
-                    'whitespace-normal break-words',
-                    micro ? 'text-[11px] leading-3.5' : 'text-[11.5px] leading-3.5',
-                  ].join(' ')}
-                  style={{
-                    display: '-webkit-box',
-                    WebkitBoxOrient: 'vertical',
-                    WebkitLineClamp: 2,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {primaryText(ev)}
-                </div>
-
-                {!micro ? (
-                  <div
-                    className={[
-                      'mt-0.5 font-medium text-textPrimary/85',
-                      'whitespace-normal break-words',
-                      'text-[10.5px] leading-3.5',
-                    ].join(' ')}
-                    style={{
-                      display: '-webkit-box',
-                      WebkitBoxOrient: 'vertical',
-                      WebkitLineClamp: compact ? 1 : 2,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {secondaryText(ev)}
-                  </div>
-                ) : null}
-
-                <div
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    e.preventDefault()
-                    if (!apiId) return
-
-                    const colRect = (e.currentTarget.closest('[data-cal-col="1"]') as HTMLDivElement | null)?.getBoundingClientRect()
-                    const columnTop = colRect?.top ?? 0
-
-                    onBeginResize({
-                      entityType,
-                      eventId: ev.id,
-                      apiId,
-                      day,
-                      startMinutes: topMinutes,
-                      originalDuration: dur,
-                      columnTop,
-                    })
-                  }}
-                  className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize bg-white/5"
-                />
-              </div>
-            </div>
+              ev={ev}
+              entityType={entityType}
+              apiId={apiId}
+              topPx={topPx}
+              heightPx={heightPx}
+              timeLabel={timeLabel}
+              compact={compact}
+              micro={micro}
+              day={day}
+              startMinutes={startMinutes}
+              originalDuration={dur}
+              columnTop={columnTop}
+              suppressClickRef={suppressClickRef}
+              onClickEvent={onClickEvent}
+              onDragStart={onDragStart}
+              onBeginResize={onBeginResize}
+            />
           )
         })}
       </div>

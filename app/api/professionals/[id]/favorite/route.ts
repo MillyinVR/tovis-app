@@ -1,19 +1,23 @@
 // app/api/professionals/[id]/favorite/route.ts
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
+function pickTrimmedString(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  return s ? s : null
+}
 
-export async function POST(_req: Request, ctx: Ctx) {
+export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
 
-    const { id: raw } = await Promise.resolve(ctx.params as any)
-    const professionalId = pickString(raw)
+    const { id } = await ctx.params
+    const professionalId = pickTrimmedString(id)
     if (!professionalId) return jsonFail(400, 'Missing professional id.')
 
     const pro = await prisma.professionalProfile.findUnique({
@@ -30,27 +34,29 @@ export async function POST(_req: Request, ctx: Ctx) {
 
     const count = await prisma.professionalFavorite.count({ where: { professionalId } })
     return jsonOk({ favorited: true, count })
-  } catch (e) {
+  } catch (e: unknown) {
     console.error('POST /api/professionals/[id]/favorite error', e)
-    return jsonFail(500, 'Internal server error')
+    const msg = e instanceof Error ? e.message : 'Internal server error'
+    return jsonFail(500, msg)
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
 
-    const { id: raw } = await Promise.resolve(ctx.params as any)
-    const professionalId = pickString(raw)
+    const { id } = await ctx.params
+    const professionalId = pickTrimmedString(id)
     if (!professionalId) return jsonFail(400, 'Missing professional id.')
 
     await prisma.professionalFavorite.deleteMany({ where: { professionalId, userId: user.id } })
 
     const count = await prisma.professionalFavorite.count({ where: { professionalId } })
     return jsonOk({ favorited: false, count })
-  } catch (e) {
+  } catch (e: unknown) {
     console.error('DELETE /api/professionals/[id]/favorite error', e)
-    return jsonFail(500, 'Internal server error')
+    const msg = e instanceof Error ? e.message : 'Internal server error'
+    return jsonFail(500, msg)
   }
 }

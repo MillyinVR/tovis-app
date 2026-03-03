@@ -1,40 +1,34 @@
 // app/api/pro/offerings/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { Prisma, ProfessionalLocationType } from '@prisma/client'
+import { jsonFail, jsonOk, pickBool, pickInt, pickString } from '@/app/api/_utils'
+import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { parseMoney, moneyToString } from '@/lib/money'
-import { Prisma } from '@prisma/client'
-import type { ProfessionalLocationType } from '@prisma/client'
 
-type CreateOfferingBody = {
-  serviceId: string
+export const dynamic = 'force-dynamic'
 
-  // legacy (ignored)
-  title?: string | null
+type JsonObject = Record<string, unknown>
 
-  // pro fields
-  description?: string | null
-  customImageUrl?: string | null
-
-  // toggles
-  offersInSalon?: boolean
-  offersMobile?: boolean
-
-  // SALON
-  salonPriceStartingAt?: string | null
-  salonDurationMinutes?: number | null
-
-  // MOBILE
-  mobilePriceStartingAt?: string | null
-  mobileDurationMinutes?: number | null
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
-type WorkingHoursDay = { enabled: boolean; start: string; end: string }
-type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
+function trimOrNull(v: unknown): string | null | undefined {
+  // undefined => not provided / invalid type
+  // null => explicit clear
+  if (v === undefined) return undefined
+  if (v === null) return null
+  if (typeof v !== 'string') return undefined
+  const t = v.trim()
+  return t ? t : null
+}
 
-function defaultWorkingHours(): WorkingHoursObj {
-  const make = (enabled: boolean): WorkingHoursDay => ({ enabled, start: '09:00', end: '17:00' })
+function isPositiveInt(n: number | null) {
+  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
+}
+
+function defaultWorkingHours(): Prisma.JsonObject {
+  const make = (enabled: boolean) => ({ enabled, start: '09:00', end: '17:00' })
   return {
     mon: make(true),
     tue: make(true),
@@ -46,20 +40,9 @@ function defaultWorkingHours(): WorkingHoursObj {
   }
 }
 
-function isPositiveInt(n: unknown) {
-  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
-}
-
-function trimOrNull(v: unknown) {
-  if (v === null) return null
-  if (typeof v !== 'string') return null
-  const t = v.trim()
-  return t ? t : null
-}
-
-function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: string) {
+function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon' | 'Mobile') {
   const s = raw.trim()
-  if (!s) throw new Error(`Missing ${label}PriceStartingAt`)
+  if (!s) throw new Error(`Missing ${label} price.`)
 
   let dec: Prisma.Decimal
   try {
@@ -69,18 +52,21 @@ function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: string)
   }
 
   if (dec.lessThan(minPrice)) {
-    throw new Error(`${label} price must be at least $${moneyToString(minPrice)}`)
+    throw new Error(`${label} price must be at least $${moneyToString(minPrice) ?? '0.00'}`)
   }
 
   return dec
 }
 
-function toDto(off: any) {
-  return {
-    id: String(off.id),
-    serviceId: String(off.serviceId),
+type OfferingRow = Prisma.ProfessionalServiceOfferingGetPayload<{
+  include: { service: { include: { category: true } } }
+}>
 
-    // legacy field kept for typing compatibility
+function toDto(off: OfferingRow) {
+  return {
+    id: off.id,
+    serviceId: off.serviceId,
+
     title: null as string | null,
 
     description: off.description ?? null,
@@ -95,17 +81,23 @@ function toDto(off: any) {
     mobilePriceStartingAt: off.mobilePriceStartingAt ? moneyToString(off.mobilePriceStartingAt) : null,
     mobileDurationMinutes: off.mobileDurationMinutes ?? null,
 
-    // canonical display
+    isActive: Boolean(off.isActive),
+
+    // service/library flags + display
     serviceName: off.service.name,
     categoryName: off.service.category?.name ?? null,
     serviceDefaultImageUrl: off.service.defaultImageUrl ?? null,
-
-    // admin floor
     minPrice: moneyToString(off.service.minPrice) ?? '0.00',
+
+    isServiceActive: Boolean(off.service.isActive),
+    isCategoryActive: Boolean(off.service.category?.isActive),
+
+    serviceIsAddOnEligible: Boolean(off.service.isAddOnEligible),
+    serviceAddOnGroup: off.service.addOnGroup ?? null,
   }
 }
 
-async function ensureBookableLocationsForOffering(args: {
+async function ensureLocationsForOffering(args: {
   tx: Prisma.TransactionClient
   professionalId: string
   offersInSalon: boolean
@@ -114,14 +106,13 @@ async function ensureBookableLocationsForOffering(args: {
   const { tx, professionalId, offersInSalon, offersMobile } = args
 
   const neededTypes: ProfessionalLocationType[] = []
-  if (offersInSalon) neededTypes.push('SALON') // SALON is our seed; booking supports SALON + SUITE.
-  if (offersMobile) neededTypes.push('MOBILE_BASE')
-
+  if (offersInSalon) neededTypes.push(ProfessionalLocationType.SALON)
+  if (offersMobile) neededTypes.push(ProfessionalLocationType.MOBILE_BASE)
   if (!neededTypes.length) return
 
   const existing = await tx.professionalLocation.findMany({
-    where: { professionalId, type: { in: neededTypes as any } },
-    select: { id: true, type: true },
+    where: { professionalId, type: { in: neededTypes } },
+    select: { type: true },
     take: 50,
   })
 
@@ -133,165 +124,172 @@ async function ensureBookableLocationsForOffering(args: {
     const totalCount = await tx.professionalLocation.count({ where: { professionalId } })
     const shouldBePrimary = totalCount === 0
 
-    const name = type === 'MOBILE_BASE' ? 'Mobile' : 'Salon'
-
     await tx.professionalLocation.create({
-  data: {
-    professionalId,
-    type,
-    name: type === 'MOBILE_BASE' ? 'Set mobile base' : 'Set salon address',
-    isPrimary: false,
-    isBookable: false,
-    timeZone: null,
-    workingHours: defaultWorkingHours() as unknown as Prisma.InputJsonValue,
-  },
-  select: { id: true },
-})
-
+      data: {
+        professionalId,
+        type,
+        name: type === ProfessionalLocationType.MOBILE_BASE ? 'Set mobile base' : 'Set salon address',
+        isPrimary: shouldBePrimary,
+        isBookable: false,
+        timeZone: null,
+        workingHours: defaultWorkingHours(),
+      },
+      select: { id: true },
+    })
   }
 }
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const profId = user.professionalProfile.id
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
 
     const offerings = await prisma.professionalServiceOffering.findMany({
-      where: { professionalId: profId, isActive: true },
-      include: { service: { include: { category: true } } },
+      where: { professionalId, isActive: true },
+      include: {
+        service: {
+          include: {
+            category: true,
+          },
+        },
+      },
       orderBy: [{ createdAt: 'asc' }],
     })
 
-    return NextResponse.json(offerings.map(toDto), { status: 200 })
+    return jsonOk({ offerings: offerings.map(toDto) }, 200)
   } catch (error) {
-    console.error('Get offerings error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('GET /api/pro/offerings error', error)
+    return jsonFail(500, 'Internal server error')
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
+
+    const raw: unknown = await request.json().catch(() => null)
+    if (!isRecord(raw)) return jsonFail(400, 'Invalid JSON body.')
+    const body = raw
+
+    const serviceId = pickString(body.serviceId)
+    if (!serviceId) return jsonFail(400, 'Missing serviceId.')
+
+    const description = Object.prototype.hasOwnProperty.call(body, 'description') ? trimOrNull(body.description) : undefined
+    if (Object.prototype.hasOwnProperty.call(body, 'description') && description === undefined) {
+      return jsonFail(400, 'description must be string or null.')
     }
 
-    const profId = user.professionalProfile.id
+    const customImageUrl = Object.prototype.hasOwnProperty.call(body, 'customImageUrl')
+      ? trimOrNull(body.customImageUrl)
+      : undefined
+    if (Object.prototype.hasOwnProperty.call(body, 'customImageUrl') && customImageUrl === undefined) {
+      return jsonFail(400, 'customImageUrl must be string or null.')
+    }
 
-    const body = (await request.json().catch(() => null)) as Partial<CreateOfferingBody> | null
-    if (!body) return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    const offersInSalonIn = Object.prototype.hasOwnProperty.call(body, 'offersInSalon') ? pickBool(body.offersInSalon) : null
+    const offersMobileIn = Object.prototype.hasOwnProperty.call(body, 'offersMobile') ? pickBool(body.offersMobile) : null
 
-    const serviceId = String(body.serviceId || '').trim()
-    if (!serviceId) return NextResponse.json({ error: 'Missing serviceId' }, { status: 400 })
+    if (Object.prototype.hasOwnProperty.call(body, 'offersInSalon') && offersInSalonIn === null) {
+      return jsonFail(400, 'offersInSalon must be boolean.')
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'offersMobile') && offersMobileIn === null) {
+      return jsonFail(400, 'offersMobile must be boolean.')
+    }
 
-    const description = trimOrNull(body.description)
-    const customImageUrl = trimOrNull(body.customImageUrl)
-
-    const offersInSalon = typeof body.offersInSalon === 'boolean' ? body.offersInSalon : true
-    const offersMobile = typeof body.offersMobile === 'boolean' ? body.offersMobile : false
+    const offersInSalon = typeof offersInSalonIn === 'boolean' ? offersInSalonIn : true
+    const offersMobile = typeof offersMobileIn === 'boolean' ? offersMobileIn : false
 
     if (!offersInSalon && !offersMobile) {
-      return NextResponse.json({ error: 'Enable at least Salon or Mobile.' }, { status: 400 })
+      return jsonFail(400, 'Enable at least Salon or Mobile.')
     }
 
     const service = await prisma.service.findUnique({
-  where: { id: serviceId },
-  select: {
-    id: true,
-    isActive: true,
-    minPrice: true,
-    category: { select: { isActive: true } },
-  },
-})
+      where: { id: serviceId },
+      select: {
+        id: true,
+        isActive: true,
+        minPrice: true,
+        isAddOnEligible: true,
+        addOnGroup: true,
+        defaultImageUrl: true,
+        name: true,
+        category: { select: { isActive: true, name: true } },
+      },
+    })
 
-if (!service || !service.isActive || !service.category?.isActive) {
-  return NextResponse.json({ error: 'This service is currently unavailable.' }, { status: 400 })
-}
-
-
-    const data: any = {
-      professionalId: profId,
-      serviceId: service.id,
-
-      // ✅ canonical naming enforcement: do not store custom title
-      title: null,
-
-      description: description || null,
-      customImageUrl: customImageUrl || null,
-
-      offersInSalon,
-      offersMobile,
+    if (!service || !service.isActive || !service.category?.isActive) {
+      return jsonFail(400, 'This service is currently unavailable.')
     }
 
-    // SALON validation
+    // Validate pricing/durations
+    const salonDur = offersInSalon ? pickInt(body.salonDurationMinutes) : null
+    const mobileDur = offersMobile ? pickInt(body.mobileDurationMinutes) : null
+
+    if (offersInSalon && !isPositiveInt(salonDur)) return jsonFail(400, 'Invalid salonDurationMinutes.')
+    if (offersMobile && !isPositiveInt(mobileDur)) return jsonFail(400, 'Invalid mobileDurationMinutes.')
+
+    let salonPrice: Prisma.Decimal | null = null
+    let mobilePrice: Prisma.Decimal | null = null
+
     if (offersInSalon) {
-      const durInput = body.salonDurationMinutes
-      if (!isPositiveInt(durInput)) return NextResponse.json({ error: 'Invalid salonDurationMinutes' }, { status: 400 })
-
-      const priceInput = typeof body.salonPriceStartingAt === 'string' ? body.salonPriceStartingAt : ''
+      const rawPrice = typeof body.salonPriceStartingAt === 'string' ? body.salonPriceStartingAt : ''
       try {
-        data.salonPriceStartingAt = parsePriceOrThrow(priceInput, service.minPrice, 'Salon')
-      } catch (e: any) {
-        return NextResponse.json(
-          { error: e?.message || 'Invalid salon price.', minPrice: moneyToString(service.minPrice) },
-          { status: 400 },
-        )
+        salonPrice = parsePriceOrThrow(rawPrice, service.minPrice, 'Salon')
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Invalid salon price.'
+        return jsonFail(400, msg, { minPrice: moneyToString(service.minPrice) ?? '0.00' })
       }
-
-      data.salonDurationMinutes = durInput
-    } else {
-      data.salonPriceStartingAt = null
-      data.salonDurationMinutes = null
     }
 
-    // MOBILE validation
     if (offersMobile) {
-      const durInput = body.mobileDurationMinutes
-      if (!isPositiveInt(durInput)) return NextResponse.json({ error: 'Invalid mobileDurationMinutes' }, { status: 400 })
-
-      const priceInput = typeof body.mobilePriceStartingAt === 'string' ? body.mobilePriceStartingAt : ''
+      const rawPrice = typeof body.mobilePriceStartingAt === 'string' ? body.mobilePriceStartingAt : ''
       try {
-        data.mobilePriceStartingAt = parsePriceOrThrow(priceInput, service.minPrice, 'Mobile')
-      } catch (e: any) {
-        return NextResponse.json(
-          { error: e?.message || 'Invalid mobile price.', minPrice: moneyToString(service.minPrice) },
-          { status: 400 },
-        )
+        mobilePrice = parsePriceOrThrow(rawPrice, service.minPrice, 'Mobile')
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Invalid mobile price.'
+        return jsonFail(400, msg, { minPrice: moneyToString(service.minPrice) ?? '0.00' })
       }
-
-      data.mobileDurationMinutes = durInput
-    } else {
-      data.mobilePriceStartingAt = null
-      data.mobileDurationMinutes = null
     }
 
     const offering = await prisma.$transaction(async (tx) => {
-      // ✅ NEW: ensure pro has matching location rows for the modes they enabled
-      await ensureBookableLocationsForOffering({
+      await ensureLocationsForOffering({
         tx,
-        professionalId: profId,
+        professionalId,
         offersInSalon,
         offersMobile,
       })
 
       return tx.professionalServiceOffering.create({
-        data,
+        data: {
+          professionalId,
+          serviceId: service.id,
+
+          title: null,
+          description: description ?? null,
+          customImageUrl: customImageUrl ?? null,
+
+          offersInSalon,
+          offersMobile,
+
+          salonPriceStartingAt: offersInSalon ? salonPrice : null,
+          salonDurationMinutes: offersInSalon ? (salonDur as number) : null,
+
+          mobilePriceStartingAt: offersMobile ? mobilePrice : null,
+          mobileDurationMinutes: offersMobile ? (mobileDur as number) : null,
+        },
         include: { service: { include: { category: true } } },
       })
     })
 
-    return NextResponse.json(toDto(offering), { status: 201 })
-  } catch (error: any) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2002') {
-        return NextResponse.json({ error: 'You already added this service to your menu.' }, { status: 409 })
-      }
+    return jsonOk({ offering: toDto(offering) }, 201)
+  } catch (error: unknown) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return jsonFail(409, 'You already added this service to your menu.')
     }
-    console.error('Create offering error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('POST /api/pro/offerings error', error)
+    return jsonFail(500, 'Internal server error')
   }
 }

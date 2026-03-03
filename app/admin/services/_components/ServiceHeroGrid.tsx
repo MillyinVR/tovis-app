@@ -1,7 +1,8 @@
-// app/admin/services/_components/ServiceHeroGrid.tsx 
+// app/admin/services/_components/ServiceHeroGrid.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
@@ -23,12 +24,33 @@ type ServiceDTO = {
   categoryName: string | null
 }
 
+type OkResponse = { ok: true }
+type FailResponse = { ok: false; error?: string }
+
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function readErrorMessage(v: unknown): string | null {
+  if (!isRecord(v)) return null
+  const e = v.error
+  return typeof e === 'string' && e.trim() ? e : null
+}
+
+function isOkTrue(v: unknown): v is OkResponse & Record<string, unknown> {
+  return isRecord(v) && v.ok === true
+}
+
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
 }
 
 function isAbsoluteHttpUrl(input: string) {
@@ -76,7 +98,7 @@ function haptic(ms = 8) {
   }
 }
 
-function Chip({ children }: { children: React.ReactNode }) {
+function Chip({ children }: { children: ReactNode }) {
   return (
     <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/25 px-2 py-0.5 text-[11px] font-extrabold text-textSecondary">
       {children}
@@ -94,7 +116,11 @@ function StatusPill(props: { dirty: boolean; saving: boolean }) {
       ? 'border-[rgb(var(--micro-accent))/0.35] bg-[rgb(var(--micro-accent))/0.12] text-textPrimary'
       : 'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary'
 
-  return <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black', tone)}>{label}</span>
+  return (
+    <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black', tone)}>
+      {label}
+    </span>
+  )
 }
 
 /** Lock page scroll while modal is open */
@@ -114,21 +140,27 @@ function useLockBodyScroll(locked: boolean) {
 }
 
 /** Focus trap + escape-to-close + focus restore */
-function useModalA11y(args: { isOpen: boolean; panelRef: React.RefObject<HTMLElement | null>; onClose: () => void }) {
+function useModalA11y<T extends HTMLElement>(args: { isOpen: boolean; panelRef: RefObject<T | null>; onClose: () => void }) {
   const { isOpen, panelRef, onClose } = args
   const lastActiveRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!isOpen) return
-    lastActiveRef.current = document.activeElement as HTMLElement | null
+
+    const active = document.activeElement
+    lastActiveRef.current = active instanceof HTMLElement ? active : null
 
     const panel = panelRef.current
+    if (!panel) return
+
     const focusable = getFocusable(panel)
     const first = focusable[0] ?? panel
-    if (first && typeof (first as any).focus === 'function') {
-      const t = window.setTimeout(() => (first as any).focus?.(), 0)
-      return () => window.clearTimeout(t)
-    }
+
+    const t = window.setTimeout(() => {
+      first.focus()
+    }, 0)
+
+    return () => window.clearTimeout(t)
   }, [isOpen, panelRef])
 
   useEffect(() => {
@@ -143,18 +175,20 @@ function useModalA11y(args: { isOpen: boolean; panelRef: React.RefObject<HTMLEle
       if (e.key !== 'Tab') return
 
       const panel = panelRef.current
+      if (!panel) return
+
       const focusable = getFocusable(panel)
       if (!focusable.length) {
         e.preventDefault()
-        panel?.focus?.()
+        panel.focus()
         return
       }
 
-      const active = document.activeElement as HTMLElement | null
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
 
-      if (panel && active && !panel.contains(active)) {
+      if (active && !panel.contains(active)) {
         e.preventDefault()
         first.focus()
         return
@@ -180,7 +214,7 @@ function useModalA11y(args: { isOpen: boolean; panelRef: React.RefObject<HTMLEle
   useEffect(() => {
     if (isOpen) return
     const el = lastActiveRef.current
-    if (el && typeof el.focus === 'function') el.focus()
+    if (el) el.focus()
   }, [isOpen])
 }
 
@@ -204,7 +238,6 @@ function isVisible(el: HTMLElement) {
 }
 
 /** Premium shimmer image */
-/** Premium shimmer image */
 function ImageWithShimmer(props: { src: string; alt?: string; className?: string }) {
   const { src, alt = '', className } = props
   const [loaded, setLoaded] = useState(false)
@@ -220,14 +253,11 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
   useEffect(() => {
     const img = imgRef.current
     if (!img) return
-
-    // if it’s already finished loading, reflect that in state
     if (img.complete) {
       if (img.naturalWidth > 0) {
         setLoaded(true)
         setFailed(false)
       } else {
-        // complete but no pixels = failed
         setLoaded(true)
         setFailed(true)
       }
@@ -250,10 +280,7 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
           ref={imgRef}
           src={src}
           alt={alt}
-          className={cx(
-            'relative z-[1] h-full w-full object-cover transition-opacity',
-            loaded ? 'opacity-100' : 'opacity-0',
-          )}
+          className={cx('relative z-[1] h-full w-full object-cover transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
           loading="lazy"
           onLoad={() => {
             setFailed(false)
@@ -286,7 +313,6 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
   )
 }
 
-
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 function Toast(props: ToastState) {
   const toneClasses =
@@ -312,6 +338,35 @@ function Toast(props: ToastState) {
 
 type FormMeta = { dirty: boolean; canSave: boolean; uploadBusy: boolean }
 type FormHandle = { submit: () => void }
+
+type SavePayload = Record<string, string>
+
+type UploadInitOk = {
+  ok: true
+  bucket: string
+  path: string
+  token: string
+  publicUrl: string
+  cacheBuster?: number
+}
+
+function parseUploadInit(v: unknown): UploadInitOk | null {
+  if (!isOkTrue(v)) return null
+  const bucket = typeof v.bucket === 'string' ? v.bucket : ''
+  const path = typeof v.path === 'string' ? v.path : ''
+  const token = typeof v.token === 'string' ? v.token : ''
+  const publicUrl = typeof v.publicUrl === 'string' ? v.publicUrl : ''
+  const cacheBuster = typeof v.cacheBuster === 'number' ? v.cacheBuster : undefined
+
+  if (!bucket || !path || !token || !publicUrl) return null
+  return { ok: true, bucket, path, token, publicUrl, cacheBuster }
+}
+
+function errorMessageFromUnknown(e: unknown): string {
+  if (e instanceof Error && e.message.trim()) return e.message
+  if (isRecord(e) && typeof e.message === 'string' && e.message.trim()) return e.message
+  return 'Something went wrong.'
+}
 
 export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categories: CategoryDTO[] }) {
   const { services, categories } = props
@@ -341,7 +396,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
   function showToast(next: ToastState, ms = 2400) {
     setToast(next)
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setToast(null), ms) as any
+    toastTimer.current = window.setTimeout(() => setToast(null), ms)
   }
 
   useEffect(() => {
@@ -357,13 +412,13 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
     setMeta({ dirty: false, canSave: false, uploadBusy: false })
   }
 
-  useModalA11y({ isOpen, panelRef: panelRef as any, onClose: close })
+  useModalA11y({ isOpen, panelRef, onClose: close })
 
   function patchLiveService(id: string, patch: Partial<ServiceDTO>) {
     setLiveServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
   }
 
-  async function save(id: string, payload: Record<string, any>) {
+  async function save(id: string, payload: SavePayload) {
     setBusy(true)
     setError(null)
 
@@ -371,15 +426,15 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
       const form = new FormData()
       form.set('_method', 'PATCH')
       Object.entries(payload).forEach(([k, v]) => {
-        if (v === undefined) return
-        form.set(k, String(v))
+        form.set(k, v)
       })
 
       const res = await fetch(`/api/admin/services/${encodeURIComponent(id)}`, { method: 'POST', body: form })
       const data = await safeJson(res)
 
-      if (!res.ok || data?.ok !== true) {
-        const msg = data?.error || `Save failed (${res.status}).`
+      const ok = res.ok && isOkTrue(data)
+      if (!ok) {
+        const msg = readErrorMessage(data) ?? `Save failed (${res.status}).`
         setError(msg)
         showToast({ tone: 'error', title: 'Save failed', body: msg })
         return
@@ -390,9 +445,9 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
       setMeta((m) => ({ ...m, dirty: false, canSave: false }))
       setOpenId(null)
       router.refresh()
-    } catch {
+    } catch (e: unknown) {
       setError('Network error while saving.')
-      showToast({ tone: 'error', title: 'Network error', body: 'Couldn’t reach the server.' })
+      showToast({ tone: 'error', title: 'Network error', body: errorMessageFromUnknown(e) })
     } finally {
       setBusy(false)
     }
@@ -416,9 +471,12 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
   const btnBase =
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-extrabold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
-  const btnSoft = 'border border-surfaceGlass/15 bg-bgPrimary/35 text-textPrimary hover:border-surfaceGlass/25 hover:bg-bgPrimary/45'
-  const btnAccent = 'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
-  const btnPrimary = 'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
+  const btnSoft =
+    'border border-surfaceGlass/15 bg-bgPrimary/35 text-textPrimary hover:border-surfaceGlass/25 hover:bg-bgPrimary/45'
+  const btnAccent =
+    'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
+  const btnPrimary =
+    'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
 
   return (
     <>
@@ -440,7 +498,10 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
         {liveServices.map((s) => (
           <div
             key={s.id}
-            className={cx('relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary', 'shadow-[0_18px_50px_rgb(0_0_0/0.45)]')}
+            className={cx(
+              'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary',
+              'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
+            )}
           >
             <div
               className={cx(
@@ -460,7 +521,9 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                 {s.defaultImageUrl ? (
                   <ImageWithShimmer src={s.defaultImageUrl} className="aspect-[16/10] w-full" />
                 ) : (
-                  <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">No image</div>
+                  <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">
+                    No image
+                  </div>
                 )}
               </div>
 
@@ -509,7 +572,13 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
       <AnimatePresence>
         {current ? (
           <motion.div key="svc-edit" className="fixed inset-0 z-[9000]" initial="initial" animate="animate" exit="exit">
-            <motion.button type="button" aria-label="Close" onClick={close} className="absolute inset-0 bg-black/80 backdrop-blur-lg" variants={overlayFade} />
+            <motion.button
+              type="button"
+              aria-label="Close"
+              onClick={close}
+              className="absolute inset-0 bg-black/80 backdrop-blur-lg"
+              variants={overlayFade}
+            />
 
             <div className="absolute inset-0 z-[9001] flex items-end justify-center px-2 sm:items-start sm:px-3 sm:pt-10">
               <motion.div
@@ -580,7 +649,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                     onToast={showToast}
                     onOptimistic={(patch) => patchLiveService(current.id, patch)}
                     onMetaChange={setMeta}
-                    onSave={(payload) => save(current.id, payload)}
+                    onSave={(payload) => void save(current.id, payload)}
                   />
                 </div>
               </motion.div>
@@ -600,7 +669,7 @@ const ServiceEditForm = forwardRef<
     inputBase: string
     busy: boolean
     error: string | null
-    onSave: (payload: Record<string, any>) => void
+    onSave: (payload: SavePayload) => void
     onOptimistic: (patch: Partial<ServiceDTO>) => void
     onToast: (t: ToastState, ms?: number) => void
     onMetaChange: (m: FormMeta) => void
@@ -614,7 +683,9 @@ const ServiceEditForm = forwardRef<
   const [name, setName] = useState(service.name)
   const [description, setDescription] = useState(service.description ?? '')
   const [categoryId, setCategoryId] = useState(service.categoryId ?? '')
-  const [defaultDurationMinutes, setDefaultDurationMinutes] = useState(service.defaultDurationMinutes ? String(service.defaultDurationMinutes) : '')
+  const [defaultDurationMinutes, setDefaultDurationMinutes] = useState(
+    service.defaultDurationMinutes ? String(service.defaultDurationMinutes) : '',
+  )
   const [minPrice, setMinPrice] = useState(service.minPrice ?? '')
   const [allowMobile, setAllowMobile] = useState(Boolean(service.allowMobile))
   const [isActive, setIsActive] = useState(Boolean(service.isActive))
@@ -626,7 +697,6 @@ const ServiceEditForm = forwardRef<
   const [localError, setLocalError] = useState<string | null>(null)
 
   // ✅ Baseline snapshot must NOT shift when optimistic updates happen.
-  // We capture it once per service.id.
   const baselineRef = useRef<{
     name: string
     description: string
@@ -641,7 +711,6 @@ const ServiceEditForm = forwardRef<
   } | null>(null)
 
   useEffect(() => {
-    // reset form when modal switches to a different service
     setName(service.name)
     setDescription(service.description ?? '')
     setCategoryId(service.categoryId ?? '')
@@ -687,18 +756,7 @@ const ServiceEditForm = forwardRef<
       (addOnGroup ?? '') !== b.addOnGroup ||
       curImg !== (b.defaultImageUrl ?? '')
     )
-  }, [
-    name,
-    description,
-    categoryId,
-    defaultDurationMinutes,
-    minPrice,
-    allowMobile,
-    isActive,
-    isAddOnEligible,
-    addOnGroup,
-    defaultImageUrl,
-  ])
+  }, [name, description, categoryId, defaultDurationMinutes, minPrice, allowMobile, isActive, isAddOnEligible, addOnGroup, defaultImageUrl])
 
   const canSave = useMemo(() => {
     if (busy) return false
@@ -738,32 +796,28 @@ const ServiceEditForm = forwardRef<
         }),
       })
 
-      const init = await safeJson(initRes)
-      if (!initRes.ok || init?.ok !== true) throw new Error(init?.error || `Upload init failed (${initRes.status}).`)
+      const initRaw = await safeJson(initRes)
+      const init = parseUploadInit(initRaw)
 
-      const bucket = String(init.bucket || '')
-      const path = String(init.path || '')
-      const token = String(init.token || '')
-      const publicUrl = String(init.publicUrl || '')
-      const cacheBuster = typeof init.cacheBuster === 'number' ? init.cacheBuster : null
+      if (!initRes.ok || !init) {
+        const msg = readErrorMessage(initRaw) ?? `Upload init failed (${initRes.status}).`
+        throw new Error(msg)
+      }
 
-      if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
-      if (!publicUrl) throw new Error('Upload init missing publicUrl.')
-
-      const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
+      const { error: upErr } = await supabaseBrowser.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file, {
         contentType: file.type,
         upsert: true,
       })
       if (upErr) throw new Error(upErr.message || 'Upload failed.')
 
-      const finalUrl = withCacheBuster(publicUrl, cacheBuster)
+      const finalUrl = withCacheBuster(init.publicUrl, init.cacheBuster)
 
       setDefaultImageUrl(finalUrl)
       onOptimistic({ defaultImageUrl: finalUrl })
 
       onToast({ tone: 'success', title: 'Image uploaded', body: 'Save is now enabled — hit it to persist.' }, 2200)
-    } catch (e: any) {
-      const msg = e?.message || 'Failed to upload image.'
+    } catch (e: unknown) {
+      const msg = errorMessageFromUnknown(e)
       setLocalError(msg)
       onToast({ tone: 'error', title: 'Upload failed', body: msg })
     } finally {
@@ -803,6 +857,9 @@ const ServiceEditForm = forwardRef<
 
   return (
     <div className="relative p-4">
+      {/* ...the rest of your JSX stays exactly the same from here down... */}
+      {/* I’m not changing any UI markup below this line—only types/safety above. */}
+      {/* Paste your existing JSX block here unchanged if your editor needs the full file. */}
       <div className="grid gap-3">
         {/* Image row */}
         <div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary/25 p-3">
@@ -819,7 +876,7 @@ const ServiceEditForm = forwardRef<
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0] || null
+                  const f = e.target.files?.[0] ?? null
                   if (!f) return
                   haptic(8)
                   void uploadDefaultImage(f)
@@ -859,7 +916,9 @@ const ServiceEditForm = forwardRef<
             {defaultImageUrl ? (
               <ImageWithShimmer src={defaultImageUrl} className="aspect-[16/10] w-full" />
             ) : (
-              <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">No image</div>
+              <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">
+                No image
+              </div>
             )}
           </div>
 

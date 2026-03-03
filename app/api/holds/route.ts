@@ -9,7 +9,10 @@ import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 
 export const dynamic = 'force-dynamic'
 
-const BUFFER_MINUTES = 5
+/**
+ * How long a client "hold" lasts before expiring.
+ * Keep short to reduce dead-time on the calendar.
+ */
 const HOLD_MINUTES = 10
 
 type CreateHoldBody = {
@@ -44,6 +47,27 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
   return null
 }
 
+function clampInt(n: number, min: number, max: number) {
+  const x = Math.trunc(n)
+  return Math.min(Math.max(x, min), max)
+}
+
+function normalizeStepMinutes(input: unknown, fallback: number) {
+  const n = typeof input === 'number' ? input : Number(input)
+  const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
+
+  // keep aligned with your calendar UI expectations
+  const allowed = new Set([5, 10, 15, 20, 30, 60])
+  if (allowed.has(raw)) return raw
+
+  if (raw <= 5) return 5
+  if (raw <= 10) return 10
+  if (raw <= 15) return 15
+  if (raw <= 20) return 20
+  if (raw <= 30) return 30
+  return 60
+}
+
 function pickDurationMinutes(args: {
   locationType: ServiceLocationType
   salonDurationMinutes: number | null
@@ -73,7 +97,7 @@ function getWeekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof Work
   return 'sun'
 }
 
-/** Accepts both "9:00" and "09:00" */
+/** Accepts both "9:00" and "09:00" (because legacy hours might exist) */
 function parseHHMM(v?: string) {
   if (!v || typeof v !== 'string') return null
   const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
@@ -102,7 +126,6 @@ function ensureWithinWorkingHours(args: {
 
   const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, tz)
   const rule = wh?.[dayKey]
-
   if (!rule || rule.enabled === false) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
   }
@@ -136,8 +159,7 @@ function ensureWithinWorkingHours(args: {
 }
 
 /**
- * Month-boundary-safe YMD +1
- * (we use UTC noon to avoid DST edge weirdness when normalizing dates)
+ * Month-boundary-safe YMD +1 (UTC noon to avoid DST edge weirdness)
  */
 function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
   const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
@@ -146,7 +168,6 @@ function addDaysToYMD(year: number, month: number, day: number, daysToAdd: numbe
 
 /**
  * Day window in UTC for the LOCAL day (in appt tz) that contains instantUtc.
- * This is used to bound booking conflict queries reliably.
  */
 function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: string }) {
   const tz = sanitizeTimeZone(args.timeZone, 'UTC') || 'UTC'
@@ -176,6 +197,16 @@ function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: strin
   return { dayStartUtc, dayEndExclusiveUtc }
 }
 
+function decimalToNumber(v: unknown): number | undefined {
+  if (v == null) return undefined
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
+  if (typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
+    const n = (v as { toNumber: () => number }).toNumber()
+    return Number.isFinite(n) ? n : undefined
+  }
+  return undefined
+}
+
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireClient()
@@ -196,11 +227,11 @@ export async function POST(req: NextRequest) {
     const scheduledForParsed = new Date(scheduledForRaw)
     if (!isValidDate(scheduledForParsed)) return jsonFail(400, 'Invalid scheduledFor.')
 
-    // scheduledFor is expected to be UTC ISO coming from availability slots
+    const now = new Date()
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
-    // must be in the near future
-    if (requestedStart.getTime() < addMinutes(new Date(), BUFFER_MINUTES).getTime()) {
+    // basic sanity: not in the past (real lead-time comes from location below)
+    if (requestedStart.getTime() < now.getTime() + 60_000) {
       return jsonFail(400, 'Please select a future time.')
     }
 
@@ -219,23 +250,16 @@ export async function POST(req: NextRequest) {
       })
 
       if (!offering || !offering.isActive) {
-        return { ok: false as const, status: 400, error: 'Invalid or inactive offering.' }
+        return { ok: false as const, status: 404, error: 'Offering not found.' }
       }
 
+      // Ensure offering supports requested booking mode
       if (locationType === 'SALON' && !offering.offersInSalon) {
-        return { ok: false as const, status: 400, error: 'This service is not offered in-salon.' }
+        return { ok: false as const, status: 400, error: 'This service is not available in-salon.' }
       }
       if (locationType === 'MOBILE' && !offering.offersMobile) {
-        return { ok: false as const, status: 400, error: 'This service is not offered as mobile.' }
+        return { ok: false as const, status: 400, error: 'This service is not available for mobile.' }
       }
-
-      const duration = pickDurationMinutes({
-        locationType,
-        salonDurationMinutes: offering.salonDurationMinutes,
-        mobileDurationMinutes: offering.mobileDurationMinutes,
-      })
-
-      const requestedEnd = addMinutes(requestedStart, duration)
 
       const loc = await pickBookableLocation({
         professionalId: offering.professionalId,
@@ -244,145 +268,193 @@ export async function POST(req: NextRequest) {
       })
 
       if (!loc) {
-        return { ok: false as const, status: 400, error: 'No bookable location found for this professional.' }
+        return { ok: false as const, status: 404, error: 'Location not found or not bookable.' }
       }
 
       const tzRes = await resolveApptTimeZone({
         location: { id: loc.id, timeZone: loc.timeZone },
         professionalId: offering.professionalId,
         fallback: 'UTC',
-        requireValid: true, // ✅ strict: must be valid to place holds
+        requireValid: true,
       })
-
       if (!tzRes.ok) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'This professional must set a valid timezone for their bookable location before accepting bookings.',
-        }
+        return { ok: false as const, status: 400, error: 'This professional must set a valid timezone before taking bookings.' }
       }
 
       const apptTz = sanitizeTimeZone(tzRes.timeZone, 'UTC') || 'UTC'
 
-      // enforce working-hours in LOCATION timezone
+      const stepMinutes = normalizeStepMinutes(loc.stepMinutes, 15)
+      const leadTimeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 0) || 0, 0, 24 * 60) // cap at 24h for sanity
+      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365) || 365, 1, 3650)
+      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, 180)
+
+      // enforce lead-time + max-days-ahead
+      if (requestedStart.getTime() < now.getTime() + leadTimeMinutes * 60_000) {
+        return { ok: false as const, status: 400, error: 'Please pick a later time.' }
+      }
+      if (requestedStart.getTime() > now.getTime() + maxDaysAhead * 24 * 60 * 60_000) {
+        return { ok: false as const, status: 400, error: 'That date is too far in the future.' }
+      }
+
+      // enforce step alignment in appointment TZ (authoritative)
+      const startMin = minutesSinceMidnightInTimeZone(requestedStart, apptTz)
+      if (startMin % stepMinutes !== 0) {
+        return { ok: false as const, status: 400, error: `Start time must be on a ${stepMinutes}-minute boundary.` }
+      }
+
+      const durationMinutes = clampInt(
+        pickDurationMinutes({
+          locationType,
+          salonDurationMinutes: offering.salonDurationMinutes,
+          mobileDurationMinutes: offering.mobileDurationMinutes,
+        }),
+        15,
+        12 * 60,
+      )
+
+      // IMPORTANT: include buffer in the reserved window
+      const requestedEnd = addMinutes(requestedStart, durationMinutes + bufferMinutes)
+
       const whCheck = ensureWithinWorkingHours({
         scheduledStartUtc: requestedStart,
         scheduledEndUtc: requestedEnd,
         workingHours: loc.workingHours,
         timeZone: apptTz,
       })
-      if (!whCheck.ok) return { ok: false as const, status: 400, error: whCheck.error }
+      if (!whCheck.ok) {
+        return { ok: false as const, status: 400, error: whCheck.error }
+      }
 
-      const now = new Date()
-
-      // cleanup expired holds
-      await tx.bookingHold.deleteMany({
-        where: { professionalId: offering.professionalId, expiresAt: { lte: now } },
-      })
-
-      // idempotency: same client already holding same slot/location/mode
-      const existingClientHold = await tx.bookingHold.findFirst({
+      // blocks conflict (global or location-specific)
+      const blocked = await tx.calendarBlock.findFirst({
         where: {
           professionalId: offering.professionalId,
-          scheduledFor: requestedStart,
-          expiresAt: { gt: now },
-          clientId,
-          locationType,
-          locationId: loc.id,
-        },
-        select: {
-          id: true,
-          expiresAt: true,
-          scheduledFor: true,
-          locationType: true,
-          locationId: true,
-          locationTimeZone: true,
-        },
-      })
-      if (existingClientHold) return { ok: true as const, status: 200, hold: existingClientHold }
-
-      // someone else holding
-      const activeHold = await tx.bookingHold.findFirst({
-        where: {
-          professionalId: offering.professionalId,
-          scheduledFor: requestedStart,
-          expiresAt: { gt: now },
-          locationType,
-          locationId: loc.id,
-          NOT: { clientId },
+          startsAt: { lt: requestedEnd },
+          endsAt: { gt: requestedStart },
+          OR: [{ locationId: loc.id }, { locationId: null }],
         },
         select: { id: true },
       })
-      if (activeHold) {
-        return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
+      if (blocked) {
+        return { ok: false as const, status: 409, error: 'That time is blocked. Try another slot.' }
       }
 
-      // booking conflicts (same local day window in appt tz)
+      // Bound queries to the local day in appt tz
       const { dayStartUtc, dayEndExclusiveUtc } = getDayWindowUtcFromUtcInstant({
         instantUtc: requestedStart,
         timeZone: apptTz,
       })
 
+      // booking conflicts (same location)
       const existingBookings = await tx.booking.findMany({
         where: {
           professionalId: offering.professionalId,
           locationId: loc.id,
-          locationType,
           scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
-          status: { in: [BookingStatus.PENDING, BookingStatus.ACCEPTED] },
+          NOT: { status: BookingStatus.CANCELLED },
         },
-        select: {
-          scheduledFor: true,
-          totalDurationMinutes: true,
-          bufferMinutes: true,
-        },
-        take: 2000,
+        select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+        take: 3000,
       })
 
       const bookingConflict = existingBookings.some((b) => {
-        const bDur = Number(b.totalDurationMinutes ?? 0)
-        if (!Number.isFinite(bDur) || bDur <= 0) return false
-        const bBuf = Number(b.bufferMinutes ?? 0)
+        if (b.status === BookingStatus.CANCELLED) return false
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
-        const bEnd = addMinutes(bStart, bDur + (Number.isFinite(bBuf) ? bBuf : 0))
+        const bDur = clampInt(Number(b.totalDurationMinutes ?? 0) || 60, 15, 12 * 60)
+        const bBuf = clampInt(Number(b.bufferMinutes ?? 0) || 0, 0, 180)
+        const bEnd = addMinutes(bStart, bDur + bBuf)
         return overlaps(bStart, bEnd, requestedStart, requestedEnd)
       })
+      if (bookingConflict) {
+        return { ok: false as const, status: 409, error: 'That time was just taken.' }
+      }
 
-      if (bookingConflict) return { ok: false as const, status: 409, error: 'That time was just taken.' }
+      // hold conflicts (overlap-aware, not just same start)
+      const holds = await tx.bookingHold.findMany({
+        where: {
+          professionalId: offering.professionalId,
+          locationId: loc.id,
+          locationType,
+          expiresAt: { gt: now },
+          scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
+        },
+        select: { scheduledFor: true, offeringId: true },
+        take: 3000,
+      })
+
+      if (holds.length) {
+        const holdOfferingIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 2000)
+        const holdOfferings = await tx.professionalServiceOffering.findMany({
+          where: { id: { in: holdOfferingIds } },
+          select: { id: true, salonDurationMinutes: true, mobileDurationMinutes: true },
+          take: 2000,
+        })
+        const byId = new Map(holdOfferings.map((o) => [o.id, o]))
+
+        const holdConflict = holds.some((h) => {
+          const o = byId.get(h.offeringId)
+          const hDur = clampInt(
+            pickDurationMinutes({
+              locationType,
+              salonDurationMinutes: o?.salonDurationMinutes ?? null,
+              mobileDurationMinutes: o?.mobileDurationMinutes ?? null,
+            }),
+            15,
+            12 * 60,
+          )
+          const hStart = normalizeToMinute(new Date(h.scheduledFor))
+          const hEnd = addMinutes(hStart, hDur + bufferMinutes)
+          return overlaps(hStart, hEnd, requestedStart, requestedEnd)
+        })
+
+        if (holdConflict) {
+          return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
+        }
+      }
 
       const expiresAt = addMinutes(now, HOLD_MINUTES)
 
-      const addressSnapshot: Prisma.InputJsonValue | undefined = loc.formattedAddress
-        ? { formattedAddress: loc.formattedAddress }
-        : undefined
+      const addressSnapshot: Prisma.InputJsonValue | undefined =
+        typeof loc.formattedAddress === 'string' && loc.formattedAddress.trim()
+          ? ({ formattedAddress: loc.formattedAddress.trim() } satisfies Prisma.InputJsonObject)
+          : undefined
 
-      const hold = await tx.bookingHold.create({
-        data: {
-          offeringId: offering.id,
-          professionalId: offering.professionalId,
-          clientId,
-          scheduledFor: requestedStart,
-          expiresAt,
-          locationType,
+      try {
+        const hold = await tx.bookingHold.create({
+          data: {
+            offeringId: offering.id,
+            professionalId: offering.professionalId,
+            clientId,
+            scheduledFor: requestedStart,
+            expiresAt,
+            locationType,
 
-          locationId: loc.id,
-          locationTimeZone: apptTz,
+            locationId: loc.id,
+            locationTimeZone: apptTz,
 
-          locationAddressSnapshot: addressSnapshot,
-          locationLatSnapshot: typeof loc.lat === 'number' ? loc.lat : undefined,
-          locationLngSnapshot: typeof loc.lng === 'number' ? loc.lng : undefined,
-        },
-        select: {
-          id: true,
-          expiresAt: true,
-          scheduledFor: true,
-          locationType: true,
-          locationId: true,
-          locationTimeZone: true,
-        },
-      })
+            locationAddressSnapshot: addressSnapshot,
+            locationLatSnapshot: decimalToNumber(loc.lat),
+            locationLngSnapshot: decimalToNumber(loc.lng),
+          },
+          select: {
+            id: true,
+            expiresAt: true,
+            scheduledFor: true,
+            locationType: true,
+            locationId: true,
+            locationTimeZone: true,
+          },
+        })
 
-      return { ok: true as const, status: 201, hold }
+        return { ok: true as const, status: 201, hold }
+      } catch (e: unknown) {
+        // Race-safe fallback for @@unique([locationId, scheduledFor])
+        const err = e as { code?: unknown }
+        if (err?.code === 'P2002') {
+          return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
+        }
+        throw e
+      }
     })
 
     if (!result.ok) return jsonFail(result.status, result.error)

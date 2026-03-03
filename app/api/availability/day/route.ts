@@ -3,15 +3,21 @@ import { prisma } from '@/lib/prisma'
 import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import type { BookableLocation } from '@/lib/booking/pickLocation'
-import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone } from '@/lib/timeZone'
+import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
 type WorkingHours = Record<string, WorkingHoursDay>
 type BusyInterval = { start: Date; end: Date }
+
+const MAX_SLOT_DURATION_MINUTES = 12 * 60
+const MAX_LOCATION_BUFFER_MINUTES = 180
+const MAX_LEAD_MINUTES = 30 * 24 * 60 // 30 days safety cap
+const MAX_DAYS_AHEAD = 3650 // 10 years safety cap
 
 function toInt(value: string | null, fallback: number) {
   const n = Number(value)
@@ -41,10 +47,6 @@ function normalizeToMinute(d: Date) {
 /** existingStart < requestedEnd AND requestedStart < existingEnd */
 function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && bStart < aEnd
-}
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
@@ -138,7 +140,7 @@ function pickModeDurationMinutes(
   const d = locationType === ServiceLocationType.MOBILE ? offering.mobileDurationMinutes : offering.salonDurationMinutes
   const n = Number(d ?? 0)
   const base = Number.isFinite(n) && n > 0 ? n : 60
-  return clampInt(base, 15, 12 * 60)
+  return clampInt(base, 15, MAX_SLOT_DURATION_MINUTES)
 }
 
 function pickEffectiveLocationType(args: {
@@ -208,16 +210,19 @@ async function loadBusyIntervals(args: {
   windowStartUtc: Date
   windowEndUtc: Date
   nowUtc: Date
-  durationMinutes: number
-  adjacencyBufferMinutes: number
+  fallbackDurationMinutes: number
+  locationBufferMinutes: number
 }) {
-  const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, durationMinutes, adjacencyBufferMinutes } =
-    args
+  const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, fallbackDurationMinutes, locationBufferMinutes } = args
+
+  // ✅ Location buffer is part of the reserved window everywhere (finalize uses it too)
+  const locBuf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_LOCATION_BUFFER_MINUTES)
 
   const [bookings, holds, blocks] = await Promise.all([
     prisma.booking.findMany({
       where: {
         professionalId,
+        locationId, // ✅ LOCATION-SCOPED
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
         NOT: { status: 'CANCELLED' },
       },
@@ -228,10 +233,11 @@ async function loadBusyIntervals(args: {
     prisma.bookingHold.findMany({
       where: {
         professionalId,
+        locationId, // ✅ LOCATION-SCOPED
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
         expiresAt: { gt: nowUtc },
       },
-      select: { scheduledFor: true, expiresAt: true },
+      select: { id: true, scheduledFor: true, expiresAt: true, offeringId: true, locationType: true },
       take: 5000,
     }),
 
@@ -247,24 +253,45 @@ async function loadBusyIntervals(args: {
     }),
   ])
 
-  const adjBuf = clampInt(Number(adjacencyBufferMinutes ?? 0) || 0, 0, 120)
+  // Holds need their *real* offering durations
+  const holdOfferingIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 5000)
+  const holdOfferings = holdOfferingIds.length
+    ? await prisma.professionalServiceOffering.findMany({
+        where: { id: { in: holdOfferingIds } },
+        select: { id: true, salonDurationMinutes: true, mobileDurationMinutes: true },
+        take: 5000,
+      })
+    : []
+
+  const holdOfferingById = new Map(holdOfferings.map((o) => [o.id, o]))
 
   const busy: BusyInterval[] = [
     ...bookings
       .filter((b) => String(b.status ?? '').toUpperCase() !== 'CANCELLED')
       .map((b) => {
         const start = normalizeToMinute(new Date(b.scheduledFor))
-        const baseDur = Number(b.totalDurationMinutes || durationMinutes)
-        const bBuf = Number(b.bufferMinutes ?? 0)
-        const effectiveBuf = Number.isFinite(bBuf) ? clampInt(bBuf, 0, 120) : adjBuf
-        return { start, end: addMinutes(start, baseDur + effectiveBuf) }
+        const baseDur = Number(b.totalDurationMinutes ?? fallbackDurationMinutes)
+        const dur = Number.isFinite(baseDur) && baseDur > 0 ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES) : fallbackDurationMinutes
+
+        const bBufRaw = Number(b.bufferMinutes ?? locBuf)
+        const bBuf = Number.isFinite(bBufRaw) ? clampInt(bBufRaw, 0, MAX_LOCATION_BUFFER_MINUTES) : locBuf
+
+        return { start, end: addMinutes(start, dur + bBuf) }
       }),
 
     ...holds
       .filter((h) => new Date(h.expiresAt).getTime() > nowUtc.getTime())
       .map((h) => {
         const start = normalizeToMinute(new Date(h.scheduledFor))
-        return { start, end: addMinutes(start, durationMinutes + adjBuf) }
+        const off = holdOfferingById.get(h.offeringId) || null
+
+        const durRaw =
+          h.locationType === ServiceLocationType.MOBILE ? off?.mobileDurationMinutes : off?.salonDurationMinutes
+
+        const baseDur = Number(durRaw ?? fallbackDurationMinutes)
+        const dur = Number.isFinite(baseDur) && baseDur > 0 ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES) : fallbackDurationMinutes
+
+        return { start, end: addMinutes(start, dur + locBuf) }
       }),
 
     ...blocks.map((bl) => ({ start: new Date(bl.startsAt), end: new Date(bl.endsAt) })),
@@ -283,32 +310,20 @@ function isSlotFree(busy: BusyInterval[], slotStart: Date, slotEnd: Date) {
 }
 
 async function computeDaySlotsFast(args: {
-  professionalId: string
-  locationId: string
   dateYMD: { year: number; month: number; day: number }
   durationMinutes: number
   stepMinutes: number
   timeZone: string
   workingHours: unknown | null
   leadTimeMinutes: number
-  adjacencyBufferMinutes: number
+  locationBufferMinutes: number
   busy: BusyInterval[]
   debug?: boolean
 }): Promise<
   | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
   | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
 > {
-  const {
-    dateYMD,
-    durationMinutes,
-    stepMinutes,
-    timeZone: tzIn,
-    workingHours,
-    leadTimeMinutes,
-    adjacencyBufferMinutes,
-    busy,
-    debug,
-  } = args
+  const { dateYMD, durationMinutes, stepMinutes, timeZone: tzIn, workingHours, leadTimeMinutes, locationBufferMinutes,  busy, debug } = args
 
   const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(dateYMD, tzIn)
   const nowUtc = new Date()
@@ -326,7 +341,6 @@ async function computeDaySlotsFast(args: {
 
   const dayKey = getDayKeyFromYMD({ ...dateYMD, timeZone })
   const rule = wh[dayKey]
-
   if (!rule) {
     return {
       ok: false,
@@ -359,25 +373,28 @@ async function computeDaySlotsFast(args: {
     }
   }
 
-  const startMinute = startParsed.hh * 60 + startParsed.mm
-  const endMinute = endParsed.hh * 60 + endParsed.mm
-  if (endMinute <= startMinute) {
+  const windowStartMin = startParsed.hh * 60 + startParsed.mm
+  const windowEndMin = endParsed.hh * 60 + endParsed.mm
+  if (windowEndMin <= windowStartMin) {
     return {
       ok: false,
       error: 'Working hours are misconfigured (end must be after start). Please re-save your schedule.',
       dayStartUtc,
       dayEndExclusiveUtc,
-      debug: debug ? { timeZone, dayKey, startMinute, endMinute } : undefined,
+      debug: debug ? { timeZone, dayKey, windowStartMin, windowEndMin } : undefined,
     }
   }
 
-  const adjBuf = clampInt(Number(adjacencyBufferMinutes ?? 0) || 0, 0, 120)
-  const cutoffUtc = addMinutes(nowUtc, clampInt(Number(leadTimeMinutes ?? 0) || 0, 0, 240))
   const step = normalizeStepMinutes(stepMinutes, 30)
+  const dur = clampInt(Number(durationMinutes || 60), 15, MAX_SLOT_DURATION_MINUTES)
+  const buf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_LOCATION_BUFFER_MINUTES)
+
+  const cutoffUtc = addMinutes(nowUtc, clampInt(Number(leadTimeMinutes ?? 0) || 0, 0, MAX_LEAD_MINUTES))
 
   const slots: string[] = []
 
-  for (let minute = startMinute; minute + durationMinutes <= endMinute; minute += step) {
+  // ✅ IMPORTANT: require duration+buffer to fit inside working hours
+  for (let minute = windowStartMin; minute + dur + buf <= windowEndMin; minute += step) {
     const hh = Math.floor(minute / 60)
     const mm = minute % 60
 
@@ -397,10 +414,9 @@ async function computeDaySlotsFast(args: {
     if (slotStartUtc >= dayEndExclusiveUtc) continue
     if (slotStartUtc.getTime() < cutoffUtc.getTime()) continue
 
-    const slotEndWorkUtc = addMinutes(slotStartUtc, durationMinutes)
-    if (slotEndWorkUtc > dayEndExclusiveUtc) continue
+    const slotEndWithBufferUtc = addMinutes(slotStartUtc, dur + buf)
+    if (slotEndWithBufferUtc > dayEndExclusiveUtc) continue
 
-    const slotEndWithBufferUtc = addMinutes(slotStartUtc, durationMinutes + adjBuf)
     if (!isSlotFree(busy, slotStartUtc, slotEndWithBufferUtc)) continue
 
     slots.push(slotStartUtc.toISOString())
@@ -415,11 +431,14 @@ function decimalToNumber(v: unknown): number | null {
     const n = (v as { toNumber: () => number }).toNumber()
     return Number.isFinite(n) ? n : null
   }
+  if (v && typeof v === 'object' && typeof (v as { toString?: unknown }).toString === 'function') {
+    const n = Number(String((v as { toString: () => string }).toString()))
+    return Number.isFinite(n) ? n : null
+  }
   return null
 }
 
 function toDecimal(n: number): Prisma.Decimal {
-  // Prisma Decimal constructor accepts string/number; using string avoids float quirks in TS inference.
   return new Prisma.Decimal(String(n))
 }
 
@@ -463,6 +482,15 @@ function parseFloatParam(v: string | null) {
   return Number.isFinite(n) ? n : null
 }
 
+function parseCommaIds(v: string | null) {
+  if (!v) return []
+  return v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 25)
+}
+
 type OtherProRow = {
   id: string
   businessName: string | null
@@ -493,7 +521,6 @@ async function loadOtherProsNearby(args: {
       professionalId: { not: excludeProfessionalId },
       type: { in: allowedTypes },
       timeZone: { not: null },
-      // workingHours is required in schema but keep a defensive filter for older rows/migrations
       workingHours: { not: Prisma.JsonNull },
       lat: { not: null, gte: toDecimal(bounds.minLat), lte: toDecimal(bounds.maxLat) },
       lng: { not: null, gte: toDecimal(bounds.minLng), lte: toDecimal(bounds.maxLng) },
@@ -515,7 +542,6 @@ async function loadOtherProsNearby(args: {
 
   const center = { lat: centerLat, lng: centerLng }
 
-  // Pick best location per pro = closest distance (tie-break isPrimary then createdAt)
   const bestByPro = new Map<
     string,
     { locationId: string; timeZone: string; distanceMiles: number; isPrimary: boolean; createdAt: Date; city: string | null; formattedAddress: string | null }
@@ -569,7 +595,6 @@ async function loadOtherProsNearby(args: {
   const proIds = Array.from(bestByPro.keys())
   if (!proIds.length) return []
 
-  // Find offerings for the same service + mode
   const offeringRows = await prisma.professionalServiceOffering.findMany({
     where: {
       professionalId: { in: proIds },
@@ -599,7 +624,6 @@ async function loadOtherProsNearby(args: {
     })
   }
 
-  // Build output sorted by distance
   const out: OtherProRow[] = []
   for (const proId of proIds) {
     const best = bestByPro.get(proId)
@@ -640,6 +664,8 @@ export async function GET(req: Request) {
     const requestedLocationId = pickString(searchParams.get('locationId'))
     const dateStr = pickString(searchParams.get('date'))
 
+    const addOnIds = parseCommaIds(searchParams.get('addOnIds'))
+
     const debug = pickString(searchParams.get('debug')) === '1'
 
     const stepRaw = pickString(searchParams.get('stepMinutes')) || pickString(searchParams.get('step'))
@@ -649,7 +675,6 @@ export async function GET(req: Request) {
       pickString(searchParams.get('lead')) ||
       null
 
-    // viewer location (optional; used only for SUMMARY otherPros)
     const viewerLat = parseFloatParam(searchParams.get('viewerLat'))
     const viewerLng = parseFloatParam(searchParams.get('viewerLng'))
     const radiusMilesRaw = parseFloatParam(searchParams.get('radiusMiles'))
@@ -697,34 +722,24 @@ export async function GET(req: Request) {
       return jsonFail(400, 'This service is not bookable.')
     }
 
-    // Choose a bookable location (typed, already validated timezone + workingHours shape)
     let loc: BookableLocation | null = await pickBookableLocation({
       professionalId,
       requestedLocationId,
       locationType: effectiveLocationType,
     })
 
-    // Fallback if the client requested the wrong booking mode
     if (!loc) {
       const canTryMobile = effectiveLocationType === ServiceLocationType.SALON && Boolean(offering.offersMobile)
       const canTrySalon = effectiveLocationType === ServiceLocationType.MOBILE && Boolean(offering.offersInSalon)
 
       if (canTryMobile) {
-        const alt = await pickBookableLocation({
-          professionalId,
-          requestedLocationId: null,
-          locationType: ServiceLocationType.MOBILE,
-        })
+        const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: ServiceLocationType.MOBILE })
         if (alt) {
           loc = alt
           effectiveLocationType = ServiceLocationType.MOBILE
         }
       } else if (canTrySalon) {
-        const alt = await pickBookableLocation({
-          professionalId,
-          requestedLocationId: null,
-          locationType: ServiceLocationType.SALON,
-        })
+        const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: ServiceLocationType.SALON })
         if (alt) {
           loc = alt
           effectiveLocationType = ServiceLocationType.SALON
@@ -732,27 +747,76 @@ export async function GET(req: Request) {
       }
     }
 
-    if (!loc) {
-      return jsonFail(400, 'No bookable location found.')
-    }
+    if (!loc) return jsonFail(400, 'No bookable location found.')
 
     const locId = loc.id
     const timeZone = sanitizeTimeZone(loc.timeZone, 'UTC')
+    if (!isValidIanaTimeZone(timeZone)) return jsonFail(400, 'This location must set a valid timezone before taking bookings.')
+
     const workingHours = loc.workingHours
 
     const defaultStepMinutes = normalizeStepMinutes(loc.stepMinutes, 30)
     const stepMinutes = debug && stepRaw ? normalizeStepMinutes(stepRaw, defaultStepMinutes) : defaultStepMinutes
 
-    const defaultLead = clampInt(Number(loc.advanceNoticeMinutes ?? 10), 0, 240)
-    const leadTimeMinutes = leadRaw ? clampInt(toInt(leadRaw, defaultLead), 0, 240) : defaultLead
+    const defaultLead = clampInt(Number(loc.advanceNoticeMinutes ?? 15) || 15, 0, MAX_LEAD_MINUTES)
+    const leadTimeMinutes = leadRaw ? clampInt(toInt(leadRaw, defaultLead), 0, MAX_LEAD_MINUTES) : defaultLead
 
-    const adjacencyBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 10), 0, 120)
-    const maxAdvanceDays = clampInt(Number(loc.maxDaysAhead ?? 365), 1, 365)
+    const locationBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 15) || 15, 0, MAX_LOCATION_BUFFER_MINUTES)
+    const maxAdvanceDays = clampInt(Number(loc.maxDaysAhead ?? 365) || 365, 1, MAX_DAYS_AHEAD)
 
-    const durationMinutes = pickModeDurationMinutes(
+    // Base duration
+    let durationMinutes = pickModeDurationMinutes(
       { salonDurationMinutes: offering.salonDurationMinutes, mobileDurationMinutes: offering.mobileDurationMinutes },
       effectiveLocationType,
     )
+
+    // Optional: add-ons affect duration (better UX; finalize will enforce anyway)
+    if (addOnIds.length) {
+      const addOnLinks = await prisma.offeringAddOn.findMany({
+        where: {
+          id: { in: addOnIds },
+          offeringId: offering.id,
+          isActive: true,
+          OR: [{ locationType: null }, { locationType: effectiveLocationType }],
+          addOnService: { isActive: true, isAddOnEligible: true },
+        },
+        select: {
+          id: true,
+          addOnServiceId: true,
+          durationOverrideMinutes: true,
+          addOnService: { select: { defaultDurationMinutes: true } },
+        },
+        take: 50,
+      })
+
+      if (addOnLinks.length !== addOnIds.length) {
+        return jsonFail(400, 'One or more add-ons are invalid for this offering.')
+      }
+
+      const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
+
+      const proAddOnOfferings = await prisma.professionalServiceOffering.findMany({
+        where: { professionalId, isActive: true, serviceId: { in: addOnServiceIds } },
+        select: { serviceId: true, salonDurationMinutes: true, mobileDurationMinutes: true },
+        take: 200,
+      })
+
+      const byServiceId = new Map(proAddOnOfferings.map((o) => [o.serviceId, o]))
+
+      const addOnDurTotal = addOnLinks.reduce((sum, x) => {
+        const proOff = byServiceId.get(x.addOnServiceId) || null
+        const durRaw =
+          x.durationOverrideMinutes ??
+          (effectiveLocationType === ServiceLocationType.MOBILE ? proOff?.mobileDurationMinutes : proOff?.salonDurationMinutes) ??
+          x.addOnService.defaultDurationMinutes ??
+          0
+
+        const d = Number(durRaw || 0)
+        return sum + (Number.isFinite(d) && d > 0 ? d : 0)
+      }, 0)
+
+      durationMinutes = clampInt(durationMinutes + addOnDurTotal, 15, MAX_SLOT_DURATION_MINUTES)
+    }
 
     const offeringPayload = {
       id: offering.id,
@@ -771,15 +835,14 @@ export async function GET(req: Request) {
     // SUMMARY MODE
     if (!dateStr) {
       const daysAhead = Math.min(14, maxAdvanceDays)
-      const ymds = Array.from({ length: daysAhead }, (_, i) =>
-        addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i),
-      )
+      const ymds = Array.from({ length: daysAhead }, (_, i) => addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i))
 
       const firstBounds = computeDayBoundsUtc(ymds[0], timeZone)
       const lastBounds = computeDayBoundsUtc(ymds[ymds.length - 1], timeZone)
 
-      const windowStartUtc = addMinutes(firstBounds.dayStartUtc, -24 * 60)
-      const windowEndUtc = addMinutes(lastBounds.dayEndExclusiveUtc, 24 * 60)
+      // wide enough for overlap (12h + buffer safety)
+      const windowStartUtc = addMinutes(firstBounds.dayStartUtc, -(MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
+      const windowEndUtc = addMinutes(lastBounds.dayEndExclusiveUtc, (MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
 
       const busy = await loadBusyIntervals({
         professionalId,
@@ -787,8 +850,8 @@ export async function GET(req: Request) {
         windowStartUtc,
         windowEndUtc,
         nowUtc,
-        durationMinutes,
-        adjacencyBufferMinutes,
+        fallbackDurationMinutes: durationMinutes,
+        locationBufferMinutes,
       })
 
       const availableDays: Array<{ date: string; slotCount: number }> = []
@@ -796,15 +859,13 @@ export async function GET(req: Request) {
 
       for (const ymd of ymds) {
         const result = await computeDaySlotsFast({
-          professionalId,
-          locationId: locId,
           dateYMD: ymd,
           durationMinutes,
           stepMinutes,
           timeZone,
           workingHours,
           leadTimeMinutes,
-          adjacencyBufferMinutes,
+          locationBufferMinutes,
           busy,
           debug: false,
         })
@@ -817,7 +878,6 @@ export async function GET(req: Request) {
         if (result.slots.length) availableDays.push({ date: ymdToString(ymd), slotCount: result.slots.length })
       }
 
-      // ✅ Other pros near viewer (or fallback to this pro's bookable location coordinates)
       const fallbackLat = decimalToNumber(loc.lat)
       const fallbackLng = decimalToNumber(loc.lng)
       const hasViewer = typeof viewerLat === 'number' && typeof viewerLng === 'number'
@@ -852,7 +912,7 @@ export async function GET(req: Request) {
 
         stepMinutes,
         leadTimeMinutes,
-        adjacencyBufferMinutes,
+        locationBufferMinutes,
         maxDaysAhead: maxAdvanceDays,
         durationMinutes,
 
@@ -864,7 +924,7 @@ export async function GET(req: Request) {
           offeringId: offering.id,
           isCreator: true as const,
           timeZone,
-          locationId: locId, // safe extra field for client convenience
+          locationId: locId,
         },
 
         availableDays,
@@ -879,6 +939,7 @@ export async function GET(req: Request) {
                 otherProsCount: otherPros.length,
                 center: centerLat != null && centerLng != null ? { lat: centerLat, lng: centerLng, radiusMiles } : null,
                 usedViewerCenter: Boolean(hasViewer),
+                addOnIds,
               },
             }
           : {}),
@@ -894,8 +955,8 @@ export async function GET(req: Request) {
     if (dayDiff > maxAdvanceDays) return jsonFail(400, `You can book up to ${maxAdvanceDays} days in advance.`)
 
     const bounds = computeDayBoundsUtc(ymd, timeZone)
-    const windowStartUtc = addMinutes(bounds.dayStartUtc, -24 * 60)
-    const windowEndUtc = addMinutes(bounds.dayEndExclusiveUtc, 24 * 60)
+    const windowStartUtc = addMinutes(bounds.dayStartUtc, -(MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
+    const windowEndUtc = addMinutes(bounds.dayEndExclusiveUtc, (MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
 
     const busy = await loadBusyIntervals({
       professionalId,
@@ -903,20 +964,18 @@ export async function GET(req: Request) {
       windowStartUtc,
       windowEndUtc,
       nowUtc,
-      durationMinutes,
-      adjacencyBufferMinutes,
+      fallbackDurationMinutes: durationMinutes,
+      locationBufferMinutes,
     })
 
     const result = await computeDaySlotsFast({
-      professionalId,
-      locationId: locId,
       dateYMD: ymd,
       durationMinutes,
       stepMinutes,
       timeZone,
       workingHours,
       leadTimeMinutes,
-      adjacencyBufferMinutes,
+      locationBufferMinutes,
       busy,
       debug,
     })
@@ -927,7 +986,7 @@ export async function GET(req: Request) {
         timeZone,
         stepMinutes,
         leadTimeMinutes,
-        adjacencyBufferMinutes,
+        locationBufferMinutes,
         maxDaysAhead: maxAdvanceDays,
         ...(debug ? { debug: result.debug } : {}),
       })
@@ -944,7 +1003,7 @@ export async function GET(req: Request) {
       timeZone,
       stepMinutes,
       leadTimeMinutes,
-      adjacencyBufferMinutes,
+      locationBufferMinutes,
       maxDaysAhead: maxAdvanceDays,
 
       durationMinutes,
@@ -953,7 +1012,7 @@ export async function GET(req: Request) {
       slots: result.slots,
 
       offering: offeringPayload,
-      ...(debug ? { debug: result.debug } : {}),
+      ...(debug ? { debug: result.debug, addOnIds } : {}),
     })
   } catch (err: unknown) {
     console.error('GET /api/availability/day error', err)

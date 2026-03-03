@@ -1,7 +1,7 @@
 // app/pro/calendar/_hooks/useCalendarData.ts
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import type {
   BookingDetails,
   CalendarEvent,
@@ -38,6 +38,19 @@ import {
 
 type Args = { view: ViewMode; currentDate: Date }
 type LocationType = 'SALON' | 'MOBILE'
+type ProLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE' | (string & {})
+
+type ProLocation = {
+  id: string
+  type: ProLocationType
+  name: string | null
+  formattedAddress: string | null
+  isPrimary: boolean
+  isBookable: boolean
+  timeZone: string | null
+  workingHours: WorkingHoursJson
+  stepMinutes: number | null
+}
 
 /** must match ProSessionFooter/useProSession.ts */
 const PRO_SESSION_FORCE_EVENT = 'tovis:pro-session:force'
@@ -76,16 +89,84 @@ function toTimeInputValueInTimeZone(dateUtc: Date, tz: string) {
   return `${pad2(p.hour)}:${pad2(p.minute)}`
 }
 
-/**
- * View range in UTC, anchored to TZ day boundaries (strict).
- *
- * IMPORTANT:
- * - Your UI uses MONDAY-first weeks (Mon..Sun).
- *
- * - Day:   [start of day, +1 day)
- * - Week:  start at Monday 00:00 in tz, 7 days
- * - Month: 6-week grid starting at Monday of the week containing the 1st (tz), 42 days
- */
+/* ---------------------------------------------
+   Safer runtime guards 
+   --------------------------------------------- */
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+}
+
+function getString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function getBool(v: unknown): boolean | null {
+  return typeof v === 'boolean' ? v : null
+}
+
+function getNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function toUpper(v: unknown): string {
+  return typeof v === 'string' ? v.toUpperCase() : ''
+}
+
+function isCalendarEvent(v: unknown): v is CalendarEvent {
+  if (!isRecord(v)) return false
+  const id = getString(v.id)
+  const kind = getString(v.kind)
+  const startsAt = getString(v.startsAt)
+  const endsAt = getString(v.endsAt)
+  if (!id || !kind || !startsAt || !endsAt) return false
+  return kind === 'BOOKING' || kind === 'BLOCK'
+}
+
+function parseCalendarEvents(v: unknown): CalendarEvent[] {
+  if (!Array.isArray(v)) return []
+  return v.filter(isCalendarEvent)
+}
+
+function parseManagementLists(v: unknown): ManagementLists {
+  if (!isRecord(v)) return { todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] }
+
+  const tb = Array.isArray(v.todaysBookings) ? v.todaysBookings.filter(isCalendarEvent) : []
+  const pr = Array.isArray(v.pendingRequests) ? v.pendingRequests.filter(isCalendarEvent) : []
+  const wl = Array.isArray(v.waitlistToday) ? v.waitlistToday.filter(isCalendarEvent) : []
+  const bt = Array.isArray(v.blockedToday) ? v.blockedToday.filter(isCalendarEvent) : []
+
+  return { todaysBookings: tb, pendingRequests: pr, waitlistToday: wl, blockedToday: bt }
+}
+
+function parseCalendarStats(v: unknown): CalendarStats {
+  if (!isRecord(v)) return null
+
+  const todaysBookings = getNumber(v.todaysBookings)
+  const pendingRequests = getNumber(v.pendingRequests)
+  const blockedHours = getNumber(v.blockedHours)
+
+  // availableHours can be null or number
+  const availableHours =
+    v.availableHours === null ? null : typeof v.availableHours === 'number' && Number.isFinite(v.availableHours) ? v.availableHours : null
+
+  if (todaysBookings === null || pendingRequests === null || blockedHours === null) return null
+
+  return { todaysBookings, availableHours, pendingRequests, blockedHours }
+}
+
+function parseServiceOptions(v: unknown): ServiceOption[] {
+  if (!Array.isArray(v)) return []
+  // We keep it permissive; UI only needs id+name in most places.
+  return v
+    .filter((x) => isRecord(x) && typeof x.id === 'string' && x.id && typeof x.name === 'string')
+    .map((x) => x as ServiceOption)
+}
+
+/* ---------------------------------------------
+   View range in UTC, anchored to TZ day boundaries (strict).
+   --------------------------------------------- */
+
 function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
   const safeTz = sanitizeTimeZone(tz, DEFAULT_TIME_ZONE)
 
@@ -160,9 +241,16 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   // ✅ Strict: start at UTC until API tells us the pro/location timezone.
   const [timeZone, setTimeZone] = useState<string>(DEFAULT_TIME_ZONE)
+  const timeZoneRef = useRef(timeZone)
+  useEffect(() => {
+    timeZoneRef.current = timeZone
+  }, [timeZone])
+
   const [needsTimeZoneSetup, setNeedsTimeZoneSetup] = useState(false)
 
-  // Working hours are per-locationType (SALON vs MOBILE)
+  // Working hours are transitioning:
+  // - legacy: per locationType (SALON vs MOBILE)
+  // - preferred: per actual ProfessionalLocation (schema stores workingHours on location)
   const [canSalon, setCanSalon] = useState(true)
   const [canMobile, setCanMobile] = useState(false)
   const [activeLocationType, setActiveLocationType] = useState<LocationType>('SALON')
@@ -170,10 +258,34 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [workingHoursSalon, setWorkingHoursSalon] = useState<WorkingHoursJson>(null)
   const [workingHoursMobile, setWorkingHoursMobile] = useState<WorkingHoursJson>(null)
 
-  const workingHoursActive = useMemo(
-    () => (activeLocationType === 'MOBILE' ? workingHoursMobile : workingHoursSalon),
-    [activeLocationType, workingHoursSalon, workingHoursMobile],
-  )
+  // ✅ NEW: locations + activeLocationId
+  const [locations, setLocations] = useState<ProLocation[]>([])
+  const [locationsLoaded, setLocationsLoaded] = useState(false)
+  const [activeLocationId, setActiveLocationId] = useState<string | null>(null)
+
+  const scopedLocations = useMemo(() => {
+    const list = locations.filter((l) => l.isBookable)
+    if (activeLocationType === 'MOBILE') return list.filter((l) => toUpper(l.type) === 'MOBILE_BASE')
+    return list.filter((l) => toUpper(l.type) === 'SALON' || toUpper(l.type) === 'SUITE')
+  }, [locations, activeLocationType])
+
+  const activeLocation = useMemo(() => {
+    if (!activeLocationId) return null
+    return locations.find((l) => l.id === activeLocationId) ?? null
+  }, [locations, activeLocationId])
+
+  const activeLocationLabel = useMemo(() => {
+    if (!activeLocation) return null
+    const base = activeLocation.name || (toUpper(activeLocation.type) === 'MOBILE_BASE' ? 'Mobile base' : toUpper(activeLocation.type) === 'SUITE' ? 'Suite' : 'Salon')
+    const addr = activeLocation.formattedAddress ? ` — ${activeLocation.formattedAddress}` : ''
+    return `${base}${addr}`
+  }, [activeLocation])
+
+  // Prefer real location workingHours if we have it, otherwise fallback to legacy per-type fetch.
+  const workingHoursActive = useMemo(() => {
+    if (activeLocation?.workingHours) return activeLocation.workingHours
+    return activeLocationType === 'MOBILE' ? workingHoursMobile : workingHoursSalon
+  }, [activeLocation, activeLocationType, workingHoursSalon, workingHoursMobile])
 
   const [stats, setStats] = useState<CalendarStats>(null)
 
@@ -263,14 +375,12 @@ export function useCalendarData({ view, currentDate }: Args) {
   // Prevent race conditions (stale responses overwriting fresh state)
   const loadSeqRef = useRef(0)
 
-  useEffect(() => {
-    return () => {
-      if (suppressClickTimerRef.current) window.clearTimeout(suppressClickTimerRef.current)
-      window.removeEventListener('mousemove', onResizeMove as any)
-      window.removeEventListener('mouseup', onResizeEnd as any)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Prevent redundant calendar reload when we adopt API-selected locationId
+  const locationSetByApiRef = useRef(false)
+
+  /* ---------------------------------------------
+     Core helpers
+     --------------------------------------------- */
 
   const utils = useMemo(
     () => ({
@@ -285,11 +395,38 @@ export function useCalendarData({ view, currentDate }: Args) {
     return computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
   }
 
+  function openConfirm(change: PendingChange) {
+    setPendingChange(change)
+    setConfirmOpen(true)
+  }
+
+  function rollbackPending() {
+    if (!pendingChange) return
+    setEvents((prev) =>
+      prev.map((ev) =>
+        ev.id === pendingChange.eventId
+          ? {
+              ...ev,
+              startsAt: pendingChange.original.startsAt,
+              endsAt: pendingChange.original.endsAt,
+              durationMinutes: pendingChange.original.durationMinutes,
+            }
+          : ev,
+      ),
+    )
+  }
+
+  function cancelConfirm() {
+    rollbackPending()
+    setConfirmOpen(false)
+    setPendingChange(null)
+  }
+
   // ✅ For pro drag/resize confirm: determine if the pending booking time is outside working hours.
   function isPendingChangeOutsideWorkingHours(change: PendingChange): boolean {
     if (change.entityType !== 'booking') return false
 
-    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+    const tz = sanitizeTimeZone(timeZoneRef.current, DEFAULT_TIME_ZONE)
 
     const originalDur = eventDurationMinutes(change.original)
     const nextStartIso = change.kind === 'move' ? change.nextStartIso : change.original.startsAt
@@ -315,13 +452,157 @@ export function useCalendarData({ view, currentDate }: Args) {
     })
   }
 
+  /* ---------------------------------------------
+     Window resize listeners (stable, no casts)
+     --------------------------------------------- */
+
+  const onResizeMove = useCallback((e: MouseEvent) => {
+    const s = resizingRef.current
+    if (!s) return
+
+    const y = e.clientY - s.columnTop
+    const endMinutes = snapMinutes(y / PX_PER_MINUTE)
+    const rawDur = endMinutes - s.startMinutes
+    const dur = Math.max(SNAP_MINUTES, roundTo15(rawDur))
+
+    const tz = sanitizeTimeZone(timeZoneRef.current, DEFAULT_TIME_ZONE)
+    const start = utcFromDayAndMinutesInTimeZone(s.day, s.startMinutes, tz)
+    const end = new Date(start.getTime() + dur * 60_000)
+
+    setEvents((prev) => prev.map((ev) => (ev.id === s.eventId ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur } : ev)))
+  }, [])
+
+  const onResizeEnd = useCallback((_e: MouseEvent) => {
+    const s = resizingRef.current
+    resizingRef.current = null
+    window.removeEventListener('mousemove', onResizeMove)
+    window.removeEventListener('mouseup', onResizeEnd)
+    if (!s) return
+
+    suppressClickBriefly()
+
+    const ev = eventsRef.current.find((x) => x.id === s.eventId)
+    if (!ev) return
+
+    const start = new Date(ev.startsAt)
+    const end = new Date(ev.endsAt)
+    const raw = Math.round((end.getTime() - start.getTime()) / 60_000)
+    const dur = Math.max(SNAP_MINUTES, roundTo15(raw))
+
+    if (dur === s.originalDuration) {
+      const rollbackEnd = new Date(start.getTime() + s.originalDuration * 60_000)
+      setEvents((prev) =>
+        prev.map((x) => (x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x)),
+      )
+      return
+    }
+
+    const originalForRollback: CalendarEvent = {
+      ...ev,
+      endsAt: new Date(start.getTime() + s.originalDuration * 60_000).toISOString(),
+      durationMinutes: s.originalDuration,
+    }
+
+    openConfirm({
+      kind: 'resize',
+      entityType: s.entityType,
+      eventId: s.eventId,
+      apiId: s.apiId,
+      nextTotalDurationMinutes: dur,
+      original: originalForRollback,
+    })
+  }, [onResizeMove])
+
+  useEffect(() => {
+    return () => {
+      if (suppressClickTimerRef.current) window.clearTimeout(suppressClickTimerRef.current)
+      window.removeEventListener('mousemove', onResizeMove)
+      window.removeEventListener('mouseup', onResizeEnd)
+    }
+  }, [onResizeMove, onResizeEnd])
+
+  /* ---------------------------------------------
+     Loads
+     --------------------------------------------- */
+
+  async function loadLocationsOnce() {
+    if (locationsLoaded) return
+    try {
+      const res = await fetch('/api/pro/locations', { cache: 'no-store' })
+      const data: unknown = await safeJson(res)
+
+      if (!res.ok || !isRecord(data) || !Array.isArray(data.locations)) {
+        setLocations([])
+        setLocationsLoaded(true)
+        return
+      }
+
+      const parsed: ProLocation[] = data.locations
+        .map((raw: unknown) => {
+          if (!isRecord(raw)) return null
+          const id = getString(raw.id)
+          if (!id) return null
+
+          const type = (getString(raw.type) ?? 'SALON') as ProLocationType
+          const name = getString(raw.name)
+          const formattedAddress = getString(raw.formattedAddress)
+
+          const isPrimary = Boolean(raw.isPrimary)
+          const isBookable = raw.isBookable === undefined ? true : Boolean(raw.isBookable)
+
+          const timeZone = getString(raw.timeZone)
+          const stepMinutes = getNumber(raw.stepMinutes)
+
+          // workingHours is Json in schema, so we keep it flexible (WorkingHoursJson)
+          const workingHours = (raw.workingHours ?? null) as WorkingHoursJson
+
+          return {
+            id,
+            type,
+            name,
+            formattedAddress,
+            isPrimary,
+            isBookable,
+            timeZone,
+            workingHours,
+            stepMinutes,
+          }
+        })
+        .filter((x): x is ProLocation => Boolean(x))
+
+      setLocations(parsed)
+      setLocationsLoaded(true)
+
+      const nextCanSalon = parsed.some((l) => l.isBookable && (toUpper(l.type) === 'SALON' || toUpper(l.type) === 'SUITE'))
+      const nextCanMobile = parsed.some((l) => l.isBookable && toUpper(l.type) === 'MOBILE_BASE')
+      setCanSalon(nextCanSalon)
+      setCanMobile(nextCanMobile)
+      setActiveLocationType((prev) => pickLocationType(nextCanSalon, nextCanMobile, prev))
+
+      // If activeLocationId isn't set yet, pick a sensible default within the active type scope.
+      if (!activeLocationId) {
+        const scoped = parsed.filter((l) => l.isBookable).filter((l) => {
+          if (activeLocationType === 'MOBILE') return toUpper(l.type) === 'MOBILE_BASE'
+          return toUpper(l.type) === 'SALON' || toUpper(l.type) === 'SUITE'
+        })
+
+        const next = scoped.find((l) => l.isPrimary)?.id ?? scoped[0]?.id ?? parsed.find((l) => l.isPrimary)?.id ?? parsed[0]?.id ?? null
+        if (next) setActiveLocationId(next)
+      }
+    } catch {
+      setLocations([])
+      setLocationsLoaded(true)
+    }
+  }
+
   async function loadServicesOnce() {
     if (servicesLoaded) return
     try {
       const res = await fetch('/api/pro/services', { cache: 'no-store' })
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
       if (!res.ok) return
-      setServices(Array.isArray(data?.services) ? data.services : [])
+      if (!isRecord(data)) return
+      setServices(parseServiceOptions(data.services))
       setServicesLoaded(true)
     } catch {
       // ignore
@@ -337,10 +618,17 @@ export function useCalendarData({ view, currentDate }: Args) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ autoAcceptBookings: next }),
       })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to save.')
-      setAutoAccept(Boolean(data?.professionalProfile?.autoAcceptBookings))
-    } catch (e) {
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        const msg = isRecord(data) ? getString(data.error) ?? 'Failed to save.' : 'Failed to save.'
+        throw new Error(msg)
+      }
+
+      if (isRecord(data) && isRecord(data.professionalProfile)) {
+        const v = getBool((data.professionalProfile as Record<string, unknown>).autoAcceptBookings)
+        if (v !== null) setAutoAccept(v)
+      }
+    } catch (e: unknown) {
       console.error(e)
       setAutoAccept((prev) => !prev)
     } finally {
@@ -353,9 +641,13 @@ export function useCalendarData({ view, currentDate }: Args) {
       method: 'GET',
       cache: 'no-store',
     })
-    const data = await safeJson(res)
-    if (!res.ok) throw new Error(data?.error || `Failed to load ${locationType} hours.`)
-    return (data?.workingHours ?? null) as WorkingHoursJson
+    const data: unknown = await safeJson(res)
+    if (!res.ok) {
+      const msg = isRecord(data) ? getString(data.error) ?? `Failed to load ${locationType} hours.` : `Failed to load ${locationType} hours.`
+      throw new Error(msg)
+    }
+    if (!isRecord(data)) return null
+    return (data.workingHours ?? null) as WorkingHoursJson
   }
 
   async function loadCalendar() {
@@ -366,40 +658,46 @@ export function useCalendarData({ view, currentDate }: Args) {
       setError(null)
 
       // Start with current tz guess (initially UTC)
-      const tzGuess = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+      const tzGuess = sanitizeTimeZone(timeZoneRef.current, DEFAULT_TIME_ZONE)
 
-      async function fetchCalendarFor(tzForRange: string) {
+      async function fetchCalendarFor(tzForRange: string, locationId: string | null) {
         const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, tzForRange)
 
-        if (process.env.NODE_ENV !== 'production') {
-          // eslint-disable-next-line no-console
-          console.log('[Calendar range]', { view, tzForRange, from: from.toISOString(), to: to.toISOString() })
-        }
+        const base = `/api/pro/calendar?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`
+        const url = locationId ? `${base}&locationId=${encodeURIComponent(locationId)}` : base
 
-        const res = await fetch(
-          `/api/pro/calendar?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`,
-          { cache: 'no-store' },
-        )
-        const data = await safeJson(res)
+        const res = await fetch(url, { cache: 'no-store' })
+        const data: unknown = await safeJson(res)
         return { res, data }
       }
 
-      // 1) fetch using current tz guess
-      let { res, data } = await fetchCalendarFor(tzGuess)
+      // 1) fetch using current tz guess and current locationId (if any)
+      let { res, data } = await fetchCalendarFor(tzGuess, activeLocationId)
       if (seq !== loadSeqRef.current) return
 
       if (!res.ok) {
-        setError(data?.error || `Failed to load calendar (${res.status}).`)
+        const msg =
+          isRecord(data) ? getString(data.error) ?? `Failed to load calendar (${res.status}).` : `Failed to load calendar (${res.status}).`
+        setError(msg)
         return
       }
 
-      const apiTzRaw = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
+      const record = isRecord(data) ? data : null
+
+      // Adopt API-selected location if provided (without triggering an extra reload)
+      const apiLocId = record && isRecord(record.location) ? getString((record.location as Record<string, unknown>).id) : null
+      if (apiLocId && apiLocId !== activeLocationId) {
+        locationSetByApiRef.current = true
+        setActiveLocationId(apiLocId)
+      }
+
+      const apiTzRaw = record ? (getString(record.timeZone) ?? '') : ''
       const apiTzValid = isValidIanaTimeZone(apiTzRaw)
       const nextTz = apiTzValid ? apiTzRaw : DEFAULT_TIME_ZONE
 
       // 2) if API gives a different valid tz, refetch ONCE so range boundaries are correct
       if (apiTzValid && nextTz !== tzGuess) {
-        const second = await fetchCalendarFor(nextTz)
+        const second = await fetchCalendarFor(nextTz, apiLocId ?? activeLocationId)
         if (seq !== loadSeqRef.current) return
         if (second.res.ok) {
           res = second.res
@@ -407,43 +705,35 @@ export function useCalendarData({ view, currentDate }: Args) {
         }
       }
 
+      const record2 = isRecord(data) ? data : null
+
       // Apply tz + setup flags
       setTimeZone(nextTz)
-      const needsSetup = Boolean(data?.needsTimeZoneSetup) || !apiTzValid
+      const needsSetup = Boolean(record2?.needsTimeZoneSetup) || !apiTzValid
       setNeedsTimeZoneSetup(needsSetup)
 
-      if (!apiTzValid) {
+      if (!apiTzValid && process.env.NODE_ENV !== 'production') {
         // eslint-disable-next-line no-console
         console.warn('[Calendar] API timezone missing/invalid; forcing UTC until pro sets timezone.', { apiTzRaw })
       }
 
       // Capabilities + active location mode
-      const nextCanSalon = Boolean(data?.canSalon ?? true)
-      const nextCanMobile = Boolean(data?.canMobile ?? false)
+      const nextCanSalon = record2 ? Boolean(record2.canSalon ?? true) : true
+      const nextCanMobile = record2 ? Boolean(record2.canMobile ?? false) : false
       setCanSalon(nextCanSalon)
       setCanMobile(nextCanMobile)
       setActiveLocationType((prev) => pickLocationType(nextCanSalon, nextCanMobile, prev))
 
       // Stats + management + auto-accept
-      setStats((data?.stats ?? null) as CalendarStats)
-      setAutoAccept(Boolean(data?.autoAcceptBookings))
+      setStats(record2 ? parseCalendarStats(record2.stats) : null)
+      setAutoAccept(record2 ? Boolean(record2.autoAcceptBookings) : false)
 
-      const m = data?.management
-      if (m && typeof m === 'object') {
-        setManagement({
-          todaysBookings: Array.isArray(m.todaysBookings) ? m.todaysBookings : [],
-          pendingRequests: Array.isArray(m.pendingRequests) ? m.pendingRequests : [],
-          waitlistToday: Array.isArray(m.waitlistToday) ? m.waitlistToday : [],
-          blockedToday: Array.isArray(m.blockedToday) ? m.blockedToday : [],
-        })
-      } else {
-        setManagement({ todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
-      }
+      setManagement(record2 ? parseManagementLists(record2.management) : { todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] })
 
       // Events (bookings + blocks)
-      const apiEvents = (Array.isArray(data?.events) ? data.events : []) as CalendarEvent[]
+      const apiEvents = record2 ? parseCalendarEvents(record2.events) : []
 
-      // working hours for BOTH types
+      // working hours for BOTH types (fallback). If you have per-location hours, the UI uses that first.
       const [nextSalon, nextMobile] = await Promise.all([loadWorkingHoursFor('SALON'), loadWorkingHoursFor('MOBILE')])
       if (seq !== loadSeqRef.current) return
       setWorkingHoursSalon(nextSalon)
@@ -451,7 +741,7 @@ export function useCalendarData({ view, currentDate }: Args) {
 
       const nextEvents = [...apiEvents].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
       setEvents(nextEvents)
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e)
       if (seq === loadSeqRef.current) setError('Network error loading calendar.')
     } finally {
@@ -459,9 +749,10 @@ export function useCalendarData({ view, currentDate }: Args) {
     }
   }
 
-  // Load services once
+  // Load services once + locations once
   useEffect(() => {
     void loadServicesOnce()
+    void loadLocationsOnce()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -470,6 +761,27 @@ export function useCalendarData({ view, currentDate }: Args) {
     void loadCalendar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentDate])
+
+  // Reload calendar when activeLocationId changes (but avoid double-load when set from API)
+  useEffect(() => {
+    if (locationSetByApiRef.current) {
+      locationSetByApiRef.current = false
+      return
+    }
+    if (!activeLocationId) return
+    void loadCalendar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLocationId])
+
+  // When switching SALON/MOBILE mode, keep activeLocationId valid for that scope
+  useEffect(() => {
+    if (!locationsLoaded) return
+    if (activeLocationId && scopedLocations.some((l) => l.id === activeLocationId)) return
+
+    const next = scopedLocations.find((l) => l.isPrimary)?.id ?? scopedLocations[0]?.id ?? null
+    setActiveLocationId(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLocationType, locationsLoaded, scopedLocations])
 
   // blocked minutes today (timezone-aware)
   const blockedMinutesToday = useMemo(() => {
@@ -502,18 +814,41 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   // Blocks
   async function createBlock(startsAtIso: string, endsAtIso: string, note?: string) {
+    // ✅ Never accidentally create a "global" block because activeLocationId is missing.
+    if (!activeLocationId) throw new Error('Select a location first.')
+
     const res = await fetch('/api/pro/calendar/blocked', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startsAt: startsAtIso, endsAt: endsAtIso, note: note ?? null }),
+      body: JSON.stringify({
+        startsAt: startsAtIso,
+        endsAt: endsAtIso,
+        note: note ?? null,
+        locationId: activeLocationId,
+      }),
     })
-    const data = await safeJson(res)
-    if (!res.ok) throw new Error(data?.error || 'Failed to create block.')
-    return (data?.block ?? data) as { id: string; startsAt: string; endsAt: string; note?: string | null }
+    const data: unknown = await safeJson(res)
+    if (!res.ok) {
+      const msg = isRecord(data) ? getString(data.error) ?? 'Failed to create block.' : 'Failed to create block.'
+      throw new Error(msg)
+    }
+
+    if (isRecord(data) && isRecord(data.block)) {
+      const b = data.block as Record<string, unknown>
+      const id = getString(b.id) ?? ''
+      const startsAt = getString(b.startsAt) ?? startsAtIso
+      const endsAt = getString(b.endsAt) ?? endsAtIso
+      const noteOut = getString(b.note)
+      return { id, startsAt, endsAt, note: noteOut }
+    }
+
+    return { id: '', startsAt: startsAtIso, endsAt: endsAtIso, note: note ?? null }
   }
 
   async function oneClickBlockFullDay(day: Date) {
     try {
+      if (!activeLocationId) throw new Error('Select a location first.')
+
       setLoading(true)
       setError(null)
       const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
@@ -522,9 +857,10 @@ export function useCalendarData({ view, currentDate }: Args) {
       await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
       await loadCalendar()
       forceProFooterRefresh()
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      setError(e?.message || 'Could not block full day.')
+      const msg = e instanceof Error ? e.message : 'Could not block full day.'
+      setError(msg)
       setTimeout(() => setError(null), 3500)
     } finally {
       setLoading(false)
@@ -532,11 +868,17 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   function openCreateBlockNow() {
+    if (!activeLocationId) {
+      setError('Select a location first.')
+      setTimeout(() => setError(null), 3000)
+      return
+    }
+
     const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
     const nowUtc = new Date()
     const p = getZonedParts(nowUtc, tz)
     const minutesNow = p.hour * 60 + p.minute
-    const rounded = snapMinutes(Math.ceil(minutesNow / 15) * 15)
+    const rounded = snapMinutes(Math.ceil(minutesNow / SNAP_MINUTES) * SNAP_MINUTES)
     const startUtc = utcFromDayAndMinutesInTimeZone(nowUtc, rounded, tz)
 
     setBlockCreateInitialStart(startUtc)
@@ -559,7 +901,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     setManagementActionError(null)
 
     const current = eventsRef.current.find((x) => x.id === bookingId)
-    const currentStatus = String((current as any)?.status || '').toUpperCase()
+    const currentStatus = current ? String(current.status || '').toUpperCase() : ''
     if (currentStatus && currentStatus === status) {
       setManagementActionBusyId(null)
       return
@@ -572,10 +914,10 @@ export function useCalendarData({ view, currentDate }: Args) {
         body: JSON.stringify({ status, notifyClient: true }),
       })
 
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
 
       if (!res.ok) {
-        const msg = String(data?.error || data?.message || 'Failed to update booking.')
+        const msg = isRecord(data) ? getString(data.error) ?? getString(data.message) ?? 'Failed to update booking.' : 'Failed to update booking.'
 
         // No-op is not an error
         if (msg.toLowerCase().includes('no changes provided')) {
@@ -589,9 +931,10 @@ export function useCalendarData({ view, currentDate }: Args) {
 
       await loadCalendar()
       forceProFooterRefresh()
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      setManagementActionError(e?.message || 'Failed to update booking.')
+      const msg = e instanceof Error ? e.message : 'Failed to update booking.'
+      setManagementActionError(msg)
       setTimeout(() => setManagementActionError(null), 3500)
     } finally {
       setManagementActionBusyId(null)
@@ -626,10 +969,15 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     try {
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}`, { method: 'GET', cache: 'no-store' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Failed to load booking (${res.status}).`)
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        const msg = isRecord(data) ? getString(data.error) ?? `Failed to load booking (${res.status}).` : `Failed to load booking (${res.status}).`
+        throw new Error(msg)
+      }
 
-      const b = data?.booking as BookingDetails
+      if (!isRecord(data) || !isRecord(data.booking)) throw new Error('Malformed booking response.')
+
+      const b = data.booking as BookingDetails
       setBooking(b)
 
       const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
@@ -638,15 +986,16 @@ export function useCalendarData({ view, currentDate }: Args) {
       setReschedTime(toTimeInputValueInTimeZone(start, tz))
       setNotifyClient(true)
 
-      const svcList = (Array.isArray(data?.services) ? data.services : services) as ServiceOption[]
-      if (svcList?.length) setServices(svcList)
+      const svcList = isRecord(data) ? parseServiceOptions((data as Record<string, unknown>).services) : []
+      if (svcList.length) setServices(svcList)
 
       // UI only (server no longer supports changing serviceId with this PATCH)
       setSelectedServiceId(b.serviceId || '')
       setDurationMinutes(Number(b.totalDurationMinutes || 60))
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      setBookingError(e?.message || 'Failed to load booking.')
+      const msg = e instanceof Error ? e.message : 'Failed to load booking.'
+      setBookingError(msg)
     } finally {
       setBookingLoading(false)
     }
@@ -729,18 +1078,21 @@ export function useCalendarData({ view, currentDate }: Args) {
           durationMinutes: snappedDur,
           notifyClient,
           allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
-          // NOTE: service changes require serviceItems replace-all; we do not send serviceId here.
         }),
       })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to save changes.')
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        const msg = isRecord(data) ? getString(data.error) ?? 'Failed to save changes.' : 'Failed to save changes.'
+        throw new Error(msg)
+      }
 
       closeBooking()
       await loadCalendar()
       forceProFooterRefresh()
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      setBookingError(e?.message || 'Failed to save changes.')
+      const msg = e instanceof Error ? e.message : 'Failed to save changes.'
+      setBookingError(msg)
     } finally {
       setSavingReschedule(false)
     }
@@ -756,13 +1108,17 @@ export function useCalendarData({ view, currentDate }: Args) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'ACCEPTED', notifyClient: true }),
       })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to approve booking.')
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        const msg = isRecord(data) ? getString(data.error) ?? 'Failed to approve booking.' : 'Failed to approve booking.'
+        throw new Error(msg)
+      }
       closeBooking()
       await loadCalendar()
       forceProFooterRefresh()
-    } catch (e: any) {
-      setBookingError(e?.message || 'Failed to approve booking.')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to approve booking.'
+      setBookingError(msg)
     } finally {
       setSavingReschedule(false)
     }
@@ -778,44 +1134,20 @@ export function useCalendarData({ view, currentDate }: Args) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'CANCELLED', notifyClient: true }),
       })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to deny booking.')
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        const msg = isRecord(data) ? getString(data.error) ?? 'Failed to deny booking.' : 'Failed to deny booking.'
+        throw new Error(msg)
+      }
       closeBooking()
       await loadCalendar()
       forceProFooterRefresh()
-    } catch (e: any) {
-      setBookingError(e?.message || 'Failed to deny booking.')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to deny booking.'
+      setBookingError(msg)
     } finally {
       setSavingReschedule(false)
     }
-  }
-
-  // Confirm modal helpers
-  function openConfirm(change: PendingChange) {
-    setPendingChange(change)
-    setConfirmOpen(true)
-  }
-
-  function rollbackPending() {
-    if (!pendingChange) return
-    setEvents((prev) =>
-      prev.map((ev) =>
-        ev.id === pendingChange.eventId
-          ? {
-              ...ev,
-              startsAt: pendingChange.original.startsAt,
-              endsAt: pendingChange.original.endsAt,
-              durationMinutes: pendingChange.original.durationMinutes,
-            }
-          : ev,
-      ),
-    )
-  }
-
-  function cancelConfirm() {
-    rollbackPending()
-    setConfirmOpen(false)
-    setPendingChange(null)
   }
 
   async function applyConfirm() {
@@ -824,10 +1156,14 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     try {
       if (pendingChange.entityType === 'booking') {
-        const payload: any = { notifyClient: true }
+        const payload: {
+          notifyClient: true
+          durationMinutes?: number
+          scheduledFor?: string
+          allowOutsideWorkingHours?: boolean
+        } = { notifyClient: true }
 
         if (pendingChange.kind === 'resize') {
-          // ✅ API expects durationMinutes
           payload.durationMinutes = pendingChange.nextTotalDurationMinutes
         } else {
           payload.scheduledFor = pendingChange.nextStartIso
@@ -842,8 +1178,11 @@ export function useCalendarData({ view, currentDate }: Args) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
-        const data = await safeJson(res)
-        if (!res.ok) throw new Error(data?.error || 'Failed to apply changes.')
+        const data: unknown = await safeJson(res)
+        if (!res.ok) {
+          const msg = isRecord(data) ? getString(data.error) ?? 'Failed to apply changes.' : 'Failed to apply changes.'
+          throw new Error(msg)
+        }
       } else {
         const current = eventsRef.current.find((x) => x.id === pendingChange.eventId)
         const startIso =
@@ -861,20 +1200,24 @@ export function useCalendarData({ view, currentDate }: Args) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ startsAt: startIso, endsAt: endIso }),
         })
-        const data = await safeJson(res)
-        if (!res.ok) throw new Error(data?.error || 'Failed to apply changes.')
+        const data: unknown = await safeJson(res)
+        if (!res.ok) {
+          const msg = isRecord(data) ? getString(data.error) ?? 'Failed to apply changes.' : 'Failed to apply changes.'
+          throw new Error(msg)
+        }
       }
 
       setConfirmOpen(false)
       setPendingChange(null)
       await loadCalendar()
       forceProFooterRefresh()
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
       rollbackPending()
       setConfirmOpen(false)
       setPendingChange(null)
-      setError(e?.message || 'Could not apply changes.')
+      const msg = e instanceof Error ? e.message : 'Could not apply changes.'
+      setError(msg)
       setTimeout(() => setError(null), 3500)
     } finally {
       setApplyingChange(false)
@@ -951,7 +1294,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     })
   }
 
-  // Resize handlers
+  // Resize start
   function beginResize(args: {
     entityType: EntityType
     eventId: string
@@ -965,63 +1308,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     resizingRef.current = args
     window.addEventListener('mousemove', onResizeMove)
     window.addEventListener('mouseup', onResizeEnd)
-  }
-
-  function onResizeMove(e: MouseEvent) {
-    const s = resizingRef.current
-    if (!s) return
-
-    const y = e.clientY - s.columnTop
-    const endMinutes = snapMinutes(y / PX_PER_MINUTE)
-    const rawDur = endMinutes - s.startMinutes
-    const dur = Math.max(SNAP_MINUTES, roundTo15(rawDur))
-
-    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-    const start = utcFromDayAndMinutesInTimeZone(s.day, s.startMinutes, tz)
-    const end = new Date(start.getTime() + dur * 60_000)
-
-    setEvents((prev) => prev.map((ev) => (ev.id === s.eventId ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur } : ev)))
-  }
-
-  function onResizeEnd() {
-    const s = resizingRef.current
-    resizingRef.current = null
-    window.removeEventListener('mousemove', onResizeMove)
-    window.removeEventListener('mouseup', onResizeEnd)
-    if (!s) return
-
-    suppressClickBriefly()
-
-    const ev = eventsRef.current.find((x) => x.id === s.eventId)
-    if (!ev) return
-
-    const start = new Date(ev.startsAt)
-    const end = new Date(ev.endsAt)
-    const raw = Math.round((end.getTime() - start.getTime()) / 60_000)
-    const dur = Math.max(SNAP_MINUTES, roundTo15(raw))
-
-    if (dur === s.originalDuration) {
-      const rollbackEnd = new Date(start.getTime() + s.originalDuration * 60_000)
-      setEvents((prev) =>
-        prev.map((x) => (x.id === s.eventId ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration } : x)),
-      )
-      return
-    }
-
-    const originalForRollback: CalendarEvent = {
-      ...ev,
-      endsAt: new Date(start.getTime() + s.originalDuration * 60_000).toISOString(),
-      durationMinutes: s.originalDuration,
-    }
-
-    openConfirm({
-      kind: 'resize',
-      entityType: s.entityType,
-      eventId: s.eventId,
-      apiId: s.apiId,
-      nextTotalDurationMinutes: dur,
-      original: originalForRollback,
-    })
   }
 
   // Click-to-create booking
@@ -1060,7 +1346,7 @@ export function useCalendarData({ view, currentDate }: Args) {
   const pendingOutsideWorkingHours = useMemo(() => {
     if (!pendingChange) return false
     return isPendingChangeOutsideWorkingHours(pendingChange)
-  }, [pendingChange, workingHoursActive, timeZone, events])
+  }, [pendingChange, workingHoursActive, events])
 
   return {
     view,
@@ -1071,6 +1357,15 @@ export function useCalendarData({ view, currentDate }: Args) {
     timeZone,
     needsTimeZoneSetup,
     blockedMinutesToday,
+
+    // ✅ NEW: location context (safe to add; page can start using it when ready)
+    locations,
+    locationsLoaded,
+    scopedLocations,
+    activeLocationId,
+    setActiveLocationId,
+    activeLocation,
+    activeLocationLabel,
 
     canSalon,
     canMobile,

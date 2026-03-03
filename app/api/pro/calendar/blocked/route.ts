@@ -11,28 +11,24 @@ type PostBody = {
   locationId?: unknown // optional: null/undefined means "all locations"
 }
 
-function toDateOrNull(v: unknown) {
+function toDateOrNull(v: unknown): Date | null {
   const s = pickString(v)
   if (!s) return null
   const d = new Date(s)
   return Number.isFinite(d.getTime()) ? d : null
 }
 
-function minutesBetween(a: Date, b: Date) {
+function minutesBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 60_000)
 }
 
-function clampRange(from: Date, to: Date) {
+function clampRange(from: Date, to: Date): { from: Date; to: Date } {
   // keep it reasonable so nobody accidentally asks for 10 years and DOSes your DB
   const MAX_DAYS = 180
-  const min = from
-  const max = to
-
-  const ms = max.getTime() - min.getTime()
+  const ms = to.getTime() - from.getTime()
   const maxMs = MAX_DAYS * 24 * 60 * 60_000
-  if (ms <= maxMs) return { from: min, to: max }
-
-  return { from: min, to: new Date(min.getTime() + maxMs) }
+  if (ms <= maxMs) return { from, to }
+  return { from, to: new Date(from.getTime() + maxMs) }
 }
 
 export async function GET(req: Request) {
@@ -93,8 +89,8 @@ export async function POST(req: Request) {
 
     const startsAt = toDateOrNull(body?.startsAt)
     const endsAt = toDateOrNull(body?.endsAt)
-    const note = pickString(body?.note)
-    const locationId = pickString(body?.locationId) // optional
+    const note = pickString(body?.note) ?? null
+    const locationId = pickString(body?.locationId) ?? null // null = global block
 
     if (!startsAt || !endsAt) return jsonFail(400, 'Missing startsAt/endsAt.')
     if (endsAt <= startsAt) return jsonFail(400, 'End must be after start.')
@@ -114,10 +110,8 @@ export async function POST(req: Request) {
     }
 
     // Overlap check:
-    // - if locationId is null => blocks "all locations" for this pro, so it conflicts with ANY block
-    // - if locationId is set => conflicts with:
-    //     a) blocks for same locationId
-    //     b) blocks that apply to all locations (locationId null)
+    // - global block (locationId null) conflicts with ANY block
+    // - location block conflicts with same locationId OR global blocks
     const conflictWhere = locationId
       ? {
           professionalId,
@@ -142,8 +136,8 @@ export async function POST(req: Request) {
         professionalId,
         startsAt,
         endsAt,
-        note: note ?? null,
-        locationId: locationId ?? null,
+        note,
+        locationId,
       },
       select: { id: true, startsAt: true, endsAt: true, note: true, locationId: true },
     })

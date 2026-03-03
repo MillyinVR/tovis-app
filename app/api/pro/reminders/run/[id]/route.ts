@@ -6,6 +6,17 @@ export const dynamic = 'force-dynamic'
 
 type Params = { params: Promise<{ id: string }> }
 
+type JsonObject = Record<string, unknown>
+
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+async function readJsonObject(req: Request): Promise<JsonObject> {
+  const raw: unknown = await req.json().catch(() => ({}))
+  return isRecord(raw) ? raw : {}
+}
+
 export async function PATCH(req: Request, props: Params) {
   try {
     const auth = await requirePro()
@@ -13,11 +24,11 @@ export async function PATCH(req: Request, props: Params) {
     const professionalId = auth.professionalId
 
     const { id } = await props.params
-    const reminderId = String(id || '').trim()
+    const reminderId = (id || '').trim()
     if (!reminderId) return jsonFail(400, 'Missing reminder id.')
 
-    const body = await req.json().catch(() => ({} as any))
-    const completed = body?.completed
+    const body = await readJsonObject(req)
+    const completed = body.completed
 
     if (typeof completed !== 'boolean') {
       return jsonFail(400, 'completed:boolean is required')
@@ -41,7 +52,7 @@ export async function PATCH(req: Request, props: Params) {
     return jsonOk(
       {
         id: updated.id,
-        completedAt: updated.completedAt?.toISOString() ?? null,
+        completedAt: updated.completedAt ? updated.completedAt.toISOString() : null,
       },
       200,
     )

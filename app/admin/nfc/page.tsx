@@ -5,10 +5,16 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { CopyButton } from './_components/CopyButton'
 import { formatShortCode, generateShortCode } from '@/lib/nfcShortCode'
-import type { NfcCardType } from '@prisma/client'
+import { NfcCardType, Prisma } from '@prisma/client'
 import type { ReadonlyHeaders } from 'next/dist/server/web/spec-extension/adapters/headers'
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>
+
+function firstParam(v: string | string[] | undefined): string {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) return v[0] ?? ''
+  return ''
+}
 
 function isAbsoluteBaseUrl(input: string) {
   try {
@@ -19,7 +25,7 @@ function isAbsoluteBaseUrl(input: string) {
   }
 }
 
-function getBaseUrlFromHeaders(h: ReadonlyHeaders) {
+function getBaseUrlFromHeaders(h: ReadonlyHeaders): string | null {
   const env =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_URL ||
@@ -28,19 +34,29 @@ function getBaseUrlFromHeaders(h: ReadonlyHeaders) {
 
   if (env && isAbsoluteBaseUrl(env)) return env.replace(/\/$/, '')
 
-  const host = h.get('x-forwarded-host') ?? h.get('host')
-  const proto = h.get('x-forwarded-proto') ?? 'https'
-  if (!host) return 'https://example.com'
+  const forwardedHost = (h.get('x-forwarded-host') ?? '').split(',')[0]?.trim()
+  const host = forwardedHost || (h.get('host') ?? '').split(',')[0]?.trim()
+
+  const forwardedProto = (h.get('x-forwarded-proto') ?? '').split(',')[0]?.trim()
+  const proto = forwardedProto || 'https'
+
+  if (!host) return null
+  if (proto !== 'https' && proto !== 'http') return null
+
   return `${proto}://${host}`.replace(/\/$/, '')
 }
 
-function isAllowedType(v: string): v is NfcCardType | 'UNASSIGNED' {
-  return (
-    v === 'UNASSIGNED' ||
-    v === 'CLIENT_REFERRAL' ||
-    v === 'PRO_BOOKING' ||
-    v === 'SALON_WHITE_LABEL'
-  )
+function parseNfcCardType(raw: unknown): NfcCardType {
+  const v = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
+  if (v === NfcCardType.UNASSIGNED) return NfcCardType.UNASSIGNED
+  if (v === NfcCardType.CLIENT_REFERRAL) return NfcCardType.CLIENT_REFERRAL
+  if (v === NfcCardType.PRO_BOOKING) return NfcCardType.PRO_BOOKING
+  if (v === NfcCardType.SALON_WHITE_LABEL) return NfcCardType.SALON_WHITE_LABEL
+  return NfcCardType.UNASSIGNED
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
 }
 
 async function requireAdmin() {
@@ -57,7 +73,8 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
   const baseUrl = getBaseUrlFromHeaders(h)
 
   const sp = (await props.searchParams) ?? {}
-  const createdFlag = String(sp.created ?? '') === '1'
+  const createdFlag = firstParam(sp.created) === '1'
+  const errorFlag = firstParam(sp.error)
 
   async function createCards(formData: FormData): Promise<void> {
     'use server'
@@ -71,13 +88,16 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
       redirect('/admin/nfc?error=qty')
     }
 
-    const typeRaw = String(formData.get('type') ?? 'UNASSIGNED').trim().toUpperCase()
-    const type = isAllowedType(typeRaw) ? typeRaw : 'UNASSIGNED'
-
+    const type = parseNfcCardType(formData.get('type'))
     const isActive = String(formData.get('isActive') ?? 'true') === 'true'
+
     const salonSlugRaw = String(formData.get('salonSlug') ?? '').trim()
     const salonSlug = salonSlugRaw ? salonSlugRaw : null
-    const safeSalonSlug = type === 'SALON_WHITE_LABEL' ? salonSlug : null
+
+    const safeSalonSlug = type === NfcCardType.SALON_WHITE_LABEL ? salonSlug : null
+    if (type === NfcCardType.SALON_WHITE_LABEL && !safeSalonSlug) {
+      redirect('/admin/nfc?error=salonSlug')
+    }
 
     await prisma.$transaction(async (tx) => {
       for (let i = 0; i < qty; i++) {
@@ -89,7 +109,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           try {
             await tx.nfcCard.create({
               data: {
-                type: type as any,
+                type,
                 isActive,
                 salonSlug: safeSalonSlug,
                 claimedAt: null,
@@ -101,20 +121,16 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
             })
             created = true
             break
-          } catch (e: any) {
-            // Unique constraint collision on shortCode (rare) — retry.
-            if (e?.code === 'P2002') continue
+          } catch (e: unknown) {
+            if (isUniqueConstraintError(e)) continue
             throw e
           }
         }
 
-        if (!created) {
-          throw new Error('Failed to generate a unique short code.')
-        }
+        if (!created) throw new Error('Failed to generate a unique short code.')
       }
     })
 
-    // Redirect back so the page re-renders and recent cards include the new batch.
     redirect('/admin/nfc?created=1')
   }
 
@@ -131,16 +147,29 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
     },
   })
 
+  const baseUrlMissing = !baseUrl
+
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
       <div className="mb-8 flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">NFC Cards</h1>
-        <p className="text-sm text-neutral-600">
-          Generate cards, program physical tags, and track claim status.
-        </p>
+        <p className="text-sm text-neutral-600">Generate cards, program physical tags, and track claim status.</p>
+
         <div className="text-xs text-neutral-500">
-          Base URL: <span className="font-mono">{baseUrl}</span>
+          Base URL:{' '}
+          {baseUrl ? (
+            <span className="font-mono">{baseUrl}</span>
+          ) : (
+            <span className="font-mono text-red-700">MISSING (set NEXT_PUBLIC_APP_URL)</span>
+          )}
         </div>
+
+        {baseUrlMissing ? (
+          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+            Base URL could not be derived from headers. Set <span className="font-mono">NEXT_PUBLIC_APP_URL</span> so you
+            don’t accidentally program tags with the wrong URL.
+          </div>
+        ) : null}
 
         {createdFlag ? (
           <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
@@ -148,9 +177,15 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           </div>
         ) : null}
 
-        {String(sp.error ?? '') === 'qty' ? (
+        {errorFlag === 'qty' ? (
           <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
             Quantity must be between 1 and 500.
+          </div>
+        ) : null}
+
+        {errorFlag === 'salonSlug' ? (
+          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+            Salon slug is required for <span className="font-mono">SALON_WHITE_LABEL</span> cards.
           </div>
         ) : null}
       </div>
@@ -159,7 +194,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold">Generate cards</h2>
           <p className="mt-1 text-sm text-neutral-600">
-            Recommended: <span className="font-medium">UNASSIGNED</span>. First signup/login claims the card.
+            Recommended: <span className="font-medium">{NfcCardType.UNASSIGNED}</span>. First signup/login claims the card.
           </p>
 
           <form action={createCards} className="mt-5 grid gap-4">
@@ -178,13 +213,13 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 <span className="text-xs font-medium text-neutral-700">Type</span>
                 <select
                   name="type"
-                  defaultValue="UNASSIGNED"
+                  defaultValue={NfcCardType.UNASSIGNED}
                   className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-300"
                 >
-                  <option value="UNASSIGNED">UNASSIGNED (recommended)</option>
-                  <option value="CLIENT_REFERRAL">CLIENT_REFERRAL</option>
-                  <option value="PRO_BOOKING">PRO_BOOKING</option>
-                  <option value="SALON_WHITE_LABEL">SALON_WHITE_LABEL</option>
+                  <option value={NfcCardType.UNASSIGNED}>UNASSIGNED (recommended)</option>
+                  <option value={NfcCardType.CLIENT_REFERRAL}>CLIENT_REFERRAL</option>
+                  <option value={NfcCardType.PRO_BOOKING}>PRO_BOOKING</option>
+                  <option value={NfcCardType.SALON_WHITE_LABEL}>SALON_WHITE_LABEL</option>
                 </select>
               </label>
             </div>
@@ -243,7 +278,15 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-3">
             <div className="text-xs font-medium text-neutral-700">NFC URL format</div>
             <p className="mt-1 text-xs text-neutral-600">
-              Put <span className="font-mono">{baseUrl}/t/&lt;cardId&gt;</span> on the tag.
+              {baseUrl ? (
+                <>
+                  Put <span className="font-mono">{baseUrl}/t/&lt;cardId&gt;</span> on the tag.
+                </>
+              ) : (
+                <>
+                  Set <span className="font-mono">NEXT_PUBLIC_APP_URL</span> to display the exact tag URL format.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -271,9 +314,10 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
             </thead>
             <tbody>
               {recent.map((c) => {
-                const tapUrl = `${baseUrl}/t/${c.id}`
-                const codeUrl = `${baseUrl}/c/${c.shortCode}`
                 const pretty = formatShortCode(c.shortCode)
+
+                const tapUrl = baseUrl ? `${baseUrl}/t/${c.id}` : null
+                const codeUrl = baseUrl ? `${baseUrl}/c/${c.shortCode}` : null
 
                 return (
                   <tr key={c.id} className="border-t border-neutral-200">
@@ -286,21 +330,31 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                     </td>
 
                     <td className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs text-neutral-700">{tapUrl}</span>
-                        <CopyButton value={tapUrl} />
-                      </div>
-                      <div className="mt-1 font-mono text-[11px] text-neutral-500">{c.id}</div>
+                      {tapUrl ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs text-neutral-700">{tapUrl}</span>
+                            <CopyButton value={tapUrl} />
+                          </div>
+                          <div className="mt-1 font-mono text-[11px] text-neutral-500">{c.id}</div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-neutral-500">Set NEXT_PUBLIC_APP_URL to show tap URLs</div>
+                      )}
                     </td>
 
                     <td className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs text-neutral-700">{codeUrl}</span>
-                        <CopyButton value={codeUrl} />
-                      </div>
+                      {codeUrl ? (
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-neutral-700">{codeUrl}</span>
+                          <CopyButton value={codeUrl} />
+                        </div>
+                      ) : (
+                        <div className="text-xs text-neutral-500">Set NEXT_PUBLIC_APP_URL to show code URLs</div>
+                      )}
                     </td>
 
-                    <td className="px-3 py-3 text-neutral-800">{String(c.type)}</td>
+                    <td className="px-3 py-3 text-neutral-800">{c.type}</td>
                     <td className="px-3 py-3 text-neutral-800">{c.isActive ? 'Yes' : 'No'}</td>
                     <td className="px-3 py-3 text-neutral-800">{c.claimedAt ? 'Yes' : 'No'}</td>
                   </tr>

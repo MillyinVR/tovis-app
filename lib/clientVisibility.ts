@@ -1,5 +1,6 @@
 // lib/clientVisibility.ts
 import { prisma } from '@/lib/prisma'
+import { BookingStatus, Prisma } from '@prisma/client'
 
 export type ClientVisibilityReason = 'ACTIVE_BOOKING' | 'PENDING_BOOKING' | 'UPCOMING_ACCEPTED' | 'NONE'
 
@@ -8,12 +9,12 @@ export type ClientVisibilityResult = {
   reason: ClientVisibilityReason
 }
 
-function visibilityOr(now: Date) {
+function visibilityOr(now: Date): Prisma.BookingWhereInput[] {
   return [
-    { status: 'PENDING' as any },
+    { status: BookingStatus.PENDING },
     { startedAt: { not: null }, finishedAt: null },
-    { status: 'ACCEPTED' as any, scheduledFor: { gte: now } },
-  ] as const
+    { status: BookingStatus.ACCEPTED, scheduledFor: { gte: now } },
+  ]
 }
 
 /**
@@ -35,7 +36,7 @@ export async function getProClientVisibility(proId: string, clientId: string): P
     where: {
       clientId,
       professionalId: proId,
-      OR: visibilityOr(now) as any,
+      OR: visibilityOr(now),
     },
     select: {
       status: true,
@@ -51,8 +52,7 @@ export async function getProClientVisibility(proId: string, clientId: string): P
   // Priority: ACTIVE > PENDING > UPCOMING_ACCEPTED
   if (hit.startedAt && !hit.finishedAt) return { canViewClient: true, reason: 'ACTIVE_BOOKING' }
 
-  const status = String(hit.status || '').toUpperCase()
-  if (status === 'PENDING') return { canViewClient: true, reason: 'PENDING_BOOKING' }
+  if (hit.status === BookingStatus.PENDING) return { canViewClient: true, reason: 'PENDING_BOOKING' }
 
   // Remaining allowed case in the OR is ACCEPTED + upcoming
   return { canViewClient: true, reason: 'UPCOMING_ACCEPTED' }
@@ -68,14 +68,14 @@ export async function getVisibleClientIdSetForPro(proId: string): Promise<Set<st
   const rows = await prisma.booking.findMany({
     where: {
       professionalId: proId,
-      OR: visibilityOr(now) as any,
+      OR: visibilityOr(now),
     },
     select: { clientId: true },
     distinct: ['clientId'],
     take: 5000,
   })
 
-  return new Set(rows.map((r) => String(r.clientId)))
+  return new Set(rows.map((r) => r.clientId))
 }
 
 /**

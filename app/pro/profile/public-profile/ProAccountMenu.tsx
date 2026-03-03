@@ -16,27 +16,38 @@ type Props = {
   messagesHref: string
 }
 
-function useOnClickOutside<T extends HTMLElement>(
-  ref: React.RefObject<T | null>,
-  onOutside: () => void,
-) {
+function useOnClickOutside<T extends HTMLElement>(ref: React.RefObject<T | null>, onOutside: () => void) {
   const onOutsideStable = useCallback(onOutside, [onOutside])
 
   useEffect(() => {
-    function onDown(e: MouseEvent | TouchEvent) {
+    const touchOpts: AddEventListenerOptions = { passive: true }
+
+    function shouldIgnore(e: Event) {
       const el = ref.current
-      if (!el) return
-      const target = e.target as Node | null
-      if (target && el.contains(target)) return
+      if (!el) return true
+
+      const t = e.target
+      if (t instanceof Node && el.contains(t)) return true
+
+      return false
+    }
+
+    function onMouseDown(e: MouseEvent) {
+      if (shouldIgnore(e)) return
       onOutsideStable()
     }
 
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('touchstart', onDown, { passive: true })
+    function onTouchStart(e: TouchEvent) {
+      if (shouldIgnore(e)) return
+      onOutsideStable()
+    }
+
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('touchstart', onTouchStart, touchOpts)
 
     return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('touchstart', onDown as any)
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('touchstart', onTouchStart, touchOpts)
     }
   }, [ref, onOutsideStable])
 }
@@ -88,13 +99,10 @@ export default function ProAccountMenu(props: Props) {
   const subtitle = (props.subtitle || '').trim()
 
   // Panel skin (no hex)
-  const panelBase =
-    'absolute right-0 mt-2 w-[min(360px,90vw)] overflow-hidden rounded-[18px] border border-white/10'
+  const panelBase = 'absolute right-0 mt-2 w-[min(360px,90vw)] overflow-hidden rounded-[18px] border border-white/10'
   const panelSkin = 'bg-bgPrimary/70 backdrop-blur'
-  const edgeGlow =
-    'shadow-[0_0_0_1px_hsl(0_0%_100%_/0.06),0_28px_90px_rgba(0,0,0,0.60)]'
-  const panelMotion =
-    'origin-top-right transition duration-200 ease-out will-change-transform will-change-opacity'
+  const edgeGlow = 'shadow-[0_0_0_1px_hsl(0_0%_100%_/0.06),0_28px_90px_rgba(0,0,0,0.60)]'
+  const panelMotion = 'origin-top-right transition duration-200 ease-out will-change-transform will-change-opacity'
 
   return (
     <div ref={wrapRef} className="relative">
@@ -159,9 +167,7 @@ export default function ProAccountMenu(props: Props) {
                   )}
 
                   {subtitle ? (
-                    <div className="mt-0.5 truncate text-[11px] font-extrabold text-textSecondary">
-                      {subtitle}
-                    </div>
+                    <div className="mt-0.5 truncate text-[11px] font-extrabold text-textSecondary">{subtitle}</div>
                   ) : null}
                 </div>
 
@@ -232,9 +238,7 @@ export default function ProAccountMenu(props: Props) {
 
                   <div className="min-w-0 flex-1">
                     <div className="text-toneDanger">Sign out</div>
-                    <div className="mt-0.5 text-[11px] font-extrabold text-textSecondary">
-                      End your session on this device
-                    </div>
+                    <div className="mt-0.5 text-[11px] font-extrabold text-textSecondary">End your session on this device</div>
                   </div>
 
                   <span className="text-textSecondary opacity-70 transition group-hover:opacity-100">›</span>

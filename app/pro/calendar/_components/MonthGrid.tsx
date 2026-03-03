@@ -6,7 +6,7 @@ import { DAY_KEYS } from '../_utils/date'
 import { isBlockedEvent } from '../_utils/calendarMath'
 import { eventChipClassName } from '../_utils/statusStyles'
 import { ymdInTimeZone } from '@/lib/timeZone'
-
+import { WEEKDAY_KEYS_DISPLAY } from '../_utils/date'
 const MIDDAY_MS = 12 * 60 * 60 * 1000
 
 function stableYmdForVisibleDay(d: Date, timeZone: string) {
@@ -84,6 +84,14 @@ export function MonthGrid(props: {
                     Today
                   </div>
                 )}
+              </div>
+              
+              <div className="grid grid-cols-7 border-b border-white/10 bg-bgSecondary">
+                {WEEKDAY_KEYS_DISPLAY.map((k) => (
+                  <div key={k} className="px-3 py-2 text-xs font-extrabold uppercase text-textSecondary">
+                    {k[0].toUpperCase() + k.slice(1)}
+                  </div>
+                ))}
               </div>
 
               <div className="mt-2 grid gap-2">

@@ -12,6 +12,7 @@ export type RateLimitBucket =
   | 'consultation:decision'
   | 'google:proxy'
   | 'messages:send'
+  | 'messages:read' // ✅ ADD
 
 type LimitConfig = {
   tokens: number
@@ -27,6 +28,9 @@ const LIMITS: Record<RateLimitBucket, LimitConfig> = {
   'consultation:decision': { tokens: 8, window: '5 m', prefix: 'rl:consultation:decision' },
   'google:proxy': { tokens: 60, window: '1 m', prefix: 'rl:google:proxy' },
   'messages:send': { tokens: 18, window: '1 m', prefix: 'rl:messages:send' },
+
+  // ✅ ADD (reads happen more often than sends)
+  'messages:read': { tokens: 120, window: '1 m', prefix: 'rl:messages:read' },
 }
 
 const redis = Redis.fromEnv()

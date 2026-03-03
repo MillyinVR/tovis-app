@@ -1,22 +1,23 @@
 // app/(auth)/signup/page.tsx
-
 import Link from 'next/link'
 
-export default function SignupChooserPage({
-  searchParams,
-}: {
-  searchParams?: { ti?: string }
-}) {
-  const ti = searchParams?.ti
+type SearchParams = { ti?: string | string[] }
+
+function firstParam(v: string | string[] | undefined): string | null {
+  if (typeof v === 'string') return v.trim() || null
+  if (Array.isArray(v)) return (v[0] ?? '').trim() || null
+  return null
+}
+
+export default function SignupChooserPage({ searchParams }: { searchParams?: SearchParams }) {
+  const ti = firstParam(searchParams?.ti)
   const qs = ti ? `?ti=${encodeURIComponent(ti)}` : ''
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-10">
       <div className="grid gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-5 tovis-glass-soft">
         <div className="text-lg font-black text-textPrimary">Create your account</div>
-        <div className="text-sm text-textSecondary">
-          Pick what you’re here to do.
-        </div>
+        <div className="text-sm text-textSecondary">Pick what you’re here to do.</div>
 
         <div className="grid gap-2 pt-2">
           <Link

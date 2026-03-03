@@ -1,5 +1,5 @@
 // lib/viewerLocation.ts
-
+import { isRecord } from '@/lib/guards'
 export type ViewerLocation = {
   label: string
   placeId: string | null
@@ -23,9 +23,6 @@ export const VIEWER_RADIUS_MIN_MILES = 5
 export const VIEWER_RADIUS_MAX_MILES = 50
 export const VIEWER_RADIUS_DEFAULT_MILES = 15
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
-}
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null

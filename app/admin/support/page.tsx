@@ -3,28 +3,34 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { Role, SupportTicketStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 async function requireAdmin() {
   const user = await getCurrentUser().catch(() => null)
   if (!user) redirect('/login')
-  if (user.role !== 'ADMIN') redirect('/forbidden')
+  if (user.role !== Role.ADMIN) redirect('/forbidden')
   return user
 }
 
-type SearchParams = Promise<Record<string, string | string[] | undefined>>
+type SearchParams = Record<string, string | string[] | undefined>
 
-function pickStatus(v: unknown) {
-  const s = typeof v === 'string' ? v.toUpperCase() : ''
-  if (s === 'OPEN' || s === 'IN_PROGRESS' || s === 'CLOSED') return s as any
-  return 'OPEN' as any
+function pickStatus(v: unknown): SupportTicketStatus {
+  const raw = Array.isArray(v) ? v[0] : v
+  const s = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
+
+  if (s === SupportTicketStatus.OPEN) return SupportTicketStatus.OPEN
+  if (s === SupportTicketStatus.IN_PROGRESS) return SupportTicketStatus.IN_PROGRESS
+  if (s === SupportTicketStatus.CLOSED) return SupportTicketStatus.CLOSED
+
+  return SupportTicketStatus.OPEN
 }
 
-export default async function AdminSupportPage(props: { searchParams?: SearchParams }) {
+export default async function AdminSupportPage(props: { searchParams?: SearchParams | Promise<SearchParams> }) {
   await requireAdmin()
 
-  const sp = (await props.searchParams) ?? {}
+  const sp = await Promise.resolve(props.searchParams ?? {})
   const status = pickStatus(sp.status)
 
   const tickets = await prisma.supportTicket.findMany({
@@ -42,7 +48,7 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
     },
   })
 
-  function tabHref(s: 'OPEN' | 'IN_PROGRESS' | 'CLOSED') {
+  function tabHref(s: SupportTicketStatus) {
     return `/admin/support?status=${encodeURIComponent(s)}`
   }
 
@@ -58,16 +64,24 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
         <p className="text-[13px] text-textSecondary">Incoming reports from clients and professionals.</p>
 
         <div className="mt-2 flex flex-wrap gap-2">
-          <Link href={tabHref('OPEN')} className={[tabBase, status === 'OPEN' ? tabOn : tabOff].join(' ')}>
+          <Link
+            href={tabHref(SupportTicketStatus.OPEN)}
+            className={[tabBase, status === SupportTicketStatus.OPEN ? tabOn : tabOff].join(' ')}
+          >
             Open
           </Link>
+
           <Link
-            href={tabHref('IN_PROGRESS')}
-            className={[tabBase, status === 'IN_PROGRESS' ? tabOn : tabOff].join(' ')}
+            href={tabHref(SupportTicketStatus.IN_PROGRESS)}
+            className={[tabBase, status === SupportTicketStatus.IN_PROGRESS ? tabOn : tabOff].join(' ')}
           >
             In progress
           </Link>
-          <Link href={tabHref('CLOSED')} className={[tabBase, status === 'CLOSED' ? tabOn : tabOff].join(' ')}>
+
+          <Link
+            href={tabHref(SupportTicketStatus.CLOSED)}
+            className={[tabBase, status === SupportTicketStatus.CLOSED ? tabOn : tabOff].join(' ')}
+          >
             Closed
           </Link>
         </div>

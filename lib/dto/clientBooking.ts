@@ -2,6 +2,7 @@
 import type { Prisma } from '@prisma/client'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { isRecord } from '@/lib/guards'
 
 export type ClientBookingItemDTO = {
   id: string
@@ -79,9 +80,6 @@ export type ClientBookingDTO = {
   consultation: ClientBookingConsultationDTO | null
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
-}
 
 function pickFormattedAddress(snapshot: unknown): string | null {
   if (!isRecord(snapshot)) return null

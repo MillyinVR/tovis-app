@@ -10,20 +10,9 @@ export type CalendarStatus =
   | 'CANCELLED'
   | 'WAITLIST'
   | 'BLOCKED'
-  | string
+  | (string & {}) // allow unknown statuses without turning everything into `string`
 
-export type CalendarEvent = {
-  id: string
-  startsAt: string // ISO string for a UTC instant
-  endsAt: string   // ISO string for a UTC instant
-  title: string
-  clientName: string
-  status: CalendarStatus
-  durationMinutes?: number
-  note?: string | null
-  blockId?: string
-  kind?: string
-}
+export type EntityType = 'booking' | 'block'
 
 export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
 
@@ -44,6 +33,7 @@ export type CalendarStats =
     }
   | null
 
+// ✅ Fix 1: this is what BookingModal + useCalendarData are trying to import
 export type ServiceOption = {
   id: string
   name: string
@@ -68,7 +58,39 @@ export type BookingDetails = {
   timeZone: IanaTimeZone
 }
 
-export type EntityType = 'booking' | 'block'
+/**
+ * ✅ Fix 2: discriminated union for events.
+ * - Only BLOCK events have blockId + note
+ * - BOOKING events never pretend to have blockId
+ */
+export type BookingCalendarEvent = {
+  kind: 'BOOKING'
+  id: string
+  startsAt: string // ISO string for a UTC instant
+  endsAt: string   // ISO string for a UTC instant
+  title: string
+  clientName: string
+  status: CalendarStatus
+  durationMinutes?: number
+  // bookings should not carry block-only fields
+  note?: never
+  blockId?: never
+}
+
+export type BlockCalendarEvent = {
+  kind: 'BLOCK'
+  id: string // UI id (often "block:xyz")
+  blockId: string // real DB id used by API routes
+  startsAt: string
+  endsAt: string
+  title: string
+  clientName: string
+  status: 'BLOCKED' | CalendarStatus
+  durationMinutes?: number
+  note?: string | null
+}
+
+export type CalendarEvent = BookingCalendarEvent | BlockCalendarEvent
 
 export type PendingChange =
   | {

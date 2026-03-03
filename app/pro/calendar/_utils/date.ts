@@ -10,13 +10,11 @@ import {
   getZonedParts,
 } from '@/lib/timeZone'
 
-export const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+export const WEEK_START: 'MON' | 'SUN' = 'MON'
 
-/**
- * ✅ Single source of truth:
- * Legacy calendar used Monday-start weeks. Keep it consistent everywhere.
- */
-const WEEK_START: 'MON' | 'SUN' = 'MON'
+export const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+export const WEEKDAY_KEYS_MON = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+export const WEEKDAY_KEYS_DISPLAY = (WEEK_START === 'MON' ? WEEKDAY_KEYS_MON : DAY_KEYS) as readonly string[]
 
 /**
  * ⚠️ Browser-local helpers (legacy)
@@ -156,9 +154,6 @@ function dowInTimeZone(anchorUtc: Date, timeZone: string): number {
 
 export function startOfWeekAnchorNoonInTimeZone(anchorUtc: Date, timeZone: string) {
   const dow = dowInTimeZone(anchorUtc, timeZone)
-
-  // For Monday-start: diff = (dow + 6) % 7
-  // For Sunday-start: diff = dow
   const diff = WEEK_START === 'MON' ? (dow + 6) % 7 : dow
 
   const p = getZonedParts(anchorUtc, timeZone)

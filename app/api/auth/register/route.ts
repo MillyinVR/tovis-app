@@ -3,10 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { hashPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { BUCKETS } from '@/lib/storageBuckets'
 import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
 import crypto from 'crypto'
 import Twilio from 'twilio'
 import {
+  Prisma,
   type ProfessionType,
   VerificationDocumentType,
   VerificationStatus,
@@ -15,20 +17,23 @@ import {
 export const dynamic = 'force-dynamic'
 
 /* =========================================================
-   Debug (optional) — consider removing in prod
+   Debug (optional) — dev only
 ========================================================= */
-console.log(
-  '[register] DATABASE_URL host =',
-  (() => {
-    const u = process.env.DATABASE_URL
-    if (!u) return '(missing)'
-    try {
-      return new URL(u).host
-    } catch {
-      return '(invalid url)'
-    }
-  })(),
-)
+if (process.env.NODE_ENV !== 'production') {
+  // eslint-disable-next-line no-console
+  console.log(
+    '[register] DATABASE_URL host =',
+    (() => {
+      const u = process.env.DATABASE_URL
+      if (!u) return '(missing)'
+      try {
+        return new URL(u).host
+      } catch {
+        return '(invalid url)'
+      }
+    })(),
+  )
+}
 
 /* =========================================================
    Types
@@ -89,13 +94,21 @@ type RegisterBody = {
   licenseState?: unknown
   licenseNumber?: unknown
 
-  // ✅ Manual fallback (upload ref/url)
+  // ✅ optional at signup now
   licenseDocumentUrl?: unknown
 }
 
 /* =========================================================
    Helpers
 ========================================================= */
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : []
+}
 
 function envOrThrow(name: string) {
   const v = process.env[name]
@@ -135,8 +148,8 @@ function normalizeRole(v: unknown): 'CLIENT' | 'PRO' | null {
   return null
 }
 
-function isLocationPayload(v: any): v is SignupLocation {
-  if (!v || typeof v !== 'object') return false
+function isLocationPayload(v: unknown): v is SignupLocation {
+  if (!isRecord(v)) return false
 
   if (v.kind === 'PRO_SALON') {
     return (
@@ -228,24 +241,27 @@ function looksLikeLicenseDocRef(s: string) {
   return false
 }
 
-/**
- * ✅ Build the create payload for VerificationDocument using REAL enums
- * and fields that exist on your model.
- */
+function validateLicenseDocUrl(input: string): { ok: true; value: string } | { ok: false; error: string } {
+  const s = input.trim()
+  if (!looksLikeLicenseDocRef(s)) return { ok: false, error: 'Invalid license document reference.' }
+
+  const ref = parseSupabaseRef(s)
+  if (ref && ref.bucket !== BUCKETS.mediaPrivate) {
+    return { ok: false, error: 'Invalid license document (must be private upload).' }
+  }
+
+  return { ok: true, value: s }
+}
+
 function createManualLicenseDocData(urlOrRef: string) {
   return {
     type: VerificationDocumentType.LICENSE,
     label: 'License (manual review)',
-    // Your model supports both imageUrl and url; use url to be generic
     url: urlOrRef,
     status: VerificationStatus.PENDING,
   }
 }
 
-/**
- * Sends the verification SMS through Twilio.
- * - Requires: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
- */
 async function sendPhoneVerificationSms(args: { to: string; code: string }) {
   const accountSid = envOrThrow('TWILIO_ACCOUNT_SID')
   const authToken = envOrThrow('TWILIO_AUTH_TOKEN')
@@ -253,18 +269,20 @@ async function sendPhoneVerificationSms(args: { to: string; code: string }) {
 
   const client = Twilio(accountSid, authToken)
   const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
-
   const msg = await client.messages.create({ to: args.to, from, body })
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[phone-verification] twilio sent', { sid: msg.sid, to: args.to, from })
-  } else {
-    console.log('[phone-verification] twilio sent', { sid: msg.sid, to: args.to })
-  }
+  // eslint-disable-next-line no-console
+  console.log(
+    '[phone-verification] twilio sent',
+    process.env.NODE_ENV !== 'production' ? { sid: msg.sid, to: args.to, from } : { sid: msg.sid, to: args.to },
+  )
 }
 
-function isPrismaUniqueError(err: any) {
-  return err?.code === 'P2002' || String(err?.message || '').toLowerCase().includes('unique constraint')
+function isPrismaUniqueError(err: unknown) {
+  if (!isRecord(err)) return false
+  const code = typeof err.code === 'string' ? err.code : ''
+  const msg = typeof err.message === 'string' ? err.message : ''
+  return code === 'P2002' || msg.toLowerCase().includes('unique constraint')
 }
 
 /* =========================================================
@@ -283,7 +301,7 @@ const ALL_PROFESSIONS: ProfessionType[] = [
 ]
 
 function isAnyProfessionType(v: string): v is ProfessionType {
-  return (ALL_PROFESSIONS as string[]).includes(v)
+  return (ALL_PROFESSIONS as readonly string[]).includes(v)
 }
 
 const CA_BBC_LICENSE_REQUIRED: ProfessionType[] = [
@@ -296,7 +314,7 @@ const CA_BBC_LICENSE_REQUIRED: ProfessionType[] = [
 ]
 
 function requiresCaBbcLicense(p: ProfessionType) {
-  return (CA_BBC_LICENSE_REQUIRED as string[]).includes(p)
+  return (CA_BBC_LICENSE_REQUIRED as readonly string[]).includes(p)
 }
 
 /* =========================================================
@@ -304,8 +322,22 @@ function requiresCaBbcLicense(p: ProfessionType) {
 ========================================================= */
 
 type CaVerifyResult =
-  | { ok: true; verified: true; statusCode: string | null; expDate: string | null; raw: any; source: 'CA_DCA_BREEZE' }
-  | { ok: true; verified: false; statusCode: string | null; expDate: string | null; raw: any; source: 'CA_DCA_BREEZE' }
+  | {
+      ok: true
+      verified: true
+      statusCode: string | null
+      expDate: string | null
+      raw: Prisma.InputJsonValue
+      source: 'CA_DCA_BREEZE'
+    }
+  | {
+      ok: true
+      verified: false
+      statusCode: string | null
+      expDate: string | null
+      raw: Prisma.InputJsonValue
+      source: 'CA_DCA_BREEZE'
+    }
   | { ok: false; error: string }
 
 let cachedTypeMap: Record<string, string> | null = null
@@ -323,22 +355,33 @@ async function getCaDcaTypeMap(): Promise<Record<string, string>> {
 
   const url = 'https://iservices.dca.ca.gov/api/search/v1/breezeDetailService/getAllLicenseTypes'
   const res = await fetch(url, { headers: { APP_ID, APP_KEY }, cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
+  const data: unknown = await res.json().catch(() => ({}))
 
   if (!res.ok) {
-    throw new Error(data?.message || data?.error || 'DCA license types lookup failed.')
+    const msg =
+      isRecord(data) && (typeof data.message === 'string' || typeof data.error === 'string')
+        ? String(data.message ?? data.error)
+        : 'DCA license types lookup failed.'
+    throw new Error(msg)
   }
 
-  const rows = Array.isArray(data?.getAllLicenseTypes) ? data.getAllLicenseTypes : []
-  const allTypes: any[] = rows.flatMap((r: any) => (Array.isArray(r?.licenseTypes) ? r.licenseTypes : []))
+  const rows = isRecord(data) ? asArray(data.getAllLicenseTypes) : []
+  const allTypes: unknown[] = rows.flatMap((r) => {
+    if (!isRecord(r)) return []
+    return asArray(r.licenseTypes)
+  })
 
   const pick = (needle: string) => {
+    const need = needle.toUpperCase()
     const hit = allTypes.find((t) => {
-      const long = String(t?.licenseLongName ?? '').toUpperCase()
-      const pub = String(t?.publicNameDesc ?? '').toUpperCase()
-      return long.includes(needle) || pub.includes(needle)
+      if (!isRecord(t)) return false
+      const long = String(t.licenseLongName ?? '').toUpperCase()
+      const pub = String(t.publicNameDesc ?? '').toUpperCase()
+      return long.includes(need) || pub.includes(need)
     })
-    return hit?.clientCode ? String(hit.clientCode) : null
+    if (!hit || !isRecord(hit)) return null
+    const code = hit.clientCode
+    return typeof code === 'string' && code.trim() ? code.trim() : null
   }
 
   const map: Record<string, string> = {
@@ -363,7 +406,10 @@ async function getCaDcaTypeMap(): Promise<Record<string, string>> {
   return map
 }
 
-async function verifyCaBbcLicense(args: { professionType: ProfessionType; licenseNumber: string }): Promise<CaVerifyResult> {
+async function verifyCaBbcLicense(args: {
+  professionType: ProfessionType
+  licenseNumber: string
+}): Promise<CaVerifyResult> {
   try {
     const APP_ID = envOrNull('DCA_SEARCH_APP_ID')
     const APP_KEY = envOrNull('DCA_SEARCH_APP_KEY')
@@ -380,30 +426,46 @@ async function verifyCaBbcLicense(args: { professionType: ProfessionType; licens
     url.searchParams.set('licNumber', args.licenseNumber)
 
     const res = await fetch(url.toString(), { headers: { APP_ID, APP_KEY }, cache: 'no-store' })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return { ok: false, error: data?.message || data?.error || 'License lookup failed.' }
+    const data: unknown = await res.json().catch(() => ({}))
 
-    const detailsRoot = Array.isArray(data?.licenseDetails) ? data.licenseDetails : []
-    const full = detailsRoot?.[0]?.getFullLicenseDetail?.[0] ?? null
-    const lic = full?.getLicenseDetails?.[0] ?? null
+    if (!res.ok) {
+      const msg =
+        isRecord(data) && (typeof data.message === 'string' || typeof data.error === 'string')
+          ? String(data.message ?? data.error)
+          : 'License lookup failed.'
+      return { ok: false, error: msg }
+    }
 
-    const statusCode = lic?.primaryStatusCode ? String(lic.primaryStatusCode) : null
-    const expDate = lic?.expDate ? String(lic.expDate) : null
-    const returnedNumber = lic?.licNumber ? String(lic.licNumber).toUpperCase() : null
+    const detailsRoot = isRecord(data) ? asArray(data.licenseDetails) : []
+    const first = detailsRoot.length ? detailsRoot[0] : null
+    const full = isRecord(first) ? asArray(first.getFullLicenseDetail)[0] : null
+    const lic = isRecord(full) ? asArray(full.getLicenseDetails)[0] : null
 
-    const numberMatches = returnedNumber && returnedNumber === args.licenseNumber
+    const statusCode =
+      isRecord(lic) && lic.primaryStatusCode != null ? String(lic.primaryStatusCode) : null
+    const expDate =
+      isRecord(lic) && lic.expDate != null ? String(lic.expDate) : null
+    const returnedNumber =
+      isRecord(lic) && lic.licNumber != null ? String(lic.licNumber).toUpperCase() : null
+
+    const numberMatches = Boolean(returnedNumber && returnedNumber === args.licenseNumber)
     const isCurrent = statusCode ? statusCode.toUpperCase().includes('CURRENT') : false
+
+    // Prisma wants InputJsonValue for create/update inputs.
+    // fetch().json() is JSON-safe; stringify/parse guarantees no Date/functions/undefined.
+    const rawJson: Prisma.InputJsonValue = JSON.parse(JSON.stringify(data ?? {}))
 
     return {
       ok: true,
       verified: Boolean(numberMatches && isCurrent),
       statusCode,
       expDate,
-      raw: data,
+      raw: rawJson,
       source: 'CA_DCA_BREEZE',
     }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'Verification error.' }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Verification error.'
+    return { ok: false, error: msg }
   }
 }
 
@@ -424,16 +486,14 @@ export async function POST(request: Request) {
     const phone = cleanPhone(body.phone)
 
     const tapIntentId = pickString(body.tapIntentId)
-    const signupLocation = isLocationPayload(body.signupLocation) ? (body.signupLocation as SignupLocation) : null
+    const signupLocation = isLocationPayload(body.signupLocation) ? body.signupLocation : null
 
     if (!email || !password || !role) {
       return jsonFail(400, 'Missing required fields.', { code: 'MISSING_FIELDS' })
     }
-
     if (!firstName || !lastName) {
       return jsonFail(400, 'First and last name are required.', { code: 'MISSING_NAME' })
     }
-
     if (!phone) {
       return jsonFail(400, 'Phone number is required.', { code: 'PHONE_REQUIRED' })
     }
@@ -460,7 +520,7 @@ export async function POST(request: Request) {
     if (role === 'PRO') {
       if (!professionRaw) return jsonFail(400, 'Profession is required for pros.', { code: 'PROFESSION_REQUIRED' })
       if (!isAnyProfessionType(professionRaw)) return jsonFail(400, 'Invalid profession type.', { code: 'PROFESSION_INVALID' })
-      profession = professionRaw as ProfessionType
+      profession = professionRaw
     }
 
     // business name
@@ -486,8 +546,8 @@ export async function POST(request: Request) {
       mobileRadiusMiles = Math.round(miles)
     }
 
-    // license verification + manual fallback
-    let verificationStatus: 'PENDING' | 'APPROVED' = 'PENDING'
+    // license verification + manual follow-up (NEW FLOW)
+    let verificationStatus: VerificationStatus = VerificationStatus.PENDING
     let licenseVerified = false
     let licenseStateToStore: string | null = null
     let licenseNumberToStore: string | null = null
@@ -495,8 +555,13 @@ export async function POST(request: Request) {
     let licenseVerifiedAtToStore: Date | null = null
     let licenseVerifiedSourceToStore: string | null = null
     let licenseStatusCodeToStore: string | null = null
-    let licenseRawJsonToStore: any = null
+
+    // ✅ KEY FIX: never null, only set when we actually have a JSON payload
+    let licenseRawJsonToStore: Prisma.InputJsonValue | undefined = undefined
+
     let manualLicenseDocUrl: string | null = null
+    let needsManualLicenseUpload = false
+    let manualLicensePendingReview = false
 
     if (role === 'PRO' && profession && requiresCaBbcLicense(profession)) {
       const licenseState = pickUpper(body.licenseState)
@@ -509,47 +574,44 @@ export async function POST(request: Request) {
         return jsonFail(400, 'Only California licenses are supported right now.', { code: 'LICENSE_STATE_UNSUPPORTED' })
       }
 
-      // always store these
       licenseStateToStore = 'CA'
       licenseNumberToStore = licenseNumber
 
       const v = await verifyCaBbcLicense({ professionType: profession, licenseNumber })
 
       if (v.ok && v.verified) {
-        verificationStatus = 'APPROVED'
+        verificationStatus = VerificationStatus.APPROVED
         licenseVerified = true
         licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
         licenseVerifiedAtToStore = new Date()
         licenseVerifiedSourceToStore = v.source
         licenseStatusCodeToStore = v.statusCode ?? null
-        licenseRawJsonToStore = v.raw ?? null
+        licenseRawJsonToStore = v.raw
       } else if (v.ok && !v.verified) {
-        // DCA responded but not current/no match -> hard fail
         return jsonFail(400, 'License could not be verified as CURRENT.', {
           code: 'LICENSE_NOT_VERIFIED',
           statusCode: v.statusCode ?? null,
         })
       } else {
-        // DCA unavailable -> allow manual fallback
-        const docUrl = pickString(body.licenseDocumentUrl)
-
-        if (!docUrl || !looksLikeLicenseDocRef(docUrl)) {
-          return jsonFail(
-            400,
-            'License verification is unavailable. Please upload a photo of your license for admin review.',
-            { code: 'LICENSE_MANUAL_REQUIRED' },
-          )
+        // ✅ DCA unavailable -> allow signup; require post-signup upload.
+        const docUrlRaw = pickString(body.licenseDocumentUrl)
+        if (docUrlRaw?.trim()) {
+          const checked = validateLicenseDocUrl(docUrlRaw)
+          if (!checked.ok) return jsonFail(400, checked.error, { code: 'LICENSE_DOC_INVALID' })
+          manualLicenseDocUrl = checked.value
+          manualLicensePendingReview = true
+        } else {
+          needsManualLicenseUpload = true
         }
 
-        const ref = parseSupabaseRef(docUrl)
-        if (ref && ref.bucket !== 'media-private') {
-          return jsonFail(400, 'Invalid license document (must be private upload).', { code: 'LICENSE_DOC_INVALID' })
-        }
-
-        verificationStatus = 'PENDING'
+        verificationStatus = VerificationStatus.PENDING
         licenseVerified = false
-        manualLicenseDocUrl = docUrl
-        licenseRawJsonToStore = { note: 'Manual fallback: DCA unavailable', error: v.error ?? null }
+        licenseRawJsonToStore = {
+          note: 'DCA unavailable at signup; manual follow-up required',
+          error: v.error ?? null,
+          needsManualUpload: needsManualLicenseUpload,
+          docProvidedAtSignup: Boolean(manualLicenseDocUrl),
+        } satisfies Prisma.InputJsonValue
       }
     }
 
@@ -621,7 +683,9 @@ export async function POST(request: Request) {
                     licenseVerifiedAt: licenseVerifiedAtToStore,
                     licenseVerifiedSource: licenseVerifiedSourceToStore,
                     licenseStatusCode: licenseStatusCodeToStore,
-                    licenseRawJson: licenseRawJsonToStore,
+
+                    // ✅ IMPORTANT: omit when undefined (prevents exactOptionalPropertyTypes pain)
+                    ...(licenseRawJsonToStore !== undefined ? { licenseRawJson: licenseRawJsonToStore } : {}),
 
                     mobileBasePostalCode: signupLocation.kind === 'PRO_MOBILE' ? signupLocation.postalCode : null,
                     mobileRadiusMiles: signupLocation.kind === 'PRO_MOBILE' ? mobileRadiusMiles : null,
@@ -668,9 +732,7 @@ export async function POST(request: Request) {
                     },
 
                     verificationDocs: manualLicenseDocUrl
-                      ? {
-                          create: createManualLicenseDocData(manualLicenseDocUrl),
-                        }
+                      ? { create: createManualLicenseDocData(manualLicenseDocUrl) }
                       : undefined,
                   },
                 }
@@ -686,7 +748,7 @@ export async function POST(request: Request) {
 
       const code = generateSmsCode()
       const codeHash = sha256(code)
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 10) // 10 min
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 10)
 
       await tx.phoneVerification.create({
         data: { userId: user.id, phone, codeHash, expiresAt },
@@ -696,10 +758,11 @@ export async function POST(request: Request) {
       return { user, code }
     })
 
-    // send SMS (best effort)
+    // SMS (best effort)
     try {
       await sendPhoneVerificationSms({ to: user.phone!, code })
     } catch (smsErr) {
+      // eslint-disable-next-line no-console
       console.error('[phone-verification] failed to send', smsErr)
     }
 
@@ -711,6 +774,10 @@ export async function POST(request: Request) {
         user: { id: user.id, email: user.email, role: user.role },
         nextUrl: consumed?.nextUrl ?? null,
         requiresPhoneVerification: true,
+
+        // ✅ safe flags for the client UX
+        needsManualLicenseUpload: role === 'PRO' ? needsManualLicenseUpload : false,
+        manualLicensePendingReview: role === 'PRO' ? manualLicensePendingReview : false,
       },
       201,
     )
@@ -734,23 +801,20 @@ export async function POST(request: Request) {
     }
 
     return res
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (isPrismaUniqueError(err)) {
       return jsonFail(400, 'Email or phone already in use.', { code: 'DUPLICATE_ACCOUNT' })
     }
 
-    const msg = String(err?.message || '')
+    const msg = err instanceof Error ? err.message : ''
+
     if (msg.includes('Missing env var: TWILIO_')) {
+      // eslint-disable-next-line no-console
       console.error('[phone-verification] twilio env missing', err)
       return jsonFail(500, 'SMS provider is not configured.', { code: 'SMS_NOT_CONFIGURED' })
     }
 
-    // guard
-    if (msg.includes('DCA API is not configured') || msg.includes('Could not resolve DCA licType codes')) {
-      console.error('[license-verification] dca config error', err)
-      return jsonFail(500, 'License verification is not configured.', { code: 'LICENSE_VERIFY_CONFIG' })
-    }
-
+    // eslint-disable-next-line no-console
     console.error('Register error', err)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }

@@ -4,7 +4,11 @@ function isApplePlatform() {
   if (typeof navigator === 'undefined') return false
   const ua = navigator.userAgent || ''
   const isIOS = /iPad|iPhone|iPod/i.test(ua)
-  const isIPadOS = /Macintosh/i.test(ua) && (navigator as any).maxTouchPoints > 1
+
+  // iPadOS often reports as Macintosh but has touch points.
+  const maxTouchPoints = typeof navigator.maxTouchPoints === 'number' ? navigator.maxTouchPoints : 0
+  const isIPadOS = /Macintosh/i.test(ua) && maxTouchPoints > 1
+
   return isIOS || isIPadOS
 }
 
@@ -21,22 +25,33 @@ export type MapsLocationInput = {
  * - Great for "view this place"
  * - Not guaranteed to start navigation automatically
  */
-export function mapsHrefFromLocation(input: MapsLocationInput) {
+export function mapsHrefFromLocation(input: MapsLocationInput): string | null {
   const placeId = (input.placeId || '').trim()
   if (placeId) {
+    // Google Place IDs are Google-only.
     return `https://www.google.com/maps/search/?api=1&query_place_id=${encodeURIComponent(placeId)}`
   }
 
   const lat = typeof input.lat === 'number' ? input.lat : null
   const lng = typeof input.lng === 'number' ? input.lng : null
   if (lat != null && lng != null) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`
+    const q = `${lat},${lng}`
+
+    if (isApplePlatform()) {
+      // Apple Maps search
+      return `https://maps.apple.com/?q=${encodeURIComponent(q)}`
+    }
+
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
   }
 
   const addr = (input.formattedAddress || '').trim()
   const label = (input.name || '').trim()
   const q = label && addr ? `${label} ${addr}` : addr || label
   if (q) {
+    if (isApplePlatform()) {
+      return `https://maps.apple.com/?q=${encodeURIComponent(q)}`
+    }
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
   }
 
@@ -48,7 +63,7 @@ export function mapsHrefFromLocation(input: MapsLocationInput) {
  * - iOS/iPadOS: Apple Maps (feels native in Safari)
  * - Else: Google Maps directions
  */
-export function directionsHrefFromLocation(input: MapsLocationInput) {
+export function directionsHrefFromLocation(input: MapsLocationInput): string | null {
   const lat = typeof input.lat === 'number' ? input.lat : null
   const lng = typeof input.lng === 'number' ? input.lng : null
   const placeId = (input.placeId || '').trim()

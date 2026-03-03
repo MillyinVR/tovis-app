@@ -1,5 +1,4 @@
 // app/api/messages/threads/route.ts
-
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
@@ -12,9 +11,7 @@ export async function GET() {
     if (!user) return jsonFail(401, 'Unauthorized.')
 
     const threads = await prisma.messageThread.findMany({
-      where: {
-        participants: { some: { userId: user.id } },
-      },
+      where: { participants: { some: { userId: user.id } } },
       orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
       take: 50,
       select: {
@@ -38,9 +35,10 @@ export async function GET() {
       },
     })
 
-    return jsonOk({ ok: true, threads })
-  } catch (e: any) {
-    console.error('GET /api/messages/threads', e)
-    return jsonFail(500, e?.message || 'Internal error')
+    return jsonOk({ threads })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Internal error'
+    console.error('GET /api/messages/threads', msg)
+    return jsonFail(500, msg)
   }
 }

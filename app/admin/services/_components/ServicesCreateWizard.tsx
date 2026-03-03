@@ -20,8 +20,35 @@ function vibeTick(intensity: 'soft' | 'med' = 'soft') {
   }
 }
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function readString(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function readNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function readErrorMessage(v: unknown): string | null {
+  if (!isRecord(v)) return null
+  const e = v.error
+  return typeof e === 'string' && e.trim() ? e : null
+}
+
+function isOkTrue(v: unknown): v is Record<string, unknown> {
+  return isRecord(v) && v.ok === true
+}
+
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    const data: unknown = await res.json()
+    return data
+  } catch {
+    return null
+  }
 }
 
 function withCacheBuster(url: string, cb?: number | null) {
@@ -93,6 +120,40 @@ function isIntLike(s: string) {
 function isImageFile(file: File | null) {
   if (!file) return true
   return file.type.startsWith('image/')
+}
+
+function errorMessageFromUnknown(e: unknown): string {
+  if (e instanceof Error && e.message.trim()) return e.message
+  if (isRecord(e) && typeof e.message === 'string' && e.message.trim()) return e.message
+  return 'Something went wrong.'
+}
+
+type CreateServiceOk = { ok: true; id: string }
+function parseCreateServiceOk(v: unknown): CreateServiceOk | null {
+  if (!isOkTrue(v)) return null
+  const id = readString(v.id)
+  if (!id) return null
+  return { ok: true, id }
+}
+
+type UploadInitOk = {
+  ok: true
+  bucket: string
+  path: string
+  token: string
+  publicUrl: string
+  cacheBuster?: number
+}
+
+function parseUploadInitOk(v: unknown): UploadInitOk | null {
+  if (!isOkTrue(v)) return null
+  const bucket = readString(v.bucket)
+  const path = readString(v.path)
+  const token = readString(v.token)
+  const publicUrl = readString(v.publicUrl)
+  const cacheBuster = readNumber(v.cacheBuster) ?? undefined
+  if (!bucket || !path || !token || !publicUrl) return null
+  return { ok: true, bucket, path, token, publicUrl, cacheBuster }
 }
 
 export default function ServicesCreateWizard(props: { categories: CategoryDTO[] }) {
@@ -174,6 +235,8 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
     })
   }, [orderedOptions, catSearch, byId])
 
+  const selectedCategory = useMemo(() => (categoryId ? byId.get(categoryId) ?? null : null), [categoryId, byId])
+
   const btnBase =
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-extrabold transition active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed'
 
@@ -197,17 +260,19 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
       headers: { Accept: 'application/json' },
     })
 
-    const data = await safeJson(res)
-    if (!res.ok || data?.ok !== true || !data?.id) {
-      setErr(data?.error || `Create failed (${res.status}).`)
+    const raw = await safeJson(res)
+    const ok = res.ok ? parseCreateServiceOk(raw) : null
+
+    if (!ok) {
+      const msg = readErrorMessage(raw) ?? `Create failed (${res.status}).`
+      setErr(msg)
       return null
     }
 
-    return { id: String(data.id) }
+    return { id: ok.id }
   }
 
   async function uploadDefaultImageToSupabase(serviceId: string, file: File) {
-    // 1) init signed upload (your /api/admin/uploads route)
     const initRes = await fetch('/api/admin/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -219,28 +284,20 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
       }),
     })
 
-    const init = await safeJson(initRes)
-    if (!initRes.ok || init?.ok !== true) {
-      throw new Error(init?.error || `Upload init failed (${initRes.status}).`)
+    const initRaw = await safeJson(initRes)
+    const init = initRes.ok ? parseUploadInitOk(initRaw) : null
+    if (!init) {
+      const msg = readErrorMessage(initRaw) ?? `Upload init failed (${initRes.status}).`
+      throw new Error(msg)
     }
 
-    const bucket = String(init.bucket || '')
-    const path = String(init.path || '')
-    const token = String(init.token || '')
-    const publicUrl = String(init.publicUrl || '')
-    const cacheBuster = typeof init.cacheBuster === 'number' ? init.cacheBuster : null
-
-    if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
-    if (!publicUrl) throw new Error('Upload init missing publicUrl.')
-
-    // 2) upload file to signed URL (Supabase)
-    const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
+    const { error: upErr } = await supabaseBrowser.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file, {
       contentType: file.type,
       upsert: true,
     })
     if (upErr) throw new Error(upErr.message || 'Upload failed.')
 
-    return withCacheBuster(publicUrl, cacheBuster)
+    return withCacheBuster(init.publicUrl, init.cacheBuster ?? null)
   }
 
   async function attachDefaultImage(serviceId: string, finalUrl: string) {
@@ -254,9 +311,10 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
       headers: { Accept: 'application/json' },
     })
 
-    const data = await safeJson(res)
-    if (!res.ok || data?.ok !== true) {
-      throw new Error(data?.error || `Failed to attach image (${res.status}).`)
+    const raw = await safeJson(res)
+    if (!res.ok || !isOkTrue(raw)) {
+      const msg = readErrorMessage(raw) ?? `Failed to attach image (${res.status}).`
+      throw new Error(msg)
     }
   }
 
@@ -287,8 +345,8 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
       setImageFile(null)
 
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Something went wrong.')
+    } catch (e: unknown) {
+      setErr(errorMessageFromUnknown(e))
     } finally {
       setBusy(false)
     }
@@ -343,9 +401,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
             </Select>
 
             <div className="flex items-center justify-between gap-2 pt-1">
-              <div className="text-[11px] text-textSecondary">
-                Tip: pick the most specific category (like “Hair → Color”).
-              </div>
+              <div className="text-[11px] text-textSecondary">Tip: pick the most specific category (like “Hair → Color”).</div>
 
               <button
                 type="button"
@@ -369,7 +425,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
                 <div className="text-[11px] text-textSecondary">
                   Category:{' '}
                   <span className="font-extrabold text-textPrimary">
-                    {categoryId && byId.get(categoryId) ? fmtCatLabel(byId.get(categoryId)!, byId) : '—'}
+                    {selectedCategory ? fmtCatLabel(selectedCategory, byId) : '—'}
                   </span>
                 </div>
               </div>
@@ -458,7 +514,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
                   accept="image/*"
                   className="hidden"
                   onChange={(e) => {
-                    const f = e.target.files?.[0] || null
+                    const f = e.target.files?.[0] ?? null
                     setImageFile(f)
                     vibeTick('soft')
                     e.currentTarget.value = ''
@@ -487,9 +543,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
                 <div className="text-[11px] text-textSecondary">No image selected.</div>
               )}
 
-              {!imageOk ? (
-                <div className="text-[11px] font-extrabold text-toneDanger">That file isn’t an image.</div>
-              ) : null}
+              {!imageOk ? <div className="text-[11px] font-extrabold text-toneDanger">That file isn’t an image.</div> : null}
             </div>
 
             {err ? <div className="text-sm text-toneDanger">{err}</div> : null}

@@ -1,22 +1,11 @@
 // app/api/pro/onboarding/location/route.ts
 import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type Body = {
-  mode?: unknown // 'SALON' | 'SUITE' | 'MOBILE'
-  placeId?: unknown
-  locationName?: unknown
-  postalCode?: unknown
-  radiusMiles?: unknown
-  sessionToken?: unknown
-  makePrimary?: unknown
-}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -43,25 +32,30 @@ function pickBool(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null
 }
 
-type AddressComponent = {
-  types?: unknown
-  long_name?: unknown
-  short_name?: unknown
-}
-
 function componentMap(addressComponents: unknown) {
   const out: Record<string, string> = {}
-  const arr = Array.isArray(addressComponents) ? (addressComponents as AddressComponent[]) : []
-  for (const c of arr) {
-    const types = Array.isArray(c?.types) ? c.types.filter((t): t is string => typeof t === 'string') : []
-    const longName = typeof c?.long_name === 'string' ? c.long_name : ''
-    const shortName = typeof c?.short_name === 'string' ? c.short_name : ''
-    for (const t of types) out[t] = shortName || longName
+
+  if (!Array.isArray(addressComponents)) return out
+
+  for (const item of addressComponents) {
+    if (!isRecord(item)) continue
+
+    const typesRaw = item.types
+    const types =
+      Array.isArray(typesRaw) ? typesRaw.filter((t): t is string => typeof t === 'string') : []
+
+    const longName = typeof item.long_name === 'string' ? item.long_name : ''
+    const shortName = typeof item.short_name === 'string' ? item.short_name : ''
+    const value = (shortName || longName).trim()
+    if (!value) continue
+
+    for (const t of types) out[t] = value
   }
+
   return out
 }
 
-function defaultWorkingHours() {
+function defaultWorkingHours(): Prisma.JsonObject {
   return {
     mon: { enabled: true, start: '09:00', end: '17:00' },
     tue: { enabled: true, start: '09:00', end: '17:00' },
@@ -98,7 +92,8 @@ async function googlePlaceDetails(placeId: string, sessionToken?: string | null)
   if (status !== 'OK') throw new Error(String(data.error_message ?? `Google status: ${status}`))
 
   const r = isRecord(data.result) ? data.result : {}
-  const loc = isRecord(r.geometry) && isRecord(r.geometry.location) ? r.geometry.location : {}
+  const geom = isRecord(r.geometry) ? r.geometry : {}
+  const loc = isRecord(geom.location) ? geom.location : {}
 
   const lat = typeof loc.lat === 'number' ? loc.lat : null
   const lng = typeof loc.lng === 'number' ? loc.lng : null
@@ -136,7 +131,7 @@ async function googleTimeZone(lat: number, lng: number) {
 
   const status = String(data.status ?? '')
   if (status !== 'OK') {
-    throw new Error(String(data.errorMessage ?? data.error_message ?? `Google status: ${status}`))
+    throw new Error(String((data as Record<string, unknown>).errorMessage ?? data.error_message ?? `Google status: ${status}`))
   }
 
   const tz = typeof data.timeZoneId === 'string' ? data.timeZoneId : null
@@ -164,8 +159,7 @@ async function googleGeocodePostal(postalCode: string) {
   const status = String(data.status ?? '')
   if (status !== 'OK') throw new Error(String(data.error_message ?? `Google status: ${status}`))
 
-  const first =
-    Array.isArray(data.results) && isRecord(data.results[0]) ? (data.results[0] as Record<string, unknown>) : null
+  const first = Array.isArray(data.results) && isRecord(data.results[0]) ? data.results[0] : null
   if (!first) throw new Error('No results found.')
 
   const geom = isRecord(first.geometry) ? first.geometry : {}
@@ -186,29 +180,33 @@ async function googleGeocodePostal(postalCode: string) {
   }
 }
 
+function kmToMilesInt(km: number) {
+  return Math.max(1, Math.min(200, Math.round(km * 0.621371)))
+}
+
 export async function POST(req: Request) {
   try {
     const gate = await requirePro()
     if (!gate.ok) return gate.res
     const proId = gate.proId
 
-    const raw: unknown = await req.json().catch(() => ({}))
-    const body: Body = isRecord(raw) ? (raw as Body) : {}
+    const raw = await req.json().catch(() => ({}))
+    const body = isRecord(raw) ? raw : {}
 
-    const mode = normalizeMode(body.mode)
+    const mode = normalizeMode(body['mode'])
     if (!mode) return jsonFail(400, 'Missing or invalid mode.', { code: 'INVALID_MODE' })
 
-    const makePrimary = pickBool(body.makePrimary) ?? true
+    const makePrimary = pickBool(body['makePrimary']) ?? true
     const workingHours = defaultWorkingHours()
 
     // Prisma-validated type for `type`
     type LocationType = Prisma.ProfessionalLocationCreateInput['type']
 
     if (mode === 'SALON' || mode === 'SUITE') {
-      const placeId = pickString(body.placeId)
+      const placeId = pickString(body['placeId'])
       if (!placeId) return jsonFail(400, 'Missing placeId.', { code: 'MISSING_PLACE' })
 
-      const sessionToken = pickString(body.sessionToken)
+      const sessionToken = pickString(body['sessionToken']) || null
       const loc = await googlePlaceDetails(placeId, sessionToken)
 
       if (loc.lat == null || loc.lng == null) {
@@ -217,8 +215,7 @@ export async function POST(req: Request) {
 
       const tz = await googleTimeZone(loc.lat, loc.lng)
 
-      const nameOverride = pickString(body.locationName)
-
+      const nameOverride = pickString(body['locationName'])
       const locationType: LocationType = (mode === 'SALON' ? 'SALON' : 'SUITE') satisfies LocationType
 
       const created = await prisma.$transaction(async (tx) => {
@@ -229,11 +226,11 @@ export async function POST(req: Request) {
           })
         }
 
-        const created = await tx.professionalLocation.create({
+        const createdLoc = await tx.professionalLocation.create({
           data: {
             professionalId: proId,
             type: locationType,
-            name: nameOverride || loc.name || null,
+            name: (nameOverride || loc.name || '').trim() || null,
             isPrimary: makePrimary,
             isBookable: true,
 
@@ -253,6 +250,7 @@ export async function POST(req: Request) {
           select: { id: true, type: true, timeZone: true, isPrimary: true },
         })
 
+        // Keep pro-level timezone aligned to latest “real” location timezone
         await tx.professionalProfile.update({
           where: { id: proId },
           data: {
@@ -263,20 +261,29 @@ export async function POST(req: Request) {
           select: { id: true },
         })
 
-        return created
+        return createdLoc
       })
 
       return jsonOk({ location: created })
     }
 
     // MOBILE
-    const postalCode = pickString(body.postalCode)
-    const radiusMiles = pickInt(body.radiusMiles)
-
+    const postalCode = pickString(body['postalCode'])
     if (!postalCode) return jsonFail(400, 'Missing postalCode.', { code: 'MISSING_POSTAL' })
 
-    if (!radiusMiles || radiusMiles < 1 || radiusMiles > 200) {
-      return jsonFail(400, 'Invalid radiusMiles.', { code: 'INVALID_RADIUS' })
+    // Support both radiusMiles (old) and radiusKm (new UI)
+    const radiusMilesRaw = pickInt(body['radiusMiles'])
+    const radiusKmRaw = pickInt(body['radiusKm'])
+
+    const radiusMiles =
+      radiusMilesRaw && radiusMilesRaw >= 1 && radiusMilesRaw <= 200
+        ? radiusMilesRaw
+        : radiusKmRaw && radiusKmRaw >= 1 && radiusKmRaw <= 400
+          ? kmToMilesInt(radiusKmRaw)
+          : null
+
+    if (!radiusMiles) {
+      return jsonFail(400, 'Invalid radius. Provide radiusMiles (1–200) or radiusKm (1–400).', { code: 'INVALID_RADIUS' })
     }
 
     const geo = await googleGeocodePostal(postalCode)
@@ -287,6 +294,7 @@ export async function POST(req: Request) {
 
     const tz = await googleTimeZone(geo.lat, geo.lng)
 
+    const nameOverride = pickString(body['locationName'])
     const mobileType: LocationType = 'MOBILE_BASE' satisfies LocationType
 
     const created = await prisma.$transaction(async (tx) => {
@@ -297,11 +305,11 @@ export async function POST(req: Request) {
         })
       }
 
-      const created = await tx.professionalLocation.create({
+      const createdLoc = await tx.professionalLocation.create({
         data: {
           professionalId: proId,
           type: mobileType,
-          name: 'Mobile base',
+          name: (nameOverride || 'Mobile base').trim() || 'Mobile base',
           isPrimary: makePrimary,
           isBookable: true,
 
@@ -329,7 +337,7 @@ export async function POST(req: Request) {
         select: { id: true },
       })
 
-      return created
+      return createdLoc
     })
 
     return jsonOk({ location: created })

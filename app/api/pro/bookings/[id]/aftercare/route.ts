@@ -1,17 +1,17 @@
 // app/api/pro/bookings/[id]/aftercare/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
 import crypto from 'node:crypto'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
-import {
-  BookingStatus,
-  AftercareRebookMode,
-  ReminderType,
-  ClientNotificationType,
-  SessionStep,
-  MediaPhase,
-} from '@prisma/client'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import {
+  AftercareRebookMode,
+  BookingStatus,
+  ClientNotificationType,
+  ReminderType,
+  SessionStep,
+  Prisma,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +37,6 @@ type Body = {
 
   recommendedProducts?: unknown
 
-  // ✅ only notify client when true
   sendToClient?: unknown
 
   // optional debug only
@@ -50,10 +49,6 @@ const MAX_PRODUCTS = 10
 const PRODUCT_NAME_MAX = 80
 const PRODUCT_NOTE_MAX = 140
 const PRODUCT_URL_MAX = 2048
-
-function jsonError(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status })
-}
 
 function trimmedString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null
@@ -103,13 +98,17 @@ function newPublicToken() {
   return crypto.randomBytes(16).toString('hex')
 }
 
-function normalizeRecommendedProducts(input: unknown) {
-  if (input == null) return [] as Array<{ name: string; url: string; note: string | null }>
+type NormalizedProduct = { name: string; url: string; note: string | null }
+type ProductsParse =
+  | { ok: true; value: NormalizedProduct[] }
+  | { ok: false; error: string }
 
-  if (!Array.isArray(input)) return { error: 'recommendedProducts must be an array.' as const }
-  if (input.length > MAX_PRODUCTS) return { error: `recommendedProducts max is ${MAX_PRODUCTS}.` as const }
+function normalizeRecommendedProducts(input: unknown): ProductsParse {
+  if (input == null) return { ok: true, value: [] }
+  if (!Array.isArray(input)) return { ok: false, error: 'recommendedProducts must be an array.' }
+  if (input.length > MAX_PRODUCTS) return { ok: false, error: `recommendedProducts max is ${MAX_PRODUCTS}.` }
 
-  const out: Array<{ name: string; url: string; note: string | null }> = []
+  const out: NormalizedProduct[] = []
 
   for (const row of input as RecommendedProductIn[]) {
     const name = typeof row?.name === 'string' ? row.name.trim().slice(0, PRODUCT_NAME_MAX) : ''
@@ -119,19 +118,17 @@ function normalizeRecommendedProducts(input: unknown) {
 
     if (!name && !url && !note) continue
 
-    if (!name) return { error: 'Each recommended product needs a name.' as const }
-    if (!url) return { error: 'Each recommended product needs a link.' as const }
-    if (!isValidHttpUrl(url)) return { error: 'Product link must be a valid http/https URL.' as const }
+    if (!name) return { ok: false, error: 'Each recommended product needs a name.' }
+    if (!url) return { ok: false, error: 'Each recommended product needs a link.' }
+    if (!isValidHttpUrl(url)) return { ok: false, error: 'Product link must be a valid http/https URL.' }
 
     out.push({ name, url, note })
   }
 
-  return out
+  return { ok: true, value: out }
 }
 
-/**
- * Avoid DST weirdness by shifting in milliseconds.
- */
+/** Avoid DST weirdness by shifting in milliseconds. */
 function addDaysByMs(base: Date, days: number) {
   const ms = base.getTime() + days * 24 * 60 * 60 * 1000
   const d = new Date(ms)
@@ -146,7 +143,6 @@ function makeClientNotifDedupeKey(bookingId: string) {
   return `client_aftercare:${bookingId}`
 }
 
-
 function resolveAftercareTimeZone(args: { bookingLocationTimeZone?: unknown; professionalTimeZone?: unknown }) {
   const bookingTz = typeof args.bookingLocationTimeZone === 'string' ? args.bookingLocationTimeZone.trim() : ''
   if (bookingTz && isValidIanaTimeZone(bookingTz)) return bookingTz
@@ -158,7 +154,6 @@ function resolveAftercareTimeZone(args: { bookingLocationTimeZone?: unknown; pro
 }
 
 function formatDateTimeInTimeZone(date: Date, timeZone: string) {
-  // timeZone passed here should already be resolved; do NOT re-resolve it (that caused confusion before).
   const tz = timeZone && isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
   return new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
@@ -183,7 +178,7 @@ function computeRebookReminderDueAt(args: {
 }
 
 /**
- * ✅ Wrap-up eligibility:
+ * Wrap-up eligibility:
  * allow aftercare while in FINISH_REVIEW (wrap-up start), AFTER_PHOTOS (wrap-up), or DONE.
  */
 function sessionStepEligible(step: SessionStep | null | undefined) {
@@ -192,13 +187,13 @@ function sessionStepEligible(step: SessionStep | null | undefined) {
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const proId = auth.professionalId
+
     const { id } = await props.params
     const bookingId = trimmedString(id)
-    if (!bookingId) return jsonError('Missing booking id.', 400)
-
-    const user = await getCurrentUser().catch(() => null)
-    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!proId) return jsonError('Not authorized.', 401)
+    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -235,46 +230,47 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       },
     })
 
-    if (!booking) return jsonError('Booking not found.', 404)
-    if (booking.professionalId !== proId) return jsonError('Forbidden.', 403)
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
 
-    return NextResponse.json({ ok: true, booking }, { status: 200 })
+    return jsonOk({ booking }, 200)
   } catch (e) {
     console.error('GET /api/pro/bookings/[id]/aftercare error', e)
-    return jsonError('Internal server error.', 500)
+    return jsonFail(500, 'Internal server error.')
   }
 }
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const proId = auth.professionalId
+
     const { id } = await props.params
     const bookingId = trimmedString(id)
-    if (!bookingId) return jsonError('Missing booking id.', 400)
+    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const user = await getCurrentUser().catch(() => null)
-    const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-    if (!proId) return jsonError('Not authorized.', 401)
-
-    const body = (await request.json().catch(() => ({}))) as Body
+    const body = (await req.json().catch(() => ({}))) as Body
 
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, NOTES_MAX) : ''
     const sendToClient = toBool(body.sendToClient)
 
-    const normalizedProducts = normalizeRecommendedProducts(body.recommendedProducts)
-    if ((normalizedProducts as any)?.error) return jsonError((normalizedProducts as any).error, 400)
+    const productsParsed = normalizeRecommendedProducts(body.recommendedProducts)
+    if (!productsParsed.ok) return jsonFail(400, productsParsed.error)
+    const products = productsParsed.value
 
     const requestedMode: AftercareRebookMode = isAftercareRebookMode(body.rebookMode)
       ? body.rebookMode
       : AftercareRebookMode.NONE
 
     const rebookedForParsed = parseOptionalISODate(body.rebookedFor)
-    if (rebookedForParsed === 'invalid') return jsonError('Invalid rebookedFor date.', 400)
+    if (rebookedForParsed === 'invalid') return jsonFail(400, 'Invalid rebookedFor date.')
 
     const windowStartParsed = parseOptionalISODate(body.rebookWindowStart)
-    if (windowStartParsed === 'invalid') return jsonError('Invalid rebookWindowStart date.', 400)
+    if (windowStartParsed === 'invalid') return jsonFail(400, 'Invalid rebookWindowStart date.')
 
     const windowEndParsed = parseOptionalISODate(body.rebookWindowEnd)
-    if (windowEndParsed === 'invalid') return jsonError('Invalid rebookWindowEnd date.', 400)
+    if (windowEndParsed === 'invalid') return jsonFail(400, 'Invalid rebookWindowEnd date.')
 
     const createRebookReminder = toBool(body.createRebookReminder)
     const createProductReminder = toBool(body.createProductReminder)
@@ -300,16 +296,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       },
     })
 
-    if (!booking) return jsonError('Booking not found.', 404)
-    if (booking.professionalId !== proId) return jsonError('Forbidden.', 403)
+    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
 
-    if (booking.status === BookingStatus.CANCELLED) return jsonError('This booking is cancelled.', 409)
+    if (booking.status === BookingStatus.CANCELLED) return jsonFail(409, 'This booking is cancelled.')
     if (booking.status === BookingStatus.PENDING) {
-      return jsonError('Aftercare can’t be posted until the booking is confirmed.', 409)
+      return jsonFail(409, 'Aftercare can’t be posted until the booking is confirmed.')
     }
 
     if (!sessionStepEligible(booking.sessionStep)) {
-      return jsonError(`Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`, 409)
+      return jsonFail(409, `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`)
     }
 
     const aftercareTimeZone = resolveAftercareTimeZone({
@@ -317,7 +313,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       professionalTimeZone: booking.professional?.timeZone,
     })
 
-    // debug only: client tz doesn't override truth
     const clientTz = typeof body.timeZone === 'string' ? body.timeZone.trim() : ''
     const clientTimeZoneReceived = clientTz && isValidIanaTimeZone(clientTz) ? clientTz : null
 
@@ -329,13 +324,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     if (requestedMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
       rebookedFor = rebookedForParsed as Date | null
-      if (!rebookedFor) return jsonError('BOOKED_NEXT_APPOINTMENT requires rebookedFor.', 400)
+      if (!rebookedFor) return jsonFail(400, 'BOOKED_NEXT_APPOINTMENT requires rebookedFor.')
     } else if (requestedMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
       if (!windowStartParsed || !windowEndParsed) {
-        return jsonError('RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.', 400)
+        return jsonFail(400, 'RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.')
       }
       if (windowEndParsed <= windowStartParsed) {
-        return jsonError('rebookWindowEnd must be after rebookWindowStart.', 400)
+        return jsonFail(400, 'rebookWindowEnd must be after rebookWindowStart.')
       }
       rebookWindowStart = windowStartParsed
       rebookWindowEnd = windowEndParsed
@@ -343,8 +338,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       normalizedMode = AftercareRebookMode.NONE
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // Ensure aftercare has a stable public token.
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
 
       const aftercare = await tx.aftercareSummary.upsert({
@@ -376,10 +370,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         },
       })
 
-      // Replace recommendations (simple + predictable)
       await tx.productRecommendation.deleteMany({ where: { aftercareSummaryId: aftercare.id } })
 
-      const products = normalizedProducts as Array<{ name: string; url: string; note: string | null }>
       if (products.length) {
         await tx.productRecommendation.createMany({
           data: products.map((p) => ({
@@ -392,55 +384,41 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         })
       }
 
-      // ✅ Notify client ONLY when explicitly sending
       let clientNotified = false
       if (sendToClient) {
         const notifKey = makeClientNotifDedupeKey(booking.id)
         const notifTitle = `Aftercare: ${booking.service?.name ?? 'Your appointment'}`
         const bodyPreview = notes.trim() ? notes.trim().slice(0, 240) : null
 
-        const existingNotif = await tx.clientNotification.findFirst({
+        await tx.clientNotification.upsert({
           where: { dedupeKey: notifKey },
-          select: { id: true },
+          create: {
+            dedupeKey: notifKey,
+            clientId: booking.clientId,
+            type: ClientNotificationType.AFTERCARE,
+            title: notifTitle,
+            body: bodyPreview,
+            bookingId: booking.id,
+            aftercareId: aftercare.id,
+            readAt: null,
+          },
+          update: {
+            type: ClientNotificationType.AFTERCARE,
+            title: notifTitle,
+            body: bodyPreview,
+            bookingId: booking.id,
+            aftercareId: aftercare.id,
+            readAt: null,
+          },
         })
-
-        if (!existingNotif) {
-          await tx.clientNotification.create({
-            data: {
-              dedupeKey: notifKey,
-              clientId: booking.clientId,
-              type: ClientNotificationType.AFTERCARE,
-              title: notifTitle,
-              body: bodyPreview,
-              bookingId: booking.id,
-              aftercareId: aftercare.id,
-              readAt: null,
-            },
-          })
-        } else {
-          await tx.clientNotification.update({
-            where: { id: existingNotif.id },
-            data: {
-              type: ClientNotificationType.AFTERCARE,
-              title: notifTitle,
-              body: bodyPreview,
-              bookingId: booking.id,
-              aftercareId: aftercare.id,
-              readAt: null,
-            },
-          })
-        }
 
         clientNotified = true
       }
 
-      // ✅ Reminders
       let remindersTouched = 0
-
       const clientName = `${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
       const serviceName = (booking.service?.name ?? 'service').trim()
 
-      // Rebook reminder (only meaningful if we have a base date)
       const rebookKey = makeReminderDedupeKey(booking.id, 'REBOOK')
       const rebookDue = computeRebookReminderDueAt({
         mode: normalizedMode,
@@ -449,7 +427,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         daysBefore: rebookReminderDaysBefore,
       })
 
-      // If mode is NONE, we should not keep a rebook reminder around.
       if (createRebookReminder && rebookDue && normalizedMode !== AftercareRebookMode.NONE) {
         const title = clientName ? `Rebook: ${clientName}` : 'Rebook reminder'
 
@@ -489,7 +466,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         remindersTouched += del.count
       }
 
-      // Product follow-up reminder
       const productKey = makeReminderDedupeKey(booking.id, 'PRODUCT_FOLLOWUP')
       if (createProductReminder) {
         const base = booking.finishedAt ?? booking.scheduledFor ?? new Date()
@@ -528,15 +504,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         remindersTouched += del.count
       }
 
-      // ✅ FINALIZE BOOKING when sending to client (idempotent + consistent)
       let bookingFinished = false
-      let bookingNow: { status: BookingStatus; sessionStep: SessionStep | null; finishedAt: Date | null } | null = null
+      let bookingNow:
+        | { status: BookingStatus; sessionStep: SessionStep | null; finishedAt: Date | null }
+        | null = null
 
       if (sendToClient) {
         const now = new Date()
-
-        // Always enforce DONE/COMPLETED/finishedAt when sending.
-        // This is the "footer truth" that prevents /api/pro/session from seeing it as ACTIVE.
         bookingNow = await tx.booking.update({
           where: { id: booking.id },
           data: {
@@ -546,16 +520,14 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
           },
           select: { status: true, sessionStep: true, finishedAt: true },
         })
-
         bookingFinished = true
       }
 
       return { aftercare, remindersTouched, clientNotified, bookingFinished, bookingNow }
     })
 
-    return NextResponse.json(
+    return jsonOk(
       {
-        ok: true,
         aftercareId: result.aftercare.id,
         publicToken: result.aftercare.publicToken,
         remindersTouched: result.remindersTouched,
@@ -569,15 +541,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         timeZoneUsed: aftercareTimeZone,
         clientTimeZoneReceived,
 
-        // ✅ new fields for the UI
         bookingFinished: result.bookingFinished,
-        booking: result.bookingNow ? { ...result.bookingNow, finishedAt: result.bookingNow.finishedAt?.toISOString() ?? null } : null,
+        booking: result.bookingNow
+          ? { ...result.bookingNow, finishedAt: result.bookingNow.finishedAt?.toISOString() ?? null }
+          : null,
         redirectTo: result.bookingFinished ? '/pro/calendar' : null,
       },
-      { status: 200 },
+      200,
     )
   } catch (e) {
     console.error('POST /api/pro/bookings/[id]/aftercare error', e)
-    return jsonError('Internal server error.', 500)
+    return jsonFail(500, 'Internal server error.')
   }
 }

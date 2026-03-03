@@ -157,7 +157,7 @@ function parseSummaryResponse(raw: unknown): AvailabilitySummaryResponse | null 
 
   const stepMinutes = pickNumber(raw.stepMinutes)
   const leadTimeMinutes = pickNumber(raw.leadTimeMinutes)
-  const adjacencyBufferMinutes = pickNumber(raw.adjacencyBufferMinutes)
+  const adjacencyBufferMinutes = pickNumber(raw.adjacencyBufferMinutes) ?? pickNumber(raw.locationBufferMinutes)
   const maxDaysAhead = pickNumber(raw.maxDaysAhead)
   const durationMinutes = pickNumber(raw.durationMinutes)
 

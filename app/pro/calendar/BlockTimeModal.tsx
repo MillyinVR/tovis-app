@@ -2,16 +2,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
-
-const SNAP_MINUTES = 15
-
-function snapMinutes(mins: number) {
-  return Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES
-}
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
+import { safeJson } from './_utils/http'
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
+}
+
+function snapToStep(mins: number, stepMinutes: number) {
+  const step = clamp(Math.trunc(stepMinutes || 15), 5, 60)
+  return Math.round(mins / step) * step
 }
 
 function toDateInputValueFromParts(parts: { year: number; month: number; day: number }) {
@@ -37,56 +37,61 @@ function parseHHMM(hhmm: string) {
   }
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 }
 
-export type BlockRow = { id: string; startsAt: string; endsAt: string; note: string | null }
+function getString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+function errorFrom(data: unknown, fallback: string) {
+  if (!isRecord(data)) return fallback
+  return getString(data.error) ?? getString(data.message) ?? fallback
+}
+
+export type BlockRow = { id: string; startsAt: string; endsAt: string; note: string | null; locationId?: string | null }
 
 export default function BlockTimeModal(props: {
   open: boolean
   onClose: () => void
   initialStart: Date // UTC instant user clicked
-  timeZone: string // pro IANA timezone (may be empty/invalid until setup)
+  timeZone: string // pro/location IANA timezone (may be empty/invalid until setup)
+
+  // ✅ location context
+  locationId: string | null
+  locationLabel?: string | null
+
+  // ✅ calendar step minutes (prefer location.stepMinutes)
+  stepMinutes?: number
+
   onCreated: (block: BlockRow) => void
 }) {
-  const { open, onClose, initialStart, timeZone, onCreated } = props
+  const { open, onClose, initialStart, timeZone, onCreated, locationId, locationLabel, stepMinutes } = props
 
   // ✅ Always resolve to a valid IANA TZ. Never fall back to LA.
   const tz = useMemo(() => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), [timeZone])
 
+  const step = useMemo(() => {
+    const n = Number(stepMinutes ?? 15)
+    return Number.isFinite(n) ? clamp(Math.trunc(n), 5, 60) : 15
+  }, [stepMinutes])
+
+  // If locationId is null, we can only create a GLOBAL block.
+  const [blockAllLocations, setBlockAllLocations] = useState<boolean>(locationId ? false : true)
+
   // Build initial inputs: clicked instant rendered into the pro timezone
   const init = useMemo(() => {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      hourCycle: 'h23',
-    }).formatToParts(initialStart)
-
-    const map: Record<string, string> = {}
-    for (const p of parts) map[p.type] = p.value
-
-    const year = Number(map.year)
-    const month = Number(map.month)
-    const day = Number(map.day)
-
-    const hourRaw = Number(map.hour)
-    const minuteRaw = Number(map.minute)
-
-    const snapped = snapMinutes(hourRaw * 60 + minuteRaw)
+    const p = getZonedParts(initialStart, tz)
+    const snapped = snapToStep(p.hour * 60 + p.minute, step)
     const hour = clamp(Math.floor(snapped / 60), 0, 23)
     const minute = clamp(snapped % 60, 0, 59)
 
     return {
-      date: toDateInputValueFromParts({ year, month, day }),
+      date: toDateInputValueFromParts({ year: p.year, month: p.month, day: p.day }),
       time: toTimeInputValueFromParts({ hour, minute }),
     }
-  }, [initialStart, tz])
+  }, [initialStart, tz, step])
 
   const [date, setDate] = useState<string>(init.date)
   const [time, setTime] = useState<string>(init.time)
@@ -104,7 +109,8 @@ export default function BlockTimeModal(props: {
     setTime(init.time)
     setDurationMinutes(60)
     setNote('')
-  }, [open, init.date, init.time])
+    setBlockAllLocations(locationId ? false : true)
+  }, [open, init.date, init.time, locationId])
 
   function close() {
     if (saving) return
@@ -122,7 +128,10 @@ export default function BlockTimeModal(props: {
       if (!yyyy || !mm || !dd) throw new Error('Pick a valid date.')
 
       const t = parseHHMM(time)
-      const dur = clamp(snapMinutes(Number(durationMinutes || 60)), 15, 12 * 60)
+
+      const durRaw = Number(durationMinutes || 60)
+      const durSnapped = snapToStep(durRaw, step)
+      const dur = clamp(durSnapped, step, 12 * 60)
 
       // ✅ wall-clock in pro TZ -> UTC instant
       const startUtc = zonedTimeToUtc({
@@ -140,26 +149,42 @@ export default function BlockTimeModal(props: {
       const endUtc = new Date(startUtc.getTime() + dur * 60_000)
       if (endUtc.getTime() <= startUtc.getTime()) throw new Error('End time must be after start time.')
 
+      // If user chose location-specific but we don't have one, refuse (trustworthy behavior).
+      if (!blockAllLocations && !locationId) {
+        throw new Error('Select a location first, or choose “Block all locations”.')
+      }
+
+      const payload = {
+        startsAt: startUtc.toISOString(),
+        endsAt: endUtc.toISOString(),
+        note: note.trim() ? note.trim() : null,
+        locationId: blockAllLocations ? null : locationId,
+      }
+
       const res = await fetch('/api/pro/calendar/blocked', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          startsAt: startUtc.toISOString(),
-          endsAt: endUtc.toISOString(),
-          note: note.trim() ? note.trim() : null,
-        }),
+        body: JSON.stringify(payload),
       })
 
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to create block.')
+      const data: unknown = await safeJson(res)
+      if (!res.ok) throw new Error(errorFrom(data, 'Failed to create block.'))
 
-      const block = data?.block as BlockRow
-      if (!block?.id) throw new Error('Block created but response was missing data.')
+      if (!isRecord(data) || !isRecord(data.block)) throw new Error('Block created but response was missing data.')
 
-      onCreated(block)
+      const b = data.block
+      const id = getString(b.id)
+      const startsAtOut = getString(b.startsAt)
+      const endsAtOut = getString(b.endsAt)
+      const noteOut = getString(b.note)
+      const locOut = (getString(b.locationId) ?? null) as string | null
+
+      if (!id || !startsAtOut || !endsAtOut) throw new Error('Block created but response was missing data.')
+
+      onCreated({ id, startsAt: startsAtOut, endsAt: endsAtOut, note: noteOut ?? null, locationId: locOut })
       close()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to create block.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create block.')
     } finally {
       setSaving(false)
     }
@@ -190,8 +215,31 @@ export default function BlockTimeModal(props: {
         <div className="p-4">
           {error && <div className="mb-3 text-xs font-semibold text-toneDanger">{error}</div>}
 
-          <div className="mb-3 text-xs text-textSecondary">
-            Timezone: <span className="font-black text-textPrimary">{tz}</span>
+          <div className="mb-3 rounded-2xl border border-white/10 bg-bgSecondary/30 p-3 text-xs text-textSecondary">
+            <div>
+              Location:{' '}
+              <span className="font-black text-textPrimary">{locationLabel || locationId || 'All locations'}</span>
+            </div>
+            <div className="mt-1">
+              TZ: <span className="font-black text-textPrimary">{tz}</span> • Step:{' '}
+              <span className="font-black text-textPrimary">{step} min</span>
+            </div>
+
+            {locationId ? (
+              <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-textPrimary">
+                <input
+                  type="checkbox"
+                  checked={blockAllLocations}
+                  onChange={(e) => setBlockAllLocations(e.target.checked)}
+                  disabled={saving}
+                />
+                Block all locations
+              </label>
+            ) : (
+              <div className="mt-2 text-xs font-semibold text-textSecondary">
+                No location selected — this block will apply to all locations.
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -201,6 +249,7 @@ export default function BlockTimeModal(props: {
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
+                disabled={saving}
                 className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary"
               />
             </div>
@@ -209,9 +258,10 @@ export default function BlockTimeModal(props: {
               <div className="mb-1 text-xs text-textSecondary">Start time</div>
               <input
                 type="time"
-                step={SNAP_MINUTES * 60}
+                step={step * 60}
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
+                disabled={saving}
                 className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary"
               />
             </div>
@@ -221,11 +271,12 @@ export default function BlockTimeModal(props: {
             <div className="mb-1 text-xs text-textSecondary">Duration (minutes)</div>
             <input
               type="number"
-              step={15}
-              min={15}
+              step={step}
+              min={step}
               max={720}
               value={durationMinutes}
               onChange={(e) => setDurationMinutes(Number(e.target.value))}
+              disabled={saving}
               className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary"
             />
           </div>
@@ -236,6 +287,7 @@ export default function BlockTimeModal(props: {
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
+              disabled={saving}
               placeholder="Lunch, dentist, school pickup, etc."
               className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary/70"
             />

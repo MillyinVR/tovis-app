@@ -28,12 +28,44 @@ type Initial = {
   offerings: { id: string; serviceId: string; name: string; basePrice: string }[]
 }
 
+type DaysState = Pick<
+  Initial['settings'],
+  'disableMon' | 'disableTue' | 'disableWed' | 'disableThu' | 'disableFri' | 'disableSat' | 'disableSun'
+>
+
+type SettingsPatch = Partial<
+  Pick<Initial['settings'], 'enabled' | 'discountsEnabled' | 'windowSameDayPct' | 'window24hPct' | 'minPrice'> &
+    DaysState
+>
+
+type RulePatch = Partial<Pick<Initial['settings']['serviceRules'][number], 'enabled' | 'minPrice'>>
+
 function isMoney(v: string) {
   return /^\d+(\.\d{1,2})?$/.test(v.trim())
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function apiErrorFrom(v: unknown): string | null {
+  if (!isRecord(v)) return null
+  if (v.ok !== false) return null
+  return typeof v.error === 'string' && v.error.trim() ? v.error : null
+}
+
+function messageFromUnknown(e: unknown): string {
+  if (e instanceof Error && e.message) return e.message
+  if (typeof e === 'string' && e.trim()) return e
+  return 'Something went wrong'
+}
+
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
 }
 
 function clampPct(n: number, min: number, max: number) {
@@ -153,6 +185,53 @@ function seedDatetimeLocalNowPlusMinutes(timeZone: string, plusMinutes: number) 
   return toDatetimeLocalFromIso(shifted.toISOString(), tz)
 }
 
+function isBlock(v: unknown): v is Block {
+  if (!isRecord(v)) return false
+  if (typeof v.id !== 'string' || !v.id.trim()) return false
+  if (typeof v.startAt !== 'string' || !v.startAt.trim()) return false
+  if (typeof v.endAt !== 'string' || !v.endAt.trim()) return false
+  const r = v.reason
+  if (!(r === null || typeof r === 'string')) return false
+  return true
+}
+
+// jsonOk/jsonFail contract
+function unwrapBlockFromApi(payload: unknown): Block | null {
+  if (!isRecord(payload)) return null
+  if (payload.ok !== true) return null
+  const maybeBlock = payload.block
+  return isBlock(maybeBlock) ? maybeBlock : null
+}
+
+const dayDefs = [
+  { key: 'disableMon', label: 'Mon' },
+  { key: 'disableTue', label: 'Tue' },
+  { key: 'disableWed', label: 'Wed' },
+  { key: 'disableThu', label: 'Thu' },
+  { key: 'disableFri', label: 'Fri' },
+  { key: 'disableSat', label: 'Sat' },
+  { key: 'disableSun', label: 'Sun' },
+] satisfies ReadonlyArray<{ key: keyof DaysState; label: string }>
+
+function dayPatch(key: keyof DaysState, value: boolean): SettingsPatch {
+  switch (key) {
+    case 'disableMon':
+      return { disableMon: value }
+    case 'disableTue':
+      return { disableTue: value }
+    case 'disableWed':
+      return { disableWed: value }
+    case 'disableThu':
+      return { disableThu: value }
+    case 'disableFri':
+      return { disableFri: value }
+    case 'disableSat':
+      return { disableSat: value }
+    case 'disableSun':
+      return { disableSun: value }
+  }
+}
+
 export default function LastMinuteSettingsClient({ initial }: { initial: Initial }) {
   const router = useRouter()
 
@@ -176,7 +255,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   const [w24, setW24] = useState(String(initial.settings.window24hPct))
   const [minPrice, setMinPrice] = useState(initial.settings.minPrice ?? '')
 
-  const [days, setDays] = useState({
+  const [days, setDays] = useState<DaysState>({
     disableMon: initial.settings.disableMon,
     disableTue: initial.settings.disableTue,
     disableWed: initial.settings.disableWed,
@@ -208,7 +287,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     return Array.from(m.values())
   }, [initial.offerings])
 
-  async function saveSettings(patch: any) {
+  async function saveSettings(patch: SettingsPatch) {
     setBusy(true)
     setErr(null)
     try {
@@ -218,16 +297,16 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
         body: JSON.stringify(patch),
       })
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Save failed (${res.status})`)
+      if (!res.ok) throw new Error(apiErrorFrom(data) ?? `Save failed (${res.status})`)
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Save failed')
+    } catch (e) {
+      setErr(messageFromUnknown(e))
     } finally {
       setBusy(false)
     }
   }
 
-  async function saveRule(serviceId: string, patch: any) {
+  async function saveRule(serviceId: string, patch: RulePatch) {
     setBusy(true)
     setErr(null)
     try {
@@ -237,10 +316,10 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
         body: JSON.stringify({ serviceId, ...patch }),
       })
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Save failed (${res.status})`)
+      if (!res.ok) throw new Error(apiErrorFrom(data) ?? `Save failed (${res.status})`)
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Save failed')
+    } catch (e) {
+      setErr(messageFromUnknown(e))
     } finally {
       setBusy(false)
     }
@@ -266,9 +345,11 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
       })
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Add block failed (${res.status})`)
+      if (!res.ok) throw new Error(apiErrorFrom(data) ?? `Add block failed (${res.status})`)
 
-      const newBlock = (data?.block ?? data) as Block
+      const newBlock = unwrapBlockFromApi(data)
+      if (!newBlock) throw new Error('Unexpected response while creating block.')
+
       setBlocks((prev) => [...prev, newBlock].sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt)))
       setBlockReason('')
 
@@ -277,8 +358,8 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
       setBlockEnd(seedDatetimeLocalNowPlusMinutes(timeZone, 120))
 
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Add block failed')
+    } catch (e) {
+      setErr(messageFromUnknown(e))
     } finally {
       setBusy(false)
     }
@@ -290,11 +371,11 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     try {
       const res = await fetch(`/api/pro/last-minute/blocks?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Remove failed (${res.status})`)
+      if (!res.ok) throw new Error(apiErrorFrom(data) ?? `Remove failed (${res.status})`)
       setBlocks((prev) => prev.filter((b) => b.id !== id))
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Remove failed')
+    } catch (e) {
+      setErr(messageFromUnknown(e))
     } finally {
       setBusy(false)
     }
@@ -419,18 +500,8 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
         <div className="mt-4">
           <div className={`${hint} mb-2`}>Disable last-minute on days</div>
           <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ['disableMon', 'Mon'],
-                ['disableTue', 'Tue'],
-                ['disableWed', 'Wed'],
-                ['disableThu', 'Thu'],
-                ['disableFri', 'Fri'],
-                ['disableSat', 'Sat'],
-                ['disableSun', 'Sun'],
-              ] as const
-            ).map(([key, dayLabel]) => {
-              const on = (days as any)[key] as boolean
+            {dayDefs.map(({ key, label: dayLabel }) => {
+              const on = days[key]
               const classes = on
                 ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
                 : 'border-white/10 bg-bgPrimary text-textPrimary'
@@ -440,9 +511,10 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
                   type="button"
                   disabled={busy || !enabled}
                   onClick={() => {
-                    const next = { ...days, [key]: !on }
-                    setDays(next)
-                    void saveSettings({ [key]: !on })
+                    const nextValue = !on
+                    const nextDays: DaysState = { ...days, [key]: nextValue }
+                    setDays(nextDays)
+                    void saveSettings(dayPatch(key, nextValue))
                   }}
                   className={[
                     'rounded-full border px-3 py-2 text-[12px] font-black transition',

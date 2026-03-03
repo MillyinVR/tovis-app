@@ -42,6 +42,21 @@ function headerLabelFor(view: ViewMode, anchorUtc: Date, tz: string) {
   return formatMonthRangeInTimeZone(anchorUtc, tz)
 }
 
+function labelForLocation(l: {
+  id: string
+  type?: string | null
+  name?: string | null
+  formattedAddress?: string | null
+}) {
+  const t = String(l.type || '').toUpperCase()
+  const base =
+    (l.name && l.name.trim()) ||
+    (t === 'MOBILE_BASE' ? 'Mobile base' : t === 'SUITE' ? 'Suite' : t === 'SALON' ? 'Salon' : 'Location')
+
+  const addr = l.formattedAddress && l.formattedAddress.trim() ? ` — ${l.formattedAddress.trim()}` : ''
+  return `${base}${addr}`
+}
+
 export default function ProCalendarPage() {
   const [view, setView] = useState<ViewMode>('week')
 
@@ -99,6 +114,8 @@ export default function ProCalendarPage() {
 
   const headerLabel = useMemo(() => headerLabelFor(view, currentDate, timeZone), [view, currentDate, timeZone])
 
+  const hasLocations = Boolean(cal.locationsLoaded && Array.isArray(cal.scopedLocations) && cal.scopedLocations.length > 0)
+
   return (
     <main className="mx-auto max-w-275 px-4 pb-10 pt-6 font-sans text-textPrimary md:pt-10">
       <CalendarHeader />
@@ -114,6 +131,54 @@ export default function ProCalendarPage() {
         onToggleAutoAccept={cal.toggleAutoAccept}
         onOpenManagement={cal.openManagement}
       />
+
+      {/* ✅ Location selection (bookings + blocks are location-scoped in Prisma) */}
+      {cal.locationsLoaded && (
+        <section className="mb-4">
+          <div className="tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-4 md:px-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-[12px] font-black text-textSecondary">Calendar location</div>
+                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                  Clients are limited to working hours. Pros can schedule outside hours when needed.
+                </div>
+              </div>
+
+              {hasLocations ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={cal.activeLocationId ?? ''}
+                    onChange={(e) => cal.setActiveLocationId(e.target.value || null)}
+                    className="rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2 text-[13px] font-bold text-textPrimary outline-none"
+                    aria-label="Select calendar location"
+                  >
+                    {cal.scopedLocations.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {labelForLocation(l)}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="text-[12px] font-semibold text-textSecondary">
+                    TZ: <span className="font-black text-textPrimary">{timeZone}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[12px] font-semibold text-toneWarn">
+                  No bookable locations yet. Add a location to use the calendar.
+                </div>
+              )}
+            </div>
+
+            {/* Extra trust signal: show the resolved label if we have it */}
+            {cal.activeLocationLabel ? (
+              <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+                Viewing: <span className="font-black text-textPrimary">{cal.activeLocationLabel}</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      )}
 
       {cal.showHoursForm && (
         <section className="mb-4">
@@ -213,13 +278,20 @@ export default function ProCalendarPage() {
         timeZone={timeZone}
         services={cal.services}
         onCreated={() => cal.reload()}
-      />
+        locationId={cal.activeLocationId ?? ''}
+        locationType={cal.activeLocationType}
+        locationLabel={cal.activeLocationLabel}
+        stepMinutes={cal.activeLocation?.stepMinutes ?? undefined}
+      />  
 
       <BlockTimeModal
         open={cal.blockCreateOpen}
         onClose={() => cal.setBlockCreateOpen(false)}
         initialStart={cal.blockCreateInitialStart}
         timeZone={timeZone}
+        locationId={cal.activeLocationId}
+        locationLabel={cal.activeLocationLabel}
+        stepMinutes={cal.activeLocation?.stepMinutes ?? undefined}
         onCreated={() => cal.reload()}
       />
 

@@ -54,38 +54,15 @@ type Props = {
   enableServiceImageUpload?: boolean
 }
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
-}
-
-function pickString(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
-}
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
-function pickImage(o: Offering) {
-  const src = (o.customImageUrl || o.serviceDefaultImageUrl || o.defaultImageUrl || '').trim()
-  return src || null
-}
-
-function imageLabel(o: Offering) {
-  if (o.customImageUrl) return 'Custom'
-  if (o.serviceDefaultImageUrl || o.defaultImageUrl) return 'Default'
-  return 'None'
-}
-
-function upstreamFlags(o: Offering) {
-  // Normalize the two naming schemes once.
-  const serviceFlag = o.isServiceActive ?? o.serviceIsActive
-  const categoryFlag = o.isCategoryActive ?? o.categoryIsActive
-
-  const serviceOk = serviceFlag !== false // default to true if undefined
-  const categoryOk = categoryFlag !== false // default to true if undefined
-
-  return { serviceOk, categoryOk, upstreamOk: serviceOk && categoryOk }
+type OfferingPatch = {
+  description?: string | null
+  customImageUrl?: string | null
+  offersInSalon?: boolean
+  offersMobile?: boolean
+  salonPriceStartingAt?: string | null
+  salonDurationMinutes?: number | null
+  mobilePriceStartingAt?: string | null
+  mobileDurationMinutes?: number | null
 }
 
 type EligibleAddOn = {
@@ -113,6 +90,68 @@ type AttachedAddOn = {
   }
 }
 
+type AddOnSaveItem = {
+  addOnServiceId: string
+  isActive: boolean
+  isRecommended: boolean
+  sortOrder: number
+  locationType: 'SALON' | 'MOBILE' | null
+  priceOverride: string | null
+  durationOverrideMinutes: number | null
+}
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ')
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function isOkTrue(v: unknown): v is Record<string, unknown> & { ok: true } {
+  return isRecord(v) && v.ok === true
+}
+
+function readErrorMessage(v: unknown): string | null {
+  if (!isRecord(v)) return null
+  const e = v.error
+  return typeof e === 'string' && e.trim() ? e : null
+}
+
+function pickString(v: unknown) {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+function pickImage(o: Offering) {
+  const src = (o.customImageUrl || o.serviceDefaultImageUrl || o.defaultImageUrl || '').trim()
+  return src || null
+}
+
+function imageLabel(o: Offering) {
+  if (o.customImageUrl) return 'Custom'
+  if (o.serviceDefaultImageUrl || o.defaultImageUrl) return 'Default'
+  return 'None'
+}
+
+function upstreamFlags(o: Offering) {
+  // Normalize the two naming schemes once.
+  const serviceFlag = o.isServiceActive ?? o.serviceIsActive
+  const categoryFlag = o.isCategoryActive ?? o.categoryIsActive
+
+  const serviceOk = serviceFlag !== false // default to true if undefined
+  const categoryOk = categoryFlag !== false // default to true if undefined
+
+  return { serviceOk, categoryOk, upstreamOk: serviceOk && categoryOk }
+}
+
 function groupKey(v: string | null) {
   const s = (v || '').trim()
   return s || 'Add-ons'
@@ -124,6 +163,31 @@ function formatMinutes(min: number) {
   const h = Math.floor(min / 60)
   const m = min % 60
   return m ? `${h}h ${m}m` : `${h}h`
+}
+
+function errorMessageFromUnknown(e: unknown): string {
+  if (e instanceof Error && e.message.trim()) return e.message
+  if (isRecord(e) && typeof e.message === 'string' && e.message.trim()) return e.message
+  return 'Something went wrong.'
+}
+
+type UploadInitOk = {
+  bucket: string
+  path: string
+  token: string
+  publicUrl: string
+  cacheBuster: number | null
+}
+
+function parseUploadInit(v: unknown): UploadInitOk | null {
+  if (!isOkTrue(v)) return null
+  const bucket = pickString(v.bucket)
+  const path = pickString(v.path)
+  const token = pickString(v.token)
+  const publicUrl = pickString(v.publicUrl)
+  const cacheBuster = typeof v.cacheBuster === 'number' ? v.cacheBuster : null
+  if (!bucket || !path || !token || !publicUrl) return null
+  return { bucket, path, token, publicUrl, cacheBuster }
 }
 
 export default function OfferingManager({
@@ -155,7 +219,7 @@ export default function OfferingManager({
     setErrorById((m) => ({ ...m, [id]: null }))
   }
 
-  async function saveOffering(offeringId: string, patch: any) {
+  async function saveOffering(offeringId: string, patch: OfferingPatch) {
     setBusyId(offeringId)
     clearMessages(offeringId)
 
@@ -167,8 +231,8 @@ export default function OfferingManager({
       })
 
       const data = await safeJson(res)
-      if (!res.ok) {
-        setError(offeringId, data?.error || `Save failed (${res.status}).`)
+      if (!res.ok || !isOkTrue(data)) {
+        setError(offeringId, readErrorMessage(data) ?? `Save failed (${res.status}).`)
         return
       }
 
@@ -190,8 +254,8 @@ export default function OfferingManager({
       const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
 
-      if (!res.ok) {
-        setError(offeringId, data?.error || `Remove failed (${res.status}).`)
+      if (!res.ok || !isOkTrue(data)) {
+        setError(offeringId, readErrorMessage(data) ?? `Remove failed (${res.status}).`)
         return
       }
 
@@ -220,29 +284,22 @@ export default function OfferingManager({
         }),
       })
 
-      const init = await safeJson(initRes)
-      if (!initRes.ok) throw new Error(init?.error || `Upload init failed (${initRes.status}).`)
+      const initRaw = await safeJson(initRes)
+      const init = initRes.ok ? parseUploadInit(initRaw) : null
+      if (!init) throw new Error(readErrorMessage(initRaw) ?? `Upload init failed (${initRes.status}).`)
 
-      const bucket = pickString(init?.bucket)
-      const path = pickString(init?.path)
-      const token = pickString(init?.token)
-      const publicUrl = pickString(init?.publicUrl)
-      const cacheBuster = typeof init?.cacheBuster === 'number' ? init.cacheBuster : null
-
-      if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
-      if (!publicUrl) throw new Error('Upload init missing publicUrl.')
-
-      const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
+      const { error: upErr } = await supabaseBrowser.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file, {
         contentType: file.type,
         upsert: true,
       })
       if (upErr) throw new Error(upErr.message || 'Upload failed.')
 
-      const finalUrl = cacheBuster ? `${publicUrl}?v=${cacheBuster}` : publicUrl
+      const finalUrl = init.cacheBuster ? `${init.publicUrl}?v=${init.cacheBuster}` : init.publicUrl
+
       await saveOffering(o.id, { customImageUrl: finalUrl })
       setSuccess(o.id, 'Image updated.')
-    } catch (e: any) {
-      setError(o.id, e?.message || 'Failed to upload image.')
+    } catch (e: unknown) {
+      setError(o.id, errorMessageFromUnknown(e) || 'Failed to upload image.')
     } finally {
       setUploadBusyId(null)
     }
@@ -287,16 +344,7 @@ function OfferingCard(props: {
   error: string | null
   success: string | null
   onToggle: () => void
-  onSave: (patch: {
-    description?: string | null
-    customImageUrl?: string | null
-    offersInSalon?: boolean
-    offersMobile?: boolean
-    salonPriceStartingAt?: string | null
-    salonDurationMinutes?: number | null
-    mobilePriceStartingAt?: string | null
-    mobileDurationMinutes?: number | null
-  }) => void
+  onSave: (patch: OfferingPatch) => void
   onRemove: () => void
   onUpload: (file: File) => void
   setError: (msg: string) => void
@@ -367,18 +415,7 @@ function OfferingCard(props: {
   }
 
   function validateAndBuildPatch():
-    | {
-        ok: true
-        patch: {
-          description?: string | null
-          offersInSalon?: boolean
-          offersMobile?: boolean
-          salonPriceStartingAt?: string | null
-          salonDurationMinutes?: number | null
-          mobilePriceStartingAt?: string | null
-          mobileDurationMinutes?: number | null
-        }
-      }
+    | { ok: true; patch: OfferingPatch }
     | { ok: false; error: string } {
     if (!offersInSalon && !offersMobile) {
       return { ok: false, error: 'Enable at least Salon or Mobile.' }
@@ -551,7 +588,7 @@ function OfferingCard(props: {
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0] || null
+                  const f = e.target.files?.[0] ?? null
                   if (!f) return
                   onUpload(f)
                   e.currentTarget.value = ''
@@ -756,19 +793,35 @@ function AddOnsManager(props: {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [recommended, setRecommended] = useState<Record<string, boolean>>({})
 
+  function parseEligibleList(v: unknown): EligibleAddOn[] {
+    if (!Array.isArray(v)) return []
+    return v.filter((x): x is EligibleAddOn => {
+      if (!isRecord(x)) return false
+      return typeof x.id === 'string' && typeof x.name === 'string' && typeof x.minPrice === 'string' && typeof x.defaultDurationMinutes === 'number'
+    })
+  }
+
+  function parseAttachedList(v: unknown): AttachedAddOn[] {
+    if (!Array.isArray(v)) return []
+    return v.filter((x): x is AttachedAddOn => {
+      if (!isRecord(x)) return false
+      return typeof x.id === 'string' && typeof x.addOnServiceId === 'string' && typeof x.title === 'string' && typeof x.isActive === 'boolean'
+    })
+  }
+
   async function load() {
     setLoading(true)
     try {
       const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, { cache: 'no-store' })
       const data = await safeJson(res)
 
-      if (!res.ok || data?.ok !== true) {
-        onError(data?.error || `Failed to load add-ons (${res.status}).`)
+      if (!res.ok || !isOkTrue(data)) {
+        onError(readErrorMessage(data) ?? `Failed to load add-ons (${res.status}).`)
         return
       }
 
-      const el: EligibleAddOn[] = Array.isArray(data.eligible) ? data.eligible : []
-      const at: AttachedAddOn[] = Array.isArray(data.attached) ? data.attached : []
+      const el = parseEligibleList(isRecord(data) ? data.eligible : null)
+      const at = parseAttachedList(isRecord(data) ? data.attached : null)
 
       setEligible(el)
       setAttached(at)
@@ -816,14 +869,14 @@ function AddOnsManager(props: {
       const existingSort = new Map(attached.map((a) => [a.addOnServiceId, a.sortOrder]))
       const ids = Object.keys(selected).filter((id) => selected[id])
 
-      const items = ids.map((addOnServiceId, idx) => ({
+      const items: AddOnSaveItem[] = ids.map((addOnServiceId, idx) => ({
         addOnServiceId,
         isActive: true,
         isRecommended: Boolean(recommended[addOnServiceId]),
         sortOrder: existingSort.get(addOnServiceId) ?? idx * 10,
-        locationType: null as 'SALON' | 'MOBILE' | null,
-        priceOverride: null as string | null,
-        durationOverrideMinutes: null as number | null,
+        locationType: null,
+        priceOverride: null,
+        durationOverrideMinutes: null,
       }))
 
       const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, {
@@ -833,8 +886,8 @@ function AddOnsManager(props: {
       })
 
       const data = await safeJson(res)
-      if (!res.ok || data?.ok !== true) {
-        onError(data?.error || `Failed to save add-ons (${res.status}).`)
+      if (!res.ok || !isOkTrue(data)) {
+        onError(readErrorMessage(data) ?? `Failed to save add-ons (${res.status}).`)
         return
       }
 

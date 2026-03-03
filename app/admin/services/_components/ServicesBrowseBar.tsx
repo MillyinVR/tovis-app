@@ -6,6 +6,14 @@ import { useRouter } from 'next/navigation'
 
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
+type PersistedFilters = {
+  q: string
+  active: '1' | '0'
+  cat: string
+  kids: '1' | '0'
+  per: string
+}
+
 type Props = {
   categories: CategoryDTO[]
   // server-derived state (from URL search params)
@@ -30,13 +38,39 @@ function cx(...parts: Array<string | false | null | undefined>) {
 const COOKIE_KEY = 'tovis_admin_services_filters'
 const LS_KEY = 'tovis_admin_services_filters_v1'
 
-function safeJsonParse<T>(s: string | null): T | null {
+function safeJsonParse(s: string | null): unknown | null {
   if (!s) return null
   try {
-    return JSON.parse(s) as T
+    return JSON.parse(s) as unknown
   } catch {
     return null
   }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function is01(v: unknown): v is '0' | '1' {
+  return v === '0' || v === '1'
+}
+
+function readString(v: unknown, fallback = ''): string {
+  return typeof v === 'string' ? v : fallback
+}
+
+function parsePersistedFilters(v: unknown): PersistedFilters | null {
+  if (!isRecord(v)) return null
+
+  const q = readString(v.q, '')
+  const active = is01(v.active) ? v.active : null
+  const cat = readString(v.cat, '')
+  const kids = is01(v.kids) ? v.kids : null
+  const per = readString(v.per, '36')
+
+  if (!active || !kids) return null
+
+  return { q, active, cat, kids, per }
 }
 
 function getCookie(name: string) {
@@ -48,7 +82,9 @@ function getCookie(name: string) {
 function setCookie(name: string, value: string, days = 120) {
   if (typeof document === 'undefined') return
   const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString()
-  document.cookie = `${name}=${encodeURIComponent(value)}; Expires=${expires}; Path=/; SameSite=Lax`
+  const secure =
+    typeof window !== 'undefined' && window.location && window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${name}=${encodeURIComponent(value)}; Expires=${expires}; Path=/; SameSite=Lax${secure}`
 }
 
 function buildQS(obj: Record<string, string>) {
@@ -59,6 +95,10 @@ function buildQS(obj: Record<string, string>) {
   })
   const s = sp.toString()
   return s ? `?${s}` : ''
+}
+
+function parseActive(v: string): '1' | '0' {
+  return v === '0' ? '0' : '1'
 }
 
 export default function ServicesBrowseBar({ categories, initial, stats }: Props) {
@@ -77,6 +117,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
   const categoryOptions = useMemo(() => {
     const byParent = new Map<string, CategoryDTO[]>()
     const tops: CategoryDTO[] = []
+
     for (const c of categories) {
       if (!c.parentId) tops.push(c)
       else {
@@ -103,7 +144,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
   }, [categories])
 
   // Remember filters (cookie + localStorage)
-  function persistFilters(next: { q: string; active: '1' | '0'; cat: string; kids: '1' | '0'; per: string }) {
+  function persistFilters(next: PersistedFilters) {
     const payload = JSON.stringify(next)
     try {
       localStorage.setItem(LS_KEY, payload)
@@ -113,19 +154,19 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
 
   // On first mount, if the URL is "blank-ish" and we have saved prefs, apply them.
   useEffect(() => {
-    const saved =
-      safeJsonParse<{ q: string; active: '1' | '0'; cat: string; kids: '1' | '0'; per: string }>(
-        getCookie(COOKIE_KEY),
-      ) ??
-      safeJsonParse<{ q: string; active: '1' | '0'; cat: string; kids: '1' | '0'; per: string }>(
-        (() => {
-          try {
-            return localStorage.getItem(LS_KEY)
-          } catch {
-            return null
-          }
-        })(),
-      )
+    const cookieRaw = safeJsonParse(getCookie(COOKIE_KEY))
+    const cookieSaved = parsePersistedFilters(cookieRaw)
+
+    const lsRaw = (() => {
+      try {
+        return safeJsonParse(localStorage.getItem(LS_KEY))
+      } catch {
+        return null
+      }
+    })()
+    const lsSaved = parsePersistedFilters(lsRaw)
+
+    const saved = cookieSaved ?? lsSaved
 
     // If user already has meaningful params, don't override them.
     const hasMeaningful =
@@ -137,19 +178,19 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
       initial.page !== 1
 
     if (!hasMeaningful && saved) {
-      setQ(saved.q ?? '')
-      setActive(saved.active ?? '1')
-      setCat(saved.cat ?? '')
-      setKids(saved.kids ?? '1')
-      setPer(saved.per ?? '36')
+      setQ(saved.q)
+      setActive(saved.active)
+      setCat(saved.cat)
+      setKids(saved.kids)
+      setPer(saved.per)
 
       // Push remembered filters into URL (page resets)
       const qs = buildQS({
-        q: (saved.q ?? '').trim(),
-        active: saved.active ?? '1',
-        cat: saved.cat ?? '',
-        kids: saved.kids ?? '1',
-        per: saved.per ?? '36',
+        q: saved.q.trim(),
+        active: saved.active,
+        cat: saved.cat,
+        kids: saved.kids,
+        per: saved.per,
         page: '1',
       })
       router.replace(`/admin/services${qs}`)
@@ -160,7 +201,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
   }, [])
 
   function apply() {
-    const next = {
+    const next: PersistedFilters = {
       q: q.trim(),
       active,
       cat,
@@ -192,8 +233,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
   const btnBase =
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-extrabold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
-  const btnSoft =
-    'border border-surfaceGlass/15 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/25'
+  const btnSoft = 'border border-surfaceGlass/15 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/25'
 
   const btnAccent =
     'border border-accentPrimary/45 bg-accentPrimary/15 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
@@ -235,7 +275,12 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
               ))}
             </select>
 
-            <select className={inputBase} value={active} onChange={(e) => setActive(e.target.value as any)} disabled={!hydrated}>
+            <select
+              className={inputBase}
+              value={active}
+              onChange={(e) => setActive(parseActive(e.target.value))}
+              disabled={!hydrated}
+            >
               <option value="1">Active only</option>
               <option value="0">All (active + disabled)</option>
             </select>
@@ -329,9 +374,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
           </div>
 
           {/* Tiny hint row */}
-          <div className="text-[11px] text-textSecondary">
-            Filters are remembered automatically. You’re welcome. 🫶
-          </div>
+          <div className="text-[11px] text-textSecondary">Filters are remembered automatically. You’re welcome. 🫶</div>
         </div>
       </div>
     </div>

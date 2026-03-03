@@ -1,6 +1,7 @@
 // lib/tapIntentConsume.ts
 import { prisma } from '@/lib/prisma'
-import type { Role, NfcCardType } from '@prisma/client'
+import { NfcCardType, Prisma, Role } from '@prisma/client'
+import { isRecord } from '@/lib/guards'
 
 function safeNextUrl(v: unknown): string | null {
   if (typeof v !== 'string') return null
@@ -11,6 +12,11 @@ function safeNextUrl(v: unknown): string | null {
   return s
 }
 
+function nextUrlFromPayloadJson(payloadJson: Prisma.JsonValue): string | null {
+  if (!isRecord(payloadJson)) return null
+  return safeNextUrl(payloadJson.nextUrl)
+}
+
 export async function consumeTapIntent(args: { tapIntentId: string | null; userId: string }) {
   const { tapIntentId, userId } = args
 
@@ -19,7 +25,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
 
   const nowUtc = new Date()
 
-  return await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const ti = await tx.tapIntent.findUnique({
       where: { id: tapIntentId },
       select: {
@@ -60,13 +66,17 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
 
     if (!user) return { ok: true as const, nextUrl: null as string | null }
 
-    const nextUrlFromPayload = safeNextUrl((ti.payloadJson as any)?.nextUrl)
+    const payloadNext = nextUrlFromPayloadJson(ti.payloadJson)
+
     const fallbackNextUrl =
-      user.role === 'ADMIN' ? '/admin' :
-      user.role === 'PRO' ? '/pro/calendar' :
+      user.role === Role.ADMIN ? '/admin' :
+      user.role === Role.PRO ? '/pro/calendar' :
       '/looks'
 
-    const nextUrl = nextUrlFromPayload ?? fallbackNextUrl
+    const nextUrl = payloadNext ?? fallbackNextUrl
+
+    // If somehow the tap intent has no cardId, bail gracefully
+    if (!ti.cardId) return { ok: true as const, nextUrl }
 
     // Load card
     const card = await tx.nfcCard.findUnique({
@@ -100,12 +110,11 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     }
 
     // Decide claim outcome based on role
-    const role = user.role as Role
-    let newType: NfcCardType = 'CLIENT_REFERRAL'
+    let newType: NfcCardType = NfcCardType.CLIENT_REFERRAL
     let proId: string | null = null
 
-    if (role === 'PRO') {
-      newType = 'PRO_BOOKING'
+    if (user.role === Role.PRO) {
+      newType = NfcCardType.PRO_BOOKING
       proId = user.professionalProfile?.id ?? null
     }
 
@@ -141,7 +150,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
         creditedUserId: user.id,
         metaJson: {
           tapIntentId: ti.id,
-          role,
+          role: user.role,
           assignedType: newType,
           professionalId: proId,
           nextUrl,

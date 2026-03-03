@@ -2,10 +2,28 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { AllergySeverity } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_SEVERITY = new Set(['MILD', 'MODERATE', 'SEVERE'])
+type JsonObject = Record<string, unknown>
+
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+// Accept old UI words, map to Prisma truth
+const SEVERITY_MAP: Record<string, AllergySeverity> = {
+  LOW: AllergySeverity.LOW,
+  MILD: AllergySeverity.LOW,
+
+  MODERATE: AllergySeverity.MODERATE,
+
+  HIGH: AllergySeverity.HIGH,
+  SEVERE: AllergySeverity.HIGH,
+
+  CRITICAL: AllergySeverity.CRITICAL,
+}
 
 export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -17,15 +35,17 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     const clientId = pickString(id)
     if (!clientId) return jsonFail(400, 'Missing client id.')
 
-    // ✅ single source of truth visibility gate
     const gate = await assertProCanViewClient(professionalId, clientId)
     if (!gate.ok) return jsonFail(403, 'Forbidden.')
 
-    const body = (await req.json().catch(() => ({}))) as any
-    const label = pickString(body?.label)
-    const description = pickString(body?.description)
-    const severityRaw = upper(body?.severity || 'MODERATE')
-    const severity = ALLOWED_SEVERITY.has(severityRaw) ? severityRaw : 'MODERATE'
+    const raw: unknown = await req.json().catch(() => ({}))
+    const body: JsonObject = isRecord(raw) ? raw : {}
+
+    const label = pickString(body.label)
+    const description = pickString(body.description)
+
+    const sevKey = upper(body.severity || 'MODERATE')
+    const severity = SEVERITY_MAP[sevKey] ?? AllergySeverity.MODERATE
 
     if (!label) return jsonFail(400, 'Label is required.')
 
@@ -34,13 +54,13 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
         clientId,
         label,
         description: description ?? null,
-        severity: severity as any,
+        severity,
         recordedByProfessionalId: professionalId,
-      } as any,
+      },
       select: { id: true },
     })
 
-    return jsonOk({ ok: true }, 200)
+    return jsonOk({}, 200)
   } catch (e) {
     console.error('POST /api/pro/clients/[id]/allergies error', e)
     return jsonFail(500, 'Failed to add allergy.')

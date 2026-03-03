@@ -1,7 +1,7 @@
 // app/pro/calendar/_utils/calendarMath.ts
 import type { CalendarEvent, WorkingHoursJson, BlockRow } from '../_types'
 import { DAY_KEYS, addDays, clamp, startOfDay } from './date'
-import { sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const PX_PER_MINUTE = 1.5
 export const SNAP_MINUTES = 15
@@ -25,9 +25,6 @@ export function computeDurationMinutesFromIso(startsAtIso: string, endsAtIso: st
   return Number.isFinite(mins) && mins > 0 ? mins : 60
 }
 
-/**
- * Parse "HH:MM" -> minutes from midnight.
- */
 function hhmmToMinutes(v: unknown): number | null {
   if (typeof v !== 'string') return null
   const s = v.trim()
@@ -41,24 +38,11 @@ function hhmmToMinutes(v: unknown): number | null {
   return h * 60 + m
 }
 
-/**
- * For a given `day` (Date object representing that day in *some* way),
- * get the day-of-week in the desired IANA `timeZone` and return that
- * day's working window.
- *
- * IMPORTANT: `day` is interpreted in `timeZone` (not system local).
- */
-export function getWorkingWindowForDay(
-  day: Date,
-  workingHours: WorkingHoursJson,
-  timeZone: string,
-) {
+export function getWorkingWindowForDay(day: Date, workingHours: WorkingHoursJson, timeZone: string) {
   if (!workingHours) return null
 
   const tz = sanitizeTimeZone(timeZone, 'UTC')
 
-  // Determine weekday in the provided timezone
-  // Using Intl avoids Date.getDay() being tied to system local tz.
   const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
     .format(day)
     .slice(0, 3)
@@ -70,23 +54,17 @@ export function getWorkingWindowForDay(
 
   if (!key) return null
 
-  const cfg = (workingHours as any)[key]
+  const cfg = workingHours[key]
   if (!cfg || !cfg.enabled) return null
 
   const startMinutes = hhmmToMinutes(cfg.start)
   const endMinutes = hhmmToMinutes(cfg.end)
-
   if (startMinutes == null || endMinutes == null) return null
   if (endMinutes <= startMinutes) return null
 
   return { startMinutes, endMinutes, key }
 }
 
-/**
- * Timezone-aware working-hours validation.
- * `day` is interpreted as a day in `timeZone`, and `startMinutes/endMinutes`
- * are minutes-from-midnight in that same timezone.
- */
 export function isOutsideWorkingHours(args: {
   day: Date
   startMinutes: number
@@ -103,18 +81,30 @@ export function isOutsideWorkingHours(args: {
   return startMinutes < window.startMinutes || endMinutes > window.endMinutes
 }
 
+/**
+ * ✅ Correct, type-safe blocked detection:
+ * - Prefer discriminant `kind`
+ * - Fallback to legacy signals in case any old data still leaks in
+ */
 export function isBlockedEvent(ev: CalendarEvent) {
-  const s = String((ev as any).status || '').toUpperCase()
+  if (ev.kind === 'BLOCK') return true
+  const s = String(ev.status || '').toUpperCase()
   if (s === 'BLOCKED') return true
   if (String(ev.id || '').startsWith('block:')) return true
-  if (String((ev as any).kind || '').toUpperCase() === 'BLOCK') return true
   return false
 }
 
+/**
+ * ✅ Correct, type-safe block id extraction:
+ * - Only BLOCK events have blockId
+ * - Fallback: parse from id if it uses "block:xyz"
+ */
 export function extractBlockId(ev: CalendarEvent) {
-  if ((ev as any).blockId) return (ev as any).blockId
+  if (ev.kind === 'BLOCK') return ev.blockId
+
   const id = String(ev.id || '')
   if (id.startsWith('block:')) return id.slice('block:'.length)
+
   return null
 }
 
@@ -122,26 +112,23 @@ export function blockToEvent(b: BlockRow): CalendarEvent {
   const s = new Date(b.startsAt)
   const e = new Date(b.endsAt)
   const note = b.note ?? null
+
+  const durationMinutes = Math.max(15, Math.round((e.getTime() - s.getTime()) / 60_000))
+
   return {
+    kind: 'BLOCK',
     id: `block:${b.id}`,
-    blockId: b.id as any,
-    kind: 'BLOCK' as any,
-    status: 'BLOCKED' as any,
+    blockId: b.id,
+    status: 'BLOCKED',
     title: 'Blocked',
     clientName: note || 'Personal time',
     note,
     startsAt: s.toISOString(),
     endsAt: e.toISOString(),
-    durationMinutes: Math.max(15, Math.round((e.getTime() - s.getTime()) / 60_000)),
-  } as any
+    durationMinutes,
+  }
 }
 
-/**
- * Overlap minutes within a "day" boundary.
- *
- * This helper is UI-only and assumes `day` is the calendar day you are rendering.
- * If you need true "today" in the pro's timezone, do it on server using startOfDayUtcInTimeZone.
- */
 export function overlapMinutesWithinDay(startsAtIso: string, endsAtIso: string, day: Date) {
   const dayStart = startOfDay(day)
   const dayEnd = addDays(dayStart, 1)

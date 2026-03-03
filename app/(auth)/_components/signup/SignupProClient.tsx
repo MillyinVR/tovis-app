@@ -2,12 +2,17 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
 
-function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  const data: unknown = await res.json().catch(() => ({}))
+  return isRecord(data) ? data : {}
 }
 
 function sanitizePhone(v: string) {
@@ -117,13 +122,10 @@ function isUsZip(raw: string) {
 }
 
 function normalizeHandleInput(raw: string) {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '')
-    .slice(0, 24)
+  return raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
 
-// ✅ MATCH YOUR PRISMA ENUM (from the schema you pasted)
+// ✅ MUST match Prisma enum values
 type ProfessionType =
   | 'COSMETOLOGIST'
   | 'BARBER'
@@ -134,7 +136,6 @@ type ProfessionType =
   | 'MASSAGE_THERAPIST'
   | 'MAKEUP_ARTIST'
 
-/** CA Board of Barbering & Cosmetology professions (license required) */
 function requiresCaBbcLicense(professionType: ProfessionType) {
   return (
     professionType === 'COSMETOLOGIST' ||
@@ -173,18 +174,27 @@ async function fetchAutocomplete(args: { input: string; sessionToken: string }) 
   url.searchParams.set('components', 'country:us')
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Location search failed.')
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Location search failed.')
 
-  const predictions = Array.isArray(data?.predictions) ? data.predictions : []
-  return predictions
-    .map((p: any) => ({
-      placeId: String(p?.placeId ?? ''),
-      description: String(p?.description ?? ''),
-      mainText: String(p?.mainText ?? ''),
-      secondaryText: String(p?.secondaryText ?? ''),
-    }))
-    .filter((p: any) => p.placeId && p.description) as GooglePrediction[]
+  const predsRaw = Array.isArray(data.predictions) ? data.predictions : []
+  const out: GooglePrediction[] = []
+
+  for (const p of predsRaw) {
+    if (!isRecord(p)) continue
+    const placeId = String(p.placeId ?? '').trim()
+    const description = String(p.description ?? '').trim()
+    if (!placeId || !description) continue
+
+    out.push({
+      placeId,
+      description,
+      mainText: String(p.mainText ?? ''),
+      secondaryText: String(p.secondaryText ?? ''),
+    })
+  }
+
+  return out
 }
 
 async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }) {
@@ -193,20 +203,20 @@ async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }
   url.searchParams.set('sessionToken', args.sessionToken)
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Could not confirm selected location.')
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not confirm selected location.')
 
-  const p = data?.place ?? {}
+  const place = isRecord(data.place) ? data.place : {}
   return {
-    placeId: String(p?.placeId ?? args.placeId),
-    name: typeof p?.name === 'string' ? p.name : null,
-    formattedAddress: typeof p?.formattedAddress === 'string' ? p.formattedAddress : null,
-    lat: typeof p?.lat === 'number' ? p.lat : null,
-    lng: typeof p?.lng === 'number' ? p.lng : null,
-    city: typeof p?.city === 'string' ? p.city : null,
-    state: typeof p?.state === 'string' ? p.state : null,
-    postalCode: typeof p?.postalCode === 'string' ? p.postalCode : null,
-    countryCode: typeof p?.countryCode === 'string' ? p.countryCode : null,
+    placeId: String(place.placeId ?? args.placeId),
+    name: typeof place.name === 'string' ? place.name : null,
+    formattedAddress: typeof place.formattedAddress === 'string' ? place.formattedAddress : null,
+    lat: typeof place.lat === 'number' ? place.lat : null,
+    lng: typeof place.lng === 'number' ? place.lng : null,
+    city: typeof place.city === 'string' ? place.city : null,
+    state: typeof place.state === 'string' ? place.state : null,
+    postalCode: typeof place.postalCode === 'string' ? place.postalCode : null,
+    countryCode: typeof place.countryCode === 'string' ? place.countryCode : null,
   }
 }
 
@@ -216,16 +226,16 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   url.searchParams.set('components', 'country:us')
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'ZIP lookup failed.')
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'ZIP lookup failed.')
 
-  const g = data?.geo ?? {}
-  const lat = typeof g?.lat === 'number' ? g.lat : null
-  const lng = typeof g?.lng === 'number' ? g.lng : null
-  const postalCode = typeof g?.postalCode === 'string' ? g.postalCode : null
-  const city = typeof g?.city === 'string' ? g.city : null
-  const state = typeof g?.state === 'string' ? g.state : null
-  const countryCode = typeof g?.countryCode === 'string' ? g.countryCode : null
+  const geo = isRecord(data.geo) ? data.geo : {}
+  const lat = typeof geo.lat === 'number' ? geo.lat : null
+  const lng = typeof geo.lng === 'number' ? geo.lng : null
+  const postalCode = typeof geo.postalCode === 'string' ? geo.postalCode : null
+  const city = typeof geo.city === 'string' ? geo.city : null
+  const state = typeof geo.state === 'string' ? geo.state : null
+  const countryCode = typeof geo.countryCode === 'string' ? geo.countryCode : null
 
   if (lat == null || lng == null) throw new Error('ZIP lookup returned no coordinates.')
   if (!postalCode) throw new Error('ZIP lookup did not resolve a valid postal code.')
@@ -239,62 +249,12 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   url.searchParams.set('lng', String(args.lng))
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Timezone lookup failed.')
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Timezone lookup failed.')
 
-  const tz = String(data?.timeZoneId ?? '')
+  const tz = typeof data.timeZoneId === 'string' ? data.timeZoneId.trim() : ''
   if (!tz) throw new Error('No timezone returned.')
   return tz
-}
-
-/**
- * Uses your existing signed upload API:
- *   POST /api/pro/uploads  (JSON)
- * Then uploads via PUT to returned signedUrl.
- *
- * Returns an internal reference string we can store:
- *   supabase://<bucket>/<path>
- */
-async function uploadVerifyPrivateImage(file: File): Promise<string> {
-  // 1) ask server for signed upload URL (requires pro auth cookie)
-  const metaRes = await fetch('/api/pro/uploads', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      kind: 'VERIFY_PRIVATE',
-      contentType: file.type || 'application/octet-stream',
-      size: file.size,
-    }),
-  })
-  const meta = await safeJson(metaRes)
-  if (!metaRes.ok || !meta?.ok) {
-    throw new Error(meta?.error || 'Could not start upload.')
-  }
-
-  const signedUrl = typeof meta?.signedUrl === 'string' ? meta.signedUrl : null
-  const bucket = typeof meta?.bucket === 'string' ? meta.bucket : null
-  const path = typeof meta?.path === 'string' ? meta.path : null
-
-  if (!signedUrl || !bucket || !path) {
-    throw new Error('Upload initialization missing signedUrl/bucket/path.')
-  }
-
-  // 2) upload the file to Supabase via signed URL
-  const putRes = await fetch(signedUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-    },
-    body: file,
-  })
-
-  if (!putRes.ok) {
-    const txt = await putRes.text().catch(() => '')
-    throw new Error(txt || 'Upload failed while sending file.')
-  }
-
-  // 3) return a reference the server/admin can resolve later
-  return `supabase://${bucket}/${path}`
 }
 
 export default function SignupProClient() {
@@ -325,12 +285,6 @@ export default function SignupProClient() {
   // CA license (only required for CA BBC professions)
   const [licenseState] = useState<'CA'>('CA')
   const [licenseNumber, setLicenseNumber] = useState('')
-
-  // ✅ manual fallback upload state
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [licenseDocumentUrl, setLicenseDocumentUrl] = useState<string | null>(null)
-  const [licenseUploadRequired, setLicenseUploadRequired] = useState(false)
-  const [licenseUploading, setLicenseUploading] = useState(false)
 
   // stable per page load
   const sessionToken = useMemo(
@@ -390,9 +344,9 @@ export default function SignupProClient() {
     try {
       const preds = await fetchAutocomplete({ input: trimmed, sessionToken })
       setLocPredictions(preds.slice(0, 6))
-    } catch (e: any) {
+    } catch (e: unknown) {
       setLocPredictions([])
-      setError(e?.message || 'Location search is unavailable right now.')
+      setError(e instanceof Error ? e.message : 'Location search is unavailable right now.')
     } finally {
       setLocLoading(false)
     }
@@ -423,9 +377,9 @@ export default function SignupProClient() {
 
       setLocPredictions([])
       setLocQuery(p.description)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setConfirmed(null)
-      setError(e?.message || 'Could not confirm location.')
+      setError(e instanceof Error ? e.message : 'Could not confirm location.')
     } finally {
       setLocLoading(false)
     }
@@ -460,38 +414,11 @@ export default function SignupProClient() {
 
       setLocPredictions([])
       setLocQuery(geo.postalCode ?? raw)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setConfirmed(null)
-      setError(e?.message || 'Could not confirm ZIP code.')
+      setError(e instanceof Error ? e.message : 'Could not confirm ZIP code.')
     } finally {
       setLocLoading(false)
-    }
-  }
-
-  async function onPickLicenseFile(file: File | null) {
-    if (!file) return
-    setError(null)
-
-    if (!file.type.startsWith('image/')) {
-      setError('Please upload an image file (jpg, png, etc.).')
-      return
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      setError('Please choose an image under 8MB.')
-      return
-    }
-
-    setLicenseUploading(true)
-    try {
-      const ref = await uploadVerifyPrivateImage(file)
-      setLicenseDocumentUrl(ref)
-      setLicenseUploadRequired(false)
-    } catch (e: any) {
-      setLicenseDocumentUrl(null)
-      setLicenseUploadRequired(true)
-      setError(e?.message || 'Could not upload license image.')
-    } finally {
-      setLicenseUploading(false)
     }
   }
 
@@ -518,10 +445,6 @@ export default function SignupProClient() {
 
     if (needsLicense && !licenseNumber.trim()) {
       return setError('License number is required for this profession.')
-    }
-
-    if (needsLicense && licenseUploadRequired && !licenseDocumentUrl) {
-      return setError('Please upload a photo of your license so we can verify you.')
     }
 
     const signupLocation =
@@ -574,32 +497,27 @@ export default function SignupProClient() {
           licenseState: needsLicense ? licenseState : undefined,
           licenseNumber: needsLicense ? licenseNumber.trim().toUpperCase() : undefined,
 
-          // ✅ send private storage ref if present
-          licenseDocumentUrl: needsLicense && licenseDocumentUrl ? licenseDocumentUrl : undefined,
-
           signupLocation,
         }),
       })
 
       const data = await safeJson(res)
       if (!res.ok) {
-        if (data?.code === 'LICENSE_MANUAL_REQUIRED') {
-          setLicenseUploadRequired(true)
-          setError(data?.error || 'Please upload a photo of your license for admin review.')
-          return
-        }
-
-        setError(data?.error || 'Signup failed.')
+        setError(typeof data.error === 'string' ? data.error : 'Signup failed.')
         return
       }
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(data?.nextUrl)
+      const nextUrl = sanitizeNextUrl(data.nextUrl)
       if (nextUrl) return router.replace(nextUrl)
 
+      // If you want, you can route to a future verification page here when you build it:
+      // if (data.needsManualLicenseUpload === true) return router.replace('/pro/verification')
+
       router.replace('/pro/services')
-    } catch (err) {
+    } catch (err: unknown) {
+      // eslint-disable-next-line no-console
       console.error(err)
       setError('Network error.')
     } finally {
@@ -619,9 +537,7 @@ export default function SignupProClient() {
     password.trim() &&
     isLocationConfirmed() &&
     (!needsLicense || licenseNumber.trim()) &&
-    (proMode !== 'MOBILE' || (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200)) &&
-    (!needsLicense || !licenseUploadRequired || Boolean(licenseDocumentUrl)) &&
-    !licenseUploading
+    (proMode !== 'MOBILE' || (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200))
 
   return (
     <AuthShell title="Create Pro Account" subtitle="Run your business from your phone — set up takes minutes.">
@@ -635,11 +551,6 @@ export default function SignupProClient() {
               const next = e.target.value as ProfessionType
               setProfessionType(next)
               setError(null)
-
-              // reset manual upload state when profession changes
-              setLicenseUploadRequired(false)
-              setLicenseDocumentUrl(null)
-              if (fileInputRef.current) fileInputRef.current.value = ''
             }}
           >
             <option value="COSMETOLOGIST">Cosmetologist</option>
@@ -769,7 +680,13 @@ export default function SignupProClient() {
               <FieldLabel>Mobile radius (miles)</FieldLabel>
               <span className="text-xs font-black text-textSecondary/80">Required</span>
             </div>
-            <Input value={mobileRadiusMiles} onChange={(e) => setMobileRadiusMiles(e.target.value)} inputMode="numeric" placeholder="e.g. 15" required />
+            <Input
+              value={mobileRadiusMiles}
+              onChange={(e) => setMobileRadiusMiles(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 15"
+              required
+            />
             <HelpText>How far you travel from your base ZIP.</HelpText>
           </label>
         ) : null}
@@ -805,51 +722,10 @@ export default function SignupProClient() {
               </label>
             </div>
 
-            {/* Manual fallback upload */}
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-3">
-                <FieldLabel>License photo (for admin review)</FieldLabel>
-                {licenseUploadRequired ? (
-                  <span className="text-xs font-black text-toneWarn">Required right now</span>
-                ) : (
-                  <span className="text-xs font-black text-textSecondary/70">Optional</span>
-                )}
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => onPickLicenseFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-xs text-textSecondary file:mr-3 file:rounded-full file:border file:border-surfaceGlass/14 file:bg-bgPrimary/25 file:px-3 file:py-1.5 file:text-xs file:font-black file:text-textPrimary hover:file:bg-bgPrimary/30"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={licenseUploading}
-                  className={cx(
-                    'inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-black transition',
-                    'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
-                    'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
-                    'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
-                    licenseUploading && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  {licenseUploading ? 'Uploading…' : licenseDocumentUrl ? 'Replace' : 'Choose file'}
-                </button>
-              </div>
-
-              {licenseDocumentUrl ? (
-                <div className="rounded-card border border-accentPrimary/20 bg-accentPrimary/10 px-3 py-2 text-xs text-textPrimary">
-                  Uploaded ✔️ We’ll send this to admin if automatic verification is unavailable.
-                </div>
-              ) : (
-                <HelpText>
-                  If automatic verification can’t run, we’ll ask for a photo. (Yes, this is annoying. No, I didn’t design the government.)
-                </HelpText>
-              )}
+            <div className="rounded-card border border-surfaceGlass/12 bg-bgPrimary/25 px-3 py-2 text-xs text-textSecondary">
+              We’ll try to verify your license automatically. If verification is unavailable, you’ll upload a license photo
+              <span className="font-black text-textPrimary"> after signup</span> for admin approval.
+              <div className="mt-1">You can still set up services + your calendar immediately.</div>
             </div>
           </div>
         ) : null}
@@ -872,7 +748,12 @@ export default function SignupProClient() {
         {/* Optional business */}
         <label className="grid gap-1.5">
           <FieldLabel>Business name (optional)</FieldLabel>
-          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Salon De Tovis" autoComplete="organization" />
+          <Input
+            value={businessName}
+            onChange={(e) => setBusinessName(e.target.value)}
+            placeholder="e.g. Salon De Tovis"
+            autoComplete="organization"
+          />
           <HelpText>You can add this later — we won’t block signup.</HelpText>
         </label>
 
@@ -900,7 +781,14 @@ export default function SignupProClient() {
             <FieldLabel>Phone</FieldLabel>
             <span className="text-xs font-black text-textSecondary/80">Required</span>
           </div>
-          <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="+1 (___) ___-____" required />
+          <Input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="+1 (___) ___-____"
+            required
+          />
         </label>
 
         {/* Email */}
@@ -923,7 +811,7 @@ export default function SignupProClient() {
 
         <div className="grid gap-2 pt-1">
           <PrimaryButton loading={loading} disabled={!canSubmit}>
-            {loading ? 'Creating…' : licenseUploading ? 'Uploading…' : 'Create Pro Account'}
+            {loading ? 'Creating…' : 'Create Pro Account'}
           </PrimaryButton>
 
           <SecondaryLinkButton href={loginHref}>Sign in</SecondaryLinkButton>

@@ -2,13 +2,19 @@
 import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro, pickString, lower } from '@/app/api/_utils'
+import { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
+type JsonRecord = Record<string, unknown>
+
+function isRecord(v: unknown): v is JsonRecord {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function normalizeEmail(v: unknown) {
   const s = pickString(v)
-  if (!s) return null
-  return lower(s)
+  return s ? lower(s) : null
 }
 
 export async function POST(request: Request) {
@@ -16,12 +22,13 @@ export async function POST(request: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const body = (await request.json().catch(() => ({}))) as any
+    const raw: unknown = await request.json().catch(() => ({}))
+    const body: JsonRecord = isRecord(raw) ? raw : {}
 
-    const firstName = pickString(body?.firstName)
-    const lastName = pickString(body?.lastName)
-    const email = normalizeEmail(body?.email)
-    const phone = pickString(body?.phone)
+    const firstName = pickString(body.firstName)
+    const lastName = pickString(body.lastName)
+    const email = normalizeEmail(body.email)
+    const phone = pickString(body.phone)
 
     if (!firstName || !lastName || !email) {
       return jsonFail(400, 'First name, last name, and email are required.')
@@ -33,7 +40,7 @@ export async function POST(request: Request) {
         select: { id: true, role: true, email: true },
       })
 
-      if (existingUser && existingUser.role !== 'CLIENT') {
+      if (existingUser && existingUser.role !== Role.CLIENT) {
         return { ok: false as const, status: 400, error: 'This email is already used by a non-client account.' }
       }
 
@@ -43,8 +50,8 @@ export async function POST(request: Request) {
           data: {
             email,
             password: crypto.randomBytes(16).toString('hex'),
-            role: 'CLIENT',
-          } as any,
+            role: Role.CLIENT,
+          },
           select: { id: true, email: true, role: true },
         }))
 
@@ -56,41 +63,20 @@ export async function POST(request: Request) {
       const clientProfile = existingProfile
         ? await tx.clientProfile.update({
             where: { id: existingProfile.id },
-            data: {
-              firstName,
-              lastName,
-              phone: phone ?? null,
-            },
+            data: { firstName, lastName, phone: phone ?? null },
             select: { id: true, userId: true },
           })
         : await tx.clientProfile.create({
-            data: {
-              userId: clientUser.id,
-              firstName,
-              lastName,
-              phone: phone ?? null,
-            },
+            data: { userId: clientUser.id, firstName, lastName, phone: phone ?? null },
             select: { id: true, userId: true },
           })
 
-      return {
-        ok: true as const,
-        clientProfileId: clientProfile.id,
-        userId: clientUser.id,
-        email: clientUser.email,
-      }
+      return { ok: true as const, clientProfileId: clientProfile.id, userId: clientUser.id, email: clientUser.email }
     })
 
     if (!result.ok) return jsonFail(result.status, result.error)
 
-    return jsonOk(
-      {
-        id: result.clientProfileId,
-        userId: result.userId,
-        email: result.email,
-      },
-      201,
-    )
+    return jsonOk({ id: result.clientProfileId, userId: result.userId, email: result.email }, 201)
   } catch (error) {
     console.error('POST /api/pro/clients error', error)
     return jsonFail(500, 'Internal server error')

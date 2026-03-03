@@ -12,14 +12,14 @@ type PatchBody = {
   note?: unknown
 }
 
-function toDateOrNull(v: unknown) {
+function toDateOrNull(v: unknown): Date | null {
   const s = pickString(v)
   if (!s) return null
   const d = new Date(s)
   return Number.isFinite(d.getTime()) ? d : null
 }
 
-function minutesBetween(a: Date, b: Date) {
+function minutesBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 60_000)
 }
 
@@ -85,26 +85,37 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Block must be between 15 minutes and 24 hours.')
     }
 
-    // Ensure it exists + belongs to this pro
+    // Ensure it exists + belongs to this pro (and grab its location scope)
     const existing = await prisma.calendarBlock.findFirst({
       where: { id: blockId, professionalId },
-      select: { id: true },
+      select: { id: true, locationId: true },
     })
     if (!existing) return jsonFail(404, 'Not found.')
 
-    // Overlap check (same pro)
+    // ✅ Location-aware overlap rules:
+    // - If this block is location-scoped: conflicts with same location OR global blocks (locationId null)
+    // - If this block is global (locationId null): conflicts with ANY other block for this pro
+    const conflictWhere = existing.locationId
+      ? {
+          professionalId,
+          id: { not: blockId },
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+          OR: [{ locationId: existing.locationId }, { locationId: null }],
+        }
+      : {
+          professionalId,
+          id: { not: blockId },
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+        }
+
     const conflict = await prisma.calendarBlock.findFirst({
-      where: {
-        professionalId,
-        id: { not: blockId },
-        startsAt: { lt: endsAt },
-        endsAt: { gt: startsAt },
-      },
+      where: conflictWhere,
       select: { id: true },
     })
     if (conflict) return jsonFail(409, 'That time overlaps an existing block.')
 
-    // Update (still safe because we already proved ownership)
     const updated = await prisma.calendarBlock.update({
       where: { id: blockId },
       data: { startsAt, endsAt, note: note ?? null },

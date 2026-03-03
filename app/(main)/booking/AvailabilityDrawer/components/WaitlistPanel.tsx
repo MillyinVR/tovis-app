@@ -8,19 +8,12 @@ import type { DrawerContext } from '../types'
 import { toISOFromDatetimeLocalInTimeZone } from '@/lib/bookingTime'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
-}
+import { isRecord, asTrimmedString, getRecordProp } from '@/lib/guards'
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null
 }
 
-function pickApiError(raw: unknown): string | null {
-  if (!isRecord(raw)) return null
-  return pickString(raw.error)
-}
 
 type WaitlistEntryDTO = {
   id: string
@@ -32,26 +25,31 @@ type WaitlistEntryDTO = {
   preferredEnd: string
   preferredTimeBucket: string | null
 }
+function pickApiError(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  return asTrimmedString(getRecordProp(raw, 'error'))
+}
 
 function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | null {
-  if (!isRecord(raw) || raw.ok !== true) return null
-  const entry = raw.entry
+  if (!isRecord(raw) || getRecordProp(raw, 'ok') !== true) return null
+
+  const entry = getRecordProp(raw, 'entry')
   if (!isRecord(entry)) return null
 
-  const id = pickString(entry.id)
-  const status = pickString(entry.status)
-  const professionalId = pickString(entry.professionalId)
-  const serviceId = pickString(entry.serviceId)
+  const id = asTrimmedString(getRecordProp(entry, 'id'))
+  const status = asTrimmedString(getRecordProp(entry, 'status'))
+  const professionalId = asTrimmedString(getRecordProp(entry, 'professionalId'))
+  const serviceId = asTrimmedString(getRecordProp(entry, 'serviceId'))
+  const preferredStart = asTrimmedString(getRecordProp(entry, 'preferredStart'))
+  const preferredEnd = asTrimmedString(getRecordProp(entry, 'preferredEnd'))
 
-  // Dates come back as ISO strings via NextResponse.json
-  const preferredStart = pickString(entry.preferredStart)
-  const preferredEnd = pickString(entry.preferredEnd)
+  const mediaIdRaw = getRecordProp(entry, 'mediaId')
+  const mediaId = mediaIdRaw === null ? null : asTrimmedString(mediaIdRaw)
+  if (mediaIdRaw !== null && mediaId == null) return null
 
-  const mediaId = entry.mediaId === null ? null : pickString(entry.mediaId)
-  if (entry.mediaId !== null && mediaId == null) return null
-
-  const preferredTimeBucket = entry.preferredTimeBucket === null ? null : pickString(entry.preferredTimeBucket)
-  if (entry.preferredTimeBucket !== null && preferredTimeBucket == null) return null
+  const bucketRaw = getRecordProp(entry, 'preferredTimeBucket')
+  const preferredTimeBucket = bucketRaw === null ? null : asTrimmedString(bucketRaw)
+  if (bucketRaw !== null && preferredTimeBucket == null) return null
 
   if (!id || !status || !professionalId || !serviceId || !preferredStart || !preferredEnd) return null
 
