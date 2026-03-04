@@ -3,6 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type Props = {
   bookingId: string
@@ -29,13 +31,28 @@ type LineItem = {
 
 const FORCE_EVENT = 'tovis:pro-session:force'
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
+function pickString(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
 }
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
-  if (typeof data?.message === 'string') return data.message
+function pickNullableString(v: unknown): string | null {
+  const s = pickString(v)
+  return s ? s : null
+}
+
+function pickNullableNumber(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string') {
+    const n = Number(v.trim())
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+function errorFromResponse(res: Response, data: unknown) {
+  const msg = readErrorMessage(data)
+  if (msg) return msg
+  if (isRecord(data) && typeof data.message === 'string' && data.message.trim()) return data.message.trim()
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -70,12 +87,46 @@ function sumMoneyStrings(items: Array<{ price: string }>) {
     const n = Number(p.value)
     if (Number.isFinite(n)) total += n
   }
-  total = Math.round(total * 100) / 100
-  return total
+  return Math.round(total * 100) / 100
 }
 
 function uid() {
-  return Math.random().toString(16).slice(2) + Date.now().toString(16)
+  return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`
+}
+
+function parseServiceOptions(data: unknown): ServiceOption[] {
+  if (!isRecord(data)) return []
+  const raw = data.services
+  if (!Array.isArray(raw)) return []
+
+  const out: ServiceOption[] = []
+  for (const row of raw) {
+    if (!isRecord(row)) continue
+
+    const offeringId = pickString(row.offeringId)
+    const serviceId = pickString(row.serviceId)
+    const serviceName = pickString(row.serviceName)
+
+    if (!offeringId || !serviceId || !serviceName) continue
+
+    out.push({
+      offeringId,
+      serviceId,
+      serviceName,
+      categoryName: pickNullableString(row.categoryName),
+      defaultPrice: pickNullableNumber(row.defaultPrice),
+    })
+  }
+
+  // stable-ish ordering for dropdown
+  out.sort((a, b) => {
+    const ac = a.categoryName ?? ''
+    const bc = b.categoryName ?? ''
+    if (ac !== bc) return ac.localeCompare(bc)
+    return a.serviceName.localeCompare(b.serviceName)
+  })
+
+  return out
 }
 
 export default function ConsultationForm({ bookingId, initialNotes, initialPrice }: Props) {
@@ -116,19 +167,20 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
         const data = await safeJson(res)
         if (!res.ok) throw new Error(errorFromResponse(res, data))
 
-        const list = Array.isArray(data?.services) ? (data.services as ServiceOption[]) : []
+        const list = parseServiceOptions(data)
+
         if (!cancelled) {
           setServices(list)
-          setSelectedOfferingId(list[0]?.offeringId || '')
+          setSelectedOfferingId(list[0]?.offeringId ?? '')
         }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load services.')
+      } catch (e: unknown) {
+        if (!cancelled) setError(errorMessageFromUnknown(e, 'Failed to load services.'))
       } finally {
         if (!cancelled) setLoadingServices(false)
       }
     }
 
-    if (bookingId) load()
+    if (bookingId) void load()
     return () => {
       cancelled = true
     }
@@ -142,15 +194,17 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     setMessage(null)
 
     const opt = services.find((s) => s.offeringId === selectedOfferingId)
-    if (!opt) return setError('Select a service to add.')
+    if (!opt) {
+      setError('Select a service to add.')
+      return
+    }
 
-    // ✅ Use suggestedTotal ONLY for the first item if present.
-    // This makes initialPrice meaningful without inventing “total-only consults”.
+    // Use suggestedTotal only for the first line item, if provided
     const price =
       items.length === 0 && suggestedTotal
         ? suggestedTotal
         : opt.defaultPrice != null
-          ? String(opt.defaultPrice.toFixed(2))
+          ? opt.defaultPrice.toFixed(2)
           : ''
 
     setItems((prev) => [
@@ -206,13 +260,17 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
     try {
       const proposedServicesJson = {
         currency: 'USD',
-        items: items.map((it) => ({
-          offeringId: it.offeringId,
-          serviceId: it.serviceId,
-          label: it.label,
-          categoryName: it.categoryName || null,
-          price: normalizeMoneyInput(it.price).value, // "12.34"
-        })),
+        items: items.map((it) => {
+          const parsed = normalizeMoneyInput(it.price)
+          if (!parsed.ok || !parsed.value) throw new Error('Invalid price in line items.')
+          return {
+            offeringId: it.offeringId,
+            serviceId: it.serviceId,
+            label: it.label,
+            categoryName: it.categoryName || null,
+            price: parsed.value, // "12.34"
+          }
+        }),
       }
 
       const proposedTotal = total.toFixed(2)
@@ -225,20 +283,21 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
       })
 
       const data = await safeJson(res)
-      if (!res.ok) return setError(errorFromResponse(res, data))
+      if (!res.ok) {
+        setError(errorFromResponse(res, data))
+        return
+      }
 
       setMessage('Sent to client for approval.')
 
-      // ✅ Refresh server components and force the sticky footer to re-fetch immediately.
       router.refresh()
       if (typeof window !== 'undefined') window.dispatchEvent(new Event(FORCE_EVENT))
 
-      // ✅ Correct navigation target: session hub
       router.push(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
+    } catch (err: unknown) {
+      if (isRecord(err) && err.name === 'AbortError') return
       console.error(err)
-      setError('Network error sending consultation.')
+      setError(errorMessageFromUnknown(err, 'Network error sending consultation.'))
     } finally {
       if (abortRef.current === controller) abortRef.current = null
       setSaving(false)
@@ -367,7 +426,9 @@ export default function ConsultationForm({ bookingId, initialNotes, initialPrice
           {saving ? 'Sending…' : 'Send to client for approval'}
         </button>
 
-        <span className="text-[12px] text-textSecondary">Client sees line items + total and must approve before you proceed.</span>
+        <span className="text-[12px] text-textSecondary">
+          Client sees line items + total and must approve before you proceed.
+        </span>
 
         {message ? <span className="text-[12px] font-black text-toneSuccess">{message}</span> : null}
         {error ? <span className="text-[12px] font-black text-toneDanger">{error}</span> : null}

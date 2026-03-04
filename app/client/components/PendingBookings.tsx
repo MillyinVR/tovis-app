@@ -8,10 +8,7 @@ import type { BookingLike } from './_helpers'
 import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
 import CardLink from './CardLink'
-
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
-}
+import { safeJson } from '@/lib/http'
 
 function errorFrom(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error

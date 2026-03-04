@@ -9,7 +9,7 @@ import { prisma } from '@/lib/prisma'
 
 import MediaUploader from '../MediaUploader'
 import MediaPreviewGrid from '../_components/MediaPreviewGrid'
-
+import { cn } from '@/lib/utils'
 import { BookingStatus, MediaPhase, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -24,13 +24,10 @@ type ApiItem = {
   signedThumbUrl: string | null
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function Card(props: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cx('tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4', props.className)}>
+    <div className={cn('tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4', props.className)}>
       {props.children}
     </div>
   )

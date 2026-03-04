@@ -3,12 +3,8 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { redirect } from 'next/navigation'
-
+import { cn } from '@/lib/utils'
 export const dynamic = 'force-dynamic'
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function pill(n: number | null) {
   if (n == null) return '—'
@@ -29,7 +25,7 @@ function HeroCard(props: {
   return (
     <Link
       href={props.href}
-      className={cx(
+      className={cn(
         'group relative overflow-hidden rounded-card border border-white/10 p-4 transition',
         'bg-bgSecondary hover:bg-surfaceGlass',
       )}
@@ -41,7 +37,7 @@ function HeroCard(props: {
 
           <div className="mt-3 inline-flex items-center gap-2 text-xs font-black">
             <span
-              className={cx(
+              className={cn(
                 'inline-flex items-center rounded-full border px-1 py-1',
                 'border-white/10 bg-bgPrimary text-textPrimary',
                 tone === 'accent' && 'bg-accentPrimary text-bgPrimary border-white/0',

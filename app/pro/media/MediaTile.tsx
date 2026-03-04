@@ -1,9 +1,9 @@
 // app/pro/media/MediaTile.tsx
-
 'use client'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 
 type MediaTileProps = {
   id: string
@@ -13,8 +13,12 @@ type MediaTileProps = {
   uploadedByRole?: string | null
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+function errorFromResponse(res: Response, data: unknown): string {
+  const msg = readErrorMessage(data)
+  if (msg) return msg
+  if (res.status === 401) return 'Please log in to continue.'
+  if (res.status === 403) return 'You don’t have access to do that.'
+  return `Request failed (${res.status}).`
 }
 
 export default function MediaTile({ id, src, caption, isFeaturedInPortfolio }: MediaTileProps) {
@@ -28,18 +32,21 @@ export default function MediaTile({ id, src, caption, isFeaturedInPortfolio }: M
     setSaving(true)
     setError(null)
 
-    try {
-      const endpoint = `/api/pro/media/${encodeURIComponent(id)}/portfolio`
-      const nextFeatured = !featured
+    const nextFeatured = !featured
+    const endpoint = `/api/pro/media/${encodeURIComponent(id)}/portfolio`
 
+    try {
       const res = await fetch(endpoint, { method: nextFeatured ? 'POST' : 'DELETE' })
       const body = await safeJson(res)
-      if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
+
+      if (!res.ok) {
+        throw new Error(errorFromResponse(res, body))
+      }
 
       setFeatured(nextFeatured)
       router.refresh()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to update.')
+    } catch (e: unknown) {
+      setError(errorMessageFromUnknown(e, 'Failed to update.'))
     } finally {
       setSaving(false)
     }
@@ -56,11 +63,14 @@ export default function MediaTile({ id, src, caption, isFeaturedInPortfolio }: M
     try {
       const res = await fetch(`/api/pro/media/${encodeURIComponent(id)}`, { method: 'DELETE' })
       const body = await safeJson(res)
-      if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
+
+      if (!res.ok) {
+        throw new Error(errorFromResponse(res, body))
+      }
 
       router.refresh()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to delete.')
+    } catch (e: unknown) {
+      setError(errorMessageFromUnknown(e, 'Failed to delete.'))
     } finally {
       setSaving(false)
     }

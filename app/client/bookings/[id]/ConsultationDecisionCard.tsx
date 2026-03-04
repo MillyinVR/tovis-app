@@ -5,10 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { moneyToString } from '@/lib/money'
 import { COPY } from '@/lib/copy'
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({}))
-}
+import { safeJson } from '@/lib/http'
 
 function errorFrom(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error

@@ -5,21 +5,19 @@ import { useEffect, useMemo, useState } from 'react'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 import type { BookingLike } from '@/app/client/components/_helpers'
 import { prettyWhen, bookingLocationLabel } from '@/app/client/components/_helpers'
+import { safeJson, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type Buckets = {
   upcoming?: BookingLike[]
   pending?: BookingLike[]
   prebooked?: BookingLike[]
   past?: BookingLike[]
-  waitlist?: any[]
+  waitlist?: unknown[]
 }
 
 function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
-}
-
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
 }
 
 function bookingTitle(b: BookingLike) {
@@ -35,21 +33,30 @@ export default function PendingConsultApprovalBanner() {
 
     async function load() {
       setLoading(true)
+
       try {
         const res = await fetch('/api/client/bookings', { cache: 'no-store' })
         const data = await safeJson(res)
-        if (!res.ok) throw new Error(data?.error || 'Failed to load bookings.')
 
-        const buckets: Buckets = data?.buckets || {}
+        if (!res.ok) {
+          const msg = readErrorMessage(data) ?? `Failed to load bookings (${res.status}).`
+          throw new Error(msg)
+        }
 
-        const all = [
-          ...asArray<BookingLike>(buckets.upcoming),
-          ...asArray<BookingLike>(buckets.pending),
-          ...asArray<BookingLike>(buckets.prebooked),
-        ]
+        // Safely read buckets from unknown JSON
+        const bucketsRaw =
+          isRecord(data) && isRecord(data.buckets)
+            ? data.buckets
+            : null
 
-        const found = all.find((b) => Boolean(b?.hasPendingConsultationApproval))
-        if (!cancelled) setItem(found || null)
+        const upcoming = asArray<BookingLike>(bucketsRaw?.upcoming)
+        const pending = asArray<BookingLike>(bucketsRaw?.pending)
+        const prebooked = asArray<BookingLike>(bucketsRaw?.prebooked)
+
+        const all = [...upcoming, ...pending, ...prebooked]
+        const found = all.find((b) => b?.hasPendingConsultationApproval === true)
+
+        if (!cancelled) setItem(found ?? null)
       } catch {
         if (!cancelled) setItem(null)
       } finally {
@@ -57,7 +64,7 @@ export default function PendingConsultApprovalBanner() {
       }
     }
 
-    load()
+    void load()
     return () => {
       cancelled = true
     }

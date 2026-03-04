@@ -2,6 +2,8 @@
 import { Suspense } from 'react'
 import { headers } from 'next/headers'
 import AddOnsClient from './ui/AddOnsClient'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,12 +35,7 @@ type AddOnsApiFail = {
 }
 
 type AddOnsApiResponse = AddOnsApiOk | AddOnsApiFail
-
 type AddOnsDTOResult = { ok: true; addOns: AddOnDTO[] } | { ok: false; error: string }
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
 
 function pickOne(v: string | string[] | undefined | null) {
   if (!v) return null
@@ -71,35 +68,47 @@ async function getRequestOrigin() {
   return `${proto}://${host}`
 }
 
+function coerceAddOn(x: unknown): AddOnDTO | null {
+  if (!isRecord(x)) return null
+
+  const id = typeof x.id === 'string' ? x.id.trim() : ''
+  const serviceId = typeof x.serviceId === 'string' ? x.serviceId.trim() : ''
+  const title = typeof x.title === 'string' ? x.title.trim() : ''
+  const price = typeof x.price === 'string' ? x.price.trim() : ''
+  const minutes = typeof x.minutes === 'number' ? x.minutes : null
+  const sortOrder = typeof x.sortOrder === 'number' ? x.sortOrder : null
+  const isRecommended = typeof x.isRecommended === 'boolean' ? x.isRecommended : false
+  const group = typeof x.group === 'string' ? x.group : x.group == null ? null : null
+
+  if (!id || !serviceId || !title || !price) return null
+  if (minutes == null || !Number.isFinite(minutes)) return null
+  if (sortOrder == null || !Number.isFinite(sortOrder)) return null
+
+  return { id, serviceId, title, group, price, minutes, sortOrder, isRecommended }
+}
+
 function parseAddOnsApiResponse(x: unknown): AddOnsApiResponse | null {
   if (!isRecord(x)) return null
+
   const ok = x.ok
   if (ok === true) {
     const addOnsRaw = x.addOns
-    return {
-      ok: true,
-      offeringId: typeof x.offeringId === 'string' ? x.offeringId : undefined,
-      locationType: x.locationType === 'MOBILE' || x.locationType === 'SALON' ? x.locationType : undefined,
-      addOns: Array.isArray(addOnsRaw) ? (addOnsRaw as AddOnDTO[]) : undefined,
-    }
+    const addOns =
+      Array.isArray(addOnsRaw) ? addOnsRaw.map(coerceAddOn).filter(Boolean) as AddOnDTO[] : undefined
+
+    const offeringId = typeof x.offeringId === 'string' ? x.offeringId : undefined
+    const locationType = x.locationType === 'MOBILE' || x.locationType === 'SALON' ? x.locationType : undefined
+
+    return { ok: true, offeringId, locationType, addOns }
   }
+
   if (ok === false) {
     const error = typeof x.error === 'string' ? x.error.trim() : ''
     if (!error) return null
     return { ok: false, error }
   }
-  return null
-}
 
-async function safeJson(res: Response): Promise<AddOnsApiResponse | null> {
-  const ct = res.headers.get('content-type') ?? ''
-  if (!ct.includes('application/json')) return null
-  try {
-    const parsed: unknown = await res.json()
-    return parseAddOnsApiResponse(parsed)
-  } catch {
-    return null
-  }
+  return null
 }
 
 async function fetchAddOns(args: { offeringId: string; locationType: ServiceLocationType }): Promise<AddOnsDTOResult> {
@@ -119,21 +128,21 @@ async function fetchAddOns(args: { offeringId: string; locationType: ServiceLoca
     return { ok: false, error: 'Network error loading add-ons.' }
   }
 
-  const body = await safeJson(res)
+  const body = await safeJsonRecord(res)
+  const parsed = parseAddOnsApiResponse(body)
 
-  // Non-2xx or malformed JSON
+  // Non-2xx: try to surface the server error message if present
   if (!res.ok) {
-    if (body && body.ok === false) return { ok: false, error: body.error }
-    return { ok: false, error: `Failed to load add-ons (${res.status}).` }
+    if (parsed && parsed.ok === false) return { ok: false, error: parsed.error }
+    return { ok: false, error: readErrorMessage(body) ?? `Failed to load add-ons (${res.status}).` }
   }
 
-  // 2xx but still not an ok:true payload (shouldn’t happen, but don’t trust it blindly)
-  if (!body || body.ok !== true) {
-    return { ok: false, error: 'Failed to load add-ons.' }
+  // 2xx but malformed / unexpected
+  if (!parsed || parsed.ok !== true) {
+    return { ok: false, error: readErrorMessage(body) ?? 'Failed to load add-ons.' }
   }
 
-  const addOns = Array.isArray(body.addOns) ? body.addOns : []
-  return { ok: true, addOns }
+  return { ok: true, addOns: parsed.addOns ?? [] }
 }
 
 export default async function BookingAddOnsPage({

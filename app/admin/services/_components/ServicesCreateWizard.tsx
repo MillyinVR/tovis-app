@@ -12,9 +12,6 @@ import { withCacheBuster } from '@/lib/url'
 
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
-// keep call sites unchanged
-const cx = cn
-
 function vibeTick(intensity: 'soft' | 'med' = 'soft') {
   try {
     const ms = intensity === 'med' ? 12 : 8
@@ -42,7 +39,7 @@ const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputEl
     <input
       ref={ref}
       {...rest}
-      className={cx(
+      className={cn(
         'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
         'placeholder:text-textSecondary/70 outline-none',
         'focus:border-surfaceGlass/30',
@@ -58,7 +55,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...rest}
-      className={cx(
+      className={cn(
         'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
         'outline-none focus:border-surfaceGlass/30',
         className,
@@ -323,7 +320,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
         </div>
 
         <div className="inline-flex items-center gap-2 rounded-full border border-surfaceGlass/12 bg-bgSecondary/60 px-3 py-1 text-[11px] font-extrabold text-textSecondary">
-          <span className={cx('h-1.5 w-1.5 rounded-full', step === 1 ? 'bg-accentPrimary' : 'bg-surfaceGlass/35')} />
+          <span className={cn('h-1.5 w-1.5 rounded-full', step === 1 ? 'bg-accentPrimary' : 'bg-surfaceGlass/35')} />
           Step {step} / 2
         </div>
       </div>
@@ -367,7 +364,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
               <button
                 type="button"
-                className={cx(btnBase, btnAccent)}
+                className={cn(btnBase, btnAccent)}
                 disabled={!canGoNext || busy}
                 onClick={() => {
                   if (!canGoNext || busy) return
@@ -394,7 +391,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
               <button
                 type="button"
-                className={cx(btnBase, btnSoft)}
+                className={cn(btnBase, btnSoft)}
                 onClick={() => {
                   setStep(1)
                   vibeTick('soft')
@@ -425,7 +422,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
                   onChange={(e) => setMinPrice(e.target.value)}
                   inputMode="decimal"
                   placeholder="e.g. 45 or 45.00"
-                  className={cx(!moneyOk && minPrice.trim() ? 'border-toneDanger/45' : '')}
+                  className={cn(!moneyOk && minPrice.trim() ? 'border-toneDanger/45' : '')}
                   disabled={busy}
                 />
                 {!moneyOk && minPrice.trim() ? (
@@ -440,7 +437,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
                   onChange={(e) => setDefaultDurationMinutes(e.target.value)}
                   inputMode="numeric"
                   placeholder="e.g. 60"
-                  className={cx(!durationOk && defaultDurationMinutes.trim() ? 'border-toneDanger/45' : '')}
+                  className={cn(!durationOk && defaultDurationMinutes.trim() ? 'border-toneDanger/45' : '')}
                   disabled={busy}
                 />
                 {!durationOk && defaultDurationMinutes.trim() ? (
@@ -486,7 +483,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
                 <button
                   type="button"
-                  className={cx(btnBase, btnSoft)}
+                  className={cn(btnBase, btnSoft)}
                   onClick={() => {
                     vibeTick('soft')
                     fileRef.current?.click()
@@ -513,7 +510,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
             <div className="mt-1 flex items-center justify-end gap-2">
               <button
                 type="button"
-                className={cx(btnBase, btnAccent, 'px-4')}
+                className={cn(btnBase, btnAccent, 'px-4')}
                 disabled={!canSubmit}
                 onClick={onSubmit}
                 title={!canSubmit ? 'Pick category + enter a name (and fix invalid fields)' : 'Create service'}

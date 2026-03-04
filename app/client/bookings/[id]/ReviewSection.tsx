@@ -4,6 +4,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
+import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -57,12 +60,9 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(url)
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
-
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+function errorFromResponse(res: Response, data: unknown) {
+  const msg = readErrorMessage(data)
+  if (msg) return msg
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -126,6 +126,57 @@ function phaseLabel(phase?: AppointmentMediaOption['phase']) {
   if (phase === 'BEFORE') return 'Before'
   if (phase === 'AFTER') return 'After'
   return 'Other'
+}
+
+function coerceMediaType(v: unknown): MediaType | null {
+  if (v === 'IMAGE' || v === 'VIDEO') return v
+  return null
+}
+
+function coercePhase(v: unknown): AppointmentMediaOption['phase'] | undefined {
+  if (v === 'BEFORE' || v === 'AFTER' || v === 'OTHER') return v
+  return undefined
+}
+
+function coerceApptMediaOption(x: unknown): AppointmentMediaOption | null {
+  if (!isRecord(x)) return null
+  const id = pickStringOrEmpty(x.id)
+  const url = pickStringOrEmpty(x.url)
+  const thumbUrl = pickStringOrEmpty(x.thumbUrl) || null
+  const mediaType = coerceMediaType(x.mediaType)
+  const createdAt = pickStringOrEmpty(x.createdAt)
+  const phase = coercePhase(x.phase)
+
+  if (!id || !url || !mediaType || !createdAt) return null
+  return { id, url, thumbUrl, mediaType, createdAt, phase }
+}
+
+function parseReviewMediaOptionsPayload(data: unknown): AppointmentMediaOption[] {
+  if (!isRecord(data)) return []
+  const itemsRaw = data.items
+  if (!Array.isArray(itemsRaw)) return []
+  return itemsRaw.map(coerceApptMediaOption).filter(Boolean) as AppointmentMediaOption[]
+}
+
+type SignedUploadInit = {
+  bucket: string
+  path: string
+  token: string
+  publicUrl: string | null
+  cacheBuster: number | null
+}
+
+function parseSignedUploadInit(data: unknown): SignedUploadInit | null {
+  if (!isRecord(data)) return null
+
+  const bucket = pickStringOrEmpty(data.bucket)
+  const path = pickStringOrEmpty(data.path)
+  const token = pickStringOrEmpty(data.token)
+  const publicUrl = pickStringOrEmpty(data.publicUrl) || null
+  const cacheBuster = typeof data.cacheBuster === 'number' && Number.isFinite(data.cacheBuster) ? data.cacheBuster : null
+
+  if (!bucket || !path || !token) return null
+  return { bucket, path, token, publicUrl, cacheBuster }
 }
 
 export default function ReviewSection({
@@ -197,15 +248,15 @@ export default function ReviewSection({
           method: 'GET',
         })
         if (!res.ok) return
-        const data = await safeJson(res)
+        const data = await safeJsonRecord(res)
         if (cancelled) return
-        const items = Array.isArray(data?.items) ? (data.items as AppointmentMediaOption[]) : []
+        const items = parseReviewMediaOptionsPayload(data)
         setApptMedia(items)
       } catch {
         // ignore
       }
     }
-    load()
+    void load()
     return () => {
       cancelled = true
     }
@@ -237,7 +288,7 @@ export default function ReviewSection({
     input: RequestInfo,
     init: RequestInit,
     loginReason: string,
-  ): Promise<{ ok: true; data: any } | { ok: false; handled: true } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; data: Record<string, unknown> | null } | { ok: false; handled: true } | { ok: false; error: string }> {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -249,7 +300,7 @@ export default function ReviewSection({
       return { ok: false, handled: true }
     }
 
-    const data = await safeJson(res)
+    const data = await safeJsonRecord(res)
     if (!res.ok) return { ok: false, error: errorFromResponse(res, data) }
     return { ok: true, data }
   }
@@ -335,9 +386,13 @@ export default function ReviewSection({
       return { ok: false as const, handled: true as const }
     }
 
-    const data = await safeJson(res)
+    const data = await safeJsonRecord(res)
     if (!res.ok) return { ok: false as const, error: errorFromResponse(res, data) }
-    return { ok: true as const, data }
+
+    const init = parseSignedUploadInit(data)
+    if (!init) return { ok: false as const, error: 'Upload init failed (missing bucket/path/token).' }
+
+    return { ok: true as const, data: init }
   }
 
   async function uploadQueued() {
@@ -362,25 +417,21 @@ export default function ReviewSection({
 
           if ('handled' in init) return
 
-          setPending((prev) =>
-            prev.map((p) => (p.id === item.id ? { ...p, status: 'ERROR', error: init.error } : p)),
-          )
+          setPending((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'ERROR', error: init.error } : p)))
           continue
         }
 
-        const { bucket, path, token, publicUrl, cacheBuster } = init.data || {}
+        const { bucket, path, token, publicUrl, cacheBuster } = init.data
 
-        const up = await (supabaseBrowser as any).storage
-          .from(bucket)
-          .uploadToSignedUrl(path, token, item.file, { contentType: item.file.type })
-          .catch((e: any) => ({ data: null, error: e }))
+        const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, item.file, {
+          contentType: item.file.type,
+          upsert: true,
+        })
 
-        if (up?.error) {
+        if (upErr) {
           sawError = true
           setPending((prev) =>
-            prev.map((p) =>
-              p.id === item.id ? { ...p, status: 'ERROR', error: up.error?.message || 'Upload failed' } : p,
-            ),
+            prev.map((p) => (p.id === item.id ? { ...p, status: 'ERROR', error: upErr.message || 'Upload failed' } : p)),
           )
           continue
         }
@@ -388,15 +439,13 @@ export default function ReviewSection({
         uploadedAny = true
 
         const finalUrl =
-          typeof publicUrl === 'string' && publicUrl
-            ? `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}v=${Number(cacheBuster || Date.now())}`
+          publicUrl
+            ? `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}v=${String(cacheBuster ?? Date.now())}`
             : null
 
         if (!finalUrl) sawError = true
 
-        setPending((prev) =>
-          prev.map((p) => (p.id === item.id ? { ...p, status: 'UPLOADED', publicUrl: finalUrl } : p)),
-        )
+        setPending((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'UPLOADED', publicUrl: finalUrl } : p)))
       }
 
       if (uploadedAny && !sawError) {
@@ -463,10 +512,10 @@ export default function ReviewSection({
       })
       setSelectedApptMediaIds([])
       router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') return
       console.error(e)
-      setError('Network error.')
+      setError(errorMessageFromUnknown(e, 'Network error.'))
     } finally {
       setLoading(false)
     }
@@ -496,10 +545,10 @@ export default function ReviewSection({
 
       setSuccess('Review updated.')
       router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') return
       console.error(e)
-      setError('Network error.')
+      setError(errorMessageFromUnknown(e, 'Network error.'))
     } finally {
       setLoading(false)
     }
@@ -549,10 +598,10 @@ export default function ReviewSection({
         return []
       })
       router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') return
       console.error(e)
-      setError('Network error.')
+      setError(errorMessageFromUnknown(e, 'Network error.'))
     } finally {
       setLoading(false)
     }
@@ -586,10 +635,10 @@ export default function ReviewSection({
 
       setSuccess('Review deleted.')
       router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') return
       console.error(e)
-      setError('Network error.')
+      setError(errorMessageFromUnknown(e, 'Network error.'))
     } finally {
       setLoading(false)
     }
@@ -825,8 +874,12 @@ export default function ReviewSection({
               </div>
             </div>
             <div className="text-right text-xs font-semibold text-textSecondary">
-              <div>{caps.images}/{MAX_IMAGES} images</div>
-              <div>{caps.videos}/{MAX_VIDEOS} video</div>
+              <div>
+                {caps.images}/{MAX_IMAGES} images
+              </div>
+              <div>
+                {caps.videos}/{MAX_VIDEOS} video
+              </div>
             </div>
           </div>
 
@@ -923,12 +976,7 @@ export default function ReviewSection({
 
         <div className="flex flex-wrap justify-end gap-2">
           {!hasReview ? (
-            <button
-              type="button"
-              disabled={loading || !bookingId}
-              onClick={submitReview}
-              className={btnPrimary(loading || !bookingId)}
-            >
+            <button type="button" disabled={loading || !bookingId} onClick={submitReview} className={btnPrimary(loading || !bookingId)}>
               {loading ? 'Submitting…' : 'Submit review'}
             </button>
           ) : (

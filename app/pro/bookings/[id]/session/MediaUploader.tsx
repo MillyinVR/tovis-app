@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
 import MediaFill from '@/app/_components/media/MediaFill'
-
+import { cn } from '@/lib/utils' 
+import { safeJson } from '@/lib/http'
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
 type UploadState = 'IDLE' | 'UPLOADING' | 'SAVING'
@@ -26,9 +27,6 @@ type SignedUploadResponse = {
   cacheBuster?: number
 }
 
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
-}
 
 function errorFrom(res: Response, data: any) {
   if (typeof data?.message === 'string' && data.message.trim()) return data.message
@@ -47,9 +45,6 @@ function bytesFromMb(mb: number) {
   return mb * 1024 * 1024
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 /**
  * Optional: create an image thumbnail client-side.
@@ -319,7 +314,7 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
               value={mediaType}
               onChange={(e) => setMediaType(e.target.value as MediaType)}
               disabled={disabled || Boolean(file)} // ✅ lock once chosen
-              className={cx(select, Boolean(file) ? 'opacity-70' : '')}
+              className={cn(select, Boolean(file) ? 'opacity-70' : '')}
               title={file ? 'Type is inferred from the selected file.' : undefined}
             >
               <option value="IMAGE">Image</option>

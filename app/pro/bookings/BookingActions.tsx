@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
-
+import { safeJson } from '@/lib/http'
 type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type LoadingAction = 'ACCEPT' | 'CANCEL' | 'START' | 'FINISH'
 
@@ -54,13 +54,6 @@ function formatWhen(iso: string | null | undefined, timeZone?: string | null) {
   return formatAppointmentWhen(d, tz)
 }
 
-async function safeJson(res: Response) {
-  if (res.status === 204) return {} as any
-  return res.json().catch(async () => {
-    const raw = await res.text().catch(() => '')
-    return raw ? { raw } : {}
-  })
-}
 
 function errorFromResponse(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error

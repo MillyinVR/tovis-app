@@ -2,8 +2,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
 
 type Offering = { id: string; name: string; basePrice: string; serviceId: string }
+
 type Opening = {
   id: string
   startAt: string
@@ -18,10 +22,6 @@ type Opening = {
   _count?: { notifications: number }
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
-
 function pretty(iso: string) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return 'Invalid date'
@@ -32,6 +32,83 @@ function pretty(iso: string) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(d)
+}
+
+function asStringOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v : null
+}
+
+function asNumberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function readArrayField(data: Record<string, unknown> | null, key: string): unknown[] {
+  if (!data) return []
+  const v = data[key]
+  return Array.isArray(v) ? v : []
+}
+
+function readNumberField(data: Record<string, unknown> | null, key: string): number | null {
+  if (!data) return null
+  const v = data[key]
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+function parseOpening(x: unknown): Opening | null {
+  if (!isRecord(x)) return null
+
+  const id = pickStringOrEmpty(x.id)
+  const startAt = pickStringOrEmpty(x.startAt)
+  const status = pickStringOrEmpty(x.status)
+
+  if (!id || !startAt || !status) return null
+
+  const offeringId = asStringOrNull(x.offeringId)
+  const serviceId = asStringOrNull(x.serviceId)
+
+  const offering = (() => {
+    if (!isRecord(x.offering)) return null
+    const oid = pickStringOrEmpty(x.offering.id)
+    const title = asStringOrNull(x.offering.title)
+    const durationMinutes = typeof x.offering.durationMinutes === 'number' && Number.isFinite(x.offering.durationMinutes) ? x.offering.durationMinutes : 0
+    const svc = isRecord(x.offering.service) ? x.offering.service : null
+    const svcName = svc ? asStringOrNull(svc.name) : null
+    if (!oid) return null
+    return { id: oid, title, durationMinutes, service: { name: svcName ?? 'Service' } }
+  })()
+
+  const service = (() => {
+    if (!isRecord(x.service)) return null
+    const sid = pickStringOrEmpty(x.service.id)
+    const name = asStringOrNull(x.service.name) ?? 'Service'
+    if (!sid) return null
+    return { id: sid, name }
+  })()
+
+  const count = (() => {
+    if (!isRecord(x._count)) return undefined
+    const n = asNumberOrNull(x._count.notifications) ?? 0
+    return { notifications: n }
+  })()
+
+  return {
+    id,
+    startAt,
+    endAt: asStringOrNull(x.endAt),
+    status,
+    discountPct: asNumberOrNull(x.discountPct),
+    note: asStringOrNull(x.note),
+    offeringId,
+    serviceId,
+    offering,
+    service,
+    _count: count,
+  }
 }
 
 export default function OpeningsPanel({ offerings }: { offerings: Offering[] }) {
@@ -53,18 +130,21 @@ export default function OpeningsPanel({ offerings }: { offerings: Offering[] }) 
     setErr(null)
     try {
       const res = await fetch('/api/pro/openings?days=7&take=50', { cache: 'no-store' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to load openings')
-      setItems(Array.isArray(data?.openings) ? data.openings : [])
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load openings')
+      const data = await safeJsonRecord(res)
+
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to load openings')
+
+      const openings = readArrayField(data, 'openings').map(parseOpening).filter(Boolean) as Opening[]
+      setItems(openings)
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to load openings')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadOpenings()
+    void loadOpenings()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -72,22 +152,46 @@ export default function OpeningsPanel({ offerings }: { offerings: Offering[] }) 
     if (!canSubmit) return
     setLoading(true)
     setErr(null)
+
     try {
-      const payload: any = {
+      const start = new Date(startAt)
+      if (Number.isNaN(start.getTime())) throw new Error('Start time is invalid.')
+
+      const payload: {
+        offeringId: string
+        startAt: string
+        endAt?: string
+        discountPct?: number
+        note?: string
+      } = {
         offeringId,
-        startAt: new Date(startAt).toISOString(),
+        startAt: start.toISOString(),
       }
-      if (endAt) payload.endAt = new Date(endAt).toISOString()
-      if (discountPct.trim()) payload.discountPct = Number(discountPct)
-      if (note.trim()) payload.note = note.trim()
+
+      if (endAt) {
+        const end = new Date(endAt)
+        if (Number.isNaN(end.getTime())) throw new Error('End time is invalid.')
+        payload.endAt = end.toISOString()
+      }
+
+      const dpRaw = discountPct.trim()
+      if (dpRaw) {
+        const n = Number(dpRaw)
+        if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('Discount % must be a number from 0 to 100.')
+        payload.discountPct = n
+      }
+
+      const noteTrim = note.trim()
+      if (noteTrim) payload.note = noteTrim
 
       const res = await fetch('/api/pro/openings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to create opening')
+
+      const data = await safeJsonRecord(res)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to create opening')
 
       // reload list so we also get _count + selects
       setStartAt('')
@@ -95,8 +199,8 @@ export default function OpeningsPanel({ offerings }: { offerings: Offering[] }) 
       setDiscountPct('')
       setNote('')
       await loadOpenings()
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to create opening')
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to create opening')
     } finally {
       setLoading(false)
     }
@@ -107,12 +211,16 @@ export default function OpeningsPanel({ offerings }: { offerings: Offering[] }) 
     setErr(null)
     try {
       const res = await fetch(`/api/openings/${encodeURIComponent(openingId)}/notify`, { method: 'POST' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to notify')
+      const data = await safeJsonRecord(res)
+
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to notify')
+
       await loadOpenings()
-      alert(`Notifications queued: ${data?.created ?? 0}`)
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to notify')
+
+      const created = readNumberField(data, 'created') ?? 0
+      alert(`Notifications queued: ${created}`)
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to notify')
     } finally {
       setLoading(false)
     }
@@ -230,6 +338,7 @@ export default function OpeningsPanel({ offerings }: { offerings: Offering[] }) 
               const svcName = o.offering?.title || o.offering?.service?.name || o.service?.name || 'Service'
               const when = pretty(o.startAt)
               const notifCount = o._count?.notifications ?? 0
+
               return (
                 <div key={o.id} style={{ border: '1px solid #eee', borderRadius: 12, padding: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>

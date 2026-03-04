@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { moneyToString } from '@/lib/money'
 import { isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { safeJson, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type Client = {
   id: string
@@ -51,12 +53,15 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
+function readStringField(data: unknown, key: string): string | null {
+  if (!isRecord(data)) return null
+  const v = data[key]
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+function errorFromResponse(res: Response, data: unknown) {
+  const msg = readErrorMessage(data)
+  if (msg) return msg
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -128,11 +133,11 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
 
     async function loadProTz() {
       try {
-        // Uses an existing endpoint in your project that already returns timeZone.
-        // If your /api/pro/calendar is heavy, we can swap to /api/pro/settings later.
         const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
         const data = await safeJson(res)
-        const tz = typeof data?.timeZone === 'string' ? data.timeZone.trim() : ''
+
+        // Only accept a valid IANA tz string
+        const tz = readStringField(data, 'timeZone')
         if (!cancelled && tz && isValidIanaTimeZone(tz)) setProTimeZone(tz)
       } catch {
         // ignore, keep fallback
@@ -198,7 +203,8 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
         return
       }
 
-      if (data?.id) router.push(`/pro/bookings/${data.id}`)
+      const id = readStringField(data, 'id')
+      if (id) router.push(`/pro/bookings/${encodeURIComponent(id)}`)
       else router.push('/pro/bookings')
 
       router.refresh()
@@ -218,19 +224,13 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
   const tzLabel = sanitizeTimeZone(proTimeZone, 'UTC')
 
   return (
-    <form onSubmit={handleSubmit} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4">
+    <form onSubmit={handleSubmit} className="tovis-glass grid gap-4 rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="grid gap-2">
         <label htmlFor="client" className={label}>
           Client <span className="text-textSecondary">*</span>
         </label>
 
-        <select
-          id="client"
-          value={clientId}
-          disabled={loading}
-          onChange={(e) => setClientId(e.target.value)}
-          className={field}
-        >
+        <select id="client" value={clientId} disabled={loading} onChange={(e) => setClientId(e.target.value)} className={field}>
           <option value="">Select client</option>
           {clientOptions.map((c) => (
             <option key={c.id} value={c.id}>

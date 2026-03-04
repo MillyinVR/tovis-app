@@ -2,6 +2,8 @@
 'use client'
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { cn } from '@/lib/utils'
+import { safeJson } from '@/lib/http'
 
 type JsonObject = Record<string, unknown>
 type Kind = 'ADDRESS' | 'AREA' | 'ANY'
@@ -28,17 +30,17 @@ type PlaceDetails = {
   sessionToken: string
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
 function isRecord(v: unknown): v is JsonObject {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/**
+ * Wraps lib/http.safeJson (unknown|null) and guarantees a plain object.
+ * This lets the rest of this file safely read fields as `unknown`.
+ */
 async function safeJsonObject(res: Response): Promise<JsonObject> {
-  const raw: unknown = await res.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
+  const data = await safeJson(res)
+  return isRecord(data) ? data : {}
 }
 
 function pickText(v: unknown): string {
@@ -73,6 +75,7 @@ function parsePredictions(data: JsonObject): Prediction[] {
 
     const mainText = pickText(item.mainText).trim()
     const secondaryText = pickText(item.secondaryText).trim()
+
     const types = Array.isArray(item.types) ? item.types.filter((x): x is string => typeof x === 'string') : []
     const distanceMeters = pickNullableNumber(item.distanceMeters)
 
@@ -121,7 +124,13 @@ export default function PlacesAutocomplete(props: {
   label?: string
   placeholder?: string
 }) {
-  const { onPickPlace, disabled = false, kind = 'ADDRESS', label = 'Address (Google Places)', placeholder = 'Start typing an address…' } = props
+  const {
+    onPickPlace,
+    disabled = false,
+    kind = 'ADDRESS',
+    label = 'Address (Google Places)',
+    placeholder = 'Start typing an address…',
+  } = props
 
   const listId = useId()
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -141,7 +150,6 @@ export default function PlacesAutocomplete(props: {
   const pickingRef = useRef(false)
 
   const hasQuery = Boolean(q.trim())
-  const canType = !disabled && !pickingRef.current
 
   const emptyState = useMemo(() => {
     if (!hasQuery) return 'Start typing to search.'
@@ -151,7 +159,7 @@ export default function PlacesAutocomplete(props: {
     return null
   }, [hasQuery, loading, error, items.length])
 
-  // Close on outside click (premium “behaves like a real control”)
+  // Close on outside click
   useEffect(() => {
     function onDown(e: MouseEvent | TouchEvent) {
       const el = wrapRef.current
@@ -220,6 +228,7 @@ export default function PlacesAutocomplete(props: {
 
         const res = await fetch(url, { cache: 'no-store', signal: ac.signal })
         const data = await safeJsonObject(res)
+
         if (!res.ok) {
           const msg = typeof data.error === 'string' && data.error.trim() ? data.error : 'Autocomplete failed.'
           throw new Error(msg)
@@ -254,7 +263,7 @@ export default function PlacesAutocomplete(props: {
     if (disabled) return
     pickingRef.current = true
 
-    // Immediately “autofill + close suggestions” (your earlier pain point)
+    // Immediately “autofill + close suggestions”
     setQ(fillText)
     setOpen(false)
     setItems([])
@@ -274,6 +283,7 @@ export default function PlacesAutocomplete(props: {
         `/api/google/places/details?placeId=${encodeURIComponent(placeId)}&sessionToken=${encodeURIComponent(st)}`,
         { cache: 'no-store' },
       )
+
       const data = await safeJsonObject(res)
       if (!res.ok) {
         const msg = typeof data.error === 'string' && data.error.trim() ? data.error : 'Details failed.'
@@ -330,9 +340,7 @@ export default function PlacesAutocomplete(props: {
               if (!disabled && q.trim()) setOpen(true)
             }}
             onKeyDown={(e) => {
-              if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-                setOpen(true)
-              }
+              if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) setOpen(true)
 
               if (e.key === 'Escape') {
                 e.preventDefault()
@@ -364,7 +372,7 @@ export default function PlacesAutocomplete(props: {
             }}
             placeholder={placeholder}
             disabled={disabled}
-            className={cx(
+            className={cn(
               'w-full rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2 pr-10',
               'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
               'focus:border-white/20',
@@ -389,9 +397,7 @@ export default function PlacesAutocomplete(props: {
           ) : null}
         </div>
 
-        <div className="text-[11px] text-textSecondary">
-          {loading ? 'Searching…' : ' '}
-        </div>
+        <div className="text-[11px] text-textSecondary">{loading ? 'Searching…' : ' '}</div>
       </div>
 
       {open ? (
@@ -415,7 +421,7 @@ export default function PlacesAutocomplete(props: {
                     aria-selected={active}
                     onMouseEnter={() => setActiveIndex(idx)}
                     onClick={() => void pick(p.placeId, p.mainText || p.description)}
-                    className={cx(
+                    className={cn(
                       'w-full text-left px-3 py-2.5 transition',
                       active ? 'bg-bgPrimary/35' : 'bg-bgSecondary/40 hover:bg-bgPrimary/30',
                       'border-b border-white/10 last:border-b-0',

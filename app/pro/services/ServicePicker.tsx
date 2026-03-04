@@ -1,9 +1,13 @@
 // app/pro/services/ServicePicker.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { pickStringOrEmpty } from '@/lib/pick'
+import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
+import { safeJson, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type ServiceDTO = {
   id: string
@@ -36,35 +40,6 @@ type OfferingDTO = {
 type Props = {
   categories: CategoryDTO[]
   offerings: OfferingDTO[]
-}
-
-// ---------- money helpers ----------
-function isValidMoneyString(v: string) {
-  return /^\d+(\.\d{1,2})?$/.test(v.trim())
-}
-
-function normalizeMoney2(v: string) {
-  const s = v.trim()
-  if (!isValidMoneyString(s)) return null
-  const [a, b = ''] = s.split('.')
-  if (b.length === 0) return `${a}.00`
-  if (b.length === 1) return `${a}.${b}0`
-  return `${a}.${b}`
-}
-
-function moneyToCentsInt(v: string) {
-  const n = normalizeMoney2(v)
-  if (!n) return null
-  const [a, b] = n.split('.')
-  return parseInt(a, 10) * 100 + parseInt(b, 10)
-}
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
-
-function pickString(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
 }
 
 export default function ServicePicker({ categories, offerings }: Props) {
@@ -202,17 +177,23 @@ export default function ServicePicker({ categories, offerings }: Props) {
         }),
       })
 
-      const init = await safeJson(initRes)
+      const initData = await safeJson(initRes)
+
       if (!initRes.ok) {
-        setError(init?.error || 'Failed to prepare upload.')
+        setError(readErrorMessage(initData) ?? 'Failed to prepare upload.')
         return
       }
 
-      const bucket = pickString(init?.bucket)
-      const path = pickString(init?.path)
-      const token = pickString(init?.token)
-      const publicUrl = pickString(init?.publicUrl)
-      const cacheBuster = typeof init?.cacheBuster === 'number' ? init.cacheBuster : null
+      if (!isRecord(initData)) {
+        setError('Upload init response was malformed.')
+        return
+      }
+
+      const bucket = pickStringOrEmpty(initData.bucket)
+      const path = pickStringOrEmpty(initData.path)
+      const token = pickStringOrEmpty(initData.token)
+      const publicUrl = pickStringOrEmpty(initData.publicUrl)
+      const cacheBuster = typeof initData.cacheBuster === 'number' ? initData.cacheBuster : null
 
       if (!bucket || !path || !token) {
         setError('Upload init missing bucket/path/token.')
@@ -244,7 +225,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (loading) return
 
@@ -305,8 +286,9 @@ export default function ServicePicker({ categories, offerings }: Props) {
       })
 
       const data = await safeJson(res)
+
       if (!res.ok) {
-        setError(data?.error || 'Something went wrong while saving this service.')
+        setError(readErrorMessage(data) ?? 'Something went wrong while saving this service.')
         return
       }
 
@@ -334,11 +316,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
         <div className="grid gap-3 md:grid-cols-3">
           <label className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Main category</div>
-            <select
-              value={selectedCategoryId}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              className={selectClass}
-            >
+            <select value={selectedCategoryId} onChange={(e) => handleCategoryChange(e.target.value)} className={selectClass}>
               <option value="">Select category</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -403,8 +381,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
               />
 
               <div className="mt-2 text-[12px] text-textSecondary">
-                This image only overrides how this service displays on{' '}
-                <span className="font-black text-textPrimary">your</span> menu.
+                This image only overrides how this service displays on <span className="font-black text-textPrimary">your</span> menu.
               </div>
 
               {uploadingImage ? <div className="mt-2 text-[12px] text-textSecondary">Uploading…</div> : null}
@@ -482,12 +459,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div
-              className={[
-                'rounded-card border border-white/10 bg-bgSecondary p-3',
-                offersInSalon ? '' : 'opacity-70',
-              ].join(' ')}
-            >
+            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersInSalon ? '' : 'opacity-70'].join(' ')}>
               <div className="mb-2 text-[12px] font-black text-textPrimary">Salon pricing</div>
 
               <div className="grid gap-2">
@@ -518,12 +490,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
               </div>
             </div>
 
-            <div
-              className={[
-                'rounded-card border border-white/10 bg-bgSecondary p-3',
-                offersMobile ? '' : 'opacity-70',
-              ].join(' ')}
-            >
+            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersMobile ? '' : 'opacity-70'].join(' ')}>
               <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile pricing</div>
 
               <div className="grid gap-2">

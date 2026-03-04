@@ -4,15 +4,12 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { VerificationStatus } from '@prisma/client'
+import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 
 type Props = {
   professionalId: string
   currentStatus: VerificationStatus
   licenseVerified: boolean
-}
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
 }
 
 function btnBase(disabled: boolean) {
@@ -30,7 +27,6 @@ function btnVariant(kind: 'primary' | 'warn' | 'danger') {
     return 'border border-surfaceGlass/25 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
   }
   // Keep warn/danger readable without introducing new token work right now.
-  // (We can token-ize status colors later.)
   if (kind === 'warn') {
     return 'border border-amber-700/70 text-amber-600 bg-bgSecondary hover:bg-surfaceGlass/10'
   }
@@ -57,12 +53,16 @@ export default function AdminProActions({ professionalId, currentStatus, license
         }),
       })
 
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Update failed.')
+      const data = await safeJsonRecord(res)
+
+      if (!res.ok) {
+        const msg = readErrorMessage(data) ?? `Update failed (${res.status}).`
+        throw new Error(msg)
+      }
 
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Update failed.')
+    } catch (e: unknown) {
+      setErr(errorMessageFromUnknown(e, 'Update failed.'))
     } finally {
       setBusy(false)
     }

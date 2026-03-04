@@ -6,7 +6,8 @@ import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
 import type { Bounds, Pin } from './_components/MapView'
-
+import { cn } from '@/lib/utils'
+import { safeJson } from '@/lib/http'
 type ApiPro = {
   id: string
   businessName: string | null
@@ -45,9 +46,6 @@ type PlacesPrediction = {
 
 const MapView = dynamic(() => import('./_components/MapView'), { ssr: false })
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 const APP_BOTTOM_INSET = 'max(var(--app-footer-space, 0px), env(safe-area-inset-bottom))'
 
@@ -91,13 +89,6 @@ function isApiPro(x: unknown): x is ApiPro {
   )
 }
 
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
 
 function nearlyEqual(a: number, b: number, eps = 1e-5) {
   return Math.abs(a - b) < eps
@@ -140,13 +131,6 @@ function newSessionToken() {
   return `sess_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`
 }
 
-/**
- * Explicit parse:
- *  - "@encinitas ca" -> locationOnly
- *  - "lashes 92024"  -> query="lashes", location="92024"
- *  - "lashes near empire state building" -> query="lashes", location="empire state building"
- *  - "92024" -> query="", location="92024"
- */
 function splitQueryAndLocation(raw: string): { query: string; location: string | null } {
   const s = raw.trim()
   if (!s) return { query: '', location: null }
@@ -774,7 +758,7 @@ export default function SearchMapClient() {
         </div>
 
         <div
-          className={cx(
+          className={cn(
             'pointer-events-none absolute left-0 right-0 top-0 z-10 h-[190px]',
             'bg-gradient-to-b from-black/60 via-black/25 to-transparent',
           )}
@@ -783,7 +767,7 @@ export default function SearchMapClient() {
         {/* Top bar */}
         <div className="absolute left-0 right-0 top-0 z-20 px-3 pt-3">
           <div
-            className={cx(
+            className={cn(
               'tovis-glass-strong rounded-card border border-white/12 bg-bgSecondary/80 p-3 backdrop-blur-xl',
               'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
             )}
@@ -794,7 +778,7 @@ export default function SearchMapClient() {
                 <div className="text-[12px] font-black text-textPrimary/85 tracking-wide">Search</div>
 
                 <div
-                  className={cx(
+                  className={cn(
                     'mt-1 flex items-center gap-2 rounded-2xl px-3 py-2',
                     'bg-bgPrimary/20',
                     'backdrop-blur-xl',
@@ -839,7 +823,7 @@ export default function SearchMapClient() {
                       }
                     }}
                     placeholder="ZIP, city, neighborhood, landmark, or “lashes 92024”"
-                    className={cx(
+                    className={cn(
                       'w-full bg-transparent text-[14px] font-semibold text-textPrimary',
                       'placeholder:text-textPrimary/60 outline-none',
                     )}
@@ -894,7 +878,7 @@ export default function SearchMapClient() {
                           void commitSelection(p)
                         }}
                         onMouseEnter={() => setAcIndex(idx)}
-                        className={cx(
+                        className={cn(
                           'flex w-full flex-col gap-0.5 px-3 py-2 text-left transition',
                           idx === acIndex ? 'bg-white/10' : 'bg-transparent hover:bg-white/10',
                           'border-b border-white/10 last:border-b-0',
@@ -915,7 +899,7 @@ export default function SearchMapClient() {
                   <select
                     value={radiusMiles}
                     onChange={(e) => setRadiusMiles(Number(e.target.value))}
-                    className={cx(
+                    className={cn(
                       'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
                     )}
@@ -941,7 +925,7 @@ export default function SearchMapClient() {
                   <select
                     value={sortMode}
                     onChange={(e) => setSortMode(e.target.value as SortMode)}
-                    className={cx(
+                    className={cn(
                       'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
                     )}
@@ -1000,7 +984,7 @@ export default function SearchMapClient() {
                     lastSearchRef.current = { query, origin: mapCenter }
                     void runSearch({ query, origin: mapCenter })
                   }}
-                  className={cx(
+                  className={cn(
                     'rounded-full px-4 py-2 text-[12px] font-black',
                     'border border-white/15',
                     'bg-bgPrimary/25 backdrop-blur-xl',
@@ -1095,7 +1079,7 @@ export default function SearchMapClient() {
                           }}
                           type="button"
                           onClick={() => handleSelectList(p)}
-                          className={cx(
+                          className={cn(
                             'w-full rounded-card border border-white/10 p-3 text-left transition',
                             active ? 'bg-white/10' : 'bg-bgPrimary/25 hover:bg-white/10',
                           )}

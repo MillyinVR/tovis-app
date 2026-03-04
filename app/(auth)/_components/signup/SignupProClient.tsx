@@ -5,15 +5,9 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
-}
-
-async function safeJson(res: Response): Promise<Record<string, unknown>> {
-  const data: unknown = await res.json().catch(() => ({}))
-  return isRecord(data) ? data : {}
-}
+import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
+import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 
 function sanitizePhone(v: string) {
   return v.replace(/\s+/g, '')
@@ -28,10 +22,6 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className="text-xs font-black tracking-wide text-textSecondary">{children}</span>
 }
@@ -44,7 +34,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -61,7 +51,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'hover:border-surfaceGlass/16',
@@ -86,7 +76,7 @@ function PrimaryButton({
     <button
       type="submit"
       disabled={disabled || loading}
-      className={cx(
+      className={cn(
         'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
         'bg-accentPrimary/26 text-textPrimary',
@@ -104,7 +94,7 @@ function SecondaryLinkButton({ href, children }: { href: string; children: React
   return (
     <Link
       href={href}
-      className={cx(
+      className={cn(
         'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -174,23 +164,25 @@ async function fetchAutocomplete(args: { input: string; sessionToken: string }) 
   url.searchParams.set('components', 'country:us')
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await safeJson(res)
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Location search failed.')
+  const data = await safeJsonRecord(res)
 
-  const predsRaw = Array.isArray(data.predictions) ? data.predictions : []
+  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Location search failed.')
+
+  const predsRaw = data && Array.isArray(data.predictions) ? data.predictions : []
   const out: GooglePrediction[] = []
 
   for (const p of predsRaw) {
     if (!isRecord(p)) continue
-    const placeId = String(p.placeId ?? '').trim()
-    const description = String(p.description ?? '').trim()
+
+    const placeId = typeof p.placeId === 'string' ? p.placeId.trim() : ''
+    const description = typeof p.description === 'string' ? p.description.trim() : ''
     if (!placeId || !description) continue
 
     out.push({
       placeId,
       description,
-      mainText: String(p.mainText ?? ''),
-      secondaryText: String(p.secondaryText ?? ''),
+      mainText: typeof p.mainText === 'string' ? p.mainText : '',
+      secondaryText: typeof p.secondaryText === 'string' ? p.secondaryText : '',
     })
   }
 
@@ -203,20 +195,22 @@ async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }
   url.searchParams.set('sessionToken', args.sessionToken)
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await safeJson(res)
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not confirm selected location.')
+  const data = await safeJsonRecord(res)
 
-  const place = isRecord(data.place) ? data.place : {}
+  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Could not confirm selected location.')
+
+  const place = data && isRecord(data.place) ? data.place : null
+
   return {
-    placeId: String(place.placeId ?? args.placeId),
-    name: typeof place.name === 'string' ? place.name : null,
-    formattedAddress: typeof place.formattedAddress === 'string' ? place.formattedAddress : null,
-    lat: typeof place.lat === 'number' ? place.lat : null,
-    lng: typeof place.lng === 'number' ? place.lng : null,
-    city: typeof place.city === 'string' ? place.city : null,
-    state: typeof place.state === 'string' ? place.state : null,
-    postalCode: typeof place.postalCode === 'string' ? place.postalCode : null,
-    countryCode: typeof place.countryCode === 'string' ? place.countryCode : null,
+    placeId: typeof place?.placeId === 'string' ? place.placeId : args.placeId,
+    name: typeof place?.name === 'string' ? place.name : null,
+    formattedAddress: typeof place?.formattedAddress === 'string' ? place.formattedAddress : null,
+    lat: typeof place?.lat === 'number' ? place.lat : null,
+    lng: typeof place?.lng === 'number' ? place.lng : null,
+    city: typeof place?.city === 'string' ? place.city : null,
+    state: typeof place?.state === 'string' ? place.state : null,
+    postalCode: typeof place?.postalCode === 'string' ? place.postalCode : null,
+    countryCode: typeof place?.countryCode === 'string' ? place.countryCode : null,
   }
 }
 
@@ -226,16 +220,17 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   url.searchParams.set('components', 'country:us')
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await safeJson(res)
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'ZIP lookup failed.')
+  const data = await safeJsonRecord(res)
 
-  const geo = isRecord(data.geo) ? data.geo : {}
-  const lat = typeof geo.lat === 'number' ? geo.lat : null
-  const lng = typeof geo.lng === 'number' ? geo.lng : null
-  const postalCode = typeof geo.postalCode === 'string' ? geo.postalCode : null
-  const city = typeof geo.city === 'string' ? geo.city : null
-  const state = typeof geo.state === 'string' ? geo.state : null
-  const countryCode = typeof geo.countryCode === 'string' ? geo.countryCode : null
+  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'ZIP lookup failed.')
+
+  const geo = data && isRecord(data.geo) ? data.geo : null
+  const lat = typeof geo?.lat === 'number' ? geo.lat : null
+  const lng = typeof geo?.lng === 'number' ? geo.lng : null
+  const postalCode = typeof geo?.postalCode === 'string' ? geo.postalCode : null
+  const city = typeof geo?.city === 'string' ? geo.city : null
+  const state = typeof geo?.state === 'string' ? geo.state : null
+  const countryCode = typeof geo?.countryCode === 'string' ? geo.countryCode : null
 
   if (lat == null || lng == null) throw new Error('ZIP lookup returned no coordinates.')
   if (!postalCode) throw new Error('ZIP lookup did not resolve a valid postal code.')
@@ -249,10 +244,11 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   url.searchParams.set('lng', String(args.lng))
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await safeJson(res)
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Timezone lookup failed.')
+  const data = await safeJsonRecord(res)
 
-  const tz = typeof data.timeZoneId === 'string' ? data.timeZoneId.trim() : ''
+  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Timezone lookup failed.')
+
+  const tz = typeof data?.timeZoneId === 'string' ? data.timeZoneId.trim() : ''
   if (!tz) throw new Error('No timezone returned.')
   return tz
 }
@@ -501,23 +497,20 @@ export default function SignupProClient() {
         }),
       })
 
-      const data = await safeJson(res)
+      const data = await safeJsonRecord(res)
+
       if (!res.ok) {
-        setError(typeof data.error === 'string' ? data.error : 'Signup failed.')
+        setError(readErrorMessage(data) ?? 'Signup failed.')
         return
       }
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(data.nextUrl)
+      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
       if (nextUrl) return router.replace(nextUrl)
-
-      // If you want, you can route to a future verification page here when you build it:
-      // if (data.needsManualLicenseUpload === true) return router.replace('/pro/verification')
 
       router.replace('/pro/services')
     } catch (err: unknown) {
-      // eslint-disable-next-line no-console
       console.error(err)
       setError('Network error.')
     } finally {
@@ -573,7 +566,7 @@ export default function SignupProClient() {
         {/* Mode */}
         <div className="grid gap-2">
           <FieldLabel>Where do you offer services?</FieldLabel>
-          <div className={cx('grid grid-cols-2 gap-2')}>
+          <div className={cn('grid grid-cols-2 gap-2')}>
             <button
               type="button"
               onClick={() => {
@@ -581,7 +574,7 @@ export default function SignupProClient() {
                 setError(null)
                 resetLocation('')
               }}
-              className={cx(
+              className={cn(
                 'rounded-full border px-3 py-2 text-xs font-black transition',
                 proMode === 'SALON'
                   ? 'border-accentPrimary/35 bg-accentPrimary/14 text-textPrimary'
@@ -597,7 +590,7 @@ export default function SignupProClient() {
                 setError(null)
                 resetLocation('')
               }}
-              className={cx(
+              className={cn(
                 'rounded-full border px-3 py-2 text-xs font-black transition',
                 proMode === 'MOBILE'
                   ? 'border-accentPrimary/35 bg-accentPrimary/14 text-textPrimary'
@@ -613,7 +606,9 @@ export default function SignupProClient() {
         <div className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>{locationLabel()}</FieldLabel>
-            {confirmed?.timeZoneId ? <span className="text-[11px] font-black text-textSecondary/80">{confirmed.timeZoneId}</span> : null}
+            {confirmed?.timeZoneId ? (
+              <span className="text-[11px] font-black text-textSecondary/80">{confirmed.timeZoneId}</span>
+            ) : null}
           </div>
 
           <div className="relative">
@@ -633,7 +628,7 @@ export default function SignupProClient() {
                       key={p.placeId}
                       type="button"
                       onClick={() => pickPrediction(p)}
-                      className={cx(
+                      className={cn(
                         'w-full rounded-card px-3 py-2 text-left transition',
                         'hover:bg-bgPrimary/35 focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
                       )}
@@ -657,7 +652,7 @@ export default function SignupProClient() {
                 type="button"
                 onClick={confirmZip}
                 disabled={locLoading || !locQuery.trim()}
-                className={cx(
+                className={cn(
                   'inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-black transition',
                   'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
                   'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -748,12 +743,7 @@ export default function SignupProClient() {
         {/* Optional business */}
         <label className="grid gap-1.5">
           <FieldLabel>Business name (optional)</FieldLabel>
-          <Input
-            value={businessName}
-            onChange={(e) => setBusinessName(e.target.value)}
-            placeholder="e.g. Salon De Tovis"
-            autoComplete="organization"
-          />
+          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Salon De Tovis" autoComplete="organization" />
           <HelpText>You can add this later — we won’t block signup.</HelpText>
         </label>
 
@@ -781,14 +771,7 @@ export default function SignupProClient() {
             <FieldLabel>Phone</FieldLabel>
             <span className="text-xs font-black text-textSecondary/80">Required</span>
           </div>
-          <Input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="+1 (___) ___-____"
-            required
-          />
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="+1 (___) ___-____" required />
         </label>
 
         {/* Email */}

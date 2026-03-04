@@ -2,12 +2,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
-
+import { cn } from '@/lib/utils'
 export const dynamic = 'force-dynamic'
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function Card({
   title,
@@ -25,7 +22,7 @@ function Card({
   return (
     <Link
       href={href}
-      className={cx(
+      className={cn(
         'group grid gap-2 rounded-card border p-4 transition',
         'bg-bgSecondary text-textPrimary',
         tone === 'highlight'
@@ -37,7 +34,7 @@ function Card({
         <div className="text-sm font-extrabold">{title}</div>
         <span
           aria-hidden="true"
-          className={cx(
+          className={cn(
             'mt-0.5 inline-flex h-6 items-center justify-center rounded-full border px-2 text-[11px] font-black',
             tone === 'highlight'
               ? 'border-accentPrimary/25 bg-accentPrimary/10 text-accentPrimary'

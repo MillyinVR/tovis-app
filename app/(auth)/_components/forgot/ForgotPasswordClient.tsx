@@ -4,16 +4,14 @@
 
 import { useState } from 'react'
 import AuthShell from '../AuthShell'
+import { cn } from '@/lib/utils'
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -66,7 +64,7 @@ export default function ForgotPasswordClient() {
           <button
             type="submit"
             disabled={loading}
-            className={cx(
+            className={cn(
               'group relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
               'border border-accentPrimary/35 bg-accentPrimary/26 text-textPrimary',
               'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',

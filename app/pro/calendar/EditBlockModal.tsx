@@ -10,6 +10,9 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { computeDurationMinutesFromIso } from './_utils/calendarMath'
+import { safeJson, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
 
 type Props = {
   open: boolean
@@ -24,10 +27,6 @@ type BlockDto = {
   startsAt: string
   endsAt: string
   note?: string | null
-}
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -57,6 +56,23 @@ function parseHHMM(hhmm: string) {
   const mi = Number(miStr)
   if (!Number.isFinite(hh) || !Number.isFinite(mi)) return null
   return { hour: clamp(hh, 0, 23), minute: clamp(mi, 0, 59) }
+}
+
+function parseBlockDto(data: unknown): BlockDto | null {
+  if (!isRecord(data)) return null
+
+  const raw = isRecord(data.block) ? data.block : data
+
+  if (!isRecord(raw)) return null
+
+  const id = pickStringOrEmpty(raw.id)
+  const startsAt = pickStringOrEmpty(raw.startsAt)
+  const endsAt = pickStringOrEmpty(raw.endsAt)
+  if (!id || !startsAt || !endsAt) return null
+
+  const note = typeof raw.note === 'string' ? raw.note : raw.note == null ? null : String(raw.note)
+
+  return { id, startsAt, endsAt, note }
 }
 
 export default function EditBlockModal({ open, blockId, timeZone, onClose, onSaved }: Props) {
@@ -96,9 +112,14 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       try {
         const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { cache: 'no-store' })
         const data = await safeJson(res)
-        if (!res.ok) throw new Error(data?.error || `Failed to load block (${res.status}).`)
 
-        const b = (data?.block ?? data) as BlockDto
+        if (!res.ok) {
+          throw new Error(readErrorMessage(data) ?? `Failed to load block (${res.status}).`)
+        }
+
+        const b = parseBlockDto(data)
+        if (!b) throw new Error('Malformed block payload.')
+
         if (cancelled) return
 
         setBlock(b)
@@ -114,8 +135,8 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
         setDurationMinutes(dur)
 
         setNote((b.note ?? '').toString())
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load block.')
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load block.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -170,12 +191,12 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       })
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to save.')
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to save.')
 
       onSaved()
       close()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to save.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save.')
     } finally {
       setSaving(false)
     }
@@ -191,12 +212,12 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
     try {
       const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to delete.')
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to delete.')
 
       onSaved()
       close()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to delete.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to delete.')
     } finally {
       setDeleting(false)
     }

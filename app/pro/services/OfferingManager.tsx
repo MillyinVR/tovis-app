@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
-
+import { cn } from '@/lib/utils'
+import { safeJson } from '@/lib/http'
 type Offering = {
   id: string
   serviceId: string
@@ -100,10 +101,6 @@ type AddOnSaveItem = {
   durationOverrideMinutes: number | null
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -122,13 +119,6 @@ function pickString(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
 
 function pickImage(o: Offering) {
   const src = (o.customImageUrl || o.serviceDefaultImageUrl || o.defaultImageUrl || '').trim()
@@ -494,14 +484,14 @@ function OfferingCard(props: {
 
   return (
     <div
-      className={cx(
+      className={cn(
         'relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
         !upstreamOk && 'opacity-[0.92]',
       )}
     >
       {/* gradient border + specular highlight */}
       <div
-        className={cx(
+        className={cn(
           'pointer-events-none absolute inset-0',
           "before:absolute before:inset-0 before:content-['']",
           'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.14),transparent_60%)]',
@@ -516,7 +506,7 @@ function OfferingCard(props: {
         {/* TOP */}
         <div className="flex items-start gap-3">
           <div
-            className={cx(
+            className={cn(
               'relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgPrimary/50',
               !upstreamOk && 'grayscale',
             )}
@@ -543,7 +533,7 @@ function OfferingCard(props: {
                 )}
               </div>
 
-              <button type="button" onClick={onToggle} disabled={busy || uploadBusy} className={cx(btnBase, btnSoft)}>
+              <button type="button" onClick={onToggle} disabled={busy || uploadBusy} className={cn(btnBase, btnSoft)}>
                 {isOpen ? 'Close' : 'Edit'}
               </button>
             </div>
@@ -575,7 +565,7 @@ function OfferingCard(props: {
             type="button"
             onClick={onRemove}
             disabled={disabledForRemove}
-            className={cx(btnBase, btnDanger, 'col-span-1 sm:col-auto')}
+            className={cn(btnBase, btnDanger, 'col-span-1 sm:col-auto')}
           >
             {busy ? 'Working…' : 'Remove'}
           </button>
@@ -598,7 +588,7 @@ function OfferingCard(props: {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={disabledForEdit}
-                className={cx(btnBase, btnAccent, 'col-span-1 sm:col-auto')}
+                className={cn(btnBase, btnAccent, 'col-span-1 sm:col-auto')}
               >
                 {uploadBusy ? 'Uploading…' : 'Upload image'}
               </button>
@@ -611,7 +601,7 @@ function OfferingCard(props: {
             type="button"
             disabled={disabledForEdit}
             onClick={() => setAddonsOpen((v) => !v)}
-            className={cx(btnBase, btnSoft, 'col-span-1 sm:col-auto')}
+            className={cn(btnBase, btnSoft, 'col-span-1 sm:col-auto')}
           >
             {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
           </button>
@@ -691,7 +681,7 @@ function OfferingCard(props: {
             ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
-              <div className={cx('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersInSalon && 'opacity-70')}>
+              <div className={cn('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersInSalon && 'opacity-70')}>
                 <div className="mb-2 text-[12px] font-black text-textPrimary">Salon</div>
                 <div className="grid gap-2">
                   <label className="grid gap-1">
@@ -721,7 +711,7 @@ function OfferingCard(props: {
                 </div>
               </div>
 
-              <div className={cx('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersMobile && 'opacity-70')}>
+              <div className={cn('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersMobile && 'opacity-70')}>
                 <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile</div>
                 <div className="grid gap-2">
                   <label className="grid gap-1">
@@ -759,7 +749,7 @@ function OfferingCard(props: {
               <button
                 type="submit"
                 disabled={disabledForEdit}
-                className={cx(
+                className={cn(
                   'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
                   disabledForEdit
                     ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
@@ -914,7 +904,7 @@ function AddOnsManager(props: {
           type="button"
           onClick={save}
           disabled={disabled || saving || loading}
-          className={cx(
+          className={cn(
             'rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]',
             disabled || saving || loading
               ? 'cursor-not-allowed border-white/10 bg-bgSecondary text-textSecondary opacity-70'
@@ -974,7 +964,7 @@ function AddOnsManager(props: {
                       type="button"
                       disabled={disabled || !isOn}
                       onClick={() => setRecommended((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
-                      className={cx(
+                      className={cn(
                         'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
                         !isOn
                           ? 'border-white/10 bg-bgSecondary text-textSecondary opacity-60'

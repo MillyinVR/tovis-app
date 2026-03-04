@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DEFAULT_TIME_ZONE, getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
-
+import { safeJson } from '@/lib/http'
 type Block = { id: string; startAt: string; endAt: string; reason: string | null }
 
 type Initial = {
@@ -59,14 +59,6 @@ function messageFromUnknown(e: unknown): string {
   if (e instanceof Error && e.message) return e.message
   if (typeof e === 'string' && e.trim()) return e
   return 'Something went wrong'
-}
-
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
 }
 
 function clampPct(n: number, min: number, max: number) {

@@ -5,10 +5,9 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
-
-function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
+import { cn } from '@/lib/utils'
+import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 function sanitizeRole(v: string | null): 'CLIENT' | 'PRO' {
   const s = (v ?? '').toUpperCase()
@@ -28,8 +27,13 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
+function readUserRole(data: unknown): 'CLIENT' | 'PRO' | 'ADMIN' | null {
+  if (!isRecord(data)) return null
+  const user = data.user
+  if (!isRecord(user)) return null
+  const role = user.role
+  if (role === 'CLIENT' || role === 'PRO' || role === 'ADMIN') return role
+  return null
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -50,7 +54,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -69,7 +73,7 @@ function PasswordToggle({ pressed, onClick }: { pressed: boolean; onClick: () =>
       type="button"
       onClick={onClick}
       aria-pressed={pressed}
-      className={cx(
+      className={cn(
         'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black transition',
         'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary',
         'hover:border-surfaceGlass/18 hover:text-textPrimary',
@@ -98,18 +102,18 @@ function PillToggle({
   const idle = 'text-textSecondary hover:text-textPrimary'
 
   return (
-    <div className={cx('rounded-full border p-1', 'border-surfaceGlass/12 bg-bgPrimary/25 tovis-glass-soft')}>
+    <div className={cn('rounded-full border p-1', 'border-surfaceGlass/12 bg-bgPrimary/25 tovis-glass-soft')}>
       <div className="grid grid-cols-2 gap-1">
         <button
           type="button"
-          className={cx(base, value === left.value ? active : idle)}
+          className={cn(base, value === left.value ? active : idle)}
           onClick={() => onChange(left.value)}
         >
           {left.label}
         </button>
         <button
           type="button"
-          className={cx(base, value === right.value ? active : idle)}
+          className={cn(base, value === right.value ? active : idle)}
           onClick={() => onChange(right.value)}
         >
           {right.label}
@@ -133,7 +137,7 @@ function TinyButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={cx(
+      className={cn(
         'inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -176,9 +180,9 @@ async function fetchAutocomplete(args: { input: string; sessionToken: string }) 
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Location search failed.')
+  if (!res.ok) throw new Error((data as any)?.error || 'Location search failed.')
 
-  const predictions = Array.isArray(data?.predictions) ? data.predictions : []
+  const predictions = Array.isArray((data as any)?.predictions) ? (data as any).predictions : []
   return predictions
     .map((p: any) => ({
       placeId: String(p?.placeId ?? ''),
@@ -196,9 +200,9 @@ async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Could not confirm selected location.')
+  if (!res.ok) throw new Error((data as any)?.error || 'Could not confirm selected location.')
 
-  const p = data?.place ?? {}
+  const p = (data as any)?.place ?? {}
   return {
     placeId: String(p?.placeId ?? args.placeId),
     name: typeof p?.name === 'string' ? p.name : null,
@@ -219,9 +223,9 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'ZIP lookup failed.')
+  if (!res.ok) throw new Error((data as any)?.error || 'ZIP lookup failed.')
 
-  const g = data?.geo ?? {}
+  const g = (data as any)?.geo ?? {}
   const lat = typeof g?.lat === 'number' ? g.lat : null
   const lng = typeof g?.lng === 'number' ? g.lng : null
   const postalCode = typeof g?.postalCode === 'string' ? g.postalCode : null
@@ -242,9 +246,9 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Timezone lookup failed.')
+  if (!res.ok) throw new Error((data as any)?.error || 'Timezone lookup failed.')
 
-  const tz = String(data?.timeZoneId ?? '')
+  const tz = String((data as any)?.timeZoneId ?? '')
   if (!tz) throw new Error('No timezone returned.')
   return tz
 }
@@ -262,7 +266,7 @@ function PrimaryButton({
     <button
       type="submit"
       disabled={disabled || loading}
-      className={cx(
+      className={cn(
         'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
         'bg-accentPrimary/26 text-textPrimary',
@@ -285,7 +289,7 @@ function SecondaryLinkButton({ href, children }: { href: string; children: React
   return (
     <Link
       href={href}
-      className={cx(
+      className={cn(
         'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -579,19 +583,21 @@ export default function SignupClient() {
         }),
       })
 
-      const data = await safeJson(res)
+      const data = await safeJsonRecord(res)
 
       if (!res.ok) {
-        setError(data?.error || 'Signup failed.')
+        setError(readErrorMessage(data) ?? 'Signup failed.')
         return
       }
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(data?.nextUrl)
+      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
       if (nextUrl) return router.replace(nextUrl)
 
-      if (data?.user?.role === 'PRO') router.replace('/pro/services')
+      // Prefer server role if present; fallback to the role the user selected.
+      const createdRole = readUserRole(data) ?? role
+      if (createdRole === 'PRO') router.replace('/pro/services')
       else router.replace('/client/looks')
     } catch (err) {
       console.error(err)
@@ -694,7 +700,7 @@ export default function SignupClient() {
                       key={p.placeId}
                       type="button"
                       onClick={() => pickPrediction(p)}
-                      className={cx(
+                      className={cn(
                         'w-full rounded-card px-3 py-2 text-left transition',
                         'hover:bg-bgPrimary/35 focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
                       )}

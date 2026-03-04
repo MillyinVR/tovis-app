@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
-
+import { safeJson, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
 type Role = 'CLIENT' | 'PRO' | 'ADMIN'
@@ -80,13 +81,16 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
-  if (typeof data?.message === 'string') return data.message
+function errorFromResponse(res: Response, data: unknown) {
+  const msg = readErrorMessage(data)
+  if (msg) return msg
+
+  if (isRecord(data)) {
+    const m = data.message
+    if (typeof m === 'string' && m.trim()) return m.trim()
+  }
+
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -514,9 +518,15 @@ export default function AftercareForm({
         return
       }
 
-      const clientNotified = Boolean(data?.clientNotified)
-      const bookingFinished = Boolean(data?.bookingFinished)
-      const redirectTo = typeof data?.redirectTo === 'string' ? data.redirectTo : null
+      const r = isRecord(data) ? data : null
+
+      const clientNotified = r?.clientNotified === true
+      const bookingFinished = r?.bookingFinished === true
+
+      const redirectTo =
+        typeof r?.redirectTo === 'string' && r.redirectTo.trim() && r.redirectTo.startsWith('/') && !r.redirectTo.startsWith('//')
+          ? r.redirectTo
+          : null
 
       if (clientNotified) {
         setSent(true)

@@ -1,15 +1,13 @@
 // app/(auth)/_components/login/LoginClient.tsx
-
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
-
-function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
+import { cn } from '@/lib/utils'
+import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 function sanitizeFrom(from: string | null): string | null {
   if (!from) return null
@@ -29,8 +27,13 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
+function readUserRole(data: unknown): 'ADMIN' | 'PRO' | 'CLIENT' | null {
+  if (!isRecord(data)) return null
+  const user = data.user
+  if (!isRecord(user)) return null
+  const role = user.role
+  if (role === 'ADMIN' || role === 'PRO' || role === 'CLIENT') return role
+  return null
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -41,7 +44,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -53,18 +56,12 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-function PrimaryButton({
-  children,
-  loading,
-}: {
-  children: React.ReactNode
-  loading?: boolean
-}) {
+function PrimaryButton({ children, loading }: { children: React.ReactNode; loading?: boolean }) {
   return (
     <button
       type="submit"
       disabled={loading}
-      className={cx(
+      className={cn(
         'group relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35 bg-accentPrimary/26 text-textPrimary',
         'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
@@ -87,17 +84,11 @@ function PrimaryButton({
   )
 }
 
-function SecondaryLinkButton({
-  href,
-  children,
-}: {
-  href: string
-  children: React.ReactNode
-}) {
+function SecondaryLinkButton({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
       href={href}
-      className={cx(
+      className={cn(
         'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-[13px] font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -123,7 +114,7 @@ export default function LoginClient() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (loading) return
 
@@ -137,25 +128,27 @@ export default function LoginClient() {
         body: JSON.stringify({ email, password, tapIntentId: ti ?? undefined }),
       })
 
-      const data = await safeJson(res)
+      const data = await safeJsonRecord(res)
 
       if (!res.ok) {
-        setError(data?.error || 'Login failed.')
+        setError(readErrorMessage(data) ?? 'Login failed.')
         return
       }
 
+      // Refresh app router caches after auth
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(data?.nextUrl)
-      if (nextUrl) return router.replace(nextUrl)
-      if (from) return router.replace(from)
+      const nextUrlRaw = readStringField(data, 'nextUrl')
+      const nextUrl = sanitizeNextUrl(nextUrlRaw)
 
-      const role = data?.user?.role
+      const role = readUserRole(data)
 
-      if (role === 'ADMIN') return router.replace('/admin')
-      if (role === 'PRO') return router.replace('/pro') // or '/pro/dashboard' if that's your real home
-      return router.replace('/looks') // CLIENT default should be looks/discovery
+      const dest =
+        nextUrl ??
+        from ??
+        (role === 'ADMIN' ? '/admin' : role === 'PRO' ? '/pro' : '/looks')
 
+      router.replace(dest)
     } catch (err) {
       console.error(err)
       setError('Network error.')
@@ -185,12 +178,7 @@ export default function LoginClient() {
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Password</FieldLabel>
-
-            {/* classy, visible, not desperate */}
-            <Link
-              href={forgotHref}
-              className="text-[11px] font-black text-textSecondary/80 hover:text-textPrimary"
-            >
+            <Link href={forgotHref} className="text-[11px] font-black text-textSecondary/80 hover:text-textPrimary">
               Forgot password?
             </Link>
           </div>
@@ -210,15 +198,12 @@ export default function LoginClient() {
           </div>
         ) : null}
 
-        {/* CTA stack */}
         <div className="grid gap-2 pt-1">
           <PrimaryButton loading={loading}>{loading ? 'Logging in…' : 'Login'}</PrimaryButton>
-
           <SecondaryLinkButton href={signupHref}>Create an account</SecondaryLinkButton>
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-textSecondary">
             <div className="text-textSecondary/70">No spam. Just bookings.</div>
-
             <Link href="/support" className="font-black text-textSecondary hover:text-textPrimary">
               Need help?
             </Link>

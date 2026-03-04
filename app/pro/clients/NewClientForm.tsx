@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-
+import { safeJson } from '@/lib/http'
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/pro'
   return window.location.pathname + window.location.search + window.location.hash
@@ -23,9 +23,6 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
 
 function errorFromResponse(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error

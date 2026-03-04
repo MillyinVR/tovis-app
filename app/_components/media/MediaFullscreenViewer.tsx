@@ -2,7 +2,7 @@
 'use client'
 
 import React, { useEffect } from 'react'
-
+import { cn } from '@/lib/utils'
 type MediaType = 'IMAGE' | 'VIDEO'
 
 type Props = {
@@ -26,9 +26,6 @@ type Props = {
   footerOffsetPx?: number
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 export default function MediaFullscreenViewer({
   src,
@@ -71,11 +68,11 @@ export default function MediaFullscreenViewer({
   }, [])
 
   return (
-    <main className={cx('fixed inset-0 z-[9990] overflow-hidden bg-black', className || '')}>
+    <main className={cn('fixed inset-0 z-[9990] overflow-hidden bg-black', className || '')}>
       {/* MEDIA LAYER */}
       <div className="absolute inset-0">
         {mediaType === 'VIDEO' ? (
-          <video src={src} controls playsInline preload="metadata" className={cx('h-full w-full', objectClass)} />
+          <video src={src} controls playsInline preload="metadata" className={cn('h-full w-full', objectClass)} />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -84,7 +81,7 @@ export default function MediaFullscreenViewer({
             draggable={false}
             loading="eager"
             decoding="async"
-            className={cx('h-full w-full', objectClass)}
+            className={cn('h-full w-full', objectClass)}
           />
         )}
       </div>

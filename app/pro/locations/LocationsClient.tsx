@@ -9,12 +9,9 @@ import type { LocationType, ProLocation, PickedPlace } from '@/lib/contracts/pro
 import { parseLocationType, parsePickedPlace, parseProLocationsPayload } from '@/lib/contracts/proLocations'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { clampInt } from '@/lib/guards'
+import { cn } from '@/lib/utils'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function isValidUsZip(v: string) {
   return /^\d{5}(-\d{4})?$/.test(v.trim())
@@ -94,7 +91,7 @@ function ConfirmModal(props: {
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className={cx('rounded-full border px-4 py-2 text-[12px] font-black transition disabled:opacity-60', confirmTone)}
+            className={cn('rounded-full border px-4 py-2 text-[12px] font-black transition disabled:opacity-60', confirmTone)}
           >
             {busy ? 'Working…' : confirmLabel}
           </button>
@@ -109,7 +106,7 @@ function Toast(props: ToastState) {
 
   return (
     <div
-      className={cx(
+      className={cn(
         'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl',
         'tovis-glass-strong tovis-noise',
         tone,
@@ -432,7 +429,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
             <select
               value={type}
               onChange={(e) => setType(parseLocationType(e.target.value))}
-              className={cx(
+              className={cn(
                 'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-bold text-textPrimary outline-none',
               )}
@@ -450,7 +447,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={type === 'MOBILE_BASE' ? 'e.g. Mobile in North County' : 'e.g. Encinitas Studio'}
-              className={cx(
+              className={cn(
                 'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
               )}
@@ -538,7 +535,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                     value={mobilePostalCode}
                     onChange={(e) => setMobilePostalCode(e.target.value)}
                     placeholder="e.g. 92024"
-                    className={cx(
+                    className={cn(
                       'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                       'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
                     )}
@@ -552,7 +549,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                   <select
                     value={mobileRadiusKm}
                     onChange={(e) => setMobileRadiusKm(Number(e.target.value))}
-                    className={cx(
+                    className={cn(
                       'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                       'text-[13px] font-bold text-textPrimary outline-none',
                     )}

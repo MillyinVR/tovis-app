@@ -12,14 +12,11 @@ import ProProfileLink from '@/app/client/components/ProProfileLink'
 
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
-
+import { cn } from '@/lib/utils'
 export const dynamic = 'force-dynamic'
 
 type StepKey = 'overview' | 'consult' | 'aftercare'
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function normalizeStep(raw: unknown): StepKey {
   const s = String(raw || '').toLowerCase().trim()
@@ -119,7 +116,7 @@ function alertClassByVariant(variant: StatusVariant) {
 }
 
 function tabClass(active: boolean) {
-  return cx(
+  return cn(
     'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
     'border border-white/10',
     active ? 'bg-accentPrimary text-bgPrimary shadow-sm' : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
@@ -127,7 +124,7 @@ function tabClass(active: boolean) {
 }
 
 function tabDisabledClass() {
-  return cx(
+  return cn(
     'inline-flex items-center rounded-full px-4 py-2 text-xs font-black',
     'border border-white/10 bg-bgPrimary text-textSecondary opacity-50 cursor-not-allowed select-none',
   )
@@ -180,7 +177,7 @@ function SectionCard(props: {
 }) {
   return (
     <section
-      className={cx(
+      className={cn(
         'rounded-card border border-white/10 p-4',
         'tovis-glass',
         'shadow-[0_14px_48px_rgba(0,0,0,0.35)]',
@@ -367,7 +364,7 @@ export default async function ClientBookingPage(props: {
     <main className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">
       {/* Top recap “hero” card */}
       <section
-        className={cx(
+        className={cn(
           'rounded-card border border-white/10 p-5',
           'tovis-glass',
           'shadow-[0_18px_60px_rgba(0,0,0,0.45)]',
@@ -395,7 +392,7 @@ export default async function ClientBookingPage(props: {
 
           <div className="flex shrink-0 flex-col items-end gap-2">
             <span
-              className={cx(
+              className={cn(
                 'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
                 pillClassByVariant(pillVariant),
               )}
@@ -501,7 +498,7 @@ export default async function ClientBookingPage(props: {
                     return (
                       <div
                         key={it.id}
-                        className={cx(
+                        className={cn(
                           'rounded-card border border-white/10 bg-bgPrimary px-4 py-3',
                           'shadow-[0_10px_30px_rgba(0,0,0,0.25)]',
                         )}
@@ -561,7 +558,7 @@ export default async function ClientBookingPage(props: {
           </nav>
 
           {/* Status message */}
-          <section className={cx('mt-4 rounded-card p-4', alertClassByVariant(msg.variant))}>
+          <section className={cn('mt-4 rounded-card p-4', alertClassByVariant(msg.variant))}>
             <div className="text-[13px] font-black text-textPrimary">{msg.title}</div>
             <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">{msg.body}</div>
           </section>

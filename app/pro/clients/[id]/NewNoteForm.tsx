@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-
+import { safeJson } from '@/lib/http'
 type Props = { clientId: string }
 
 function currentPathWithQuery() {
@@ -23,10 +23,6 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   const qs = new URLSearchParams({ from })
   if (reason) qs.set('reason', reason)
   router.push(`/login?${qs.toString()}`)
-}
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
 }
 
 function errorFromResponse(res: Response, data: any) {

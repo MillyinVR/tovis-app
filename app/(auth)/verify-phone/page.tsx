@@ -5,20 +5,14 @@ import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell from '../_components/AuthShell'
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
-function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
+import { cn } from '@/lib/utils'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -44,7 +38,7 @@ function PrimaryButton({
     <button
       type="submit"
       disabled={disabled || loading}
-      className={cx(
+      className={cn(
         'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
         'bg-accentPrimary/26 text-textPrimary',
@@ -77,7 +71,7 @@ function TinyButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={cx(
+      className={cn(
         'inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -96,6 +90,17 @@ function sanitizeNextUrl(raw: string | null) {
   if (!s.startsWith('/')) return null
   if (s.startsWith('//')) return null
   return s
+}
+
+function readRetryAfterSeconds(data: Record<string, unknown> | null): number | null {
+  if (!data) return null
+  const v = data.retryAfterSeconds
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number(v)
+    if (Number.isFinite(n)) return n
+  }
+  return null
 }
 
 export default function VerifyPhonePage() {
@@ -122,12 +127,15 @@ export default function VerifyPhonePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
-      const data = await safeJson(res)
+
+      const data = await safeJsonRecord(res)
 
       if (!res.ok) {
-        const retry =
-          data?.retryAfterSeconds ? ` Try again in ~${Math.ceil(Number(data.retryAfterSeconds) / 60)} min.` : ''
-        setError((data?.error || 'Could not resend code.') + retry)
+        const retryAfterSeconds = readRetryAfterSeconds(data)
+        const retryMsg =
+          retryAfterSeconds != null ? ` Try again in ~${Math.ceil(retryAfterSeconds / 60)} min.` : ''
+
+        setError((readErrorMessage(data) ?? 'Could not resend code.') + retryMsg)
         return
       }
 
@@ -160,10 +168,11 @@ export default function VerifyPhonePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: trimmed }),
       })
-      const data = await safeJson(res)
+
+      const data = await safeJsonRecord(res)
 
       if (!res.ok) {
-        setError(data?.error || 'Verification failed.')
+        setError(readErrorMessage(data) ?? 'Verification failed.')
         return
       }
 

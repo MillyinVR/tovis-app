@@ -3,13 +3,10 @@
 'use client'
 
 import React from 'react'
-
+import { cn } from '@/lib/utils'
 type MediaType = 'IMAGE' | 'VIDEO'
 type Fit = 'cover' | 'contain'
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 export default function MediaFill(props: {
   src: string
@@ -30,7 +27,7 @@ export default function MediaFill(props: {
         src={src}
         playsInline
         preload="metadata"
-        className={cx('block h-full w-full', objectClass, className)}
+        className={cn('block h-full w-full', objectClass, className)}
         {...videoProps}
       />
     )
@@ -44,7 +41,7 @@ export default function MediaFill(props: {
       draggable={false}
       loading="lazy"
       decoding="async"
-      className={cx('block h-full w-full', objectClass, className)}
+      className={cn('block h-full w-full', objectClass, className)}
       {...imgProps}
     />
   )

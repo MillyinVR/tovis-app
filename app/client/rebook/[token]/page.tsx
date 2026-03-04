@@ -6,7 +6,9 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen, formatRangeInTimeZone } from '@/lib/formatInTimeZone'
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
-
+import { pickString } from '@/lib/pick'
+import { cn } from '@/lib/utils'
+import { BookingSource, BookingStatus } from '@prisma/client'
 export const dynamic = 'force-dynamic'
 
 type SearchParamsShape = {
@@ -15,22 +17,11 @@ type SearchParamsShape = {
   windowEnd?: string
 }
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
 
 function toDate(v: unknown): Date | null {
   if (!v) return null
   const d = v instanceof Date ? v : new Date(String(v))
   return Number.isNaN(d.getTime()) ? null : d
-}
-
-function formatWhen(d: Date, timeZone: string) {
-  return formatAppointmentWhen(d, timeZone)
-}
-
-function formatDateRange(start: Date, end: Date, timeZone: string) {
-  return formatRangeInTimeZone(start, end, timeZone)
 }
 
 type RebookInfo =
@@ -55,7 +46,7 @@ function computeRebookInfo(
     if (!d) return { mode: 'NONE', label: null }
     return {
       mode: 'BOOKED_NEXT_APPOINTMENT',
-      label: `Next appointment booked: ${formatWhen(d, timeZone)}`,
+      label: `Next appointment booked: ${formatAppointmentWhen(d, timeZone)}`,
       bookedAt: d,
     }
   }
@@ -66,7 +57,7 @@ function computeRebookInfo(
     if (s && e) {
       return {
         mode: 'RECOMMENDED_WINDOW',
-        label: `Recommended rebook window: ${formatDateRange(s, e, timeZone)}`,
+        label: `Recommended rebook window: ${formatRangeInTimeZone(s, e, timeZone)}`,
         windowStart: s,
         windowEnd: e,
       }
@@ -79,13 +70,14 @@ function computeRebookInfo(
   if (legacy) {
     return {
       mode: 'RECOMMENDED_DATE',
-      label: `Recommended next visit: ${formatWhen(legacy, timeZone)}`,
+      label: `Recommended next visit: ${formatAppointmentWhen(legacy, timeZone)}`,
       recommendedAt: legacy,
     }
   }
 
   return { mode: 'NONE', label: null }
 }
+
 
 function safeDecimalString(v: unknown): string | null {
   if (v == null) return null
@@ -95,9 +87,6 @@ function safeDecimalString(v: unknown): string | null {
   return null
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 export default async function ClientRebookFromAftercarePage(props: {
   params: { token: string }
@@ -210,7 +199,7 @@ export default async function ClientRebookFromAftercarePage(props: {
   let dto: ClientBookingDTO
   try {
     dto = await buildClientBookingDTO({
-      booking: rawBooking as any,
+      booking: rawBooking,
       unreadAftercare: false,
       hasPendingConsultationApproval: false,
     })
@@ -219,11 +208,11 @@ export default async function ClientRebookFromAftercarePage(props: {
 
     dto = {
       id: String(rawBooking.id),
-      status: (rawBooking.status as any) ?? null,
-      source: (rawBooking.source as any) ?? null,
-      sessionStep: (rawBooking.sessionStep as any) ?? null,
+      status: (rawBooking.status) ?? null,
+      source: (rawBooking.source) ?? null,
+      sessionStep: (rawBooking.sessionStep) ?? null,
 
-      scheduledFor: (rawBooking.scheduledFor as any)?.toISOString?.() ?? new Date().toISOString(),
+      scheduledFor: (rawBooking.scheduledFor)?.toISOString?.() ?? new Date().toISOString(),
       totalDurationMinutes: Number(rawBooking.totalDurationMinutes ?? 0),
       bufferMinutes: Number(rawBooking.bufferMinutes ?? 0),
 
@@ -309,9 +298,9 @@ export default async function ClientRebookFromAftercarePage(props: {
       nextBooking = await prisma.booking.findFirst({
         where: {
           rebookOfBookingId: rawBooking.id,
-          source: 'AFTERCARE',
-          status: { not: 'CANCELLED' },
-        } as any,
+          source: BookingSource.AFTERCARE,
+          status: { not: BookingStatus.CANCELLED },
+        },
         orderBy: { scheduledFor: 'asc' },
         select: { id: true, scheduledFor: true, status: true },
       })
@@ -348,7 +337,7 @@ export default async function ClientRebookFromAftercarePage(props: {
     <main className="mx-auto w-full max-w-[720px] px-4 pb-14 pt-16 text-textPrimary">
       <Link
         href={`/client/bookings/${encodeURIComponent(dto.id)}`}
-        className={cx(
+        className={cn(
           'inline-flex items-center gap-2 rounded-full border border-surfaceGlass/10 bg-bgSecondary px-4 py-2',
           'text-xs font-black text-textPrimary transition hover:bg-surfaceGlass',
         )}
@@ -408,7 +397,7 @@ export default async function ClientRebookFromAftercarePage(props: {
           ) : (
             <Link
               href={bookHref}
-              className={cx(
+              className={cn(
                 'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black text-bgPrimary transition',
                 'bg-accentPrimary hover:bg-accentPrimaryHover',
                 rebookInfo.mode === 'NONE' && 'opacity-70',

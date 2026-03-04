@@ -5,6 +5,10 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 import { prettyWhen } from '@/app/client/components/_helpers'
+import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 
 type Pro = {
   id?: string | null
@@ -39,18 +43,6 @@ type NotificationRow = {
 
 type TabKey = 'forYou' | 'openNow'
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
-function safeArray<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : []
-}
-
-async function safeJson(res: Response) {
-  return (await res.json().catch(() => ({}))) as any
-}
-
 function proTz(o: OpeningRow) {
   return sanitizeTimeZone(o.professional?.timeZone, 'UTC')
 }
@@ -60,13 +52,12 @@ function openingHref(o: OpeningRow) {
   const tz = proTz(o)
 
   return `/offerings/${encodeURIComponent(o.offeringId)}?scheduledFor=${encodeURIComponent(
-    o.startAt
+    o.startAt,
   )}&source=DISCOVERY&openingId=${encodeURIComponent(o.id)}&proTimeZone=${encodeURIComponent(tz)}`
 }
 
 function TierPill({ tier }: { tier: string }) {
-  const label =
-    tier === 'TIER1_WAITLIST_LAPSED' ? 'Priority' : tier === 'TIER2_FAVORITE_VIEWER' ? 'For you' : 'Open'
+  const label = tier === 'TIER1_WAITLIST_LAPSED' ? 'Priority' : tier === 'TIER2_FAVORITE_VIEWER' ? 'For you' : 'Open'
 
   return (
     <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[11px] font-black text-textPrimary">
@@ -80,14 +71,14 @@ function MiniTab({ active, label, onClick }: { active: boolean; label: string; o
     <button
       type="button"
       onClick={onClick}
-      className={cx(
+      className={cn(
         'relative inline-flex items-center px-1 pb-2 text-[12px] font-black transition',
         'outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bgPrimary',
-        active ? 'text-textPrimary' : 'text-textSecondary hover:text-textPrimary'
+        active ? 'text-textPrimary' : 'text-textSecondary hover:text-textPrimary',
       )}
     >
       {label}
-      {active ? <span className="absolute -bottom-[1px] left-0 h-[2px] w-full bg-accentPrimary" /> : null}
+      {active ? <span className="absolute -bottom-px left-0 h-0.5 w-full bg-accentPrimary" /> : null}
     </button>
   )
 }
@@ -142,6 +133,80 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
   )
 }
 
+/** ---------- parsing helpers (no property access on unknown) ---------- */
+
+function asStringOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v : null
+}
+
+function asNumberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function parsePro(x: unknown): Pro {
+  if (!isRecord(x)) {
+    return { id: null, businessName: null, city: null, location: null, timeZone: null }
+  }
+  return {
+    id: asStringOrNull(x.id),
+    businessName: asStringOrNull(x.businessName),
+    city: asStringOrNull(x.city),
+    location: asStringOrNull(x.location),
+    timeZone: asStringOrNull(x.timeZone),
+  }
+}
+
+function parseSvc(x: unknown): Svc {
+  if (!isRecord(x)) return null
+  const name = asStringOrNull(x.name)
+  return name ? { name } : null
+}
+
+function parseOpeningRow(x: unknown): OpeningRow | null {
+  if (!isRecord(x)) return null
+
+  const id = pickStringOrEmpty(x.id)
+  const startAt = pickStringOrEmpty(x.startAt)
+  if (!id || !startAt) return null
+
+  return {
+    id,
+    startAt,
+    endAt: asStringOrNull(x.endAt),
+    discountPct: asNumberOrNull(x.discountPct),
+    note: asStringOrNull(x.note),
+    offeringId: asStringOrNull(x.offeringId),
+    professional: parsePro(x.professional),
+    service: parseSvc(x.service),
+  }
+}
+
+function parseNotificationRow(x: unknown): NotificationRow | null {
+  if (!isRecord(x)) return null
+  const id = pickStringOrEmpty(x.id)
+  const tier = pickStringOrEmpty(x.tier)
+  const sentAt = pickStringOrEmpty(x.sentAt)
+
+  const opening = parseOpeningRow(x.opening)
+  if (!id || !tier || !sentAt || !opening) return null
+
+  return {
+    id,
+    tier,
+    sentAt,
+    openedAt: asStringOrNull(x.openedAt),
+    clickedAt: asStringOrNull(x.clickedAt),
+    bookedAt: asStringOrNull(x.bookedAt),
+    opening,
+  }
+}
+
+function readArrayField(data: Record<string, unknown> | null, key: string): unknown[] {
+  if (!data) return []
+  const v = data[key]
+  return Array.isArray(v) ? v : []
+}
+
 export default function LastMinuteOpenings() {
   const [tab, setTab] = useState<TabKey>('openNow')
   const [feed, setFeed] = useState<OpeningRow[]>([])
@@ -162,25 +227,25 @@ export default function LastMinuteOpenings() {
           fetch('/api/openings?hours=48', { cache: 'no-store' }),
         ])
 
-        const nData = await safeJson(nRes)
-        const fData = await safeJson(fRes)
+        const nData = await safeJsonRecord(nRes)
+        const fData = await safeJsonRecord(fRes)
 
-        if (!nRes.ok) throw new Error(nData?.error || 'Failed to load your openings.')
-        if (!fRes.ok) throw new Error(fData?.error || 'Failed to load openings feed.')
+        if (!nRes.ok) throw new Error(readErrorMessage(nData) ?? 'Failed to load your openings.')
+        if (!fRes.ok) throw new Error(readErrorMessage(fData) ?? 'Failed to load openings feed.')
 
         if (!alive) return
 
-        const notifications = safeArray<NotificationRow>(nData?.notifications)
-        const openings = safeArray<OpeningRow>(fData?.openings)
+        const notifications = readArrayField(nData, 'notifications').map(parseNotificationRow).filter(Boolean) as NotificationRow[]
+        const openings = readArrayField(fData, 'openings').map(parseOpeningRow).filter(Boolean) as OpeningRow[]
 
         setNotif(notifications)
         setFeed(openings)
 
         // default mini-tab: "For you" if it exists
         if (notifications.length > 0) setTab('forYou')
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return
-        setErr(e?.message || 'Failed to load openings.')
+        setErr(e instanceof Error ? e.message : 'Failed to load openings.')
       } finally {
         if (!alive) return
         setLoading(false)
@@ -211,7 +276,9 @@ export default function LastMinuteOpenings() {
   }
 
   const showForYou = tab === 'forYou'
-  const list = showForYou ? notif.map((n) => ({ key: n.id, opening: n.opening, badge: <TierPill tier={n.tier} /> })) : feed.map((o) => ({ key: o.id, opening: o, badge: null }))
+  const list = showForYou
+    ? notif.map((n) => ({ key: n.id, opening: n.opening, badge: <TierPill tier={n.tier} /> }))
+    : feed.map((o) => ({ key: o.id, opening: o, badge: null }))
 
   return (
     <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">

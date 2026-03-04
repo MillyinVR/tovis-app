@@ -9,7 +9,7 @@ import LooksTopBar from './LooksTopBar'
 import LookSlide from './LookSlide'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
-
+import { safeJson } from '@/lib/http'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
 import type { FeedItem, UiCategory, UiComment } from './lookTypes'
 
@@ -43,13 +43,6 @@ function sanitizeFrom(from: string) {
   return trimmed
 }
 
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return {}
-  }
-}
 
 function parseCategories(raw: unknown): UiCategory[] {
   if (!isRecord(raw)) return [ALL_TAB]

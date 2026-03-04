@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { cn } from '@/lib/utils'
+import { safeJsonParse } from '@/lib/http'
 
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
@@ -38,15 +39,6 @@ type Props = {
 const COOKIE_KEY = 'tovis_admin_services_filters'
 const LS_KEY = 'tovis_admin_services_filters_v1'
 
-function safeJsonParse(s: string | null): unknown | null {
-  if (!s) return null
-  try {
-    return JSON.parse(s) as unknown
-  } catch {
-    return null
-  }
-}
-
 function as01(v: unknown): '0' | '1' | null {
   if (v === '0' || v === 0) return '0'
   if (v === '1' || v === 1) return '1'
@@ -76,8 +68,7 @@ function getCookie(name: string) {
 function setCookie(name: string, value: string, days = 120) {
   if (typeof document === 'undefined') return
   const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString()
-  const secure =
-    typeof window !== 'undefined' && window.location && window.location.protocol === 'https:' ? '; Secure' : ''
+  const secure = typeof window !== 'undefined' && window.location?.protocol === 'https:' ? '; Secure' : ''
   document.cookie = `${name}=${encodeURIComponent(value)}; Expires=${expires}; Path=/; SameSite=Lax${secure}`
 }
 
@@ -312,7 +303,10 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
               <div className="flex items-center gap-2 rounded-full border border-surfaceGlass/15 bg-bgPrimary/30 px-3 py-1.5">
                 <div className="text-[11px] font-extrabold text-textSecondary">Jump</div>
                 <input
-                  className={cn('w-16 bg-transparent text-xs font-black text-textPrimary outline-none', 'placeholder:text-textSecondary/70')}
+                  className={cn(
+                    'w-16 bg-transparent text-xs font-black text-textPrimary outline-none',
+                    'placeholder:text-textSecondary/70',
+                  )}
                   value={jump}
                   onChange={(e) => setJump(e.target.value)}
                   inputMode="numeric"

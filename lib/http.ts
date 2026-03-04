@@ -9,6 +9,26 @@ export async function safeJson(res: Response): Promise<unknown | null> {
   }
 }
 
+/** Same as safeJson, but guarantees the return is an object (record) or null. */
+export async function safeJsonRecord(res: Response): Promise<UnknownRecord | null> {
+  const data = await safeJson(res)
+  return isRecord(data) ? data : null
+}
+
+/** Read a trimmed string field from an unknown payload. */
+export function readStringField(data: unknown, key: string): string | null {
+  if (!isRecord(data)) return null
+  const v = data[key]
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+/** Read a number field from an unknown payload. */
+export function readNumberField(data: unknown, key: string): number | null {
+  if (!isRecord(data)) return null
+  const v = data[key]
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
 export function readErrorMessage(data: unknown): string | null {
   if (!isRecord(data)) return null
   const e = data.error
@@ -26,4 +46,15 @@ export function errorMessageFromUnknown(e: unknown, fallback = 'Something went w
 
 export function isOkTrue(data: unknown): data is UnknownRecord & { ok: true } {
   return isRecord(data) && data.ok === true
+}
+
+export function safeJsonParse(input: string | null | undefined): unknown | null {
+  if (input == null) return null
+  const s = String(input).trim()
+  if (!s) return null
+  try {
+    return JSON.parse(s)
+  } catch {
+    return null
+  }
 }

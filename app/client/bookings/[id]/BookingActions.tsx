@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DEFAULT_TIME_ZONE, getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
-
+import { safeJson } from '@/lib/http'
 type Props = {
   bookingId: string
   status: any
@@ -58,10 +58,6 @@ function fromDatetimeLocalValueInTimeZone(v: string, tz: string): Date | null {
   return Number.isNaN(utc.getTime()) ? null : utc
 }
 
-async function safeJson(res: Response) {
-  if (res.status === 204) return {} as any
-  return (await res.json().catch(() => ({}))) as any
-}
 
 function errorFromResponse(res: Response, data: any) {
   if (typeof data?.error === 'string') return data.error

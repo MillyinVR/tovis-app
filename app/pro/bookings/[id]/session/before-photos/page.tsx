@@ -8,7 +8,7 @@ import { getServerOrigin } from '@/lib/serverOrigin'
 
 import MediaUploader from '../MediaUploader'
 import MediaPreviewGrid from '../_components/MediaPreviewGrid'
-
+import { cn } from '@/lib/utils'
 import { transitionSessionStep } from '@/lib/booking/transitions'
 import { BookingStatus, ConsultationApprovalStatus, SessionStep } from '@prisma/client'
 
@@ -24,13 +24,10 @@ type ApiMediaItem = {
   signedThumbUrl: string | null
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function Card(props: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cx('tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4', props.className)}>
+    <div className={cn('tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4', props.className)}>
       {props.children}
     </div>
   )

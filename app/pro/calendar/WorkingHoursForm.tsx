@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { safeJson, readErrorMessage } from '@/lib/http'
 
 type Period = 'AM' | 'PM'
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
@@ -23,7 +24,7 @@ type WorkingHoursState = Record<WeekdayKey, DayConfig>
 type ApiDayConfig = {
   enabled: boolean
   start: string // "HH:MM"
-  end: string   // "HH:MM"
+  end: string // "HH:MM"
 }
 
 // ✅ keep API type strict (object), but allow prop to be null/undefined
@@ -34,6 +35,8 @@ type WorkingHoursFormProps = {
   onSaved?: (hours: ApiWorkingHours) => void
   locationType?: LocationType
 }
+
+type JsonObject = Record<string, unknown>
 
 const DAYS: Array<{ key: WeekdayKey; label: string }> = [
   { key: 'mon', label: 'Mon' },
@@ -55,6 +58,11 @@ function isObject(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
 
+async function safeJsonObject(res: Response): Promise<JsonObject> {
+  const data = await safeJson(res)
+  return isObject(data) ? (data as JsonObject) : {}
+}
+
 /** Accept "9:00" or "09:00" and normalize to HH:MM, else null */
 function normalizeHHMM(v: unknown): string | null {
   const s = typeof v === 'string' ? v.trim() : ''
@@ -70,12 +78,11 @@ function normalizeHHMM(v: unknown): string | null {
 function looksLikeApiHours(v: unknown): v is ApiWorkingHours {
   if (!isObject(v)) return false
   for (const d of DAY_KEYS) {
-    const row = (v as any)[d]
+    const row = (v as Record<string, unknown>)[d]
     if (!isObject(row)) return false
     if (typeof row.enabled !== 'boolean') return false
     if (typeof row.start !== 'string') return false
     if (typeof row.end !== 'string') return false
-    // don’t require valid times here — we normalize below
   }
   return true
 }
@@ -86,8 +93,9 @@ function looksLikeApiHours(v: unknown): v is ApiWorkingHours {
  * - Sat/Sun off
  */
 function defaultApiHours(): ApiWorkingHours {
-  const weekday = { enabled: true, start: '09:00', end: '17:00' }
-  const weekend = { enabled: false, start: '09:00', end: '17:00' }
+  const weekday: ApiDayConfig = { enabled: true, start: '09:00', end: '17:00' }
+  const weekend: ApiDayConfig = { enabled: false, start: '09:00', end: '17:00' }
+
   return {
     mon: { ...weekday },
     tue: { ...weekday },
@@ -159,51 +167,71 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
+function errorFromResponse(res: Response, data: unknown) {
+  const msg = readErrorMessage(data)
+  if (msg) return msg
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+  if (isObject(data)) {
+    const m = data.message
+    if (typeof m === 'string' && m.trim()) return m.trim()
+  }
+
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
 }
 
-/** UI state defaults match API defaults */
 function buildDefaultState(): WorkingHoursState {
-  const api = defaultApiHours()
-  const next = {} as WorkingHoursState
-  for (const { key } of DAYS) {
-    const cfg = api[key]
-    const startParsed = parseTime24(cfg.start)
-    const endParsed = parseTime24(cfg.end)
-    next[key] = {
-      enabled: Boolean(cfg.enabled),
-      startHour: startParsed.hour,
-      startMinute: startParsed.minute,
-      startPeriod: startParsed.period,
-      endHour: endParsed.hour,
-      endMinute: endParsed.minute,
-      endPeriod: endParsed.period,
-    }
-  }
-  return next
+  return hydrateFromApi(defaultApiHours())
 }
 
 function hydrateFromApi(raw: ApiWorkingHours | null | undefined): WorkingHoursState {
-  const next = buildDefaultState()
-  if (!raw) return next
-  if (!looksLikeApiHours(raw)) return next
+  const base = defaultApiHours()
 
-  for (const { key } of DAYS) {
-    const cfg = raw[key]
-    if (!cfg) continue
+  const src: ApiWorkingHours = looksLikeApiHours(raw)
+    ? {
+        mon: {
+          enabled: raw.mon.enabled,
+          start: normalizeHHMM(raw.mon.start) ?? base.mon.start,
+          end: normalizeHHMM(raw.mon.end) ?? base.mon.end,
+        },
+        tue: {
+          enabled: raw.tue.enabled,
+          start: normalizeHHMM(raw.tue.start) ?? base.tue.start,
+          end: normalizeHHMM(raw.tue.end) ?? base.tue.end,
+        },
+        wed: {
+          enabled: raw.wed.enabled,
+          start: normalizeHHMM(raw.wed.start) ?? base.wed.start,
+          end: normalizeHHMM(raw.wed.end) ?? base.wed.end,
+        },
+        thu: {
+          enabled: raw.thu.enabled,
+          start: normalizeHHMM(raw.thu.start) ?? base.thu.start,
+          end: normalizeHHMM(raw.thu.end) ?? base.thu.end,
+        },
+        fri: {
+          enabled: raw.fri.enabled,
+          start: normalizeHHMM(raw.fri.start) ?? base.fri.start,
+          end: normalizeHHMM(raw.fri.end) ?? base.fri.end,
+        },
+        sat: {
+          enabled: raw.sat.enabled,
+          start: normalizeHHMM(raw.sat.start) ?? base.sat.start,
+          end: normalizeHHMM(raw.sat.end) ?? base.sat.end,
+        },
+        sun: {
+          enabled: raw.sun.enabled,
+          start: normalizeHHMM(raw.sun.start) ?? base.sun.start,
+          end: normalizeHHMM(raw.sun.end) ?? base.sun.end,
+        },
+      }
+    : base
 
+  const dayState = (cfg: ApiDayConfig): DayConfig => {
     const startParsed = parseTime24(cfg.start)
     const endParsed = parseTime24(cfg.end)
-
-    next[key] = {
+    return {
       enabled: Boolean(cfg.enabled),
       startHour: startParsed.hour,
       startMinute: startParsed.minute,
@@ -214,20 +242,33 @@ function hydrateFromApi(raw: ApiWorkingHours | null | undefined): WorkingHoursSt
     }
   }
 
-  return next
+  return {
+    mon: dayState(src.mon),
+    tue: dayState(src.tue),
+    wed: dayState(src.wed),
+    thu: dayState(src.thu),
+    fri: dayState(src.fri),
+    sat: dayState(src.sat),
+    sun: dayState(src.sun),
+  }
 }
 
 function toApiPayload(state: WorkingHoursState): ApiWorkingHours {
-  const payload = {} as Record<WeekdayKey, ApiDayConfig>
-  for (const { key } of DAYS) {
-    const cfg = state[key]
-    payload[key] = {
-      enabled: Boolean(cfg.enabled),
-      start: toTime24(cfg.startHour, cfg.startMinute, cfg.startPeriod),
-      end: toTime24(cfg.endHour, cfg.endMinute, cfg.endPeriod),
-    }
+  const day = (cfg: DayConfig): ApiDayConfig => ({
+    enabled: Boolean(cfg.enabled),
+    start: toTime24(cfg.startHour, cfg.startMinute, cfg.startPeriod),
+    end: toTime24(cfg.endHour, cfg.endMinute, cfg.endPeriod),
+  })
+
+  return {
+    mon: day(state.mon),
+    tue: day(state.tue),
+    wed: day(state.wed),
+    thu: day(state.thu),
+    fri: day(state.fri),
+    sat: day(state.sat),
+    sun: day(state.sun),
   }
-  return payload
 }
 
 function validateState(state: WorkingHoursState): string | null {
@@ -315,24 +356,32 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
           return
         }
 
-        const data = await safeJson(res)
+        const data = await safeJsonObject(res)
+
         if (!res.ok) {
-          if (!cancelled) setError(errorFromResponse(res, data))
+          if (!cancelled) {
+            setError(errorFromResponse(res, data))
+            setState(buildDefaultState())
+          }
           return
         }
 
-        const apiRaw = data?.workingHours
-        const api = looksLikeApiHours(apiRaw) ? (apiRaw as ApiWorkingHours) : null
+        const apiRaw = data.workingHours
+        const api = looksLikeApiHours(apiRaw) ? apiRaw : null
         const next = hydrateFromApi(api)
 
         if (!cancelled) setState(next)
       } catch (e) {
+        // eslint-disable-next-line no-console
         console.error(e)
-        if (!cancelled) setError('Network error loading hours.')
+        if (!cancelled) {
+          setError('Network error loading hours.')
+          setState(buildDefaultState())
+        }
       }
     }
 
-    load()
+    void load()
     return () => {
       cancelled = true
     }
@@ -380,7 +429,7 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
         return
       }
 
-      const data = await safeJson(res)
+      const data = await safeJsonObject(res)
       if (!res.ok) {
         setError(errorFromResponse(res, data))
         return
@@ -391,9 +440,10 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
 
       // Refresh so calendar overlay + any server components update
       router.refresh()
-    } catch (err: any) {
+    } catch (err) {
+      // eslint-disable-next-line no-console
       console.error(err)
-      setError(err?.message || 'Failed to save.')
+      setError(err instanceof Error && err.message.trim() ? err.message : 'Failed to save.')
     } finally {
       setSaving(false)
     }
@@ -406,7 +456,12 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
   return (
     <form onSubmit={handleSubmit} className="text-textPrimary">
       {/* context strip */}
-      <div className={['mb-3 rounded-2xl border px-3 py-2 text-[12px] font-semibold text-textSecondary', locationHint].join(' ')}>
+      <div
+        className={[
+          'mb-3 rounded-2xl border px-3 py-2 text-[12px] font-semibold text-textSecondary',
+          locationHint,
+        ].join(' ')}
+      >
         Editing base schedule for{' '}
         <span className="font-extrabold text-textPrimary">{locationType === 'SALON' ? 'Salon' : 'Mobile'}</span>
       </div>
@@ -541,7 +596,8 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
         </div>
 
         <div className="mt-2 text-[11px] text-textSecondary">
-          This sets your base availability for <span className="font-semibold">{locationType.toLowerCase()}</span>. Bookings and blocks will still override it.
+          This sets your base availability for <span className="font-semibold">{locationType.toLowerCase()}</span>.
+          Bookings and blocks will still override it.
         </div>
       </div>
     </form>

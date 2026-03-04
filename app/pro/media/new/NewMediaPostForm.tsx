@@ -5,16 +5,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
 import { MediaType, MediaVisibility } from '@prisma/client'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 
 type ProService = { id: string; name: string }
 
 const CAPTION_MAX = 300
 const MAX_IMAGE_MB = 25
 const MAX_VIDEO_MB = 200
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
 
 function bytesFromMb(mb: number) {
   return mb * 1024 * 1024
@@ -26,6 +25,42 @@ function computeVisibility(isEligibleForLooks: boolean, isFeaturedInPortfolio: b
 
 function guessMediaType(file: File): MediaType {
   return (file.type || '').toLowerCase().startsWith('video/') ? MediaType.VIDEO : MediaType.IMAGE
+}
+
+function coerceProService(x: unknown): ProService | null {
+  if (!isRecord(x)) return null
+  const id = pickStringOrEmpty(x.id)
+  const nameRaw = pickStringOrEmpty(x.name)
+  if (!id) return null
+  return { id, name: nameRaw || 'Service' }
+}
+
+function parseServicesPayload(data: unknown): ProService[] {
+  if (!isRecord(data)) return []
+  const raw = data.services
+  if (!Array.isArray(raw)) return []
+  return raw.map(coerceProService).filter(Boolean) as ProService[]
+}
+
+type UploadInit = {
+  bucket: string
+  path: string
+  token: string
+  publicUrl: string | null
+}
+
+function parseUploadInit(data: unknown): UploadInit | null {
+  if (!isRecord(data)) return null
+  const bucket = pickStringOrEmpty(data.bucket)
+  const path = pickStringOrEmpty(data.path)
+  const token = pickStringOrEmpty(data.token)
+  const publicUrl = (() => {
+    const s = pickStringOrEmpty(data.publicUrl)
+    return s ? s : null
+  })()
+
+  if (!bucket || !path || !token) return null
+  return { bucket, path, token, publicUrl }
 }
 
 export default function NewMediaPostForm() {
@@ -49,12 +84,29 @@ export default function NewMediaPostForm() {
   const isPublicSelectionValid = isEligibleForLooks || isFeaturedInPortfolio
 
   useEffect(() => {
+    let cancelled = false
+
     ;(async () => {
-      const res = await fetch('/api/pro/services', { cache: 'no-store' })
-      const data = await safeJson(res)
-      const list = Array.isArray(data?.services) ? data.services : []
-      setServices(list.map((s: any) => ({ id: String(s.id), name: String(s.name || 'Service') })))
-    })().catch(() => setServices([]))
+      try {
+        const res = await fetch('/api/pro/services', { cache: 'no-store' })
+        const data = await safeJsonRecord(res)
+
+        if (!res.ok) {
+          // Don't hard-fail the page; just show no services.
+          if (!cancelled) setServices([])
+          return
+        }
+
+        const list = parseServicesPayload(data)
+        if (!cancelled) setServices(list)
+      } catch {
+        if (!cancelled) setServices([])
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -104,26 +156,20 @@ export default function NewMediaPostForm() {
       }),
     })
 
-    const data = await safeJson(res)
-    if (!res.ok) throw new Error(data?.error || `Upload init failed (${res.status})`)
+    const data = await safeJsonRecord(res)
+    if (!res.ok) throw new Error(readErrorMessage(data) ?? `Upload init failed (${res.status})`)
 
-    const storageBucket = String(data.bucket || '')
-    const storagePath = String(data.path || '')
-    const token = String(data.token || '')
-    const publicUrl = data.publicUrl ? String(data.publicUrl) : null
+    const init = parseUploadInit(data)
+    if (!init) throw new Error('Upload init failed (missing bucket/path/token).')
 
-    if (!storageBucket || !storagePath || !token) {
-      throw new Error('Upload init failed (missing bucket/path/token).')
-    }
-
-    const { error: upErr } = await supabaseBrowser.storage.from(storageBucket).uploadToSignedUrl(storagePath, token, file, {
+    const { error: upErr } = await supabaseBrowser.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file, {
       contentType: file.type || undefined,
       upsert: false,
     })
 
     if (upErr) throw new Error(upErr.message || 'Upload failed')
 
-    return { storageBucket, storagePath, publicUrl }
+    return { storageBucket: init.bucket, storagePath: init.path, publicUrl: init.publicUrl }
   }
 
   async function submit() {
@@ -150,13 +196,13 @@ export default function NewMediaPostForm() {
         }),
       })
 
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`)
+      const data = await safeJsonRecord(res)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? `Request failed (${res.status})`)
 
       router.push('/pro/media')
       router.refresh()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to create post.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create post.')
     } finally {
       setSaving(false)
     }
@@ -201,7 +247,10 @@ export default function NewMediaPostForm() {
         <div className="flex flex-wrap gap-3">
           <select
             value={mediaType}
-            onChange={(e) => setMediaType(e.target.value as MediaType)}
+            onChange={(e) => {
+              const v = e.target.value
+              setMediaType(v === MediaType.VIDEO ? MediaType.VIDEO : MediaType.IMAGE)
+            }}
             className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
           >
             <option value={MediaType.IMAGE}>Image</option>

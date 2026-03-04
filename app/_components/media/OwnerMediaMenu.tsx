@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { MediaVisibility } from '@prisma/client'
+import { cn } from '@/lib/utils'
+import { safeJson } from '@/lib/http'
 
 type Visibility = MediaVisibility
 type ServiceOption = { id: string; name: string }
@@ -21,14 +23,27 @@ type Props = {
   serviceOptions: ServiceOption[]
 }
 
+type JsonObject = Record<string, unknown>
+
 const CAPTION_MAX = 300
 
-async function safeJson(res: Response) {
-  return (res.json().catch(() => ({})) as Promise<any>)
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
+async function safeJsonObject(res: Response): Promise<JsonObject> {
+  const data = await safeJson(res)
+  return isRecord(data) ? data : {}
+}
+
+function pickErrorMessage(data: JsonObject, fallback: string) {
+  const e = data.error
+  if (typeof e === 'string' && e.trim()) return e.trim()
+
+  const m = data.message
+  if (typeof m === 'string' && m.trim()) return m.trim()
+
+  return fallback
 }
 
 function uniqueStrings(input: string[]) {
@@ -62,14 +77,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
   const [serviceQuery, setServiceQuery] = useState('')
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
-
   const busy = saving
 
   // Close the 3-dot menu when clicking outside
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (!wrapRef.current) return
-      if (wrapRef.current.contains(e.target as Node)) return
+      const el = wrapRef.current
+      if (!el) return
+      if (el.contains(e.target as Node)) return
       setOpenMenu(false)
     }
     document.addEventListener('mousedown', onDoc)
@@ -97,17 +112,22 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
   const mustHaveService = selectedServiceIds.length > 0
 
   // Keep state logically consistent:
-  // - If no public surfaces, visibility cannot be PUBLIC.
-  // - If user sets PUBLIC, ensure at least one surface is on.
+  // - If user sets PUBLIC while both surfaces are off, turn one surface on (don’t silently flip them back to private).
+  // - If both surfaces are off (and visibility isn't PUBLIC), force private visibility.
   useEffect(() => {
-    // If both toggles off, force private visibility
-    if (!isPublicSurfaceOn && visibility === MediaVisibility.PUBLIC) {
-      setVisibility(MediaVisibility.PRO_CLIENT)
-    }
-
-    // If they flip visibility to PUBLIC while both toggles are off, pick a sane default.
     if (visibility === MediaVisibility.PUBLIC && !isPublicSurfaceOn) {
       setIsFeaturedInPortfolio(true)
+      return
+    }
+
+    if (!isPublicSurfaceOn && visibility === MediaVisibility.PUBLIC) {
+      // (Shouldn’t happen after the branch above, but keep it safe.)
+      setVisibility(MediaVisibility.PRO_CLIENT)
+      return
+    }
+
+    if (!isPublicSurfaceOn && visibility !== MediaVisibility.PRO_CLIENT) {
+      setVisibility(MediaVisibility.PRO_CLIENT)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEligibleForLooks, isFeaturedInPortfolio, visibility])
@@ -142,8 +162,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     }
 
     // If no public surfaces, keep it private.
-    const nextVisibility =
-      isPublicSurfaceOn ? visibility : MediaVisibility.PRO_CLIENT
+    const nextVisibility = isPublicSurfaceOn ? visibility : MediaVisibility.PRO_CLIENT
 
     setSaving(true)
 
@@ -160,14 +179,16 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
         }),
       })
 
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`)
+      const data = await safeJsonObject(res)
+      if (!res.ok) {
+        throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))
+      }
 
       setOpenEdit(false)
       setOpenMenu(false)
       router.refresh()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to save.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save.')
     } finally {
       setSaving(false)
     }
@@ -183,14 +204,16 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     setSaving(true)
     try {
       const res = await fetch(`/api/pro/media/${encodeURIComponent(mediaId)}`, { method: 'DELETE' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`)
+      const data = await safeJsonObject(res)
+      if (!res.ok) {
+        throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))
+      }
 
       setOpenMenu(false)
       setOpenEdit(false)
       router.refresh()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to delete.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to delete.')
     } finally {
       setSaving(false)
     }
@@ -204,7 +227,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
       <button
         type="button"
         onClick={() => setOpenMenu((v) => !v)}
-        className={cx(
+        className={cn(
           'inline-flex h-10 w-10 items-center justify-center rounded-full',
           'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
           'text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)]',
@@ -219,7 +242,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
       {/* Menu */}
       {openMenu ? (
         <div
-          className={cx(
+          className={cn(
             'absolute right-0 mt-2 w-44 overflow-hidden rounded-[16px]',
             'border border-white/12 bg-bgPrimary/70 backdrop-blur-xl',
             'shadow-[0_18px_60px_rgba(0,0,0,0.55)]',
@@ -251,7 +274,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
       {openEdit ? (
         <div className="fixed inset-0 z-[9999] bg-black/60" onClick={closeEdit}>
           <div
-            className={cx(
+            className={cn(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
               'border border-white/12 bg-bgPrimary/70 backdrop-blur-2xl',
               'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
@@ -273,7 +296,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
               <button
                 type="button"
                 onClick={closeEdit}
-                className={cx(
+                className={cn(
                   'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
                     ? 'cursor-not-allowed border-white/10 text-white/50 opacity-70'
@@ -291,14 +314,18 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 {/* Caption */}
                 <Field
                   label="Caption"
-                  right={<span className="text-[11px] font-semibold text-textSecondary">{caption.trim().length}/{CAPTION_MAX}</span>}
+                  right={
+                    <span className="text-[11px] font-semibold text-textSecondary">
+                      {caption.trim().length}/{CAPTION_MAX}
+                    </span>
+                  }
                 >
                   <textarea
                     value={caption}
                     onChange={(e) => setCaption(e.target.value.slice(0, CAPTION_MAX))}
                     rows={3}
                     disabled={busy}
-                    className={cx(
+                    className={cn(
                       'w-full resize-y rounded-[16px] border border-white/10 bg-bgPrimary/35',
                       'px-3 py-3 text-[13px] text-textPrimary outline-none',
                       'focus:ring-2 focus:ring-accentPrimary/35',
@@ -308,10 +335,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 </Field>
 
                 {/* Visibility */}
-                <Field
-                  label="Who can view"
-                  hint="Public shows on your profile and in Looks. Client + you is private (not public)."
-                >
+                <Field label="Who can view" hint="Public shows on your profile and in Looks. Client + you is private (not public).">
                   <Segmented<Visibility>
                     value={visibility}
                     disabled={busy}
@@ -355,7 +379,9 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 <Field
                   label="Services attached"
                   hint="At least 1 service is required."
-                  right={<span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>}
+                  right={
+                    <span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>
+                  }
                 >
                   {selectedServiceIds.length ? (
                     <div className="flex flex-wrap gap-2 rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3">
@@ -367,7 +393,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                             type="button"
                             disabled={busy}
                             onClick={() => removeService(id)}
-                            className={cx(
+                            className={cn(
                               'inline-flex items-center gap-2 rounded-full px-3 py-1',
                               'border border-white/12 bg-bgPrimary/30 backdrop-blur-xl',
                               'text-[12px] font-extrabold text-textPrimary',
@@ -398,7 +424,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                       onChange={(e) => setServiceQuery(e.target.value)}
                       placeholder="Search services…"
                       disabled={busy}
-                      className={cx(
+                      className={cn(
                         'w-full rounded-[16px] border border-white/10 bg-bgPrimary/35',
                         'px-3 py-2 text-[13px] text-textPrimary outline-none',
                         'focus:ring-2 focus:ring-accentPrimary/35',
@@ -415,7 +441,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                           type="button"
                           disabled={busy}
                           onClick={() => toggleService(s.id)}
-                          className={cx(
+                          className={cn(
                             'flex w-full items-center justify-between gap-3 px-4 py-3 text-left',
                             'border-b border-white/5 last:border-b-0',
                             busy ? 'opacity-70' : 'hover:bg-white/5',
@@ -424,14 +450,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                           <span className="text-[13px] font-black text-textPrimary">{s.name}</span>
 
                           <span
-                            className={cx(
+                            className={cn(
                               'inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black',
                               on
                                 ? 'border border-accentPrimary/30 bg-accentPrimary/20 text-accentPrimary'
                                 : 'border border-white/10 bg-bgPrimary/25 text-textSecondary',
                             )}
                           >
-                            <span className={cx('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-white/35')} />
+                            <span className={cn('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-white/35')} />
                             {on ? 'Selected' : 'Add'}
                           </span>
                         </button>
@@ -469,7 +495,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     type="button"
                     onClick={closeEdit}
                     disabled={busy}
-                    className={cx(
+                    className={cn(
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
                       busy
                         ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
@@ -483,7 +509,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     type="button"
                     onClick={saveEdits}
                     disabled={!canSave}
-                    className={cx(
+                    className={cn(
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
                       !canSave
                         ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
@@ -541,7 +567,7 @@ function Segmented<T extends string>({
 }) {
   return (
     <div
-      className={cx(
+      className={cn(
         'grid grid-cols-2 gap-2 rounded-[18px] border border-white/12 bg-bgPrimary/25 p-2',
         disabled ? 'opacity-70' : '',
       )}
@@ -556,7 +582,7 @@ function Segmented<T extends string>({
             type="button"
             disabled={disabled}
             onClick={() => onChange(opt.value)}
-            className={cx(
+            className={cn(
               'rounded-[16px] border px-3 py-3 text-left transition',
               'backdrop-blur-xl',
               active
@@ -569,7 +595,7 @@ function Segmented<T extends string>({
           >
             <div className="flex items-center justify-between gap-2">
               <div className="text-[13px] font-black text-textPrimary">{opt.label}</div>
-              <div className={cx('h-2 w-2 rounded-full', active ? 'bg-accentPrimary' : 'bg-white/35')} />
+              <div className={cn('h-2 w-2 rounded-full', active ? 'bg-accentPrimary' : 'bg-white/35')} />
             </div>
             {opt.sub ? <div className="mt-0.5 text-[11px] font-semibold text-textSecondary">{opt.sub}</div> : null}
           </button>
@@ -597,7 +623,7 @@ function HermesToggleRow({
       type="button"
       onClick={() => !disabled && setValue(!value)}
       disabled={disabled}
-      className={cx(
+      className={cn(
         'flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-3 text-left transition',
         disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-white/5 active:scale-[0.995]',
       )}
@@ -609,19 +635,19 @@ function HermesToggleRow({
 
       <div className="flex items-center gap-2">
         <span
-          className={cx(
+          className={cn(
             'hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black',
             value
               ? 'border border-accentPrimary/25 bg-accentPrimary/15 text-accentPrimary'
               : 'border border-white/10 bg-bgPrimary/25 text-textSecondary',
           )}
         >
-          <span className={cx('h-1.5 w-1.5 rounded-full', value ? 'bg-accentPrimary' : 'bg-white/35')} />
+          <span className={cn('h-1.5 w-1.5 rounded-full', value ? 'bg-accentPrimary' : 'bg-white/35')} />
           {value ? 'Enabled' : 'Disabled'}
         </span>
 
         <div
-          className={cx(
+          className={cn(
             'relative h-7 w-14 rounded-full border p-1 transition',
             value ? 'border-accentPrimary/35 bg-accentPrimary/80' : 'border-white/12 bg-bgPrimary/50',
           )}
@@ -630,14 +656,14 @@ function HermesToggleRow({
           <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/10 to-transparent" />
 
           <div
-            className={cx(
+            className={cn(
               'relative h-5 w-5 rounded-full bg-white transition',
               'shadow-[0_10px_25px_rgba(0,0,0,0.35)]',
               value ? 'translate-x-7' : 'translate-x-0',
             )}
           >
             <div
-              className={cx(
+              className={cn(
                 'absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full',
                 value ? 'bg-accentPrimary' : 'bg-black/25',
               )}

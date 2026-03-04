@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import LastMinuteOpenings from './components/LastMinuteOpenings'
-
+import { cn } from '@/lib/utils'
 import type { BookingLike, WaitlistLike } from './components/_helpers'
 import {
   Badge,
@@ -27,10 +27,6 @@ type ApiBuckets = {
 type TabKey = 'upcoming' | 'aftercare' | 'pending' | 'waitlist'
 
 const EMPTY: ApiBuckets = { upcoming: [], pending: [], waitlist: [], prebooked: [], past: [] }
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
@@ -114,7 +110,7 @@ function HeroThumb({ title, subtitle }: { title: string; subtitle?: string | nul
 
   return (
     <div
-      className={cx('relative h-[74px] w-[74px] shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgPrimary')}
+      className={cn('relative h-[74px] w-[74px] shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgPrimary')}
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(60px_60px_at_20%_20%,rgba(255,255,255,0.10),transparent_60%),radial-gradient(80px_80px_at_80%_70%,rgba(255,255,255,0.06),transparent_55%)]" />
       <div className="absolute inset-0 bg-surfaceGlass/30" />
@@ -152,14 +148,14 @@ function TopTabs({
   return (
     <div className="w-full">
       <div className="mx-auto w-full max-w-xl">
-        <div className={cx('relative rounded-full border border-white/10 bg-bgSecondary p-1', 'shadow-[0_10px_30px_rgba(0,0,0,0.35)]')}>
+        <div className={cn('relative rounded-full border border-white/10 bg-bgSecondary p-1', 'shadow-[0_10px_30px_rgba(0,0,0,0.35)]')}>
           <div className="pointer-events-none absolute inset-0 rounded-full [background:radial-gradient(700px_180px_at_30%_0%,rgba(255,255,255,0.14),transparent_60%)]" />
 
           <div className="pointer-events-none absolute inset-y-1 left-1 right-1">
             <div className="relative h-full">
               <div
                 style={indicatorStyle}
-                className={cx(
+                className={cn(
                   'absolute left-0 top-0 h-full w-1/4 rounded-full',
                   'border border-white/15 bg-bgPrimary',
                   'shadow-[0_12px_35px_rgba(0,0,0,0.45)]',
@@ -178,7 +174,7 @@ function TopTabs({
                   key={it.k}
                   type="button"
                   onClick={() => setTab(it.k)}
-                  className={cx(
+                  className={cn(
                     'relative z-10 flex w-1/4 items-center justify-center gap-2',
                     'rounded-full px-3 py-2',
                     'outline-none transition',
@@ -195,10 +191,10 @@ function TopTabs({
                     </span>
                   ) : null}
 
-                  <span className={cx('transition-opacity', active ? 'opacity-100' : 'opacity-90')}>{it.label}</span>
+                  <span className={cn('transition-opacity', active ? 'opacity-100' : 'opacity-90')}>{it.label}</span>
 
                   <span
-                    className={cx(
+                    className={cn(
                       'inline-flex items-center justify-center rounded-full px-1.5 py-0.5',
                       'text-[11px] font-black leading-none transition',
                       active ? 'border border-white/15 bg-bgSecondary text-textPrimary' : 'border border-white/8 bg-bgPrimary text-textPrimary/85',
@@ -233,7 +229,7 @@ function SearchBar({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder="Search your bookings…"
-            className={cx(
+            className={cn(
               'w-full bg-transparent text-[13px] font-semibold',
               'text-textPrimary placeholder:text-textSecondary/70',
               'outline-none',
@@ -245,7 +241,7 @@ function SearchBar({
             <button
               type="button"
               onClick={onClear}
-              className={cx(
+              className={cn(
                 'rounded-full border border-white/10 bg-bgPrimary px-2.5 py-1',
                 'text-[11px] font-black text-textPrimary transition hover:border-white/20',
               )}
@@ -292,7 +288,7 @@ function BookingHeroCard({
           go()
         }
       }}
-      className={cx(
+      className={cn(
         'group cursor-pointer rounded-card border border-white/10 bg-bgSecondary p-4 transition',
         'hover:border-white/20 hover:bg-surfaceGlass/40',
         'focus-visible:ring-2 focus-visible:ring-accentPrimary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-bgPrimary',
@@ -385,7 +381,7 @@ function ConsultationApprovalBanner({
   return (
     <div className="mx-auto w-full max-w-xl">
       <div
-        className={cx(
+        className={cn(
           'rounded-card border border-white/10 p-4',
           // “bright sign” without inventing new colors: use accentPrimary, but keep glass vibe.
           'bg-accentPrimary text-bgPrimary',
@@ -411,7 +407,7 @@ function ConsultationApprovalBanner({
             <button
               type="button"
               onClick={() => router.push(firstHref)}
-              className={cx(
+              className={cn(
                 'inline-flex items-center rounded-full border border-bgPrimary/30 bg-bgPrimary px-4 py-2',
                 'text-[12px] font-black text-textPrimary transition hover:bg-surfaceGlass',
               )}
@@ -432,7 +428,7 @@ function ConsultationApprovalBanner({
                 key={b.id}
                 type="button"
                 onClick={() => router.push(href)}
-                className={cx(
+                className={cn(
                   'inline-flex items-center rounded-full border border-bgPrimary/30 bg-bgPrimary/15 px-3 py-1.5',
                   'text-[11px] font-black text-bgPrimary transition hover:bg-bgPrimary/25',
                 )}
@@ -601,7 +597,7 @@ export default function ClientBookingsDashboard() {
         <button
           type="button"
           onClick={reload}
-          className={cx(
+          className={cn(
             'mt-3 inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2',
             'text-[12px] font-black text-textPrimary transition hover:border-white/20',
           )}

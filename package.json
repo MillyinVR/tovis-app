@@ -51,6 +51,7 @@
     "stylelint": "^16.26.1",
     "stylelint-config-tailwindcss": "^1.0.0",
     "tailwindcss": "^4.1.18",
+    "ts-morph": "^27.0.2",
     "ts-node": "^10.9.2",
     "ts-prune": "^0.10.3",
     "tsx": "^4.21.0",

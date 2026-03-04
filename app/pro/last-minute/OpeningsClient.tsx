@@ -4,6 +4,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
 
 type OfferingLite = {
   id: string
@@ -28,10 +31,6 @@ type OpeningRow = {
   service?: { name: string } | null
   offering?: { title: string | null } | null
   _count?: { notifications?: number }
-}
-
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
 }
 
 function getBrowserTimeZone(): string {
@@ -92,10 +91,73 @@ function prettyWhenInTimeZone(isoUtc: string, timeZone: string) {
   }).format(d)
 }
 
+/** ---------- safe parsing helpers ---------- */
+
+function asStringOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v : null
+}
+
+function asNumberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function readArrayField(data: Record<string, unknown> | null, key: string): unknown[] {
+  if (!data) return []
+  const v = data[key]
+  return Array.isArray(v) ? v : []
+}
+
+function parseOpeningRow(x: unknown): OpeningRow | null {
+  if (!isRecord(x)) return null
+
+  const id = pickStringOrEmpty(x.id)
+  const status = pickStringOrEmpty(x.status)
+  const startAt = pickStringOrEmpty(x.startAt)
+  if (!id || !status || !startAt) return null
+
+  const endAt = asStringOrNull(x.endAt)
+  const discountPct = asNumberOrNull(x.discountPct)
+  const note = asStringOrNull(x.note)
+  const offeringId = asStringOrNull(x.offeringId)
+  const serviceId = asStringOrNull(x.serviceId)
+
+  const service = (() => {
+    if (!isRecord(x.service)) return null
+    const name = asStringOrNull(x.service.name)
+    return name ? { name } : null
+  })()
+
+  const offering = (() => {
+    if (!isRecord(x.offering)) return null
+    const title = typeof x.offering.title === 'string' ? x.offering.title : null
+    return { title }
+  })()
+
+  const _count = (() => {
+    if (!isRecord(x._count)) return undefined
+    const n = asNumberOrNull(x._count.notifications)
+    return { notifications: n ?? undefined }
+  })()
+
+  return {
+    id,
+    status,
+    startAt,
+    endAt,
+    discountPct,
+    note,
+    offeringId,
+    serviceId,
+    service,
+    offering,
+    _count,
+  }
+}
+
 export default function OpeningsClient({ offerings }: Props) {
   const router = useRouter()
 
-  // Standard: datetime-local is a wall-clock input in browser TZ.
+  // datetime-local is wall-clock input in browser TZ
   const timeZone = useMemo(() => getBrowserTimeZone(), [])
 
   const [items, setItems] = useState<OpeningRow[]>([])
@@ -108,7 +170,7 @@ export default function OpeningsClient({ offerings }: Props) {
   const [offeringId, setOfferingId] = useState(defaultOfferingId)
 
   const [startAtLocal, setStartAtLocal] = useState(() => {
-    // seed: next top-of-hour in browser TZ, but store as datetime-local string
+    // seed: next top-of-hour in browser TZ
     const now = new Date()
     now.setSeconds(0, 0)
     now.setMinutes(0)
@@ -139,13 +201,15 @@ export default function OpeningsClient({ offerings }: Props) {
     setErr(null)
     try {
       const res = await fetch('/api/pro/openings?hours=48&take=100', { cache: 'no-store' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to load openings.')
-      const list = Array.isArray(data?.openings) ? (data.openings as OpeningRow[]) : []
+      const data = await safeJsonRecord(res)
+
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to load openings.')
+
+      const list = readArrayField(data, 'openings').map(parseOpeningRow).filter(Boolean) as OpeningRow[]
       list.sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt))
       setItems(list)
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load openings.')
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to load openings.')
       setItems([])
     } finally {
       setLoading(false)
@@ -194,15 +258,15 @@ export default function OpeningsClient({ offerings }: Props) {
         }),
       })
 
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to create opening.')
+      const data = await safeJsonRecord(res)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to create opening.')
 
       setNote('')
       setDiscountPct('')
       await loadOpenings()
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to create opening.')
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to create opening.')
     } finally {
       setBusy(false)
     }
@@ -214,12 +278,12 @@ export default function OpeningsClient({ offerings }: Props) {
     setErr(null)
     try {
       const res = await fetch(`/api/openings/${encodeURIComponent(openingId)}/notify`, { method: 'POST' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Notify failed.')
+      const data = await safeJsonRecord(res)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Notify failed.')
       await loadOpenings()
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Notify failed.')
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Notify failed.')
     } finally {
       setBusy(false)
     }
@@ -231,12 +295,12 @@ export default function OpeningsClient({ offerings }: Props) {
     setErr(null)
     try {
       const res = await fetch(`/api/pro/openings?id=${encodeURIComponent(openingId)}`, { method: 'DELETE' })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Remove failed.')
+      const data = await safeJsonRecord(res)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Remove failed.')
       setItems((prev) => prev.filter((x) => x.id !== openingId))
       router.refresh()
-    } catch (e: any) {
-      setErr(e?.message || 'Remove failed.')
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Remove failed.')
     } finally {
       setBusy(false)
     }
@@ -260,9 +324,7 @@ export default function OpeningsClient({ offerings }: Props) {
       {/* Create */}
       <section className={card}>
         <div className="text-[14px] font-black text-textPrimary">Create a last-minute opening</div>
-        <div className={`${hint} mt-1`}>
-          Add a slot in the next 48 hours. Notify queues eligible clients. Humans love feeling chosen.
-        </div>
+        <div className={`${hint} mt-1`}>Add a slot in the next 48 hours. Notify queues eligible clients.</div>
 
         <div className="mt-4 grid gap-4">
           <label className="grid gap-2">
@@ -410,12 +472,7 @@ export default function OpeningsClient({ offerings }: Props) {
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      disabled={busy || status !== 'ACTIVE'}
-                      onClick={() => notifyOpening(o.id)}
-                      className={btnPrimary}
-                    >
+                    <button type="button" disabled={busy || status !== 'ACTIVE'} onClick={() => notifyOpening(o.id)} className={btnPrimary}>
                       Notify clients
                     </button>
 

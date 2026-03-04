@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import PlacesAutocomplete from './PlacesAutocomplete'
-
+import { cn } from '@/lib/utils'
 type LocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
 
 export type ProLocation = {
@@ -48,10 +48,6 @@ function isRecord(v: unknown): v is JsonObject {
 async function safeJsonObject(res: Response): Promise<JsonObject> {
   const raw: unknown = await res.json().catch(() => ({}))
   return isRecord(raw) ? raw : {}
-}
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
 }
 
 function clampInt(n: number, min: number, max: number) {
@@ -261,7 +257,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                 const v = e.target.value
                 setType(v === 'SUITE' ? 'SUITE' : v === 'MOBILE_BASE' ? 'MOBILE_BASE' : 'SALON')
               }}
-              className={cx(
+              className={cn(
                 'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-bold text-textPrimary outline-none',
               )}
@@ -279,7 +275,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={type === 'MOBILE_BASE' ? 'e.g. Mobile in North County' : 'e.g. Encinitas Studio'}
-              className={cx(
+              className={cn(
                 'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
               )}
@@ -331,7 +327,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                     value={mobilePostalCode}
                     onChange={(e) => setMobilePostalCode(e.target.value)}
                     placeholder="e.g. 92024"
-                    className={cx(
+                    className={cn(
                       'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                       'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
                     )}
@@ -345,7 +341,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                   <select
                     value={mobileRadiusMiles}
                     onChange={(e) => setMobileRadiusMiles(Number(e.target.value))}
-                    className={cx(
+                    className={cn(
                       'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
                       'text-[13px] font-bold text-textPrimary outline-none',
                     )}

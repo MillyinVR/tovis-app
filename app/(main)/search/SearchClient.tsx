@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LocateFixed, MapPin, Search, X } from 'lucide-react'
 import { isRecord } from '@/lib/guards' 
+import { safeJson } from '@/lib/http'
 import {
   VIEWER_RADIUS_DEFAULT_MILES,
   VIEWER_RADIUS_MAX_MILES,
@@ -15,6 +16,7 @@ import {
   subscribeViewerLocation,
   type ViewerLocation,
 } from '@/lib/viewerLocation'
+import { cn } from '@/lib/utils'
 
 type Tab = 'PROS' | 'SERVICES'
 
@@ -51,10 +53,6 @@ type PlacePrediction = {
   secondaryText: string
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null
@@ -69,13 +67,6 @@ function clampInt(n: number, min: number, max: number) {
   return Math.min(Math.max(x, min), max)
 }
 
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return {}
-  }
-}
 
 function parsePredictions(raw: unknown): PlacePrediction[] {
   if (!isRecord(raw)) return []
@@ -511,7 +502,7 @@ export default function SearchClient() {
             <button
               type="button"
               onClick={() => setTab('PROS')}
-              className={cx(
+              className={cn(
                 'rounded-full border px-3 py-2 text-[12px] font-black transition',
                 tab === 'PROS'
                   ? 'border-accentPrimary bg-bgPrimary/25 text-textPrimary'
@@ -523,7 +514,7 @@ export default function SearchClient() {
             <button
               type="button"
               onClick={() => setTab('SERVICES')}
-              className={cx(
+              className={cn(
                 'rounded-full border px-3 py-2 text-[12px] font-black transition',
                 tab === 'SERVICES'
                   ? 'border-accentPrimary bg-bgPrimary/25 text-textPrimary'
@@ -592,7 +583,7 @@ export default function SearchClient() {
               <button
                 type="button"
                 onClick={useMyLocation}
-                className={cx(
+                className={cn(
                   'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[12px] font-black transition',
                   'border-white/10 bg-bgSecondary text-textPrimary hover:bg-white/5',
                 )}

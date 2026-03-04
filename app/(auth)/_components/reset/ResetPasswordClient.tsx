@@ -4,16 +4,13 @@
 
 import { useState } from 'react'
 import AuthShell from '../AuthShell'
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
+import { cn } from '@/lib/utils'
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -72,7 +69,7 @@ export default function ResetPasswordClient({ token }: { token: string }) {
               <button
                 type="button"
                 onClick={() => setShow((v) => !v)}
-                className={cx(
+                className={cn(
                   'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black transition',
                   'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary',
                   'hover:border-surfaceGlass/18 hover:text-textPrimary',
@@ -103,7 +100,7 @@ export default function ResetPasswordClient({ token }: { token: string }) {
           <button
             type="submit"
             disabled={loading}
-            className={cx(
+            className={cn(
               'group relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
               'border border-accentPrimary/35 bg-accentPrimary/26 text-textPrimary',
               'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',

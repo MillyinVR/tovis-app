@@ -5,10 +5,7 @@ import type { BookingLike } from './_helpers'
 import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
 import CardLink from './CardLink'
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
+import { cn } from '@/lib/utils'
 
 function statusLabel(statusRaw: unknown) {
   const s = statusUpper(statusRaw)
@@ -35,7 +32,7 @@ function SoftPill({
 
   return (
     <span
-      className={cx(
+      className={cn(
         'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black backdrop-blur',
         cls
       )}

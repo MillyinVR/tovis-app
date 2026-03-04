@@ -3,18 +3,8 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
+import { cn } from '@/lib/utils'
+import { safeJson } from '@/lib/http'
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null
@@ -129,7 +119,7 @@ export default function VerificationUploadClient() {
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={uploading}
-        className={cx(
+        className={cn(
           'inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-black transition',
           'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
           'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',

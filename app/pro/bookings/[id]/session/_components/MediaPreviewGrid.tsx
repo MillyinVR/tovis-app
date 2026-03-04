@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react'
 import MediaFill from '@/app/_components/media/MediaFill'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
-
+import { cn } from '@/lib/utils'
 type Item = {
   id: string
   mediaType: 'IMAGE' | 'VIDEO'
@@ -16,9 +16,6 @@ type Item = {
   signedThumbUrl: string | null
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
 
 function fmtDate(v: unknown) {
   try {
@@ -70,7 +67,7 @@ export default function MediaPreviewGrid({
                   <button
                     type="button"
                     onClick={() => setOpenId(m.id)}
-                    className={cx(
+                    className={cn(
                       'mt-2 block w-full overflow-hidden rounded-card border border-white/10 bg-bgPrimary',
                       'focus:outline-none focus:ring-2 focus:ring-accentPrimary/35',
                     )}
@@ -128,7 +125,7 @@ export default function MediaPreviewGrid({
             <button
               type="button"
               onClick={() => setOpenId(null)}
-              className={cx(
+              className={cn(
                 'inline-flex items-center gap-2 rounded-full border border-white/10',
                 'bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary',
                 'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
@@ -142,7 +139,7 @@ export default function MediaPreviewGrid({
             <div className="pointer-events-none">
               <div className="pointer-events-auto w-full max-w-[680px]">
                 <div
-                  className={cx(
+                  className={cn(
                     'rounded-[18px] border border-white/10 bg-bgPrimary/25 backdrop-blur-xl',
                     'px-4 py-3',
                     'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',

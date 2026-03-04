@@ -1,10 +1,12 @@
 // app/api/auth/phone/send/route.ts
 import crypto from 'crypto'
 import { cookies } from 'next/headers'
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
+import { safeJson } from '@/lib/http'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -38,14 +40,6 @@ function envOrThrow(key: string) {
   return v
 }
 
-async function safeJsonUnknown(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
 async function sendTwilioSms(args: { to: string; body: string }): Promise<{ sid: string | null }> {
   const sid = envOrThrow('TWILIO_ACCOUNT_SID')
   const auth = envOrThrow('TWILIO_AUTH_TOKEN')
@@ -69,11 +63,11 @@ async function sendTwilioSms(args: { to: string; body: string }): Promise<{ sid:
     cache: 'no-store',
   })
 
-  const data: unknown = await safeJsonUnknown(res)
+  // ✅ safeJson exists; just treat its output as unknown and narrow.
+  const data: unknown = await safeJson(res)
 
   if (!res.ok) {
-    const msg =
-      isRecord(data) && typeof data.message === 'string' ? data.message : 'SMS send failed.'
+    const msg = isRecord(data) && typeof data.message === 'string' ? data.message : 'SMS send failed.'
     const code =
       isRecord(data) && (typeof data.code === 'number' || typeof data.code === 'string')
         ? ` (Twilio code ${String(data.code)})`
@@ -175,7 +169,7 @@ export async function POST(request: Request) {
     }
 
     return jsonOk({}, 200)
-  } catch (err) {
+  } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Internal server error'
     console.error('[phone/send] error', msg)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })

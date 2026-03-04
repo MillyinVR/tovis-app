@@ -11,6 +11,7 @@ import type {
   UiSessionMode,
 } from '@/lib/proSession/types'
 import { isRecord } from '@/lib/guards' 
+import { safeJson } from '@/lib/http'
 type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
 
 export const FORCE_EVENT = 'tovis:pro-session:force'
@@ -62,13 +63,6 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-async function safeJson(res: Response): Promise<unknown | null> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
 
 function errorFromResponse(res: Response, data: unknown) {
   const e = getStringProp(data, 'error')

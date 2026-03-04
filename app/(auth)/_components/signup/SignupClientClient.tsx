@@ -5,10 +5,8 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
-
-function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
+import { cn } from '@/lib/utils'
+import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 
 function sanitizePhone(v: string) {
   return v.replace(/\s+/g, '')
@@ -23,10 +21,6 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className="text-xs font-black tracking-wide text-textSecondary">{children}</span>
 }
@@ -39,7 +33,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={cx(
+      className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
         'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
@@ -65,7 +59,7 @@ function PrimaryButton({
     <button
       type="submit"
       disabled={disabled || loading}
-      className={cx(
+      className={cn(
         'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
         'bg-accentPrimary/26 text-textPrimary',
@@ -83,7 +77,7 @@ function SecondaryLinkButton({ href, children }: { href: string; children: React
   return (
     <Link
       href={href}
-      className={cx(
+      className={cn(
         'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
         'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
         'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
@@ -116,10 +110,10 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   url.searchParams.set('components', 'country:us')
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'ZIP lookup failed.')
+  const data = await res.json().catch(() => ({} as any))
+  if (!res.ok) throw new Error((data as any)?.error || 'ZIP lookup failed.')
 
-  const g = data?.geo ?? {}
+  const g = (data as any)?.geo ?? {}
   const lat = typeof g?.lat === 'number' ? g.lat : null
   const lng = typeof g?.lng === 'number' ? g.lng : null
   const postalCode = typeof g?.postalCode === 'string' ? g.postalCode : null
@@ -139,10 +133,10 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   url.searchParams.set('lng', String(args.lng))
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || 'Timezone lookup failed.')
+  const data = await res.json().catch(() => ({} as any))
+  if (!res.ok) throw new Error((data as any)?.error || 'Timezone lookup failed.')
 
-  const tz = String(data?.timeZoneId ?? '')
+  const tz = String((data as any)?.timeZoneId ?? '')
   if (!tz) throw new Error('No timezone returned.')
   return tz
 }
@@ -179,23 +173,24 @@ export default function SignupClientClient() {
     setConfirmed(null)
   }
 
-  // Auto-confirm on blur + safe to call from submit
-  async function confirmZipIfValid(rawInput?: string) {
+  // Auto-confirm on blur + safe to call from submit.
+  // Returns the confirmed object (so submit logic doesn't depend on state updating in time).
+  async function confirmZipIfValid(rawInput?: string): Promise<ConfirmedZip | null> {
     const raw = (rawInput ?? zip).trim()
 
     // empty: let required validation handle it
-    if (!raw) return false
+    if (!raw) return null
 
     // already confirmed for this ZIP: no-op
-    if (confirmed?.postalCode && confirmed.postalCode === raw) return true
+    if (confirmed?.postalCode && confirmed.postalCode === raw) return confirmed
 
     if (!isUsZip(raw)) {
       setConfirmed(null)
       setError('Please enter a valid 5-digit ZIP code.')
-      return false
+      return null
     }
 
-    if (zipLoading) return Boolean(confirmed)
+    if (zipLoading) return confirmed
 
     setZipLoading(true)
     setError(null)
@@ -204,7 +199,7 @@ export default function SignupClientClient() {
       const geo = await fetchGeocodeByPostal({ postalCode: raw })
       const tz = await fetchTimeZoneId({ lat: geo.lat, lng: geo.lng })
 
-      setConfirmed({
+      const nextConfirmed: ConfirmedZip = {
         timeZoneId: tz,
         lat: geo.lat,
         lng: geo.lng,
@@ -212,14 +207,15 @@ export default function SignupClientClient() {
         state: geo.state,
         countryCode: geo.countryCode,
         postalCode: geo.postalCode,
-      })
+      }
 
+      setConfirmed(nextConfirmed)
       setZip(geo.postalCode ?? raw)
-      return true
+      return nextConfirmed
     } catch (e: any) {
       setConfirmed(null)
       setError(e?.message || 'Could not confirm ZIP code.')
-      return false
+      return null
     } finally {
       setZipLoading(false)
     }
@@ -233,8 +229,8 @@ export default function SignupClientClient() {
     if (!firstName.trim() || !lastName.trim()) return setError('First and last name are required.')
 
     // force-confirm ZIP if user never blurred the field
-    const zipOk = await confirmZipIfValid(zip)
-    if (!zipOk || !confirmed) return setError('Please enter a valid ZIP code.')
+    const confirmedZip = await confirmZipIfValid(zip)
+    if (!confirmedZip) return setError('Please enter a valid ZIP code.')
 
     if (!sanitizePhone(phone).trim()) return setError('Phone number is required.')
     if (!email.trim()) return setError('Email is required.')
@@ -256,26 +252,27 @@ export default function SignupClientClient() {
 
           signupLocation: {
             kind: 'CLIENT_ZIP',
-            postalCode: confirmed.postalCode,
-            city: confirmed.city,
-            state: confirmed.state,
-            countryCode: confirmed.countryCode,
-            lat: confirmed.lat,
-            lng: confirmed.lng,
-            timeZoneId: confirmed.timeZoneId,
+            postalCode: confirmedZip.postalCode,
+            city: confirmedZip.city,
+            state: confirmedZip.state,
+            countryCode: confirmedZip.countryCode,
+            lat: confirmedZip.lat,
+            lng: confirmedZip.lng,
+            timeZoneId: confirmedZip.timeZoneId,
           },
         }),
       })
 
-      const data = await safeJson(res)
+      const data = await safeJsonRecord(res)
+
       if (!res.ok) {
-        setError(data?.error || 'Signup failed.')
+        setError(readErrorMessage(data) ?? 'Signup failed.')
         return
       }
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(data?.nextUrl)
+      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
       if (nextUrl) return router.replace(nextUrl)
 
       router.replace('/feed')
@@ -329,7 +326,6 @@ export default function SignupClientClient() {
                 setError(null)
               }}
               onBlur={() => {
-                // don’t block UI; confirmZipIfValid manages its own loading state
                 void confirmZipIfValid(zip)
               }}
               placeholder="e.g. 92024"
@@ -339,7 +335,6 @@ export default function SignupClientClient() {
 
             <div className="flex items-center justify-between gap-3">
               {zipLoading ? <HelpText>Confirming…</HelpText> : <HelpText>We’ll confirm this when you leave the field.</HelpText>}
-
               {confirmed ? <span className="text-xs font-black text-accentPrimary">Confirmed</span> : null}
             </div>
 
