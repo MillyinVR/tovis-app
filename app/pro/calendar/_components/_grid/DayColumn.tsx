@@ -41,9 +41,15 @@ function parseHHMM(v: string) {
   return { hh, mm }
 }
 
-function weekdayKeyInTimeZone(date: Date, timeZone: string) {
+type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+function weekdayKeyInTimeZone(date: Date, timeZone: string): WeekdayKey {
+  const tz = timeZone
   const safe = new Date(date.getTime() + MIDDAY_MS)
-  const wd = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(safe).toLowerCase()
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
+    .format(safe)
+    .toLowerCase()
+
   if (wd.startsWith('mon')) return 'mon'
   if (wd.startsWith('tue')) return 'tue'
   if (wd.startsWith('wed')) return 'wed'
@@ -351,8 +357,9 @@ export function DayColumn(props: {
           const micro = heightPx < 28
           const compact = heightPx < 52
 
+          const tz = timeZone
           const timeLabel = new Intl.DateTimeFormat('en-US', {
-            timeZone,
+            timeZone: tz,
             hour: 'numeric',
             minute: '2-digit',
           }).format(evStart)
