@@ -10,8 +10,9 @@ function stableYmdForVisibleDay(d: Date, timeZone: string) {
 
 function dayHeaderParts(date: Date, timeZone: string) {
   const safe = new Date(date.getTime() + MIDDAY_MS)
-  const weekday = new Intl.DateTimeFormat(undefined, { timeZone, weekday: 'short' }).format(safe)
-  const day = new Intl.DateTimeFormat(undefined, { timeZone, day: 'numeric' }).format(safe)
+  const tz = timeZone
+  const weekday = new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'short' }).format(safe)
+  const day = new Intl.DateTimeFormat(undefined, { timeZone: tz, day: 'numeric' }).format(safe)
   return { weekday, day }
 }
 

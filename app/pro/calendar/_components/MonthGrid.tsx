@@ -22,10 +22,10 @@ export function MonthGrid(props: {
 }) {
   const { visibleDays, currentDate, events, timeZone, onPickDay } = props
 
-  const currentMonth = new Intl.DateTimeFormat('en-US', { timeZone, month: 'numeric', year: 'numeric' }).format(currentDate)
-
+ const tz = timeZone
+  const currentMonth = new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'numeric', year: 'numeric' }).format(currentDate)
   function inCurrentMonth(day: Date) {
-    const m = new Intl.DateTimeFormat('en-US', { timeZone, month: 'numeric', year: 'numeric' }).format(day)
+    const m = new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'numeric', year: 'numeric' }).format(day)
     return m === currentMonth
   }
 
@@ -76,7 +76,7 @@ export function MonthGrid(props: {
             >
               <div className="flex items-baseline justify-between">
                 <div className={['text-sm font-black', inMonth ? 'text-textPrimary' : 'text-textSecondary'].join(' ')}>
-                  {new Intl.DateTimeFormat('en-US', { timeZone, day: 'numeric' }).format(d)}
+                  {new Intl.DateTimeFormat('en-US', { timeZone: tz, day: 'numeric' }).format(d)}
                 </div>
 
                 {isToday && (

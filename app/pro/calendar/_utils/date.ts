@@ -105,11 +105,13 @@ export function yearInTimeZone(d: Date, timeZone: string) {
 }
 
 export function formatDayLabelInTimeZone(d: Date, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, { timeZone, weekday: 'short', month: 'short', day: 'numeric' }).format(d)
+  const tz = timeZone
+  return new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' }).format(d)
 }
 
 export function formatMonthRangeInTimeZone(d: Date, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, { timeZone, month: 'long', year: 'numeric' }).format(d)
+  const tz = timeZone
+  return new Intl.DateTimeFormat(undefined, { timeZone: tz, month: 'long', year: 'numeric' }).format(d)
 }
 
 /**
@@ -143,8 +145,8 @@ export function addDaysAnchorNoonInTimeZone(anchorUtc: Date, deltaDays: number, 
 }
 
 function dowInTimeZone(anchorUtc: Date, timeZone: string): number {
-  // 0..6 Sunday..Saturday
-  const wd = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(anchorUtc)
+  const tz = timeZone
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(anchorUtc)
   const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
   return map[wd] ?? 0
 }
@@ -192,12 +194,13 @@ export function addMonthsAnchorNoonInTimeZone(anchorUtc: Date, deltaMonths: numb
 }
 
 export function formatWeekRangeInTimeZone(anchorUtc: Date, timeZone: string) {
-  const weekStartNoonUtc = startOfWeekAnchorNoonInTimeZone(anchorUtc, timeZone)
-  const startUtc = startOfDayUtcInTimeZone(weekStartNoonUtc, timeZone)
+  const tz = timeZone
+  const weekStartNoonUtc = startOfWeekAnchorNoonInTimeZone(anchorUtc, tz)
+  const startUtc = startOfDayUtcInTimeZone(weekStartNoonUtc, tz)
   const endUtc = new Date(startUtc.getTime() + 6 * 24 * 60 * 60_000)
 
-  const startStr = new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric' }).format(startUtc)
-  const endStr = new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric' }).format(endUtc)
+  const startStr = new Intl.DateTimeFormat(undefined, { timeZone: tz, month: 'short', day: 'numeric' }).format(startUtc)
+  const endStr = new Intl.DateTimeFormat(undefined, { timeZone: tz, month: 'short', day: 'numeric' }).format(endUtc)
 
   return `${startStr} – ${endStr}`
 }
