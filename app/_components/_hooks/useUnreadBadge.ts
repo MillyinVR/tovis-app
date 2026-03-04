@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isRecord } from '@/lib/guards'
+
 function formatBadgeCount(n: number): string | null {
   if (!Number.isFinite(n) || n <= 0) return null
   return n > 99 ? '99+' : String(n)
