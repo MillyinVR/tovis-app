@@ -52,13 +52,16 @@ export async function POST(request: Request) {
       { status: 200 },
     )
 
-    response.cookies.set('tovis_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    })
+   const COOKIE_DOMAIN = process.env.NODE_ENV === 'production' ? '.tovis.app' : undefined
+
+  response.cookies.set('tovis_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+    ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
+  })
 
     return response
   } catch (error) {
