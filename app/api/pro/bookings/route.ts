@@ -1,9 +1,36 @@
 // app/api/pro/bookings/route.ts
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, Prisma, ServiceLocationType, ProfessionalLocationType } from '@prisma/client'
+import {
+  BookingStatus,
+  BookingServiceItemType,
+  Prisma,
+  ProfessionalLocationType,
+  ServiceLocationType,
+} from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { isValidIanaTimeZone, minutesSinceMidnightInTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
+import { isValidIanaTimeZone, minutesSinceMidnightInTimeZone, sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
+import { isRecord } from '@/lib/guards'
+
 export const dynamic = 'force-dynamic'
+
+const MAX_SLOT_DURATION_MINUTES = 12 * 60
+const MAX_BUFFER_MINUTES = 180
+const MAX_OTHER_OVERLAP_MINUTES = MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
+
+type Body = {
+  clientId?: unknown
+  scheduledFor?: unknown
+  internalNotes?: unknown
+
+  locationId?: unknown
+  locationType?: unknown
+
+  serviceIds?: unknown
+
+  bufferMinutes?: unknown
+  totalDurationMinutes?: unknown
+  allowOutsideWorkingHours?: unknown
+}
 
 function normalizeToMinute(d: Date) {
   const x = new Date(d)
@@ -15,19 +42,52 @@ function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
 }
 
+/** existingStart < requestedEnd AND existingEnd > requestedStart */
+function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
+  return aStart < bEnd && aEnd > bStart
+}
+
 function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.trunc(n)))
+  const x = Math.trunc(n)
+  return Math.min(Math.max(x, min), max)
+}
+
+function normalizeStepMinutes(input: unknown, fallback: number) {
+  const n = typeof input === 'number' ? input : Number(input)
+  const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
+
+  const allowed = new Set([5, 10, 15, 20, 30, 60])
+  if (allowed.has(raw)) return raw
+
+  if (raw <= 5) return 5
+  if (raw <= 10) return 10
+  if (raw <= 15) return 15
+  if (raw <= 20) return 20
+  if (raw <= 30) return 30
+  return 60
 }
 
 function snapToStep(n: number, stepMinutes: number) {
   const step = clampInt(stepMinutes || 15, 5, 60)
-  const x = Math.round(n / step) * step
-  return x < 0 ? 0 : x
+  return Math.round(n / step) * step
 }
 
 function normalizeLocationType(v: unknown): ServiceLocationType {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
   return s === 'MOBILE' ? ServiceLocationType.MOBILE : ServiceLocationType.SALON
+}
+
+function pickBool(v: unknown): boolean | null {
+  return typeof v === 'boolean' ? v : null
+}
+
+function pickInt(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : null
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number(v)
+    return Number.isFinite(n) ? Math.trunc(n) : null
+  }
+  return null
 }
 
 function toStringArray(v: unknown): string[] {
@@ -38,14 +98,6 @@ function toStringArray(v: unknown): string[] {
     .filter(Boolean)
 }
 
-/** existingStart < requestedEnd AND existingEnd > requestedStart */
-function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-  return aStart < bEnd && aEnd > bStart
-}
-
-/**
- * Money helpers (route-local; cents-based)
- */
 function moneyStringToCents(raw: string): number {
   const cleaned = raw.replace(/\$/g, '').replace(/,/g, '').trim()
   if (!cleaned) return 0
@@ -62,11 +114,9 @@ function moneyToCents(v: unknown): number {
   if (v == null) return 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.max(0, Math.round(v * 100)) : 0
   if (typeof v === 'string') return moneyStringToCents(v)
-
-  // Prisma Decimal-like: try toString()
-  const maybe = v as { toString?: () => string }
-  const s = typeof maybe?.toString === 'function' ? maybe.toString() : ''
-  return typeof s === 'string' ? moneyStringToCents(s) : 0
+  const maybe = v as { toString?: unknown }
+  if (typeof maybe.toString === 'function') return moneyStringToCents(maybe.toString())
+  return 0
 }
 
 function centsToMoneyString(cents: number): string {
@@ -76,30 +126,81 @@ function centsToMoneyString(cents: number): string {
   return `${dollars}.${String(rem).padStart(2, '0')}`
 }
 
-function durationOrDefault(totalDurationMinutes: unknown) {
-  const n = Number(totalDurationMinutes ?? 0)
-  return Number.isFinite(n) && n > 0 ? n : 60
+function decimalToNumber(v: unknown): number | null {
+  if (v == null) return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  const maybe = v as { toString?: unknown }
+  if (typeof maybe.toString === 'function') {
+    const n = Number(maybe.toString())
+    return Number.isFinite(n) ? n : null
+  }
+  return null
 }
 
-function decimalToNumber(v: unknown): number | undefined {
-  if (v == null) return undefined
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
-  const maybe = v as { toString?: () => string }
-  const s = typeof maybe?.toString === 'function' ? maybe.toString() : ''
-  const n = Number(s)
-  return Number.isFinite(n) ? n : undefined
+/* ----------------------------
+   Working-hours enforcement
+---------------------------- */
+
+type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
+type WorkingHours = Record<string, WorkingHoursDay>
+
+function parseHHMM(v?: string) {
+  if (!v || typeof v !== 'string') return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return { hh, mm }
 }
 
-type Body = {
-  clientId?: unknown
-  scheduledFor?: unknown
-  internalNotes?: unknown
-  locationId?: unknown
-  locationType?: unknown
-  serviceIds?: unknown
-  bufferMinutes?: unknown
-  totalDurationMinutes?: unknown
-  allowOutsideWorkingHours?: unknown // pro-only hint (optional)
+function weekdayKeyInTimeZone(dateUtc: Date, timeZone: string) {
+  const z = getZonedParts(dateUtc, timeZone)
+  const noonUtc = new Date(Date.UTC(z.year, z.month - 1, z.day, 12, 0, 0, 0))
+  const w = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(noonUtc).toLowerCase()
+  if (w.startsWith('sun')) return 'sun'
+  if (w.startsWith('mon')) return 'mon'
+  if (w.startsWith('tue')) return 'tue'
+  if (w.startsWith('wed')) return 'wed'
+  if (w.startsWith('thu')) return 'thu'
+  if (w.startsWith('fri')) return 'fri'
+  return 'sat'
+}
+
+function ensureWithinWorkingHours(args: {
+  scheduledStartUtc: Date
+  scheduledEndUtc: Date
+  workingHours: unknown
+  timeZone: string
+}): { ok: true } | { ok: false; error: string } {
+  const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
+
+  if (!isRecord(workingHours)) return { ok: false, error: 'Working hours are not set yet.' }
+
+  const dayKey = weekdayKeyInTimeZone(scheduledStartUtc, timeZone)
+  const rule = workingHours[dayKey]
+  if (!rule || typeof rule !== 'object') return { ok: false, error: 'That time is outside working hours.' }
+
+  const enabled = (rule as WorkingHoursDay).enabled
+  if (enabled === false) return { ok: false, error: 'That time is outside working hours.' }
+
+  const startHHMM = parseHHMM((rule as WorkingHoursDay).start)
+  const endHHMM = parseHHMM((rule as WorkingHoursDay).end)
+  if (!startHHMM || !endHHMM) return { ok: false, error: 'Working hours are misconfigured.' }
+
+  const windowStartMin = startHHMM.hh * 60 + startHHMM.mm
+  const windowEndMin = endHHMM.hh * 60 + endHHMM.mm
+  if (windowEndMin <= windowStartMin) return { ok: false, error: 'Working hours are misconfigured.' }
+
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
+
+  if (startMin < windowStartMin || endMin > windowEndMin) {
+    return { ok: false, error: 'That time is outside working hours.' }
+  }
+
+  return { ok: true }
 }
 
 export async function POST(req: Request) {
@@ -110,32 +211,34 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as Body
 
-    const clientId = pickString(body?.clientId)
-    const scheduledForRaw = pickString(body?.scheduledFor)
-    const internalNotes = pickString(body?.internalNotes)
+    const clientId = pickString(body.clientId)
+    const scheduledForRaw = pickString(body.scheduledFor)
+    const internalNotes = pickString(body.internalNotes)
 
-    const locationId = pickString(body?.locationId)
-    const locationType = normalizeLocationType(body?.locationType)
+    const locationId = pickString(body.locationId)
+    const locationType = normalizeLocationType(body.locationType)
 
-    const serviceIds = toStringArray(body?.serviceIds)
-    const uniqueServiceIds = Array.from(new Set(serviceIds)).slice(0, 10)
+    const serviceIds = Array.from(new Set(toStringArray(body.serviceIds))).slice(0, 10)
+
+    const allowOutside = pickBool(body.allowOutsideWorkingHours) ?? false
 
     if (!clientId) return jsonFail(400, 'Missing clientId.')
     if (!scheduledForRaw) return jsonFail(400, 'Missing scheduledFor.')
     if (!locationId) return jsonFail(400, 'Missing locationId.')
-    if (!uniqueServiceIds.length) return jsonFail(400, 'Select at least one service.')
+    if (!serviceIds.length) return jsonFail(400, 'Select at least one service.')
 
     const scheduledStart = normalizeToMinute(new Date(scheduledForRaw))
     if (!Number.isFinite(scheduledStart.getTime())) return jsonFail(400, 'Invalid scheduledFor.')
 
-    // Location is REQUIRED by schema; also gives timezone + snapshots + stepMinutes
     const loc = await prisma.professionalLocation.findFirst({
       where: { id: locationId, professionalId, isBookable: true },
       select: {
         id: true,
         type: true,
         stepMinutes: true,
+        bufferMinutes: true,
         timeZone: true,
+        workingHours: true,
         formattedAddress: true,
         lat: true,
         lng: true,
@@ -143,7 +246,6 @@ export async function POST(req: Request) {
     })
     if (!loc) return jsonFail(404, 'Location not found or not bookable.')
 
-    // Enforce booking mode matches location type (high-trust data)
     if (locationType === ServiceLocationType.MOBILE && loc.type !== ProfessionalLocationType.MOBILE_BASE) {
       return jsonFail(400, 'This location is not a mobile base.')
     }
@@ -151,36 +253,39 @@ export async function POST(req: Request) {
       return jsonFail(400, 'This location is mobile-only.')
     }
 
-    const stepMinutes = clampInt(Number(loc.stepMinutes ?? 15), 5, 60)
-
-    // Ensure start time aligns with step (prevents odd times from clients/tools)
     const apptTz = sanitizeTimeZone(loc.timeZone, 'UTC')
-if (!isValidIanaTimeZone(apptTz)) return jsonFail(400, 'This location must set a valid timezone before taking bookings.')
+    if (!isValidIanaTimeZone(apptTz)) {
+      return jsonFail(400, 'This location must set a valid timezone before taking bookings.')
+    }
 
-const startMin = minutesSinceMidnightInTimeZone(scheduledStart, apptTz)
-if (startMin % stepMinutes !== 0) {
-  return jsonFail(400, `Start time must be on a ${stepMinutes}-minute boundary.`)
-}
+    const stepMinutes = normalizeStepMinutes(loc.stepMinutes, 15)
 
-    const bufferMinutes = (() => {
-      const n = Number(body?.bufferMinutes ?? 0)
-      if (!Number.isFinite(n) || n < 0 || n > 180) return 0
-      return snapToStep(n, stepMinutes)
-    })()
+    // Step alignment (in LOCATION TZ)
+    const startMin = minutesSinceMidnightInTimeZone(scheduledStart, apptTz)
+    if (startMin % stepMinutes !== 0) {
+      return jsonFail(400, `Start time must be on a ${stepMinutes}-minute boundary.`)
+    }
 
-    // Offerings for selected services (must support the booking mode)
+    // Booking buffer: default to location buffer; allow override.
+    const locationBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
+
+    const requestedBuffer = pickInt(body.bufferMinutes)
+    const bufferMinutes =
+      requestedBuffer == null
+        ? locationBufferMinutes
+        : clampInt(snapToStep(clampInt(requestedBuffer, 0, MAX_BUFFER_MINUTES), stepMinutes), 0, MAX_BUFFER_MINUTES)
+
+    // Offerings must exist and support mode
     const offerings = await prisma.professionalServiceOffering.findMany({
       where: {
         professionalId,
         isActive: true,
-        serviceId: { in: uniqueServiceIds },
+        serviceId: { in: serviceIds },
         ...(locationType === ServiceLocationType.MOBILE ? { offersMobile: true } : { offersInSalon: true }),
       },
       select: {
         id: true,
         serviceId: true,
-        offersInSalon: true,
-        offersMobile: true,
         salonPriceStartingAt: true,
         mobilePriceStartingAt: true,
         salonDurationMinutes: true,
@@ -189,23 +294,22 @@ if (startMin % stepMinutes !== 0) {
       take: 50,
     })
 
-    const offeringByServiceId = new Map<string, (typeof offerings)[number]>()
-    for (const o of offerings) offeringByServiceId.set(o.serviceId, o)
-
-    for (const sid of uniqueServiceIds) {
+    const offeringByServiceId = new Map(offerings.map((o) => [o.serviceId, o]))
+    for (const sid of serviceIds) {
       if (!offeringByServiceId.get(sid)) {
-        return jsonFail(400, 'One or more selected services are not available for this professional.')
+        return jsonFail(400, 'One or more selected services are not available for this professional/location type.')
       }
     }
 
     const serviceRows = await prisma.service.findMany({
-      where: { id: { in: uniqueServiceIds } },
+      where: { id: { in: serviceIds } },
       select: { id: true, name: true, defaultDurationMinutes: true },
       take: 50,
     })
     const serviceById = new Map(serviceRows.map((s) => [s.id, s]))
 
-    const items = uniqueServiceIds.map((sid, idx) => {
+    // Build items: first is BASE, rest are ADD_ON.
+    const items = serviceIds.map((sid, idx) => {
       const off = offeringByServiceId.get(sid)!
       const svc = serviceById.get(sid)
 
@@ -214,9 +318,18 @@ if (startMin % stepMinutes !== 0) {
           ? Number(off.mobileDurationMinutes ?? svc?.defaultDurationMinutes ?? 0)
           : Number(off.salonDurationMinutes ?? svc?.defaultDurationMinutes ?? 0)
 
-      const durationMinutesSnapshot = clampInt(snapToStep(Number(durRaw || 0), stepMinutes), stepMinutes, 12 * 60)
+      const dur = Number.isFinite(durRaw) && durRaw > 0 ? durRaw : 0
+      if (!dur) throw new Error('BAD_DURATION')
+
+      const durationMinutesSnapshot = clampInt(
+        snapToStep(clampInt(dur, stepMinutes, MAX_SLOT_DURATION_MINUTES), stepMinutes),
+        stepMinutes,
+        MAX_SLOT_DURATION_MINUTES,
+      )
 
       const priceRaw = locationType === ServiceLocationType.MOBILE ? off.mobilePriceStartingAt : off.salonPriceStartingAt
+      if (priceRaw == null) throw new Error('PRICING_NOT_SET')
+
       const priceCents = moneyToCents(priceRaw)
 
       return {
@@ -229,65 +342,99 @@ if (startMin % stepMinutes !== 0) {
       }
     })
 
-    const computedDuration = items.reduce((sum, i) => sum + Number(i.durationMinutesSnapshot || 0), 0)
-    const computedSubtotalCents = items.reduce((sum, i) => sum + Number(i.priceCents || 0), 0)
+    const computedDuration = items.reduce((sum, i) => sum + i.durationMinutesSnapshot, 0)
+    const computedSubtotalCents = items.reduce((sum, i) => sum + i.priceCents, 0)
 
-    const uiDuration = Number(body?.totalDurationMinutes)
+    const uiDuration = pickInt(body.totalDurationMinutes)
     const totalDurationMinutes =
-      Number.isFinite(uiDuration) && uiDuration >= stepMinutes && uiDuration <= 12 * 60
-        ? clampInt(snapToStep(uiDuration, stepMinutes), stepMinutes, 12 * 60)
-        : clampInt(snapToStep(computedDuration || 60, stepMinutes), stepMinutes, 12 * 60)
+      uiDuration != null && uiDuration >= computedDuration && uiDuration <= MAX_SLOT_DURATION_MINUTES
+        ? clampInt(snapToStep(uiDuration, stepMinutes), computedDuration, MAX_SLOT_DURATION_MINUTES)
+        : clampInt(snapToStep(computedDuration || 60, stepMinutes), stepMinutes, MAX_SLOT_DURATION_MINUTES)
 
     const scheduledEnd = addMinutes(scheduledStart, totalDurationMinutes + bufferMinutes)
 
-    // ✅ Conflict checks MUST be location-scoped + include blocks + holds
-    const MAX_OTHER_OVERLAP_MINUTES = 12 * 60 + 180 // max duration + max buffer
-    const earliestStart = addMinutes(scheduledStart, -MAX_OTHER_OVERLAP_MINUTES)
+    if (!allowOutside) {
+      const wh = ensureWithinWorkingHours({
+        scheduledStartUtc: scheduledStart,
+        scheduledEndUtc: scheduledEnd,
+        workingHours: loc.workingHours,
+        timeZone: apptTz,
+      })
+      if (!wh.ok) return jsonFail(400, wh.error)
+    }
 
-    const others = await prisma.booking.findMany({
-      where: {
-        professionalId,
-        locationId: loc.id, // ✅ location-scoped
-        scheduledFor: { gte: earliestStart, lt: scheduledEnd },
-        NOT: { status: BookingStatus.CANCELLED },
-      },
-      select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
-      take: 500,
-    })
-
-    const hasBookingConflict = others.some((b) => {
-      if (b.status === BookingStatus.CANCELLED) return false
-      const bDur = durationOrDefault(b.totalDurationMinutes)
-      const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
-      const bStart = normalizeToMinute(new Date(b.scheduledFor))
-      const bEnd = addMinutes(bStart, bDur + bBuf)
-      return overlaps(bStart, bEnd, scheduledStart, scheduledEnd)
-    })
-    if (hasBookingConflict) return jsonFail(409, 'That time is not available.')
-
+    // Blocks: location OR global
     const blockConflict = await prisma.calendarBlock.findFirst({
       where: {
         professionalId,
         startsAt: { lt: scheduledEnd },
         endsAt: { gt: scheduledStart },
-        OR: [{ locationId: loc.id }, { locationId: null }], // ✅ location + global blocks
+        OR: [{ locationId: loc.id }, { locationId: null }],
       },
       select: { id: true },
     })
     if (blockConflict) return jsonFail(409, 'That time is blocked on your calendar.')
 
-    const holdConflict = await prisma.bookingHold.findFirst({
+    // Tight overlap window so we don’t miss conflicts due to query limits
+    const earliestStart = addMinutes(scheduledStart, -MAX_OTHER_OVERLAP_MINUTES)
+
+    // Bookings: location-scoped
+    const others = await prisma.booking.findMany({
+      where: {
+        professionalId,
+        locationId: loc.id,
+        scheduledFor: { gte: earliestStart, lt: scheduledEnd },
+        NOT: { status: BookingStatus.CANCELLED },
+      },
+      select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+      take: 2000,
+    })
+
+    const hasBookingConflict = others.some((b) => {
+      if (b.status === BookingStatus.CANCELLED) return false
+      const bStart = normalizeToMinute(new Date(b.scheduledFor))
+      const bDur = Number(b.totalDurationMinutes ?? 0) > 0 ? Number(b.totalDurationMinutes) : 60
+      const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
+      const bEnd = addMinutes(bStart, bDur + bBuf)
+      return overlaps(bStart, bEnd, scheduledStart, scheduledEnd)
+    })
+    if (hasBookingConflict) return jsonFail(409, 'That time is not available.')
+
+    // Holds: overlap-aware (needs offering durations)
+    const holds = await prisma.bookingHold.findMany({
       where: {
         professionalId,
         locationId: loc.id,
         expiresAt: { gt: new Date() },
-        scheduledFor: { gte: scheduledStart, lt: scheduledEnd },
+        scheduledFor: { gte: earliestStart, lt: scheduledEnd },
       },
-      select: { id: true },
+      select: { id: true, scheduledFor: true, offeringId: true, locationType: true },
+      take: 2000,
     })
-    if (holdConflict) return jsonFail(409, 'That time is currently on hold.')
 
-    const primaryItem = items[0] // guaranteed
+    if (holds.length) {
+      const offeringIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 2000)
+      const offerRows = await prisma.professionalServiceOffering.findMany({
+        where: { id: { in: offeringIds } },
+        select: { id: true, salonDurationMinutes: true, mobileDurationMinutes: true },
+        take: 2000,
+      })
+      const byId = new Map(offerRows.map((o) => [o.id, o]))
+
+      const hasHoldConflict = holds.some((h) => {
+        const o = byId.get(h.offeringId)
+        const durRaw =
+          h.locationType === ServiceLocationType.MOBILE ? o?.mobileDurationMinutes : o?.salonDurationMinutes
+        const base = Number(durRaw ?? 0)
+        const dur = Number.isFinite(base) && base > 0 ? clampInt(base, 15, MAX_SLOT_DURATION_MINUTES) : 60
+
+        const hStart = normalizeToMinute(new Date(h.scheduledFor))
+        const hEnd = addMinutes(hStart, dur + locationBufferMinutes)
+        return overlaps(hStart, hEnd, scheduledStart, scheduledEnd)
+      })
+
+      if (hasHoldConflict) return jsonFail(409, 'That time is currently on hold.')
+    }
 
     // Snapshots
     const locationAddressSnapshot: Prisma.InputJsonValue | undefined =
@@ -295,65 +442,78 @@ if (startMin % stepMinutes !== 0) {
         ? ({ formattedAddress: loc.formattedAddress.trim() } satisfies Prisma.InputJsonObject)
         : undefined
 
-    const locationLatSnapshot = decimalToNumber(loc.lat)
-    const locationLngSnapshot = decimalToNumber(loc.lng)
+    const locationLatSnapshot = decimalToNumber(loc.lat) ?? undefined
+    const locationLngSnapshot = decimalToNumber(loc.lng) ?? undefined
 
-    const created = await prisma.booking.create({
-      data: {
-        professionalId,
-        clientId,
+    const base = items[0]
 
-        // schema requires serviceId
-        serviceId: primaryItem.serviceId,
-        offeringId: primaryItem.offeringId,
+    const created = await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.create({
+        data: {
+          professionalId,
+          clientId,
 
-        scheduledFor: scheduledStart,
-        status: BookingStatus.ACCEPTED, // pro-created = accepted
-        locationType,
+          serviceId: base.serviceId,
+          offeringId: base.offeringId,
 
-        // schema requires locationId
-        locationId: loc.id,
-        locationTimeZone: loc.timeZone ?? null,
-        locationAddressSnapshot,
-        locationLatSnapshot,
-        locationLngSnapshot,
+          scheduledFor: scheduledStart,
+          status: BookingStatus.ACCEPTED,
 
-        internalNotes: internalNotes ?? null,
-        bufferMinutes,
-        totalDurationMinutes,
+          locationType,
+          locationId: loc.id,
+          locationTimeZone: apptTz,
+          locationAddressSnapshot,
+          locationLatSnapshot,
+          locationLngSnapshot,
 
-        // Booking-level truth
-        subtotalSnapshot: new Prisma.Decimal(centsToMoneyString(computedSubtotalCents)),
+          internalNotes: internalNotes ?? null,
 
-        serviceItems: {
-          create: items.map((i) => ({
-            serviceId: i.serviceId,
-            offeringId: i.offeringId,
-            priceSnapshot: new Prisma.Decimal(centsToMoneyString(i.priceCents)),
-            durationMinutesSnapshot: i.durationMinutesSnapshot,
-            sortOrder: i.sortOrder,
-          })),
+          bufferMinutes,
+          totalDurationMinutes,
+          subtotalSnapshot: new Prisma.Decimal(centsToMoneyString(computedSubtotalCents)),
         },
-      },
-      select: {
-        id: true,
-        scheduledFor: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-        status: true,
-        client: { select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } } },
-      },
+        select: { id: true, scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+      })
+
+      const baseItem = await tx.bookingServiceItem.create({
+        data: {
+          bookingId: booking.id,
+          serviceId: base.serviceId,
+          offeringId: base.offeringId,
+          itemType: BookingServiceItemType.BASE,
+          priceSnapshot: new Prisma.Decimal(centsToMoneyString(base.priceCents)),
+          durationMinutesSnapshot: base.durationMinutesSnapshot,
+          sortOrder: 0,
+        },
+        select: { id: true },
+      })
+
+      const addOns = items.slice(1)
+      if (addOns.length) {
+        await tx.bookingServiceItem.createMany({
+          data: addOns.map((a, i) => ({
+            bookingId: booking.id,
+            serviceId: a.serviceId,
+            offeringId: null,
+            itemType: BookingServiceItemType.ADD_ON,
+            parentItemId: baseItem.id,
+            priceSnapshot: new Prisma.Decimal(centsToMoneyString(a.priceCents)),
+            durationMinutesSnapshot: a.durationMinutesSnapshot,
+            sortOrder: 100 + i,
+            notes: 'MANUAL_ADDON',
+          })),
+        })
+      }
+
+      return booking
     })
 
-    const fn = created.client?.firstName?.trim() || ''
-    const ln = created.client?.lastName?.trim() || ''
-    const clientName = fn || ln ? `${fn} ${ln}`.trim() : created.client?.user?.email || 'Client'
-
-    const serviceName = items.map((i) => i.serviceName).filter(Boolean).join(' + ') || 'Appointment'
     const endsAt = addMinutes(
       new Date(created.scheduledFor),
-      Number(created.totalDurationMinutes ?? totalDurationMinutes) + Number(created.bufferMinutes ?? bufferMinutes),
+      Number(created.totalDurationMinutes) + Number(created.bufferMinutes),
     )
+
+    const serviceName = items.map((i) => i.serviceName).filter(Boolean).join(' + ') || 'Appointment'
 
     return jsonOk(
       {
@@ -361,24 +521,26 @@ if (startMin % stepMinutes !== 0) {
           id: created.id,
           scheduledFor: new Date(created.scheduledFor).toISOString(),
           endsAt: endsAt.toISOString(),
-          totalDurationMinutes: Number(created.totalDurationMinutes ?? totalDurationMinutes),
-          bufferMinutes: Number(created.bufferMinutes ?? bufferMinutes),
+          totalDurationMinutes: Number(created.totalDurationMinutes),
+          bufferMinutes: Number(created.bufferMinutes),
           status: created.status,
           serviceName,
-          clientName,
           subtotalCents: computedSubtotalCents,
-
-          // nice to have for debugging / UI confidence
           locationId: loc.id,
           locationType,
           stepMinutes,
+          timeZone: apptTz,
         },
       },
       200,
     )
   } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : ''
+
+    if (msg === 'PRICING_NOT_SET') return jsonFail(409, 'Pricing is not set for one or more selected services.')
+    if (msg === 'BAD_DURATION') return jsonFail(409, 'Duration is not set for one or more selected services.')
+
     console.error('POST /api/pro/bookings error', e)
-    const msg = e instanceof Error && e.message.trim() ? e.message : 'Failed to create booking.'
-    return jsonFail(500, msg)
+    return jsonFail(500, 'Failed to create booking.')
   }
 }

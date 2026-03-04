@@ -7,6 +7,11 @@ import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
 
+import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
+import { safeJson, readErrorMessage, errorMessageFromUnknown, isOkTrue } from '@/lib/http'
+import { withCacheBuster } from '@/lib/url'
+
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
 type ServiceDTO = {
@@ -24,34 +29,11 @@ type ServiceDTO = {
   categoryName: string | null
 }
 
-type OkResponse = { ok: true }
-type FailResponse = { ok: false; error?: string }
+type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
-}
-
-function readErrorMessage(v: unknown): string | null {
-  if (!isRecord(v)) return null
-  const e = v.error
-  return typeof e === 'string' && e.trim() ? e : null
-}
-
-function isOkTrue(v: unknown): v is OkResponse & Record<string, unknown> {
-  return isRecord(v) && v.ok === true
-}
-
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
+type FormMeta = { dirty: boolean; canSave: boolean; uploadBusy: boolean }
+type FormHandle = { submit: () => void }
+type SavePayload = Record<string, string>
 
 function isAbsoluteHttpUrl(input: string) {
   try {
@@ -76,18 +58,6 @@ function fmtMoney(v: string | null) {
   const n = Number(s)
   if (!Number.isFinite(n)) return `$${s}`
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n)
-}
-
-function withCacheBuster(url: string, cb?: number | null) {
-  const cacheBuster = typeof cb === 'number' ? cb : Date.now()
-  try {
-    const u = new URL(url)
-    u.searchParams.set('v', String(cacheBuster))
-    return u.toString()
-  } catch {
-    const joiner = url.includes('?') ? '&' : '?'
-    return `${url}${joiner}v=${cacheBuster}`
-  }
 }
 
 function haptic(ms = 8) {
@@ -116,11 +86,7 @@ function StatusPill(props: { dirty: boolean; saving: boolean }) {
       ? 'border-[rgb(var(--micro-accent))/0.35] bg-[rgb(var(--micro-accent))/0.12] text-textPrimary'
       : 'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary'
 
-  return (
-    <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black', tone)}>
-      {label}
-    </span>
-  )
+  return <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black', tone)}>{label}</span>
 }
 
 /** Lock page scroll while modal is open */
@@ -249,7 +215,6 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
     setFailed(false)
   }, [src])
 
-  // ✅ Fix: if the image is already in cache, onLoad might not fire
   useEffect(() => {
     const img = imgRef.current
     if (!img) return
@@ -265,7 +230,7 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
   }, [src])
 
   return (
-    <div className={cx('relative overflow-hidden', className)}>
+    <div className={cn('relative overflow-hidden', className)}>
       {!loaded && !failed ? (
         <div className="absolute inset-0">
           <div className="absolute inset-0 animate-pulse bg-bgPrimary/35" />
@@ -280,7 +245,7 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
           ref={imgRef}
           src={src}
           alt={alt}
-          className={cx('relative z-[1] h-full w-full object-cover transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
+          className={cn('relative z-[1] h-full w-full object-cover transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
           loading="lazy"
           onLoad={() => {
             setFailed(false)
@@ -313,7 +278,6 @@ function ImageWithShimmer(props: { src: string; alt?: string; className?: string
   )
 }
 
-type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 function Toast(props: ToastState) {
   const toneClasses =
     props.tone === 'success'
@@ -322,7 +286,7 @@ function Toast(props: ToastState) {
 
   return (
     <div
-      className={cx(
+      className={cn(
         'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl',
         'tovis-glass-strong tovis-noise',
         toneClasses,
@@ -336,11 +300,6 @@ function Toast(props: ToastState) {
   )
 }
 
-type FormMeta = { dirty: boolean; canSave: boolean; uploadBusy: boolean }
-type FormHandle = { submit: () => void }
-
-type SavePayload = Record<string, string>
-
 type UploadInitOk = {
   ok: true
   bucket: string
@@ -352,20 +311,15 @@ type UploadInitOk = {
 
 function parseUploadInit(v: unknown): UploadInitOk | null {
   if (!isOkTrue(v)) return null
-  const bucket = typeof v.bucket === 'string' ? v.bucket : ''
-  const path = typeof v.path === 'string' ? v.path : ''
-  const token = typeof v.token === 'string' ? v.token : ''
-  const publicUrl = typeof v.publicUrl === 'string' ? v.publicUrl : ''
-  const cacheBuster = typeof v.cacheBuster === 'number' ? v.cacheBuster : undefined
+  // v is a record, but fields are still unknown; read safely
+  const bucket = typeof v['bucket'] === 'string' ? v['bucket'] : ''
+  const path = typeof v['path'] === 'string' ? v['path'] : ''
+  const token = typeof v['token'] === 'string' ? v['token'] : ''
+  const publicUrl = typeof v['publicUrl'] === 'string' ? v['publicUrl'] : ''
+  const cacheBuster = typeof v['cacheBuster'] === 'number' && Number.isFinite(v['cacheBuster']) ? v['cacheBuster'] : undefined
 
   if (!bucket || !path || !token || !publicUrl) return null
   return { ok: true, bucket, path, token, publicUrl, cacheBuster }
-}
-
-function errorMessageFromUnknown(e: unknown): string {
-  if (e instanceof Error && e.message.trim()) return e.message
-  if (isRecord(e) && typeof e.message === 'string' && e.message.trim()) return e.message
-  return 'Something went wrong.'
 }
 
 export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categories: CategoryDTO[] }) {
@@ -425,9 +379,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
     try {
       const form = new FormData()
       form.set('_method', 'PATCH')
-      Object.entries(payload).forEach(([k, v]) => {
-        form.set(k, v)
-      })
+      for (const [k, v] of Object.entries(payload)) form.set(k, v)
 
       const res = await fetch(`/api/admin/services/${encodeURIComponent(id)}`, { method: 'POST', body: form })
       const data = await safeJson(res)
@@ -471,10 +423,8 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
   const btnBase =
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-extrabold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
-  const btnSoft =
-    'border border-surfaceGlass/15 bg-bgPrimary/35 text-textPrimary hover:border-surfaceGlass/25 hover:bg-bgPrimary/45'
-  const btnAccent =
-    'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
+  const btnSoft = 'border border-surfaceGlass/15 bg-bgPrimary/35 text-textPrimary hover:border-surfaceGlass/25 hover:bg-bgPrimary/45'
+  const btnAccent = 'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
   const btnPrimary =
     'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
 
@@ -498,13 +448,13 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
         {liveServices.map((s) => (
           <div
             key={s.id}
-            className={cx(
+            className={cn(
               'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary',
               'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
             )}
           >
             <div
-              className={cx(
+              className={cn(
                 'pointer-events-none absolute inset-0',
                 "before:absolute before:inset-0 before:content-['']",
                 'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.12),transparent_60%)]',
@@ -555,7 +505,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
 
                 <button
                   type="button"
-                  className={cx(btnBase, btnAccent)}
+                  className={cn(btnBase, btnAccent)}
                   onClick={() => {
                     haptic(8)
                     setOpenId(s.id)
@@ -588,7 +538,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                 aria-modal="true"
                 aria-label={`Edit service: ${current.name}`}
                 tabIndex={-1}
-                className={cx(
+                className={cn(
                   'relative w-full max-w-3xl overflow-hidden outline-none',
                   'tovis-glass-strong tovis-noise',
                   'rounded-t-[26px] sm:rounded-[26px] border border-white/12',
@@ -613,7 +563,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      className={cx(btnBase, btnPrimary)}
+                      className={cn(btnBase, btnPrimary)}
                       disabled={!meta.canSave || busy || meta.uploadBusy}
                       onClick={() => {
                         haptic(10)
@@ -630,7 +580,7 @@ export default function ServiceHeroGrid(props: { services: ServiceDTO[]; categor
                         haptic(6)
                         close()
                       }}
-                      className={cx(btnBase, btnSoft)}
+                      className={cn(btnBase, btnSoft)}
                     >
                       Close
                     </button>
@@ -683,9 +633,7 @@ const ServiceEditForm = forwardRef<
   const [name, setName] = useState(service.name)
   const [description, setDescription] = useState(service.description ?? '')
   const [categoryId, setCategoryId] = useState(service.categoryId ?? '')
-  const [defaultDurationMinutes, setDefaultDurationMinutes] = useState(
-    service.defaultDurationMinutes ? String(service.defaultDurationMinutes) : '',
-  )
+  const [defaultDurationMinutes, setDefaultDurationMinutes] = useState(service.defaultDurationMinutes ? String(service.defaultDurationMinutes) : '')
   const [minPrice, setMinPrice] = useState(service.minPrice ?? '')
   const [allowMobile, setAllowMobile] = useState(Boolean(service.allowMobile))
   const [isActive, setIsActive] = useState(Boolean(service.isActive))
@@ -696,7 +644,7 @@ const ServiceEditForm = forwardRef<
   const [uploadBusy, setUploadBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
 
-  // ✅ Baseline snapshot must NOT shift when optimistic updates happen.
+  // Baseline snapshot must NOT shift when optimistic updates happen.
   const baselineRef = useRef<{
     name: string
     description: string
@@ -857,9 +805,6 @@ const ServiceEditForm = forwardRef<
 
   return (
     <div className="relative p-4">
-      {/* ...the rest of your JSX stays exactly the same from here down... */}
-      {/* I’m not changing any UI markup below this line—only types/safety above. */}
-      {/* Paste your existing JSX block here unchanged if your editor needs the full file. */}
       <div className="grid gap-3">
         {/* Image row */}
         <div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary/25 p-3">
@@ -916,9 +861,7 @@ const ServiceEditForm = forwardRef<
             {defaultImageUrl ? (
               <ImageWithShimmer src={defaultImageUrl} className="aspect-[16/10] w-full" />
             ) : (
-              <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">
-                No image
-              </div>
+              <div className="grid aspect-[16/10] w-full place-items-center text-xs font-extrabold text-textSecondary">No image</div>
             )}
           </div>
 
@@ -953,13 +896,7 @@ const ServiceEditForm = forwardRef<
 
           <label className="grid gap-1">
             <div className="text-xs font-extrabold text-textSecondary">Default minutes</div>
-            <input
-              className={inputBase}
-              value={defaultDurationMinutes}
-              onChange={(e) => setDefaultDurationMinutes(e.target.value)}
-              disabled={busy}
-              inputMode="numeric"
-            />
+            <input className={inputBase} value={defaultDurationMinutes} onChange={(e) => setDefaultDurationMinutes(e.target.value)} disabled={busy} inputMode="numeric" />
           </label>
         </div>
 

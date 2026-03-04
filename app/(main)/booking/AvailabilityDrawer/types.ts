@@ -83,6 +83,7 @@ export type AvailabilitySummaryOk = ApiOk<{
 
   stepMinutes: number
   leadTimeMinutes: number
+  locationBufferMinutes: number
   adjacencyBufferMinutes: number
   maxDaysAhead: number
   durationMinutes: number
@@ -118,6 +119,7 @@ export type AvailabilityDayOk = ApiOk<{
   timeZone: string
   stepMinutes: number
   leadTimeMinutes: number
+  locationBufferMinutes: number
   adjacencyBufferMinutes: number
   maxDaysAhead: number
 
@@ -141,7 +143,7 @@ export type HoldParsed = {
   holdId: string
   holdUntilMs: number
   scheduledForISO: string
-  locationType?: ServiceLocationType | null
+  locationType: ServiceLocationType | null
 }
 
 /**

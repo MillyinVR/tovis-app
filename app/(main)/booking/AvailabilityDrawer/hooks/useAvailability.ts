@@ -3,231 +3,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type {
-  AvailabilityOffering,
-  AvailabilityOtherPro,
-  AvailabilitySummaryResponse,
-  DrawerContext,
-  ProCard,
-  ServiceLocationType,
-} from '../types'
+import type { AvailabilitySummaryResponse, DrawerContext, ServiceLocationType } from '../types'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
+import { parseAvailabilitySummaryResponse } from '../contract'
+import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
 
-type CacheEntry = {
-  at: number
-  data: AvailabilitySummaryResponse
-}
+type CacheEntry = { at: number; data: AvailabilitySummaryResponse }
 
-const CACHE_TTL_MS = 30_000
+const CACHE_TTL_MS = 7_500
 const SOFT_THROTTLE_MS = 800
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
-}
-
-function pickString(x: unknown): string | null {
-  return typeof x === 'string' && x.trim() ? x.trim() : null
-}
-
-function pickNumber(x: unknown): number | null {
-  return typeof x === 'number' && Number.isFinite(x) ? x : null
-}
-
-function pickBool(x: unknown): boolean | null {
-  return typeof x === 'boolean' ? x : null
-}
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
-  return pickString(raw.error)
-}
-
-function pickLocationType(x: unknown): ServiceLocationType | null {
-  const s = pickString(x)?.toUpperCase() ?? ''
-  if (s === 'SALON') return 'SALON'
-  if (s === 'MOBILE') return 'MOBILE'
-  return null
-}
-
-function parseOffering(x: unknown): AvailabilityOffering | null {
-  if (!isRecord(x)) return null
-
-  const id = pickString(x.id)
-  const offersInSalon = pickBool(x.offersInSalon)
-  const offersMobile = pickBool(x.offersMobile)
-  if (!id || offersInSalon == null || offersMobile == null) return null
-
-  const salonDurationMinutes = x.salonDurationMinutes == null ? null : pickNumber(x.salonDurationMinutes)
-  const mobileDurationMinutes = x.mobileDurationMinutes == null ? null : pickNumber(x.mobileDurationMinutes)
-
-  const salonPriceStartingAt = x.salonPriceStartingAt == null ? null : pickString(x.salonPriceStartingAt)
-  const mobilePriceStartingAt = x.mobilePriceStartingAt == null ? null : pickString(x.mobilePriceStartingAt)
-
-  if (x.salonDurationMinutes != null && salonDurationMinutes == null) return null
-  if (x.mobileDurationMinutes != null && mobileDurationMinutes == null) return null
-  if (x.salonPriceStartingAt != null && salonPriceStartingAt == null) return null
-  if (x.mobilePriceStartingAt != null && mobilePriceStartingAt == null) return null
-
-  return {
-    id,
-    offersInSalon,
-    offersMobile,
-    salonDurationMinutes,
-    mobileDurationMinutes,
-    salonPriceStartingAt,
-    mobilePriceStartingAt,
-  }
-}
-
-function parseProCardBase(x: unknown): ProCard | null {
-  if (!isRecord(x)) return null
-  const id = pickString(x.id)
-  if (!id) return null
-
-  const businessName = x.businessName == null ? null : pickString(x.businessName)
-  const avatarUrl = x.avatarUrl == null ? null : pickString(x.avatarUrl)
-  const location = x.location == null ? null : pickString(x.location)
-  const offeringId = x.offeringId == null ? null : pickString(x.offeringId)
-  const timeZone = x.timeZone == null ? null : pickString(x.timeZone)
-  const isCreator = x.isCreator == null ? undefined : pickBool(x.isCreator) ?? undefined
-
-  return {
-    id,
-    businessName: businessName ?? null,
-    avatarUrl: avatarUrl ?? null,
-    location: location ?? null,
-    offeringId: offeringId ?? null,
-    timeZone: timeZone ?? null,
-    isCreator,
-  }
-}
-
-function parseOtherPro(x: unknown): AvailabilityOtherPro | null {
-  if (!isRecord(x)) return null
-
-  const base = parseProCardBase(x)
-  if (!base?.id) return null
-
-  const offeringId = pickString(x.offeringId)
-  const locationId = pickString(x.locationId)
-  const timeZone = pickString(x.timeZone)
-  if (!offeringId || !locationId || !timeZone) return null
-
-  const distanceMiles = x.distanceMiles == null ? null : pickNumber(x.distanceMiles)
-
-  return {
-    ...base,
-    offeringId,
-    locationId,
-    timeZone,
-    distanceMiles: distanceMiles ?? null,
-  }
-}
-
-function parseSummaryResponse(raw: unknown): AvailabilitySummaryResponse | null {
-  if (!isRecord(raw)) return null
-
-  if (raw.ok === false) {
-    const error = pickApiError(raw)
-    if (!error) return null
-    const timeZone = raw.timeZone == null ? undefined : pickString(raw.timeZone) ?? undefined
-    const locationId = raw.locationId == null ? undefined : pickString(raw.locationId) ?? undefined
-    return { ok: false, error, timeZone, locationId }
-  }
-
-  if (raw.ok !== true) return null
-  if (raw.mode !== 'SUMMARY') return null
-
-  const mediaId = raw.mediaId === null ? null : pickString(raw.mediaId)
-  if (raw.mediaId !== null && mediaId == null) return null
-
-  const serviceId = pickString(raw.serviceId)
-  const professionalId = pickString(raw.professionalId)
-  const serviceName = pickString(raw.serviceName)
-  const serviceCategoryName = raw.serviceCategoryName === null ? null : pickString(raw.serviceCategoryName)
-
-  if (!serviceId || !professionalId || !serviceName) return null
-  if (raw.serviceCategoryName !== null && serviceCategoryName == null) return null
-
-  const locationType = pickLocationType(raw.locationType)
-  const locationId = pickString(raw.locationId)
-  const timeZone = pickString(raw.timeZone)
-  if (!locationType || !locationId || !timeZone) return null
-
-  const stepMinutes = pickNumber(raw.stepMinutes)
-  const leadTimeMinutes = pickNumber(raw.leadTimeMinutes)
-  const adjacencyBufferMinutes = pickNumber(raw.adjacencyBufferMinutes) ?? pickNumber(raw.locationBufferMinutes)
-  const maxDaysAhead = pickNumber(raw.maxDaysAhead)
-  const durationMinutes = pickNumber(raw.durationMinutes)
-
-  if (
-    stepMinutes == null ||
-    leadTimeMinutes == null ||
-    adjacencyBufferMinutes == null ||
-    maxDaysAhead == null ||
-    durationMinutes == null
-  ) {
-    return null
-  }
-
-  const primaryBase = parseProCardBase(raw.primaryPro)
-  const primaryOfferingId = isRecord(raw.primaryPro) ? pickString(raw.primaryPro.offeringId) : null
-  if (!primaryBase || !primaryOfferingId) return null
-
-  const availableDaysRaw = raw.availableDays
-  if (!Array.isArray(availableDaysRaw)) return null
-  const availableDays: Array<{ date: string; slotCount: number }> = []
-  for (const row of availableDaysRaw) {
-    if (!isRecord(row)) return null
-    const date = pickString(row.date)
-    const slotCount = pickNumber(row.slotCount)
-    if (!date || slotCount == null) return null
-    availableDays.push({ date, slotCount })
-  }
-
-  const otherProsRaw = raw.otherPros
-  if (!Array.isArray(otherProsRaw)) return null
-  const otherPros: AvailabilityOtherPro[] = []
-  for (const row of otherProsRaw) {
-    const p = parseOtherPro(row)
-    if (!p) return null
-    otherPros.push(p)
-  }
-
-  const waitlistSupported = pickBool(raw.waitlistSupported)
-  if (waitlistSupported == null) return null
-
-  const offering = parseOffering(raw.offering)
-  if (!offering) return null
-
-  return {
-    ok: true,
-    mode: 'SUMMARY',
-    mediaId: mediaId ?? null,
-    serviceId,
-    professionalId,
-    serviceName,
-    serviceCategoryName: serviceCategoryName ?? null,
-    locationType,
-    locationId,
-    timeZone,
-    stepMinutes,
-    leadTimeMinutes,
-    adjacencyBufferMinutes,
-    maxDaysAhead,
-    durationMinutes,
-    primaryPro: {
-      ...primaryBase,
-      offeringId: primaryOfferingId,
-      isCreator: true as const,
-      timeZone,
-    },
-    availableDays,
-    otherPros,
-    waitlistSupported,
-    offering,
-  }
+  const e = (raw as Record<string, unknown>).error
+  return pickString(e)
 }
 
 function buildQueryKey(args: {
@@ -268,7 +59,8 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
         ? context.viewerRadiusMiles
         : null
 
-    const placeId = typeof context.viewerPlaceId === 'string' && context.viewerPlaceId.trim() ? context.viewerPlaceId.trim() : null
+    const placeId =
+      typeof context.viewerPlaceId === 'string' && context.viewerPlaceId.trim() ? context.viewerPlaceId.trim() : null
 
     return { lat, lng, radiusMiles, placeId }
   }, [context.viewerLat, context.viewerLng, context.viewerRadiusMiles, context.viewerPlaceId])
@@ -304,7 +96,6 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
 
       setLoading(true)
       setError(null)
-      // ✅ do NOT clear existing data here (premium refresh UX)
 
       const qs = new URLSearchParams()
       qs.set('professionalId', proId)
@@ -338,10 +129,11 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
           throw new Error(pickApiError(raw) ?? `Request failed (${res.status}).`)
         }
 
-        const parsed = parseSummaryResponse(raw)
-        if (!parsed || parsed.ok !== true || parsed.mode !== 'SUMMARY') {
-          throw new Error('Availability endpoint returned unexpected response.')
-        }
+        const parsed = parseAvailabilitySummaryResponse(raw)
+        if (!parsed) throw new Error('Availability endpoint returned unexpected response.')
+
+        if (!parsed.ok) throw new Error(parsed.error)
+        if (parsed.mode !== 'SUMMARY') throw new Error('Availability endpoint returned unexpected response.')
 
         cacheRef.current.set(key, { at: Date.now(), data: parsed })
         setData(parsed)

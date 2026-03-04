@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
-import { safeJson } from './_utils/http'
+import { safeJson } from '@/lib/http'
 
 type DayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
 const DAY_KEYS: DayKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']

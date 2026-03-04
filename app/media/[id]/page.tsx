@@ -6,22 +6,16 @@ import { getCurrentUser } from '@/lib/currentUser'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
+import { asTrimmedString } from '@/lib/guards'
+import { cn } from '@/lib/utils'
 
 type PageProps = {
-  params: Promise<{ id: string }>
-}
-
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
+  params: { id: string } | Promise<{ id: string }>
 }
 
 export default async function PublicMediaDetailPage({ params }: PageProps) {
-  const { id: rawId } = await params
-  const id = pickString(rawId)
+  const { id: rawId } = await Promise.resolve(params)
+  const id = asTrimmedString(rawId)
   if (!id) notFound()
 
   const media = await prisma.mediaAsset.findUnique({
@@ -43,7 +37,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
   // Only PUBLIC media is viewable on this route
   if (!media || media.visibility !== 'PUBLIC') notFound()
 
-  // ✅ FIX: url can be null (schema allows it), but this page requires a renderable URL
+  // url can be null (schema allows it), but this page requires a renderable URL
   if (!media.url) notFound()
 
   const viewer = await getCurrentUser().catch(() => null)
@@ -78,7 +72,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
       topLeft={
         <Link
           href={backHref}
-          className={cx(
+          className={cn(
             'inline-flex items-center gap-2 rounded-full border border-white/10',
             'bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary',
             'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
@@ -107,7 +101,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
         <div className="pointer-events-none">
           <div className="pointer-events-auto w-full max-w-[520px]">
             <div
-              className={cx(
+              className={cn(
                 'rounded-[18px] border border-white/10 bg-bgPrimary/25 backdrop-blur-xl',
                 'px-4 py-3',
                 'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
@@ -126,7 +120,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
                   {tags.slice(0, 6).map((name, idx) => (
                     <span
                       key={`${name}_${idx}`}
-                      className={cx(
+                      className={cn(
                         'rounded-full border border-white/10 bg-bgPrimary/20',
                         'px-3 py-1 text-[12px] font-extrabold text-textPrimary',
                         'backdrop-blur-xl',

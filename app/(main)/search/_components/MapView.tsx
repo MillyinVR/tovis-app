@@ -10,7 +10,7 @@ import { Circle, MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } 
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
-
+import { isRecord } from '@/lib/guards'
 type Coords = { lat: number; lng: number }
 
 export type Pin = {
@@ -36,10 +36,6 @@ type Props = {
   fitBounds?: Bounds | null
 
   enableClustering?: boolean
-}
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
 }
 
 function assetUrl(mod: unknown): string | undefined {

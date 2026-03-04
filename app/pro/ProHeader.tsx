@@ -49,7 +49,7 @@ export default function ProHeader() {
   const title = titleFromPath(pathname)
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-bgPrimary/80 backdrop-blur">
+    <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-bgSecondary/98 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
       <div className="mx-auto flex h-12 max-w-5xl items-center justify-between px-3 font-sans">
         {/* Back */}
         <button

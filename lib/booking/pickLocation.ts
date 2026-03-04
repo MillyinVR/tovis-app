@@ -1,23 +1,13 @@
 // lib/booking/pickLocation.ts
 import { prisma } from '@/lib/prisma'
-import type { ServiceLocationType, ProfessionalLocationType, Prisma } from '@prisma/client'
-import { TtlCache, stableKey } from '@/lib/cache/ttlCache'
+import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
-
-export type BookableLocation = PickedLocation
+import { isRecord } from '@/lib/guards'
 
 type PickBookableLocationArgs = {
   professionalId: string
   requestedLocationId?: string | null
-  locationType: ServiceLocationType // 'SALON' | 'MOBILE'
-}
-
-function cleanId(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
-}
-
-function allowedProfessionalTypes(locationType: ServiceLocationType): ProfessionalLocationType[] {
-  return locationType === 'MOBILE' ? ['MOBILE_BASE'] : ['SALON', 'SUITE']
+  locationType: ServiceLocationType // SALON | MOBILE
 }
 
 const select = {
@@ -42,33 +32,54 @@ const select = {
   createdAt: true,
 } satisfies Prisma.ProfessionalLocationSelect
 
-type PickedLocation = Prisma.ProfessionalLocationGetPayload<{ select: typeof select }>
+export type BookableLocation = Prisma.ProfessionalLocationGetPayload<{ select: typeof select }>
 
-// module-scope cache
-const locationCache = new TtlCache<PickedLocation>(800)
-const TTL_MS = 10 * 60_000 // 10 minutes
+function cleanId(v: unknown) {
+  return typeof v === 'string' ? v.trim() : ''
+}
 
-function isUsableLocation(loc: PickedLocation | null): loc is PickedLocation {
+function allowedProfessionalTypes(locationType: ServiceLocationType): ProfessionalLocationType[] {
+  return locationType === ServiceLocationType.MOBILE
+    ? [ProfessionalLocationType.MOBILE_BASE]
+    : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
+}
+
+function isUsableLocation(loc: BookableLocation | null): loc is BookableLocation {
   if (!loc?.id) return false
+  if (!loc.isBookable) return false
+
   const tz = typeof loc.timeZone === 'string' ? loc.timeZone.trim() : ''
   if (!tz || !isValidIanaTimeZone(tz)) return false
-  // workingHours is Json in schema; still sanity check shape
-  if (!loc.workingHours || typeof loc.workingHours !== 'object') return false
+
+  // workingHours is Json in schema; require object-ish (not array/null)
+  if (!isRecord(loc.workingHours)) return false
+
   return true
 }
 
-export async function pickBookableLocation(args: PickBookableLocationArgs): Promise<PickedLocation | null> {
+/**
+ * Pick a bookable location for availability/hold/finalize logic.
+ *
+ * Rules:
+ * 1) If requestedLocationId is provided, honor it ONLY if it matches:
+ *    - same professional
+ *    - isBookable
+ *    - correct allowed location type(s) for the booking mode
+ *    - valid IANA timezone
+ *    - workingHours object present
+ * 2) Otherwise pick best by: isPrimary desc, createdAt asc
+ *
+ * NOTE: No caching here on purpose—so pro updates reflect immediately.
+ */
+export async function pickBookableLocation(args: PickBookableLocationArgs): Promise<BookableLocation | null> {
   const professionalId = cleanId(args.professionalId)
   const requestedLocationId = cleanId(args.requestedLocationId)
-  const allowedTypes = allowedProfessionalTypes(args.locationType)
 
   if (!professionalId) return null
 
-  const cacheKey = stableKey(['pickBookableLocation', professionalId, args.locationType, requestedLocationId])
-  const cached = locationCache.get(cacheKey)
-  if (cached) return cached
+  const allowedTypes = allowedProfessionalTypes(args.locationType)
 
-  // 1) honor requested id only if it matches booking mode + is bookable
+  // 1) requested location (only if valid + matches mode)
   if (requestedLocationId) {
     const byId = await prisma.professionalLocation.findFirst({
       where: {
@@ -80,13 +91,10 @@ export async function pickBookableLocation(args: PickBookableLocationArgs): Prom
       select,
     })
 
-    if (isUsableLocation(byId)) {
-      locationCache.set(cacheKey, byId, TTL_MS)
-      return byId
-    }
+    if (isUsableLocation(byId)) return byId
   }
 
-  // 2) otherwise pick best match for this booking mode
+  // 2) best fallback for this booking mode
   const best = await prisma.professionalLocation.findFirst({
     where: {
       professionalId,
@@ -97,9 +105,5 @@ export async function pickBookableLocation(args: PickBookableLocationArgs): Prom
     select,
   })
 
-
-  if (!isUsableLocation(best)) return null
-
-  locationCache.set(cacheKey, best, TTL_MS)
-  return best
+  return isUsableLocation(best) ? best : null
 }

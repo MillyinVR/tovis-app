@@ -1,33 +1,33 @@
 // app/api/pro/reminders/run/[id]/route.ts
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { isRecord, type UnknownRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { params: Promise<{ id: string }> }
 
-type JsonObject = Record<string, unknown>
-
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
+async function readParams(ctx: Params) {
+  return await ctx.params
 }
 
-async function readJsonObject(req: Request): Promise<JsonObject> {
+async function readBody(req: NextRequest): Promise<UnknownRecord> {
   const raw: unknown = await req.json().catch(() => ({}))
   return isRecord(raw) ? raw : {}
 }
 
-export async function PATCH(req: Request, props: Params) {
+export async function PATCH(req: NextRequest, ctx: Params) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await props.params
-    const reminderId = (id || '').trim()
+    const { id } = await readParams(ctx)
+    const reminderId = String(id || '').trim()
     if (!reminderId) return jsonFail(400, 'Missing reminder id.')
 
-    const body = await readJsonObject(req)
+    const body = await readBody(req)
     const completed = body.completed
 
     if (typeof completed !== 'boolean') {

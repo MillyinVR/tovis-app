@@ -2,7 +2,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-
+import { isRecord } from '@/lib/guards'
 function formatBadgeCount(n: number): string | null {
   if (!Number.isFinite(n) || n <= 0) return null
   return n > 99 ? '99+' : String(n)
@@ -12,9 +12,6 @@ type UnreadCountOk = { ok: true; badge?: string; count?: number }
 type UnreadCountFail = { ok: false; error: string; count?: number }
 type UnreadCountResponse = UnreadCountOk | UnreadCountFail
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
 
 function isUnreadCountResponse(x: unknown): x is UnreadCountResponse {
   if (!isRecord(x)) return false
@@ -25,7 +22,7 @@ function isUnreadCountResponse(x: unknown): x is UnreadCountResponse {
   }
   if (x.ok === false) {
     if (typeof x.error !== 'string' || x.error.trim().length === 0) return false
-    if ('count' in x && x.count != null && typeof x.count !== 'number') return false
+    if ('count' in x && x.count != null && (typeof x.count !== 'number' || !Number.isFinite(x.count))) return false
     return true
   }
   return false

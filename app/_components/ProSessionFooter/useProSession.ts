@@ -10,7 +10,7 @@ import type {
   UiSessionCenterAction,
   UiSessionMode,
 } from '@/lib/proSession/types'
-
+import { isRecord } from '@/lib/guards' 
 type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
 
 export const FORCE_EVENT = 'tovis:pro-session:force'
@@ -22,10 +22,6 @@ const FETCH_TIMEOUT_MS = 8_000
 const VISIBILITY_DEBOUNCE_MS = 200
 
 const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
 
 function getString(x: unknown): string | null {
   return typeof x === 'string' ? x : null

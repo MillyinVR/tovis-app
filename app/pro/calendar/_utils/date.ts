@@ -4,7 +4,7 @@ import {
   ymdInTimeZone,
   minutesSinceMidnightInTimeZone,
   timeZoneOffsetMinutes,
-  zonedTimeToUtc as zonedToUtc,
+  zonedTimeToUtc,
   startOfDayUtcInTimeZone,
   utcFromDayAndMinutesInTimeZone,
   getZonedParts,
@@ -17,8 +17,8 @@ export const WEEKDAY_KEYS_MON = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'
 export const WEEKDAY_KEYS_DISPLAY = (WEEK_START === 'MON' ? WEEKDAY_KEYS_MON : DAY_KEYS) as readonly string[]
 
 /**
- * ⚠️ Browser-local helpers (legacy)
- * Keep for non-calendar usage only. Calendar UI should use TZ helpers below.
+ * ⚠️ Browser-local helpers (legacy-ish)
+ * Calendar TZ math should prefer the TZ helpers below.
  */
 export function startOfDay(d: Date) {
   const nd = new Date(d)
@@ -32,10 +32,7 @@ export function addDays(d: Date, days: number) {
   return nd
 }
 
-/**
- * Legacy startOfWeek(): Monday start.
- * (diff = (day + 6) % 7)
- */
+/** Monday-start week (diff = (day + 6) % 7) */
 export function startOfWeek(d: Date) {
   const nd = startOfDay(d)
   const day = nd.getDay()
@@ -72,7 +69,7 @@ export function formatWeekRange(d: Date) {
 
 /* ---------------------------------------------
    ✅ TZ-safe helpers for calendar UI
-   --------------------------------------------- */
+--------------------------------------------- */
 
 export function parseYmd(ymd: string): { year: number; month: number; day: number } | null {
   const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
@@ -116,12 +113,12 @@ export function formatMonthRangeInTimeZone(d: Date, timeZone: string) {
 }
 
 /**
- * DST-safe "focus date" anchor:
+ * DST-safe anchor:
  * represent the chosen calendar day as local NOON in the calendar TZ, stored as a UTC Date.
  */
 export function anchorNoonInTimeZone(dayUtc: Date, timeZone: string) {
   const p = getZonedParts(dayUtc, timeZone)
-  return zonedToUtc({
+  return zonedTimeToUtc({
     year: p.year,
     month: p.month,
     day: p.day,
@@ -134,7 +131,7 @@ export function anchorNoonInTimeZone(dayUtc: Date, timeZone: string) {
 
 export function addDaysAnchorNoonInTimeZone(anchorUtc: Date, deltaDays: number, timeZone: string) {
   const p = getZonedParts(anchorUtc, timeZone)
-  return zonedToUtc({
+  return zonedTimeToUtc({
     year: p.year,
     month: p.month,
     day: p.day + deltaDays,
@@ -157,7 +154,7 @@ export function startOfWeekAnchorNoonInTimeZone(anchorUtc: Date, timeZone: strin
   const diff = WEEK_START === 'MON' ? (dow + 6) % 7 : dow
 
   const p = getZonedParts(anchorUtc, timeZone)
-  return zonedToUtc({
+  return zonedTimeToUtc({
     year: p.year,
     month: p.month,
     day: p.day - diff,
@@ -170,7 +167,7 @@ export function startOfWeekAnchorNoonInTimeZone(anchorUtc: Date, timeZone: strin
 
 export function startOfMonthAnchorNoonInTimeZone(anchorUtc: Date, timeZone: string) {
   const p = getZonedParts(anchorUtc, timeZone)
-  return zonedToUtc({
+  return zonedTimeToUtc({
     year: p.year,
     month: p.month,
     day: 1,
@@ -183,7 +180,7 @@ export function startOfMonthAnchorNoonInTimeZone(anchorUtc: Date, timeZone: stri
 
 export function addMonthsAnchorNoonInTimeZone(anchorUtc: Date, deltaMonths: number, timeZone: string) {
   const p = getZonedParts(anchorUtc, timeZone)
-  return zonedToUtc({
+  return zonedTimeToUtc({
     year: p.year,
     month: p.month + deltaMonths,
     day: p.day,
@@ -246,15 +243,14 @@ export function clamp(n: number, min: number, max: number) {
 }
 
 /* ---------------------------------------------
-   Re-export TZ helpers from lib/timeZone
-   --------------------------------------------- */
+   ✅ Re-export TZ helpers (some calendar components import these)
+--------------------------------------------- */
 
 export {
   isValidIanaTimeZone,
   ymdInTimeZone,
   minutesSinceMidnightInTimeZone,
   timeZoneOffsetMinutes,
-  zonedToUtc,
   startOfDayUtcInTimeZone,
   utcFromDayAndMinutesInTimeZone,
   getZonedParts,

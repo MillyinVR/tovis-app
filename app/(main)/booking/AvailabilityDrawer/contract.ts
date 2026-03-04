@@ -160,13 +160,15 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
 
   const stepMinutes = pickNumber(x.stepMinutes)
   const leadTimeMinutes = pickNumber(x.leadTimeMinutes)
-  const adjacencyBufferMinutes = pickNumber(x.adjacencyBufferMinutes)
+  const locationBufferMinutes = pickNumber(x.locationBufferMinutes)
+  const adjacencyBufferMinutes = pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
   const maxDaysAhead = pickNumber(x.maxDaysAhead)
   const durationMinutes = pickNumber(x.durationMinutes)
 
   if (
     stepMinutes == null ||
     leadTimeMinutes == null ||
+    locationBufferMinutes == null ||
     adjacencyBufferMinutes == null ||
     maxDaysAhead == null ||
     durationMinutes == null
@@ -176,8 +178,6 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
 
   const primaryProBase = pickProCardBase(x.primaryPro)
   if (!primaryProBase) return null
-
-  // primaryPro must have offeringId
   if (!primaryProBase.offeringId) return null
 
   const availableDaysRaw = x.availableDays
@@ -221,6 +221,7 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
     timeZone,
     stepMinutes,
     leadTimeMinutes,
+    locationBufferMinutes,
     adjacencyBufferMinutes,
     maxDaysAhead,
     durationMinutes,
@@ -265,7 +266,8 @@ export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayRespons
 
   const stepMinutes = pickNumber(x.stepMinutes)
   const leadTimeMinutes = pickNumber(x.leadTimeMinutes)
-  const adjacencyBufferMinutes = pickNumber(x.adjacencyBufferMinutes)
+  const locationBufferMinutes = pickNumber(x.locationBufferMinutes)
+  const adjacencyBufferMinutes = pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
   const maxDaysAhead = pickNumber(x.maxDaysAhead)
 
   const durationMinutes = pickNumber(x.durationMinutes)
@@ -281,6 +283,7 @@ export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayRespons
     !timeZone ||
     stepMinutes == null ||
     leadTimeMinutes == null ||
+    locationBufferMinutes == null ||
     adjacencyBufferMinutes == null ||
     maxDaysAhead == null ||
     durationMinutes == null ||
@@ -304,6 +307,7 @@ export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayRespons
     timeZone,
     stepMinutes,
     leadTimeMinutes,
+    locationBufferMinutes,
     adjacencyBufferMinutes,
     maxDaysAhead,
     durationMinutes,

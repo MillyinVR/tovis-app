@@ -9,7 +9,6 @@ type Tab = { href: string; label: string; match?: 'exact' | 'prefix' }
 
 const tabs: Tab[] = [
   { href: '/pro/dashboard', label: 'Overview', match: 'exact' },
-  // ✅ removed: { href: '/pro/services', label: 'Services', match: 'prefix' },
   { href: '/pro/reviews', label: 'Reviews', match: 'prefix' },
   { href: '/pro/aftercare', label: 'Aftercare', match: 'prefix' },
   { href: '/pro/bookings', label: 'Bookings', match: 'prefix' },
@@ -49,8 +48,12 @@ export default function ProTopTabs() {
   }, [])
 
   return (
-    <div className="sticky z-40 border-b border-white/10 bg-bgPrimary/80 backdrop-blur" style={{ top: 48 }}>
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
+      <div
+      className="fixed left-0 right-0 z-40 border-b border-white/10 bg-bgSecondary/98 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+      style={{ top: 'calc(48px + var(--pro-banner-h, 0px))' }}
+    >
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-bgSecondary via-bgSecondary/95 to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-bgSecondary via-bgSecondary/95 to-transparent" />
 
       <div className="relative mx-auto max-w-5xl">
         <div ref={scrollerRef} className="flex gap-2 overflow-x-auto px-3 py-2 looksNoScrollbar">

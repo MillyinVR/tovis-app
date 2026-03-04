@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 
 import ProHeader from './ProHeader'
 import ProTopTabs from './ProTopTabs'
+import ProComplianceBanner from './ProComplianceBanner'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,11 +20,13 @@ export default async function ProRootLayout({ children }: { children: ReactNode 
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
       <ProHeader />
+      <ProComplianceBanner />
       <ProTopTabs />
 
       <main
         style={{
-          paddingTop: UI.headerH + UI.tabsH,
+          // banner is fixed, so we “reserve” space via a CSS var set by ProComplianceBanner
+          paddingTop: `calc(${UI.headerH + UI.tabsH}px + var(--pro-banner-h, 0px))`,
           minHeight: '100dvh',
         }}
       >

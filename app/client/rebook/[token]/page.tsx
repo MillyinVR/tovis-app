@@ -100,17 +100,15 @@ function cx(...parts: Array<string | false | null | undefined>) {
 }
 
 export default async function ClientRebookFromAftercarePage(props: {
-  params: { token: string } | Promise<{ token: string }>
-  searchParams?: SearchParamsShape | Promise<SearchParamsShape>
+  params: { token: string }
+  searchParams?: SearchParamsShape
 }) {
-  const { token } = await Promise.resolve(props.params as any)
-  const publicToken = pickString(token)
+  const publicToken = pickString(props.params.token)
   if (!publicToken) notFound()
 
-  const sp = props.searchParams ? await Promise.resolve(props.searchParams as any) : undefined
-  const recommendedAtFromUrl = pickString(sp?.recommendedAt)
-  const windowStartFromUrl = pickString(sp?.windowStart)
-  const windowEndFromUrl = pickString(sp?.windowEnd)
+  const recommendedAtFromUrl = pickString(props.searchParams?.recommendedAt)
+  const windowStartFromUrl = pickString(props.searchParams?.windowStart)
+  const windowEndFromUrl = pickString(props.searchParams?.windowEnd)
 
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {

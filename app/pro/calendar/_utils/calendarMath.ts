@@ -1,7 +1,10 @@
 // app/pro/calendar/_utils/calendarMath.ts
 import type { CalendarEvent, WorkingHoursJson, BlockRow } from '../_types'
-import { DAY_KEYS, addDays, clamp, startOfDay } from './date'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { addDays, clamp, startOfDay, DAY_KEYS } from './date'
+import {
+  getWorkingWindowForDay as getWorkingWindowForDayLib,
+  isOutsideWorkingHours as isOutsideWorkingHoursLib,
+} from '@/lib/scheduling/workingHours'
 
 export const PX_PER_MINUTE = 1.5
 export const SNAP_MINUTES = 15
@@ -25,44 +28,12 @@ export function computeDurationMinutesFromIso(startsAtIso: string, endsAtIso: st
   return Number.isFinite(mins) && mins > 0 ? mins : 60
 }
 
-function hhmmToMinutes(v: unknown): number | null {
-  if (typeof v !== 'string') return null
-  const s = v.trim()
-  if (!s) return null
-  const [hhStr, mmStr] = s.split(':')
-  const hh = Number(hhStr)
-  const mm = Number(mmStr)
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  const h = clamp(Math.floor(hh), 0, 23)
-  const m = clamp(Math.floor(mm), 0, 59)
-  return h * 60 + m
-}
-
+// ✅ single source of truth: lib/scheduling/workingHours
 export function getWorkingWindowForDay(day: Date, workingHours: WorkingHoursJson, timeZone: string) {
-  if (!workingHours) return null
-
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-
-  const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
-    .format(day)
-    .slice(0, 3)
-    .toLowerCase()
-
-  const key = (DAY_KEYS as readonly string[]).includes(weekdayShort)
-    ? (weekdayShort as (typeof DAY_KEYS)[number])
-    : null
-
-  if (!key) return null
-
-  const cfg = workingHours[key]
-  if (!cfg || !cfg.enabled) return null
-
-  const startMinutes = hhmmToMinutes(cfg.start)
-  const endMinutes = hhmmToMinutes(cfg.end)
-  if (startMinutes == null || endMinutes == null) return null
-  if (endMinutes <= startMinutes) return null
-
-  return { startMinutes, endMinutes, key }
+  // Keep return shape compatible with existing callers.
+  const w = getWorkingWindowForDayLib(day, workingHours, timeZone)
+  if (!w) return null
+  return { startMinutes: w.startMinutes, endMinutes: w.endMinutes, key: w.key as (typeof DAY_KEYS)[number] }
 }
 
 export function isOutsideWorkingHours(args: {
@@ -72,20 +43,16 @@ export function isOutsideWorkingHours(args: {
   workingHours: WorkingHoursJson
   timeZone: string
 }) {
-  const { day, startMinutes, endMinutes, workingHours, timeZone } = args
-  if (!workingHours) return true
-
-  const window = getWorkingWindowForDay(day, workingHours, timeZone)
-  if (!window) return true
-
-  return startMinutes < window.startMinutes || endMinutes > window.endMinutes
+  return isOutsideWorkingHoursLib({
+    day: args.day,
+    startMinutes: args.startMinutes,
+    endMinutes: args.endMinutes,
+    workingHours: args.workingHours,
+    timeZone: args.timeZone,
+  })
 }
 
-/**
- * ✅ Correct, type-safe blocked detection:
- * - Prefer discriminant `kind`
- * - Fallback to legacy signals in case any old data still leaks in
- */
+/** Prefer discriminant `kind`, fallback for legacy */
 export function isBlockedEvent(ev: CalendarEvent) {
   if (ev.kind === 'BLOCK') return true
   const s = String(ev.status || '').toUpperCase()
@@ -94,17 +61,11 @@ export function isBlockedEvent(ev: CalendarEvent) {
   return false
 }
 
-/**
- * ✅ Correct, type-safe block id extraction:
- * - Only BLOCK events have blockId
- * - Fallback: parse from id if it uses "block:xyz"
- */
+/** Only BLOCK events have blockId; fallback parses "block:xyz" */
 export function extractBlockId(ev: CalendarEvent) {
   if (ev.kind === 'BLOCK') return ev.blockId
-
   const id = String(ev.id || '')
   if (id.startsWith('block:')) return id.slice('block:'.length)
-
   return null
 }
 
@@ -112,7 +73,6 @@ export function blockToEvent(b: BlockRow): CalendarEvent {
   const s = new Date(b.startsAt)
   const e = new Date(b.endsAt)
   const note = b.note ?? null
-
   const durationMinutes = Math.max(15, Math.round((e.getTime() - s.getTime()) / 60_000))
 
   return {

@@ -5,40 +5,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import PlacesAutocomplete from './PlacesAutocomplete'
 import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
 
-type LocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
-
-export type ProLocation = {
-  id: string
-  type: LocationType
-  name: string | null
-  isPrimary: boolean
-  isBookable: boolean
-
-  formattedAddress: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  countryCode: string | null
-  placeId: string | null
-
-  lat: number | null
-  lng: number | null
-  timeZone: string | null
-  createdAt: string
-}
-
-type PickedPlace = {
-  placeId: string | null
-  formattedAddress: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  countryCode: string | null
-  lat: number | null
-  lng: number | null
-  name?: string | null
-  sessionToken?: string | null
-}
+import type { LocationType, ProLocation, PickedPlace } from '@/lib/contracts/proLocations'
+import { parseLocationType, parsePickedPlace, parseProLocationsPayload } from '@/lib/contracts/proLocations'
+import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import { clampInt } from '@/lib/guards'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 
@@ -46,117 +16,12 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function readString(v: unknown): string {
-  return typeof v === 'string' ? v : ''
-}
-
-function readNullableString(v: unknown): string | null {
-  return typeof v === 'string' ? v : null
-}
-
-function readBool(v: unknown): boolean {
-  return typeof v === 'boolean' ? v : Boolean(v)
-}
-
-function readNullableNumber(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-}
-
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-function readErrorMessage(v: unknown): string | null {
-  if (!isRecord(v)) return null
-  const e = v.error
-  return typeof e === 'string' && e.trim() ? e : null
-}
-
-function parseLocationType(v: string): LocationType {
-  const s = v.trim().toUpperCase()
-  if (s === 'SALON') return 'SALON'
-  if (s === 'SUITE') return 'SUITE'
-  if (s === 'MOBILE_BASE') return 'MOBILE_BASE'
-  return 'SALON'
-}
-
-function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.trunc(n)))
-}
-
 function isValidUsZip(v: string) {
   return /^\d{5}(-\d{4})?$/.test(v.trim())
 }
 
-function parsePickedPlace(v: unknown): PickedPlace | null {
-  if (!isRecord(v)) return null
-  return {
-    placeId: readNullableString(v.placeId),
-    formattedAddress: readNullableString(v.formattedAddress),
-    city: readNullableString(v.city),
-    state: readNullableString(v.state),
-    postalCode: readNullableString(v.postalCode),
-    countryCode: readNullableString(v.countryCode),
-    lat: readNullableNumber(v.lat),
-    lng: readNullableNumber(v.lng),
-    name: readNullableString(v.name),
-    sessionToken: readNullableString(v.sessionToken),
-  }
-}
-
-function parseLocationsPayload(v: unknown): ProLocation[] {
-  if (!isRecord(v)) return []
-  const raw = v.locations
-  if (!Array.isArray(raw)) return []
-
-  const out: ProLocation[] = []
-  for (const item of raw) {
-    if (!isRecord(item)) continue
-    const id = readString(item.id)
-    const type = parseLocationType(readString(item.type))
-    if (!id) continue
-
-    out.push({
-      id,
-      type,
-      name: readNullableString(item.name),
-      isPrimary: readBool(item.isPrimary),
-      isBookable: readBool(item.isBookable),
-
-      formattedAddress: readNullableString(item.formattedAddress),
-      city: readNullableString(item.city),
-      state: readNullableString(item.state),
-      postalCode: readNullableString(item.postalCode),
-      countryCode: readNullableString(item.countryCode),
-      placeId: readNullableString(item.placeId),
-
-      lat: readNullableNumber(item.lat),
-      lng: readNullableNumber(item.lng),
-      timeZone: readNullableString(item.timeZone),
-      createdAt: readString(item.createdAt) || new Date().toISOString(),
-    })
-  }
-
-  return out
-}
-
 function formatLocationTitle(l: ProLocation) {
-  return (
-    l.name ||
-    (l.type === 'SALON'
-      ? 'Salon location'
-      : l.type === 'SUITE'
-        ? 'Suite location'
-        : 'Mobile base')
-  )
+  return l.name || (l.type === 'SALON' ? 'Salon location' : l.type === 'SUITE' ? 'Suite location' : 'Mobile base')
 }
 
 function formatLocationAddress(l: ProLocation) {
@@ -229,10 +94,7 @@ function ConfirmModal(props: {
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className={cx(
-              'rounded-full border px-4 py-2 text-[12px] font-black transition disabled:opacity-60',
-              confirmTone,
-            )}
+            className={cx('rounded-full border px-4 py-2 text-[12px] font-black transition disabled:opacity-60', confirmTone)}
           >
             {busy ? 'Working…' : confirmLabel}
           </button>
@@ -243,10 +105,7 @@ function ConfirmModal(props: {
 }
 
 function Toast(props: ToastState) {
-  const tone =
-    props.tone === 'success'
-      ? 'border-toneSuccess/25 bg-toneSuccess/10'
-      : 'border-toneDanger/25 bg-toneDanger/10'
+  const tone = props.tone === 'success' ? 'border-toneSuccess/25 bg-toneSuccess/10' : 'border-toneDanger/25 bg-toneDanger/10'
 
   return (
     <div
@@ -269,7 +128,6 @@ export default function LocationsClient({ initialLocations }: { initialLocations
 
   const [busy, setBusy] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
-
   const [error, setError] = useState<string | null>(null)
 
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -311,19 +169,18 @@ export default function LocationsClient({ initialLocations }: { initialLocations
   useEffect(() => {
     setError(null)
     setPickedPlace(null)
-    // Keep name + makePrimary (user intent)
   }, [type])
 
   async function refresh() {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/locations', { cache: 'no-store' })
+      const res = await fetch('/api/pro/locations', { cache: 'no-store', headers: { Accept: 'application/json' } })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(readErrorMessage(data) ?? `Failed to refresh (${res.status}).`)
-      setLocations(parseLocationsPayload(data))
+      setLocations(parseProLocationsPayload(data))
     } catch (e: unknown) {
-      const msg = e instanceof Error && e.message ? e.message : 'Failed to refresh.'
+      const msg = errorMessageFromUnknown(e, 'Failed to refresh.')
       setError(msg)
       showToast({ tone: 'error', title: 'Couldn’t refresh', body: msg })
     } finally {
@@ -343,7 +200,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
     try {
       const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ isPrimary: true }),
       })
       const data = await safeJson(res)
@@ -352,7 +209,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
       showToast({ tone: 'success', title: 'Primary updated' })
       await refresh()
     } catch (e: unknown) {
-      const msg = e instanceof Error && e.message ? e.message : 'Failed to set primary.'
+      const msg = errorMessageFromUnknown(e, 'Failed to set primary.')
       setError(msg)
       showToast({ tone: 'error', title: 'Couldn’t set primary', body: msg })
       await refresh()
@@ -368,7 +225,10 @@ export default function LocationsClient({ initialLocations }: { initialLocations
     setError(null)
 
     try {
-      const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(readErrorMessage(data) ?? `Failed to delete (${res.status}).`)
 
@@ -376,7 +236,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
       setConfirmDelete({ open: false, id: null })
       await refresh()
     } catch (e: unknown) {
-      const msg = e instanceof Error && e.message ? e.message : 'Failed to delete location.'
+      const msg = errorMessageFromUnknown(e, 'Failed to delete location.')
       setError(msg)
       showToast({ tone: 'error', title: 'Couldn’t delete', body: msg })
     } finally {
@@ -403,7 +263,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
 
       const res = await fetch('/api/pro/onboarding/location', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           mode,
           placeId,
@@ -415,17 +275,14 @@ export default function LocationsClient({ initialLocations }: { initialLocations
       const data = await safeJson(res)
       if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to create location.')
 
-      // If user did NOT want it primary and we had a previous primary, restore it.
-      // (This effectively de-primary's the newly created one.)
       if (!makePrimary && prevPrimary) {
         const res2 = await fetch(`/api/pro/locations/${encodeURIComponent(prevPrimary)}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ isPrimary: true }),
         })
         const data2 = await safeJson(res2)
         if (!res2.ok) {
-          // Not fatal; the location exists. Just warn.
           showToast({
             tone: 'error',
             title: 'Created, but primary restore failed',
@@ -436,14 +293,13 @@ export default function LocationsClient({ initialLocations }: { initialLocations
         showToast({ tone: 'success', title: 'Location added' })
       }
 
-      // reset form bits
       setName('')
       setPickedPlace(null)
-      setMakePrimary(false) // future additions default to not primary once at least one exists
+      setMakePrimary(false)
 
       await refresh()
     } catch (e: unknown) {
-      const msg = e instanceof Error && e.message ? e.message : 'Failed to create location.'
+      const msg = errorMessageFromUnknown(e, 'Failed to create location.')
       setError(msg)
       showToast({ tone: 'error', title: 'Couldn’t add location', body: msg })
     } finally {
@@ -470,7 +326,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
 
       const res = await fetch('/api/pro/onboarding/location', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           mode: 'MOBILE',
           postalCode: zip,
@@ -485,7 +341,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
       if (!makePrimary && prevPrimary) {
         const res2 = await fetch(`/api/pro/locations/${encodeURIComponent(prevPrimary)}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ isPrimary: true }),
         })
         const data2 = await safeJson(res2)
@@ -506,7 +362,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
       setMakePrimary(false)
       await refresh()
     } catch (e: unknown) {
-      const msg = e instanceof Error && e.message ? e.message : 'Failed to create mobile base.'
+      const msg = errorMessageFromUnknown(e, 'Failed to create mobile base.')
       setError(msg)
       showToast({ tone: 'error', title: 'Couldn’t add mobile base', body: msg })
     } finally {
@@ -516,7 +372,6 @@ export default function LocationsClient({ initialLocations }: { initialLocations
   }
 
   const radiusOptions = useMemo(() => [5, 10, 15, 25, 40, 60, 100, 150, 200], [])
-
   const primaryCount = useMemo(() => locations.filter((l) => l.isPrimary).length, [locations])
 
   return (
@@ -604,18 +459,18 @@ export default function LocationsClient({ initialLocations }: { initialLocations
           </label>
 
           <label className="flex items-center gap-2 text-[13px] font-semibold text-textPrimary/85">
-            <input type="checkbox" checked={makePrimary} onChange={(e) => setMakePrimary(e.target.checked)} disabled={busy} />
-            Make primary
-            <span className="text-[12px] font-semibold text-textSecondary">
-              (what clients see first)
-            </span>
+            <input
+              type="checkbox"
+              checked={makePrimary}
+              onChange={(e) => setMakePrimary(e.target.checked)}
+              disabled={busy}
+            />
+            Make primary <span className="text-[12px] font-semibold text-textSecondary">(what clients see first)</span>
           </label>
 
           {showPlacePicker ? (
             <div className="grid gap-3 rounded-2xl border border-white/10 bg-bgPrimary/20 p-3">
-              <div className="text-[13px] text-textSecondary">
-                Search and pick an address. Then confirm to add it.
-              </div>
+              <div className="text-[13px] text-textSecondary">Search and pick an address. Then confirm to add it.</div>
 
               <PlacesAutocomplete
                 disabled={!canInteract}
@@ -628,16 +483,17 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                   }
                   setError(null)
                   setPickedPlace(parsed)
-                  showToast({ tone: 'success', title: 'Address selected', body: parsed.formattedAddress ?? 'Ready to add.' }, 1600)
+                  showToast(
+                    { tone: 'success', title: 'Address selected', body: parsed.formattedAddress ?? 'Ready to add.' },
+                    1600,
+                  )
                 }}
               />
 
               {pickedPlace ? (
                 <div className="rounded-2xl border border-white/10 bg-bgSecondary/50 p-3">
                   <div className="text-[11px] font-black text-textSecondary">Selected</div>
-                  <div className="mt-1 text-[13px] font-black text-textPrimary">
-                    {pickedPlace.formattedAddress || '—'}
-                  </div>
+                  <div className="mt-1 text-[13px] font-black text-textPrimary">{pickedPlace.formattedAddress || '—'}</div>
                   <div className="mt-1 text-[12px] text-textSecondary">
                     {pickedPlace.city ? `${pickedPlace.city}${pickedPlace.state ? `, ${pickedPlace.state}` : ''}` : null}
                     {pickedPlace.postalCode ? ` • ${pickedPlace.postalCode}` : null}
@@ -673,9 +529,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
 
           {showMobileForm ? (
             <div className="grid gap-3 rounded-2xl border border-white/10 bg-bgPrimary/20 p-3">
-              <div className="text-[13px] text-textSecondary">
-                Set your home ZIP and travel radius. This powers mobile discovery.
-              </div>
+              <div className="text-[13px] text-textSecondary">Set your home ZIP and travel radius. This powers mobile discovery.</div>
 
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="grid gap-2">
@@ -766,6 +620,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                         ) : null}
 
                         <span className="text-[11px] font-bold text-textSecondary">{l.type}</span>
+
                         {!l.isBookable ? (
                           <span className="rounded-full border border-toneWarn/30 bg-bgPrimary/25 px-2 py-1 text-[11px] font-black text-toneWarn">
                             Not bookable

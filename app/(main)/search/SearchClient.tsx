@@ -4,7 +4,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LocateFixed, MapPin, Search, X } from 'lucide-react'
-
+import { isRecord } from '@/lib/guards' 
 import {
   VIEWER_RADIUS_DEFAULT_MILES,
   VIEWER_RADIUS_MAX_MILES,
@@ -55,9 +55,6 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
-}
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null

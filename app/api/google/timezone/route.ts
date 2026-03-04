@@ -1,13 +1,26 @@
 // app/api/google/timezone/route.ts
-import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
+import {
+  fetchWithTimeout,
+  getGoogleMapsKey,
+  jsonFail,
+  jsonOk,
+  pickNumber,
+  pickString,
+  safeJson,
+} from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
-function pickNumber(v: string | null) {
-  if (!v) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
+function isAbortError(e: unknown) {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'name' in e &&
+    typeof (e as { name: unknown }).name === 'string' &&
+    (e as { name: string }).name === 'AbortError'
+  )
 }
 
 export async function GET(req: Request) {
@@ -29,21 +42,32 @@ export async function GET(req: Request) {
       cache: 'no-store',
     })
 
-    const data = await safeJson<any>(res)
-
+    const data = await safeJson<unknown>(res)
     if (!res.ok) return jsonFail(502, 'Google request failed.', { details: data })
 
-    const status = String(data?.status ?? '')
+    if (!isRecord(data)) return jsonFail(502, 'Invalid Google response.', { details: data })
+
+    const status = pickString(data.status) ?? ''
     if (status !== 'OK') {
-      return jsonFail(400, data?.errorMessage || data?.error_message || `Google status: ${status}`, { details: data })
+      const msg =
+        pickString(data.errorMessage) ??
+        pickString((data as Record<string, unknown>)['error_message']) ??
+        `Google status: ${status}`
+
+      return jsonFail(400, msg, { details: data })
     }
 
-    const timeZoneId = typeof data?.timeZoneId === 'string' ? data.timeZoneId : null
-    if (!timeZoneId) return jsonFail(400, 'No timeZoneId returned.')
+    const timeZoneId = pickString(data.timeZoneId)
+    if (!timeZoneId) return jsonFail(400, 'No timeZoneId returned.', { details: data })
+
+    // Defensive: don’t accept garbage
+    if (!isValidIanaTimeZone(timeZoneId)) {
+      return jsonFail(400, 'Invalid timeZoneId returned.', { timeZoneId, details: data })
+    }
 
     return jsonOk({ ok: true, timeZoneId })
-  } catch (e: any) {
-    const msg = e?.name === 'AbortError' ? 'Google request timed out.' : e?.message || 'Internal error'
+  } catch (e: unknown) {
+    const msg = isAbortError(e) ? 'Google request timed out.' : e instanceof Error ? e.message : 'Internal error'
     console.error('GET /api/google/timezone error', e)
     return jsonFail(500, msg)
   }

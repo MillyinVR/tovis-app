@@ -1,5 +1,4 @@
 // lib/guards.ts
-
 export type UnknownRecord = Record<string, unknown>
 
 export function isRecord(v: unknown): v is UnknownRecord {
@@ -27,6 +26,21 @@ export function asInt(v: unknown): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : null
 }
 
-export function getRecordProp<T = unknown>(obj: UnknownRecord, key: string): T | undefined {
-  return obj[key] as T | undefined
+export function getRecordProp(obj: UnknownRecord, key: string): unknown {
+  return obj[key]
 }
+
+export function hasOwn(obj: UnknownRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+export function hasOwnKey<K extends string>(
+  obj: UnknownRecord,
+  key: K,
+): obj is UnknownRecord & Record<K, unknown> {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+// Back-compat: UI imports clampInt from guards sometimes.
+// Keep it, but source from lib/pick (single implementation).
+export { clampInt } from '@/lib/pick'

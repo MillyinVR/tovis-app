@@ -1,12 +1,18 @@
 // app/api/google/places/autocomplete/route.ts
-import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { getGoogleMapsKey, fetchWithTimeout, safeJson, clampGoogleRadiusMeters } from '@/app/api/_utils'
+import {
+  clampGoogleRadiusMeters,
+  fetchWithTimeout,
+  getGoogleMapsKey,
+  jsonFail,
+  jsonOk,
+  pickString,
+  safeJson,
+} from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
 type Kind = 'ADDRESS' | 'AREA' | 'ANY'
-
-type JsonObject = Record<string, unknown>
 
 type Prediction = {
   placeId: string
@@ -15,10 +21,6 @@ type Prediction = {
   secondaryText: string
   types: string[]
   distanceMeters: number | null
-}
-
-function isRecord(x: unknown): x is JsonObject {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
 
 function pickNumber(v: string | null) {
@@ -41,7 +43,7 @@ function normalizeKind(v: string | null): Kind {
   if (s === 'ADDRESS') return 'ADDRESS'
   if (s === 'AREA') return 'AREA'
   if (s === 'ANY') return 'ANY'
-  // ✅ Default to ANY so callers that forget kind don't break cities/landmarks
+  // default to ANY so callers that forget kind don’t break cities/landmarks
   return 'ANY'
 }
 
@@ -51,7 +53,6 @@ function isUsZip(input: string) {
 
 function normalizeCountryCode(raw: string | null): string {
   const cleaned = (raw || '').trim().toUpperCase().replace(/[^A-Z]/g, '')
-  // ISO-ish 2-letter. If invalid, default US.
   return cleaned.length === 2 ? cleaned : 'US'
 }
 
@@ -72,49 +73,48 @@ function includedPrimaryTypesFor(kind: Kind, zipLike: boolean): string[] | undef
 
 function readSuggestionsArray(data: unknown): unknown[] {
   if (!isRecord(data)) return []
-  const s = data['suggestions']
+  const s = data.suggestions
   return Array.isArray(s) ? s : []
 }
 
-function readPlacePrediction(suggestion: unknown): JsonObject | null {
+function readPlacePrediction(suggestion: unknown): Record<string, unknown> | null {
   if (!isRecord(suggestion)) return null
-  const pp = suggestion['placePrediction']
+  const pp = suggestion.placePrediction
   return isRecord(pp) ? pp : null
 }
 
-function readStructuredFormat(pp: JsonObject): JsonObject | null {
-  const sf = pp['structuredFormat']
+function readStructuredFormat(pp: Record<string, unknown>): Record<string, unknown> | null {
+  const sf = pp.structuredFormat
   return isRecord(sf) ? sf : null
 }
 
-function readTextObj(pp: JsonObject): JsonObject | null {
-  const t = pp['text']
+function readTextObj(pp: Record<string, unknown>): Record<string, unknown> | null {
+  const t = pp.text
   return isRecord(t) ? t : null
 }
 
-function readTypes(pp: JsonObject): string[] {
-  const raw = pp['types']
+function readTypes(pp: Record<string, unknown>): string[] {
+  const raw = pp.types
   if (!Array.isArray(raw)) return []
   return raw.filter((x): x is string => typeof x === 'string')
 }
 
-function readDistanceMeters(pp: JsonObject): number | null {
-  const v = pp['distanceMeters']
+function readDistanceMeters(pp: Record<string, unknown>): number | null {
+  const v = pp.distanceMeters
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-function parsePrediction(pp: JsonObject): Prediction | null {
-  const placeId = pickText(pp['placeId']).trim()
+function parsePrediction(pp: Record<string, unknown>): Prediction | null {
+  const placeId = pickText(pp.placeId).trim()
   if (!placeId) return null
 
   const sf = readStructuredFormat(pp)
-  const mainText = sf ? pickTextOrEmpty(sf['mainText'], 'text') : ''
-  const secondaryText = sf ? pickTextOrEmpty(sf['secondaryText'], 'text') : ''
+  const mainText = sf ? pickTextOrEmpty(sf.mainText, 'text') : ''
+  const secondaryText = sf ? pickTextOrEmpty(sf.secondaryText, 'text') : ''
 
   const textObj = readTextObj(pp)
   const description =
-    (textObj ? pickText(textObj['text']) : '').trim() ||
-    [mainText, secondaryText].filter(Boolean).join(', ').trim()
+    (textObj ? pickText(textObj.text) : '').trim() || [mainText, secondaryText].filter(Boolean).join(', ').trim()
 
   if (!description) return null
 
@@ -214,7 +214,7 @@ export async function GET(req: Request) {
 
     const predictions = suggestions
       .map(readPlacePrediction)
-      .filter((pp): pp is JsonObject => Boolean(pp))
+      .filter((pp): pp is Record<string, unknown> => Boolean(pp))
       .map(parsePrediction)
       .filter((p): p is Prediction => Boolean(p))
 

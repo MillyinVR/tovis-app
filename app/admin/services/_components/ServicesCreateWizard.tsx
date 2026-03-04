@@ -5,11 +5,15 @@ import React, { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
 
+import { isRecord, asNumber, asTrimmedString } from '@/lib/guards'
+import { cn } from '@/lib/utils'
+import { safeJson, readErrorMessage, errorMessageFromUnknown, isOkTrue } from '@/lib/http'
+import { withCacheBuster } from '@/lib/url'
+
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
+// keep call sites unchanged
+const cx = cn
 
 function vibeTick(intensity: 'soft' | 'med' = 'soft') {
   try {
@@ -20,54 +24,18 @@ function vibeTick(intensity: 'soft' | 'med' = 'soft') {
   }
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
-}
-
 function readString(v: unknown): string {
-  return typeof v === 'string' ? v : ''
+  return asTrimmedString(v) ?? ''
 }
 
 function readNumber(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-}
-
-function readErrorMessage(v: unknown): string | null {
-  if (!isRecord(v)) return null
-  const e = v.error
-  return typeof e === 'string' && e.trim() ? e : null
-}
-
-function isOkTrue(v: unknown): v is Record<string, unknown> {
-  return isRecord(v) && v.ok === true
-}
-
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    const data: unknown = await res.json()
-    return data
-  } catch {
-    return null
-  }
-}
-
-function withCacheBuster(url: string, cb?: number | null) {
-  const cacheBuster = typeof cb === 'number' ? cb : Date.now()
-  try {
-    const u = new URL(url)
-    u.searchParams.set('v', String(cacheBuster))
-    return u.toString()
-  } catch {
-    const joiner = url.includes('?') ? '&' : '?'
-    return `${url}${joiner}v=${cacheBuster}`
-  }
+  return asNumber(v)
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-extrabold text-textSecondary">{children}</div>
 }
 
-/** ✅ forwardRef so ref={...} works */
 const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(props, ref) {
   const { className, ...rest } = props
   return (
@@ -120,12 +88,6 @@ function isIntLike(s: string) {
 function isImageFile(file: File | null) {
   if (!file) return true
   return file.type.startsWith('image/')
-}
-
-function errorMessageFromUnknown(e: unknown): string {
-  if (e instanceof Error && e.message.trim()) return e.message
-  if (isRecord(e) && typeof e.message === 'string' && e.message.trim()) return e.message
-  return 'Something went wrong.'
 }
 
 type CreateServiceOk = { ok: true; id: string }
@@ -334,7 +296,6 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
         await attachDefaultImage(created.id, finalUrl)
       }
 
-      // reset
       setStep(1)
       setCatSearch('')
       setCategoryId('')
@@ -354,6 +315,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
   return (
     <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
+      {/* (UI markup unchanged below) */}
       <div className="flex items-start justify-between gap-3">
         <div className="grid gap-1">
           <div className="text-sm font-extrabold text-textPrimary">Create service</div>

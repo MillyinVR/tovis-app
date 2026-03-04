@@ -1,17 +1,34 @@
-// app/api/admin/uploads/route.ts 
+// app/api/admin/uploads/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { AdminPermissionRole } from '@prisma/client'
-import { hasAdminPermission } from '@/lib/adminPermissions'
+import { Role, AdminPermissionRole } from '@prisma/client'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { hasAdminPermission } from '@/lib/adminPermissions'
+
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
-import { safeUrl } from '@/app/api/_utils/media'
+
+import { isRecord } from '@/lib/guards'
+import { pickNumber, pickString } from '@/lib/pick'
+import { errorMessageFromUnknown } from '@/lib/http'
+import { safeUrl } from '@/lib/media'
+import { withCacheBuster } from '@/lib/url'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
+type InitBody = {
+  kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC'
+  serviceId: string
+  contentType: string
+  size: number
+}
+
+type FinalizeBody = {
+  kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE'
+  serviceId: string
+  publicUrl: string
+  cacheBuster?: number
+  path?: string
 }
 
 function isAllowedImageContentType(ct: string) {
@@ -57,63 +74,70 @@ async function objectExists(args: { bucket: string; path: string }) {
   const parts = args.path.split('/')
   const file = parts.pop() || ''
   const folder = parts.join('/') || ''
+
   const { data, error } = await supabaseAdmin.storage.from(args.bucket).list(folder, { limit: 1000 })
   if (error) return false
-  return (data || []).some((x: any) => x?.name === file)
+
+  return (data ?? []).some((x) => typeof x?.name === 'string' && x.name === file)
 }
 
-type InitBody = {
-  kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC'
-  serviceId: string
-  contentType: string
-  size: number
+function parseInitBody(raw: Record<string, unknown>): InitBody | null {
+  const kind = pickString(raw.kind)
+  if (kind !== 'SERVICE_DEFAULT_IMAGE_PUBLIC') return null
+
+  const serviceId = pickString(raw.serviceId)
+  const contentType = pickString(raw.contentType)
+  const size = pickNumber(raw.size)
+
+  if (!serviceId || !contentType || size == null) return null
+  return { kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC', serviceId, contentType, size }
 }
 
-type FinalizeBody = {
-  kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE'
-  serviceId: string
-  publicUrl: string
-  cacheBuster?: number
-  path?: string
+function parseFinalizeBody(raw: Record<string, unknown>): FinalizeBody | null {
+  const kind = pickString(raw.kind)
+  if (kind !== 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE') return null
+
+  const serviceId = pickString(raw.serviceId)
+  const publicUrl = pickString(raw.publicUrl)
+  if (!serviceId || !publicUrl) return null
+
+  const cacheBusterRaw = raw.cacheBuster
+  const cacheBuster = typeof cacheBusterRaw === 'number' && Number.isFinite(cacheBusterRaw) ? cacheBusterRaw : undefined
+
+  const path = pickString(raw.path) ?? undefined
+
+  return { kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE', serviceId, publicUrl, cacheBuster, path }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await requireUser({ roles: ['ADMIN'] as any })
+    const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const body = (await req.json().catch(() => null)) as InitBody | FinalizeBody | null
-    if (!body) return jsonFail(400, 'Invalid JSON')
+    const rawJson: unknown = await req.json().catch(() => null)
+    if (!isRecord(rawJson)) return jsonFail(400, 'Invalid JSON')
 
     // ------------------------------------------
     // FINALIZE: persist image url in Prisma
     // ------------------------------------------
-    if (body.kind === 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE') {
-      const serviceId = pickString(body.serviceId)
-      const rawUrl = pickString(body.publicUrl)
-      const cacheBuster = typeof body.cacheBuster === 'number' ? body.cacheBuster : null
-      const path = pickString(body.path)
-
-      if (!serviceId) return jsonFail(400, 'Missing serviceId')
-      if (!rawUrl) return jsonFail(400, 'Missing publicUrl')
-
-      const ok = await requireSupportScope({ adminUserId: user.id, serviceId })
+    const finalize = parseFinalizeBody(rawJson)
+    if (finalize) {
+      const ok = await requireSupportScope({ adminUserId: user.id, serviceId: finalize.serviceId })
       if (!ok) return jsonFail(403, 'Forbidden')
 
-      const cleaned = safeUrl(rawUrl)
+      const cleaned = safeUrl(finalize.publicUrl)
       if (!cleaned) return jsonFail(400, 'Invalid publicUrl')
 
       const bucket = 'media-public'
-      if (path) {
-        await objectExists({ bucket, path }).catch(() => false)
-        // best-effort: we don't block finalize on eventual consistency
+      if (finalize.path) {
+        await objectExists({ bucket, path: finalize.path }).catch(() => false)
       }
 
-      const finalUrl = cacheBuster ? `${cleaned}${cleaned.includes('?') ? '&' : '?'}v=${cacheBuster}` : cleaned
+      const finalUrl = finalize.cacheBuster ? withCacheBuster(cleaned, finalize.cacheBuster) : cleaned
 
       await prisma.service.update({
-        where: { id: serviceId },
+        where: { id: finalize.serviceId },
         data: { defaultImageUrl: finalUrl },
       })
 
@@ -121,7 +145,7 @@ export async function POST(req: NextRequest) {
         .create({
           data: {
             adminUserId: user.id,
-            serviceId,
+            serviceId: finalize.serviceId,
             action: 'SERVICE_IMAGE_UPDATED',
             note: 'defaultImageUrl updated via upload finalize',
           },
@@ -134,56 +158,44 @@ export async function POST(req: NextRequest) {
     // ------------------------------------------
     // INIT: sign upload URL
     // ------------------------------------------
-    const kind = pickString((body as any).kind)
-    const serviceId = pickString((body as any).serviceId)
-    const contentType = pickString((body as any).contentType)
-    const size = Number((body as any).size ?? 0)
+    const init = parseInitBody(rawJson)
+    if (!init) return jsonFail(400, 'Unsupported kind')
 
-    if (kind !== 'SERVICE_DEFAULT_IMAGE_PUBLIC') return jsonFail(400, 'Unsupported kind')
-    if (!serviceId) return jsonFail(400, 'Missing serviceId')
-    if (!contentType || !isAllowedImageContentType(contentType)) return jsonFail(400, 'Invalid contentType')
-    if (!Number.isFinite(size) || size <= 0 || size > 8_000_000) return jsonFail(400, 'Invalid size (max 8MB)')
+    if (!isAllowedImageContentType(init.contentType)) return jsonFail(400, 'Invalid contentType')
+    if (!Number.isFinite(init.size) || init.size <= 0 || init.size > 8_000_000) {
+      return jsonFail(400, 'Invalid size (max 8MB)')
+    }
 
-    const ok = await requireSupportScope({ adminUserId: user.id, serviceId })
+    const ok = await requireSupportScope({ adminUserId: user.id, serviceId: init.serviceId })
     if (!ok) return jsonFail(403, 'Forbidden')
 
     const base = mustBaseUrl()
     const bucket = 'media-public'
-    const ext = safeExtFromContentType(contentType)
+    const ext = safeExtFromContentType(init.contentType)
     const cacheBuster = Date.now()
+    const path = `service/default/${init.serviceId}/default.${ext}`
 
-    const path = `service/default/${serviceId}/default.${ext}`
-
-    await cleanupOldServiceDefaultImages({ bucket, serviceId })
-
-    const tryUpsert = await supabaseAdmin.storage
-      .from(bucket)
-      .createSignedUploadUrl(path, { upsert: true })
-      .catch((e) => ({ data: null as any, error: e }))
+    await cleanupOldServiceDefaultImages({ bucket, serviceId: init.serviceId })
 
     let token: string | null = null
 
-    if ((tryUpsert as any)?.data?.token) {
-      token = (tryUpsert as any).data.token
-    } else {
-      const fallback = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path)
-      if ((fallback as any)?.error) return jsonFail(500, (fallback as any).error.message || 'Failed to create signed upload URL')
-      token = (fallback as any)?.data?.token ?? null
+    try {
+      const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path, { upsert: true })
+      if (error) throw error
+      token = data?.token ?? null
+    } catch {
+      const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path)
+      if (error) return jsonFail(500, errorMessageFromUnknown(error) || 'Failed to create signed upload URL')
+      token = data?.token ?? null
     }
 
     if (!token) return jsonFail(500, 'Signed upload token missing')
 
     const publicUrl = buildPublicUrl({ base, bucket, path })
 
-    return jsonOk({
-      bucket,
-      path,
-      token,
-      publicUrl,
-      cacheBuster,
-    })
-  } catch (e: any) {
+    return jsonOk({ bucket, path, token, publicUrl, cacheBuster })
+  } catch (e: unknown) {
     console.error('POST /api/admin/uploads error', e)
-    return jsonFail(500, e?.message || 'Internal server error')
+    return jsonFail(500, errorMessageFromUnknown(e) || 'Internal server error')
   }
 }

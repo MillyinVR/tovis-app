@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
-import { safeJson } from './_utils/http'
+import { safeJson } from '@/lib/http'
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))

@@ -1,37 +1,35 @@
 // app/api/pro/clients/[id]/allergies/route.ts
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { AllergySeverity } from '@prisma/client'
+import { isRecord, type UnknownRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
-type JsonObject = Record<string, unknown>
+type Params = { params: Promise<{ id: string }> }
 
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-// Accept old UI words, map to Prisma truth
 const SEVERITY_MAP: Record<string, AllergySeverity> = {
   LOW: AllergySeverity.LOW,
   MILD: AllergySeverity.LOW,
-
   MODERATE: AllergySeverity.MODERATE,
-
   HIGH: AllergySeverity.HIGH,
   SEVERE: AllergySeverity.HIGH,
-
   CRITICAL: AllergySeverity.CRITICAL,
 }
 
-export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+async function readParams(ctx: Params) {
+  return await ctx.params
+}
+
+export async function POST(req: NextRequest, ctx: Params) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await context.params
+    const { id } = await readParams(ctx)
     const clientId = pickString(id)
     if (!clientId) return jsonFail(400, 'Missing client id.')
 
@@ -39,7 +37,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!gate.ok) return jsonFail(403, 'Forbidden.')
 
     const raw: unknown = await req.json().catch(() => ({}))
-    const body: JsonObject = isRecord(raw) ? raw : {}
+    const body: UnknownRecord = isRecord(raw) ? raw : {}
 
     const label = pickString(body.label)
     const description = pickString(body.description)

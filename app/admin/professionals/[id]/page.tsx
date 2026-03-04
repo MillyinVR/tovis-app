@@ -257,8 +257,11 @@ export default async function AdminProfessionalDetailPage({
             ) : (
               <div className="mt-4 grid gap-3">
                 {pro.verificationDocs.map((d) => {
-                  const href = d.url || d.imageUrl || null
                   const created = fmtUtcDateTime(new Date(d.createdAt))
+                  const hasFile = Boolean(d.url || d.imageUrl)
+                  const openHref = hasFile
+                    ? `/api/admin/verification-docs/open?id=${encodeURIComponent(d.id)}`
+                    : null
 
                   return (
                     <div key={d.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
@@ -272,10 +275,10 @@ export default async function AdminProfessionalDetailPage({
 
                       {d.label ? <div className={`${hint} mt-2`}>{d.label}</div> : null}
 
-                      {href ? (
+                      {openHref ? (
                         <div className="mt-3">
                           <a
-                            href={href}
+                            href={openHref}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
@@ -283,7 +286,11 @@ export default async function AdminProfessionalDetailPage({
                             Open document
                           </a>
                         </div>
-                      ) : null}
+                      ) : (
+                        <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+                          No file URL on record.
+                        </div>
+                      )}
 
                       {d.adminNote ? (
                         <div className={`${hint} mt-3`}>

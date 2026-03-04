@@ -4,6 +4,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
+import { cn } from '@/lib/utils'
+
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
 type PersistedFilters = {
@@ -31,10 +35,6 @@ type Props = {
   }
 }
 
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ')
-}
-
 const COOKIE_KEY = 'tovis_admin_services_filters'
 const LS_KEY = 'tovis_admin_services_filters_v1'
 
@@ -47,29 +47,23 @@ function safeJsonParse(s: string | null): unknown | null {
   }
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
-}
-
-function is01(v: unknown): v is '0' | '1' {
-  return v === '0' || v === '1'
-}
-
-function readString(v: unknown, fallback = ''): string {
-  return typeof v === 'string' ? v : fallback
+function as01(v: unknown): '0' | '1' | null {
+  if (v === '0' || v === 0) return '0'
+  if (v === '1' || v === 1) return '1'
+  return null
 }
 
 function parsePersistedFilters(v: unknown): PersistedFilters | null {
   if (!isRecord(v)) return null
 
-  const q = readString(v.q, '')
-  const active = is01(v.active) ? v.active : null
-  const cat = readString(v.cat, '')
-  const kids = is01(v.kids) ? v.kids : null
-  const per = readString(v.per, '36')
+  const q = pickStringOrEmpty(v.q)
+  const active = as01(v.active)
+  const cat = pickStringOrEmpty(v.cat)
+  const kids = as01(v.kids)
+  const perRaw = pickStringOrEmpty(v.per)
+  const per = perRaw && /^\d+$/.test(perRaw) ? perRaw : '36'
 
   if (!active || !kids) return null
-
   return { q, active, cat, kids, per }
 }
 
@@ -89,10 +83,10 @@ function setCookie(name: string, value: string, days = 120) {
 
 function buildQS(obj: Record<string, string>) {
   const sp = new URLSearchParams()
-  Object.entries(obj).forEach(([k, v]) => {
-    if (!v) return
+  for (const [k, v] of Object.entries(obj)) {
+    if (!v) continue
     sp.set(k, v)
-  })
+  }
   const s = sp.toString()
   return s ? `?${s}` : ''
 }
@@ -113,7 +107,6 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
 
   const [hydrated, setHydrated] = useState(false)
 
-  // Build category options with indentation for children
   const categoryOptions = useMemo(() => {
     const byParent = new Map<string, CategoryDTO[]>()
     const tops: CategoryDTO[] = []
@@ -121,10 +114,9 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
     for (const c of categories) {
       if (!c.parentId) tops.push(c)
       else {
-        const pid = c.parentId
-        const arr = byParent.get(pid) ?? []
+        const arr = byParent.get(c.parentId) ?? []
         arr.push(c)
-        byParent.set(pid, arr)
+        byParent.set(c.parentId, arr)
       }
     }
 
@@ -137,38 +129,38 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
     const out: Array<{ label: string; value: string }> = [{ label: 'All categories', value: '' }]
     for (const t of tops) {
       out.push({ label: t.name, value: t.id })
-      const kidsArr = byParent.get(t.id) ?? []
-      for (const k of kidsArr) out.push({ label: `↳ ${k.name}`, value: k.id })
+      for (const k of byParent.get(t.id) ?? []) out.push({ label: `↳ ${k.name}`, value: k.id })
     }
     return out
   }, [categories])
 
-  // Remember filters (cookie + localStorage)
   function persistFilters(next: PersistedFilters) {
     const payload = JSON.stringify(next)
+
+    // localStorage is best-effort
     try {
-      localStorage.setItem(LS_KEY, payload)
-    } catch {}
+      if (typeof window !== 'undefined') localStorage.setItem(LS_KEY, payload)
+    } catch {
+      // ignore
+    }
+
     setCookie(COOKIE_KEY, payload)
   }
 
-  // On first mount, if the URL is "blank-ish" and we have saved prefs, apply them.
   useEffect(() => {
-    const cookieRaw = safeJsonParse(getCookie(COOKIE_KEY))
-    const cookieSaved = parsePersistedFilters(cookieRaw)
+    const cookieSaved = parsePersistedFilters(safeJsonParse(getCookie(COOKIE_KEY)))
 
-    const lsRaw = (() => {
+    const lsSaved = (() => {
       try {
-        return safeJsonParse(localStorage.getItem(LS_KEY))
+        if (typeof window === 'undefined') return null
+        return parsePersistedFilters(safeJsonParse(localStorage.getItem(LS_KEY)))
       } catch {
         return null
       }
     })()
-    const lsSaved = parsePersistedFilters(lsRaw)
 
     const saved = cookieSaved ?? lsSaved
 
-    // If user already has meaningful params, don't override them.
     const hasMeaningful =
       initial.q.trim() ||
       initial.cat ||
@@ -184,7 +176,6 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
       setKids(saved.kids)
       setPer(saved.per)
 
-      // Push remembered filters into URL (page resets)
       const qs = buildQS({
         q: saved.q.trim(),
         active: saved.active,
@@ -193,6 +184,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
         per: saved.per,
         page: '1',
       })
+
       router.replace(`/admin/services${qs}`)
     }
 
@@ -201,16 +193,9 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
   }, [])
 
   function apply() {
-    const next: PersistedFilters = {
-      q: q.trim(),
-      active,
-      cat,
-      kids,
-      per,
-    }
+    const next: PersistedFilters = { q: q.trim(), active, cat, kids, per }
     persistFilters(next)
-    const qs = buildQS({ ...next, page: '1' })
-    router.push(`/admin/services${qs}`)
+    router.push(`/admin/services${buildQS({ ...next, page: '1' })}`)
   }
 
   function goToPage(n: number) {
@@ -234,7 +219,6 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-extrabold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
   const btnSoft = 'border border-surfaceGlass/15 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/25'
-
   const btnAccent =
     'border border-accentPrimary/45 bg-accentPrimary/15 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
 
@@ -243,7 +227,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
 
   return (
     <div
-      className={cx(
+      className={cn(
         'sticky top-3 z-20',
         'rounded-card border border-surfaceGlass/10 bg-bgSecondary/80 backdrop-blur-xl',
         'shadow-[0_18px_60px_rgb(0_0_0/0.55)]',
@@ -251,7 +235,6 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
     >
       <div className="p-3">
         <div className="grid gap-3">
-          {/* Filters row */}
           <div className="grid gap-2 lg:grid-cols-[1fr_220px_200px_140px_120px]">
             <input
               className={inputBase}
@@ -293,12 +276,11 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
               <option value="120">120 / page</option>
             </select>
 
-            <button type="button" className={cx(btnBase, btnAccent)} onClick={apply} disabled={!hydrated}>
+            <button type="button" className={cn(btnBase, btnAccent)} onClick={apply} disabled={!hydrated}>
               Apply
             </button>
           </div>
 
-          {/* Kids + pagination row */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="flex items-center gap-2 text-xs font-black text-textPrimary">
               <input
@@ -320,7 +302,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
 
               <button
                 type="button"
-                className={cx(btnBase, btnSoft)}
+                className={cn(btnBase, btnSoft)}
                 onClick={() => goToPage(page - 1)}
                 disabled={!hydrated || page <= 1}
               >
@@ -330,10 +312,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
               <div className="flex items-center gap-2 rounded-full border border-surfaceGlass/15 bg-bgPrimary/30 px-3 py-1.5">
                 <div className="text-[11px] font-extrabold text-textSecondary">Jump</div>
                 <input
-                  className={cx(
-                    'w-16 bg-transparent text-xs font-black text-textPrimary outline-none',
-                    'placeholder:text-textSecondary/70',
-                  )}
+                  className={cn('w-16 bg-transparent text-xs font-black text-textPrimary outline-none', 'placeholder:text-textSecondary/70')}
                   value={jump}
                   onChange={(e) => setJump(e.target.value)}
                   inputMode="numeric"
@@ -349,7 +328,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
                 />
                 <button
                   type="button"
-                  className={cx(
+                  className={cn(
                     'rounded-full border border-surfaceGlass/15 bg-bgSecondary px-2 py-1 text-[11px] font-extrabold text-textPrimary hover:border-surfaceGlass/25',
                   )}
                   disabled={!hydrated}
@@ -364,7 +343,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
 
               <button
                 type="button"
-                className={cx(btnBase, btnSoft)}
+                className={cn(btnBase, btnSoft)}
                 onClick={() => goToPage(page + 1)}
                 disabled={!hydrated || page >= totalPages}
               >
@@ -373,7 +352,6 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
             </div>
           </div>
 
-          {/* Tiny hint row */}
           <div className="text-[11px] text-textSecondary">Filters are remembered automatically. You’re welcome. 🫶</div>
         </div>
       </div>

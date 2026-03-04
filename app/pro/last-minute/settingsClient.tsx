@@ -1,3 +1,4 @@
+// app/pro/last-minute/settingsClient.tsx
 'use client'
 
 import { useMemo, useState } from 'react'

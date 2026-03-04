@@ -4,6 +4,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { asTrimmedString, isRecord, type UnknownRecord } from '@/lib/guards'
+import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import { withCacheBuster } from '@/lib/url'
 
 type Props = {
   initial: {
@@ -17,21 +20,6 @@ type Props = {
   }
 }
 
-async function safeJson(res: Response) {
-  return res.json().catch(() => ({})) as Promise<any>
-}
-
-function pickString(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
-}
-
-function withCacheBust(url: string, v: number) {
-  const s = (url || '').trim()
-  if (!s) return ''
-  const join = s.includes('?') ? '&' : '?'
-  return `${s}${join}v=${encodeURIComponent(String(v))}`
-}
-
 // Client-side preview only (server validates)
 function normalizeHandleClientPreview(raw: string) {
   return raw
@@ -41,6 +29,15 @@ function normalizeHandleClientPreview(raw: string) {
     .replace(/[^a-z0-9-]/g, '')
     .replace(/^-+/, '')
     .replace(/-+$/, '')
+}
+
+function readString(obj: UnknownRecord, key: string) {
+  return asTrimmedString(obj[key])
+}
+
+function readNumber(obj: UnknownRecord, key: string) {
+  const v = obj[key]
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
 export default function EditProfileButton({ initial }: Props) {
@@ -154,7 +151,7 @@ export default function EditProfileButton({ initial }: Props) {
     try {
       const signedRes = await fetch('/api/pro/uploads', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           kind: 'AVATAR_PUBLIC',
           contentType: avatarFile.type,
@@ -162,26 +159,33 @@ export default function EditProfileButton({ initial }: Props) {
         }),
       })
 
-      const signed = await safeJson(signedRes)
-      if (!signedRes.ok) throw new Error(signed?.error || `Failed to init avatar upload (${signedRes.status})`)
+      const signedRaw = await safeJson(signedRes)
 
-      const bucket = pickString(signed?.bucket)
-      const path = pickString(signed?.path)
-      const token = pickString(signed?.token)
-      const publicUrl = pickString(signed?.publicUrl)
-      const cacheBuster = typeof signed?.cacheBuster === 'number' ? signed.cacheBuster : Date.now()
+      if (!signedRes.ok) {
+        throw new Error(readErrorMessage(signedRaw) ?? `Failed to init avatar upload (${signedRes.status})`)
+      }
+
+      if (!isRecord(signedRaw)) {
+        throw new Error('Upload init returned invalid JSON.')
+      }
+
+      const bucket = readString(signedRaw, 'bucket')
+      const path = readString(signedRaw, 'path')
+      const token = readString(signedRaw, 'token')
+      const publicUrl = readString(signedRaw, 'publicUrl')
+      const cacheBuster = readNumber(signedRaw, 'cacheBuster') ?? Date.now()
 
       if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
       if (!publicUrl) throw new Error('Avatar upload must be public but no publicUrl was returned.')
 
       const up = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, avatarFile, {
         contentType: avatarFile.type,
-        upsert: true, // ✅ safe + consistent with stable "current.*" paths
+        upsert: true, // ✅ stable "current.*" paths
       })
 
       if (up.error) throw new Error(up.error.message || 'Avatar upload failed')
 
-      return withCacheBust(publicUrl, cacheBuster)
+      return withCacheBuster(publicUrl, cacheBuster)
     } finally {
       setUploadingAvatar(false)
     }
@@ -196,7 +200,7 @@ export default function EditProfileButton({ initial }: Props) {
 
       const res = await fetch('/api/pro/profile', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           businessName,
           professionType,
@@ -208,7 +212,7 @@ export default function EditProfileButton({ initial }: Props) {
       })
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(data?.error || 'Failed to save')
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to save')
 
       setAvatarUrl(nextAvatarUrl)
       setSavedFlash(true)
@@ -218,8 +222,8 @@ export default function EditProfileButton({ initial }: Props) {
 
       router.refresh()
       window.setTimeout(() => beginClose(), 250)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to save')
+    } catch (e: unknown) {
+      setError(errorMessageFromUnknown(e))
     } finally {
       setSaving(false)
       window.setTimeout(() => setSavedFlash(false), 800)

@@ -1,20 +1,19 @@
 // app/api/pro/clients/route.ts
 import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, requirePro, pickString, lower } from '@/app/api/_utils'
 import { Role } from '@prisma/client'
+
+import { isRecord, type UnknownRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
+
+import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { requirePro } from '@/app/api/_utils/auth/requirePro'
 
 export const dynamic = 'force-dynamic'
 
-type JsonRecord = Record<string, unknown>
-
-function isRecord(v: unknown): v is JsonRecord {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
 function normalizeEmail(v: unknown) {
   const s = pickString(v)
-  return s ? lower(s) : null
+  return s ? s.toLowerCase() : null
 }
 
 export async function POST(request: Request) {
@@ -23,7 +22,7 @@ export async function POST(request: Request) {
     if (!auth.ok) return auth.res
 
     const raw: unknown = await request.json().catch(() => ({}))
-    const body: JsonRecord = isRecord(raw) ? raw : {}
+    const body: UnknownRecord = isRecord(raw) ? raw : {}
 
     const firstName = pickString(body.firstName)
     const lastName = pickString(body.lastName)

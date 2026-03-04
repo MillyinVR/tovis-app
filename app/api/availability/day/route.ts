@@ -7,7 +7,7 @@ import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone, m
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
-
+import type { AvailabilitySummaryOk, AvailabilityDayOk } from '@/app/(main)/booking/AvailabilityDrawer/types'
 export const dynamic = 'force-dynamic'
 
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
@@ -897,8 +897,11 @@ export async function GET(req: Request) {
             })
           : []
 
+      const adjacencyBufferMinutes = locationBufferMinutes
+
       return jsonOk({
-        mode: 'SUMMARY' as const,
+        ok: true,
+        mode: 'SUMMARY',
         mediaId: mediaId || null,
         serviceId,
         professionalId,
@@ -913,6 +916,7 @@ export async function GET(req: Request) {
         stepMinutes,
         leadTimeMinutes,
         locationBufferMinutes,
+        adjacencyBufferMinutes: locationBufferMinutes,
         maxDaysAhead: maxAdvanceDays,
         durationMinutes,
 
@@ -992,8 +996,11 @@ export async function GET(req: Request) {
       })
     }
 
+    const adjacencyBufferMinutes = locationBufferMinutes
+
     return jsonOk({
-      mode: 'DAY' as const,
+      ok: true,
+      mode: 'DAY',
       professionalId,
       serviceId,
       locationType: effectiveLocationType,
@@ -1004,6 +1011,7 @@ export async function GET(req: Request) {
       stepMinutes,
       leadTimeMinutes,
       locationBufferMinutes,
+      adjacencyBufferMinutes: locationBufferMinutes,
       maxDaysAhead: maxAdvanceDays,
 
       durationMinutes,
