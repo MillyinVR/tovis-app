@@ -3,12 +3,16 @@ import { prisma } from '@/lib/prisma'
 import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import type { BookableLocation } from '@/lib/booking/pickLocation'
-import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
+import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone } from '@/lib/timeZone'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
-import type { AvailabilitySummaryOk, AvailabilityDayOk } from '@/app/(main)/booking/AvailabilityDrawer/types'
+import { getRedis } from '@/lib/redis'
+import { createHash } from 'crypto'
+
 export const dynamic = 'force-dynamic'
+// If you’re on Next “edge” runtime, you MUST remove crypto usage and I’ll adjust hashing.
+// export const runtime = 'nodejs'
 
 type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
 type WorkingHours = Record<string, WorkingHoursDay>
@@ -18,6 +22,11 @@ const MAX_SLOT_DURATION_MINUTES = 12 * 60
 const MAX_LOCATION_BUFFER_MINUTES = 180
 const MAX_LEAD_MINUTES = 30 * 24 * 60 // 30 days safety cap
 const MAX_DAYS_AHEAD = 3650 // 10 years safety cap
+
+// Cache TTLs (keep short to avoid “cached lies”)
+const TTL_DAY_SECONDS = 60
+const TTL_SUMMARY_SECONDS = 30
+const TTL_BUSY_SECONDS = 45
 
 function toInt(value: string | null, fallback: number) {
   const n = Number(value)
@@ -204,7 +213,35 @@ function mergeBusyIntervals(list: BusyInterval[]) {
   return out
 }
 
-async function loadBusyIntervals(args: {
+function stableHash(input: unknown) {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 24)
+}
+
+// Redis helpers (fail-open)
+const redis = getRedis()
+
+async function cacheGetJson<T>(key: string): Promise<T | null> {
+  if (!redis) return null
+  try {
+    const raw = await redis.get<string>(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as T
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function cacheSetJson(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  if (!redis) return
+  try {
+    await redis.set(key, JSON.stringify(value), { ex: ttlSeconds })
+  } catch {
+    // fail-open
+  }
+}
+
+async function loadBusyIntervalsUncached(args: {
   professionalId: string
   locationId: string
   windowStartUtc: Date
@@ -215,14 +252,13 @@ async function loadBusyIntervals(args: {
 }) {
   const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, fallbackDurationMinutes, locationBufferMinutes } = args
 
-  // ✅ Location buffer is part of the reserved window everywhere (finalize uses it too)
   const locBuf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_LOCATION_BUFFER_MINUTES)
 
   const [bookings, holds, blocks] = await Promise.all([
     prisma.booking.findMany({
       where: {
         professionalId,
-        locationId, // ✅ LOCATION-SCOPED
+        locationId,
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
         NOT: { status: 'CANCELLED' },
       },
@@ -233,7 +269,7 @@ async function loadBusyIntervals(args: {
     prisma.bookingHold.findMany({
       where: {
         professionalId,
-        locationId, // ✅ LOCATION-SCOPED
+        locationId,
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
         expiresAt: { gt: nowUtc },
       },
@@ -253,7 +289,6 @@ async function loadBusyIntervals(args: {
     }),
   ])
 
-  // Holds need their *real* offering durations
   const holdOfferingIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 5000)
   const holdOfferings = holdOfferingIds.length
     ? await prisma.professionalServiceOffering.findMany({
@@ -285,8 +320,7 @@ async function loadBusyIntervals(args: {
         const start = normalizeToMinute(new Date(h.scheduledFor))
         const off = holdOfferingById.get(h.offeringId) || null
 
-        const durRaw =
-          h.locationType === ServiceLocationType.MOBILE ? off?.mobileDurationMinutes : off?.salonDurationMinutes
+        const durRaw = h.locationType === ServiceLocationType.MOBILE ? off?.mobileDurationMinutes : off?.salonDurationMinutes
 
         const baseDur = Number(durRaw ?? fallbackDurationMinutes)
         const dur = Number.isFinite(baseDur) && baseDur > 0 ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES) : fallbackDurationMinutes
@@ -298,6 +332,47 @@ async function loadBusyIntervals(args: {
   ]
 
   return mergeBusyIntervals(busy)
+}
+
+async function loadBusyIntervals(args: {
+  professionalId: string
+  locationId: string
+  windowStartUtc: Date
+  windowEndUtc: Date
+  nowUtc: Date
+  fallbackDurationMinutes: number
+  locationBufferMinutes: number
+  cache?: { enabled: boolean }
+}) {
+  const cacheEnabled = Boolean(args.cache?.enabled)
+
+  if (!cacheEnabled || !redis) {
+    return loadBusyIntervalsUncached(args)
+  }
+
+  const key = [
+    'avail:busy:v1',
+    args.professionalId,
+    args.locationId,
+    args.windowStartUtc.toISOString(),
+    args.windowEndUtc.toISOString(),
+    // include buffer+fallback because it affects busy interval end times
+    String(args.locationBufferMinutes ?? ''),
+    String(args.fallbackDurationMinutes ?? ''),
+  ].join(':')
+
+  const hit = await cacheGetJson<{ busy: Array<{ start: string; end: string }> }>(key)
+  if (hit?.busy?.length) {
+    return mergeBusyIntervals(hit.busy.map((x) => ({ start: new Date(x.start), end: new Date(x.end) })))
+  }
+
+  const busy = await loadBusyIntervalsUncached(args)
+  void cacheSetJson(
+    key,
+    { busy: busy.map((b) => ({ start: b.start.toISOString(), end: b.end.toISOString() })) },
+    TTL_BUSY_SECONDS,
+  )
+  return busy
 }
 
 function isSlotFree(busy: BusyInterval[], slotStart: Date, slotEnd: Date) {
@@ -323,7 +398,7 @@ async function computeDaySlotsFast(args: {
   | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
   | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
 > {
-  const { dateYMD, durationMinutes, stepMinutes, timeZone: tzIn, workingHours, leadTimeMinutes, locationBufferMinutes,  busy, debug } = args
+  const { dateYMD, durationMinutes, stepMinutes, timeZone: tzIn, workingHours, leadTimeMinutes, locationBufferMinutes, busy, debug } = args
 
   const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(dateYMD, tzIn)
   const nowUtc = new Date()
@@ -393,7 +468,6 @@ async function computeDaySlotsFast(args: {
 
   const slots: string[] = []
 
-  // ✅ IMPORTANT: require duration+buffer to fit inside working hours
   for (let minute = windowStartMin; minute + dur + buf <= windowEndMin; minute += step) {
     const hh = Math.floor(minute / 60)
     const mm = minute % 60
@@ -544,7 +618,15 @@ async function loadOtherProsNearby(args: {
 
   const bestByPro = new Map<
     string,
-    { locationId: string; timeZone: string; distanceMiles: number; isPrimary: boolean; createdAt: Date; city: string | null; formattedAddress: string | null }
+    {
+      locationId: string
+      timeZone: string
+      distanceMiles: number
+      isPrimary: boolean
+      createdAt: Date
+      city: string | null
+      formattedAddress: string | null
+    }
   >()
 
   for (const l of candidateLocs) {
@@ -610,11 +692,7 @@ async function loadOtherProsNearby(args: {
     take: 2000,
   })
 
-  const offeringByPro = new Map<
-    string,
-    { offeringId: string; businessName: string | null; avatarUrl: string | null; proLocation: string | null }
-  >()
-
+  const offeringByPro = new Map<string, { offeringId: string; businessName: string | null; avatarUrl: string | null; proLocation: string | null }>()
   for (const o of offeringRows) {
     offeringByPro.set(o.professionalId, {
       offeringId: o.id,
@@ -664,7 +742,7 @@ export async function GET(req: Request) {
     const requestedLocationId = pickString(searchParams.get('locationId'))
     const dateStr = pickString(searchParams.get('date'))
 
-    const addOnIds = parseCommaIds(searchParams.get('addOnIds'))
+    const addOnIds = parseCommaIds(searchParams.get('addOnIds')).sort()
 
     const debug = pickString(searchParams.get('debug')) === '1'
 
@@ -683,6 +761,9 @@ export async function GET(req: Request) {
     if (!professionalId || !serviceId) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
     }
+
+    // NOTE: For cache keys we need values that affect output.
+    // We intentionally do NOT include mediaId; it is just echoed back.
 
     const [pro, service, offering] = await Promise.all([
       prisma.professionalProfile.findUnique({
@@ -751,7 +832,9 @@ export async function GET(req: Request) {
 
     const locId = loc.id
     const timeZone = sanitizeTimeZone(loc.timeZone, 'UTC')
-    if (!isValidIanaTimeZone(timeZone)) return jsonFail(400, 'This location must set a valid timezone before taking bookings.')
+    if (!isValidIanaTimeZone(timeZone)) {
+      return jsonFail(400, 'This location must set a valid timezone before taking bookings.')
+    }
 
     const workingHours = loc.workingHours
 
@@ -770,7 +853,7 @@ export async function GET(req: Request) {
       effectiveLocationType,
     )
 
-    // Optional: add-ons affect duration (better UX; finalize will enforce anyway)
+    // Add-ons affect duration
     if (addOnIds.length) {
       const addOnLinks = await prisma.offeringAddOn.findMany({
         where: {
@@ -832,17 +915,42 @@ export async function GET(req: Request) {
     const nowParts = getZonedParts(nowUtc, timeZone)
     const todayYMD = { year: nowParts.year, month: nowParts.month, day: nowParts.day }
 
-    // SUMMARY MODE
+    // -----------------------
+    // SUMMARY MODE (no date)
+    // -----------------------
     if (!dateStr) {
+      const cacheKey = debug
+        ? null
+        : [
+            'avail:summary:v1',
+            professionalId,
+            serviceId,
+            locId,
+            effectiveLocationType,
+            timeZone,
+            String(stepMinutes),
+            String(leadTimeMinutes),
+            String(locationBufferMinutes),
+            String(maxAdvanceDays),
+            stableHash({ addOnIds, viewerLat, viewerLng, radiusMiles }),
+          ].join(':')
+
+      if (cacheKey) {
+        const hit = await cacheGetJson<unknown>(cacheKey)
+        if (hit && isRecord(hit) && hit.ok === true && hit.mode === 'SUMMARY') {
+          // re-inject mediaId (purely echo)
+          return jsonOk({ ...(hit as Record<string, unknown>), mediaId: mediaId || null })
+        }
+      }
+
       const daysAhead = Math.min(14, maxAdvanceDays)
       const ymds = Array.from({ length: daysAhead }, (_, i) => addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i))
 
       const firstBounds = computeDayBoundsUtc(ymds[0], timeZone)
       const lastBounds = computeDayBoundsUtc(ymds[ymds.length - 1], timeZone)
 
-      // wide enough for overlap (12h + buffer safety)
       const windowStartUtc = addMinutes(firstBounds.dayStartUtc, -(MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
-      const windowEndUtc = addMinutes(lastBounds.dayEndExclusiveUtc, (MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
+      const windowEndUtc = addMinutes(lastBounds.dayEndExclusiveUtc, MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES)
 
       const busy = await loadBusyIntervals({
         professionalId,
@@ -852,6 +960,7 @@ export async function GET(req: Request) {
         nowUtc,
         fallbackDurationMinutes: durationMinutes,
         locationBufferMinutes,
+        cache: { enabled: !debug },
       })
 
       const availableDays: Array<{ date: string; slotCount: number }> = []
@@ -874,7 +983,6 @@ export async function GET(req: Request) {
           firstError = firstError ?? result.error
           continue
         }
-
         if (result.slots.length) availableDays.push({ date: ymdToString(ymd), slotCount: result.slots.length })
       }
 
@@ -897,11 +1005,9 @@ export async function GET(req: Request) {
             })
           : []
 
-      const adjacencyBufferMinutes = locationBufferMinutes
-
-      return jsonOk({
+      const payload = {
         ok: true,
-        mode: 'SUMMARY',
+        mode: 'SUMMARY' as const,
         mediaId: mediaId || null,
         serviceId,
         professionalId,
@@ -947,10 +1053,16 @@ export async function GET(req: Request) {
               },
             }
           : {}),
-      })
+      }
+
+      if (cacheKey) void cacheSetJson(cacheKey, { ...payload, mediaId: null }, TTL_SUMMARY_SECONDS)
+
+      return jsonOk(payload)
     }
 
-    // DAY MODE
+    // -----------------------
+    // DAY MODE (date present)
+    // -----------------------
     const ymd = parseYYYYMMDD(dateStr)
     if (!ymd) return jsonFail(400, 'Invalid date. Use YYYY-MM-DD.')
 
@@ -958,9 +1070,32 @@ export async function GET(req: Request) {
     if (dayDiff < 0) return jsonFail(400, 'Date is in the past.')
     if (dayDiff > maxAdvanceDays) return jsonFail(400, `You can book up to ${maxAdvanceDays} days in advance.`)
 
+    const dayCacheKey = debug
+      ? null
+      : [
+          'avail:day:v1',
+          professionalId,
+          serviceId,
+          locId,
+          effectiveLocationType,
+          dateStr,
+          timeZone,
+          String(stepMinutes),
+          String(leadTimeMinutes),
+          String(locationBufferMinutes),
+          stableHash({ addOnIds, durationMinutes }),
+        ].join(':')
+
+    if (dayCacheKey) {
+      const hit = await cacheGetJson<unknown>(dayCacheKey)
+      if (hit && isRecord(hit) && hit.ok === true && hit.mode === 'DAY') {
+        return jsonOk(hit)
+      }
+    }
+
     const bounds = computeDayBoundsUtc(ymd, timeZone)
     const windowStartUtc = addMinutes(bounds.dayStartUtc, -(MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
-    const windowEndUtc = addMinutes(bounds.dayEndExclusiveUtc, (MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES))
+    const windowEndUtc = addMinutes(bounds.dayEndExclusiveUtc, MAX_SLOT_DURATION_MINUTES + MAX_LOCATION_BUFFER_MINUTES)
 
     const busy = await loadBusyIntervals({
       professionalId,
@@ -970,6 +1105,7 @@ export async function GET(req: Request) {
       nowUtc,
       fallbackDurationMinutes: durationMinutes,
       locationBufferMinutes,
+      cache: { enabled: !debug },
     })
 
     const result = await computeDaySlotsFast({
@@ -996,11 +1132,9 @@ export async function GET(req: Request) {
       })
     }
 
-    const adjacencyBufferMinutes = locationBufferMinutes
-
-    return jsonOk({
+    const payload = {
       ok: true,
-      mode: 'DAY',
+      mode: 'DAY' as const,
       professionalId,
       serviceId,
       locationType: effectiveLocationType,
@@ -1021,7 +1155,11 @@ export async function GET(req: Request) {
 
       offering: offeringPayload,
       ...(debug ? { debug: result.debug, addOnIds } : {}),
-    })
+    }
+
+    if (dayCacheKey) void cacheSetJson(dayCacheKey, payload, TTL_DAY_SECONDS)
+
+    return jsonOk(payload)
   } catch (err: unknown) {
     console.error('GET /api/availability/day error', err)
     return jsonFail(500, 'Failed to load availability')

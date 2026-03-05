@@ -1,37 +1,41 @@
 // lib/rateLimitRedis.ts
-import { redis } from '@/lib/redis'
+import { requireRedis } from '@/lib/redis'
 
-type RateLimitArgs = {
+export type RateLimitArgs = {
   key: string
   limit: number
-  windowSec: number
+  windowSeconds: number
 }
 
-/**
- * Fixed-window counter:
- * - INCR key
- * - EXPIRE key windowSec (only when first created)
- */
-export async function rateLimitRedis({ key, limit, windowSec }: RateLimitArgs) {
-  if (!redis) {
-    // Dev fallback: no Redis configured locally
-    return { ok: true, remaining: limit, resetSec: windowSec }
-  }
+export type RateLimitResult = {
+  success: boolean
+  limit: number
+  remaining: number
+  resetMs: number
+}
 
-  const count = await redis.incr(key)
+export async function rateLimitRedis(args: RateLimitArgs): Promise<RateLimitResult> {
+  const redis = requireRedis()
 
+  const { key, limit, windowSeconds } = args
+  const now = Date.now()
+  const windowMs = windowSeconds * 1000
+
+  // Fixed-window counter
+  const bucket = Math.floor(now / windowMs)
+  const redisKey = `rl:${key}:${bucket}`
+
+  const count = await redis.incr(redisKey)
   if (count === 1) {
-    // first hit creates the window
-    await redis.expire(key, windowSec)
+    await redis.expire(redisKey, windowSeconds)
   }
 
-  const ttl = await redis.ttl(key) // seconds
-  const remaining = Math.max(0, limit - count)
+  const resetMs = (bucket + 1) * windowMs
 
   return {
-    ok: count <= limit,
-    remaining,
-    resetSec: ttl > 0 ? ttl : windowSec,
-    count,
+    success: count <= limit,
+    limit,
+    remaining: Math.max(0, limit - count),
+    resetMs,
   }
 }

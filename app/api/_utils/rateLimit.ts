@@ -1,8 +1,7 @@
 // app/api/_utils/rateLimit.ts
 import { headers } from 'next/headers'
-import { Redis } from '@upstash/redis'
-import { Ratelimit } from '@upstash/ratelimit'
 import { jsonFail } from './responses'
+import { rateLimitRedis } from '@/lib/rateLimitRedis'
 
 export type RateLimitBucket =
   | 'holds:create'
@@ -12,47 +11,43 @@ export type RateLimitBucket =
   | 'consultation:decision'
   | 'google:proxy'
   | 'messages:send'
-  | 'messages:read' // ✅ ADD
+  | 'messages:read'
 
 type LimitConfig = {
-  tokens: number
-  window: `${number} s` | `${number} m` | `${number} h` | `${number} d`
+  limit: number
+  windowSeconds: number
   prefix: string
 }
 
 const LIMITS: Record<RateLimitBucket, LimitConfig> = {
-  'holds:create': { tokens: 12, window: '1 m', prefix: 'rl:holds:create' },
-  'bookings:reschedule': { tokens: 8, window: '5 m', prefix: 'rl:bookings:reschedule' },
-  'looks:like': { tokens: 60, window: '1 m', prefix: 'rl:looks:like' },
-  'looks:comment': { tokens: 12, window: '1 m', prefix: 'rl:looks:comment' },
-  'consultation:decision': { tokens: 8, window: '5 m', prefix: 'rl:consultation:decision' },
-  'google:proxy': { tokens: 60, window: '1 m', prefix: 'rl:google:proxy' },
-  'messages:send': { tokens: 18, window: '1 m', prefix: 'rl:messages:send' },
-
-  // ✅ ADD (reads happen more often than sends)
-  'messages:read': { tokens: 120, window: '1 m', prefix: 'rl:messages:read' },
+  'holds:create': { limit: 12, windowSeconds: 60, prefix: 'rl:holds:create' },
+  'bookings:reschedule': { limit: 8, windowSeconds: 5 * 60, prefix: 'rl:bookings:reschedule' },
+  'looks:like': { limit: 60, windowSeconds: 60, prefix: 'rl:looks:like' },
+  'looks:comment': { limit: 12, windowSeconds: 60, prefix: 'rl:looks:comment' },
+  'consultation:decision': { limit: 8, windowSeconds: 5 * 60, prefix: 'rl:consultation:decision' },
+  'google:proxy': { limit: 60, windowSeconds: 60, prefix: 'rl:google:proxy' },
+  'messages:send': { limit: 18, windowSeconds: 60, prefix: 'rl:messages:send' },
+  'messages:read': { limit: 120, windowSeconds: 60, prefix: 'rl:messages:read' },
 }
-
-const redis = Redis.fromEnv()
 
 async function getClientIpFromHeaders(): Promise<string | null> {
   const h = await headers()
 
-  // Standard on Vercel / proxies
   const xff = h.get('x-forwarded-for')
   if (xff) {
     const first = xff.split(',')[0]?.trim()
     return first || null
   }
 
-  // Some setups set this
   const rip = h.get('x-real-ip')
   if (rip) return rip.trim() || null
 
   return null
 }
 
-export type RateLimitIdentity = { kind: 'user'; id: string } | { kind: 'ip'; id: string }
+export type RateLimitIdentity =
+  | { kind: 'user'; id: string }
+  | { kind: 'ip'; id: string }
 
 export async function rateLimitIdentity(userId?: string | null): Promise<RateLimitIdentity | null> {
   const u = typeof userId === 'string' ? userId.trim() : ''
@@ -60,25 +55,6 @@ export async function rateLimitIdentity(userId?: string | null): Promise<RateLim
 
   const ip = await getClientIpFromHeaders()
   return ip ? { kind: 'ip', id: ip } : null
-}
-
-// Tiny runtime cache so we don’t re-create Ratelimit objects constantly
-const limiterCache = new Map<RateLimitBucket, Ratelimit>()
-
-function getLimiter(bucket: RateLimitBucket) {
-  const hit = limiterCache.get(bucket)
-  if (hit) return hit
-
-  const cfg = LIMITS[bucket]
-  const limiter = new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(cfg.tokens, cfg.window),
-    prefix: cfg.prefix,
-    analytics: true,
-  })
-
-  limiterCache.set(bucket, limiter)
-  return limiter
 }
 
 export async function enforceRateLimit(args: {
@@ -89,34 +65,45 @@ export async function enforceRateLimit(args: {
   const { bucket, identity, keySuffix } = args
   if (!identity) return null
 
-  const limiter = getLimiter(bucket)
-  const key = `${identity.kind}:${identity.id}${keySuffix ? `:${keySuffix}` : ''}`
+  const cfg = LIMITS[bucket]
 
-  const result = await limiter.limit(key)
+  // One key per bucket + identity (+ optional suffix)
+  const key = `${cfg.prefix}:${identity.kind}:${identity.id}${keySuffix ? `:${keySuffix}` : ''}`
 
-  if (result.success) return null
+  try {
+    const result = await rateLimitRedis({
+      key,
+      limit: cfg.limit,
+      windowSeconds: cfg.windowSeconds,
+    })
 
-  // result.reset is a unix ms timestamp
-  const retryAfterSec = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000))
+    if (result.success) return null
 
-  return jsonFail(
-    429,
-    'Too many requests. Please slow down.',
-    {
-      code: 'RATE_LIMITED',
-      details: {
-        limit: result.limit,
-        remaining: result.remaining,
-        reset: result.reset,
+    const retryAfterSec = Math.max(1, Math.ceil((result.resetMs - Date.now()) / 1000))
+
+    return jsonFail(
+      429,
+      'Too many requests. Please slow down.',
+      {
+        code: 'RATE_LIMITED',
+        details: {
+          limit: result.limit,
+          remaining: result.remaining,
+          reset: result.resetMs,
+        },
       },
-    },
-    {
-      headers: {
-        'X-RateLimit-Limit': String(result.limit),
-        'X-RateLimit-Remaining': String(result.remaining),
-        'X-RateLimit-Reset': String(result.reset),
-        'Retry-After': String(retryAfterSec),
+      {
+        headers: {
+          'X-RateLimit-Limit': String(result.limit),
+          'X-RateLimit-Remaining': String(result.remaining),
+          'X-RateLimit-Reset': String(result.resetMs),
+          'Retry-After': String(retryAfterSec),
+        },
       },
-    },
-  )
+    )
+  } catch (e) {
+    // Fail-open: if Redis is missing/down, don't take your API down.
+    console.warn('Rate limit skipped (redis error):', e)
+    return null
+  }
 }
