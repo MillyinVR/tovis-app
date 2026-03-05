@@ -59,6 +59,14 @@ function uniqueStrings(input: string[]) {
   return out
 }
 
+/**
+ * ✅ Single source of truth:
+ * visibility is derived from the two public surfaces.
+ */
+function visibilityFromFlags(flags: { isEligibleForLooks: boolean; isFeaturedInPortfolio: boolean }): Visibility {
+  return flags.isEligibleForLooks || flags.isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
+}
+
 export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Props) {
   const router = useRouter()
 
@@ -70,7 +78,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
   // Edit state
   const [caption, setCaption] = useState(initial.caption ?? '')
-  const [visibility, setVisibility] = useState<Visibility>(initial.visibility)
   const [isEligibleForLooks, setIsEligibleForLooks] = useState(Boolean(initial.isEligibleForLooks))
   const [isFeaturedInPortfolio, setIsFeaturedInPortfolio] = useState(Boolean(initial.isFeaturedInPortfolio))
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(uniqueStrings(initial.serviceIds ?? []))
@@ -78,6 +85,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const busy = saving
+
+  const isPublicSurfaceOn = isEligibleForLooks || isFeaturedInPortfolio
+  const computedVisibility = visibilityFromFlags({ isEligibleForLooks, isFeaturedInPortfolio })
+  const mustHaveService = selectedServiceIds.length > 0
 
   // Close the 3-dot menu when clicking outside
   useEffect(() => {
@@ -108,30 +119,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     return map
   }, [serviceOptions])
 
-  const isPublicSurfaceOn = isEligibleForLooks || isFeaturedInPortfolio
-  const mustHaveService = selectedServiceIds.length > 0
-
-  // Keep state logically consistent:
-  // - If user sets PUBLIC while both surfaces are off, turn one surface on (don’t silently flip them back to private).
-  // - If both surfaces are off (and visibility isn't PUBLIC), force private visibility.
-  useEffect(() => {
-    if (visibility === MediaVisibility.PUBLIC && !isPublicSurfaceOn) {
-      setIsFeaturedInPortfolio(true)
-      return
-    }
-
-    if (!isPublicSurfaceOn && visibility === MediaVisibility.PUBLIC) {
-      // (Shouldn’t happen after the branch above, but keep it safe.)
-      setVisibility(MediaVisibility.PRO_CLIENT)
-      return
-    }
-
-    if (!isPublicSurfaceOn && visibility !== MediaVisibility.PRO_CLIENT) {
-      setVisibility(MediaVisibility.PRO_CLIENT)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEligibleForLooks, isFeaturedInPortfolio, visibility])
-
   function toggleService(id: string) {
     setSelectedServiceIds((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -151,6 +138,27 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     setError(null)
   }
 
+  /**
+   * ✅ Segmented control behavior while keeping a single source of truth:
+   * - Selecting PUBLIC ensures at least one public surface is enabled.
+   * - Selecting PRO_CLIENT turns both public surfaces off.
+   */
+  function onChangeVisibility(next: Visibility) {
+    setError(null)
+
+    if (next === MediaVisibility.PUBLIC) {
+      // If user wants "public" and neither surface is on, turn on portfolio by default.
+      if (!isPublicSurfaceOn) setIsFeaturedInPortfolio(true)
+      return
+    }
+
+    if (next === MediaVisibility.PRO_CLIENT) {
+      // Private means no public surfaces.
+      if (isEligibleForLooks) setIsEligibleForLooks(false)
+      if (isFeaturedInPortfolio) setIsFeaturedInPortfolio(false)
+    }
+  }
+
   async function saveEdits() {
     if (saving) return
     setError(null)
@@ -161,9 +169,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
       return
     }
 
-    // If no public surfaces, keep it private.
-    const nextVisibility = isPublicSurfaceOn ? visibility : MediaVisibility.PRO_CLIENT
-
     setSaving(true)
 
     try {
@@ -172,10 +177,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           caption: caption.trim().slice(0, CAPTION_MAX) || null,
-          visibility: nextVisibility,
+
+          // ✅ single truth = flags
           isEligibleForLooks,
           isFeaturedInPortfolio,
           serviceIds: selectedServiceIds,
+
+          // optional compatibility: send computed visibility (server should still normalize)
+          visibility: computedVisibility,
         }),
       })
 
@@ -334,15 +343,12 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                   />
                 </Field>
 
-                {/* Visibility */}
-                <Field label="Who can view" hint="Public shows on your profile and in Looks. Client + you is private (not public).">
+                {/* Visibility (derived) */}
+                <Field label="Who can view" hint="Public requires Looks or Portfolio enabled. Private means neither is enabled.">
                   <Segmented<Visibility>
-                    value={visibility}
+                    value={computedVisibility}
                     disabled={busy}
-                    onChange={(v) => {
-                      setVisibility(v)
-                      setError(null)
-                    }}
+                    onChange={(v) => onChangeVisibility(v)}
                     options={[
                       { value: MediaVisibility.PUBLIC, label: 'Public', sub: 'Visible to clients' },
                       { value: MediaVisibility.PRO_CLIENT, label: 'Client + you', sub: 'Private (not public)' },
@@ -379,9 +385,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 <Field
                   label="Services attached"
                   hint="At least 1 service is required."
-                  right={
-                    <span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>
-                  }
+                  right={<span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>}
                 >
                   {selectedServiceIds.length ? (
                     <div className="flex flex-wrap gap-2 rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3">
@@ -485,9 +489,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold text-white/55">
-                  {visibility === MediaVisibility.PRO_CLIENT || !isPublicSurfaceOn
-                    ? 'Private to client + you.'
-                    : 'Public visibility enabled.'}
+                  {computedVisibility === MediaVisibility.PRO_CLIENT ? 'Private to client + you.' : 'Public visibility enabled.'}
                 </div>
 
                 <div className="flex justify-end gap-2">

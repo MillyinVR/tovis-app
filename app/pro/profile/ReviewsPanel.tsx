@@ -1,5 +1,4 @@
 // app/pro/profile/ReviewsPanel.tsx
-
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -15,12 +14,23 @@ export type ReviewForPanel = {
   clientName?: string | null
   mediaAssets?: Array<{
     id: string
-    url: string
-    thumbUrl: string | null
+    url: string // render-safe (server must provide)
+    thumbUrl: string | null // render-safe (server must provide)
     mediaType: MediaType
     isFeaturedInPortfolio?: boolean
     isEligibleForLooks?: boolean
   }>
+}
+
+function pickNonEmptyString(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+function mediaSrc(m: { url: string; thumbUrl: string | null }): string | null {
+  const t = pickNonEmptyString(m.thumbUrl)
+  if (t) return t
+  const u = pickNonEmptyString(m.url)
+  return u || null
 }
 
 export default function ReviewsPanel({
@@ -30,7 +40,7 @@ export default function ReviewsPanel({
   reviews: ReviewForPanel[]
   editable?: boolean
 }) {
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
+  const [lightbox, setLightbox] = useState<{ src: string; mediaType: MediaType } | null>(null)
   const [busyMediaId, setBusyMediaId] = useState<string | null>(null)
 
   // local copy so we can update UI without reload
@@ -42,25 +52,26 @@ export default function ReviewsPanel({
 
   const stars = useMemo(() => [1, 2, 3, 4, 5], [])
 
-  function open(src: string) {
-    setLightboxSrc(src)
+  function open(src: string, mediaType: MediaType) {
+    setLightbox({ src, mediaType })
   }
   function close() {
-    setLightboxSrc(null)
+    setLightbox(null)
   }
 
   useEffect(() => {
-    if (!lightboxSrc) return
+    if (!lightbox) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [lightboxSrc])
+  }, [lightbox])
 
   async function setPortfolio(mediaId: string, value: boolean) {
     if (!editable) return
     setBusyMediaId(mediaId)
+
     try {
       const res = await fetch(`/api/pro/media/${encodeURIComponent(mediaId)}/portfolio`, {
         method: value ? 'POST' : 'DELETE',
@@ -68,13 +79,10 @@ export default function ReviewsPanel({
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to update portfolio.')
 
-      // update local state
       setLocalReviews((prev) =>
         prev.map((r) => ({
           ...r,
-          mediaAssets: r.mediaAssets?.map((m) =>
-            m.id === mediaId ? { ...m, isFeaturedInPortfolio: value } : m,
-          ),
+          mediaAssets: r.mediaAssets?.map((m) => (m.id === mediaId ? { ...m, isFeaturedInPortfolio: value } : m)),
         })),
       )
     } catch (e) {
@@ -95,8 +103,8 @@ export default function ReviewsPanel({
           const date = new Date(rev.createdAt).toLocaleDateString()
 
           const media = rev.mediaAssets ?? []
-          const primary = media[0]
-          const primarySrc = primary?.thumbUrl || primary?.url || null
+          const primary = media[0] ?? null
+          const primarySrc = primary ? mediaSrc(primary) : null
 
           return (
             <div
@@ -127,26 +135,25 @@ export default function ReviewsPanel({
                   </div>
                 </div>
 
-                {rev.headline ? (
-                  <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>{rev.headline}</div>
-                ) : null}
+                {rev.headline ? <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>{rev.headline}</div> : null}
 
-                {rev.body ? (
-                  <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>{rev.body}</div>
-                ) : null}
+                {rev.body ? <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>{rev.body}</div> : null}
 
                 {/* thumbnails */}
                 {media.length > 0 ? (
                   <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {media.slice(0, 6).map((m) => {
-                      const src = m.thumbUrl || m.url
+                      const src = mediaSrc(m)
+                      if (!src) return null
+
                       const inPortfolio = Boolean(m.isFeaturedInPortfolio)
+                      const isVideo = m.mediaType === 'VIDEO'
 
                       return (
                         <div key={m.id} style={{ width: 92 }}>
                           <button
                             type="button"
-                            onClick={() => open(src)}
+                            onClick={() => open(src, m.mediaType)}
                             style={{
                               border: '1px solid #eee',
                               borderRadius: 10,
@@ -157,15 +164,50 @@ export default function ReviewsPanel({
                               overflow: 'hidden',
                               cursor: 'pointer',
                               display: 'block',
+                              position: 'relative',
                             }}
                             title="View"
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={src}
-                              alt="Review media"
-                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                            />
+                            {isVideo ? (
+                              <div
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  background: '#111',
+                                  color: '#fff',
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                }}
+                              >
+                                VIDEO
+                              </div>
+                            ) : (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={src}
+                                alt="Review media"
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                              />
+                            )}
+
+                            {isVideo ? (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  top: 6,
+                                  right: 6,
+                                  background: 'rgba(0,0,0,0.65)',
+                                  color: '#fff',
+                                  fontSize: 10,
+                                  padding: '2px 6px',
+                                  borderRadius: 999,
+                                }}
+                              >
+                                ▶
+                              </div>
+                            ) : null}
                           </button>
 
                           {editable ? (
@@ -195,19 +237,17 @@ export default function ReviewsPanel({
                     })}
 
                     {media.length > 6 ? (
-                      <div style={{ fontSize: 12, color: '#6b7280', alignSelf: 'center' }}>
-                        +{media.length - 6}
-                      </div>
+                      <div style={{ fontSize: 12, color: '#6b7280', alignSelf: 'center' }}>+{media.length - 6}</div>
                     ) : null}
                   </div>
                 ) : null}
               </div>
 
               {/* RIGHT: big media */}
-              {primarySrc ? (
+              {primary && primarySrc ? (
                 <button
                   type="button"
-                  onClick={() => open(primarySrc)}
+                  onClick={() => open(primarySrc, primary.mediaType)}
                   style={{
                     border: '1px solid #eee',
                     borderRadius: 12,
@@ -217,15 +257,50 @@ export default function ReviewsPanel({
                     cursor: 'pointer',
                     width: '100%',
                     aspectRatio: '1 / 1',
+                    position: 'relative',
                   }}
                   title="View full size"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={primarySrc}
-                    alt="Primary review media"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
+                  {primary.mediaType === 'VIDEO' ? (
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'grid',
+                        placeItems: 'center',
+                        background: '#111',
+                        color: '#fff',
+                        fontSize: 12,
+                        fontWeight: 900,
+                      }}
+                    >
+                      VIDEO
+                    </div>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={primarySrc}
+                      alt="Primary review media"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  )}
+
+                  {primary.mediaType === 'VIDEO' ? (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 10,
+                        right: 10,
+                        background: 'rgba(0,0,0,0.65)',
+                        color: '#fff',
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                      }}
+                    >
+                      ▶
+                    </div>
+                  ) : null}
                 </button>
               ) : null}
             </div>
@@ -234,7 +309,7 @@ export default function ReviewsPanel({
       )}
 
       {/* LIGHTBOX */}
-      {lightboxSrc ? (
+      {lightbox ? (
         <div
           onClick={close}
           style={{
@@ -257,8 +332,18 @@ export default function ReviewsPanel({
               width: '100%',
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={lightboxSrc} alt="Full size" style={{ width: '100%', height: 'auto', display: 'block' }} />
+            {lightbox.mediaType === 'VIDEO' ? (
+              <video
+                src={lightbox.src}
+                controls
+                playsInline
+                style={{ width: '100%', height: 'auto', display: 'block' }}
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={lightbox.src} alt="Full size" style={{ width: '100%', height: 'auto', display: 'block' }} />
+            )}
+
             <div style={{ padding: 10, display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 type="button"

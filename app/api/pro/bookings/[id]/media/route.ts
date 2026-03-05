@@ -2,13 +2,13 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { BookingStatus, MediaPhase, MediaType, MediaVisibility, Role, SessionStep } from '@prisma/client'
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { BUCKETS } from '@/lib/storageBuckets'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-type StorageBucket = (typeof BUCKETS)[keyof typeof BUCKETS]
 
 const CAPTION_MAX = 300
 const PATH_MAX = 2048
@@ -16,7 +16,6 @@ const BUCKET_MAX = 128
 
 // Session uploads must go to private bucket
 const SESSION_BUCKET = BUCKETS.mediaPrivate
-
 const SIGNED_URL_TTL_SECONDS = 60 * 10 // 10 minutes
 
 function upper(v: unknown) {
@@ -38,15 +37,7 @@ function parseMediaType(v: unknown): MediaType | null {
   return null
 }
 
-function isPublicBucket(bucket: string): bucket is typeof BUCKETS.mediaPublic {
-  return bucket === BUCKETS.mediaPublic
-}
-
-function isPrivateBucket(bucket: string): bucket is typeof BUCKETS.mediaPrivate {
-  return bucket === BUCKETS.mediaPrivate
-}
-
-function safeBucket(raw: unknown): StorageBucket | null {
+function safeBucket(raw: unknown): (typeof BUCKETS)[keyof typeof BUCKETS] | null {
   const s = pickString(raw)
   if (!s) return null
   if (s.length > BUCKET_MAX) return null
@@ -68,10 +59,6 @@ function safeCaption(raw: unknown): string | null {
   const s = pickString(raw)
   if (!s) return null
   return s.slice(0, CAPTION_MAX)
-}
-
-function safeHttpUrl(raw: unknown): string | null {
-  return typeof raw === 'string' && raw.startsWith('http') ? raw : null
 }
 
 function canUploadPhase(sessionStep: SessionStep | null, phase: MediaPhase): boolean {
@@ -101,42 +88,26 @@ function mustStartWithBookingPrefix(path: string, bookingId: string) {
 }
 
 /**
- * Only returns a public HTTP url for the PUBLIC bucket. Otherwise null.
- * Prevents storing non-renderable "supabase://..." or private object urls in DB.
+ * Verify object exists before writing DB row.
+ * For private bucket: createSignedUrl then HEAD/GET it.
  */
-function publicHttpUrl(bucket: string, path: string): string | null {
-  if (!isPublicBucket(bucket)) return null
-  const admin = getSupabaseAdmin()
-  const { data } = admin.storage.from(bucket).getPublicUrl(path)
-  const u = data?.publicUrl
-  return typeof u === 'string' && u.startsWith('http') ? u : null
-}
-
-async function signObjectUrl(bucket: string, path: string): Promise<string | null> {
+async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<boolean> {
   try {
     const admin = getSupabaseAdmin()
     const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
-    if (error) return null
-    return data?.signedUrl ?? null
+    if (error) return false
+    const signed = data?.signedUrl
+    if (!signed) return false
+
+    const head = await fetch(signed, { method: 'HEAD' }).catch(() => null)
+    if (head?.ok) return true
+    if (head && (head.status === 403 || head.status === 404)) return false
+
+    const get = await fetch(signed, { method: 'GET' }).catch(() => null)
+    return Boolean(get?.ok)
   } catch {
-    return null
+    return false
   }
-}
-
-/**
- * Verify object exists before writing DB row.
- * We sign then HEAD/GET it.
- */
-async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<boolean> {
-  const signed = await signObjectUrl(bucket, path)
-  if (!signed) return false
-
-  const head = await fetch(signed, { method: 'HEAD' }).catch(() => null)
-  if (head?.ok) return true
-  if (head && (head.status === 403 || head.status === 404)) return false
-
-  const get = await fetch(signed, { method: 'GET' }).catch(() => null)
-  return Boolean(get?.ok)
 }
 
 export async function GET(req: Request, ctx: Ctx) {
@@ -147,7 +118,7 @@ export async function GET(req: Request, ctx: Ctx) {
     const proId = auth.professionalId
 
     const params = await Promise.resolve(ctx.params)
-    const bookingId = pickString(params?.id)
+    const bookingId = pickString((params as any)?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const booking = await prisma.booking.findUnique({
@@ -178,10 +149,14 @@ export async function GET(req: Request, ctx: Ctx) {
         reviewId: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
+
+        // Canonical pointers
         storageBucket: true,
         storagePath: true,
         thumbBucket: true,
         thumbPath: true,
+
+        // Legacy (don’t treat as canonical)
         url: true,
         thumbUrl: true,
       },
@@ -190,30 +165,21 @@ export async function GET(req: Request, ctx: Ctx) {
 
     const items = await Promise.all(
       rows.map(async (m) => {
-        // Prefer signed urls for private objects. Public objects use getPublicUrl.
-        const signedUrl = isPrivateBucket(m.storageBucket) ? await signObjectUrl(m.storageBucket, m.storagePath) : null
-        const signedThumbUrl =
-          m.thumbBucket && m.thumbPath && isPrivateBucket(m.thumbBucket)
-            ? await signObjectUrl(m.thumbBucket, m.thumbPath)
-            : null
+        const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+          storageBucket: m.storageBucket,
+          storagePath: m.storagePath,
+          thumbBucket: m.thumbBucket,
+          thumbPath: m.thumbPath,
+          url: m.url,
+          thumbUrl: m.thumbUrl,
+        })
 
-        const publicUrl =
-          publicHttpUrl(m.storageBucket, m.storagePath) ??
-          (isPublicBucket(m.storageBucket) ? safeHttpUrl(m.url) : null)
-        const publicThumbUrl =
-          (m.thumbBucket && m.thumbPath ? publicHttpUrl(m.thumbBucket, m.thumbPath) : null) ??
-          (m.thumbBucket && isPublicBucket(m.thumbBucket) ? safeHttpUrl(m.thumbUrl) : null)
-
-        const renderUrl = signedUrl ?? publicUrl ?? null
-        const renderThumbUrl = signedThumbUrl ?? publicThumbUrl ?? null
-
-        // response-only healing: url fields are render-safe
         return {
           ...m,
-          signedUrl,
-          signedThumbUrl,
           renderUrl,
           renderThumbUrl,
+
+          // Optional “response-heal” for old UI that expects url/thumbUrl to be renderable:
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         }
@@ -236,7 +202,7 @@ export async function POST(req: Request, ctx: Ctx) {
     const user = auth.user
 
     const params = await Promise.resolve(ctx.params)
-    const bookingId = pickString(params?.id)
+    const bookingId = pickString((params as any)?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
     const body = (await req.json().catch(() => ({}))) as {
@@ -321,10 +287,8 @@ export async function POST(req: Request, ctx: Ctx) {
         }
       }
 
-      // For private bucket, url/thumbUrl should be null.
-      const url = publicHttpUrl(storageBucket, storagePath) // always null for media-private
-      const thumbUrl = thumbBucket && thumbPath ? publicHttpUrl(thumbBucket, thumbPath) : null
-
+      // ✅ Single source of truth: store pointers only.
+      // url/thumbUrl stay NULL for new rows.
       const created = await tx.mediaAsset.create({
         data: {
           professionalId: booking.professionalId,
@@ -337,8 +301,8 @@ export async function POST(req: Request, ctx: Ctx) {
           thumbBucket,
           thumbPath,
 
-          url,
-          thumbUrl,
+          url: null,
+          thumbUrl: null,
 
           mediaType,
           phase,
@@ -372,7 +336,6 @@ export async function POST(req: Request, ctx: Ctx) {
 
       let advancedTo: SessionStep | null = null
 
-      // first BEFORE media -> SERVICE_IN_PROGRESS (from consult/before_photos)
       if (phase === MediaPhase.BEFORE) {
         const step = booking.sessionStep ?? SessionStep.NONE
         const canAdvanceFrom =
@@ -396,7 +359,6 @@ export async function POST(req: Request, ctx: Ctx) {
         }
       }
 
-      // AFTER upload while in AFTER_PHOTOS -> DONE
       if (phase === MediaPhase.AFTER && booking.sessionStep === SessionStep.AFTER_PHOTOS) {
         await tx.booking.update({
           where: { id: booking.id },
@@ -411,41 +373,23 @@ export async function POST(req: Request, ctx: Ctx) {
 
     if (!result.ok) return jsonFail(result.status, result.error)
 
-    // Return signed urls for rendering (private bucket)
-    const signedUrl = isPrivateBucket(result.created.storageBucket)
-      ? await signObjectUrl(result.created.storageBucket, result.created.storagePath)
-      : null
-    const signedThumbUrl =
-      result.created.thumbBucket && result.created.thumbPath
-        ? isPrivateBucket(result.created.thumbBucket)
-          ? await signObjectUrl(result.created.thumbBucket, result.created.thumbPath)
-          : null
-        : null
-
-    const publicUrl =
-      publicHttpUrl(result.created.storageBucket, result.created.storagePath) ??
-      (isPublicBucket(result.created.storageBucket) ? safeHttpUrl(result.created.url) : null)
-
-    const publicThumbUrl =
-      (result.created.thumbBucket && result.created.thumbPath
-        ? publicHttpUrl(result.created.thumbBucket, result.created.thumbPath)
-        : null) ??
-      (result.created.thumbBucket && isPublicBucket(result.created.thumbBucket)
-        ? safeHttpUrl(result.created.thumbUrl)
-        : null)
-
-    const renderUrl = signedUrl ?? publicUrl ?? null
-    const renderThumbUrl = signedThumbUrl ?? publicThumbUrl ?? null
+    const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+      storageBucket: result.created.storageBucket,
+      storagePath: result.created.storagePath,
+      thumbBucket: result.created.thumbBucket,
+      thumbPath: result.created.thumbPath,
+      url: result.created.url,
+      thumbUrl: result.created.thumbUrl,
+    })
 
     return jsonOk(
       {
         item: {
           ...result.created,
-          signedUrl,
-          signedThumbUrl,
           renderUrl,
           renderThumbUrl,
-          // response-heal: url fields are safe to render
+
+          // Optional response-heal for old UI:
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         },

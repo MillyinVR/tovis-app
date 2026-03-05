@@ -17,13 +17,34 @@ export function safeUrl(raw: unknown): string | null {
 }
 
 /**
- * Extract bucket/path from Supabase Storage URLs (public or signed).
+ * Supports:
+ *  - https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path...>
+ *  - https://<project>.supabase.co/storage/v1/object/sign/<bucket>/<path...>?token=...
+ *  - https://<project>.supabase.co/storage/v1/object/<bucket>/<path...> (older patterns)
+ *  - supabase://<bucket>/<path...>  <-- your legacy pseudo scheme
  */
-export function parseSupabaseStoragePointer(urlStr: string): { bucket: string; path: string } | null {
+export function parseSupabasePointer(raw: string): { bucket: string; path: string } | null {
+  const s = raw.trim()
+  if (!s) return null
+
+  // ✅ Legacy pseudo scheme (THIS is what your browser error shows)
+  if (s.startsWith('supabase://')) {
+    // supabase://bucket/path/to/file.jpg
+    const rest = s.slice('supabase://'.length)
+    const slash = rest.indexOf('/')
+    if (slash <= 0) return null
+    const bucket = rest.slice(0, slash).trim()
+    const path = rest.slice(slash + 1).trim()
+    if (!bucket || !path) return null
+    return { bucket, path }
+  }
+
+  // ✅ Real URLs
   try {
-    const u = new URL(urlStr)
+    const u = new URL(s)
     const parts = u.pathname.split('/').filter(Boolean)
 
+    // find ".../storage/v1/object/..."
     const idx = parts.findIndex((p) => p === 'storage')
     if (idx === -1) return null
 
@@ -31,27 +52,32 @@ export function parseSupabaseStoragePointer(urlStr: string): { bucket: string; p
     const object = parts[idx + 2]
     if (v1 !== 'v1' || object !== 'object') return null
 
-    const mode = parts[idx + 3] // public | sign | bucket (depending)
-    const bucket = parts[idx + 4]
-    const restStart = idx + 5
+    // patterns:
+    // /storage/v1/object/public/<bucket>/<path...>
+    // /storage/v1/object/sign/<bucket>/<path...>
+    // /storage/v1/object/<bucket>/<path...>
+    const modeOrBucket = parts[idx + 3]
+    const bucketMaybe = parts[idx + 4]
 
-    if (mode && bucket && (mode === 'public' || mode === 'sign')) {
-      const path = parts.slice(restStart).join('/')
-      if (!path) return null
+    if (modeOrBucket === 'public' || modeOrBucket === 'sign') {
+      const bucket = bucketMaybe
+      const path = parts.slice(idx + 5).join('/')
+      if (!bucket || !path) return null
       return { bucket, path }
     }
 
-    const bucketAlt = parts[idx + 3]
-    const pathAlt = parts.slice(idx + 4).join('/')
-    if (!bucketAlt || !pathAlt) return null
-    return { bucket: bucketAlt, path: pathAlt }
+    // fallback: modeOrBucket is actually bucket
+    const bucket = modeOrBucket
+    const path = parts.slice(idx + 4).join('/')
+    if (!bucket || !path) return null
+    return { bucket, path }
   } catch {
     return null
   }
 }
 
 export function resolveStoragePointers(args: {
-  url: string
+  url?: string | null
   thumbUrl?: string | null
   storageBucket?: string | null
   storagePath?: string | null
@@ -65,6 +91,7 @@ export function resolveStoragePointers(args: {
       thumbPath: string | null
     }
   | null {
+  // ✅ Canonical already present
   if (args.storageBucket && args.storagePath) {
     return {
       storageBucket: args.storageBucket,
@@ -74,10 +101,14 @@ export function resolveStoragePointers(args: {
     }
   }
 
-  const ptr = parseSupabaseStoragePointer(args.url)
+  const url = typeof args.url === 'string' ? args.url : ''
+  const ptr = url ? parseSupabasePointer(url) : null
   if (!ptr) return null
 
-  const thumbPtr = args.thumbUrl ? parseSupabaseStoragePointer(args.thumbUrl) : null
+  const thumbPtr =
+    typeof args.thumbUrl === 'string' && args.thumbUrl.trim()
+      ? parseSupabasePointer(args.thumbUrl)
+      : null
 
   return {
     storageBucket: ptr.bucket,
@@ -86,7 +117,6 @@ export function resolveStoragePointers(args: {
     thumbPath: thumbPtr?.path ?? null,
   }
 }
-
 export function parseIdArray(x: unknown, max: number): string[] {
   if (!Array.isArray(x)) return []
   const out: string[] = []
@@ -100,7 +130,13 @@ export function parseIdArray(x: unknown, max: number): string[] {
 }
 
 export function parseRating1to5(x: unknown): number | null {
-  const n = typeof x === 'number' ? x : typeof x === 'string' ? Number.parseInt(x, 10) : Number.NaN
+  const n =
+    typeof x === 'number'
+      ? x
+      : typeof x === 'string'
+        ? Number.parseInt(x, 10)
+        : Number.NaN
+
   if (!Number.isFinite(n) || n < 1 || n > 5) return null
   return n
 }

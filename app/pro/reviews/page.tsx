@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import MediaPortfolioToggle from './MediaPortfolioToggle'
 import HashJumpHighlight from './HashJumpHighlight'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 
 function pickNonEmptyString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
@@ -18,20 +19,93 @@ export default async function ProReviewsPage() {
 
   const proId = user.professionalProfile.id
 
+  // ✅ Option A: load canonical storage pointers for media assets
   const reviews = await prisma.review.findMany({
     where: { professionalId: proId },
     orderBy: { createdAt: 'desc' },
+    take: 100,
     include: {
       client: true,
       mediaAssets: {
         orderBy: { createdAt: 'desc' },
-        include: {
-          services: { include: { service: true } },
+        select: {
+          id: true,
+          caption: true,
+          mediaType: true,
+          isFeaturedInPortfolio: true,
+
+          // ✅ canonical pointers (single source of truth)
+          storageBucket: true,
+          storagePath: true,
+          thumbBucket: true,
+          thumbPath: true,
+
+          // legacy fallback only (renderMediaUrls will ignore unless already http(s))
+          url: true,
+          thumbUrl: true,
+
+          services: {
+            include: { service: true },
+          },
         },
       },
     },
-    take: 100,
   })
+
+  // ✅ Precompute render-safe src URLs server-side
+  const reviewsForUI = await Promise.all(
+    reviews.map(async (rev) => {
+      const first = pickNonEmptyString(rev.client?.firstName)
+      const last = pickNonEmptyString(rev.client?.lastName)
+      const clientName = `${first} ${last}`.trim() || 'Client'
+      const date = new Date(rev.createdAt).toLocaleDateString()
+      const reviewAnchor = `review-${rev.id}`
+
+      const mediaTiles = (
+        await Promise.all(
+          (rev.mediaAssets || []).map(async (m) => {
+            // If canonical pointers are missing, we can’t render under Option A.
+            // (Leaving legacy fallback in renderMediaUrls as a safety net.)
+            if (!m.storageBucket || !m.storagePath) return null
+
+            const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+              storageBucket: m.storageBucket,
+              storagePath: m.storagePath,
+              thumbBucket: m.thumbBucket ?? null,
+              thumbPath: m.thumbPath ?? null,
+              url: m.url ?? null,
+              thumbUrl: m.thumbUrl ?? null,
+            })
+
+            const src = (renderThumbUrl ?? renderUrl ?? '').trim()
+            if (!src) return null
+
+            return {
+              id: m.id,
+              caption: m.caption ?? null,
+              isVideo: m.mediaType === 'VIDEO',
+              isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+              services: m.services ?? [],
+              src,
+            }
+          }),
+        )
+      ).filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+      return {
+        id: rev.id,
+        rating: rev.rating,
+        headline: rev.headline ?? null,
+        body: rev.body ?? null,
+        bookingId: rev.bookingId ?? null,
+        createdAtISO: new Date(rev.createdAt).toISOString(),
+        date,
+        clientName,
+        reviewAnchor,
+        mediaTiles,
+      }
+    }),
+  )
 
   return (
     <main
@@ -62,7 +136,7 @@ export default async function ProReviewsPage() {
         </div>
       </div>
 
-      {reviews.length === 0 ? (
+      {reviewsForUI.length === 0 ? (
         <div
           style={{
             borderRadius: 12,
@@ -77,17 +151,11 @@ export default async function ProReviewsPage() {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
-          {reviews.map((rev) => {
-            const first = pickNonEmptyString(rev.client?.firstName)
-            const last = pickNonEmptyString(rev.client?.lastName)
-            const clientName = `${first} ${last}`.trim() || 'Client'
-            const date = new Date(rev.createdAt).toLocaleDateString()
-            const reviewAnchor = `review-${rev.id}`
-
+          {reviewsForUI.map((rev) => {
             return (
               <article
                 key={rev.id}
-                id={reviewAnchor}
+                id={rev.reviewAnchor}
                 style={{
                   borderRadius: 14,
                   border: '1px solid #eee',
@@ -105,7 +173,7 @@ export default async function ProReviewsPage() {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, color: '#6b7280' }}>
-                      {clientName} • {date}
+                      {rev.clientName} • {rev.date}
                     </div>
 
                     <div
@@ -119,15 +187,13 @@ export default async function ProReviewsPage() {
                       {'★'.repeat(rev.rating).padEnd(5, '☆')}
                     </div>
 
-                    {rev.headline ? (
-                      <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600 }}>{rev.headline}</div>
-                    ) : null}
+                    {rev.headline ? <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600 }}>{rev.headline}</div> : null}
 
                     {rev.body ? <div style={{ marginTop: 6, fontSize: 13, color: '#111' }}>{rev.body}</div> : null}
 
                     <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       <Link
-                        href={`/pro/reviews#${reviewAnchor}`}
+                        href={`/pro/reviews#${rev.reviewAnchor}`}
                         style={{
                           fontSize: 12,
                           color: '#111',
@@ -161,11 +227,9 @@ export default async function ProReviewsPage() {
                   </div>
                 </div>
 
-                {rev.mediaAssets.length > 0 ? (
+                {rev.mediaTiles.length > 0 ? (
                   <div style={{ marginTop: 12 }}>
-                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-                      Photos / videos from this review
-                    </div>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Photos / videos from this review</div>
 
                     <div
                       style={{
@@ -174,11 +238,7 @@ export default async function ProReviewsPage() {
                         gap: 8,
                       }}
                     >
-                      {rev.mediaAssets.map((m) => {
-                        // ✅ src is string | undefined (never null)
-                        const src = pickNonEmptyString(m.thumbUrl) || pickNonEmptyString(m.url) || undefined
-                        const isVideo = m.mediaType === 'VIDEO'
-
+                      {rev.mediaTiles.map((m) => {
                         return (
                           <div
                             key={m.id}
@@ -199,35 +259,19 @@ export default async function ProReviewsPage() {
                               }}
                               title="Open"
                             >
-                              {src ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={src}
-                                  alt={m.caption || 'Review media'}
-                                  style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'cover',
-                                    display: 'block',
-                                  }}
-                                />
-                              ) : (
-                                <div
-                                  style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    display: 'grid',
-                                    placeItems: 'center',
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    color: '#6b7280',
-                                  }}
-                                >
-                                  Missing media URL
-                                </div>
-                              )}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={m.src}
+                                alt={m.caption || 'Review media'}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                  display: 'block',
+                                }}
+                              />
 
-                              {isVideo ? (
+                              {m.isVideo ? (
                                 <div
                                   style={{
                                     position: 'absolute',

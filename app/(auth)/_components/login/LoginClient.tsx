@@ -3,37 +3,78 @@
 
 import Link from 'next/link'
 import { useMemo, useState, type FormEvent } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
-function sanitizeFrom(from: string | null): string | null {
-  if (!from) return null
-  const trimmed = from.trim()
-  if (!trimmed) return null
-  if (!trimmed.startsWith('/')) return null
-  if (trimmed.startsWith('//')) return null
-  return trimmed
-}
+type UserRole = 'ADMIN' | 'PRO' | 'CLIENT'
+type LoginReason = 'PRO_REQUIRED' | 'PRO_SETUP_REQUIRED' | 'ADMIN_REQUIRED' | 'LOGIN_REQUIRED'
 
-function sanitizeNextUrl(nextUrl: unknown): string | null {
-  if (typeof nextUrl !== 'string') return null
-  const s = nextUrl.trim()
+const PRO_HOME = '/pro/calendar'
+
+function sanitizeInternalPath(raw: string | null): string | null {
+  if (!raw) return null
+  const s = raw.trim()
   if (!s) return null
   if (!s.startsWith('/')) return null
   if (s.startsWith('//')) return null
   return s
 }
 
-function readUserRole(data: unknown): 'ADMIN' | 'PRO' | 'CLIENT' | null {
+function isAuthPath(path: string): boolean {
+  return (
+    path === '/login' ||
+    path.startsWith('/login?') ||
+    path === '/signup' ||
+    path.startsWith('/signup?') ||
+    path === '/forgot-password' ||
+    path.startsWith('/forgot-password?')
+  )
+}
+
+function sanitizeRedirectTarget(path: string | null): string | null {
+  if (!path) return null
+  if (isAuthPath(path)) return null
+  return path
+}
+
+function sanitizeReason(raw: string | null): LoginReason | null {
+  if (!raw) return null
+  const s = raw.trim().toUpperCase()
+  if (
+    s === 'PRO_REQUIRED' ||
+    s === 'PRO_SETUP_REQUIRED' ||
+    s === 'ADMIN_REQUIRED' ||
+    s === 'LOGIN_REQUIRED'
+  ) {
+    return s as LoginReason
+  }
+  return null
+}
+
+function readUserRole(data: unknown): UserRole | null {
   if (!isRecord(data)) return null
   const user = data.user
   if (!isRecord(user)) return null
   const role = user.role
-  if (role === 'ADMIN' || role === 'PRO' || role === 'CLIENT') return role
+  return role === 'ADMIN' || role === 'PRO' || role === 'CLIENT' ? role : null
+}
+
+function roleIntentFromPath(path: string | null): UserRole | null {
+  if (!path) return null
+  if (path === '/admin' || path.startsWith('/admin/')) return 'ADMIN'
+  if (path === '/pro' || path.startsWith('/pro/')) return 'PRO'
   return null
+}
+
+// Normalize “generic pro root” to the real pro home.
+function normalizeLanding(path: string, role: UserRole): string {
+  if (role === 'PRO') {
+    if (path === '/pro' || path.startsWith('/pro?')) return PRO_HOME
+  }
+  return path
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -101,11 +142,14 @@ function SecondaryLinkButton({ href, children }: { href: string; children: React
 }
 
 export default function LoginClient() {
-  const router = useRouter()
   const searchParams = useSearchParams()
 
   const fromRaw = searchParams.get('from')
-  const from = useMemo(() => sanitizeFrom(fromRaw), [fromRaw])
+  const from = useMemo(() => sanitizeInternalPath(fromRaw), [fromRaw])
+  const fromSafe = useMemo(() => sanitizeRedirectTarget(from), [from])
+
+  const reasonRaw = searchParams.get('reason')
+  const explicitReason = useMemo(() => sanitizeReason(reasonRaw), [reasonRaw])
 
   const ti = searchParams.get('ti')
 
@@ -113,6 +157,32 @@ export default function LoginClient() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // Infer a reason if guards didn’t attach one
+  const inferredReason = useMemo<LoginReason | null>(() => {
+    if (explicitReason) return explicitReason
+    const intent = roleIntentFromPath(fromSafe)
+    if (intent === 'ADMIN') return 'ADMIN_REQUIRED'
+    if (intent === 'PRO') return 'PRO_REQUIRED'
+    return null
+  }, [explicitReason, fromSafe])
+
+  const reasonCopy = useMemo(() => {
+    if (!inferredReason) return null
+    switch (inferredReason) {
+      case 'LOGIN_REQUIRED':
+        return { title: 'Login required', body: 'Please log in to continue.' }
+      case 'ADMIN_REQUIRED':
+        return { title: 'Admin account required', body: 'You tried to open an admin-only page. Log in with your admin account.' }
+      case 'PRO_REQUIRED':
+        return { title: 'Professional account required', body: 'You tried to open a Pro-only page. Log in with your Pro account (or create one).' }
+      case 'PRO_SETUP_REQUIRED':
+        return {
+          title: 'Professional setup required',
+          body: 'Your account is Pro, but it isn’t fully set up yet (missing a professional profile). Finish setup or contact support.',
+        }
+    }
+  }, [inferredReason])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -122,10 +192,28 @@ export default function LoginClient() {
     setLoading(true)
 
     try {
+      const emailTrimmed = email.trim()
+      const passwordTrimmed = password.trim()
+
+      if (!emailTrimmed || !passwordTrimmed) {
+        setError('Email and password are required.')
+        return
+      }
+
+      // This drives your API’s expectedRole enforcement.
+      const expectedRole = roleIntentFromPath(fromSafe)
+
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, tapIntentId: ti ?? undefined }),
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({
+          email: emailTrimmed,
+          password: passwordTrimmed,
+          expectedRole: expectedRole ?? undefined,
+          tapIntentId: ti ?? undefined,
+        }),
       })
 
       const data = await safeJsonRecord(res)
@@ -135,20 +223,24 @@ export default function LoginClient() {
         return
       }
 
-      // Refresh app router caches after auth
-      router.refresh()
+      const role = readUserRole(data)
+      if (!role) {
+        setError('Login succeeded, but your account role is missing. Please contact support.')
+        return
+      }
 
       const nextUrlRaw = readStringField(data, 'nextUrl')
-      const nextUrl = sanitizeNextUrl(nextUrlRaw)
+      const nextUrl = sanitizeRedirectTarget(sanitizeInternalPath(nextUrlRaw ?? null))
 
-      const role = readUserRole(data)
+      // Default landing by role
+      const roleDefault = role === 'ADMIN' ? '/admin' : role === 'PRO' ? PRO_HOME : '/looks'
 
-      const dest =
-        nextUrl ??
-        from ??
-        (role === 'ADMIN' ? '/admin' : role === 'PRO' ? '/pro' : '/looks')
+      // Destination preference: server nextUrl > from > role default
+      const rawDest = nextUrl ?? fromSafe ?? roleDefault
+      const dest = normalizeLanding(rawDest, role)
 
-      router.replace(dest)
+      // Hard nav so server components + footers re-evaluate with new cookie (cookie-backed session).
+      window.location.assign(dest)
     } catch (err) {
       console.error(err)
       setError('Network error.')
@@ -162,7 +254,15 @@ export default function LoginClient() {
 
   return (
     <AuthShell title="Login" subtitle="Enter your credentials. Try not to be dramatic about it.">
-      <form onSubmit={handleSubmit} className="mt-1 grid gap-4">
+      {/* noValidate avoids silent browser validation blocking submit */}
+      <form noValidate onSubmit={handleSubmit} className="mt-1 grid gap-4">
+        {reasonCopy ? (
+          <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-semibold text-toneWarn">
+            <div className="font-black">{reasonCopy.title}</div>
+            <div className="mt-0.5 text-[13px] font-semibold text-toneWarn/90">{reasonCopy.body}</div>
+          </div>
+        ) : null}
+
         <label className="grid gap-1.5">
           <FieldLabel>Email</FieldLabel>
           <Input

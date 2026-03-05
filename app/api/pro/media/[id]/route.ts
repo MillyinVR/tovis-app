@@ -1,41 +1,26 @@
 // app/api/pro/media/[id]/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import { MediaVisibility } from '@prisma/client'
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { pickBool, pickString } from '@/lib/pick'
 
 export const dynamic = 'force-dynamic'
 
-function pickString(v: unknown): string {
-  return typeof v === 'string' ? v.trim() : ''
-}
+type Ctx = { params: Promise<{ id: string }> }
 
-function pickBool(v: unknown): boolean | null {
-  return typeof v === 'boolean' ? v : null
-}
-
-/**
- * Accepts UI-friendly values and maps them to Prisma enum.
- * - "PUBLIC"  -> MediaVisibility.PUBLIC
- * - "PRIVATE" -> MediaVisibility.PRO_CLIENT
- * Also accepts real enum strings like "PRO_CLIENT".
- */
-function pickVisibility(v: unknown): MediaVisibility | null {
-  const s = pickString(v).toUpperCase()
-  if (!s) return null
-
-  if (s === 'PUBLIC') return MediaVisibility.PUBLIC
-  if (s === 'PRIVATE') return MediaVisibility.PRO_CLIENT
-  if (s === 'PRO_CLIENT') return MediaVisibility.PRO_CLIENT
-
-  return null
+function normalizeVisibilityFromFlags(flags: {
+  isEligibleForLooks: boolean
+  isFeaturedInPortfolio: boolean
+}): MediaVisibility {
+  return flags.isEligibleForLooks || flags.isFeaturedInPortfolio
+    ? MediaVisibility.PUBLIC
+    : MediaVisibility.PRO_CLIENT
 }
 
 function uniqueStrings(input: string[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
-  for (const raw of input) {
-    const s = (raw || '').trim()
+  for (const s of input) {
     if (!s) continue
     if (seen.has(s)) continue
     seen.add(s)
@@ -44,109 +29,83 @@ function uniqueStrings(input: string[]): string[] {
   return out
 }
 
-function pickStringArray(v: unknown): string[] {
+function parseServiceIds(v: unknown, max = 50): string[] | null {
+  if (v === undefined) return null // means "not provided"
   if (!Array.isArray(v)) return []
-  return uniqueStrings(v.map((x) => pickString(x)).filter((x) => x.length > 0))
+  const cleaned = v
+    .map((x) => pickString(x))
+    .filter((x): x is string => typeof x === 'string' && x.length > 0)
+    .slice(0, max)
+  return uniqueStrings(cleaned)
 }
-
-/**
- * Single-source-of-truth rule:
- * If either Looks or Portfolio is enabled, visibility must be PUBLIC.
- * If both are off, visibility must be PRO_CLIENT.
- */
-function normalizeVisibilityFromFlags(flags: { isEligibleForLooks: boolean; isFeaturedInPortfolio: boolean }): MediaVisibility {
-  return flags.isEligibleForLooks || flags.isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
-}
-
-type Ctx = { params: Promise<{ id: string }> }
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
-    const { id } = await ctx.params
-    const mediaId = pickString(id)
-    if (!mediaId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
 
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    const proId = user.professionalProfile.id
+    const { id: rawId } = await ctx.params
+    const mediaId = pickString(rawId)
+    if (!mediaId) return jsonFail(400, 'Missing id.')
 
-    // Load owned media + current services (for invariants)
     const existing = await prisma.mediaAsset.findUnique({
       where: { id: mediaId },
       select: {
         id: true,
         professionalId: true,
+        caption: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
         services: { select: { serviceId: true } },
       },
     })
 
-    if (!existing || existing.professionalId !== proId) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    }
+    if (!existing) return jsonFail(404, 'Not found.')
+    if (existing.professionalId !== auth.professionalId) return jsonFail(403, 'Forbidden.')
 
-    const body = (await req.json().catch(() => ({}))) as any
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
 
-    // Caption
-    const captionRaw = body?.caption
-    const caption = captionRaw == null ? null : pickString(captionRaw) || null
+    const captionRaw = body.caption
+    const caption = captionRaw === null ? null : (pickString(captionRaw) ?? null)
 
-    // Flags (nullable so PATCH can be partial)
-    const isEligibleForLooksPatch = pickBool(body?.isEligibleForLooks)
-    const isFeaturedInPortfolioPatch = pickBool(body?.isFeaturedInPortfolio)
+    const looksPatch = pickBool(body.isEligibleForLooks)
+    const portfolioPatch = pickBool(body.isFeaturedInPortfolio)
 
-    // Apply patch values over existing to get "next" flags
     const nextFlags = {
-      isEligibleForLooks: isEligibleForLooksPatch == null ? Boolean(existing.isEligibleForLooks) : isEligibleForLooksPatch,
+      isEligibleForLooks: looksPatch === null ? Boolean(existing.isEligibleForLooks) : looksPatch,
       isFeaturedInPortfolio:
-        isFeaturedInPortfolioPatch == null ? Boolean(existing.isFeaturedInPortfolio) : isFeaturedInPortfolioPatch,
+        portfolioPatch === null ? Boolean(existing.isFeaturedInPortfolio) : portfolioPatch,
     }
 
-    // serviceIds: only rewrite if provided
-    const serviceIdsProvided = Array.isArray(body?.serviceIds)
-    const serviceIds = serviceIdsProvided ? pickStringArray(body?.serviceIds) : []
+    const nextVisibility = normalizeVisibilityFromFlags(nextFlags)
 
-    // Invariant: ALL media must have >= 1 service
-    // - If client provides serviceIds: require >=1
-    // - If not provided: require existing already has >=1 (forces cleanup of any legacy bad rows)
-    const existingServiceCount = (existing.services || []).length
+    const serviceIds = parseServiceIds(body.serviceIds)
+    const serviceIdsProvided = serviceIds !== null
+
+    const existingServiceCount = existing.services?.length ?? 0
 
     if (serviceIdsProvided) {
-      if (serviceIds.length === 0) {
-        return NextResponse.json({ error: 'Select at least one service tag.' }, { status: 400 })
-      }
+      if (serviceIds.length === 0) return jsonFail(400, 'Select at least one service tag.')
 
-      // Validate serviceIds (exists + active)
-      const services = await prisma.service.findMany({
+      const valid = await prisma.service.findMany({
         where: { id: { in: serviceIds }, isActive: true },
         select: { id: true },
       })
-      if (services.length !== serviceIds.length) {
-        return NextResponse.json({ error: 'One or more serviceIds are invalid.' }, { status: 400 })
-      }
+      if (valid.length !== serviceIds.length) return jsonFail(400, 'One or more serviceIds are invalid.')
     } else {
       if (existingServiceCount === 0) {
-        return NextResponse.json(
-          { error: 'This media has no services attached. Please add at least one service before saving edits.' },
-          { status: 409 },
+        return jsonFail(
+          409,
+          'This media has no services attached. Please add at least one service before saving edits.',
         )
       }
     }
 
-    // Visibility:
-    // We accept incoming visibility, but we normalize it from flags so DB can’t drift.
-    // (If you *really* want manual override, remove normalization and enforce consistency instead.)
-    const _incomingVisibility = pickVisibility(body?.visibility) // allowed for UI compatibility, but not trusted
-    const visibility = normalizeVisibilityFromFlags(nextFlags)
-
     const data: Parameters<typeof prisma.mediaAsset.update>[0]['data'] = {
       caption,
-      visibility,
-      ...(isEligibleForLooksPatch == null ? {} : { isEligibleForLooks: isEligibleForLooksPatch }),
-      ...(isFeaturedInPortfolioPatch == null ? {} : { isFeaturedInPortfolio: isFeaturedInPortfolioPatch }),
+      visibility: nextVisibility,
+      ...(looksPatch === null ? {} : { isEligibleForLooks: looksPatch }),
+      ...(portfolioPatch === null ? {} : { isFeaturedInPortfolio: portfolioPatch }),
 
       ...(serviceIdsProvided
         ? {
@@ -158,39 +117,46 @@ export async function PATCH(req: Request, ctx: Ctx) {
         : {}),
     }
 
-    await prisma.mediaAsset.update({ where: { id: mediaId }, data })
+    const updated = await prisma.mediaAsset.update({
+      where: { id: mediaId },
+      data,
+      select: {
+        id: true,
+        caption: true,
+        visibility: true,
+        isEligibleForLooks: true,
+        isFeaturedInPortfolio: true,
+      },
+    })
 
-    return NextResponse.json({ ok: true })
-  } catch (e: any) {
+    return jsonOk({ media: updated }, 200)
+  } catch (e) {
     console.error('PATCH /api/pro/media/[id] error', e)
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+    return jsonFail(500, 'Failed to update media.')
   }
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
-    const { id } = await ctx.params
-    const mediaId = pickString(id)
-    if (!mediaId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
 
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== 'PRO' || !user.professionalProfile?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    const proId = user.professionalProfile.id
+    const { id: rawId } = await ctx.params
+    const mediaId = pickString(rawId)
+    if (!mediaId) return jsonFail(400, 'Missing id.')
 
     const existing = await prisma.mediaAsset.findUnique({
       where: { id: mediaId },
       select: { id: true, professionalId: true },
     })
-    if (!existing || existing.professionalId !== proId) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    }
+
+    if (!existing) return jsonFail(404, 'Not found.')
+    if (existing.professionalId !== auth.professionalId) return jsonFail(403, 'Forbidden.')
 
     await prisma.mediaAsset.delete({ where: { id: mediaId } })
-    return NextResponse.json({ ok: true })
-  } catch (e: any) {
+    return jsonOk({}, 200)
+  } catch (e) {
     console.error('DELETE /api/pro/media/[id] error', e)
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+    return jsonFail(500, 'Failed to delete media.')
   }
 }

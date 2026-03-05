@@ -6,45 +6,61 @@ import { getCurrentUser } from '@/lib/currentUser'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
-import { asTrimmedString } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
 import { cn } from '@/lib/utils'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { MediaVisibility } from '@prisma/client'
 
-type PageProps = {
-  params: { id: string } | Promise<{ id: string }>
-}
+type PageProps = { params: Promise<{ id: string }> }
 
 export default async function PublicMediaDetailPage({ params }: PageProps) {
-  const { id: rawId } = await Promise.resolve(params)
-  const id = asTrimmedString(rawId)
+  const { id: rawId } = await params
+  const id = pickString(rawId)
   if (!id) notFound()
 
   const media = await prisma.mediaAsset.findUnique({
     where: { id },
     select: {
       id: true,
-      url: true,
       caption: true,
       mediaType: true,
       visibility: true,
       professionalId: true,
       isEligibleForLooks: true,
       isFeaturedInPortfolio: true,
+
+      // SSoT fields
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+
+      // legacy fallbacks
+      url: true,
+      thumbUrl: true,
+
       services: { select: { serviceId: true, service: { select: { name: true } } } },
       _count: { select: { likes: true, comments: true } },
     },
   })
 
-  // Only PUBLIC media is viewable on this route
-  if (!media || media.visibility !== 'PUBLIC') notFound()
+  if (!media || media.visibility !== MediaVisibility.PUBLIC) notFound()
 
-  // url can be null (schema allows it), but this page requires a renderable URL
-  if (!media.url) notFound()
+  const { renderUrl } = await renderMediaUrls({
+    storageBucket: media.storageBucket,
+    storagePath: media.storagePath,
+    thumbBucket: media.thumbBucket,
+    thumbPath: media.thumbPath,
+    url: media.url,
+    thumbUrl: media.thumbUrl,
+  })
+
+  if (!renderUrl) notFound()
 
   const viewer = await getCurrentUser().catch(() => null)
   const isOwner =
     viewer?.role === 'PRO' &&
-    viewer?.professionalProfile?.id &&
-    viewer.professionalProfile.id === media.professionalId
+    viewer?.professionalProfile?.id === media.professionalId
 
   const backHref = `/professionals/${media.professionalId}`
   const isVideo = media.mediaType === 'VIDEO'
@@ -63,7 +79,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
 
   return (
     <MediaFullscreenViewer
-      src={media.url}
+      src={renderUrl}
       mediaType={isVideo ? 'VIDEO' : 'IMAGE'}
       alt={media.caption || 'Media'}
       fit="contain"

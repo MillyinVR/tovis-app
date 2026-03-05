@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import MediaTile from './MediaTile'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,21 +21,46 @@ export default async function ProMediaPage() {
     take: 60,
     select: {
       id: true,
-      url: true,
-      thumbUrl: true,
       caption: true,
       isFeaturedInPortfolio: true,
       reviewId: true,
+
+      // single source of truth inputs
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+
+      // legacy fallbacks (still allowed)
+      url: true,
+      thumbUrl: true,
     },
   })
 
-  const items = media
-    .map((m) => {
-      const src = (m.thumbUrl ?? m.url ?? '').trim()
-      return { ...m, src: src || null }
-    })
-    .filter((m) => Boolean(m.src))
+  const resolved = await Promise.all(
+    media.map(async (m) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+        storageBucket: m.storageBucket,
+        storagePath: m.storagePath,
+        thumbBucket: m.thumbBucket,
+        thumbPath: m.thumbPath,
+        url: m.url,
+        thumbUrl: m.thumbUrl,
+      })
 
+      const src = (renderThumbUrl ?? renderUrl ?? '').trim()
+      if (!src) return null
+
+      return {
+        id: m.id,
+        caption: m.caption ?? null,
+        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+        src,
+      }
+    }),
+  )
+
+  const items = resolved.filter((x): x is NonNullable<typeof x> => x !== null)
   const brokenCount = media.length - items.length
 
   return (
@@ -55,7 +81,7 @@ export default async function ProMediaPage() {
 
       {brokenCount > 0 ? (
         <div className="mb-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-[12px] text-textSecondary">
-          {brokenCount} item(s) missing a URL and were hidden.
+          {brokenCount} item(s) missing a renderable URL and were hidden.
         </div>
       ) : null}
 
@@ -69,9 +95,9 @@ export default async function ProMediaPage() {
             <MediaTile
               key={m.id}
               id={m.id}
-              src={m.src!}
+              src={m.src}
               caption={m.caption}
-              isFeaturedInPortfolio={Boolean(m.isFeaturedInPortfolio)}
+              isFeaturedInPortfolio={m.isFeaturedInPortfolio}
             />
           ))}
         </div>

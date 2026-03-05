@@ -8,10 +8,19 @@ import FavoriteButton from './FavoriteButton'
 import ShareButton from './ShareButton'
 import { moneyToString } from '@/lib/money'
 import { messageStartHref } from '@/lib/messages'
-import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
 import ServicesBookingOverlay from './ServicesBookingOverlay'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { MediaType, MediaVisibility } from '@prisma/client'
+import { pickString } from '@/lib/pick'
 
+function hasStoragePointers<T extends { storageBucket: unknown; storagePath: unknown }>(
+  m: T,
+): m is T & { storageBucket: string; storagePath: string } {
+  const b = pickString(m.storageBucket)
+  const p = pickString(m.storagePath)
+  return Boolean(b && p)
+}
 export const dynamic = 'force-dynamic'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
@@ -90,7 +99,19 @@ export default async function PublicProfessionalProfilePage({
         orderBy: { createdAt: 'desc' },
         take: 50,
         include: {
-          mediaAssets: true,
+          mediaAssets: {
+            select: {
+              id: true,
+              mediaType: true,
+              isFeaturedInPortfolio: true,
+              url: true,
+              thumbUrl: true,
+              storageBucket: true,
+              storagePath: true,
+              thumbBucket: true,
+              thumbPath: true,
+            },
+          },
           client: { include: { user: true } },
         },
       },
@@ -99,7 +120,7 @@ export default async function PublicProfessionalProfilePage({
 
   if (!pro) notFound()
 
-  // ✅ Visibility gate: pending/unapproved pros are only viewable by themselves
+  // Visibility gate: pending/unapproved pros are only viewable by themselves
   const isOwner = viewer?.role === 'PRO' && viewer?.professionalProfile?.id === pro.id
   const isApproved = pro.verificationStatus === 'APPROVED'
 
@@ -116,8 +137,6 @@ export default async function PublicProfessionalProfilePage({
             We’re verifying the professional’s license and details. Check back soon.
           </div>
         </div>
-
-      
       </main>
     )
   }
@@ -144,47 +163,112 @@ export default async function PublicProfessionalProfilePage({
       }))
     : false
 
+  // Client-facing portfolio: PUBLIC + featured only
   const portfolioMedia = await prisma.mediaAsset.findMany({
     where: {
       professionalId: pro.id,
-      visibility: 'PUBLIC',
+      visibility: MediaVisibility.PUBLIC,
       isFeaturedInPortfolio: true,
     },
     orderBy: { createdAt: 'desc' },
     take: 60,
-    include: { services: { include: { service: true } } },
+    select: {
+      id: true,
+      caption: true,
+      mediaType: true,
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+      url: true,
+      thumbUrl: true,
+    },
   })
+
+  // Build render-safe tiles (filter out any broken legacy rows)
+  const portfolioTiles = (
+    await Promise.all(
+      portfolioMedia.map(async (m) => {
+        if (!hasStoragePointers(m)) return null
+
+        const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+          storageBucket: m.storageBucket,
+          storagePath: m.storagePath,
+          thumbBucket: m.thumbBucket ?? null,
+          thumbPath: m.thumbPath ?? null,
+          url: m.url ?? null,
+          thumbUrl: m.thumbUrl ?? null,
+        })
+
+        const src = (renderThumbUrl ?? renderUrl ?? '').trim()
+        if (!src) return null
+
+        return {
+          id: m.id,
+          caption: m.caption ?? null,
+          mediaType: m.mediaType,
+          isVideo: m.mediaType === MediaType.VIDEO,
+          src,
+        }
+      }),
+    )
+  ).filter((x): x is NonNullable<typeof x> => Boolean(x))
 
   const displayName = pro.businessName || 'Beauty professional'
   const avatar = (pro.avatarUrl as string | null | undefined) || null
 
-  const reviewsForUI = (pro.reviews || []).map((rev: any) => {
-    const u = rev.client?.user
-    const clientName =
-      u?.name?.trim()
-        ? u.name.trim()
-        : u?.email?.trim()
-          ? u.email.trim()
-          : rev.client?.firstName
-            ? `${rev.client.firstName}${rev.client.lastName ? ` ${rev.client.lastName}` : ''}`
-            : 'Client'
+  // ReviewsPanel expects mediaAssets[].url as renderable string
+  const reviewsForUI = await Promise.all(
+    (pro.reviews || []).map(async (rev: any) => {
+      const u = rev.client?.user
+      const clientName =
+        u?.name?.trim()
+          ? u.name.trim()
+          : u?.email?.trim()
+            ? u.email.trim()
+            : rev.client?.firstName
+              ? `${rev.client.firstName}${rev.client.lastName ? ` ${rev.client.lastName}` : ''}`
+              : 'Client'
 
-    return {
-      id: rev.id,
-      rating: rev.rating,
-      headline: rev.headline ?? null,
-      body: rev.body ?? null,
-      createdAt: new Date(rev.createdAt).toISOString(),
-      clientName,
-      mediaAssets: (rev.mediaAssets || []).map((m: any) => ({
-        id: m.id,
-        url: m.url,
-        thumbUrl: m.thumbUrl ?? null,
-        mediaType: m.mediaType,
-        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-      })),
-    }
-  })
+      const mediaAssets = (
+        await Promise.all(
+          (rev.mediaAssets || []).map(async (m: any) => {
+            if (!hasStoragePointers(m)) return null
+
+            const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+              storageBucket: m.storageBucket,
+              storagePath: m.storagePath,
+              thumbBucket: m.thumbBucket ?? null,
+              thumbPath: m.thumbPath ?? null,
+              url: m.url ?? null,
+              thumbUrl: m.thumbUrl ?? null,
+            })
+
+            const url = (renderUrl ?? '').trim()
+            if (!url) return null
+
+            return {
+              id: m.id,
+              url,
+              thumbUrl: renderThumbUrl ?? null,
+              mediaType: m.mediaType,
+              isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+            }
+          }),
+        )
+      ).filter((x: any): x is NonNullable<typeof x> => Boolean(x))
+
+      return {
+        id: rev.id,
+        rating: rev.rating,
+        headline: rev.headline ?? null,
+        body: rev.body ?? null,
+        createdAt: new Date(rev.createdAt).toISOString(),
+        clientName,
+        mediaAssets,
+      }
+    }),
+  )
 
   const tabQS = activeTab === 'portfolio' ? '' : `?tab=${activeTab}`
   const fromPath = `/professionals/${pro.id}${tabQS}`
@@ -193,7 +277,6 @@ export default async function PublicProfessionalProfilePage({
   const mustLogin = !viewer
   const messageHref = mustLogin ? loginHref : messageStartHref({ kind: 'PRO_PROFILE', professionalId: pro.id })
 
-  // ✅ Display only (no fallback, no sanitize, no recreation)
   const proTimeZone = displayTimeZoneOrNull(pro.timeZone)
 
   const tabs = [
@@ -266,30 +349,26 @@ export default async function PublicProfessionalProfilePage({
 
       {activeTab === 'portfolio' ? (
         <section className="pt-4">
-          {portfolioMedia.length === 0 ? (
+          {portfolioTiles.length === 0 ? (
             <EmptyBox>No portfolio posts yet.</EmptyBox>
           ) : (
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
-              {portfolioMedia.map((m: any) => {
-                const src = m.thumbUrl || m.url
-                const isVideo = m.mediaType === 'VIDEO'
-                return (
-                  <Link
-                    key={m.id}
-                    href={`/media/${m.id}`}
-                    className="group relative block aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
-                    title={m.caption || 'Open'}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
-                    {isVideo ? (
-                      <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                        VIDEO
-                      </div>
-                    ) : null}
-                  </Link>
-                )
-              })}
+              {portfolioTiles.map((m) => (
+                <Link
+                  key={m.id}
+                  href={`/media/${m.id}`}
+                  className="group relative block aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
+                  title={m.caption || 'Open'}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
+                  {m.isVideo ? (
+                    <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                      VIDEO
+                    </div>
+                  ) : null}
+                </Link>
+              ))}
             </div>
           )}
         </section>

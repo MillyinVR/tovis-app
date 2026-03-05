@@ -8,6 +8,7 @@ import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { pickString } from '@/lib/pick'
 import { cn } from '@/lib/utils'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 
 type PageProps = {
   params: Promise<{ id: string }>
@@ -22,20 +23,41 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
     where: { id },
     select: {
       id: true,
-      url: true,
       caption: true,
       mediaType: true,
       visibility: true,
       professionalId: true,
       isEligibleForLooks: true,
       isFeaturedInPortfolio: true,
+
+      // ✅ canonical storage pointers
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+
+      // legacy/fallback only
+      url: true,
+      thumbUrl: true,
+
       services: { select: { serviceId: true, service: { select: { name: true } } } },
       _count: { select: { likes: true, comments: true } },
     },
   })
 
   if (!media || media.visibility !== 'PUBLIC') notFound()
-  if (!media.url) notFound()
+
+  // ✅ single source of truth for render URLs
+  const { renderUrl } = await renderMediaUrls({
+    storageBucket: media.storageBucket,
+    storagePath: media.storagePath,
+    thumbBucket: media.thumbBucket,
+    thumbPath: media.thumbPath,
+    url: media.url,
+    thumbUrl: media.thumbUrl,
+  })
+
+  if (!renderUrl) notFound()
 
   const viewer = await getCurrentUser().catch(() => null)
   const isOwner =
@@ -60,7 +82,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
 
   return (
     <MediaFullscreenViewer
-      src={media.url}
+      src={renderUrl}
       mediaType={isVideo ? 'VIDEO' : 'IMAGE'}
       alt={media.caption || 'Media'}
       fit="contain"

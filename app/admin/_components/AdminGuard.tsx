@@ -10,6 +10,10 @@ type Scope = {
   categoryId?: string | null
 }
 
+function loginHref(from: string, reason: 'LOGIN_REQUIRED' | 'ADMIN_REQUIRED') {
+  return `/login?from=${encodeURIComponent(from)}&reason=${encodeURIComponent(reason)}`
+}
+
 export default async function AdminGuard({
   children,
   allowedRoles,
@@ -21,9 +25,14 @@ export default async function AdminGuard({
   scope?: Scope
   from?: string
 }) {
+  const fromPath = from ?? '/admin'
+
   const user = await getCurrentUser().catch(() => null)
-  if (!user) redirect(`/login?from=${encodeURIComponent(from ?? '/admin')}`)
-  if (user.role !== 'ADMIN') redirect('/')
+  if (!user) redirect(loginHref(fromPath, 'LOGIN_REQUIRED'))
+
+  if (user.role !== 'ADMIN') {
+    redirect(loginHref(fromPath, 'ADMIN_REQUIRED'))
+  }
 
   if (allowedRoles?.length) {
     const ok = await hasAdminPermission({

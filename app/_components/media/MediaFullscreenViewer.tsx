@@ -3,6 +3,7 @@
 
 import React, { useEffect } from 'react'
 import { cn } from '@/lib/utils'
+
 type MediaType = 'IMAGE' | 'VIDEO'
 
 type Props = {
@@ -26,7 +27,6 @@ type Props = {
   footerOffsetPx?: number
 }
 
-
 export default function MediaFullscreenViewer({
   src,
   mediaType,
@@ -41,6 +41,7 @@ export default function MediaFullscreenViewer({
   footerOffsetPx = 0,
 }: Props) {
   const objectClass = fit === 'cover' ? 'object-cover' : 'object-contain'
+  const safeSrc = (src || '').trim()
 
   // ✅ Stop the page behind it from scrolling (especially iOS)
   useEffect(() => {
@@ -67,16 +68,27 @@ export default function MediaFullscreenViewer({
     }
   }, [])
 
+  // ✅ Guard: never render broken media elements
+  if (!safeSrc) {
+    return (
+      <main className={cn('fixed inset-0 z-[9990] grid place-items-center bg-black', className || '')}>
+        <div className="rounded-card border border-white/10 bg-bgPrimary/40 px-4 py-3 text-sm font-semibold text-textSecondary">
+          Missing media URL.
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className={cn('fixed inset-0 z-[9990] overflow-hidden bg-black', className || '')}>
       {/* MEDIA LAYER */}
       <div className="absolute inset-0">
         {mediaType === 'VIDEO' ? (
-          <video src={src} controls playsInline preload="metadata" className={cn('h-full w-full', objectClass)} />
+          <video src={safeSrc} controls playsInline preload="metadata" className={cn('h-full w-full', objectClass)} />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={src}
+            src={safeSrc}
             alt={alt || 'Media'}
             draggable={false}
             loading="eager"
@@ -110,12 +122,12 @@ export default function MediaFullscreenViewer({
         {/* Center floating UI */}
         {center ? <div className="pointer-events-auto absolute inset-0 z-20">{center}</div> : null}
 
-        {/* Bottom overlay: ✅ anchor ABOVE the app footer */}
+        {/* Bottom overlay: anchor ABOVE the app footer */}
         {bottom ? (
           <div
             className="absolute inset-x-0 z-20 px-4"
             style={{
-              bottom: footerOffsetPx, // ✅ this is the real TikTok-style fix
+              bottom: footerOffsetPx,
               paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
             }}
           >

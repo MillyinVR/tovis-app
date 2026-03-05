@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
@@ -26,6 +26,9 @@ type Props = {
   mediaId: string | null
   addOns: AddOnDTO[]
   initialError?: string | null
+
+  // ✅ server-hydrated selection
+  initialSelectedIds?: string[]
 }
 
 function formatMinutes(min: number) {
@@ -42,6 +45,42 @@ function formatMoneyLabel(v: string) {
   return `$${v}`
 }
 
+function parseCommaIds(raw: string | null, max: number): string[] {
+  if (!raw) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const part of raw.split(',')) {
+    const s = part.trim()
+    if (!s) continue
+    if (seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+function buildRecommendedMap(addOns: AddOnDTO[]): Record<string, boolean> {
+  const next: Record<string, boolean> = {}
+  for (const a of addOns) if (a.isRecommended) next[a.id] = true
+  return next
+}
+
+function buildSelectedMapFromIds(addOns: AddOnDTO[], ids: string[]): Record<string, boolean> {
+  const allowed = new Set(addOns.map((a) => a.id))
+  const next: Record<string, boolean> = {}
+  for (const id of ids) if (allowed.has(id)) next[id] = true
+  return next
+}
+
+function selectedIdsFromMap(selected: Record<string, boolean>): string[] {
+  return Object.keys(selected).filter((k) => Boolean(selected[k]))
+}
+
+function keyFromIds(ids: string[]) {
+  return ids.slice().sort().join(',')
+}
+
 export default function AddOnsClient({
   holdId,
   offeringId,
@@ -50,24 +89,40 @@ export default function AddOnsClient({
   mediaId,
   addOns,
   initialError,
+  initialSelectedIds,
 }: Props) {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const searchStr = searchParams.toString()
+  const urlHasAddOnIds = useMemo(() => {
+    return Boolean(searchParams.get('addOnIds')?.trim())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchStr])
 
   const [error, setError] = useState<string | null>(initialError ?? null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Optional hold countdown
-  const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null)
+  // Track whether user interacted (prevents URL “pollution” on initial load)
+  const [touched, setTouched] = useState(false)
 
+  // Optional hold countdown (fixed cleanup)
+  const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null)
   useEffect(() => {
-    if (!holdId) return
-    let alive = true
+    if (!holdId) {
+      setHoldSecondsLeft(null)
+      return
+    }
+
+    let cancelled = false
+    let intervalId: number | null = null
 
     ;(async () => {
       try {
         const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { cache: 'no-store' })
         const body = await res.json().catch(() => ({}))
-        if (!alive) return
+        if (cancelled) return
         if (!res.ok || !body?.ok) return
 
         const expiresAt = typeof body?.hold?.expiresAt === 'string' ? new Date(body.hold.expiresAt) : null
@@ -80,44 +135,74 @@ export default function AddOnsClient({
         }
 
         tick()
-        const t = window.setInterval(tick, 500)
-        return () => window.clearInterval(t)
+        intervalId = window.setInterval(tick, 500)
       } catch {
         // ignore
       }
     })()
 
     return () => {
-      alive = false
+      cancelled = true
+      if (intervalId != null) window.clearInterval(intervalId)
     }
   }, [holdId])
 
-  const defaultSelected = useMemo(() => {
-    const next: Record<string, boolean> = {}
-    for (const a of addOns) if (a.isRecommended) next[a.id] = true
-    return next
-  }, [addOns])
+  const recommendedMap = useMemo(() => buildRecommendedMap(addOns), [addOns])
 
-  const [selected, setSelected] = useState<Record<string, boolean>>(defaultSelected)
+  const urlSelectedIds = useMemo(() => {
+    const raw = searchParams.get('addOnIds')
+    return parseCommaIds(raw, 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchStr])
 
-  // if addOns changes (rare), reset defaults once
+  const initialSelectedMap = useMemo(() => {
+    if (Array.isArray(initialSelectedIds) && initialSelectedIds.length) {
+      return buildSelectedMapFromIds(addOns, initialSelectedIds)
+    }
+    if (urlSelectedIds.length) return buildSelectedMapFromIds(addOns, urlSelectedIds)
+    return recommendedMap
+  }, [addOns, initialSelectedIds, urlSelectedIds, recommendedMap])
+
+  const [selected, setSelected] = useState<Record<string, boolean>>(initialSelectedMap)
+
+  // Re-hydrate if server re-renders (or addOns list changes)
   useEffect(() => {
-    setSelected(defaultSelected)
-  }, [defaultSelected])
+    setSelected((cur) => {
+      const curKey = keyFromIds(selectedIdsFromMap(cur))
+      const nextKey = keyFromIds(selectedIdsFromMap(initialSelectedMap))
+      return curKey === nextKey ? cur : initialSelectedMap
+    })
+  }, [initialSelectedMap])
 
-  const selectedIds = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected])
+  const selectedIds = useMemo(() => selectedIdsFromMap(selected), [selected])
+  const selectedKey = useMemo(() => keyFromIds(selectedIds), [selectedIds])
+
+  // Keep URL in sync ONLY after user interaction, or if URL already had addOnIds
+  useEffect(() => {
+    if (!pathname) return
+    if (!touched && !urlHasAddOnIds) return
+
+    const currentKey = keyFromIds(parseCommaIds(searchParams.get('addOnIds'), 50))
+    if (currentKey === selectedKey) return
+
+    const qs = new URLSearchParams(searchParams.toString())
+    if (selectedIds.length) qs.set('addOnIds', selectedKey)
+    else qs.delete('addOnIds')
+
+    const nextHref = qs.toString() ? `${pathname}?${qs.toString()}` : pathname
+    router.replace(nextHref, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, selectedKey, selectedIds.length, touched, urlHasAddOnIds])
 
   const totals = useMemo(() => {
     let centsLike = 0
     let minutes = 0
-
     for (const a of addOns) {
       if (!selected[a.id]) continue
       const price = Number(a.price ?? 0)
       if (Number.isFinite(price)) centsLike += Math.round(price * 100)
       minutes += Number(a.minutes ?? 0) || 0
     }
-
     return { extraPrice: centsLike / 100, extraMinutes: minutes }
   }, [addOns, selected])
 
@@ -158,18 +243,25 @@ export default function AddOnsClient({
           locationType,
           source,
           mediaId,
-          addOnIds: selectedIds, // ✅ OfferingAddOn.id[]
+          addOnIds: selectedIds,
         }),
       })
 
       const body = await res.json().catch(() => ({}))
 
       if (res.status === 401) {
-        const from = `/booking/add-ons?holdId=${encodeURIComponent(holdId)}&offeringId=${encodeURIComponent(
+        // ✅ preserve selection through login redirect (always)
+        const fromQs = new URLSearchParams({
+          holdId,
           offeringId,
-        )}&locationType=${encodeURIComponent(locationType)}&source=${encodeURIComponent(source)}${
-          mediaId ? `&mediaId=${encodeURIComponent(mediaId)}` : ''
-        }`
+          locationType,
+          source,
+        })
+
+        if (mediaId) fromQs.set('mediaId', mediaId)
+        if (selectedIds.length) fromQs.set('addOnIds', selectedKey)
+
+        const from = `/booking/add-ons?${fromQs.toString()}`
         router.push(`/login?from=${encodeURIComponent(from)}&reason=finalize`)
         return
       }
@@ -186,8 +278,8 @@ export default function AddOnsClient({
       }
 
       router.push(`/booking/${encodeURIComponent(bookingId)}`)
-    } catch (e: any) {
-      setError(e?.message || 'Network error completing booking.')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Network error completing booking.')
     } finally {
       setSubmitting(false)
     }
@@ -234,9 +326,7 @@ export default function AddOnsClient({
         </button>
       </div>
 
-      {error ? (
-        <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-toneDanger">{error}</div>
-      ) : null}
+      {error ? <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-toneDanger">{error}</div> : null}
 
       {!error && addOns.length === 0 ? (
         <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-textSecondary">
@@ -258,7 +348,10 @@ export default function AddOnsClient({
                     <button
                       key={a.id}
                       type="button"
-                      onClick={() => setSelected((prev) => ({ ...prev, [a.id]: !prev[a.id] }))}
+                      onClick={() => {
+                        setTouched(true)
+                        setSelected((prev) => ({ ...prev, [a.id]: !prev[a.id] }))
+                      }}
                       className={[
                         'rounded-card border px-4 py-3 text-left transition',
                         'border-white/10',
@@ -335,7 +428,6 @@ export default function AddOnsClient({
         </div>
       ) : null}
 
-      {/* Sticky bottom CTA */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-bgPrimary/70 backdrop-blur">
         <div className="mx-auto max-w-180 px-4 py-3">
           <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3">

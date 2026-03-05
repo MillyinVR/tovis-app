@@ -4,12 +4,39 @@
 import type { FeedItem } from './lookTypes'
 import MediaFill from '@/app/_components/media/MediaFill'
 
-export default function LookMedia({ item, isActive }: { item: FeedItem; isActive: boolean }) {
+type FeedItemWithRender = FeedItem & {
+  renderUrl?: string | null
+  renderThumbUrl?: string | null
+}
+
+function pickNonEmpty(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+export default function LookMedia({ item, isActive }: { item: FeedItemWithRender; isActive: boolean }) {
   const mediaType = item.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'
+
+  const renderUrl = pickNonEmpty(item.renderUrl)
+  const renderThumbUrl = pickNonEmpty(item.renderThumbUrl)
+  const legacyUrl = pickNonEmpty((item as FeedItem).url) // legacy fallback only
+
+  // Images should prefer thumb when available
+  const src =
+    mediaType === 'VIDEO'
+      ? (renderUrl ?? legacyUrl)
+      : (renderThumbUrl ?? renderUrl ?? legacyUrl)
+
+  if (!src) {
+    return (
+      <div className="grid h-full w-full place-items-center bg-bgPrimary/30 text-[12px] font-black text-textSecondary">
+        Missing media URL
+      </div>
+    )
+  }
 
   return (
     <MediaFill
-      src={item.url}
+      src={src}
       mediaType={mediaType}
       alt={item.caption || 'Look'}
       fit="cover"
@@ -17,8 +44,10 @@ export default function LookMedia({ item, isActive }: { item: FeedItem; isActive
         muted: true,
         loop: true,
         playsInline: true,
-        controls: true,
-        preload: 'metadata',
+        // feed UX: don’t show controls unless active
+        controls: Boolean(isActive),
+        preload: isActive ? 'auto' : 'metadata',
+        autoPlay: Boolean(isActive),
         'data-active': isActive ? '1' : '0',
       }}
       imgProps={{

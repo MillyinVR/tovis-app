@@ -6,16 +6,18 @@ import MediaFill from '@/app/_components/media/MediaFill'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { cn } from '@/lib/utils'
+
 type Item = {
   id: string
   mediaType: 'IMAGE' | 'VIDEO'
   caption: string | null
   createdAt: string | Date
   reviewId: string | null
-  signedUrl: string | null
-  signedThumbUrl: string | null
-}
 
+  // ✅ single source of truth for UI rendering
+  renderUrl: string | null
+  renderThumbUrl: string | null
+}
 
 function fmtDate(v: unknown) {
   try {
@@ -27,13 +29,7 @@ function fmtDate(v: unknown) {
   }
 }
 
-export default function MediaPreviewGrid({
-  items,
-  title,
-}: {
-  items: Item[]
-  title: string
-}) {
+export default function MediaPreviewGrid({ items, title }: { items: Item[]; title: string }) {
   const [openId, setOpenId] = useState<string | null>(null)
 
   const active = useMemo(() => items.find((x) => x.id === openId) ?? null, [items, openId])
@@ -49,8 +45,8 @@ export default function MediaPreviewGrid({
       ) : (
         <div className="mt-3 grid gap-3">
           {items.map((m) => {
-            const previewSrc = m.signedThumbUrl || m.signedUrl
-            const openSrc = m.signedUrl || m.signedThumbUrl
+            const previewSrc = m.renderThumbUrl || m.renderUrl
+            const openSrc = m.renderUrl || m.renderThumbUrl
             const when = fmtDate(m.createdAt)
             const wasReleased = Boolean(m.reviewId)
 
@@ -81,7 +77,6 @@ export default function MediaPreviewGrid({
                         fit="cover"
                         className="absolute inset-0 h-full w-full"
                         videoProps={{
-                          // previews should not blast audio or go fullscreen randomly
                           muted: true,
                           playsInline: true,
                           preload: 'metadata',
@@ -92,7 +87,7 @@ export default function MediaPreviewGrid({
                   </button>
                 ) : (
                   <div className="mt-2 rounded-card border border-white/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
-                    Couldn’t generate a signed URL (file missing or storage error).
+                    Couldn’t generate a render URL (file missing or storage error).
                   </div>
                 )}
 
@@ -105,7 +100,9 @@ export default function MediaPreviewGrid({
                 </div>
 
                 <div className="mt-2 text-[11px] font-semibold text-textSecondary">
-                  {wasReleased ? 'Client attached this to a review (released).' : 'Stays private unless the client attaches it to a review.'}
+                  {wasReleased
+                    ? 'Client attached this to a review (released).'
+                    : 'Stays private unless the client attaches it to a review.'}
                 </div>
               </div>
             )
@@ -113,9 +110,9 @@ export default function MediaPreviewGrid({
         </div>
       )}
 
-      {active?.signedUrl ? (
+      {active?.renderUrl ? (
         <MediaFullscreenViewer
-          src={active.signedUrl}
+          src={active.renderUrl}
           mediaType={active.mediaType}
           alt={active.caption || 'Media'}
           fit="contain"

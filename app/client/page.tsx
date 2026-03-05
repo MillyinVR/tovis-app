@@ -5,7 +5,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import LastMinuteOpenings from './components/LastMinuteOpenings'
 import PendingConsultApprovalBanner from './components/PendingConsultApprovalBanner'
 import ClientBookingsHeroCards from './ClientBookingsHeroCards'
-
+import LogoutButton from './components/LogoutButton'
 export const dynamic = 'force-dynamic'
 
 export default async function ClientDashboardPage() {
@@ -18,10 +18,14 @@ export default async function ClientDashboardPage() {
 
   return (
     <main className="mx-auto mt-16 w-full max-w-5xl px-4 pb-12 text-textPrimary">
-      <header className="mb-6">
-        <h1 className="text-2xl font-black tracking-tight">Your calendar</h1>
-        <p className="mt-1 text-sm font-semibold text-textSecondary">Welcome, {displayName}.</p>
-      </header>
+      <header className="mb-6 flex items-start justify-between gap-3">
+  <div>
+    <h1 className="text-2xl font-black tracking-tight">Your calendar</h1>
+    <p className="mt-1 text-sm font-semibold text-textSecondary">Welcome, {displayName}.</p>
+  </div>
+
+  <LogoutButton />
+</header>
 
       <div className="grid gap-4">
         <PendingConsultApprovalBanner />

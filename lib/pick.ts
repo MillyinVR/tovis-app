@@ -17,6 +17,7 @@ export function pickNonEmptyString(v: unknown): string | null {
   return pickString(v)
 }
 
+
 export function pickNumber(v: unknown): number | null {
   const n =
     typeof v === 'number'

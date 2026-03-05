@@ -1,3 +1,4 @@
+// app/pro/bookings/[id]/session/before-photos/page.tsx
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { headers } from 'next/headers'
@@ -20,8 +21,8 @@ type ApiMediaItem = {
   caption: string | null
   createdAt: string | Date
   reviewId: string | null
-  signedUrl: string | null
-  signedThumbUrl: string | null
+  renderUrl: string | null
+  renderThumbUrl: string | null
 }
 
 
@@ -56,7 +57,21 @@ async function fetchBeforeMedia(bookingId: string): Promise<ApiMediaItem[]> {
 
   if (!res?.ok) return []
   const data = (await res.json().catch(() => ({}))) as any
-  return (Array.isArray(data?.items) ? data.items : []) as ApiMediaItem[]
+  const items = Array.isArray(data?.items) ? data.items : []
+
+  return items.map((m: any) => ({
+    id: String(m?.id || ''),
+    mediaType: m?.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE',
+    caption: typeof m?.caption === 'string' ? m.caption : null,
+    createdAt: m?.createdAt ?? new Date().toISOString(),
+    reviewId: typeof m?.reviewId === 'string' ? m.reviewId : null,
+
+    // ✅ canonical render fields (Option A)
+    renderUrl: typeof m?.renderUrl === 'string' ? m.renderUrl : typeof m?.url === 'string' ? m.url : null,
+    renderThumbUrl:
+      typeof m?.renderThumbUrl === 'string' ? m.renderThumbUrl : typeof m?.thumbUrl === 'string' ? m.thumbUrl : null,
+  }))
+  .filter((m: ApiMediaItem) => Boolean(m.id))
 }
 
 type PageProps = { params: Promise<{ id: string }> }

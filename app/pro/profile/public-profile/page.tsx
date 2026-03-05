@@ -11,6 +11,10 @@ import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import ProAccountMenu from './ProAccountMenu'
 import ServicesManagerSection from '../_sections/ServicesManagerSection'
 
+import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { pickString } from '@/lib/pick'
+import { MediaVisibility, MediaType } from '@prisma/client'
+
 export const dynamic = 'force-dynamic'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
@@ -31,7 +35,6 @@ function pickTab(resolved: SearchParams | undefined): TabKey {
       : Array.isArray(resolved?.tab)
         ? resolved.tab[0]
         : undefined
-
   return raw === 'services' || raw === 'reviews' ? raw : 'portfolio'
 }
 
@@ -47,6 +50,12 @@ function formatClientName(input: { userEmail?: string | null; firstName?: string
 
 function pickNonEmptyString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
+}
+
+function hasStoragePointers(m: { storageBucket: unknown; storagePath: unknown }): m is { storageBucket: string; storagePath: string } {
+  const b = pickString(m.storageBucket)
+  const p = pickString(m.storagePath)
+  return Boolean(b && p)
 }
 
 export default async function ProPublicProfilePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -79,10 +88,19 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           headline: true,
           body: true,
           createdAt: true,
-          // ✅ keep the DB-level filter (good), but TS still needs a runtime guard later
           mediaAssets: {
-            where: { url: { not: null } },
-            select: { id: true, url: true, thumbUrl: true, mediaType: true, isFeaturedInPortfolio: true },
+            // ✅ single source of truth: storage pointers (no url filter)
+            select: {
+              id: true,
+              mediaType: true,
+              isFeaturedInPortfolio: true,
+              storageBucket: true,
+              storagePath: true,
+              thumbBucket: true,
+              thumbPath: true,
+              url: true,
+              thumbUrl: true,
+            },
           },
           client: {
             select: {
@@ -100,18 +118,31 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
   const [portfolioMedia, favoritesCount, serviceOptions] = await Promise.all([
     prisma.mediaAsset.findMany({
-      where: { professionalId: pro.id },
+      // ✅ Pro’s portfolio tab should show what’s marked as portfolio (even if PRO_CLIENT)
+      where: {
+        professionalId: pro.id,
+        isFeaturedInPortfolio: true,
+      },
       orderBy: { createdAt: 'desc' },
       take: 120,
       select: {
         id: true,
-        url: true,
-        thumbUrl: true,
         caption: true,
         mediaType: true,
         visibility: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
+
+        // canonical
+        storageBucket: true,
+        storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
+
+        // legacy fallback (renderUrls uses only if already http)
+        url: true,
+        thumbUrl: true,
+
         services: { select: { serviceId: true } },
       },
     }),
@@ -130,40 +161,92 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
       ? (pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount).toFixed(1)
       : null
 
-  // ✅ IMPORTANT: ReviewsPanel expects mediaAssets[].url to be string (non-null)
-  // Prisma types may still say `string | null`, so we guard + narrow here.
-  const reviewsForUI = pro.reviews.map((rev) => {
-    const clientName = formatClientName({
-      userEmail: rev.client?.user?.email ?? null,
-      firstName: rev.client?.firstName ?? null,
-      lastName: rev.client?.lastName ?? null,
-    })
+  // ✅ ReviewsPanel wants renderable URLs
+  const reviewsForUI = await Promise.all(
+    pro.reviews.map(async (rev) => {
+      const clientName = formatClientName({
+        userEmail: rev.client?.user?.email ?? null,
+        firstName: rev.client?.firstName ?? null,
+        lastName: rev.client?.lastName ?? null,
+      })
 
-    const mediaAssetsForUI = (rev.mediaAssets || [])
-      .map((m) => ({
-        id: m.id,
-        url: typeof m.url === 'string' ? m.url.trim() : '',
-        thumbUrl: m.thumbUrl ?? null,
-        mediaType: m.mediaType,
-        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-      }))
-      .filter((m) => m.url.length > 0)
+      const mediaAssetsForUI = (
+        await Promise.all(
+          (rev.mediaAssets || []).map(async (m) => {
+            if (!hasStoragePointers(m)) return null
 
-    return {
-      id: rev.id,
-      rating: rev.rating,
-      headline: rev.headline ?? null,
-      body: rev.body ?? null,
-      createdAt: new Date(rev.createdAt).toISOString(),
-      clientName,
-      mediaAssets: mediaAssetsForUI,
-    }
-  })
+            const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+              storageBucket: m.storageBucket,
+              storagePath: m.storagePath,
+              thumbBucket: m.thumbBucket,
+              thumbPath: m.thumbPath,
+              url: m.url,
+              thumbUrl: m.thumbUrl,
+            })
+
+            const url = (renderUrl ?? '').trim()
+            if (!url) return null
+
+            return {
+              id: m.id,
+              url,
+              thumbUrl: renderThumbUrl ?? null,
+              mediaType: m.mediaType,
+              isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+            }
+          }),
+        )
+      ).filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+      return {
+        id: rev.id,
+        rating: rev.rating,
+        headline: rev.headline ?? null,
+        body: rev.body ?? null,
+        createdAt: new Date(rev.createdAt).toISOString(),
+        clientName,
+        mediaAssets: mediaAssetsForUI,
+      }
+    }),
+  )
 
   const publicUrl = `/professionals/${pro.id}`
   const displayName = pro.businessName?.trim() || 'Your business name'
   const subtitle = pro.professionType || 'Beauty professional'
   const location = pro.location?.trim() || null
+
+  // ✅ Portfolio tiles: render-safe src
+  const portfolioTiles = (
+    await Promise.all(
+      portfolioMedia.map(async (m) => {
+        if (!hasStoragePointers(m)) return null
+
+        const { renderUrl, renderThumbUrl } = await renderMediaUrls({
+          storageBucket: m.storageBucket,
+          storagePath: m.storagePath,
+          thumbBucket: m.thumbBucket,
+          thumbPath: m.thumbPath,
+          url: m.url,
+          thumbUrl: m.thumbUrl,
+        })
+
+        const src = (renderThumbUrl ?? renderUrl ?? '').trim()
+        if (!src) return null
+
+        const serviceIds = (m.services ?? [])
+          .map((s) => pickNonEmptyString(s.serviceId))
+          .filter((id): id is string => id.length > 0)
+
+        return {
+          ...m,
+          src,
+          serviceIds,
+          isVideo: m.mediaType === MediaType.VIDEO,
+          isPrivate: m.visibility === MediaVisibility.PRO_CLIENT,
+        }
+      }),
+    )
+  ).filter((x): x is NonNullable<typeof x> => Boolean(x))
 
   return (
     <main className="mx-auto max-w-5xl pb-6 font-sans">
@@ -290,71 +373,53 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
               </div>
             </Link>
 
-            {portfolioMedia.map((m) => {
-              // ✅ img src must be string | undefined (NOT null)
-              const src = pickNonEmptyString(m.thumbUrl) || pickNonEmptyString(m.url) || undefined
+            {portfolioTiles.map((m) => (
+              <div
+                key={m.id}
+                className="group relative aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
+                title={m.caption || 'Open'}
+              >
+                <Link href={`/media/${m.id}`} className="absolute inset-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
+                </Link>
 
-              const isVideo = m.mediaType === 'VIDEO'
-              const isPrivate = m.visibility === 'PRO_CLIENT'
-
-              const serviceIds = (m.services ?? [])
-                .map((s) => pickNonEmptyString(s.serviceId))
-                .filter((id): id is string => id.length > 0)
-
-              return (
-                <div
-                  key={m.id}
-                  className="group relative aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
-                  title={m.caption || 'Open'}
-                >
-                  <Link href={`/media/${m.id}`} className="absolute inset-0">
-                    {src ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="grid h-full w-full place-items-center bg-bgPrimary/30 text-[12px] font-black text-textSecondary">
-                        Missing media URL
-                      </div>
-                    )}
-                  </Link>
-
-                  <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1.5">
-                    {isPrivate ? (
-                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">ONLY YOU</span>
-                    ) : null}
-                    {m.isEligibleForLooks ? (
-                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">LOOKS</span>
-                    ) : null}
-                    {m.isFeaturedInPortfolio ? (
-                      <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">PORTFOLIO</span>
-                    ) : null}
-                  </div>
-
-                  {isVideo ? (
-                    <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                      VIDEO
-                    </div>
+                <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1.5">
+                  {m.isPrivate ? (
+                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">ONLY YOU</span>
                   ) : null}
-
-                  <div className="absolute left-2 top-2 z-10 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
-                    <OwnerMediaMenu
-                      mediaId={m.id}
-                      serviceOptions={serviceOptions}
-                      initial={{
-                        caption: m.caption ?? null,
-                        visibility: m.visibility,
-                        isEligibleForLooks: Boolean(m.isEligibleForLooks),
-                        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-                        serviceIds,
-                      }}
-                    />
-                  </div>
+                  {m.isEligibleForLooks ? (
+                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">LOOKS</span>
+                  ) : null}
+                  {m.isFeaturedInPortfolio ? (
+                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">PORTFOLIO</span>
+                  ) : null}
                 </div>
-              )
-            })}
+
+                {m.isVideo ? (
+                  <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                    VIDEO
+                  </div>
+                ) : null}
+
+                <div className="absolute left-2 top-2 z-10 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+                  <OwnerMediaMenu
+                    mediaId={m.id}
+                    serviceOptions={serviceOptions}
+                    initial={{
+                      caption: m.caption ?? null,
+                      visibility: m.visibility,
+                      isEligibleForLooks: Boolean(m.isEligibleForLooks),
+                      isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+                      serviceIds: m.serviceIds,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
 
-          {portfolioMedia.length === 0 ? (
+          {portfolioTiles.length === 0 ? (
             <div className="mt-3 text-[12px] text-textSecondary">No posts yet. Go ahead—feed the algorithm.</div>
           ) : null}
         </section>

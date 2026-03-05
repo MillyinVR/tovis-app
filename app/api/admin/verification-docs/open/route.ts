@@ -1,27 +1,17 @@
 // app/api/admin/verification-docs/open/route.ts
+import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { AdminPermissionRole, Role } from '@prisma/client'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { parseSupabasePointer, safeUrl } from '@/lib/media'
 
 export const dynamic = 'force-dynamic'
 
 function trimId(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
-}
-
-function parseSupabaseRef(input: string): { bucket: string; path: string } | null {
-  const s = input.trim()
-  if (!s.startsWith('supabase://')) return null
-  const rest = s.slice('supabase://'.length)
-  const idx = rest.indexOf('/')
-  if (idx <= 0) return null
-  const bucket = rest.slice(0, idx).trim()
-  const path = rest.slice(idx + 1).trim()
-  if (!bucket || !path) return null
-  return { bucket, path }
 }
 
 export async function GET(req: Request) {
@@ -52,23 +42,24 @@ export async function GET(req: Request) {
     })
     if (!perm.ok) return perm.res
 
-    const href = (doc.url ?? doc.imageUrl ?? '').trim()
-    if (!href) return jsonFail(404, 'Document has no URL.')
+    const hrefRaw = (doc.url ?? doc.imageUrl ?? '').trim()
+    if (!hrefRaw) return jsonFail(404, 'Document has no URL.')
 
-    const ref = parseSupabaseRef(href)
-    if (ref) {
+    // ✅ Single parsing logic: handles supabase://... AND real storage URLs
+    const ptr = parseSupabasePointer(hrefRaw)
+    if (ptr) {
       const admin = getSupabaseAdmin()
-      const { data, error } = await admin.storage.from(ref.bucket).createSignedUrl(ref.path, 60 * 10) // 10 min
+      const { data, error } = await admin.storage.from(ptr.bucket).createSignedUrl(ptr.path, 60 * 10) // 10 min
       if (error) return jsonFail(500, error.message || 'Failed to sign URL.')
-      const signedUrl = (data as { signedUrl?: string } | null)?.signedUrl ?? null
-      if (!signedUrl) return jsonFail(500, 'Signed URL missing.')
-      return Response.redirect(signedUrl, 302)
+
+      const signed = safeUrl((data as { signedUrl?: unknown } | null)?.signedUrl)
+      if (!signed) return jsonFail(500, 'Signed URL missing.')
+      return NextResponse.redirect(signed, 302)
     }
 
-    // Allow only http(s) redirects for non-supabase URLs (avoid weird open redirects)
-    if (href.startsWith('https://') || href.startsWith('http://')) {
-      return Response.redirect(href, 302)
-    }
+    // ✅ Non-supabase URLs: only allow http(s)
+    const href = safeUrl(hrefRaw)
+    if (href) return NextResponse.redirect(href, 302)
 
     return jsonFail(400, 'Unsupported document URL format.')
   } catch (e) {

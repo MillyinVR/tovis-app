@@ -1,5 +1,4 @@
 // app/(main)/booking/add-ons/page.tsx
-import { Suspense } from 'react'
 import { headers } from 'next/headers'
 import AddOnsClient from './ui/AddOnsClient'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
@@ -21,7 +20,6 @@ type AddOnDTO = {
   isRecommended: boolean
 }
 
-// ✅ Discriminated union aligned with jsonOk/jsonFail outputs
 type AddOnsApiOk = {
   ok: true
   addOns?: AddOnDTO[]
@@ -59,8 +57,24 @@ function normalizeSource(v: string | null): BookingSource {
   return 'REQUESTED'
 }
 
+function parseCommaIds(raw: string | null, max: number): string[] {
+  if (!raw) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const part of raw.split(',')) {
+    const s = part.trim()
+    if (!s) continue
+    if (seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+    if (out.length >= max) break
+  }
+
+  return out
+}
+
 async function getRequestOrigin() {
-  // In your Next version, headers() is async
   const h = await headers()
   const host = h.get('x-forwarded-host') ?? h.get('host')
   const proto = h.get('x-forwarded-proto') ?? 'http'
@@ -93,8 +107,7 @@ function parseAddOnsApiResponse(x: unknown): AddOnsApiResponse | null {
   const ok = x.ok
   if (ok === true) {
     const addOnsRaw = x.addOns
-    const addOns =
-      Array.isArray(addOnsRaw) ? addOnsRaw.map(coerceAddOn).filter(Boolean) as AddOnDTO[] : undefined
+    const addOns = Array.isArray(addOnsRaw) ? (addOnsRaw.map(coerceAddOn).filter(Boolean) as AddOnDTO[]) : undefined
 
     const offeringId = typeof x.offeringId === 'string' ? x.offeringId : undefined
     const locationType = x.locationType === 'MOBILE' || x.locationType === 'SALON' ? x.locationType : undefined
@@ -117,11 +130,17 @@ async function fetchAddOns(args: { offeringId: string; locationType: ServiceLoca
   const origin = await getRequestOrigin()
   const url = origin ? `${origin}/api/offerings/add-ons?${qs.toString()}` : `/api/offerings/add-ons?${qs.toString()}`
 
+  const h = await headers()
+  const cookie = h.get('cookie') ?? ''
+
   let res: Response
   try {
     res = await fetch(url, {
       cache: 'no-store',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
     })
   } catch (err: unknown) {
     console.error('fetchAddOns network error:', err)
@@ -131,13 +150,11 @@ async function fetchAddOns(args: { offeringId: string; locationType: ServiceLoca
   const body = await safeJsonRecord(res)
   const parsed = parseAddOnsApiResponse(body)
 
-  // Non-2xx: try to surface the server error message if present
   if (!res.ok) {
     if (parsed && parsed.ok === false) return { ok: false, error: parsed.error }
     return { ok: false, error: readErrorMessage(body) ?? `Failed to load add-ons (${res.status}).` }
   }
 
-  // 2xx but malformed / unexpected
   if (!parsed || parsed.ok !== true) {
     return { ok: false, error: readErrorMessage(body) ?? 'Failed to load add-ons.' }
   }
@@ -158,6 +175,9 @@ export default async function BookingAddOnsPage({
   const source = normalizeSource(cleanString(pickOne(sp.source) ?? null))
   const mediaId = cleanString(pickOne(sp.mediaId) ?? null)
 
+  const urlAddOnIdsRaw = cleanString(pickOne(sp.addOnIds) ?? null)
+  const urlAddOnIds = parseCommaIds(urlAddOnIdsRaw, 50)
+
   let addOns: AddOnDTO[] = []
   let initialError: string | null = null
 
@@ -169,25 +189,30 @@ export default async function BookingAddOnsPage({
     else addOns = res.addOns
   }
 
+  // ✅ server-hydrate initial selection (prevents client flicker)
+  const initialSelectedIds = (() => {
+    if (!addOns.length) return []
+
+    const allowed = new Set(addOns.map((a) => a.id))
+    const filteredFromUrl = urlAddOnIds.filter((id) => allowed.has(id))
+
+    if (filteredFromUrl.length) return filteredFromUrl
+
+    // If URL has nothing valid, fall back to recommended defaults
+    const recommended = addOns.filter((a) => a.isRecommended).map((a) => a.id)
+    return recommended
+  })()
+
   return (
-    <Suspense
-      fallback={
-        <main className="mx-auto max-w-180 px-4 pb-24 pt-10 text-textPrimary">
-          <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-textSecondary">
-            Loading add-ons…
-          </div>
-        </main>
-      }
-    >
-      <AddOnsClient
-        holdId={holdId}
-        offeringId={offeringId}
-        locationType={locationType}
-        source={source}
-        mediaId={mediaId}
-        addOns={addOns}
-        initialError={initialError}
-      />
-    </Suspense>
+    <AddOnsClient
+      holdId={holdId}
+      offeringId={offeringId}
+      locationType={locationType}
+      source={source}
+      mediaId={mediaId}
+      addOns={addOns}
+      initialError={initialError}
+      initialSelectedIds={initialSelectedIds}
+    />
   )
 }

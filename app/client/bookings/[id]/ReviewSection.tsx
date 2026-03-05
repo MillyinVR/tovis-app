@@ -42,7 +42,15 @@ type PendingUpload = {
   localUrl: string
   status: 'QUEUED' | 'UPLOADING' | 'UPLOADED' | 'ERROR'
   error?: string | null
-  publicUrl?: string | null
+
+  // ✅ canonical (SSOT)
+  storageBucket?: string | null
+  storagePath?: string | null
+  thumbBucket?: string | null
+  thumbPath?: string | null
+
+  // optional: render convenience only (NOT truth)
+  renderUrl?: string | null
 }
 
 const MAX_IMAGES = 6
@@ -106,10 +114,10 @@ function tinyBtn(disabled?: boolean, active?: boolean) {
 }
 
 function isVideoFile(f: File) {
-  return f.type.startsWith('video/')
+  return (f.type || '').toLowerCase().startsWith('video/')
 }
 function isImageFile(f: File) {
-  return f.type.startsWith('image/')
+  return (f.type || '').toLowerCase().startsWith('image/')
 }
 
 function countCaps(items: PendingUpload[]) {
@@ -140,12 +148,12 @@ function coercePhase(v: unknown): AppointmentMediaOption['phase'] | undefined {
 
 function coerceApptMediaOption(x: unknown): AppointmentMediaOption | null {
   if (!isRecord(x)) return null
-  const id = pickStringOrEmpty(x.id)
-  const url = pickStringOrEmpty(x.url)
-  const thumbUrl = pickStringOrEmpty(x.thumbUrl) || null
-  const mediaType = coerceMediaType(x.mediaType)
-  const createdAt = pickStringOrEmpty(x.createdAt)
-  const phase = coercePhase(x.phase)
+  const id = pickStringOrEmpty((x as any).id)
+  const url = pickStringOrEmpty((x as any).url)
+  const thumbUrl = pickStringOrEmpty((x as any).thumbUrl) || null
+  const mediaType = coerceMediaType((x as any).mediaType)
+  const createdAt = pickStringOrEmpty((x as any).createdAt)
+  const phase = coercePhase((x as any).phase)
 
   if (!id || !url || !mediaType || !createdAt) return null
   return { id, url, thumbUrl, mediaType, createdAt, phase }
@@ -153,7 +161,7 @@ function coerceApptMediaOption(x: unknown): AppointmentMediaOption | null {
 
 function parseReviewMediaOptionsPayload(data: unknown): AppointmentMediaOption[] {
   if (!isRecord(data)) return []
-  const itemsRaw = data.items
+  const itemsRaw = (data as any).items
   if (!Array.isArray(itemsRaw)) return []
   return itemsRaw.map(coerceApptMediaOption).filter(Boolean) as AppointmentMediaOption[]
 }
@@ -169,11 +177,13 @@ type SignedUploadInit = {
 function parseSignedUploadInit(data: unknown): SignedUploadInit | null {
   if (!isRecord(data)) return null
 
-  const bucket = pickStringOrEmpty(data.bucket)
-  const path = pickStringOrEmpty(data.path)
-  const token = pickStringOrEmpty(data.token)
-  const publicUrl = pickStringOrEmpty(data.publicUrl) || null
-  const cacheBuster = typeof data.cacheBuster === 'number' && Number.isFinite(data.cacheBuster) ? data.cacheBuster : null
+  const bucket = pickStringOrEmpty((data as any).bucket)
+  const path = pickStringOrEmpty((data as any).path)
+  const token = pickStringOrEmpty((data as any).token)
+  const publicUrl = pickStringOrEmpty((data as any).publicUrl) || null
+  const cacheBuster = typeof (data as any).cacheBuster === 'number' && Number.isFinite((data as any).cacheBuster)
+    ? (data as any).cacheBuster
+    : null
 
   if (!bucket || !path || !token) return null
   return { bucket, path, token, publicUrl, cacheBuster }
@@ -201,7 +211,6 @@ export default function ReviewSection({
 
   const [apptMedia, setApptMedia] = useState<AppointmentMediaOption[]>([])
   const [selectedApptMediaIds, setSelectedApptMediaIds] = useState<string[]>([])
-
   const [pending, setPending] = useState<PendingUpload[]>([])
 
   const [loading, setLoading] = useState(false)
@@ -331,7 +340,6 @@ export default function ReviewSection({
 
     setPending((prev) => {
       const { images: curImages, videos: curVideos } = countCaps(prev)
-
       let imagesLeft = Math.max(0, MAX_IMAGES - curImages)
       let videosLeft = Math.max(0, MAX_VIDEOS - curVideos)
 
@@ -340,6 +348,7 @@ export default function ReviewSection({
 
       for (const f of filtered) {
         const mediaType: MediaType = isVideoFile(f) ? 'VIDEO' : 'IMAGE'
+
         if (mediaType === 'VIDEO') {
           if (videosLeft <= 0) {
             rejected++
@@ -362,7 +371,12 @@ export default function ReviewSection({
           localUrl: URL.createObjectURL(f),
           status: 'QUEUED',
           error: null,
-          publicUrl: null,
+
+          storageBucket: null,
+          storagePath: null,
+          thumbBucket: null,
+          thumbPath: null,
+          renderUrl: null,
         })
       }
 
@@ -414,9 +428,7 @@ export default function ReviewSection({
         const init = await initSignedUpload(item.file)
         if (!init.ok) {
           sawError = true
-
           if ('handled' in init) return
-
           setPending((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'ERROR', error: init.error } : p)))
           continue
         }
@@ -439,13 +451,24 @@ export default function ReviewSection({
         uploadedAny = true
 
         const finalUrl =
-          publicUrl
-            ? `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}v=${String(cacheBuster ?? Date.now())}`
-            : null
+          publicUrl ? `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}v=${String(cacheBuster ?? Date.now())}` : null
 
-        if (!finalUrl) sawError = true
-
-        setPending((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'UPLOADED', publicUrl: finalUrl } : p)))
+        setPending((prev) =>
+          prev.map((p) =>
+            p.id === item.id
+              ? {
+                  ...p,
+                  status: 'UPLOADED',
+                  error: null,
+                  storageBucket: bucket,
+                  storagePath: path,
+                  thumbBucket: null,
+                  thumbPath: null,
+                  renderUrl: finalUrl,
+                }
+              : p,
+          ),
+        )
       }
 
       if (uploadedAny && !sawError) {
@@ -458,8 +481,18 @@ export default function ReviewSection({
 
   function pendingForSubmit() {
     return pending
-      .filter((p) => p.status === 'UPLOADED' && typeof p.publicUrl === 'string' && p.publicUrl)
-      .map((p) => ({ url: p.publicUrl as string, mediaType: p.mediaType }))
+      .filter((p) => p.status === 'UPLOADED' && p.storageBucket && p.storagePath)
+      .map((p) => ({
+        mediaType: p.mediaType,
+        storageBucket: p.storageBucket as string,
+        storagePath: p.storagePath as string,
+        thumbBucket: p.thumbBucket ?? null,
+        thumbPath: p.thumbPath ?? null,
+
+        // legacy compatibility (optional)
+        url: p.renderUrl ?? null,
+        thumbUrl: null as string | null,
+      }))
   }
 
   async function submitReview() {
@@ -976,7 +1009,12 @@ export default function ReviewSection({
 
         <div className="flex flex-wrap justify-end gap-2">
           {!hasReview ? (
-            <button type="button" disabled={loading || !bookingId} onClick={submitReview} className={btnPrimary(loading || !bookingId)}>
+            <button
+              type="button"
+              disabled={loading || !bookingId}
+              onClick={submitReview}
+              className={btnPrimary(loading || !bookingId)}
+            >
               {loading ? 'Submitting…' : 'Submit review'}
             </button>
           ) : (

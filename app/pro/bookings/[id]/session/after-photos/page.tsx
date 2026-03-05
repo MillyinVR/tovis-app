@@ -1,3 +1,4 @@
+// app/pro/bookings/[id]/session/after-photos/page.tsx
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { headers } from 'next/headers'
@@ -20,8 +21,8 @@ type ApiItem = {
   caption: string | null
   createdAt: string | Date
   reviewId: string | null
-  signedUrl: string | null
-  signedThumbUrl: string | null
+  renderUrl: string | null
+  renderThumbUrl: string | null
 }
 
 
@@ -59,7 +60,36 @@ async function fetchAfterMedia(bookingId: string): Promise<ApiItem[]> {
 
   if (!res?.ok) return []
   const data = (await res.json().catch(() => ({}))) as any
-  return (Array.isArray(data?.items) ? data.items : []) as ApiItem[]
+  const items = Array.isArray(data?.items) ? data.items : []
+
+  // ✅ Normalize: prefer renderUrl/renderThumbUrl, fallback to url/thumbUrl, fallback to old signedUrl names
+  return items
+    .map((m: any) => ({
+      id: String(m?.id || ''),
+      mediaType: m?.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE',
+      caption: typeof m?.caption === 'string' ? m.caption : null,
+      createdAt: m?.createdAt ?? new Date().toISOString(),
+      reviewId: typeof m?.reviewId === 'string' ? m.reviewId : null,
+
+      renderUrl:
+        typeof m?.renderUrl === 'string'
+          ? m.renderUrl
+          : typeof m?.url === 'string'
+            ? m.url
+            : typeof m?.signedUrl === 'string'
+              ? m.signedUrl
+              : null,
+
+      renderThumbUrl:
+        typeof m?.renderThumbUrl === 'string'
+          ? m.renderThumbUrl
+          : typeof m?.thumbUrl === 'string'
+            ? m.thumbUrl
+            : typeof m?.signedThumbUrl === 'string'
+              ? m.signedThumbUrl
+              : null,
+    }))
+    .filter((m: ApiItem) => Boolean(m.id))
 }
 
 type PageProps = { params: Promise<{ id: string }> }

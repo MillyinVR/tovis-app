@@ -1,9 +1,10 @@
 // app/api/media/url/route.ts
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { pickString } from '@/lib/pick'
 import { MediaVisibility } from '@prisma/client'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,38 +18,56 @@ export async function GET(req: Request) {
       where: { id: mediaId },
       select: {
         id: true,
-        url: true,
         visibility: true,
+        professionalId: true,
+
+        // ✅ single source of truth inputs
         storageBucket: true,
         storagePath: true,
-        professionalId: true,
+        thumbBucket: true,
+        thumbPath: true,
+
+        // fallback only (renderer will only use if http(s))
+        url: true,
+        thumbUrl: true,
       },
     })
 
     if (!media) return jsonFail(404, 'Not found.')
 
-    // ✅ Prisma enum (no strings)
-    if (media.visibility === MediaVisibility.PUBLIC && typeof media.url === 'string' && media.url.startsWith('http')) {
-      return jsonOk({ url: media.url })
+    // ✅ Public media can be fetched without auth
+    if (media.visibility === MediaVisibility.PUBLIC) {
+      const { renderUrl } = await renderMediaUrls({
+        storageBucket: media.storageBucket,
+        storagePath: media.storagePath,
+        thumbBucket: media.thumbBucket,
+        thumbPath: media.thumbPath,
+        url: media.url,
+        thumbUrl: media.thumbUrl,
+      })
+
+      if (!renderUrl) return jsonFail(500, 'Media is missing renderable URL.')
+      return jsonOk({ url: renderUrl })
     }
 
-    // Anything non-public requires auth
+    // ✅ Anything non-public requires auth
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Unauthorized.')
 
     const isOwnerPro = user.role === 'PRO' && user.professionalProfile?.id === media.professionalId
+    if (!isOwnerPro) return jsonFail(403, 'Forbidden.')
 
-    // For now: only owner pro can view non-PUBLIC
-    if (media.visibility !== MediaVisibility.PUBLIC && !isOwnerPro) return jsonFail(403, 'Forbidden.')
+    const { renderUrl } = await renderMediaUrls({
+      storageBucket: media.storageBucket,
+      storagePath: media.storagePath,
+      thumbBucket: media.thumbBucket,
+      thumbPath: media.thumbPath,
+      url: media.url,
+      thumbUrl: media.thumbUrl,
+    })
 
-    const bucket = pickString(media.storageBucket)
-    const path = pickString(media.storagePath)
-    if (!bucket || !path) return jsonFail(500, 'Missing storage info.')
-
-    const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, 60) // 60s
-    if (error || !data?.signedUrl) return jsonFail(500, error?.message || 'Failed to sign URL.')
-
-    return jsonOk({ url: data.signedUrl })
+    if (!renderUrl) return jsonFail(500, 'Media is missing renderable URL.')
+    return jsonOk({ url: renderUrl })
   } catch (e) {
     console.error('GET /api/media/url error', e)
     return jsonFail(500, 'Internal server error')

@@ -1,14 +1,67 @@
 // app/api/auth/login/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
-import { pickString, normalizeEmail } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
+import { Role } from '@prisma/client'
+
+export const dynamic = 'force-dynamic'
 
 type LoginBody = {
   email?: unknown
   password?: unknown
   tapIntentId?: unknown
+  expectedRole?: unknown
+}
+
+function normalizeExpectedRole(raw: unknown): Role | null {
+  const s = pickString(raw)?.trim().toUpperCase() ?? ''
+  if (s === Role.ADMIN) return Role.ADMIN
+  if (s === Role.PRO) return Role.PRO
+  if (s === Role.CLIENT) return Role.CLIENT
+  return null
+}
+
+function hostToHostname(hostHeader: string | null): string | null {
+  if (!hostHeader) return null
+  const host = hostHeader.trim().toLowerCase()
+  if (!host) return null
+
+  // Handle IPv6 like "[::1]:3000"
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']')
+    if (end === -1) return null
+    return host.slice(1, end)
+  }
+
+  // Strip port if present: "localhost:3000" -> "localhost"
+  const idx = host.indexOf(':')
+  return idx >= 0 ? host.slice(0, idx) : host
+}
+
+function resolveCookieDomain(hostname: string | null): string | undefined {
+  if (!hostname) return undefined
+
+  // Share cookie across subdomains of tovis.app or tovis.me
+  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) return '.tovis.app'
+  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) return '.tovis.me'
+
+  // localhost / other hosts: host-only cookie (no Domain attribute)
+  return undefined
+}
+
+function resolveIsHttps(request: Request): boolean {
+  // Prefer proxy headers (Vercel / reverse proxies)
+  const xfProto = request.headers.get('x-forwarded-proto')?.trim().toLowerCase()
+  if (xfProto === 'https') return true
+  if (xfProto === 'http') return false
+
+  // Fallback to request.url
+  try {
+    return new URL(request.url).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 export async function POST(request: Request) {
@@ -18,23 +71,43 @@ export async function POST(request: Request) {
     const email = normalizeEmail(body.email)
     const password = pickString(body.password)
     const tapIntentId = pickString(body.tapIntentId)
+    const expectedRole = normalizeExpectedRole(body.expectedRole)
 
     if (!email || !password) {
-      return NextResponse.json({ error: 'Missing email or password' }, { status: 400 })
+      return jsonFail(400, 'Missing email or password', { code: 'MISSING_CREDENTIALS' })
     }
 
     const user = await prisma.user.findUnique({
       where: { email },
-      select: { id: true, email: true, password: true, role: true },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        role: true,
+        professionalProfile: { select: { id: true } },
+        clientProfile: { select: { id: true } },
+      },
     })
 
-    if (!user) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
-    }
+    if (!user) return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
 
     const isValid = await verifyPassword(password, user.password)
-    if (!isValid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    if (!isValid) return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+
+    // ✅ Role intent enforcement (prevents “login then bounce back to login” loops)
+    if (expectedRole && user.role !== expectedRole) {
+      return jsonFail(403, `That account is not a ${expectedRole.toLowerCase()} account.`, {
+        code: 'ROLE_MISMATCH',
+        expectedRole,
+        actualRole: user.role,
+      })
+    }
+
+    // ✅ Pro setup enforcement (matches your /pro layout requirement)
+    if (user.role === Role.PRO && !user.professionalProfile?.id) {
+      return jsonFail(409, 'Professional setup is not complete yet.', {
+        code: 'PRO_SETUP_REQUIRED',
+      })
     }
 
     const token = createToken({ userId: user.id, role: user.role })
@@ -44,28 +117,30 @@ export async function POST(request: Request) {
       userId: user.id,
     })
 
-    const response = NextResponse.json(
+    const res = jsonOk(
       {
         user: { id: user.id, email: user.email, role: user.role },
         nextUrl: consumed?.nextUrl ?? null,
       },
-      { status: 200 },
+      200,
     )
 
-   const COOKIE_DOMAIN = process.env.NODE_ENV === 'production' ? '.tovis.app' : undefined
+    const hostname = hostToHostname(request.headers.get('x-forwarded-host') ?? request.headers.get('host'))
+    const cookieDomain = resolveCookieDomain(hostname)
+    const isHttps = resolveIsHttps(request)
 
-  response.cookies.set('tovis_token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7,
-    ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
-  })
+    res.cookies.set('tovis_token', token, {
+      httpOnly: true,
+      secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+      ...(cookieDomain ? { domain: cookieDomain } : {}), // ✅ domain only for tovis.app / tovis.me
+    })
 
-    return response
+    return res
   } catch (error) {
     console.error('Login error', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

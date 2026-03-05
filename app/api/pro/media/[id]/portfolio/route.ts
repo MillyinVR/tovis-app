@@ -1,28 +1,16 @@
 // app/api/pro/media/[id]/portfolio/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { MediaVisibility } from '@prisma/client'
-import { BUCKETS } from '@/lib/storageBuckets'
+import { resolveStoragePointers, safeUrl } from '@/lib/media'
 
 export const dynamic = 'force-dynamic'
 
 type Props = { params: Promise<{ id: string }> }
-type StorageBucket = (typeof BUCKETS)[keyof typeof BUCKETS]
 
 function computeVisibility(isFeaturedInPortfolio: boolean, isEligibleForLooks: boolean): MediaVisibility {
   return isFeaturedInPortfolio || isEligibleForLooks ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
-}
-
-function publicUrlFor(bucket: StorageBucket, path: string) {
-  const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path)
-  const url = data?.publicUrl
-  return typeof url === 'string' && url.startsWith('http') ? url : null
-}
-
-function isStorageBucket(v: unknown): v is StorageBucket {
-  return v === BUCKETS.mediaPublic || v === BUCKETS.mediaPrivate
 }
 
 function errorMessage(e: unknown) {
@@ -39,9 +27,16 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
       isFeaturedInPortfolio: true,
       isEligibleForLooks: true,
       visibility: true,
+
+      // Canonical pointers
       storageBucket: true,
       storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+
+      // Legacy fallbacks
       url: true,
+      thumbUrl: true,
     },
   })
 
@@ -50,28 +45,46 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
   return { ok: true as const, media }
 }
 
-async function promoteIfNeeded(media: { storageBucket: string | null; storagePath: string | null }) {
-  if (!isStorageBucket(media.storageBucket)) return null
-  if (media.storageBucket !== BUCKETS.mediaPrivate) return null
-  if (!media.storagePath) return null
+/**
+ * Optional: if you have old rows where storageBucket/path is missing but url exists,
+ * attempt to backfill canonical pointers from the url(s).
+ *
+ * This keeps your app moving toward a single source of truth without a separate script.
+ */
+async function backfillPointersIfMissing(mediaId: string, m: {
+  storageBucket: string
+  storagePath: string
+  thumbBucket: string | null
+  thumbPath: string | null
+  url: string | null
+  thumbUrl: string | null
+}) {
+  const hasPointers = Boolean(m.storageBucket && m.storagePath)
+  if (hasPointers) return
 
-  const fromBucket: StorageBucket = BUCKETS.mediaPrivate
-  const toBucket: StorageBucket = BUCKETS.mediaPublic
+  const url = safeUrl(m.url)
+  if (!url) return
 
-  const fromPath = media.storagePath
-  const toPath = `promoted/${fromPath}`
+  const ptrs = resolveStoragePointers({
+    url,
+    thumbUrl: safeUrl(m.thumbUrl),
+    storageBucket: m.storageBucket || null,
+    storagePath: m.storagePath || null,
+    thumbBucket: m.thumbBucket,
+    thumbPath: m.thumbPath,
+  })
+  if (!ptrs) return
 
-  // Copy private -> public
-  const { error: copyErr } = await supabaseAdmin.storage.from(fromBucket).copy(fromPath, `${toBucket}/${toPath}`)
-  if (copyErr) throw new Error(copyErr.message || 'Failed to promote media')
-
-  const url = publicUrlFor(toBucket, toPath)
-  if (!url) throw new Error('Failed to compute public URL for promoted media.')
-
-  // Optional cleanup: don’t hard-fail if remove fails
-  await supabaseAdmin.storage.from(fromBucket).remove([fromPath]).catch(() => null)
-
-  return { bucket: toBucket, path: toPath, url }
+  await prisma.mediaAsset.update({
+    where: { id: mediaId },
+    data: {
+      storageBucket: ptrs.storageBucket,
+      storagePath: ptrs.storagePath,
+      thumbBucket: ptrs.thumbBucket,
+      thumbPath: ptrs.thumbPath,
+    },
+    select: { id: true },
+  })
 }
 
 export async function POST(_req: NextRequest, props: Props) {
@@ -87,34 +100,28 @@ export async function POST(_req: NextRequest, props: Props) {
     const owned = await loadOwnedMedia(mediaId, professionalId)
     if (!owned.ok) return jsonFail(owned.status, owned.error)
 
-    const promoted = await promoteIfNeeded({
-      storageBucket: owned.media.storageBucket,
-      storagePath: owned.media.storagePath,
-    })
-
-    const updateData = {
-      isFeaturedInPortfolio: true,
-      visibility: computeVisibility(true, owned.media.isEligibleForLooks),
-      ...(promoted
-        ? {
-            storageBucket: promoted.bucket,
-            storagePath: promoted.path,
-            url: promoted.url,
-          }
-        : {}),
-    }
+    // Optional: move old rows toward canonical pointers
+    await backfillPointersIfMissing(mediaId, owned.media)
 
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
-      data: updateData,
+      data: {
+        isFeaturedInPortfolio: true,
+        visibility: computeVisibility(true, owned.media.isEligibleForLooks),
+      },
       select: {
         id: true,
         isFeaturedInPortfolio: true,
         isEligibleForLooks: true,
         visibility: true,
-        url: true,
+
+        // Keep returning pointers so callers can render consistently
         storageBucket: true,
         storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
+        url: true,
+        thumbUrl: true,
       },
     })
 
@@ -138,18 +145,33 @@ export async function DELETE(_req: NextRequest, props: Props) {
     const owned = await loadOwnedMedia(mediaId, professionalId)
     if (!owned.ok) return jsonFail(owned.status, owned.error)
 
+    // Optional: move old rows toward canonical pointers
+    await backfillPointersIfMissing(mediaId, owned.media)
+
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
       data: {
         isFeaturedInPortfolio: false,
         visibility: computeVisibility(false, owned.media.isEligibleForLooks),
       },
-      select: { id: true, isFeaturedInPortfolio: true, isEligibleForLooks: true, visibility: true },
+      select: {
+        id: true,
+        isFeaturedInPortfolio: true,
+        isEligibleForLooks: true,
+        visibility: true,
+
+        storageBucket: true,
+        storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
+        url: true,
+        thumbUrl: true,
+      },
     })
 
     return jsonOk({ media: updated }, 200)
   } catch (e) {
     console.error('DELETE /api/pro/media/[id]/portfolio error', e)
-    return jsonFail(500, 'Internal server error')
+    return jsonFail(500, errorMessage(e))
   }
 }
