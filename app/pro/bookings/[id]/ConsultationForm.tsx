@@ -94,9 +94,9 @@ function uid() {
   return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`
 }
 
-function parseServiceOptions(data: unknown): ServiceOption[] {
-  if (!isRecord(data)) return []
-  const raw = data.services
+function parseServiceOptions(payload: unknown): ServiceOption[] {
+  if (!isRecord(payload)) return []
+  const raw = payload.services
   if (!Array.isArray(raw)) return []
 
   const out: ServiceOption[] = []

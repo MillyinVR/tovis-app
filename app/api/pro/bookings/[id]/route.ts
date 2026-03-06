@@ -38,7 +38,13 @@ const MAX_BOOKING_BUFFER_MINUTES = 180
 const MAX_OTHER_OVERLAP_MINUTES = MAX_SLOT_DURATION_MINUTES + MAX_BOOKING_BUFFER_MINUTES
 const DEFAULT_DURATION_MINUTES = 60
 
-type ParsedServiceItemInput = {
+type RequestedServiceItemInput = {
+  serviceId: string
+  offeringId: string
+  sortOrder: number
+}
+
+type NormalizedServiceItemInput = {
   serviceId: string
   offeringId: string
   durationMinutesSnapshot: number
@@ -212,8 +218,7 @@ async function createClientNotification(args: {
 
 function parseServiceItemsInput(
   rawItems: unknown[] | null,
-  stepMinutes: number,
-): ParsedServiceItemInput[] | null {
+): RequestedServiceItemInput[] | null {
   if (rawItems == null) return null
   if (!rawItems.length) throw new Error('BAD_ITEMS')
 
@@ -222,24 +227,13 @@ function parseServiceItemsInput(
 
     const serviceId = pickString(raw.serviceId)
     const offeringId = pickString(raw.offeringId)
-    const duration = pickInt(raw.durationMinutesSnapshot)
     const sortOrder = pickInt(raw.sortOrder)
-    const priceCents = moneyToCents(raw.priceSnapshot)
 
     if (!serviceId || !offeringId) throw new Error('BAD_ITEMS')
-    if (duration == null || duration < 15 || duration > MAX_SLOT_DURATION_MINUTES) {
-      throw new Error('BAD_ITEMS')
-    }
 
     return {
       serviceId,
       offeringId,
-      durationMinutesSnapshot: clamp(
-        snapToStep(duration, stepMinutes),
-        15,
-        MAX_SLOT_DURATION_MINUTES,
-      ),
-      priceSnapshot: centsToDecimal(priceCents),
       sortOrder: sortOrder != null ? sortOrder : index,
     }
   })
@@ -609,65 +603,117 @@ export async function PATCH(req: Request, ctx: Ctx) {
           ? clamp(snapToStep(nextBuffer, stepMinutes), 0, MAX_BOOKING_BUFFER_MINUTES)
           : Math.max(0, Number(existing.bufferMinutes ?? 0))
 
-      const parsedServiceItems = parseServiceItemsInput(serviceItemsRaw, stepMinutes)
+      const parsedServiceItems = parseServiceItemsInput(serviceItemsRaw)
 
       let nextBookingServiceId: string | null = null
       let nextBookingOfferingId: string | null = null
 
       if (parsedServiceItems) {
-        const offeringIds = Array.from(new Set(parsedServiceItems.map((item) => item.offeringId))).slice(0, 50)
+      const offeringIds = Array.from(
+        new Set(parsedServiceItems.map((item) => item.offeringId)),
+      ).slice(0, 50)
 
-        const offerings = await tx.professionalServiceOffering.findMany({
-          where: {
-            id: { in: offeringIds },
-            professionalId: existing.professionalId,
-            isActive: true,
+      const offerings = await tx.professionalServiceOffering.findMany({
+        where: {
+          id: { in: offeringIds },
+          professionalId: existing.professionalId,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          serviceId: true,
+          offersInSalon: true,
+          offersMobile: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
+          service: {
+            select: {
+              defaultDurationMinutes: true,
+            },
           },
-          select: {
-            id: true,
-            serviceId: true,
-          },
-          take: 100,
-        })
+        },
+        take: 100,
+      })
 
-        const offeringServiceById = new Map(
-          offerings.map((offering) => [offering.id, offering.serviceId]),
-        )
+      const offeringById = new Map(
+        offerings.map((offering) => [offering.id, offering]),
+      )
 
-        for (const item of parsedServiceItems) {
-          const serviceIdForOffering = offeringServiceById.get(item.offeringId)
-          if (!serviceIdForOffering || serviceIdForOffering !== item.serviceId) {
-            throw new Error('BAD_ITEMS')
-          }
-        }
-
-        await tx.bookingServiceItem.deleteMany({
-          where: { bookingId: existing.id },
-        })
-
-        const baseItem = parsedServiceItems[0]
-        if (!baseItem) {
+      const normalizedServiceItems: NormalizedServiceItemInput[] = parsedServiceItems.map((item, index) => {
+        const offering = offeringById.get(item.offeringId)
+        if (!offering) {
           throw new Error('BAD_ITEMS')
         }
 
-        for (const [index, item] of parsedServiceItems.entries()) {
-          await tx.bookingServiceItem.create({
-            data: {
-              bookingId: existing.id,
-              serviceId: item.serviceId,
-              offeringId: item.offeringId,
-              itemType: index === 0 ? BookingServiceItemType.BASE : BookingServiceItemType.ADD_ON,
-              parentItemId: null,
-              priceSnapshot: item.priceSnapshot,
-              durationMinutesSnapshot: item.durationMinutesSnapshot,
-              sortOrder: item.sortOrder,
-            },
-          })
+        if (offering.serviceId !== item.serviceId) {
+          throw new Error('BAD_ITEMS')
         }
 
-        nextBookingServiceId = baseItem.serviceId
-        nextBookingOfferingId = baseItem.offeringId
+        const isMobile = existing.locationType === ServiceLocationType.MOBILE
+        const modeAllowed = isMobile ? offering.offersMobile : offering.offersInSalon
+
+        const rawDuration = isMobile
+          ? Number(offering.mobileDurationMinutes ?? offering.service.defaultDurationMinutes ?? 0)
+          : Number(offering.salonDurationMinutes ?? offering.service.defaultDurationMinutes ?? 0)
+
+        const rawPrice = isMobile
+          ? offering.mobilePriceStartingAt
+          : offering.salonPriceStartingAt
+
+        if (!modeAllowed) {
+          throw new Error('BAD_ITEMS')
+        }
+
+        if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
+          throw new Error('BAD_ITEMS')
+        }
+
+        if (rawPrice == null) {
+          throw new Error('BAD_ITEMS')
+        }
+
+        return {
+          serviceId: item.serviceId,
+          offeringId: item.offeringId,
+          durationMinutesSnapshot: clamp(
+            snapToStep(rawDuration, stepMinutes),
+            15,
+            MAX_SLOT_DURATION_MINUTES,
+          ),
+          priceSnapshot: centsToDecimal(moneyToCents(rawPrice)),
+          sortOrder: index,
+        }
+      })
+
+      await tx.bookingServiceItem.deleteMany({
+        where: { bookingId: existing.id },
+      })
+
+      const baseItem = normalizedServiceItems[0]
+      if (!baseItem) {
+        throw new Error('BAD_ITEMS')
       }
+
+      for (const [index, item] of normalizedServiceItems.entries()) {
+        await tx.bookingServiceItem.create({
+          data: {
+            bookingId: existing.id,
+            serviceId: item.serviceId,
+            offeringId: item.offeringId,
+            itemType: index === 0 ? BookingServiceItemType.BASE : BookingServiceItemType.ADD_ON,
+            parentItemId: null,
+            priceSnapshot: item.priceSnapshot,
+            durationMinutesSnapshot: item.durationMinutesSnapshot,
+            sortOrder: item.sortOrder,
+          },
+        })
+      }
+
+      nextBookingServiceId = baseItem.serviceId
+      nextBookingOfferingId = baseItem.offeringId
+    }
 
       const itemsNow = await tx.bookingServiceItem.findMany({
         where: { bookingId: existing.id },
