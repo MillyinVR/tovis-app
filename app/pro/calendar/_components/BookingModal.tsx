@@ -75,10 +75,12 @@ export function BookingModal(props: {
   )
 
   const isPending = String(booking?.status || '').toUpperCase() === 'PENDING'
+  const noServicesSelected = selectedDraftServiceIds.length === 0
 
   const items = useMemo(() => {
-    if (serviceItemsDraft && serviceItemsDraft.length > 0) return serviceItemsDraft
-    return booking?.serviceItems ?? []
+    return Array.isArray(serviceItemsDraft)
+      ? serviceItemsDraft
+      : (booking?.serviceItems ?? [])
   }, [serviceItemsDraft, booking])
 
   const label = useMemo(() => {
@@ -88,11 +90,12 @@ export function BookingModal(props: {
     return names.length ? names.join(' + ') : 'Appointment'
   }, [bookingServiceLabel, items])
 
-  const totalDuration = useMemo(() => {
-    if (Number.isFinite(durationMinutes) && durationMinutes > 0) return durationMinutes
-    if (booking?.totalDurationMinutes && booking.totalDurationMinutes > 0) return booking.totalDurationMinutes
-    return 60
-  }, [durationMinutes, booking?.totalDurationMinutes])
+  const totalDuration =
+    Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? durationMinutes
+      : booking?.totalDurationMinutes && booking.totalDurationMinutes > 0
+        ? booking.totalDurationMinutes
+        : 60
 
   const selectedSet = useMemo(() => new Set(selectedDraftServiceIds), [selectedDraftServiceIds])
 
@@ -102,6 +105,10 @@ export function BookingModal(props: {
   }
 
   function toggleService(serviceId: string, checked: boolean) {
+    if (!checked && selectedDraftServiceIds.length === 1 && selectedDraftServiceIds[0] === serviceId) {
+      return
+    }
+
     const next = checked
       ? Array.from(new Set([...selectedDraftServiceIds, serviceId]))
       : selectedDraftServiceIds.filter((id) => id !== serviceId)
@@ -274,6 +281,8 @@ export function BookingModal(props: {
                                 </div>
                               </div>
                             </label>
+
+                            
                           )
                         })}
                       </div>
@@ -344,6 +353,12 @@ export function BookingModal(props: {
                   Notify client about changes
                 </label>
 
+                {noServicesSelected ? (
+                  <div className="mt-3 rounded-2xl border border-toneDanger/30 bg-bgSecondary p-3 text-sm font-semibold text-toneDanger">
+                    Select at least one service before saving.
+                  </div>
+                ) : null}
+
                 <div className="mt-4 flex justify-end gap-2">
                   <button
                     type="button"
@@ -357,9 +372,15 @@ export function BookingModal(props: {
                   <button
                     type="button"
                     onClick={onSave}
-                    disabled={saving || (editOutside && !allowOutsideHours)}
+                    disabled={saving || noServicesSelected || (editOutside && !allowOutsideHours)}
                     className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/70 disabled:opacity-70"
-                    title={editOutside && !allowOutsideHours ? 'Enable override to save outside working hours.' : ''}
+                    title={
+                      noServicesSelected
+                        ? 'Select at least one service before saving.'
+                        : editOutside && !allowOutsideHours
+                          ? 'Enable override to save outside working hours.'
+                          : ''
+                    }
                   >
                     {saving ? 'Saving…' : 'Save changes'}
                   </button>

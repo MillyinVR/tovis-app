@@ -1,8 +1,6 @@
 // app/pro/calendar/CreateBookingModal.tsx
 'use client'
 
-'use client'
-
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'

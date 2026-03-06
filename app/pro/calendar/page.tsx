@@ -64,16 +64,15 @@ export default function ProCalendarPage() {
 
   const timeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
 
-  const [booted, setBooted] = useState(false)
   const didBootRef = useRef(false)
+  const booted = didBootRef.current
 
   useEffect(() => {
     if (didBootRef.current) return
     if (cal.loading) return
 
-    setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
     didBootRef.current = true
-    setBooted(true)
+    setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
   }, [cal.loading, timeZone])
 
   const visibleDays = useMemo(() => {
@@ -186,7 +185,6 @@ export default function ProCalendarPage() {
         onToday={() => {
           const next = anchorNoonInTimeZone(new Date(), timeZone)
           setCurrentDate(next)
-          if (!booted) setBooted(true)
           didBootRef.current = true
         }}
         onBack={() => {
