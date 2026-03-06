@@ -14,20 +14,27 @@ export function BookingModal(props: {
   services: ServiceOption[]
   timeZone: string
 
+  // New shape
+  bookingServiceLabel?: string
+  serviceItemsDraft?: BookingDetails['serviceItems']
+
+  // Existing edit props
   reschedDate: string
   reschedTime: string
   durationMinutes: number
-  selectedServiceId: string
   notifyClient: boolean
   allowOutsideHours: boolean
   editOutside: boolean
   saving: boolean
 
+  // Kept temporarily so page.tsx can still compile while we update file-by-file
+  selectedServiceId: string
+  onChangeDurationMinutes: (v: number) => void
+  onChangeSelectedServiceId: (v: string) => void
+
   onClose: () => void
   onChangeReschedDate: (v: string) => void
   onChangeReschedTime: (v: string) => void
-  onChangeDurationMinutes: (v: number) => void
-  onChangeSelectedServiceId: (v: string) => void
   onToggleNotifyClient: (v: boolean) => void
   onToggleAllowOutsideHours: (v: boolean) => void
   onSave: () => void
@@ -39,13 +46,14 @@ export function BookingModal(props: {
     loading,
     error,
     booking,
-    services,
     timeZone,
+
+    bookingServiceLabel,
+    serviceItemsDraft,
 
     reschedDate,
     reschedTime,
     durationMinutes,
-    selectedServiceId,
     notifyClient,
     allowOutsideHours,
     editOutside,
@@ -54,8 +62,6 @@ export function BookingModal(props: {
     onClose,
     onChangeReschedDate,
     onChangeReschedTime,
-    onChangeDurationMinutes,
-    onChangeSelectedServiceId,
     onToggleNotifyClient,
     onToggleAllowOutsideHours,
     onSave,
@@ -63,10 +69,33 @@ export function BookingModal(props: {
     onDeny,
   } = props
 
-  // ✅ Strict policy: never LA fallback. If missing/invalid, fall back to DEFAULT_TIME_ZONE.
-  const tz = useMemo(() => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), [timeZone])
+  const tz = useMemo(
+    () => sanitizeTimeZone(booking?.timeZone ?? timeZone, DEFAULT_TIME_ZONE),
+    [booking?.timeZone, timeZone],
+  )
 
   const isPending = String(booking?.status || '').toUpperCase() === 'PENDING'
+
+  const items = useMemo(() => {
+    if (serviceItemsDraft && serviceItemsDraft.length > 0) return serviceItemsDraft
+    return booking?.serviceItems ?? []
+  }, [serviceItemsDraft, booking])
+
+  const label = useMemo(() => {
+    if (bookingServiceLabel && bookingServiceLabel.trim()) return bookingServiceLabel.trim()
+
+    const names = items
+      .map((item) => item.serviceName.trim())
+      .filter(Boolean)
+
+    return names.length ? names.join(' + ') : 'Appointment'
+  }, [bookingServiceLabel, items])
+
+  const totalDuration = useMemo(() => {
+    if (Number.isFinite(durationMinutes) && durationMinutes > 0) return durationMinutes
+    if (booking?.totalDurationMinutes && booking.totalDurationMinutes > 0) return booking.totalDurationMinutes
+    return 60
+  }, [durationMinutes, booking?.totalDurationMinutes])
 
   function close() {
     if (saving) return
@@ -108,7 +137,7 @@ export function BookingModal(props: {
           {booking ? (
             <>
               <div className="mb-4 grid gap-2">
-                <div className="text-sm font-extrabold text-textPrimary">{booking.serviceName}</div>
+                <div className="text-sm font-extrabold text-textPrimary">{label}</div>
 
                 <div className="text-sm font-semibold text-textSecondary">
                   <span className="font-black text-textPrimary">Client:</span> {booking.client.fullName}
@@ -121,8 +150,14 @@ export function BookingModal(props: {
                   <span className="font-semibold text-textPrimary">
                     {formatAppointmentWhen(new Date(booking.scheduledFor), tz)}
                   </span>{' '}
-                  <span className="opacity-75">· {tz}</span> ({booking.totalDurationMinutes} min)
+                  <span className="opacity-75">· {tz}</span> ({totalDuration} min)
                 </div>
+
+                {typeof booking.subtotalSnapshot === 'string' && booking.subtotalSnapshot.trim() ? (
+                  <div className="text-sm font-semibold text-textSecondary">
+                    <span className="font-black text-textPrimary">Subtotal:</span> ${booking.subtotalSnapshot}
+                  </div>
+                ) : null}
 
                 {isPending ? (
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -175,7 +210,8 @@ export function BookingModal(props: {
                       type="date"
                       value={reschedDate}
                       onChange={(e) => onChangeReschedDate(e.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-semibold text-textPrimary"
+                      disabled={saving}
+                      className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-semibold text-textPrimary disabled:opacity-70"
                     />
                   </div>
 
@@ -186,47 +222,60 @@ export function BookingModal(props: {
                       step={15 * 60}
                       value={reschedTime}
                       onChange={(e) => onChangeReschedTime(e.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-semibold text-textPrimary"
+                      disabled={saving}
+                      className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-semibold text-textPrimary disabled:opacity-70"
                     />
                   </div>
                 </div>
 
                 <div className="mt-3">
-                  <div className="mb-1 text-xs font-semibold text-textSecondary">Duration (minutes)</div>
-                  <input
-                    type="number"
-                    step={15}
-                    min={15}
-                    max={720}
-                    value={durationMinutes}
-                    onChange={(e) => onChangeDurationMinutes(Number(e.target.value))}
-                    className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-semibold text-textPrimary"
-                  />
+                  <div className="mb-1 text-xs font-semibold text-textSecondary">Services</div>
+
+                  {items.length ? (
+                    <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3">
+                      <div className="grid gap-2">
+                        {items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-extrabold text-textPrimary">
+                                {item.serviceName}
+                              </div>
+                              <div className="text-xs font-semibold text-textSecondary">
+                                {item.itemType === 'BASE' ? 'Base service' : 'Add-on'}
+                              </div>
+                            </div>
+
+                            <div className="text-right text-xs font-semibold text-textSecondary">
+                              <div>{item.durationMinutesSnapshot} min</div>
+                              <div>${item.priceSnapshot}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3 text-sm font-semibold text-textSecondary">
+                      No service items on this booking.
+                    </div>
+                  )}
                 </div>
 
-                {services?.length ? (
-                  <div className="mt-3">
-                    <div className="mb-1 text-xs font-semibold text-textSecondary">Service</div>
-                    <select
-                      value={selectedServiceId}
-                      onChange={(e) => onChangeSelectedServiceId(e.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-semibold text-textPrimary"
-                    >
-                      <option value="">(No service)</option>
-                      {services.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
+                <div className="mt-3">
+                  <div className="mb-1 text-xs font-semibold text-textSecondary">Total duration</div>
+                  <div className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-extrabold text-textPrimary">
+                    {totalDuration} minutes
                   </div>
-                ) : null}
+                </div>
 
                 <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-textSecondary">
                   <input
                     type="checkbox"
                     checked={notifyClient}
                     onChange={(e) => onToggleNotifyClient(e.target.checked)}
+                    disabled={saving}
                   />
                   Notify client about changes
                 </label>

@@ -701,13 +701,37 @@ export async function PATCH(req: Request, ctx: Ctx) {
         (sum, item) => sum + Number(item.durationMinutesSnapshot ?? 0),
         0,
       )
+      // Duration contract:
+      // - serviceItems update => computed service duration is authoritative
+      // - explicit duration may be used only when serviceItems are not being edited
+      // - conflicting explicit duration + serviceItems is rejected
 
       const existingDurationFallback = durationOrFallback(existing.totalDurationMinutes)
-      const finalDuration =
+
+      const snappedNextDuration =
         nextDuration != null
           ? clamp(snapToStep(nextDuration, stepMinutes), 15, MAX_SLOT_DURATION_MINUTES)
-          : computedDuration > 0
-            ? computedDuration
+          : null
+
+      const hasServiceItemsUpdate = parsedServiceItems != null
+
+      if (hasServiceItemsUpdate && computedDuration <= 0) {
+        throw new Error('BAD_ITEMS')
+      }
+
+      if (
+        hasServiceItemsUpdate &&
+        snappedNextDuration != null &&
+        snappedNextDuration !== computedDuration
+      ) {
+        throw new Error('DURATION_MISMATCH')
+      }
+
+      const finalDuration =
+        hasServiceItemsUpdate
+          ? computedDuration
+          : snappedNextDuration != null
+            ? snappedNextDuration
             : existingDurationFallback
 
       const finalEnd = addMinutes(finalStart, finalDuration + finalBuffer)
@@ -924,6 +948,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (message.startsWith('STEP:')) {
       return jsonFail(400, `Start time must be on a ${message.slice(5)}-minute boundary.`)
     }
+    if (message === 'DURATION_MISMATCH') {
+        return jsonFail(400, 'Duration does not match selected services.')
+      }
     if (message === 'BAD_START') return jsonFail(400, 'Invalid scheduledFor.')
 
     console.error('PATCH /api/pro/bookings/[id] error:', error)

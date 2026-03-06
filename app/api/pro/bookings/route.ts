@@ -617,9 +617,10 @@ export async function POST(req: Request) {
       })
 
       const addOnItems = items.slice(1)
-      if (addOnItems.length > 0) {
-        await tx.bookingServiceItem.createMany({
-          data: addOnItems.map((item, index) => ({
+
+      for (const [index, item] of addOnItems.entries()) {
+        await tx.bookingServiceItem.create({
+          data: {
             bookingId: booking.id,
             serviceId: item.serviceId,
             offeringId: item.offeringId,
@@ -629,13 +630,12 @@ export async function POST(req: Request) {
             durationMinutesSnapshot: item.durationMinutesSnapshot,
             sortOrder: 100 + index,
             notes: 'MANUAL_ADDON',
-          })),
+          },
         })
       }
 
       return booking
     })
-
     const endsAt = addMinutes(
       new Date(createdBooking.scheduledFor),
       Number(createdBooking.totalDurationMinutes) + Number(createdBooking.bufferMinutes),

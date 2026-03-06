@@ -10,7 +10,7 @@ export type CalendarStatus =
   | 'CANCELLED'
   | 'WAITLIST'
   | 'BLOCKED'
-  | (string & {}) // allow unknown statuses without turning everything into `string`
+  | (string & {})
 
 export type EntityType = 'booking' | 'block'
 
@@ -33,7 +33,18 @@ export type CalendarStats =
     }
   | null
 
-// ✅ Fix 1: this is what BookingModal + useCalendarData are trying to import
+/**
+ * Service selector option used by calendar booking create/edit UI.
+ *
+ * Current API shape from /api/pro/services is:
+ * - id = service id
+ * - offeringId = optional active offering id
+ * - durationMinutes = display/helper duration
+ *
+ * Keep this flexible for now, because the hook is still loading the existing
+ * /api/pro/services payload and we will tighten it further when we wire the
+ * edit modal to offering-driven service items.
+ */
 export type ServiceOption = {
   id: string
   name: string
@@ -41,27 +52,52 @@ export type ServiceOption = {
   offeringId?: string
 }
 
+/**
+ * Booking service item returned by GET /api/pro/bookings/[id].
+ * This is now the real source of truth for editable booking services.
+ */
+export type BookingServiceItem = {
+  id: string
+  serviceId: string
+  offeringId: string | null
+  itemType: 'BASE' | 'ADD_ON' | (string & {})
+  serviceName: string
+  priceSnapshot: string
+  durationMinutesSnapshot: number
+  sortOrder: number
+}
+
+/**
+ * Booking details for the edit modal.
+ *
+ * Important:
+ * - Do not pretend a booking is single-service anymore.
+ * - serviceItems drives display + future edit payload construction.
+ * - totalDurationMinutes remains the persisted booking duration.
+ */
 export type BookingDetails = {
   id: string
   status: string
   scheduledFor: string // ISO string for a UTC instant
   endsAt: string       // ISO string for a UTC instant
+  locationType?: 'SALON' | 'MOBILE' | (string & {})
   totalDurationMinutes: number
+  durationMinutes?: number
   bufferMinutes?: number
-  serviceId: string | null
-  serviceName: string
+  subtotalSnapshot?: string
   client: {
     fullName: string
     email: string | null
     phone: string | null
   }
   timeZone: IanaTimeZone
+  serviceItems: BookingServiceItem[]
 }
 
 /**
- * ✅ Fix 2: discriminated union for events.
- * - Only BLOCK events have blockId + note
- * - BOOKING events never pretend to have blockId
+ * Calendar event union.
+ * - BLOCK events carry block-only fields
+ * - BOOKING events do not
  */
 export type BookingCalendarEvent = {
   kind: 'BOOKING'
@@ -72,7 +108,6 @@ export type BookingCalendarEvent = {
   clientName: string
   status: CalendarStatus
   durationMinutes?: number
-  // bookings should not carry block-only fields
   note?: never
   blockId?: never
 }
@@ -110,7 +145,11 @@ export type PendingChange =
       original: CalendarEvent
     }
 
-export type ManagementKey = 'todaysBookings' | 'pendingRequests' | 'waitlistToday' | 'blockedToday'
+export type ManagementKey =
+  | 'todaysBookings'
+  | 'pendingRequests'
+  | 'waitlistToday'
+  | 'blockedToday'
 
 export type ManagementLists = {
   todaysBookings: CalendarEvent[]

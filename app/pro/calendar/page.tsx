@@ -18,7 +18,6 @@ import { BookingModal } from './_components/BookingModal'
 
 import type { ViewMode } from './_types'
 
-// ✅ Single source of truth for calendar date math
 import {
   anchorNoonInTimeZone,
   addDaysAnchorNoonInTimeZone,
@@ -59,23 +58,12 @@ function labelForLocation(l: {
 
 export default function ProCalendarPage() {
   const [view, setView] = useState<ViewMode>('week')
-
-  // Start with "now" (will be normalized once we know the calendar TZ)
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date())
 
   const cal = useCalendarData({ view, currentDate })
 
-  // ✅ Use calendar tz; if missing/invalid the hook uses DEFAULT_TIME_ZONE (UTC).
   const timeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
 
-  /**
-   * ✅ Boot gate:
-   * - On first mount we may render with UTC first (before API tz arrives),
-   *   then re-render with real tz (America/Los_Angeles), causing a visible “jump”.
-   *
-   * Fix: initialize the focus date ONCE after the first load finishes,
-   * and don’t render the calendar grids until then.
-   */
   const [booted, setBooted] = useState(false)
   const didBootRef = useRef(false)
 
@@ -91,20 +79,17 @@ export default function ProCalendarPage() {
   const visibleDays = useMemo(() => {
     const tz = timeZone
 
-    // Build the grid using TZ-anchored day starts (UTC Dates representing midnight-in-TZ)
     if (view === 'day') {
       const startUtc = startOfDayUtcInTimeZone(currentDate, tz)
       return [startUtc]
     }
 
     if (view === 'week') {
-      // ✅ Monday-start week (comes from _utils/date.ts)
       const weekStartNoon = startOfWeekAnchorNoonInTimeZone(currentDate, tz)
       const weekStartDayStartUtc = startOfDayUtcInTimeZone(weekStartNoon, tz)
       return Array.from({ length: 7 }, (_, i) => new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000))
     }
 
-    // month grid: start at week start that contains the 1st of the month
     const monthStartNoon = startOfMonthAnchorNoonInTimeZone(currentDate, tz)
     const firstWeekNoon = startOfWeekAnchorNoonInTimeZone(monthStartNoon, tz)
     const firstGridDayStartUtc = startOfDayUtcInTimeZone(firstWeekNoon, tz)
@@ -114,7 +99,9 @@ export default function ProCalendarPage() {
 
   const headerLabel = useMemo(() => headerLabelFor(view, currentDate, timeZone), [view, currentDate, timeZone])
 
-  const hasLocations = Boolean(cal.locationsLoaded && Array.isArray(cal.scopedLocations) && cal.scopedLocations.length > 0)
+  const hasLocations = Boolean(
+    cal.locationsLoaded && Array.isArray(cal.scopedLocations) && cal.scopedLocations.length > 0,
+  )
 
   return (
     <main className="mx-auto max-w-275 px-4 pb-10 pt-6 font-sans text-textPrimary md:pt-10">
@@ -132,7 +119,6 @@ export default function ProCalendarPage() {
         onOpenManagement={cal.openManagement}
       />
 
-      {/* ✅ Location selection (bookings + blocks are location-scoped in Prisma) */}
       {cal.locationsLoaded && (
         <section className="mb-4">
           <div className="tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-4 md:px-5">
@@ -170,7 +156,6 @@ export default function ProCalendarPage() {
               )}
             </div>
 
-            {/* Extra trust signal: show the resolved label if we have it */}
             {cal.activeLocationLabel ? (
               <div className="mt-3 text-[12px] font-semibold text-textSecondary">
                 Viewing: <span className="font-black text-textPrimary">{cal.activeLocationLabel}</span>
@@ -199,7 +184,6 @@ export default function ProCalendarPage() {
         setView={setView}
         headerLabel={headerLabel}
         onToday={() => {
-          // If we haven’t booted yet, “Today” should still behave sensibly.
           const next = anchorNoonInTimeZone(new Date(), timeZone)
           setCurrentDate(next)
           if (!booted) setBooted(true)
@@ -217,14 +201,12 @@ export default function ProCalendarPage() {
         }}
       />
 
-      {/* Boot placeholder (prevents “UTC week flash”) */}
       {!booted && (
         <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-6 text-sm text-textSecondary">
           Loading calendar…
         </div>
       )}
 
-      {/* Regular loading/error (still useful after boot, e.g. manual reloads) */}
       {booted && cal.loading && (
         <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-3 text-sm text-textSecondary">
           Loading…
@@ -269,7 +251,6 @@ export default function ProCalendarPage() {
         />
       )}
 
-      {/* Modals */}
       <CreateBookingModal
         open={cal.createOpen}
         onClose={() => cal.setCreateOpen(false)}
@@ -282,7 +263,7 @@ export default function ProCalendarPage() {
         locationType={cal.activeLocationType}
         locationLabel={cal.activeLocationLabel}
         stepMinutes={cal.activeLocation?.stepMinutes ?? undefined}
-      />  
+      />
 
       <BlockTimeModal
         open={cal.blockCreateOpen}
@@ -345,10 +326,11 @@ export default function ProCalendarPage() {
         booking={cal.booking}
         services={cal.services}
         timeZone={timeZone}
+        bookingServiceLabel={cal.bookingServiceLabel}
+        serviceItemsDraft={cal.serviceItemsDraft}
         reschedDate={cal.reschedDate}
         reschedTime={cal.reschedTime}
         durationMinutes={cal.durationMinutes}
-        selectedServiceId={cal.selectedServiceId}
         notifyClient={cal.notifyClient}
         allowOutsideHours={cal.allowOutsideHours}
         editOutside={cal.editOutside}
@@ -357,12 +339,13 @@ export default function ProCalendarPage() {
         onChangeReschedDate={cal.setReschedDate}
         onChangeReschedTime={cal.setReschedTime}
         onChangeDurationMinutes={cal.setDurationMinutes}
-        onChangeSelectedServiceId={cal.setSelectedServiceId}
+        onChangeSelectedServiceId={() => {}}
         onToggleNotifyClient={cal.setNotifyClient}
         onToggleAllowOutsideHours={cal.setAllowOutsideHours}
         onSave={() => void cal.submitChanges()}
         onApprove={() => void cal.approveBooking()}
         onDeny={() => void cal.denyBooking()}
+        selectedServiceId=""
       />
     </main>
   )
