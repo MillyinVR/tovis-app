@@ -6,9 +6,9 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { isRecord, type UnknownRecord, hasOwn } from '@/lib/guards'
 import { clampInt, pickEnum, pickInt, pickNumber, pickString } from '@/app/api/_utils/pick'
+import { hhmmToMinutes, parseHHMM } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
-
 
 function normalizeProfessionalLocationType(v: unknown): ProfessionalLocationType | null {
   return pickEnum(v, Object.values(ProfessionalLocationType))
@@ -41,49 +41,100 @@ function defaultWorkingHours(): WorkingHoursObj {
   }
 }
 
-/** Accepts "9:00" or "09:00" -> returns "HH:MM" */
 function normalizeHHMM(v: unknown): string | null {
-  const s = typeof v === 'string' ? v.trim() : ''
-  const m = /^(\d{1,2}):(\d{2})$/.exec(s)
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+  const parsed = parseHHMM(v)
+  if (!parsed) return null
+  return `${String(parsed.hh).padStart(2, '0')}:${String(parsed.mm).padStart(2, '0')}`
+}
+
+function isValidWorkingHoursDay(v: unknown): v is WorkingHoursDay {
+  if (!isRecord(v)) return false
+  if (typeof v.enabled !== 'boolean') return false
+  if (typeof v.start !== 'string' || typeof v.end !== 'string') return false
+
+  const start = normalizeHHMM(v.start)
+  const end = normalizeHHMM(v.end)
+  if (!start || !end) return false
+
+  const startMinutes = hhmmToMinutes(start)
+  const endMinutes = hhmmToMinutes(end)
+  if (startMinutes == null || endMinutes == null) return false
+
+  return endMinutes > startMinutes
 }
 
 function looksLikeWorkingHours(v: unknown): v is WorkingHoursObj {
   if (!isRecord(v)) return false
+
   for (const d of DAYS) {
-    const day = v[d]
-    if (!isRecord(day)) return false
-    if (typeof day.enabled !== 'boolean') return false
-    if (typeof day.start !== 'string' || typeof day.end !== 'string') return false
+    if (!isValidWorkingHoursDay(v[d])) return false
   }
+
   return true
 }
 
-function normalizeWorkingHours(raw: WorkingHoursObj): WorkingHoursObj {
-  const fallback = defaultWorkingHours()
-  const out: WorkingHoursObj = { ...fallback }
+function normalizeWorkingHoursDay(day: WorkingHoursDay): WorkingHoursDay {
+  const start = normalizeHHMM(day.start)
+  const end = normalizeHHMM(day.end)
 
-  for (const d of DAYS) {
-    const src = raw[d]
-    const start = normalizeHHMM(src?.start) ?? fallback[d].start
-    const end = normalizeHHMM(src?.end) ?? fallback[d].end
-    out[d] = { enabled: Boolean(src?.enabled), start, end }
+  if (!start || !end) {
+    throw new Error('INVALID_WORKING_HOURS')
   }
 
-  return out
+  const startMinutes = hhmmToMinutes(start)
+  const endMinutes = hhmmToMinutes(end)
+  if (startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+    throw new Error('INVALID_WORKING_HOURS')
+  }
+
+  return {
+    enabled: day.enabled,
+    start,
+    end,
+  }
 }
 
-/**
- * Prisma JSON boundary cast (exception-with-receipts).
- * Our WorkingHoursObj is valid JSON; TS doesn’t prove it.
- */
+function normalizeWorkingHours(raw: WorkingHoursObj): WorkingHoursObj {
+  return {
+    mon: normalizeWorkingHoursDay(raw.mon),
+    tue: normalizeWorkingHoursDay(raw.tue),
+    wed: normalizeWorkingHoursDay(raw.wed),
+    thu: normalizeWorkingHoursDay(raw.thu),
+    fri: normalizeWorkingHoursDay(raw.fri),
+    sat: normalizeWorkingHoursDay(raw.sat),
+    sun: normalizeWorkingHoursDay(raw.sun),
+  }
+}
+
+function safeHoursFromDb(raw: unknown): WorkingHoursObj {
+  if (!looksLikeWorkingHours(raw)) return defaultWorkingHours()
+  return normalizeWorkingHours(raw)
+}
+
 function toInputJsonValue(hours: WorkingHoursObj): Prisma.InputJsonValue {
-  return hours as unknown as Prisma.InputJsonValue
+  return {
+    mon: { enabled: hours.mon.enabled, start: hours.mon.start, end: hours.mon.end },
+    tue: { enabled: hours.tue.enabled, start: hours.tue.start, end: hours.tue.end },
+    wed: { enabled: hours.wed.enabled, start: hours.wed.start, end: hours.wed.end },
+    thu: { enabled: hours.thu.enabled, start: hours.thu.start, end: hours.thu.end },
+    fri: { enabled: hours.fri.enabled, start: hours.fri.start, end: hours.fri.end },
+    sat: { enabled: hours.sat.enabled, start: hours.sat.start, end: hours.sat.end },
+    sun: { enabled: hours.sun.enabled, start: hours.sun.start, end: hours.sun.end },
+  } satisfies Prisma.InputJsonObject
+}
+
+function decimalToNumber(v: unknown): number | null {
+  if (v == null) return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
+    const n = (v as { toNumber: () => number }).toNumber()
+    return Number.isFinite(n) ? n : null
+  }
+  if (typeof v === 'object' && typeof (v as { toString?: unknown }).toString === 'function') {
+    const n = Number((v as { toString: () => string }).toString())
+    return Number.isFinite(n) ? n : null
+  }
+  return null
 }
 
 /* ----------------------------
@@ -135,6 +186,9 @@ export async function GET() {
     return jsonOk({
       locations: locations.map((l) => ({
         ...l,
+        lat: decimalToNumber(l.lat),
+        lng: decimalToNumber(l.lng),
+        workingHours: safeHoursFromDb(l.workingHours),
         createdAt: l.createdAt.toISOString(),
         updatedAt: l.updatedAt.toISOString(),
       })),
@@ -163,7 +217,6 @@ export async function POST(req: Request) {
 
     const name = hasOwn(body, 'name') ? pickString(body.name) : null
 
-    // safer default: create drafts unless client explicitly marks bookable
     const isBookable = hasOwn(body, 'isBookable') ? body.isBookable : undefined
     if (isBookable !== undefined && typeof isBookable !== 'boolean') {
       return jsonFail(400, 'isBookable must be boolean.')
@@ -183,30 +236,30 @@ export async function POST(req: Request) {
     const countryCode = hasOwn(body, 'countryCode') ? pickString(body.countryCode) : null
     const placeId = hasOwn(body, 'placeId') ? pickString(body.placeId) : null
 
-    // lat/lng accept: number OR string number OR null (explicit clear)
     let latRaw: number | null | undefined = undefined
     if (hasOwn(body, 'lat')) {
-      if (body.lat === null) latRaw = null
-      else {
+      if (body.lat === null) {
+        latRaw = null
+      } else {
         const n = pickNumber(body.lat)
-        if (n == null) return jsonFail(400, 'lat must be a number or null')
+        if (n == null) return jsonFail(400, 'lat must be a number or null.')
         latRaw = n
       }
     }
 
     let lngRaw: number | null | undefined = undefined
     if (hasOwn(body, 'lng')) {
-      if (body.lng === null) lngRaw = null
-      else {
+      if (body.lng === null) {
+        lngRaw = null
+      } else {
         const n = pickNumber(body.lng)
-        if (n == null) return jsonFail(400, 'lng must be a number or null')
+        if (n == null) return jsonFail(400, 'lng must be a number or null.')
         lngRaw = n
       }
     }
 
     const timeZone = hasOwn(body, 'timeZone') ? pickString(body.timeZone) : null
 
-    // optional schedule knobs (fallbacks mirror original behavior)
     const bufferMinutes = hasOwn(body, 'bufferMinutes')
       ? clampInt(pickInt(body.bufferMinutes) ?? 0, 0, 180)
       : undefined
@@ -223,34 +276,33 @@ export async function POST(req: Request) {
       ? clampInt(pickInt(body.maxDaysAhead) ?? 365, 1, 3650)
       : undefined
 
-    // workingHours (optional)
     let workingHours: WorkingHoursObj = defaultWorkingHours()
     if (hasOwn(body, 'workingHours')) {
       if (!looksLikeWorkingHours(body.workingHours)) {
-        return jsonFail(400, 'workingHours must be an object with mon..sun: { enabled, start, end }.')
+        return jsonFail(
+          400,
+          'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
+        )
       }
       workingHours = normalizeWorkingHours(body.workingHours)
     }
 
     const willBookable = typeof isBookable === 'boolean' ? isBookable : false
 
-    // If bookable, timezone MUST be valid
     if (willBookable) {
       if (!timeZone || !isValidIanaTimeZone(timeZone)) {
-        return jsonFail(400, 'Bookable locations must have a valid IANA timeZone (e.g. America/Los_Angeles).')
+        return jsonFail(400, 'Bookable locations must have a valid IANA timeZone.')
       }
 
-      // If bookable, always require lat/lng (availability + nearby pros depends on it)
       const latNum = latRaw === undefined ? null : latRaw
       const lngNum = lngRaw === undefined ? null : lngRaw
       if (latNum == null || lngNum == null) {
         return jsonFail(400, 'Bookable locations must include lat/lng.')
       }
 
-      // If salon/suite and bookable, require address bits
       if (requireAddressForType(type)) {
         if (!placeId || !formattedAddress) {
-          return jsonFail(400, 'Salon/Suite bookable locations require placeId + formattedAddress.')
+          return jsonFail(400, 'Salon/Suite bookable locations require placeId and formattedAddress.')
         }
       }
     }
@@ -258,7 +310,6 @@ export async function POST(req: Request) {
     const created = await prisma.$transaction(async (tx) => {
       const existingCount = await tx.professionalLocation.count({ where: { professionalId } })
       const isFirst = existingCount === 0
-
       const willPrimary = isFirst ? true : Boolean(wantsPrimary)
 
       if (willPrimary) {
@@ -268,7 +319,7 @@ export async function POST(req: Request) {
         })
       }
 
-      const row = await tx.professionalLocation.create({
+      return tx.professionalLocation.create({
         data: {
           professionalId,
           type,
@@ -300,21 +351,38 @@ export async function POST(req: Request) {
         select: {
           id: true,
           type: true,
+          name: true,
           isPrimary: true,
           isBookable: true,
+          formattedAddress: true,
+          addressLine1: true,
+          addressLine2: true,
+          city: true,
+          state: true,
+          postalCode: true,
+          countryCode: true,
+          placeId: true,
+          lat: true,
+          lng: true,
           timeZone: true,
+          workingHours: true,
+          bufferMinutes: true,
+          stepMinutes: true,
+          advanceNoticeMinutes: true,
+          maxDaysAhead: true,
           createdAt: true,
           updatedAt: true,
         },
       })
-
-      return row
     })
 
     return jsonOk(
       {
         location: {
           ...created,
+          lat: decimalToNumber(created.lat),
+          lng: decimalToNumber(created.lng),
+          workingHours: safeHoursFromDb(created.workingHours),
           createdAt: created.createdAt.toISOString(),
           updatedAt: created.updatedAt.toISOString(),
         },
@@ -322,6 +390,13 @@ export async function POST(req: Request) {
       201,
     )
   } catch (e) {
+    if (e instanceof Error && e.message === 'INVALID_WORKING_HOURS') {
+      return jsonFail(
+        400,
+        'workingHours must contain valid HH:MM times and each day must have end after start.',
+      )
+    }
+
     console.error('POST /api/pro/locations error', e)
     return jsonFail(500, 'Failed to create location')
   }

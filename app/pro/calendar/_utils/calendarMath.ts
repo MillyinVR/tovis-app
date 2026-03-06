@@ -28,12 +28,16 @@ export function computeDurationMinutesFromIso(startsAtIso: string, endsAtIso: st
   return Number.isFinite(mins) && mins > 0 ? mins : 60
 }
 
-// ✅ single source of truth: lib/scheduling/workingHours
+// single source of truth: lib/scheduling/workingHours
 export function getWorkingWindowForDay(day: Date, workingHours: WorkingHoursJson, timeZone: string) {
-  // Keep return shape compatible with existing callers.
   const w = getWorkingWindowForDayLib(day, workingHours, timeZone)
-  if (!w) return null
-  return { startMinutes: w.startMinutes, endMinutes: w.endMinutes, key: w.key as (typeof DAY_KEYS)[number] }
+  if (!w.ok) return null
+
+  return {
+    startMinutes: w.startMinutes,
+    endMinutes: w.endMinutes,
+    key: w.key as (typeof DAY_KEYS)[number],
+  }
 }
 
 export function isOutsideWorkingHours(args: {

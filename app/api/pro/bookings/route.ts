@@ -10,6 +10,7 @@ import {
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isValidIanaTimeZone, minutesSinceMidnightInTimeZone, sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
 
@@ -141,33 +142,6 @@ function decimalToNumber(v: unknown): number | null {
    Working-hours enforcement
 ---------------------------- */
 
-type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
-type WorkingHours = Record<string, WorkingHoursDay>
-
-function parseHHMM(v?: string) {
-  if (!v || typeof v !== 'string') return null
-  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return { hh, mm }
-}
-
-function weekdayKeyInTimeZone(dateUtc: Date, timeZone: string) {
-  const z = getZonedParts(dateUtc, timeZone)
-  const noonUtc = new Date(Date.UTC(z.year, z.month - 1, z.day, 12, 0, 0, 0))
-  const w = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(noonUtc).toLowerCase()
-  if (w.startsWith('sun')) return 'sun'
-  if (w.startsWith('mon')) return 'mon'
-  if (w.startsWith('tue')) return 'tue'
-  if (w.startsWith('wed')) return 'wed'
-  if (w.startsWith('thu')) return 'thu'
-  if (w.startsWith('fri')) return 'fri'
-  return 'sat'
-}
-
 function ensureWithinWorkingHours(args: {
   scheduledStartUtc: Date
   scheduledEndUtc: Date
@@ -176,27 +150,34 @@ function ensureWithinWorkingHours(args: {
 }): { ok: true } | { ok: false; error: string } {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
 
-  if (!isRecord(workingHours)) return { ok: false, error: 'Working hours are not set yet.' }
+  if (!isRecord(workingHours)) {
+    return { ok: false, error: 'Working hours are not set yet.' }
+  }
 
-  const dayKey = weekdayKeyInTimeZone(scheduledStartUtc, timeZone)
-  const rule = workingHours[dayKey]
-  if (!rule || typeof rule !== 'object') return { ok: false, error: 'That time is outside working hours.' }
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
 
-  const enabled = (rule as WorkingHoursDay).enabled
-  if (enabled === false) return { ok: false, error: 'That time is outside working hours.' }
+  const sParts = getZonedParts(scheduledStartUtc, tz)
+  const eParts = getZonedParts(scheduledEndUtc, tz)
+  const sameLocalDay = sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+  if (!sameLocalDay) {
+    return { ok: false, error: 'That time is outside working hours.' }
+  }
 
-  const startHHMM = parseHHMM((rule as WorkingHoursDay).start)
-  const endHHMM = parseHHMM((rule as WorkingHoursDay).end)
-  if (!startHHMM || !endHHMM) return { ok: false, error: 'Working hours are misconfigured.' }
+  const window = getWorkingWindowForDay(scheduledStartUtc, workingHours, tz)
+  if (!window.ok) {
+    if (window.reason === 'MISSING') {
+      return { ok: false, error: 'Working hours are not set yet.' }
+    }
+    if (window.reason === 'DISABLED') {
+      return { ok: false, error: 'That time is outside working hours.' }
+    }
+    return { ok: false, error: 'Working hours are misconfigured.' }
+  }
 
-  const windowStartMin = startHHMM.hh * 60 + startHHMM.mm
-  const windowEndMin = endHHMM.hh * 60 + endHHMM.mm
-  if (windowEndMin <= windowStartMin) return { ok: false, error: 'Working hours are misconfigured.' }
+  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
+  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
 
-  const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, timeZone)
-  const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, timeZone)
-
-  if (startMin < windowStartMin || endMin > windowEndMin) {
+  if (startMin < window.startMinutes || endMin > window.endMinutes) {
     return { ok: false, error: 'That time is outside working hours.' }
   }
 

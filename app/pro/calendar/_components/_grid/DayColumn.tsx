@@ -15,6 +15,7 @@ import {
 } from '../../_utils/calendarMath'
 import { useDayEvents } from './useDayEvents'
 import { EventCard } from './EventCard'
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 type LocationType = 'SALON' | 'MOBILE'
 type Window = { startMinutes: number; endMinutes: number }
@@ -30,51 +31,14 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
-function parseHHMM(v: string) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23) return null
-  if (mm < 0 || mm > 59) return null
-  return { hh, mm }
-}
-
-type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
-
-function weekdayKeyInTimeZone(date: Date, timeZone: string): WeekdayKey {
-  const tz = timeZone
-  const safe = new Date(date.getTime() + MIDDAY_MS)
-  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
-    .format(safe)
-    .toLowerCase()
-
-  if (wd.startsWith('mon')) return 'mon'
-  if (wd.startsWith('tue')) return 'tue'
-  if (wd.startsWith('wed')) return 'wed'
-  if (wd.startsWith('thu')) return 'thu'
-  if (wd.startsWith('fri')) return 'fri'
-  if (wd.startsWith('sat')) return 'sat'
-  return 'sun'
-}
-
 function getWorkingWindowForDateInTimeZone(day: Date, workingHours: WorkingHoursJson, timeZone: string): Window | null {
-  if (!workingHours) return null
+  const result = getWorkingWindowForDay(new Date(day.getTime() + MIDDAY_MS), workingHours, timeZone)
+  if (!result.ok) return null
 
-  const key = weekdayKeyInTimeZone(day, timeZone)
-  const rule = workingHours[key]
-  if (!rule || rule.enabled === false) return null
-
-  const s = parseHHMM(rule.start)
-  const e = parseHHMM(rule.end)
-  if (!s || !e) return null
-
-  const startMinutes = s.hh * 60 + s.mm
-  const endMinutes = e.hh * 60 + e.mm
-  if (endMinutes <= startMinutes) return null
-
-  return { startMinutes, endMinutes }
+  return {
+    startMinutes: result.startMinutes,
+    endMinutes: result.endMinutes,
+  }
 }
 
 function mergeWindows(windows: Window[]): Window[] {
@@ -99,26 +63,6 @@ function mergeWindows(windows: Window[]): Window[] {
     }
   }
   return out
-}
-
-function endMinutesForDay(args: { dayYmd: string; end: Date; timeZone: string }) {
-  const { dayYmd, end, timeZone } = args
-  const endYmdInclusive = ymdInTimeZone(new Date(end.getTime() - 1), timeZone)
-  if (dayYmd !== endYmdInclusive) return null
-
-  const endYmdExact = ymdInTimeZone(end, timeZone)
-  const minutes = minutesSinceMidnightInTimeZone(end, timeZone)
-
-  if (minutes === 0 && endYmdExact !== endYmdInclusive) return TOTAL_MINUTES
-  return minutes
-}
-
-function formatTimeLabelFromMinutes(mins: number) {
-  const hh = Math.floor(mins / 60)
-  const mm = mins % 60
-  const h12 = ((hh + 11) % 12) + 1
-  const ampm = hh >= 12 ? 'PM' : 'AM'
-  return `${h12}:${String(mm).padStart(2, '0')} ${ampm}`
 }
 
 export function DayColumn(props: {

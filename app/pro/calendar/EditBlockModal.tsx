@@ -13,6 +13,7 @@ import { computeDurationMinutesFromIso } from './_utils/calendarMath'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
+import { parseHHMM } from '@/lib/scheduling/workingHours'
 
 type Props = {
   open: boolean
@@ -48,14 +49,6 @@ function parseYmd(ymd: string) {
   const [yyyy, mm, dd] = (ymd || '').split('-').map((x) => Number(x))
   if (!yyyy || !mm || !dd) return null
   return { year: yyyy, month: mm, day: dd }
-}
-
-function parseHHMM(hhmm: string) {
-  const [hhStr, miStr] = (hhmm || '').split(':')
-  const hh = Number(hhStr)
-  const mi = Number(miStr)
-  if (!Number.isFinite(hh) || !Number.isFinite(mi)) return null
-  return { hour: clamp(hh, 0, 23), minute: clamp(mi, 0, 59) }
 }
 
 function parseBlockDto(data: unknown): BlockDto | null {
@@ -159,18 +152,17 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       const d = parseYmd(dateStr)
       if (!d) throw new Error('Pick a valid date.')
 
-      const t = parseHHMM(startTime)
-      if (!t) throw new Error('Pick a valid start time.')
+      const parsed = parseHHMM(startTime)
+      if (!parsed) throw new Error('Pick a valid start time.')
 
       const dur = roundTo15(Number(durationMinutes || 60))
 
-      // ✅ wall-clock in tz -> UTC
       const startUtc = zonedTimeToUtc({
         year: d.year,
         month: d.month,
         day: d.day,
-        hour: t.hour,
-        minute: t.minute,
+        hour: parsed.hh,
+        minute: parsed.mm,
         second: 0,
         timeZone: tz,
       })

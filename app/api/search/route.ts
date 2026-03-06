@@ -2,7 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { Prisma, type ProfessionType } from '@prisma/client'
-
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 export const dynamic = 'force-dynamic'
 
 function pickNumber(v: string | null) {
@@ -86,92 +86,38 @@ function inferProfessionTypes(q: string): ProfessionType[] {
   return Array.from(new Set(hits))
 }
 
-// ---- open-now helpers (location working hours) ----
-type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
-type DayHours = { enabled: boolean; start: string; end: string }
-type WorkingHours = Partial<Record<WeekdayKey, DayHours>>
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
-
-function parseHHMM(s: unknown): number | null {
-  if (typeof s !== 'string') return null
-  const m = s.trim().match(/^(\d{2}):(\d{2})$/)
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return hh * 60 + mm
-}
-
-function parseWorkingHours(raw: unknown): WorkingHours | null {
-  if (!isRecord(raw)) return null
-  const out: WorkingHours = {}
-  const keys: WeekdayKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-  for (const k of keys) {
-    const v = raw[k]
-    if (!isRecord(v)) continue
-    const enabled = v.enabled === true
-    const start = typeof v.start === 'string' ? v.start : null
-    const end = typeof v.end === 'string' ? v.end : null
-    if (!start || !end) continue
-    out[k] = { enabled, start, end }
-  }
-  return out
-}
-
-function localNowKeyAndMinutes(timeZone: string): { day: WeekdayKey; minutes: number } | null {
-  const tz = timeZone?.trim()
+function localNowMinutes(timeZone: string): number | null {
+  const tz = timeZone.trim()
   if (!tz) return null
 
-  const d = new Date()
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
-    weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).formatToParts(d)
+  }).formatToParts(new Date())
 
-  const wd = parts.find((p) => p.type === 'weekday')?.value?.toLowerCase() ?? ''
   const hour = parts.find((p) => p.type === 'hour')?.value
-  const min = parts.find((p) => p.type === 'minute')?.value
+  const minute = parts.find((p) => p.type === 'minute')?.value
+
   const hh = hour ? Number(hour) : NaN
-  const mm = min ? Number(min) : NaN
+  const mm = minute ? Number(minute) : NaN
   if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
 
-  const day: WeekdayKey =
-    wd.startsWith('mon') ? 'mon' :
-    wd.startsWith('tue') ? 'tue' :
-    wd.startsWith('wed') ? 'wed' :
-    wd.startsWith('thu') ? 'thu' :
-    wd.startsWith('fri') ? 'fri' :
-    wd.startsWith('sat') ? 'sat' :
-    'sun'
-
-  return { day, minutes: hh * 60 + mm }
+  return hh * 60 + mm
 }
 
 function isOpenNow(args: { timeZone: string | null; workingHours: unknown }) {
   const tz = args.timeZone?.trim() ?? ''
   if (!tz) return false
-  const wh = parseWorkingHours(args.workingHours)
-  if (!wh) return false
 
-  const now = localNowKeyAndMinutes(tz)
-  if (!now) return false
+  const window = getWorkingWindowForDay(new Date(), args.workingHours, tz)
+  if (!window.ok) return false
 
-  const day = wh[now.day]
-  if (!day || day.enabled !== true) return false
+  const nowMinutes = localNowMinutes(tz)
+  if (nowMinutes == null) return false
 
-  const start = parseHHMM(day.start)
-  const end = parseHHMM(day.end)
-  if (start == null || end == null) return false
-
-  // simple same-day window (if you ever support overnight shifts, we’ll handle that later)
-  return now.minutes >= start && now.minutes <= end
+  return nowMinutes >= window.startMinutes && nowMinutes <= window.endMinutes
 }
 
 // ---- response location shape ----

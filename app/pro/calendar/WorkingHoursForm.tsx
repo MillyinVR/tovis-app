@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson, readErrorMessage } from '@/lib/http'
+import { parseHHMM } from '@/lib/scheduling/workingHours'
 
 type Period = 'AM' | 'PM'
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
@@ -63,18 +64,11 @@ async function safeJsonObject(res: Response): Promise<JsonObject> {
   return isObject(data) ? (data as JsonObject) : {}
 }
 
-/** Accept "9:00" or "09:00" and normalize to HH:MM, else null */
 function normalizeHHMM(v: unknown): string | null {
-  const s = typeof v === 'string' ? v.trim() : ''
-  const m = /^(\d{1,2}):(\d{2})$/.exec(s)
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+  const parsed = parseHHMM(v)
+  if (!parsed) return null
+  return `${String(parsed.hh).padStart(2, '0')}:${String(parsed.mm).padStart(2, '0')}`
 }
-
 function looksLikeApiHours(v: unknown): v is ApiWorkingHours {
   if (!isObject(v)) return false
   for (const d of DAY_KEYS) {
@@ -108,12 +102,11 @@ function defaultApiHours(): ApiWorkingHours {
 }
 
 function parseTime24(time: string | null | undefined): { hour: number; minute: number; period: Period } {
-  const t = normalizeHHMM(time)
-  if (!t) return { hour: 9, minute: 0, period: 'AM' }
+  const parsed = parseHHMM(time)
+  if (!parsed) return { hour: 9, minute: 0, period: 'AM' }
 
-  const [hStr, mStr] = t.split(':')
-  const hh24 = clamp(Number(hStr), 0, 23)
-  const mm = clamp(Number(mStr), 0, 59)
+  const hh24 = parsed.hh
+  const mm = parsed.mm
 
   if (hh24 === 0) return { hour: 12, minute: mm, period: 'AM' }
   if (hh24 === 12) return { hour: 12, minute: mm, period: 'PM' }

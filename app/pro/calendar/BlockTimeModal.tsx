@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'
+import { parseHHMM } from '@/lib/scheduling/workingHours'
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
@@ -25,16 +26,6 @@ function toTimeInputValueFromParts(parts: { hour: number; minute: number }) {
   const hh = String(parts.hour).padStart(2, '0')
   const mm = String(parts.minute).padStart(2, '0')
   return `${hh}:${mm}`
-}
-
-function parseHHMM(hhmm: string) {
-  const [hhStr, mmStr] = (hhmm || '').split(':')
-  const hh = Number(hhStr)
-  const mm = Number(mmStr)
-  return {
-    hour: Number.isFinite(hh) ? clamp(hh, 0, 23) : 0,
-    minute: Number.isFinite(mm) ? clamp(mm, 0, 59) : 0,
-  }
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -127,19 +118,19 @@ export default function BlockTimeModal(props: {
       const [yyyy, mm, dd] = (date || '').split('-').map((x) => Number(x))
       if (!yyyy || !mm || !dd) throw new Error('Pick a valid date.')
 
-      const t = parseHHMM(time)
+      const parsed = parseHHMM(time)
+      if (!parsed) throw new Error('Pick a valid start time.')
 
       const durRaw = Number(durationMinutes || 60)
       const durSnapped = snapToStep(durRaw, step)
       const dur = clamp(durSnapped, step, 12 * 60)
 
-      // ✅ wall-clock in pro TZ -> UTC instant
       const startUtc = zonedTimeToUtc({
         year: yyyy,
         month: mm,
         day: dd,
-        hour: t.hour,
-        minute: t.minute,
+        hour: parsed.hh,
+        minute: parsed.mm,
         second: 0,
         timeZone: tz,
       })

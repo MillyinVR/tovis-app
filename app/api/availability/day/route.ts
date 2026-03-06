@@ -9,6 +9,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { getRedis } from '@/lib/redis'
 import { createHash } from 'crypto'
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
 // If you’re on Next “edge” runtime, you MUST remove crypto usage and I’ll adjust hashing.
@@ -77,17 +78,6 @@ function parseYYYYMMDD(s: unknown) {
   return { year, month, day }
 }
 
-/** Accepts both "9:00" and "09:00" */
-function parseHHMM(s: unknown) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s ?? '').trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return { hh, mm }
-}
-
 function normalizeStepMinutes(input: unknown, fallback: number) {
   const n = typeof input === 'number' ? input : Number(input)
   const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
@@ -118,29 +108,6 @@ function ymdToString(ymd: { year: number; month: number; day: number }) {
   return `${ymd.year}-${mm}-${dd}`
 }
 
-function getDayKeyFromYMD(args: { year: number; month: number; day: number; timeZone: string }) {
-  const timeZone = sanitizeTimeZone(args.timeZone, 'UTC')
-
-  const noonUtc = zonedTimeToUtc({
-    year: args.year,
-    month: args.month,
-    day: args.day,
-    hour: 12,
-    minute: 0,
-    second: 0,
-    timeZone,
-  })
-
-  const w = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(noonUtc).toLowerCase()
-
-  if (w.startsWith('sun')) return 'sun'
-  if (w.startsWith('mon')) return 'mon'
-  if (w.startsWith('tue')) return 'tue'
-  if (w.startsWith('wed')) return 'wed'
-  if (w.startsWith('thu')) return 'thu'
-  if (w.startsWith('fri')) return 'fri'
-  return 'sat'
-}
 
 function pickModeDurationMinutes(
   offering: { salonDurationMinutes: number | null; mobileDurationMinutes: number | null },
@@ -403,62 +370,51 @@ async function computeDaySlotsFast(args: {
   const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(dateYMD, tzIn)
   const nowUtc = new Date()
 
-  const wh = workingHours && typeof workingHours === 'object' ? (workingHours as WorkingHours) : null
-  if (!wh) {
+  const dayAnchorUtc = zonedTimeToUtc({
+    year: dateYMD.year,
+    month: dateYMD.month,
+    day: dateYMD.day,
+    hour: 12,
+    minute: 0,
+    second: 0,
+    timeZone,
+  })
+
+  const window = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
+
+  if (!window.ok) {
+    if (window.reason === 'MISSING') {
+      return {
+        ok: false,
+        error: 'Working hours are not set for this location.',
+        dayStartUtc,
+        dayEndExclusiveUtc,
+        debug: debug ? { timeZone, reason: 'no-workingHours' } : undefined,
+      }
+    }
+
+    if (window.reason === 'DISABLED') {
+      return {
+        ok: true,
+        slots: [],
+        dayStartUtc,
+        dayEndExclusiveUtc,
+        debug: debug ? { timeZone, reason: 'disabled-day' } : undefined,
+      }
+    }
+
     return {
       ok: false,
-      error: 'Working hours are not set for this location.',
+      error: 'Working hours are misconfigured. Please re-save your schedule.',
       dayStartUtc,
       dayEndExclusiveUtc,
-      debug: debug ? { timeZone, reason: 'no-workingHours' } : undefined,
+      debug: debug ? { timeZone, reason: 'misconfigured-workingHours' } : undefined,
     }
   }
 
-  const dayKey = getDayKeyFromYMD({ ...dateYMD, timeZone })
-  const rule = wh[dayKey]
-  if (!rule) {
-    return {
-      ok: false,
-      error: 'Working hours are misconfigured (missing weekday rules). Please re-save your schedule.',
-      dayStartUtc,
-      dayEndExclusiveUtc,
-      debug: debug ? { timeZone, dayKey, whKeys: Object.keys(wh) } : undefined,
-    }
-  }
-
-  if (rule.enabled === false) {
-    return {
-      ok: true,
-      slots: [],
-      dayStartUtc,
-      dayEndExclusiveUtc,
-      debug: debug ? { timeZone, dayKey, enabled: false } : undefined,
-    }
-  }
-
-  const startParsed = parseHHMM(rule.start)
-  const endParsed = parseHHMM(rule.end)
-  if (!startParsed || !endParsed) {
-    return {
-      ok: false,
-      error: 'Working hours are misconfigured (invalid start/end time). Please re-save your schedule.',
-      dayStartUtc,
-      dayEndExclusiveUtc,
-      debug: debug ? { timeZone, dayKey, rule } : undefined,
-    }
-  }
-
-  const windowStartMin = startParsed.hh * 60 + startParsed.mm
-  const windowEndMin = endParsed.hh * 60 + endParsed.mm
-  if (windowEndMin <= windowStartMin) {
-    return {
-      ok: false,
-      error: 'Working hours are misconfigured (end must be after start). Please re-save your schedule.',
-      dayStartUtc,
-      dayEndExclusiveUtc,
-      debug: debug ? { timeZone, dayKey, windowStartMin, windowEndMin } : undefined,
-    }
-  }
+  const dayKey = window.key
+  const windowStartMin = window.startMinutes
+  const windowEndMin = window.endMinutes
 
   const step = normalizeStepMinutes(stepMinutes, 30)
   const dur = clampInt(Number(durationMinutes || 60), 15, MAX_SLOT_DURATION_MINUTES)

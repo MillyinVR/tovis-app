@@ -1,16 +1,12 @@
 // app/pro/calendar/CreateBookingModal.tsx
 'use client'
 
+'use client'
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone, zonedTimeToUtc, getZonedParts } from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'
-
-type DayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
-const DAY_KEYS: DayKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-
-type WorkingHoursJson =
-  | Record<DayKey, { enabled: boolean; start: string; end: string }>
-  | null
+import { getWorkingWindowForDay, parseHHMM, type WorkingHoursJson } from '@/lib/scheduling/workingHours'
 
 type ClientLite = { id: string; fullName: string; email: string | null; phone: string | null }
 type ServiceLite = { id: string; name: string; durationMinutes?: number | null }
@@ -30,16 +26,6 @@ function roundDurationToStep(mins: number, stepMinutes: number) {
   const step = clamp(Math.trunc(stepMinutes || 15), 5, 60)
   const snapped = snapToStep(mins, step)
   return clamp(snapped, step, 12 * 60)
-}
-
-function parseHHMM(hhmm: string) {
-  const [hhStr, mmStr] = (hhmm || '').split(':')
-  const hh = Number(hhStr)
-  const mm = Number(mmStr)
-  return {
-    hour: Number.isFinite(hh) ? clamp(hh, 0, 23) : 0,
-    minute: Number.isFinite(mm) ? clamp(mm, 0, 59) : 0,
-  }
 }
 
 function toDateInputValueFromParts(parts: { year: number; month: number; day: number }) {
@@ -99,21 +85,6 @@ function coerceClients(data: unknown): { recent: ClientLite[]; other: ClientLite
     recent: recentArr.map(parseClient).filter((x): x is ClientLite => Boolean(x)),
     other: otherArr.map(parseClient).filter((x): x is ClientLite => Boolean(x)),
   }
-}
-
-function getWorkingWindowForDayKey(dayKey: DayKey, workingHours: WorkingHoursJson) {
-  if (!workingHours) return null
-  const cfg = workingHours[dayKey]
-  if (!cfg || !cfg.enabled) return null
-
-  const start = parseHHMM(String(cfg.start))
-  const end = parseHHMM(String(cfg.end))
-
-  const startMinutes = start.hour * 60 + start.minute
-  const endMinutes = end.hour * 60 + end.minute
-  if (endMinutes <= startMinutes) return null
-
-  return { startMinutes, endMinutes }
 }
 
 export default function CreateBookingModal(props: {
@@ -313,47 +284,44 @@ export default function CreateBookingModal(props: {
   }, [selectedServices, step])
 
   const wallClock = useMemo(() => {
-    const [yyyy, mm, dd] = (dateStr || '').split('-').map((x) => Number(x))
-    if (!yyyy || !mm || !dd) return null
-    const t = parseHHMM(timeStr)
-    return { year: yyyy, month: mm, day: dd, hour: t.hour, minute: t.minute }
-  }, [dateStr, timeStr])
+  const [yyyy, mm, dd] = (dateStr || '').split('-').map((x) => Number(x))
+  if (!yyyy || !mm || !dd) return null
+
+  const parsed = parseHHMM(timeStr)
+  if (!parsed) return null
+
+  return {
+    year: yyyy,
+    month: mm,
+    day: dd,
+    hour: parsed.hh,
+    minute: parsed.mm,
+  }
+}, [dateStr, timeStr])
 
   const outsideHours = useMemo(() => {
-    if (!wallClock) return false
+  if (!wallClock) return false
 
-    // Use NOON for weekday derivation (DST-safe)
-    const noonUtc = zonedTimeToUtc({
-      year: wallClock.year,
-      month: wallClock.month,
-      day: wallClock.day,
-      hour: 12,
-      minute: 0,
-      second: 0,
-      timeZone: tz,
-    })
-    if (!Number.isFinite(noonUtc.getTime())) return true
+  const noonUtc = zonedTimeToUtc({
+    year: wallClock.year,
+    month: wallClock.month,
+    day: wallClock.day,
+    hour: 12,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+  if (!Number.isFinite(noonUtc.getTime())) return true
 
-    const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
-      .format(noonUtc)
-      .slice(0, 3)
-      .toLowerCase()
+  const window = getWorkingWindowForDay(noonUtc, workingHours, tz)
+  if (!window.ok) return true
 
-    const dayKey = (DAY_KEYS as readonly string[]).includes(weekdayShort)
-      ? (weekdayShort as DayKey)
-      : null
-    if (!dayKey) return true
+  const startM = wallClock.hour * 60 + wallClock.minute
+  const buf = clamp(Number(bufferMinutes) || 0, 0, 180)
+  const endM = startM + computedDuration + buf
 
-    const window = getWorkingWindowForDayKey(dayKey, workingHours)
-    if (!window) return true
-
-    const startM = wallClock.hour * 60 + wallClock.minute
-    const buf = clamp(Number(bufferMinutes) || 0, 0, 180)
-    const endM = startM + computedDuration + buf
-
-    return startM < window.startMinutes || endM > window.endMinutes
-  }, [wallClock, workingHours, computedDuration, bufferMinutes, tz])
-
+  return startM < window.startMinutes || endM > window.endMinutes
+}, [wallClock, workingHours, computedDuration, bufferMinutes, tz])
   const canSubmit = useMemo(() => {
     if (saving) return false
     if (!locationId) return false

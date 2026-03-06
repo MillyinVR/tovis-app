@@ -6,7 +6,8 @@ import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import { getZonedParts, minutesSinceMidnightInTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
-
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+import { isRecord } from '@/lib/guards'
 export const dynamic = 'force-dynamic'
 
 /**
@@ -78,37 +79,6 @@ function pickDurationMinutes(args: {
   return Number.isFinite(n) && n > 0 ? n : 60
 }
 
-/** Working-hours enforcement (LOCATION truth) */
-type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
-type WorkingHours = Record<string, WorkingHoursDay>
-
-function getWeekdayKeyInTimeZone(dateUtc: Date, timeZoneRaw: string): keyof WorkingHours {
-  const tz = sanitizeTimeZone(timeZoneRaw, 'UTC') || 'UTC'
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
-    .format(dateUtc)
-    .toLowerCase()
-
-  if (weekday.startsWith('mon')) return 'mon'
-  if (weekday.startsWith('tue')) return 'tue'
-  if (weekday.startsWith('wed')) return 'wed'
-  if (weekday.startsWith('thu')) return 'thu'
-  if (weekday.startsWith('fri')) return 'fri'
-  if (weekday.startsWith('sat')) return 'sat'
-  return 'sun'
-}
-
-/** Accepts both "9:00" and "09:00" (because legacy hours might exist) */
-function parseHHMM(v?: string) {
-  if (!v || typeof v !== 'string') return null
-  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return { hh, mm }
-}
-
 function ensureWithinWorkingHours(args: {
   scheduledStartUtc: Date
   scheduledEndUtc: Date
@@ -117,46 +87,40 @@ function ensureWithinWorkingHours(args: {
 }): { ok: true } | { ok: false; error: string } {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
 
-  if (!workingHours || typeof workingHours !== 'object') {
-    return { ok: false, error: 'This professional has not set working hours yet.' }
-  }
+  if (!isRecord(workingHours)) {
+  return { ok: false, error: 'This professional has not set working hours yet.' }
+}
 
   const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
-  const wh = workingHours as WorkingHours
 
-  const dayKey = getWeekdayKeyInTimeZone(scheduledStartUtc, tz)
-  const rule = wh?.[dayKey]
-  if (!rule || rule.enabled === false) {
-    return { ok: false, error: 'That time is outside this professional’s working hours.' }
-  }
-
-  const startHHMM = parseHHMM(rule.start)
-  const endHHMM = parseHHMM(rule.end)
-  if (!startHHMM || !endHHMM) {
-    return { ok: false, error: 'This professional’s working hours are misconfigured.' }
-  }
-
-  const windowStartMin = startHHMM.hh * 60 + startHHMM.mm
-  const windowEndMin = endHHMM.hh * 60 + endHHMM.mm
-  if (windowEndMin <= windowStartMin) {
-    return { ok: false, error: 'This professional’s working hours are misconfigured.' }
-  }
-
-  // Must start & end on the same local day in tz
   const sParts = getZonedParts(scheduledStartUtc, tz)
   const eParts = getZonedParts(scheduledEndUtc, tz)
   const sameLocalDay = sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
-  if (!sameLocalDay) return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  if (!sameLocalDay) {
+    return { ok: false, error: 'That time is outside this professional’s working hours.' }
+  }
+
+  const window = getWorkingWindowForDay(scheduledStartUtc, workingHours, tz)
+  if (!window.ok) {
+    if (window.reason === 'MISSING') {
+      return { ok: false, error: 'This professional has not set working hours yet.' }
+    }
+    if (window.reason === 'DISABLED') {
+      return { ok: false, error: 'That time is outside this professional’s working hours.' }
+    }
+    return { ok: false, error: 'This professional’s working hours are misconfigured.' }
+  }
 
   const startMin = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
   const endMin = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
 
-  if (startMin < windowStartMin || endMin > windowEndMin) {
+  if (startMin < window.startMinutes || endMin > window.endMinutes) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
   }
 
   return { ok: true }
 }
+
 
 /**
  * Month-boundary-safe YMD +1 (UTC noon to avoid DST edge weirdness)
