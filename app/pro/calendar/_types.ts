@@ -50,8 +50,8 @@ export type ServiceOption = {
   name: string
   durationMinutes?: number | null
   offeringId?: string
+  priceStartingAt?: string | null
 }
-
 /**
  * Booking service item returned by GET /api/pro/bookings/[id].
  * This is now the real source of truth for editable booking services.

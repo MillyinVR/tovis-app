@@ -338,14 +338,14 @@ export default function ProCalendarPage() {
         onClose={cal.closeBooking}
         onChangeReschedDate={cal.setReschedDate}
         onChangeReschedTime={cal.setReschedTime}
-        onChangeDurationMinutes={cal.setDurationMinutes}
-        onChangeSelectedServiceId={() => {}}
+        selectedDraftServiceIds={cal.selectedDraftServiceIds}
+        hasDraftServiceItemsChanges={cal.hasDraftServiceItemsChanges}
+        onChangeSelectedDraftServiceIds={cal.setDraftServiceIds}
         onToggleNotifyClient={cal.setNotifyClient}
         onToggleAllowOutsideHours={cal.setAllowOutsideHours}
         onSave={() => void cal.submitChanges()}
         onApprove={() => void cal.approveBooking()}
         onDeny={() => void cal.denyBooking()}
-        selectedServiceId=""
       />
     </main>
   )

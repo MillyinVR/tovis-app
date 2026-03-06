@@ -14,11 +14,11 @@ export function BookingModal(props: {
   services: ServiceOption[]
   timeZone: string
 
-  // New shape
   bookingServiceLabel?: string
   serviceItemsDraft?: BookingDetails['serviceItems']
+  selectedDraftServiceIds: string[]
+  hasDraftServiceItemsChanges?: boolean
 
-  // Existing edit props
   reschedDate: string
   reschedTime: string
   durationMinutes: number
@@ -27,14 +27,10 @@ export function BookingModal(props: {
   editOutside: boolean
   saving: boolean
 
-  // Kept temporarily so page.tsx can still compile while we update file-by-file
-  selectedServiceId: string
-  onChangeDurationMinutes: (v: number) => void
-  onChangeSelectedServiceId: (v: string) => void
-
   onClose: () => void
   onChangeReschedDate: (v: string) => void
   onChangeReschedTime: (v: string) => void
+  onChangeSelectedDraftServiceIds: (ids: string[]) => void
   onToggleNotifyClient: (v: boolean) => void
   onToggleAllowOutsideHours: (v: boolean) => void
   onSave: () => void
@@ -46,10 +42,13 @@ export function BookingModal(props: {
     loading,
     error,
     booking,
+    services,
     timeZone,
 
     bookingServiceLabel,
     serviceItemsDraft,
+    selectedDraftServiceIds,
+    hasDraftServiceItemsChanges,
 
     reschedDate,
     reschedTime,
@@ -62,6 +61,7 @@ export function BookingModal(props: {
     onClose,
     onChangeReschedDate,
     onChangeReschedTime,
+    onChangeSelectedDraftServiceIds,
     onToggleNotifyClient,
     onToggleAllowOutsideHours,
     onSave,
@@ -84,10 +84,7 @@ export function BookingModal(props: {
   const label = useMemo(() => {
     if (bookingServiceLabel && bookingServiceLabel.trim()) return bookingServiceLabel.trim()
 
-    const names = items
-      .map((item) => item.serviceName.trim())
-      .filter(Boolean)
-
+    const names = items.map((item) => item.serviceName.trim()).filter(Boolean)
     return names.length ? names.join(' + ') : 'Appointment'
   }, [bookingServiceLabel, items])
 
@@ -97,9 +94,19 @@ export function BookingModal(props: {
     return 60
   }, [durationMinutes, booking?.totalDurationMinutes])
 
+  const selectedSet = useMemo(() => new Set(selectedDraftServiceIds), [selectedDraftServiceIds])
+
   function close() {
     if (saving) return
     onClose()
+  }
+
+  function toggleService(serviceId: string, checked: boolean) {
+    const next = checked
+      ? Array.from(new Set([...selectedDraftServiceIds, serviceId]))
+      : selectedDraftServiceIds.filter((id) => id !== serviceId)
+
+    onChangeSelectedDraftServiceIds(next)
   }
 
   if (!open) return null
@@ -107,7 +114,7 @@ export function BookingModal(props: {
   return (
     <div className="fixed inset-0 z-999 flex items-center justify-center bg-black/50 p-4" onClick={close}>
       <div
-        className="w-full max-w-150 overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
+        className="w-full max-w-170 overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -229,7 +236,64 @@ export function BookingModal(props: {
                 </div>
 
                 <div className="mt-3">
-                  <div className="mb-1 text-xs font-semibold text-textSecondary">Services</div>
+                  <div className="mb-1 text-xs font-semibold text-textSecondary">Select services</div>
+
+                  {services.length ? (
+                    <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3">
+                      <div className="grid gap-2">
+                        {services.map((service) => {
+                          const checked = selectedSet.has(service.id)
+                          const dur =
+                            typeof service.durationMinutes === 'number' && service.durationMinutes > 0
+                              ? service.durationMinutes
+                              : null
+                          const price =
+                            typeof service.priceStartingAt === 'string' && service.priceStartingAt.trim()
+                              ? service.priceStartingAt
+                              : null
+
+                          return (
+                            <label
+                              key={`${service.id}:${service.offeringId ?? 'no-offering'}`}
+                              className="flex items-center gap-3 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => toggleService(service.id, e.target.checked)}
+                                disabled={saving}
+                              />
+
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-extrabold text-textPrimary">
+                                  {service.name}
+                                </div>
+                                <div className="text-xs font-semibold text-textSecondary">
+                                  {dur != null ? `${dur} min` : 'Duration not set'}
+                                  {price != null ? ` • $${price}` : ''}
+                                </div>
+                              </div>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3 text-sm font-semibold text-textSecondary">
+                      No active services available for this booking type.
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-textSecondary">Current service items</div>
+                    {hasDraftServiceItemsChanges ? (
+                      <div className="rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-extrabold text-textPrimary">
+                        Unsaved service changes
+                      </div>
+                    ) : null}
+                  </div>
 
                   {items.length ? (
                     <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3">
@@ -258,7 +322,7 @@ export function BookingModal(props: {
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3 text-sm font-semibold text-textSecondary">
-                      No service items on this booking.
+                      No service items selected.
                     </div>
                   )}
                 </div>

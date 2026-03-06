@@ -1,3 +1,4 @@
+// app/pro/calendar/_hooks/useCalendarData.ts
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
@@ -264,16 +265,78 @@ function parseServiceOptions(v: unknown): ServiceOption[] {
       row.durationMinutes === null ? null : (pickNumber(row.durationMinutes) ?? null)
 
     const offeringId = pickString(row.offeringId) ?? undefined
+    const priceStartingAt =
+      row.priceStartingAt === null ? null : (pickString(row.priceStartingAt) ?? null)
 
     out.push({
       id,
       name,
       ...(durationMinutes !== null ? { durationMinutes } : {}),
       ...(offeringId ? { offeringId } : {}),
+      ...(priceStartingAt !== null ? { priceStartingAt } : {}),
     })
   }
 
   return out
+}
+function normalizeMoneyString(raw: string | null | undefined): string {
+  const value = (raw ?? '').trim()
+  return value ? value : '0.00'
+}
+
+function makeDraftItemId(serviceId: string, offeringId: string, sortOrder: number): string {
+  return `draft:${serviceId}:${offeringId}:${sortOrder}`
+}
+
+function buildDraftItemFromServiceOption(
+  service: ServiceOption,
+  sortOrder: number,
+): BookingServiceItem | null {
+  const offeringId = service.offeringId?.trim() ?? ''
+  const durationMinutesSnapshot = Number(service.durationMinutes ?? 0)
+  const priceSnapshot = normalizeMoneyString(service.priceStartingAt)
+
+  if (!service.id || !service.name || !offeringId) return null
+  if (!Number.isFinite(durationMinutesSnapshot) || durationMinutesSnapshot <= 0) return null
+
+  return {
+    id: makeDraftItemId(service.id, offeringId, sortOrder),
+    serviceId: service.id,
+    offeringId,
+    itemType: sortOrder === 0 ? 'BASE' : 'ADD_ON',
+    serviceName: service.name,
+    priceSnapshot,
+    durationMinutesSnapshot: Math.max(SNAP_MINUTES, roundTo15(durationMinutesSnapshot)),
+    sortOrder,
+  }
+}
+
+function normalizeDraftServiceItems(items: BookingServiceItem[]): BookingServiceItem[] {
+  return items.map((item, index) => ({
+    ...item,
+    itemType: index === 0 ? 'BASE' : 'ADD_ON',
+    sortOrder: index,
+  }))
+}
+
+function sameServiceItems(a: BookingServiceItem[], b: BookingServiceItem[]): boolean {
+  if (a.length !== b.length) return false
+
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i]
+    const right = b[i]
+    if (!left || !right) return false
+
+    if (left.serviceId !== right.serviceId) return false
+    if ((left.offeringId ?? null) !== (right.offeringId ?? null)) return false
+    if (left.serviceName !== right.serviceName) return false
+    if (left.priceSnapshot !== right.priceSnapshot) return false
+    if (Number(left.durationMinutesSnapshot) !== Number(right.durationMinutesSnapshot)) return false
+    if (Number(left.sortOrder) !== Number(right.sortOrder)) return false
+    if (String(left.itemType) !== String(right.itemType)) return false
+  }
+
+  return true
 }
 
 function parseBookingServiceItem(v: unknown): BookingServiceItem | null {
@@ -594,18 +657,63 @@ export function useCalendarData({ view, currentDate }: Args) {
     [],
   )
 
-  const durationMinutes = useMemo(() => {
-    const computed = serviceItemsTotalDuration(serviceItemsDraft)
-    if (computed > 0) return computed
+  const hasDraftServiceItemsChanges = useMemo(() => {
+    if (!booking) return false
+    return !sameServiceItems(
+      normalizeDraftServiceItems(serviceItemsDraft),
+      normalizeDraftServiceItems(booking.serviceItems),
+    )
+  }, [serviceItemsDraft, booking])
 
-    const fallback = Number(manualDurationMinutes || booking?.totalDurationMinutes || 60)
-    return Math.max(SNAP_MINUTES, roundTo15(fallback))
-  }, [serviceItemsDraft, manualDurationMinutes, booking?.totalDurationMinutes])
+  function setDraftServiceIds(nextServiceIds: string[]) {
+    const uniqueIds = Array.from(
+      new Set(
+        nextServiceIds
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    )
+
+    const nextItems = uniqueIds
+      .map((serviceId, index) => {
+        const option = services.find((s) => s.id === serviceId)
+        return option ? buildDraftItemFromServiceOption(option, index) : null
+      })
+      .filter((item): item is BookingServiceItem => Boolean(item))
+
+    setServiceItemsDraft(normalizeDraftServiceItems(nextItems))
+  }
 
   const bookingServiceLabel = useMemo(() => {
     const source = serviceItemsDraft.length ? serviceItemsDraft : booking?.serviceItems ?? []
     return serviceItemsLabel(source)
   }, [serviceItemsDraft, booking])
+  const durationMinutes = useMemo(() => {
+    const draftComputed = serviceItemsTotalDuration(serviceItemsDraft)
+
+    if (hasDraftServiceItemsChanges && draftComputed > 0) {
+      return draftComputed
+    }
+
+    const persisted = Number(booking?.totalDurationMinutes ?? 0)
+    if (persisted > 0) return persisted
+
+    if (draftComputed > 0) return draftComputed
+
+    const fallback = Number(manualDurationMinutes || 60)
+    return Math.max(SNAP_MINUTES, roundTo15(fallback))
+  }, [
+    serviceItemsDraft,
+    hasDraftServiceItemsChanges,
+    booking?.totalDurationMinutes,
+    manualDurationMinutes,
+  ])
+  const selectedDraftServiceIds = useMemo(
+    () => serviceItemsDraft.map((item) => item.serviceId),
+    [serviceItemsDraft],
+  )
+
+  
 
   function eventDurationMinutes(ev: CalendarEvent) {
     return typeof ev.durationMinutes === 'number' && Number.isFinite(ev.durationMinutes) && ev.durationMinutes > 0
@@ -823,20 +931,28 @@ export function useCalendarData({ view, currentDate }: Args) {
     }
   }
 
-  async function loadServicesOnce() {
-    if (servicesLoaded) return
-
+  async function loadServicesForLocation(locationType: LocationType): Promise<ServiceOption[]> {
     try {
-      const res = await fetch('/api/pro/services', { cache: 'no-store' })
+      const res = await fetch(
+        `/api/pro/services?locationType=${encodeURIComponent(locationType)}`,
+        { cache: 'no-store' },
+      )
       const data: unknown = await safeJson(res)
 
-      if (!res.ok) return
-      if (!isRecord(data)) return
+      if (!res.ok || !isRecord(data)) {
+        setServices([])
+        setServicesLoaded(true)
+        return []
+      }
 
-      setServices(parseServiceOptions(data.services))
+      const parsed = parseServiceOptions(data.services)
+      setServices(parsed)
       setServicesLoaded(true)
+      return parsed
     } catch {
-      // ignore
+      setServices([])
+      setServicesLoaded(true)
+      return []
     }
   }
 
@@ -977,10 +1093,14 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   useEffect(() => {
-    void loadServicesOnce()
     void loadLocationsOnce()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    void loadServicesForLocation(activeLocationType)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLocationType])
 
   useEffect(() => {
     void loadCalendar()
@@ -1217,8 +1337,10 @@ export function useCalendarData({ view, currentDate }: Args) {
       setReschedTime(toTimeInputValueInTimeZone(start, bookingTz))
       setNotifyClient(true)
 
-      const svcList = parseServiceOptions(isRecord(data) ? data.services : null)
-      if (svcList.length) setServices(svcList)
+      const editLocationType: LocationType =
+        parsed.locationType === 'MOBILE' ? 'MOBILE' : 'SALON'
+
+      await loadServicesForLocation(editLocationType)
     } catch (e: unknown) {
       console.error(e)
       setBookingError(errorMessageFromUnknown(e))
@@ -1287,7 +1409,12 @@ export function useCalendarData({ view, currentDate }: Args) {
         timeZone: tz,
       })
 
-      const snappedDur = Math.max(SNAP_MINUTES, roundTo15(durationMinutes))
+      const effectiveDuration =
+        hasDraftServiceItemsChanges && serviceItemsDraft.length > 0
+          ? serviceItemsTotalDuration(serviceItemsDraft)
+          : Number(booking.totalDurationMinutes || durationMinutes || 60)
+
+      const snappedDur = Math.max(SNAP_MINUTES, roundTo15(effectiveDuration))
 
       const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
       const outside = isOutsideWorkingHours({
@@ -1298,15 +1425,37 @@ export function useCalendarData({ view, currentDate }: Args) {
         timeZone: tz,
       })
 
+      const payload: {
+        scheduledFor: string
+        notifyClient: boolean
+        allowOutsideWorkingHours: boolean
+        serviceItems?: {
+          serviceId: string
+          offeringId: string
+          durationMinutesSnapshot: number
+          priceSnapshot: string
+          sortOrder: number
+        }[]
+      } = {
+        scheduledFor: nextStart.toISOString(),
+        notifyClient,
+        allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
+      }
+
+      if (hasDraftServiceItemsChanges) {
+        payload.serviceItems = normalizeDraftServiceItems(serviceItemsDraft).map((item) => ({
+          serviceId: item.serviceId,
+          offeringId: item.offeringId ?? '',
+          durationMinutesSnapshot: Number(item.durationMinutesSnapshot),
+          priceSnapshot: item.priceSnapshot,
+          sortOrder: Number(item.sortOrder),
+        }))
+      }
+
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(booking.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scheduledFor: nextStart.toISOString(),
-          durationMinutes: snappedDur,
-          notifyClient,
-          allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
-        }),
+        body: JSON.stringify(payload),
       })
 
       const data: unknown = await safeJson(res)
@@ -1644,6 +1793,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     bookingServiceLabel,
     serviceItemsDraft,
     setServiceItemsDraft,
+    selectedDraftServiceIds,
+    setDraftServiceIds,
+    hasDraftServiceItemsChanges,
     reschedDate,
     reschedTime,
     durationMinutes,
