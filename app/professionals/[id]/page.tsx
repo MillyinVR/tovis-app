@@ -95,10 +95,27 @@ export default async function PublicProfessionalProfilePage({
         },
         orderBy: { createdAt: 'asc' },
       },
+
+      // ✅ Select helpfulCount explicitly + only fields we use
       reviews: {
         orderBy: { createdAt: 'desc' },
         take: 50,
-        include: {
+        select: {
+          id: true,
+          rating: true,
+          headline: true,
+          body: true,
+          createdAt: true,
+          helpfulCount: true,
+
+          client: {
+            select: {
+              firstName: true,
+              lastName: true,
+              user: { select: { email: true } },
+            },
+          },
+
           mediaAssets: {
             select: {
               id: true,
@@ -112,7 +129,6 @@ export default async function PublicProfessionalProfilePage({
               thumbPath: true,
             },
           },
-          client: { include: { user: true } },
         },
       },
     },
@@ -217,22 +233,30 @@ export default async function PublicProfessionalProfilePage({
   const displayName = pro.businessName || 'Beauty professional'
   const avatar = (pro.avatarUrl as string | null | undefined) || null
 
+  // ✅ Spotlight support: which reviews has this viewer marked helpful?
+  const viewerHelpfulSet = new Set<string>()
+  if (isClientViewer && pro.reviews.length) {
+    const reviewIds = pro.reviews.map((r) => r.id)
+    const helpfulRows = await prisma.reviewHelpful.findMany({
+      where: { userId: viewer!.id, reviewId: { in: reviewIds } },
+      select: { reviewId: true },
+    })
+    for (const row of helpfulRows) viewerHelpfulSet.add(row.reviewId)
+  }
+
   // ReviewsPanel expects mediaAssets[].url as renderable string
   const reviewsForUI = await Promise.all(
-    (pro.reviews || []).map(async (rev: any) => {
-      const u = rev.client?.user
-      const clientName =
-        u?.name?.trim()
-          ? u.name.trim()
-          : u?.email?.trim()
-            ? u.email.trim()
-            : rev.client?.firstName
-              ? `${rev.client.firstName}${rev.client.lastName ? ` ${rev.client.lastName}` : ''}`
-              : 'Client'
+    pro.reviews.map(async (rev) => {
+      const first = (rev.client?.firstName ?? '').trim()
+      const last = (rev.client?.lastName ?? '').trim()
+      const fullName = [first, last].filter(Boolean).join(' ')
+      const email = (rev.client?.user?.email ?? '').trim()
+
+      const clientName = fullName || email || 'Client'
 
       const mediaAssets = (
         await Promise.all(
-          (rev.mediaAssets || []).map(async (m: any) => {
+          (rev.mediaAssets || []).map(async (m) => {
             if (!hasStoragePointers(m)) return null
 
             const { renderUrl, renderThumbUrl } = await renderMediaUrls({
@@ -256,7 +280,7 @@ export default async function PublicProfessionalProfilePage({
             }
           }),
         )
-      ).filter((x: any): x is NonNullable<typeof x> => Boolean(x))
+      ).filter((x): x is NonNullable<typeof x> => Boolean(x))
 
       return {
         id: rev.id,
@@ -266,6 +290,10 @@ export default async function PublicProfessionalProfilePage({
         createdAt: new Date(rev.createdAt).toISOString(),
         clientName,
         mediaAssets,
+
+        // ✅ Spotlight fuel fields
+        helpfulCount: rev.helpfulCount ?? 0,
+        viewerHelpful: viewerHelpfulSet.has(rev.id),
       }
     }),
   )

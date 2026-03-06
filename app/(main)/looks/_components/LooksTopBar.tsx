@@ -4,6 +4,9 @@
 import { useMemo, useState } from 'react'
 import { Search, X } from 'lucide-react'
 
+const TAB_LOOKS = 'The Looks'
+const TAB_SPOTLIGHT = 'Spotlight'
+
 export default function LooksTopBar(props: {
   categories: string[]
   activeCategory: string
@@ -15,15 +18,29 @@ export default function LooksTopBar(props: {
   const [searchOpen, setSearchOpen] = useState(false)
 
   const tabs = useMemo(() => {
-
     const cleaned = (categories || [])
       .map((c) => (typeof c === 'string' ? c.trim() : ''))
       .filter(Boolean)
       .filter((c) => c.toLowerCase() !== 'for you')
 
-    const unique = Array.from(new Set(cleaned))
-    if (!unique.includes('The Looks')) unique.unshift('The Looks')
-    return unique
+    // Dedup case-insensitively, preserve first occurrence
+    const seen = new Set<string>()
+    const unique: string[] = []
+    for (const c of cleaned) {
+      const key = c.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      unique.push(c)
+    }
+
+    // Remove any existing “The Looks” / “Spotlight” from the backend list (case-insensitive),
+    // then re-insert in the exact order we want.
+    const rest = unique.filter((c) => {
+      const key = c.toLowerCase()
+      return key !== TAB_LOOKS.toLowerCase() && key !== TAB_SPOTLIGHT.toLowerCase()
+    })
+
+    return [TAB_LOOKS, TAB_SPOTLIGHT, ...rest]
   }, [categories])
 
   return (

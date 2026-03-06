@@ -31,6 +31,8 @@ function initialLetter(name: string | null) {
   return (s ? s.slice(0, 1) : 'P').toUpperCase()
 }
 
+type IconVariant = 'default' | 'book'
+
 export default function RightActionRail({
   pro,
   viewerLiked,
@@ -57,18 +59,33 @@ export default function RightActionRail({
   function IconButton({
     icon,
     count,
+    label,
     onClick,
     ariaLabel,
     hideZero = false,
+    variant = 'default',
   }: {
     icon: ReactNode
     count?: number
+    label?: string
     onClick: () => void
     ariaLabel: string
     hideZero?: boolean
+    variant?: IconVariant
   }) {
     const showCount = typeof count === 'number' && (!hideZero || count > 0)
-    const formatted = showCount && typeof count === 'number' ? formatCount(count) : null
+    const formatted = showCount ? formatCount(count!) : null
+    const footerText = label ?? formatted
+
+    const isBook = variant === 'book'
+
+    const baseIconFilter =
+      'brightness(1.75) drop-shadow(0 0 10px rgba(255,255,255,0.9)) drop-shadow(0 10px 22px rgba(0,0,0,0.95))'
+
+    // Extra “premium” accent glow ONLY for Book (no background circle)
+    const iconFilter = isBook
+      ? `${baseIconFilter} drop-shadow(0 0 14px rgb(var(--accent-primary) / 0.55)) drop-shadow(0 0 34px rgb(var(--accent-primary) / 0.22))`
+      : baseIconFilter
 
     return (
       <button
@@ -77,28 +94,47 @@ export default function RightActionRail({
         aria-label={ariaLabel}
         title={ariaLabel}
         className={[
-          // “unset” without casting
           'appearance-none border-0 bg-transparent p-0 m-0',
           'grid cursor-pointer justify-items-center gap-1 text-center',
           'transition-transform active:scale-95 md:hover:scale-[1.03]',
         ].join(' ')}
       >
-        <div
-          className="grid place-items-center"
-          style={{
-            filter:
-              'brightness(1.75) drop-shadow(0 0 10px rgba(255,255,255,0.9)) drop-shadow(0 10px 22px rgba(0,0,0,0.95))',
-          }}
-        >
-          {icon}
+        <div className="relative grid place-items-center" style={{ transform: 'translateZ(0)' }}>
+          {isBook ? (
+            <div
+              aria-hidden="true"
+              className="absolute"
+              style={{
+                // bigger than icon so it reads as a halo, not a button
+                inset: -20,
+                borderRadius: 9999,
+                // bloom + ring (no solid fill)
+                background:
+                  'radial-gradient(circle at 50% 45%, rgb(var(--accent-primary) / 0.78) 0%, rgb(var(--accent-primary) / 0.22) 36%, rgb(var(--accent-primary) / 0) 72%), radial-gradient(circle, rgb(var(--accent-primary) / 0) 54%, rgb(var(--accent-primary) / 0.65) 60%, rgb(var(--accent-primary) / 0) 76%)',
+                filter: 'blur(10px)',
+                opacity: 0.9,
+                pointerEvents: 'none',
+              }}
+            />
+          ) : null}
+
+          <div
+            className="grid place-items-center"
+            style={{
+              filter: iconFilter,
+              transform: 'translateZ(0)',
+            }}
+          >
+            {icon}
+          </div>
         </div>
 
-        {formatted ? (
+        {footerText ? (
           <div
             className="w-full text-center text-[12px] font-extrabold tracking-wide text-white/95"
             style={{ textShadow: '0 2px 10px rgba(0,0,0,0.9)' }}
           >
-            {formatted}
+            {footerText}
           </div>
         ) : (
           <div className="h-[14px]" />
@@ -178,7 +214,9 @@ export default function RightActionRail({
       )}
 
       <IconButton
-        ariaLabel="Check availability"
+        ariaLabel="Book"
+        label="Book"
+        variant="book"
         onClick={onOpenAvailability}
         icon={<CalendarDays size={ICON_SIZE} className="text-white" />}
       />

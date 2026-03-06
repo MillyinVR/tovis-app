@@ -273,9 +273,7 @@ export default function SignupClientClient() {
       router.refresh()
 
       const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
-      if (nextUrl) return router.replace(nextUrl)
-
-      router.replace('/feed')
+      window.location.assign(nextUrl ?? '/looks')
     } catch (err) {
       console.error(err)
       setError('Network error.')

@@ -12,6 +12,11 @@ export type ReviewForPanel = {
   body: string | null
   createdAt: string
   clientName?: string | null
+
+  // Spotlight fuel:
+  helpfulCount?: number
+  viewerHelpful?: boolean
+
   mediaAssets?: Array<{
     id: string
     url: string // render-safe (server must provide)
@@ -33,6 +38,19 @@ function mediaSrc(m: { url: string; thumbUrl: string | null }): string | null {
   return u || null
 }
 
+function currentPathWithQuery() {
+  if (typeof window === 'undefined') return '/looks'
+  return window.location.pathname + window.location.search + window.location.hash
+}
+
+function sanitizeFrom(from: string) {
+  const trimmed = from.trim()
+  if (!trimmed) return '/looks'
+  if (!trimmed.startsWith('/')) return '/looks'
+  if (trimmed.startsWith('//')) return '/looks'
+  return trimmed
+}
+
 export default function ReviewsPanel({
   reviews,
   editable = false,
@@ -42,6 +60,9 @@ export default function ReviewsPanel({
 }) {
   const [lightbox, setLightbox] = useState<{ src: string; mediaType: MediaType } | null>(null)
   const [busyMediaId, setBusyMediaId] = useState<string | null>(null)
+
+  // Helpful toggle busy state (per review)
+  const [busyHelpfulReviewId, setBusyHelpfulReviewId] = useState<string | null>(null)
 
   // local copy so we can update UI without reload
   const [localReviews, setLocalReviews] = useState<ReviewForPanel[]>(reviews)
@@ -68,6 +89,13 @@ export default function ReviewsPanel({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [lightbox])
 
+  function redirectToLogin(reason: string) {
+    if (typeof window === 'undefined') return
+    const from = sanitizeFrom(currentPathWithQuery())
+    const qs = new URLSearchParams({ from, reason })
+    window.location.href = `/login?${qs.toString()}`
+  }
+
   async function setPortfolio(mediaId: string, value: boolean) {
     if (!editable) return
     setBusyMediaId(mediaId)
@@ -93,6 +121,90 @@ export default function ReviewsPanel({
     }
   }
 
+  async function toggleHelpful(reviewId: string) {
+    if (editable) return // pros editing portfolio shouldn’t be voting on reviews here
+    if (busyHelpfulReviewId) return
+
+    const cur = localReviews.find((r) => r.id === reviewId)
+    if (!cur) return
+
+    const beforeHelpful = Boolean(cur.viewerHelpful)
+    const beforeCount = typeof cur.helpfulCount === 'number' ? cur.helpfulCount : 0
+
+    const optimisticHelpful = !beforeHelpful
+    const optimisticCount = Math.max(0, beforeCount + (optimisticHelpful ? 1 : -1))
+
+    // optimistic update
+    setLocalReviews((prev) =>
+      prev.map((r) =>
+        r.id === reviewId
+          ? { ...r, viewerHelpful: optimisticHelpful, helpfulCount: optimisticCount }
+          : r,
+      ),
+    )
+
+    setBusyHelpfulReviewId(reviewId)
+
+    try {
+      const res = await fetch(`/api/reviews/${encodeURIComponent(reviewId)}/helpful`, {
+        method: beforeHelpful ? 'DELETE' : 'POST',
+        headers: { Accept: 'application/json' },
+      })
+
+      // guest → login
+      if (res.status === 401) {
+        // revert
+        setLocalReviews((prev) =>
+          prev.map((r) =>
+            r.id === reviewId
+              ? { ...r, viewerHelpful: beforeHelpful, helpfulCount: beforeCount }
+              : r,
+          ),
+        )
+        redirectToLogin('helpful')
+        return
+      }
+
+      const data: unknown = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        // revert on any failure
+        setLocalReviews((prev) =>
+          prev.map((r) =>
+            r.id === reviewId
+              ? { ...r, viewerHelpful: beforeHelpful, helpfulCount: beforeCount }
+              : r,
+          ),
+        )
+        return
+      }
+
+      // sync to server response if present
+      const serverHelpful =
+        typeof (data as any)?.helpful === 'boolean' ? (data as any).helpful : optimisticHelpful
+      const serverCount =
+        typeof (data as any)?.helpfulCount === 'number' ? (data as any).helpfulCount : optimisticCount
+
+      setLocalReviews((prev) =>
+        prev.map((r) =>
+          r.id === reviewId ? { ...r, viewerHelpful: serverHelpful, helpfulCount: serverCount } : r,
+        ),
+      )
+    } catch (e) {
+      console.error(e)
+      // revert on network error
+      setLocalReviews((prev) =>
+        prev.map((r) =>
+          r.id === reviewId
+            ? { ...r, viewerHelpful: beforeHelpful, helpfulCount: beforeCount }
+            : r,
+        ),
+      )
+    } finally {
+      setBusyHelpfulReviewId(null)
+    }
+  }
+
   return (
     <section style={{ display: 'grid', gap: 10 }}>
       {localReviews.length === 0 ? (
@@ -105,6 +217,10 @@ export default function ReviewsPanel({
           const media = rev.mediaAssets ?? []
           const primary = media[0] ?? null
           const primarySrc = primary ? mediaSrc(primary) : null
+
+          const helpfulCount = typeof rev.helpfulCount === 'number' ? rev.helpfulCount : 0
+          const viewerHelpful = Boolean(rev.viewerHelpful)
+          const helpfulBusy = busyHelpfulReviewId === rev.id
 
           return (
             <div
@@ -138,6 +254,40 @@ export default function ReviewsPanel({
                 {rev.headline ? <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>{rev.headline}</div> : null}
 
                 {rev.body ? <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>{rev.body}</div> : null}
+
+                {/* Helpful row (client-facing only) */}
+                {!editable ? (
+                  <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <button
+                      type="button"
+                      disabled={helpfulBusy}
+                      onClick={() => toggleHelpful(rev.id)}
+                      style={{
+                        border: '1px solid #e5e7eb',
+                        borderRadius: 999,
+                        padding: '6px 10px',
+                        background: viewerHelpful ? '#111' : '#fff',
+                        color: viewerHelpful ? '#fff' : '#111',
+                        cursor: helpfulBusy ? 'default' : 'pointer',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        opacity: helpfulBusy ? 0.75 : 1,
+                      }}
+                      title={viewerHelpful ? 'Marked helpful' : 'Mark helpful'}
+                    >
+                      {helpfulBusy ? '…' : viewerHelpful ? 'Helpful ✓' : 'Helpful'}
+                    </button>
+
+                    <div style={{ fontSize: 12, color: '#6b7280' }}>
+                      {helpfulCount} {helpfulCount === 1 ? 'helpful' : 'helpfuls'}
+                    </div>
+                  </div>
+                ) : (
+                  // In editable mode, show count only (no vote)
+                  <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+                    {helpfulCount} {helpfulCount === 1 ? 'helpful' : 'helpfuls'}
+                  </div>
+                )}
 
                 {/* thumbnails */}
                 {media.length > 0 ? (
@@ -333,12 +483,7 @@ export default function ReviewsPanel({
             }}
           >
             {lightbox.mediaType === 'VIDEO' ? (
-              <video
-                src={lightbox.src}
-                controls
-                playsInline
-                style={{ width: '100%', height: 'auto', display: 'block' }}
-              />
+              <video src={lightbox.src} controls playsInline style={{ width: '100%', height: 'auto', display: 'block' }} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={lightbox.src} alt="Full size" style={{ width: '100%', height: 'auto', display: 'block' }} />

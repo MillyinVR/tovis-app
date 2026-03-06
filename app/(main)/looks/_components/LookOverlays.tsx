@@ -1,4 +1,3 @@
-// app/(main)/looks/_components/LookOverlays.tsx
 'use client'
 
 import Link from 'next/link'
@@ -17,6 +16,19 @@ type ClampStyle = CSSProperties & {
   WebkitBoxOrient?: 'vertical' | 'horizontal'
 }
 
+function pickTrimmed(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : ''
+  return s ? s : null
+}
+
+function formatHelpful(n: number) {
+  return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
+}
+
+function formatRating(r: number) {
+  return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)
+}
+
 export default function LookOverlays(props: Props) {
   const { item: m, rightRailBottom, futureSelf } = props
 
@@ -26,10 +38,30 @@ export default function LookOverlays(props: Props) {
   const businessName = (pro?.businessName ?? '').trim()
 
   const displayHandle = handle ? `@${handle}` : businessName ? businessName : null
-  const serviceLabel = (m.serviceName ?? '').trim() || null
-  const caption = (m.caption ?? '').trim() || null
+  const serviceLabel = pickTrimmed(m.serviceName)
+  const caption = pickTrimmed(m.caption)
 
-  const hasAnyText = Boolean(displayHandle || serviceLabel || caption || futureSelf)
+  // Spotlight / review metadata
+  const isReviewSpotlight = Boolean(m.reviewId)
+  const reviewHeadline = pickTrimmed(m.reviewHeadline)
+  const reviewHelpfulCount = typeof m.reviewHelpfulCount === 'number' ? m.reviewHelpfulCount : null
+  const reviewRating = typeof m.reviewRating === 'number' ? m.reviewRating : null
+
+  // Caption behavior:
+  // - Spotlight: prefer review headline, fallback to caption
+  // - Normal: use caption
+  const captionText = isReviewSpotlight ? (reviewHeadline ?? caption) : caption
+
+  // Bottom line behavior:
+  // - Spotlight: show rating/helpful meta instead of futureSelf
+  // - Normal: keep futureSelf
+  const metaParts: string[] = []
+  if (reviewRating !== null) metaParts.push(`★ ${formatRating(reviewRating)}`)
+  if (reviewHelpfulCount !== null) metaParts.push(formatHelpful(reviewHelpfulCount))
+  const spotlightMeta = metaParts.join(' • ')
+  const footerLine = isReviewSpotlight ? spotlightMeta : futureSelf
+
+  const hasAnyText = Boolean(displayHandle || serviceLabel || captionText || footerLine)
   if (!hasAnyText) return null
 
   const profileHref = pro?.id ? `/professionals/${encodeURIComponent(pro.id)}` : null
@@ -84,13 +116,13 @@ export default function LookOverlays(props: Props) {
         </div>
       ) : null}
 
-      {caption ? (
+      {captionText ? (
         <div className="mt-1 text-white" style={captionClampStyle}>
-          {caption}
+          {isReviewSpotlight && reviewHeadline ? `“${captionText}”` : captionText}
         </div>
       ) : null}
 
-      {futureSelf ? <div className="mt-0.5 text-[12px] font-semibold text-white/80">{futureSelf}</div> : null}
+      {footerLine ? <div className="mt-0.5 text-[12px] font-semibold text-white/80">{footerLine}</div> : null}
     </div>
   )
 }

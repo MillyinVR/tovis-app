@@ -6,6 +6,20 @@ import LookMedia from './LookMedia'
 import LookOverlays from './LookOverlays'
 import type { FeedItem } from './lookTypes'
 
+function formatHelpful(n: number) {
+  return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
+}
+
+function formatRating(r: number) {
+  // Show cleanly (4 vs 4.5)
+  return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)
+}
+
+function pickNonEmpty(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : ''
+  return s ? s : null
+}
+
 export default function LookSlide(props: {
   index: number
   item: FeedItem
@@ -24,6 +38,21 @@ export default function LookSlide(props: {
 }) {
   const { index, item, isActive, rightRailBottom, signal, futureSelf, onDoubleClickLike, onTouchEndLike, rightRail } = props
 
+  const isReviewSpotlight = Boolean(item.reviewId)
+
+  const helpfulCount = typeof item.reviewHelpfulCount === 'number' ? item.reviewHelpfulCount : null
+  const rating = typeof item.reviewRating === 'number' ? item.reviewRating : null
+  const headline = pickNonEmpty(item.reviewHeadline)
+
+  const metaParts: string[] = []
+  if (rating !== null) metaParts.push(`★ ${formatRating(rating)}`)
+  if (helpfulCount !== null) metaParts.push(formatHelpful(helpfulCount))
+  if (headline) metaParts.push(`“${headline}”`)
+  const metaLine = metaParts.join(' • ')
+
+  // Position badge below the fixed top bar (safe-area aware)
+  const spotlightTop = 'calc(env(safe-area-inset-top, 0px) + 64px)'
+
   return (
     <article
       data-look-slide="1"
@@ -37,6 +66,22 @@ export default function LookSlide(props: {
         <div className="mx-auto h-full w-full max-w-560px md:max-w-520px lg:max-w-560px xl:max-w-600px">
           <div className="relative h-full w-full overflow-hidden md:rounded-[18px]">
             <LookMedia item={item} isActive={isActive} />
+
+            {/* Review Spotlight badge */}
+            {isReviewSpotlight ? (
+              <div className="pointer-events-none absolute left-3 right-3 z-30" style={{ top: spotlightTop }}>
+                <div
+                  className="inline-flex max-w-full flex-col gap-0.5 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 backdrop-blur-md"
+                  style={{ boxShadow: '0 10px 26px rgba(0,0,0,0.35)' }}
+                >
+                  <div className="text-[12px] font-black tracking-tight text-white">Review Spotlight</div>
+                  {metaLine ? (
+                    <div className="truncate text-[11px] font-semibold text-white/80">{metaLine}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             <LookOverlays item={item} rightRailBottom={rightRailBottom} signal={signal} futureSelf={futureSelf} />
             {rightRail}
           </div>

@@ -592,13 +592,11 @@ export default function SignupClient() {
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
-      if (nextUrl) return router.replace(nextUrl)
-
       // Prefer server role if present; fallback to the role the user selected.
       const createdRole = readUserRole(data) ?? role
-      if (createdRole === 'PRO') router.replace('/pro/services')
-      else router.replace('/client/looks')
+      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+      const roleDest = createdRole === 'PRO' ? '/pro/services' : '/looks'
+      window.location.assign(nextUrl ?? roleDest)
     } catch (err) {
       console.error(err)
       setError('Network error.')

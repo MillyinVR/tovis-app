@@ -21,6 +21,25 @@ import {
 } from '@/lib/viewerLocation'
 
 const ALL_TAB: UiCategory = { name: 'The Looks', slug: 'all' }
+const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
+
+const FEED_LIMIT = 24
+const FEED_CACHE_TTL_MS = 15_000
+const UPDATING_DELAY_MS = 250
+
+type FeedCacheEntry = { items: FeedItem[]; expiresAt: number }
+
+function withSpotlight(cats: UiCategory[]) {
+  if (cats.some((c) => c.slug === SPOTLIGHT_TAB.slug)) return cats
+  const next = [...cats]
+  next.splice(1, 0, SPOTLIGHT_TAB) // right after "The Looks"
+  return next
+}
+
+function makeFeedKey(args: { slug: string; q: string; limit: number }) {
+  const q = args.q.trim().toLowerCase()
+  return `${args.slug}|${q}|${args.limit}`
+}
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x)
@@ -43,11 +62,10 @@ function sanitizeFrom(from: string) {
   return trimmed
 }
 
-
 function parseCategories(raw: unknown): UiCategory[] {
-  if (!isRecord(raw)) return [ALL_TAB]
+  if (!isRecord(raw)) return withSpotlight([ALL_TAB])
   const arr = raw.categories
-  if (!Array.isArray(arr)) return [ALL_TAB]
+  if (!Array.isArray(arr)) return withSpotlight([ALL_TAB])
 
   const normalized: UiCategory[] = arr
     .filter((c): c is Partial<UiCategory> => Boolean(c && typeof c === 'object'))
@@ -61,7 +79,7 @@ function parseCategories(raw: unknown): UiCategory[] {
   const map = new Map<string, UiCategory>()
   for (const c of normalized) map.set(c.slug, c)
 
-  return [ALL_TAB, ...Array.from(map.values())]
+  return withSpotlight([ALL_TAB, ...Array.from(map.values())])
 }
 
 /**
@@ -115,11 +133,13 @@ function getNavigatorShare() {
 export default function LooksFeed() {
   const router = useRouter()
 
+  // State
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState<string | null>(null)
 
-  const [cats, setCats] = useState<UiCategory[]>([ALL_TAB])
+  const [cats, setCats] = useState<UiCategory[]>(withSpotlight([ALL_TAB]))
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>(ALL_TAB.slug)
 
   const categoriesForTopBar = useMemo(() => cats.map((c) => c.name), [cats])
@@ -137,19 +157,22 @@ export default function LooksFeed() {
   const [commentError, setCommentError] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
 
+  // Refs
+  const hasLoadedOnceRef = useRef(false)
+  const feedCacheRef = useRef(new Map<string, FeedCacheEntry>())
+  const abortRef = useRef<AbortController | null>(null)
+  const updatingTimerRef = useRef<number | null>(null)
+
   const likeInFlight = useRef<Record<string, boolean>>({})
   const lastTapRef = useRef<Record<string, number>>({})
-
   const feedScrollRef = useRef<HTMLDivElement | null>(null)
 
   const [availabilityOpen, setAvailabilityOpen] = useState(false)
   const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(null)
-
   const [activeIndex, setActiveIndex] = useState(0)
 
   // ✅ viewer location (single source of truth)
   const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
-
   useEffect(() => {
     setViewerLoc(loadViewerLocation())
     return subscribeViewerLocation(setViewerLoc)
@@ -179,38 +202,90 @@ export default function LooksFeed() {
     try {
       const res = await fetch('/api/looks/categories', { cache: 'no-store', headers: { Accept: 'application/json' } })
       const raw = await safeJson(res)
-      if (!res.ok) throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load categories' : 'Failed to load categories')
+      if (!res.ok) {
+        throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load categories' : 'Failed to load categories')
+      }
 
       const next = parseCategories(raw)
       setCats(next)
       setActiveCategorySlug((cur) => (next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug))
     } catch {
-      setCats([ALL_TAB])
-      setActiveCategorySlug(ALL_TAB.slug)
+      const next = withSpotlight([ALL_TAB])
+      setCats(next)
+      setActiveCategorySlug((cur) => (next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug))
     }
   }, [])
 
   const loadFeed = useCallback(async () => {
-    setLoading(true)
+    const key = makeFeedKey({ slug: activeCategorySlug, q: query, limit: FEED_LIMIT })
+    const now = Date.now()
+
+    // 1) Instant render from cache (seamless tab switches)
+    const cached = feedCacheRef.current.get(key)
+    const cachedFresh = Boolean(cached && cached.expiresAt > now)
+
+    if (cachedFresh && cached) {
+      setItems(cached.items)
+      setFeedError(null)
+      setLoading(false)
+      setRefreshing(false)
+      hasLoadedOnceRef.current = true
+      // still refresh in background, but silently
+    }
+
+    // 2) Cancel any in-flight request
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+
+    // 3) Only show "refreshing" if it’s slow AND we didn’t have cached content
+    if (updatingTimerRef.current) window.clearTimeout(updatingTimerRef.current)
+    if (hasLoadedOnceRef.current && !cachedFresh) {
+      updatingTimerRef.current = window.setTimeout(() => setRefreshing(true), UPDATING_DELAY_MS)
+    } else {
+      setRefreshing(false)
+    }
+
+    // 4) Initial load spinner only when we truly have nothing
+    if (!hasLoadedOnceRef.current && !cachedFresh) setLoading(true)
+
     setFeedError(null)
 
     try {
       const qs = new URLSearchParams()
-      qs.set('limit', '24')
+      qs.set('limit', String(FEED_LIMIT))
       if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) qs.set('category', activeCategorySlug)
       if (query.trim()) qs.set('q', query.trim())
 
-      const res = await fetch(`/api/looks?${qs.toString()}`, { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const res = await fetch(`/api/looks?${qs.toString()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal: ac.signal,
+      })
+
       const raw = await safeJson(res)
+      if (ac.signal.aborted) return
 
-      if (!res.ok) throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load looks' : 'Failed to load looks')
+      if (!res.ok) {
+        throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load looks' : 'Failed to load looks')
+      }
 
-      setItems(parseFeedItems(raw))
+      const nextItems = parseFeedItems(raw)
+
+      setItems(nextItems)
+      feedCacheRef.current.set(key, { items: nextItems, expiresAt: Date.now() + FEED_CACHE_TTL_MS })
+      hasLoadedOnceRef.current = true
     } catch (e: unknown) {
+      // Ignore aborts (tab switching fast)
+      if (e instanceof DOMException && e.name === 'AbortError') return
+      if (ac.signal.aborted) return
+
       setFeedError(e instanceof Error ? e.message : 'Failed to load looks')
-      setItems([])
+      // keep old items so it doesn't feel like a wipe
     } finally {
+      if (updatingTimerRef.current) window.clearTimeout(updatingTimerRef.current)
       setLoading(false)
+      setRefreshing(false)
     }
   }, [activeCategorySlug, query])
 
@@ -306,7 +381,11 @@ export default function LooksFeed() {
         setItems((prev) =>
           prev.map((m) =>
             m.id === mediaId
-              ? { ...m, viewerLiked: serverLiked, _count: { ...m._count, likes: typeof serverCount === 'number' ? serverCount : m._count.likes } }
+              ? {
+                  ...m,
+                  viewerLiked: serverLiked,
+                  _count: { ...m._count, likes: typeof serverCount === 'number' ? serverCount : m._count.likes },
+                }
               : m,
           ),
         )
@@ -397,14 +476,18 @@ export default function LooksFeed() {
 
       if (isGuestBlocked(res.status)) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
-        setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)))
+        setItems((prev) =>
+          prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+        )
         redirectToLogin('comment')
         return
       }
 
       if (!res.ok) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
-        setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)))
+        setItems((prev) =>
+          prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+        )
         const msg = isRecord(raw) ? pickString(raw.error) : null
         setCommentError(msg ?? 'Failed to post comment')
         return
@@ -413,7 +496,9 @@ export default function LooksFeed() {
       await openCommentsDrawer(mediaId)
     } catch (e: unknown) {
       setComments((prev) => prev.filter((c) => c.id !== tempId))
-      setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)))
+      setItems((prev) =>
+        prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+      )
       setCommentError(e instanceof Error ? e.message : 'Failed to post comment')
     } finally {
       setPosting(false)
@@ -465,10 +550,6 @@ export default function LooksFeed() {
     }
   }, [])
 
-  if (loading) return <div className="p-3 text-textSecondary">Loading Looks…</div>
-  if (feedError) return <div className="p-3 text-toneDanger">{feedError}</div>
-  if (!items.length) return <div className="p-3 text-textSecondary">No Looks yet. This is where the glow-ups will live.</div>
-
   const FEED_VIEWPORT_HEIGHT = `calc(100dvh - ${FOOTER_HEIGHT}px)`
 
   return (
@@ -482,44 +563,88 @@ export default function LooksFeed() {
           setQuery={setQuery}
         />
 
-        <div ref={feedScrollRef} className="looksNoScrollbar h-full overflow-y-auto overscroll-contain" style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}>
-          {items.map((m, idx) => {
-            const signal = BOOKING_SIGNALS[hashStringToIndex(m.id, BOOKING_SIGNALS.length)]
-            const futureSelf = FUTURE_SELF_LINES[hashStringToIndex(m.id + '_future', FUTURE_SELF_LINES.length)]
-            const isActive = idx === activeIndex
+        <div style={{ height: '100%', position: 'relative' }}>
+          <div
+            ref={feedScrollRef}
+            className="looksNoScrollbar h-full overflow-y-auto overscroll-contain"
+            style={{
+              scrollSnapType: 'y mandatory',
+              WebkitOverflowScrolling: 'touch',
+              transition: 'opacity 120ms ease',
+              opacity: refreshing ? 0.92 : 1,
+            }}
+          >
+            {loading && !items.length ? (
+              <div className="p-3 text-textSecondary">Loading Looks…</div>
+            ) : !items.length ? (
+              <div className="p-3 text-textSecondary">No Looks yet. This is where the glow-ups will live.</div>
+            ) : (
+              items.map((m, idx) => {
+                const signal = BOOKING_SIGNALS[hashStringToIndex(m.id, BOOKING_SIGNALS.length)]
+                const futureSelf = FUTURE_SELF_LINES[hashStringToIndex(m.id + '_future', FUTURE_SELF_LINES.length)]
+                const isActive = idx === activeIndex
 
-            const rightRail = (
-              <RightActionRail
-                pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null } : null}
-                viewerLiked={m.viewerLiked}
-                likeCount={m._count.likes}
-                commentCount={m._count.comments}
-                bottom={RIGHT_RAIL_BOTTOM}
-                onOpenAvailability={() => openAvailabilityFor(m)}
-                onToggleLike={() => toggleLike(m.id)}
-                onOpenComments={() => openCommentsDrawer(m.id)}
-                onShare={() => shareLook(m)}
-              />
-            )
+                const rightRail = (
+                  <RightActionRail
+                    pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null } : null}
+                    viewerLiked={m.viewerLiked}
+                    likeCount={m._count.likes}
+                    commentCount={m._count.comments}
+                    bottom={RIGHT_RAIL_BOTTOM}
+                    onOpenAvailability={() => openAvailabilityFor(m)}
+                    onToggleLike={() => toggleLike(m.id)}
+                    onOpenComments={() => openCommentsDrawer(m.id)}
+                    onShare={() => shareLook(m)}
+                  />
+                )
 
-            return (
-              <LookSlide
-                key={m.id}
-                index={idx}
-                item={m}
-                isActive={isActive}
-                rightRailBottom={RIGHT_RAIL_BOTTOM}
-                signal={signal}
-                futureSelf={futureSelf}
-                rightRail={rightRail}
-                onDoubleClickLike={() => handleDoubleClickLikeOnly(m.id)}
-                onTouchEndLike={() => handleTouchEndLikeOnly(m.id)}
-                onToggleLike={() => toggleLike(m.id)}
-                onOpenComments={() => openCommentsDrawer(m.id)}
-                onOpenAvailability={() => openAvailabilityFor(m)}
-              />
-            )
-          })}
+                return (
+                  <LookSlide
+                    key={m.id}
+                    index={idx}
+                    item={m}
+                    isActive={isActive}
+                    rightRailBottom={RIGHT_RAIL_BOTTOM}
+                    signal={signal}
+                    futureSelf={futureSelf}
+                    rightRail={rightRail}
+                    onDoubleClickLike={() => handleDoubleClickLikeOnly(m.id)}
+                    onTouchEndLike={() => handleTouchEndLikeOnly(m.id)}
+                    onToggleLike={() => toggleLike(m.id)}
+                    onOpenComments={() => openCommentsDrawer(m.id)}
+                    onOpenAvailability={() => openAvailabilityFor(m)}
+                  />
+                )
+              })
+            )}
+          </div>
+
+          {feedError ? (
+            <div className="p-3 text-toneDanger" style={{ position: 'absolute', left: 0, right: 0, top: 70, pointerEvents: 'none' }}>
+              {feedError}
+            </div>
+          ) : null}
+
+          {/* Only shows if the fetch is slow AND there was no cached content */}
+          {refreshing ? (
+          <div
+            className="text-xs font-semibold text-textSecondary"
+            style={{
+              position: 'absolute',
+              right: 12,
+              top: 72,
+              background: 'rgba(0,0,0,0.28)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              borderRadius: 999,
+              padding: '6px 10px',
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
+              pointerEvents: 'none',
+            }}
+          >
+            Updating…
+          </div>
+        ) : null}
         </div>
       </div>
 

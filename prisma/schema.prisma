@@ -212,6 +212,12 @@ enum SupportTicketStatus {
   CLOSED
 }
 
+enum ViralServiceRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -297,15 +303,16 @@ model AdminPermission {
 }
 
 model User {
-  id              String    @id @default(cuid())
-  email           String    @unique
-  phone           String?   @unique @db.VarChar(32) // E.164 preferred: +16195551234
-  phoneVerifiedAt DateTime?
-  password        String
-  role            Role
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
+  id                 String                     @id @default(cuid())
+  email              String                     @unique
+  phone              String?                    @unique @db.VarChar(32) // E.164 preferred: +16195551234
+  phoneVerifiedAt    DateTime?
+  password           String
+  role               Role
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  reviewHelpfulVotes ReviewHelpful[]
+  favoriteServices   ServiceFavorite[]
   adminActionLogs    AdminActionLog[]           @relation("AdminUserLogs")
   adminPermissions   AdminPermission[]
   sentMessages       Message[]                  @relation("UserSentMessages")
@@ -369,8 +376,8 @@ model ClientProfile {
   openingNotifications OpeningNotification[]
   notificationSettings ClientNotificationSettings?
   messageThreads       MessageThread[]             @relation("ClientThreads")
-
-  alertBanner String?
+  viralRequests        ViralServiceRequest[]
+  alertBanner          String?
 
   user User @relation(fields: [userId], references: [id])
 
@@ -602,8 +609,8 @@ model Service {
   messageThreads      MessageThread[]               @relation("ServiceThreads")
   quotes              Quote[]                       @relation("ServiceQuotes")
   bookingServiceItems BookingServiceItem[]
-
-  offeringAddOnLinks OfferingAddOn[] @relation("AddOnService")
+  favoritedBy         ServiceFavorite[]
+  offeringAddOnLinks  OfferingAddOn[]               @relation("AddOnService")
 }
 
 model OfferingAddOn {
@@ -1121,6 +1128,8 @@ model Review {
   mediaAssets MediaAsset[]
 
   notifications Notification[]
+  helpfulCount  Int             @default(0)
+  helpfulVotes  ReviewHelpful[]
 
   @@index([professionalId, createdAt])
   @@index([clientId, createdAt])
@@ -1579,4 +1588,48 @@ model SupportTicket {
 
   @@index([status, createdAt])
   @@index([createdByUserId, createdAt])
+}
+
+model ReviewHelpful {
+  id        String   @id @default(cuid())
+  reviewId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@index([reviewId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model ServiceFavorite {
+  id        String   @id @default(cuid())
+  serviceId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, userId])
+  @@index([userId, createdAt])
+  @@index([serviceId, createdAt])
+}
+
+model ViralServiceRequest {
+  id        String                    @id @default(cuid())
+  clientId  String
+  name      String
+  sourceUrl String?
+  status    ViralServiceRequestStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
+  @@index([status, createdAt])
 }
