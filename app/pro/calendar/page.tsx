@@ -1,7 +1,7 @@
 // app/pro/calendar/page.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import CreateBookingModal from './CreateBookingModal'
 import BlockTimeModal from './BlockTimeModal'
@@ -64,39 +64,39 @@ export default function ProCalendarPage() {
 
   const timeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
 
-  const didBootRef = useRef(false)
-  const booted = didBootRef.current
+  const anchoredCurrentDate = useMemo(
+    () => anchorNoonInTimeZone(currentDate, timeZone),
+    [currentDate, timeZone],
+  )
 
-  useEffect(() => {
-    if (didBootRef.current) return
-    if (cal.loading) return
-
-    didBootRef.current = true
-    setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
-  }, [cal.loading, timeZone])
+  const showInitialLoading = cal.loading && cal.events.length === 0
+  const showReloadLoading = cal.loading && cal.events.length > 0
 
   const visibleDays = useMemo(() => {
     const tz = timeZone
 
     if (view === 'day') {
-      const startUtc = startOfDayUtcInTimeZone(currentDate, tz)
+      const startUtc = startOfDayUtcInTimeZone(anchoredCurrentDate, tz)
       return [startUtc]
     }
 
     if (view === 'week') {
-      const weekStartNoon = startOfWeekAnchorNoonInTimeZone(currentDate, tz)
+      const weekStartNoon = startOfWeekAnchorNoonInTimeZone(anchoredCurrentDate, tz)
       const weekStartDayStartUtc = startOfDayUtcInTimeZone(weekStartNoon, tz)
       return Array.from({ length: 7 }, (_, i) => new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000))
     }
 
-    const monthStartNoon = startOfMonthAnchorNoonInTimeZone(currentDate, tz)
+    const monthStartNoon = startOfMonthAnchorNoonInTimeZone(anchoredCurrentDate, tz)
     const firstWeekNoon = startOfWeekAnchorNoonInTimeZone(monthStartNoon, tz)
     const firstGridDayStartUtc = startOfDayUtcInTimeZone(firstWeekNoon, tz)
 
     return Array.from({ length: 42 }, (_, i) => new Date(firstGridDayStartUtc.getTime() + i * 24 * 60 * 60_000))
-  }, [view, currentDate, timeZone])
+  }, [view, anchoredCurrentDate, timeZone])
 
-  const headerLabel = useMemo(() => headerLabelFor(view, currentDate, timeZone), [view, currentDate, timeZone])
+  const headerLabel = useMemo(
+    () => headerLabelFor(view, anchoredCurrentDate, timeZone),
+    [view, anchoredCurrentDate, timeZone],
+  )
 
   const hasLocations = Boolean(
     cal.locationsLoaded && Array.isArray(cal.scopedLocations) && cal.scopedLocations.length > 0,
@@ -183,9 +183,7 @@ export default function ProCalendarPage() {
         setView={setView}
         headerLabel={headerLabel}
         onToday={() => {
-          const next = anchorNoonInTimeZone(new Date(), timeZone)
-          setCurrentDate(next)
-          didBootRef.current = true
+          setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
         }}
         onBack={() => {
           if (view === 'day') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -1, timeZone))
@@ -199,13 +197,13 @@ export default function ProCalendarPage() {
         }}
       />
 
-      {!booted && (
+      {showInitialLoading && (
         <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-6 text-sm text-textSecondary">
           Loading calendar…
         </div>
       )}
 
-      {booted && cal.loading && (
+      {showReloadLoading && (
         <div className="mb-3 tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-3 text-sm text-textSecondary">
           Loading…
         </div>
@@ -217,7 +215,7 @@ export default function ProCalendarPage() {
         </div>
       )}
 
-      {(view === 'day' || view === 'week') && booted && (
+      {(view === 'day' || view === 'week') && !showInitialLoading && (
         <DayWeekGrid
           view={view}
           visibleDays={visibleDays}
@@ -236,7 +234,7 @@ export default function ProCalendarPage() {
         />
       )}
 
-      {view === 'month' && booted && (
+      {view === 'month' && !showInitialLoading && (
         <MonthGrid
           visibleDays={visibleDays}
           currentDate={currentDate}

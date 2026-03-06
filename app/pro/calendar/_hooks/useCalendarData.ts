@@ -576,7 +576,7 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [savingAutoAccept, setSavingAutoAccept] = useState(false)
 
   const [services, setServices] = useState<ServiceOption[]>([])
-  const [servicesLoaded, setServicesLoaded] = useState(false)
+  
 
   const [openBookingId, setOpenBookingId] = useState<string | null>(null)
   const [bookingLoading, setBookingLoading] = useState(false)
@@ -800,7 +800,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     )
   }, [])
 
-  const onResizeEnd = useCallback((_e: MouseEvent) => {
+  const onResizeEnd = useCallback(() => {
     const s = resizingRef.current
     resizingRef.current = null
     window.removeEventListener('mousemove', onResizeMove)
@@ -941,17 +941,14 @@ export function useCalendarData({ view, currentDate }: Args) {
 
       if (!res.ok || !isRecord(data)) {
         setServices([])
-        setServicesLoaded(true)
         return []
       }
 
       const parsed = parseServiceOptions(data.services)
       setServices(parsed)
-      setServicesLoaded(true)
       return parsed
     } catch {
       setServices([])
-      setServicesLoaded(true)
       return []
     }
   }
@@ -1099,7 +1096,6 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   useEffect(() => {
     void loadServicesForLocation(activeLocationType)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLocationType])
 
   useEffect(() => {
@@ -1714,10 +1710,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen,
   )
 
-  const pendingOutsideWorkingHours = useMemo(() => {
-    if (!pendingChange) return false
-    return isPendingChangeOutsideWorkingHours(pendingChange)
-  }, [pendingChange, workingHoursActive, events])
+  const pendingOutsideWorkingHours = pendingChange
+    ? isPendingChangeOutsideWorkingHours(pendingChange)
+    : false
 
   return {
     view,
