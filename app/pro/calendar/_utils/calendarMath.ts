@@ -21,7 +21,10 @@ export function roundTo15(mins: number) {
   return clamp(snapped, MIN_DURATION, MAX_DURATION)
 }
 
-export function computeDurationMinutesFromIso(startsAtIso: string, endsAtIso: string) {
+export function computeDurationMinutesFromIso(
+  startsAtIso: string,
+  endsAtIso: string,
+) {
   const s = new Date(startsAtIso).getTime()
   const e = new Date(endsAtIso).getTime()
   const mins = Math.round((e - s) / 60_000)
@@ -29,7 +32,11 @@ export function computeDurationMinutesFromIso(startsAtIso: string, endsAtIso: st
 }
 
 // single source of truth: lib/scheduling/workingHours
-export function getWorkingWindowForDay(day: Date, workingHours: WorkingHoursJson, timeZone: string) {
+export function getWorkingWindowForDay(
+  day: Date,
+  workingHours: WorkingHoursJson,
+  timeZone: string,
+) {
   const w = getWorkingWindowForDayLib(day, workingHours, timeZone)
   if (!w.ok) return null
 
@@ -77,7 +84,10 @@ export function blockToEvent(b: BlockRow): CalendarEvent {
   const s = new Date(b.startsAt)
   const e = new Date(b.endsAt)
   const note = b.note ?? null
-  const durationMinutes = Math.max(15, Math.round((e.getTime() - s.getTime()) / 60_000))
+  const durationMinutes = Math.max(
+    15,
+    Math.round((e.getTime() - s.getTime()) / 60_000),
+  )
 
   return {
     kind: 'BLOCK',
@@ -87,13 +97,18 @@ export function blockToEvent(b: BlockRow): CalendarEvent {
     title: 'Blocked',
     clientName: note || 'Personal time',
     note,
+    locationId: null,
     startsAt: s.toISOString(),
     endsAt: e.toISOString(),
     durationMinutes,
   }
 }
 
-export function overlapMinutesWithinDay(startsAtIso: string, endsAtIso: string, day: Date) {
+export function overlapMinutesWithinDay(
+  startsAtIso: string,
+  endsAtIso: string,
+  day: Date,
+) {
   const dayStart = startOfDay(day)
   const dayEnd = addDays(dayStart, 1)
 

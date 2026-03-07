@@ -163,7 +163,8 @@ function buildItems(args: {
       locationType,
       salonDurationMinutes: offering.salonDurationMinutes,
       mobileDurationMinutes: offering.mobileDurationMinutes,
-      fallbackDurationMinutes: service.defaultDurationMinutes ?? DEFAULT_DURATION_MINUTES,
+      fallbackDurationMinutes:
+        service.defaultDurationMinutes ?? DEFAULT_DURATION_MINUTES,
     })
 
     if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
@@ -182,7 +183,9 @@ function buildItems(args: {
       mobilePriceStartingAt: offering.mobilePriceStartingAt,
     })
 
-    if (rawPrice == null) throwCode('PRICING_NOT_SET')
+    if (rawPrice == null) {
+      throwCode('PRICING_NOT_SET')
+    }
 
     return {
       serviceId,
@@ -222,7 +225,7 @@ export async function POST(req: Request) {
     if (!locationType) return jsonFail(400, 'Missing or invalid locationType.')
     if (!serviceIds.length) return jsonFail(400, 'Select at least one service.')
 
-    const scheduledStart = normalizeToMinute(scheduledFor)
+    const requestedStart = normalizeToMinute(scheduledFor)
 
     const result = await prisma.$transaction(async (tx) => {
       const [client, location] = await Promise.all([
@@ -274,16 +277,22 @@ export async function POST(req: Request) {
         requireValid: true,
       })
 
-      if (!tzResult.ok) throwCode('TIMEZONE_REQUIRED')
-
-      const appointmentTimeZone = sanitizeTimeZone(tzResult.timeZone, 'UTC')
-      if (!isValidIanaTimeZone(appointmentTimeZone)) {
+      if (!tzResult.ok) {
         throwCode('TIMEZONE_REQUIRED')
       }
 
+      const rawResolvedTimeZone =
+        typeof tzResult.timeZone === 'string' ? tzResult.timeZone.trim() : ''
+
+      if (!isValidIanaTimeZone(rawResolvedTimeZone)) {
+        throwCode('TIMEZONE_REQUIRED')
+      }
+
+      const appointmentTimeZone = sanitizeTimeZone(rawResolvedTimeZone, 'UTC')
+
       const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
       const startMinuteOfDay = minutesSinceMidnightInTimeZone(
-        scheduledStart,
+        requestedStart,
         appointmentTimeZone,
       )
 
@@ -389,15 +398,15 @@ export async function POST(req: Request) {
               MAX_SLOT_DURATION_MINUTES,
             )
 
-      const scheduledEnd = addMinutes(
-        scheduledStart,
+      const requestedEnd = addMinutes(
+        requestedStart,
         totalDurationMinutes + bufferMinutes,
       )
 
       if (!allowOutsideWorkingHours) {
         const workingHoursResult = ensureWithinWorkingHours({
-          scheduledStartUtc: scheduledStart,
-          scheduledEndUtc: scheduledEnd,
+          scheduledStartUtc: requestedStart,
+          scheduledEndUtc: requestedEnd,
           workingHours: location.workingHours,
           timeZone: appointmentTimeZone,
           fallbackTimeZone: 'UTC',
@@ -417,22 +426,22 @@ export async function POST(req: Request) {
         tx,
         professionalId,
         locationId: location.id,
-        requestedStart: scheduledStart,
-        requestedEnd: scheduledEnd,
+        requestedStart,
+        requestedEnd,
       })
 
       await assertNoBookingConflict({
         tx,
         professionalId,
-        requestedStart: scheduledStart,
-        requestedEnd: scheduledEnd,
+        requestedStart,
+        requestedEnd,
       })
 
       const holdConflict = await hasHoldConflict({
         tx,
         professionalId,
-        requestedStart: scheduledStart,
-        requestedEnd: scheduledEnd,
+        requestedStart,
+        requestedEnd,
         defaultBufferMinutes: bufferMinutes,
         fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
       })
@@ -465,7 +474,7 @@ export async function POST(req: Request) {
             clientId,
             serviceId: baseItem.serviceId,
             offeringId: baseItem.offeringId,
-            scheduledFor: scheduledStart,
+            scheduledFor: requestedStart,
             status: BookingStatus.ACCEPTED,
             locationType,
             locationId: location.id,
@@ -540,7 +549,8 @@ export async function POST(req: Request) {
 
     const endsAt = addMinutes(
       new Date(result.booking.scheduledFor),
-      Number(result.booking.totalDurationMinutes) + Number(result.booking.bufferMinutes),
+      Number(result.booking.totalDurationMinutes) +
+        Number(result.booking.bufferMinutes),
     )
 
     const serviceName =
@@ -558,7 +568,8 @@ export async function POST(req: Request) {
           status: result.booking.status,
           serviceName,
           subtotalSnapshot:
-            moneyToString(result.subtotalSnapshot) ?? result.subtotalSnapshot.toString(),
+            moneyToString(result.subtotalSnapshot) ??
+            result.subtotalSnapshot.toString(),
           subtotalCents: decimalToCents(result.subtotalSnapshot),
           locationId: result.locationId,
           locationType: result.locationType,
@@ -595,11 +606,17 @@ export async function POST(req: Request) {
     }
 
     if (message === 'PRICING_NOT_SET') {
-      return jsonFail(409, 'Pricing is not set for one or more selected services.')
+      return jsonFail(
+        409,
+        'Pricing is not set for one or more selected services.',
+      )
     }
 
     if (message === 'BAD_DURATION') {
-      return jsonFail(409, 'Duration is not set for one or more selected services.')
+      return jsonFail(
+        409,
+        'Duration is not set for one or more selected services.',
+      )
     }
 
     if (message === 'TIMEZONE_REQUIRED') {
@@ -629,7 +646,10 @@ export async function POST(req: Request) {
     }
 
     if (message.startsWith('WH:')) {
-      return jsonFail(400, message.slice(3) || 'That time is outside working hours.')
+      return jsonFail(
+        400,
+        message.slice(3) || 'That time is outside working hours.',
+      )
     }
 
     console.error('POST /api/pro/bookings error', error)

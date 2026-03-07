@@ -22,7 +22,6 @@ import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import {
-  DEFAULT_DURATION_MINUTES,
   MAX_ADVANCE_NOTICE_MINUTES,
   MAX_BUFFER_MINUTES,
   MAX_DAYS_AHEAD,
@@ -64,20 +63,21 @@ type TxnErrorCode =
   | 'TIME_NOT_AVAILABLE'
   | 'TOO_FAR'
 
-function throwCode(code: TxnErrorCode): never {
-  throw new Error(code)
+type ExactHoldLocationContext = {
+  locationId: string
+  timeZone: string
+  stepMinutes: number
+  bufferMinutes: number
+  advanceNoticeMinutes: number
+  maxDaysAhead: number
+  workingHours: unknown
+  formattedAddress: string | null
+  lat: number | undefined
+  lng: number | undefined
 }
 
-type FinalizeBookingBody = {
-  offeringId?: unknown
-  holdId?: unknown
-  source?: unknown
-  locationType?: unknown
-  mediaId?: unknown
-  openingId?: unknown
-  aftercareToken?: unknown
-  rebookOfBookingId?: unknown
-  addOnIds?: unknown
+function throwCode(code: TxnErrorCode): never {
+  throw new Error(code)
 }
 
 function normalizeSourceLoose(args: {
@@ -111,6 +111,83 @@ function pickStringArray(value: unknown): string[] {
 
 function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length
+}
+
+function normalizeFormattedAddress(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+async function resolveExactHoldLocationContext(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  locationId: string
+  holdLocationTimeZone: string | null
+}): Promise<
+  | { ok: true; context: ExactHoldLocationContext }
+  | { ok: false; error: 'LOCATION_NOT_FOUND' | 'TIMEZONE_REQUIRED' }
+> {
+  const { tx, professionalId, locationId, holdLocationTimeZone } = args
+
+  const location = await tx.professionalLocation.findFirst({
+    where: {
+      id: locationId,
+      professionalId,
+      isBookable: true,
+    },
+    select: {
+      id: true,
+      timeZone: true,
+      workingHours: true,
+      bufferMinutes: true,
+      stepMinutes: true,
+      advanceNoticeMinutes: true,
+      maxDaysAhead: true,
+      formattedAddress: true,
+      lat: true,
+      lng: true,
+    },
+  })
+
+  if (!location) {
+    return { ok: false, error: 'LOCATION_NOT_FOUND' }
+  }
+
+  const tzResult = await resolveApptTimeZone({
+    holdLocationTimeZone,
+    location: { id: location.id, timeZone: location.timeZone },
+    professionalId,
+    fallback: 'UTC',
+    requireValid: true,
+  })
+
+  if (!tzResult.ok) {
+    return { ok: false, error: 'TIMEZONE_REQUIRED' }
+  }
+
+  const timeZone = sanitizeTimeZone(tzResult.timeZone, 'UTC')
+  if (!isValidIanaTimeZone(timeZone)) {
+    return { ok: false, error: 'TIMEZONE_REQUIRED' }
+  }
+
+  return {
+    ok: true,
+    context: {
+      locationId: location.id,
+      timeZone,
+      stepMinutes: normalizeStepMinutes(location.stepMinutes, 15),
+      bufferMinutes: clampInt(Number(location.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES),
+      advanceNoticeMinutes: clampInt(
+        Number(location.advanceNoticeMinutes ?? 15),
+        0,
+        MAX_ADVANCE_NOTICE_MINUTES,
+      ),
+      maxDaysAhead: clampInt(Number(location.maxDaysAhead ?? 365), 1, MAX_DAYS_AHEAD),
+      workingHours: location.workingHours,
+      formattedAddress: normalizeFormattedAddress(location.formattedAddress),
+      lat: decimalToNumber(location.lat),
+      lng: decimalToNumber(location.lng),
+    },
+  }
 }
 
 export async function POST(request: Request) {
@@ -326,83 +403,45 @@ export async function POST(request: Request) {
       if (hold.locationType !== locationType) throwCode('HOLD_MISMATCH')
       if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
 
-      const location = await tx.professionalLocation.findFirst({
-        where: {
-          id: hold.locationId,
-          professionalId: offering.professionalId,
-          isBookable: true,
-        },
-        select: {
-          id: true,
-          timeZone: true,
-          workingHours: true,
-          bufferMinutes: true,
-          stepMinutes: true,
-          advanceNoticeMinutes: true,
-          maxDaysAhead: true,
-          formattedAddress: true,
-          lat: true,
-          lng: true,
-        },
-      })
-
-      if (!location) throwCode('LOCATION_NOT_FOUND')
-
-      const tzResult = await resolveApptTimeZone({
-        holdLocationTimeZone: hold.locationTimeZone,
-        location: { id: location.id, timeZone: location.timeZone },
+      const locationContextResult = await resolveExactHoldLocationContext({
+        tx,
         professionalId: offering.professionalId,
-        fallback: 'UTC',
-        requireValid: true,
+        locationId: hold.locationId,
+        holdLocationTimeZone: hold.locationTimeZone,
       })
 
-      if (!tzResult.ok) throwCode('TIMEZONE_REQUIRED')
-
-      const appointmentTimeZone = sanitizeTimeZone(tzResult.timeZone, 'UTC')
-      if (!isValidIanaTimeZone(appointmentTimeZone)) {
-        throwCode('TIMEZONE_REQUIRED')
+      if (!locationContextResult.ok) {
+        throwCode(locationContextResult.error)
       }
 
-      const bufferMinutes = clampInt(
-        Number(location.bufferMinutes ?? 0),
-        0,
-        MAX_BUFFER_MINUTES,
-      )
-
-      const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
-
-      const advanceNoticeMinutes = clampInt(
-        Number(location.advanceNoticeMinutes ?? 15),
-        0,
-        MAX_ADVANCE_NOTICE_MINUTES,
-      )
-
-      const maxDaysAhead = clampInt(
-        Number(location.maxDaysAhead ?? 365),
-        1,
-        MAX_DAYS_AHEAD,
-      )
+      const locationContext = locationContextResult.context
 
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
       if (!Number.isFinite(requestedStart.getTime())) {
         throwCode('TIME_IN_PAST')
       }
 
-      if (requestedStart.getTime() < now.getTime() + advanceNoticeMinutes * 60_000) {
+      if (
+        requestedStart.getTime() <
+        now.getTime() + locationContext.advanceNoticeMinutes * 60_000
+      ) {
         throwCode('TIME_IN_PAST')
       }
 
-      if (requestedStart.getTime() > now.getTime() + maxDaysAhead * 24 * 60 * 60_000) {
+      if (
+        requestedStart.getTime() >
+        now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
+      ) {
         throwCode('TOO_FAR')
       }
 
       const startMinuteOfDay = minutesSinceMidnightInTimeZone(
         requestedStart,
-        appointmentTimeZone,
+        locationContext.timeZone,
       )
 
-      if (startMinuteOfDay % stepMinutes !== 0) {
-        throw new Error(`STEP:${stepMinutes}`)
+      if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
+        throw new Error(`STEP:${locationContext.stepMinutes}`)
       }
 
       if (openingId) {
@@ -573,14 +612,14 @@ export async function POST(request: Request) {
 
       const requestedEnd = addMinutes(
         requestedStart,
-        totalDurationMinutes + bufferMinutes,
+        totalDurationMinutes + locationContext.bufferMinutes,
       )
 
       const workingHoursCheck = ensureWithinWorkingHours({
         scheduledStartUtc: requestedStart,
         scheduledEndUtc: requestedEnd,
-        workingHours: location.workingHours,
-        timeZone: appointmentTimeZone,
+        workingHours: locationContext.workingHours,
+        timeZone: locationContext.timeZone,
         fallbackTimeZone: 'UTC',
         messages: {
           missing: 'This professional has not set working hours yet.',
@@ -596,7 +635,7 @@ export async function POST(request: Request) {
       const blockConflict = await findCalendarBlockConflict({
         tx,
         professionalId: offering.professionalId,
-        locationId: location.id,
+        locationId: locationContext.locationId,
         requestedStart,
         requestedEnd,
       })
@@ -617,9 +656,9 @@ export async function POST(request: Request) {
         professionalId: offering.professionalId,
         requestedStart,
         requestedEnd,
-        defaultBufferMinutes: bufferMinutes,
+        defaultBufferMinutes: locationContext.bufferMinutes,
         excludeHoldId: hold.id,
-        fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
+        fallbackDurationMinutes: totalDurationMinutes,
       })
 
       if (holdConflict) throwCode('TIME_NOT_AVAILABLE')
@@ -629,7 +668,7 @@ export async function POST(request: Request) {
       )
 
       const addressSnapshot = buildAddressSnapshot(
-        formattedAddressFromHold ?? location.formattedAddress,
+        formattedAddressFromHold ?? locationContext.formattedAddress,
       )
 
       let created: {
@@ -656,15 +695,15 @@ export async function POST(request: Request) {
 
             subtotalSnapshot: subtotal,
             totalDurationMinutes,
-            bufferMinutes,
+            bufferMinutes: locationContext.bufferMinutes,
 
-            locationId: location.id,
-            locationTimeZone: appointmentTimeZone,
+            locationId: locationContext.locationId,
+            locationTimeZone: locationContext.timeZone,
             locationAddressSnapshot: addressSnapshot,
             locationLatSnapshot:
-              hold.locationLatSnapshot ?? decimalToNumber(location.lat),
+              decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
             locationLngSnapshot:
-              hold.locationLngSnapshot ?? decimalToNumber(location.lng),
+              decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
           },
           select: {
             id: true,

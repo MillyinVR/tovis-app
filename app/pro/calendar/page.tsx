@@ -8,7 +8,10 @@ import BlockTimeModal from './BlockTimeModal'
 import EditBlockModal from './EditBlockModal'
 import WorkingHoursTabs from './WorkingHoursTabs'
 import { useCalendarData } from './_hooks/useCalendarData'
-import { CalendarHeader, CalendarHeaderControls } from './_components/CalendarHeader'
+import {
+  CalendarHeader,
+  CalendarHeaderControls,
+} from './_components/CalendarHeader'
 import { ManagementStrip } from './_components/ManagementStrip'
 import { DayWeekGrid } from './_components/DayWeekGrid'
 import { MonthGrid } from './_components/MonthGrid'
@@ -29,7 +32,12 @@ import {
   formatDayLabelInTimeZone,
 } from './_utils/date'
 
-import { DEFAULT_TIME_ZONE, sanitizeTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
+import {
+  DEFAULT_TIME_ZONE,
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  startOfDayUtcInTimeZone,
+} from '@/lib/timeZone'
 
 function safeTz(raw: unknown) {
   return sanitizeTimeZone(typeof raw === 'string' ? raw : '', DEFAULT_TIME_ZONE)
@@ -50,9 +58,19 @@ function labelForLocation(l: {
   const t = String(l.type || '').toUpperCase()
   const base =
     (l.name && l.name.trim()) ||
-    (t === 'MOBILE_BASE' ? 'Mobile base' : t === 'SUITE' ? 'Suite' : t === 'SALON' ? 'Salon' : 'Location')
+    (t === 'MOBILE_BASE'
+      ? 'Mobile base'
+      : t === 'SUITE'
+        ? 'Suite'
+        : t === 'SALON'
+          ? 'Salon'
+          : 'Location')
 
-  const addr = l.formattedAddress && l.formattedAddress.trim() ? ` — ${l.formattedAddress.trim()}` : ''
+  const addr =
+    l.formattedAddress && l.formattedAddress.trim()
+      ? ` — ${l.formattedAddress.trim()}`
+      : ''
+
   return `${base}${addr}`
 }
 
@@ -62,18 +80,30 @@ export default function ProCalendarPage() {
 
   const cal = useCalendarData({ view, currentDate })
 
-  const timeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
+  const calendarTimeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
+
+  const activeLocationTimeZone = useMemo(() => {
+    const raw = cal.activeLocation?.timeZone
+    if (typeof raw === 'string' && raw.trim() && isValidIanaTimeZone(raw.trim())) {
+      return sanitizeTimeZone(raw.trim(), calendarTimeZone)
+    }
+    return calendarTimeZone
+  }, [cal.activeLocation?.timeZone, calendarTimeZone])
+
+  const bookingModalTimeZone = useMemo(() => {
+    return safeTz(cal.booking?.timeZone ?? calendarTimeZone)
+  }, [cal.booking?.timeZone, calendarTimeZone])
 
   const anchoredCurrentDate = useMemo(
-    () => anchorNoonInTimeZone(currentDate, timeZone),
-    [currentDate, timeZone],
+    () => anchorNoonInTimeZone(currentDate, calendarTimeZone),
+    [currentDate, calendarTimeZone],
   )
 
   const showInitialLoading = cal.loading && cal.events.length === 0
   const showReloadLoading = cal.loading && cal.events.length > 0
 
   const visibleDays = useMemo(() => {
-    const tz = timeZone
+    const tz = calendarTimeZone
 
     if (view === 'day') {
       const startUtc = startOfDayUtcInTimeZone(anchoredCurrentDate, tz)
@@ -83,23 +113,35 @@ export default function ProCalendarPage() {
     if (view === 'week') {
       const weekStartNoon = startOfWeekAnchorNoonInTimeZone(anchoredCurrentDate, tz)
       const weekStartDayStartUtc = startOfDayUtcInTimeZone(weekStartNoon, tz)
-      return Array.from({ length: 7 }, (_, i) => new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000))
+
+      return Array.from(
+        { length: 7 },
+        (_, i) => new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000),
+      )
     }
 
-    const monthStartNoon = startOfMonthAnchorNoonInTimeZone(anchoredCurrentDate, tz)
+    const monthStartNoon = startOfMonthAnchorNoonInTimeZone(
+      anchoredCurrentDate,
+      tz,
+    )
     const firstWeekNoon = startOfWeekAnchorNoonInTimeZone(monthStartNoon, tz)
     const firstGridDayStartUtc = startOfDayUtcInTimeZone(firstWeekNoon, tz)
 
-    return Array.from({ length: 42 }, (_, i) => new Date(firstGridDayStartUtc.getTime() + i * 24 * 60 * 60_000))
-  }, [view, anchoredCurrentDate, timeZone])
+    return Array.from(
+      { length: 42 },
+      (_, i) => new Date(firstGridDayStartUtc.getTime() + i * 24 * 60 * 60_000),
+    )
+  }, [view, anchoredCurrentDate, calendarTimeZone])
 
   const headerLabel = useMemo(
-    () => headerLabelFor(view, anchoredCurrentDate, timeZone),
-    [view, anchoredCurrentDate, timeZone],
+    () => headerLabelFor(view, anchoredCurrentDate, calendarTimeZone),
+    [view, anchoredCurrentDate, calendarTimeZone],
   )
 
   const hasLocations = Boolean(
-    cal.locationsLoaded && Array.isArray(cal.scopedLocations) && cal.scopedLocations.length > 0,
+    cal.locationsLoaded &&
+      Array.isArray(cal.scopedLocations) &&
+      cal.scopedLocations.length > 0,
   )
 
   return (
@@ -123,9 +165,12 @@ export default function ProCalendarPage() {
           <div className="tovis-glass-soft tovis-noise rounded-2xl border border-white/10 px-4 py-4 md:px-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="text-[12px] font-black text-textSecondary">Calendar location</div>
+                <div className="text-[12px] font-black text-textSecondary">
+                  Calendar location
+                </div>
                 <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                  Clients are limited to working hours. Pros can schedule outside hours when needed.
+                  All appointments for this pro are shown here. Blocked time and
+                  create-booking actions use the selected location.
                 </div>
               </div>
 
@@ -145,7 +190,10 @@ export default function ProCalendarPage() {
                   </select>
 
                   <div className="text-[12px] font-semibold text-textSecondary">
-                    TZ: <span className="font-black text-textPrimary">{timeZone}</span>
+                    TZ:{' '}
+                    <span className="font-black text-textPrimary">
+                      {calendarTimeZone}
+                    </span>
                   </div>
                 </div>
               ) : (
@@ -157,7 +205,10 @@ export default function ProCalendarPage() {
 
             {cal.activeLocationLabel ? (
               <div className="mt-3 text-[12px] font-semibold text-textSecondary">
-                Viewing: <span className="font-black text-textPrimary">{cal.activeLocationLabel}</span>
+                Selected location:{' '}
+                <span className="font-black text-textPrimary">
+                  {cal.activeLocationLabel}
+                </span>
               </div>
             ) : null}
           </div>
@@ -183,17 +234,37 @@ export default function ProCalendarPage() {
         setView={setView}
         headerLabel={headerLabel}
         onToday={() => {
-          setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
+          setCurrentDate(anchorNoonInTimeZone(new Date(), calendarTimeZone))
         }}
         onBack={() => {
-          if (view === 'day') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -1, timeZone))
-          else if (view === 'week') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, -7, timeZone))
-          else setCurrentDate((d) => addMonthsAnchorNoonInTimeZone(d, -1, timeZone))
+          if (view === 'day') {
+            setCurrentDate((d) =>
+              addDaysAnchorNoonInTimeZone(d, -1, calendarTimeZone),
+            )
+          } else if (view === 'week') {
+            setCurrentDate((d) =>
+              addDaysAnchorNoonInTimeZone(d, -7, calendarTimeZone),
+            )
+          } else {
+            setCurrentDate((d) =>
+              addMonthsAnchorNoonInTimeZone(d, -1, calendarTimeZone),
+            )
+          }
         }}
         onNext={() => {
-          if (view === 'day') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, 1, timeZone))
-          else if (view === 'week') setCurrentDate((d) => addDaysAnchorNoonInTimeZone(d, 7, timeZone))
-          else setCurrentDate((d) => addMonthsAnchorNoonInTimeZone(d, 1, timeZone))
+          if (view === 'day') {
+            setCurrentDate((d) =>
+              addDaysAnchorNoonInTimeZone(d, 1, calendarTimeZone),
+            )
+          } else if (view === 'week') {
+            setCurrentDate((d) =>
+              addDaysAnchorNoonInTimeZone(d, 7, calendarTimeZone),
+            )
+          } else {
+            setCurrentDate((d) =>
+              addMonthsAnchorNoonInTimeZone(d, 1, calendarTimeZone),
+            )
+          }
         }}
       />
 
@@ -223,7 +294,7 @@ export default function ProCalendarPage() {
           workingHoursSalon={cal.workingHoursSalon}
           workingHoursMobile={cal.workingHoursMobile}
           activeLocationType={cal.activeLocationType}
-          timeZone={timeZone}
+          timeZone={calendarTimeZone}
           onClickEvent={cal.openBookingOrBlock}
           onCreateForClick={cal.openCreateForClick}
           onDragStart={cal.drag.onDragStart}
@@ -239,9 +310,9 @@ export default function ProCalendarPage() {
           visibleDays={visibleDays}
           currentDate={currentDate}
           events={cal.events}
-          timeZone={timeZone}
+          timeZone={calendarTimeZone}
           onPickDay={(d) => {
-            setCurrentDate(anchorNoonInTimeZone(d, timeZone))
+            setCurrentDate(anchorNoonInTimeZone(d, calendarTimeZone))
             setView('day')
           }}
         />
@@ -252,7 +323,7 @@ export default function ProCalendarPage() {
         onClose={() => cal.setCreateOpen(false)}
         workingHours={cal.workingHoursActive}
         initialStart={cal.createInitialStart}
-        timeZone={timeZone}
+        timeZone={activeLocationTimeZone}
         services={cal.services}
         onCreated={() => cal.reload()}
         locationId={cal.activeLocationId ?? ''}
@@ -265,7 +336,7 @@ export default function ProCalendarPage() {
         open={cal.blockCreateOpen}
         onClose={() => cal.setBlockCreateOpen(false)}
         initialStart={cal.blockCreateInitialStart}
-        timeZone={timeZone}
+        timeZone={activeLocationTimeZone}
         locationId={cal.activeLocationId}
         locationLabel={cal.activeLocationLabel}
         stepMinutes={cal.activeLocation?.stepMinutes ?? undefined}
@@ -275,7 +346,7 @@ export default function ProCalendarPage() {
       <EditBlockModal
         open={cal.editBlockOpen}
         blockId={cal.editBlockId}
-        timeZone={timeZone}
+        timeZone={activeLocationTimeZone}
         onClose={() => {
           cal.setEditBlockOpen(false)
           cal.setEditBlockId(null)
@@ -301,8 +372,12 @@ export default function ProCalendarPage() {
           cal.closeManagement()
           void cal.oneClickBlockFullDay(new Date())
         }}
-        onApproveBookingId={(bookingId: string) => void cal.approveBookingById(bookingId)}
-        onDenyBookingId={(bookingId: string) => void cal.denyBookingById(bookingId)}
+        onApproveBookingId={(bookingId: string) =>
+          void cal.approveBookingById(bookingId)
+        }
+        onDenyBookingId={(bookingId: string) =>
+          void cal.denyBookingById(bookingId)
+        }
         actionBusyId={cal.managementActionBusyId}
         actionError={cal.managementActionError}
       />
@@ -321,7 +396,7 @@ export default function ProCalendarPage() {
         error={cal.bookingError}
         booking={cal.booking}
         services={cal.services}
-        timeZone={timeZone}
+        timeZone={bookingModalTimeZone}
         bookingServiceLabel={cal.bookingServiceLabel}
         serviceItemsDraft={cal.serviceItemsDraft}
         reschedDate={cal.reschedDate}

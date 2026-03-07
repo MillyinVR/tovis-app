@@ -1,7 +1,14 @@
 // app/pro/calendar/_hooks/useCalendarData.ts
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from 'react'
 import type {
   BookingDetails,
   BookingServiceItem,
@@ -57,6 +64,13 @@ type ProLocation = {
   stepMinutes: number | null
 }
 
+type CalendarRouteLocation = {
+  id: string
+  type: ProLocationType
+  timeZone: string | null
+  timeZoneValid: boolean
+}
+
 /** must match ProSessionFooter/useProSession.ts */
 const PRO_SESSION_FORCE_EVENT = 'tovis:pro-session:force'
 
@@ -76,11 +90,28 @@ function upper(v: unknown) {
   return (pickString(v) ?? '').toUpperCase()
 }
 
-function pickLocationType(canSalon: boolean, canMobile: boolean, preferred?: LocationType): LocationType {
-  if (preferred && ((preferred === 'SALON' && canSalon) || (preferred === 'MOBILE' && canMobile))) return preferred
+function pickLocationType(
+  canSalon: boolean,
+  canMobile: boolean,
+  preferred?: LocationType,
+): LocationType {
+  if (
+    preferred &&
+    ((preferred === 'SALON' && canSalon) || (preferred === 'MOBILE' && canMobile))
+  ) {
+    return preferred
+  }
   if (canSalon) return 'SALON'
   if (canMobile) return 'MOBILE'
   return 'SALON'
+}
+
+function locationTypeFromProfessionalType(value: unknown): LocationType {
+  return upper(value) === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
+}
+
+function locationTypeFromBookingValue(value: unknown): LocationType {
+  return upper(value) === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
 // Anchor a "day" to local noon for working-hours weekday math (not timezone conversion).
@@ -134,15 +165,26 @@ function parseWorkingHoursJson(v: unknown): WorkingHoursJson {
   return { sun, mon, tue, wed, thu, fri, sat }
 }
 
+function parseCalendarRouteLocation(v: unknown): CalendarRouteLocation | null {
+  if (!isRecord(v)) return null
+
+  const id = pickString(v.id)
+  if (!id) return null
+
+  return {
+    id,
+    type: (pickString(v.type) ?? 'SALON') as ProLocationType,
+    timeZone: pickString(v.timeZone) ?? null,
+    timeZoneValid: Boolean(v.timeZoneValid),
+  }
+}
+
 function serviceItemsTotalDuration(items: BookingServiceItem[]): number {
   return items.reduce((sum, item) => sum + Number(item.durationMinutesSnapshot ?? 0), 0)
 }
 
 function serviceItemsLabel(items: BookingServiceItem[]): string {
-  const names = items
-    .map((item) => item.serviceName.trim())
-    .filter(Boolean)
-
+  const names = items.map((item) => item.serviceName.trim()).filter(Boolean)
   return names.length ? names.join(' + ') : 'Appointment'
 }
 
@@ -186,7 +228,7 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
 
   const title = pickString(v.title) ?? (kind === 'BLOCK' ? 'Blocked' : 'Booking')
   const clientName = pickString(v.clientName) ?? ''
-  const status = pickString(v.status) ?? (kind === 'BLOCK' ? 'BLOCKED' : 'PENDING')
+  const rawStatus = pickString(v.status)
 
   const dur = pickNumber(v.durationMinutes)
   const durationMinutes = dur != null && dur > 0 ? dur : undefined
@@ -219,10 +261,8 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
         : []
 
     const details = {
-      serviceName:
-        isRecord(v.details) ? pickString(v.details.serviceName) ?? title : title,
-      bufferMinutes:
-        isRecord(v.details) ? pickNumber(v.details.bufferMinutes) ?? 0 : 0,
+      serviceName: isRecord(v.details) ? pickString(v.details.serviceName) ?? title : title,
+      bufferMinutes: isRecord(v.details) ? pickNumber(v.details.bufferMinutes) ?? 0 : 0,
       serviceItems,
     }
 
@@ -257,7 +297,7 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
       endsAt,
       title,
       clientName,
-      status,
+      status: 'BLOCKED',
       note: note ?? null,
       locationId: locationId ?? null,
       ...(durationMinutes != null ? { durationMinutes } : {}),
@@ -343,6 +383,7 @@ function parseServiceOptions(v: unknown): ServiceOption[] {
 
   return out
 }
+
 function normalizeMoneyString(raw: string | null | undefined): string {
   const value = (raw ?? '').trim()
   return value ? value : '0.00'
@@ -516,11 +557,23 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     return { from, to }
   }
 
-  const mapMon: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
+  const mapMon: Record<string, number> = {
+    Mon: 0,
+    Tue: 1,
+    Wed: 2,
+    Thu: 3,
+    Fri: 4,
+    Sat: 5,
+    Sun: 6,
+  }
 
   if (v === 'week') {
     const p = getZonedParts(focusUtc, safeTz)
-    const weekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(focusUtc)
+    const weekdayShort = new Intl.DateTimeFormat('en-US', {
+      timeZone: safeTz,
+      weekday: 'short',
+    }).format(focusUtc)
+
     const dow = mapMon[weekdayShort] ?? 0
     const weekStartDay = p.day - dow
 
@@ -550,9 +603,12 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
     timeZone: safeTz,
   })
 
-  const firstWeekdayShort = new Intl.DateTimeFormat('en-US', { timeZone: safeTz, weekday: 'short' }).format(firstOfMonthUtc)
-  const firstDow = mapMon[firstWeekdayShort] ?? 0
+  const firstWeekdayShort = new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTz,
+    weekday: 'short',
+  }).format(firstOfMonthUtc)
 
+  const firstDow = mapMon[firstWeekdayShort] ?? 0
   const firstParts = getZonedParts(firstOfMonthUtc, safeTz)
   const gridStartDay = firstParts.day - firstDow
 
@@ -600,7 +656,9 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   const scopedLocations = useMemo(() => {
     const list = locations.filter((l) => l.isBookable)
-    if (activeLocationType === 'MOBILE') return list.filter((l) => upper(l.type) === 'MOBILE_BASE')
+    if (activeLocationType === 'MOBILE') {
+      return list.filter((l) => upper(l.type) === 'MOBILE_BASE')
+    }
     return list.filter((l) => upper(l.type) === 'SALON' || upper(l.type) === 'SUITE')
   }, [locations, activeLocationType])
 
@@ -620,7 +678,10 @@ export function useCalendarData({ view, currentDate }: Args) {
           ? 'Suite'
           : 'Salon')
 
-    const addr = activeLocation.formattedAddress ? ` — ${activeLocation.formattedAddress}` : ''
+    const addr = activeLocation.formattedAddress
+      ? ` — ${activeLocation.formattedAddress}`
+      : ''
+
     return `${base}${addr}`
   }, [activeLocation])
 
@@ -640,12 +701,13 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [savingAutoAccept, setSavingAutoAccept] = useState(false)
 
   const [services, setServices] = useState<ServiceOption[]>([])
-  
 
   const [openBookingId, setOpenBookingId] = useState<string | null>(null)
   const [bookingLoading, setBookingLoading] = useState(false)
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [booking, setBooking] = useState<BookingDetails | null>(null)
+  const [openBookingLocationId, setOpenBookingLocationId] = useState<string | null>(null)
+  const [openBookingLocationType, setOpenBookingLocationType] = useState<LocationType>('SALON')
 
   const [serviceItemsDraft, setServiceItemsDraft] = useState<BookingServiceItem[]>([])
   const [manualDurationMinutes, setManualDurationMinutes] = useState<number>(60)
@@ -752,6 +814,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     const source = serviceItemsDraft.length ? serviceItemsDraft : booking?.serviceItems ?? []
     return serviceItemsLabel(source)
   }, [serviceItemsDraft, booking])
+
   const durationMinutes = useMemo(() => {
     const draftComputed = serviceItemsTotalDuration(serviceItemsDraft)
 
@@ -772,17 +835,43 @@ export function useCalendarData({ view, currentDate }: Args) {
     booking?.totalDurationMinutes,
     manualDurationMinutes,
   ])
+
   const selectedDraftServiceIds = useMemo(
     () => serviceItemsDraft.map((item) => item.serviceId),
     [serviceItemsDraft],
   )
 
-  
-
   function eventDurationMinutes(ev: CalendarEvent) {
-    return typeof ev.durationMinutes === 'number' && Number.isFinite(ev.durationMinutes) && ev.durationMinutes > 0
+    return typeof ev.durationMinutes === 'number' &&
+      Number.isFinite(ev.durationMinutes) &&
+      ev.durationMinutes > 0
       ? ev.durationMinutes
       : computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
+  }
+
+  function resolveBookingSchedulingContext(args: {
+    locationId: string | null
+    locationType: LocationType
+    fallbackTimeZone: string
+  }) {
+    const location =
+      args.locationId != null
+        ? locations.find((entry) => entry.id === args.locationId) ?? null
+        : null
+
+    const resolvedTimeZone =
+      location?.timeZone && isValidIanaTimeZone(location.timeZone)
+        ? sanitizeTimeZone(location.timeZone, args.fallbackTimeZone)
+        : sanitizeTimeZone(args.fallbackTimeZone, DEFAULT_TIME_ZONE)
+
+    const resolvedWorkingHours =
+      location?.workingHours ??
+      (args.locationType === 'MOBILE' ? workingHoursMobile : workingHoursSalon)
+
+    return {
+      timeZone: resolvedTimeZone,
+      workingHours: resolvedWorkingHours,
+    }
   }
 
   function openConfirm(change: PendingChange) {
@@ -815,18 +904,27 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   function isPendingChangeOutsideWorkingHours(change: PendingChange): boolean {
     if (change.entityType !== 'booking') return false
+    if (change.original.kind !== 'BOOKING') return false
 
-    const tz = sanitizeTimeZone(timeZoneRef.current, DEFAULT_TIME_ZONE)
+    const originalLocationType = locationTypeFromBookingValue(change.original.locationType)
+    const context = resolveBookingSchedulingContext({
+      locationId: change.original.locationId ?? null,
+      locationType: originalLocationType,
+      fallbackTimeZone: timeZoneRef.current,
+    })
 
     const originalDur = eventDurationMinutes(change.original)
-    const nextStartIso = change.kind === 'move' ? change.nextStartIso : change.original.startsAt
+    const nextStartIso =
+      change.kind === 'move' ? change.nextStartIso : change.original.startsAt
     const nextDurMinutes =
-      change.kind === 'resize' ? Number(change.nextTotalDurationMinutes || originalDur) : Number(originalDur)
+      change.kind === 'resize'
+        ? Number(change.nextTotalDurationMinutes || originalDur)
+        : Number(originalDur)
 
     const startUtc = new Date(nextStartIso)
     if (!Number.isFinite(startUtc.getTime())) return false
 
-    const p = getZonedParts(startUtc, tz)
+    const p = getZonedParts(startUtc, context.timeZone)
     const startMinutes = p.hour * 60 + p.minute
     const dur = roundTo15(nextDurMinutes)
     const endMinutes = startMinutes + dur
@@ -837,8 +935,8 @@ export function useCalendarData({ view, currentDate }: Args) {
       day: dayAnchor,
       startMinutes,
       endMinutes,
-      workingHours: workingHoursActive,
-      timeZone: tz,
+      workingHours: context.workingHours,
+      timeZone: context.timeZone,
     })
   }
 
@@ -886,7 +984,11 @@ export function useCalendarData({ view, currentDate }: Args) {
       setEvents((prev) =>
         prev.map((x) =>
           x.id === s.eventId
-            ? { ...x, endsAt: rollbackEnd.toISOString(), durationMinutes: s.originalDuration }
+            ? {
+                ...x,
+                endsAt: rollbackEnd.toISOString(),
+                durationMinutes: s.originalDuration,
+              }
             : x,
         ),
       )
@@ -937,13 +1039,14 @@ export function useCalendarData({ view, currentDate }: Args) {
           const id = pickString(raw.id)
           if (!id) return null
 
-          const type: ProLocationType = pickString(raw.type) ?? 'SALON'
+          const type: ProLocationType = (pickString(raw.type) ?? 'SALON') as ProLocationType
           const name = pickString(raw.name) ?? null
           const formattedAddress = pickString(raw.formattedAddress) ?? null
           const isPrimary = Boolean(raw.isPrimary)
           const isBookable = raw.isBookable === undefined ? true : Boolean(raw.isBookable)
           const timeZone = pickString(raw.timeZone) ?? null
-          const stepMinutes = raw.stepMinutes === null ? null : (pickNumber(raw.stepMinutes) ?? null)
+          const stepMinutes =
+            raw.stepMinutes === null ? null : (pickNumber(raw.stepMinutes) ?? null)
           const workingHours = parseWorkingHoursJson(raw.workingHours)
 
           return {
@@ -963,8 +1066,12 @@ export function useCalendarData({ view, currentDate }: Args) {
       setLocations(parsed)
       setLocationsLoaded(true)
 
-      const nextCanSalon = parsed.some((l) => l.isBookable && (upper(l.type) === 'SALON' || upper(l.type) === 'SUITE'))
-      const nextCanMobile = parsed.some((l) => l.isBookable && upper(l.type) === 'MOBILE_BASE')
+      const nextCanSalon = parsed.some(
+        (l) => l.isBookable && (upper(l.type) === 'SALON' || upper(l.type) === 'SUITE'),
+      )
+      const nextCanMobile = parsed.some(
+        (l) => l.isBookable && upper(l.type) === 'MOBILE_BASE',
+      )
 
       setCanSalon(nextCanSalon)
       setCanMobile(nextCanMobile)
@@ -1044,13 +1151,18 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   async function loadWorkingHoursFor(locationType: LocationType) {
-    const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`, {
-      method: 'GET',
-      cache: 'no-store',
-    })
+    const res = await fetch(
+      `/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`,
+      {
+        method: 'GET',
+        cache: 'no-store',
+      },
+    )
     const data: unknown = await safeJson(res)
 
-    if (!res.ok) throw new Error(apiMessage(data, `Failed to load ${locationType} hours.`))
+    if (!res.ok) {
+      throw new Error(apiMessage(data, `Failed to load ${locationType} hours.`))
+    }
     if (!isRecord(data)) return null
 
     return parseWorkingHoursJson(data.workingHours)
@@ -1085,14 +1197,8 @@ export function useCalendarData({ view, currentDate }: Args) {
       }
 
       const record = isRecord(data) ? data : null
-
-      const apiLocId =
-        record && isRecord(record.location) ? pickString(record.location.id) : null
-
-      if (apiLocId && apiLocId !== activeLocationId) {
-        locationSetByApiRef.current = true
-        setActiveLocationId(apiLocId)
-      }
+      const apiLocationFirst = record ? parseCalendarRouteLocation(record.location) : null
+      const apiLocId = apiLocationFirst?.id ?? null
 
       const apiTzRaw = record ? pickString(record.timeZone) ?? '' : ''
       const apiTzValid = isValidIanaTimeZone(apiTzRaw)
@@ -1108,16 +1214,32 @@ export function useCalendarData({ view, currentDate }: Args) {
       }
 
       const record2 = isRecord(data) ? data : null
+      const apiLocation = record2 ? parseCalendarRouteLocation(record2.location) : null
+
+      if (apiLocation?.id && apiLocation.id !== activeLocationId) {
+        locationSetByApiRef.current = true
+        setActiveLocationId(apiLocation.id)
+      }
+
+      if (apiLocation) {
+        const apiLocationType = locationTypeFromProfessionalType(apiLocation.type)
+        setActiveLocationType(apiLocationType)
+      }
 
       setTimeZone(nextTz)
-      setNeedsTimeZoneSetup(Boolean(record2?.needsTimeZoneSetup) || !apiTzValid)
+      setNeedsTimeZoneSetup(Boolean(record2?.needsTimeZoneSetup))
 
       const nextCanSalon = record2 ? Boolean(record2.canSalon ?? true) : true
       const nextCanMobile = record2 ? Boolean(record2.canMobile ?? false) : false
 
       setCanSalon(nextCanSalon)
       setCanMobile(nextCanMobile)
-      setActiveLocationType((prev) => pickLocationType(nextCanSalon, nextCanMobile, prev))
+
+      if (!apiLocation) {
+        setActiveLocationType((prev) =>
+          pickLocationType(nextCanSalon, nextCanMobile, prev),
+        )
+      }
 
       setStats(record2 ? parseCalendarStats(record2.stats) : null)
       setAutoAccept(record2 ? Boolean(record2.autoAcceptBookings) : false)
@@ -1125,7 +1247,12 @@ export function useCalendarData({ view, currentDate }: Args) {
       setManagement(
         record2
           ? parseManagementLists(record2.management)
-          : { todaysBookings: [], pendingRequests: [], waitlistToday: [], blockedToday: [] },
+          : {
+              todaysBookings: [],
+              pendingRequests: [],
+              waitlistToday: [],
+              blockedToday: [],
+            },
       )
 
       const apiEvents = record2 ? parseCalendarEvents(record2.events) : []
@@ -1301,7 +1428,10 @@ export function useCalendarData({ view, currentDate }: Args) {
     setEditBlockOpen(true)
   }
 
-  async function setBookingStatusById(args: { bookingId: string; status: 'ACCEPTED' | 'CANCELLED' }) {
+  async function setBookingStatusById(args: {
+    bookingId: string
+    status: 'ACCEPTED' | 'CANCELLED'
+  }) {
     const { bookingId, status } = args
     if (!bookingId) return
     if (managementActionBusyId) return
@@ -1369,12 +1499,19 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     setOpenBookingId(id)
     setBooking(null)
+    setOpenBookingLocationId(null)
+    setOpenBookingLocationType('SALON')
     setServiceItemsDraft([])
     setBookingError(null)
     setBookingLoading(true)
     setAllowOutsideHours(false)
 
     try {
+      if (maybeEv && maybeEv.kind === 'BOOKING') {
+        setOpenBookingLocationId(maybeEv.locationId ?? null)
+        setOpenBookingLocationType(locationTypeFromBookingValue(maybeEv.locationType))
+      }
+
       const res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}`, {
         method: 'GET',
         cache: 'no-store',
@@ -1400,6 +1537,10 @@ export function useCalendarData({ view, currentDate }: Args) {
       const editLocationType: LocationType =
         parsed.locationType === 'MOBILE' ? 'MOBILE' : 'SALON'
 
+      if (!maybeEv || maybeEv.kind !== 'BOOKING') {
+        setOpenBookingLocationType(editLocationType)
+      }
+
       await loadServicesForLocation(editLocationType)
     } catch (e: unknown) {
       console.error(e)
@@ -1412,6 +1553,8 @@ export function useCalendarData({ view, currentDate }: Args) {
   function closeBooking() {
     setOpenBookingId(null)
     setBooking(null)
+    setOpenBookingLocationId(null)
+    setOpenBookingLocationType('SALON')
     setServiceItemsDraft([])
     setBookingError(null)
     setSavingReschedule(false)
@@ -1428,17 +1571,22 @@ export function useCalendarData({ view, currentDate }: Args) {
     const [hh, mi] = (reschedTime || '').split(':').map((x) => Number(x))
     if (!Number.isFinite(hh) || !Number.isFinite(mi)) return false
 
+    const context = resolveBookingSchedulingContext({
+      locationId: openBookingLocationId,
+      locationType: openBookingLocationType,
+      fallbackTimeZone: booking.timeZone || timeZone,
+    })
+
     const startMinutes = hh * 60 + mi
     const endMinutes = startMinutes + durationMinutes
     const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
-    const editTz = sanitizeTimeZone(booking.timeZone || timeZone, DEFAULT_TIME_ZONE)
 
     return isOutsideWorkingHours({
       day: dayAnchor,
       startMinutes,
       endMinutes,
-      workingHours: workingHoursActive,
-      timeZone: editTz,
+      workingHours: context.workingHours,
+      timeZone: context.timeZone,
     })
   }
 
@@ -1457,7 +1605,11 @@ export function useCalendarData({ view, currentDate }: Args) {
       const [hh, mi] = (reschedTime || '').split(':').map((x) => Number(x))
       if (!Number.isFinite(hh) || !Number.isFinite(mi)) throw new Error('Pick a valid time.')
 
-      const tz = sanitizeTimeZone(booking.timeZone || timeZone, DEFAULT_TIME_ZONE)
+      const context = resolveBookingSchedulingContext({
+        locationId: openBookingLocationId,
+        locationType: openBookingLocationType,
+        fallbackTimeZone: booking.timeZone || timeZone,
+      })
 
       const nextStart = zonedTimeToUtc({
         year: yyyy,
@@ -1466,7 +1618,7 @@ export function useCalendarData({ view, currentDate }: Args) {
         hour: hh,
         minute: mi,
         second: 0,
-        timeZone: tz,
+        timeZone: context.timeZone,
       })
 
       const effectiveDuration =
@@ -1475,14 +1627,14 @@ export function useCalendarData({ view, currentDate }: Args) {
           : Number(booking.totalDurationMinutes || durationMinutes || 60)
 
       const snappedDur = Math.max(SNAP_MINUTES, roundTo15(effectiveDuration))
-
       const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
+
       const outside = isOutsideWorkingHours({
         day: dayAnchor,
         startMinutes: hh * 60 + mi,
         endMinutes: hh * 60 + mi + snappedDur,
-        workingHours: workingHoursActive,
-        timeZone: tz,
+        workingHours: context.workingHours,
+        timeZone: context.timeZone,
       })
 
       const payload: {
@@ -1674,11 +1826,17 @@ export function useCalendarData({ view, currentDate }: Args) {
     const minutesFromTop = pxFromTop / PX_PER_MINUTE
     const dur = eventDurationMinutes(ev)
 
-    dragGrabOffsetMinutesRef.current = clamp(minutesFromTop, 0, Math.max(0, dur - SNAP_MINUTES))
+    dragGrabOffsetMinutesRef.current = clamp(
+      minutesFromTop,
+      0,
+      Math.max(0, dur - SNAP_MINUTES),
+    )
 
     try {
       e.dataTransfer.setData('text/plain', ev.id)
-    } catch {}
+    } catch {
+      // ignore
+    }
 
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -1710,10 +1868,15 @@ export function useCalendarData({ view, currentDate }: Args) {
     const nextEnd = new Date(nextStart.getTime() + dur * 60_000)
 
     setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, startsAt: nextStart.toISOString(), endsAt: nextEnd.toISOString(), durationMinutes: dur }
-          : e,
+      prev.map((event) =>
+        event.id === eventId
+          ? {
+              ...event,
+              startsAt: nextStart.toISOString(),
+              endsAt: nextEnd.toISOString(),
+              durationMinutes: dur,
+            }
+          : event,
       ),
     )
 
@@ -1771,7 +1934,13 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   const isOverlayOpen = Boolean(
-    confirmOpen || pendingChange || openBookingId || createOpen || managementOpen || blockCreateOpen || editBlockOpen,
+    confirmOpen ||
+      pendingChange ||
+      openBookingId ||
+      createOpen ||
+      managementOpen ||
+      blockCreateOpen ||
+      editBlockOpen,
   )
 
   const pendingOutsideWorkingHours = pendingChange

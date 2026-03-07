@@ -19,6 +19,7 @@ import {
 } from '@prisma/client'
 import {
   isValidIanaTimeZone,
+  sanitizeTimeZone,
   minutesSinceMidnightInTimeZone,
 } from '@/lib/timeZone'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
@@ -36,8 +37,8 @@ import {
   normalizeToMinute,
 } from '@/lib/booking/conflicts'
 import {
-  findCalendarBlockConflict,
-  hasBookingConflict,
+  assertNoBookingConflict,
+  assertNoCalendarBlockConflict,
   hasHoldConflict,
 } from '@/lib/booking/conflictQueries'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
@@ -110,7 +111,9 @@ async function createClientNotification(args: {
   })
 }
 
-function parseRequestedServiceItems(raw: unknown): RequestedServiceItemInput[] | null {
+function parseRequestedServiceItems(
+  raw: unknown,
+): RequestedServiceItemInput[] | null {
   if (raw === undefined) return null
   if (!Array.isArray(raw)) throwCode('BAD_ITEMS')
   if (raw.length === 0) throwCode('BAD_ITEMS')
@@ -273,7 +276,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 
     const timeZone =
       tzResult.ok && isValidIanaTimeZone(tzResult.timeZone)
-        ? tzResult.timeZone
+        ? sanitizeTimeZone(tzResult.timeZone, 'UTC')
         : 'UTC'
 
     return jsonOk(
@@ -286,6 +289,7 @@ export async function GET(_req: Request, ctx: Ctx) {
             start,
             totalDurationMinutes + bufferMinutes,
           ).toISOString(),
+          locationId: booking.locationId ?? null,
           locationType: booking.locationType,
           bufferMinutes,
           durationMinutes: totalDurationMinutes,
@@ -448,7 +452,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
       const outputTimeZone =
         outputTzResult.ok && isValidIanaTimeZone(outputTzResult.timeZone)
-          ? outputTzResult.timeZone
+          ? sanitizeTimeZone(outputTzResult.timeZone, 'UTC')
           : 'UTC'
 
       if (nextStatus === BookingStatus.CANCELLED) {
@@ -541,7 +545,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         throwCode('TIMEZONE_REQUIRED')
       }
 
-      const appointmentTimeZone = apptTzResult.timeZone
+      const appointmentTimeZone = sanitizeTimeZone(apptTzResult.timeZone, 'UTC')
       const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
       const locationBufferMinutes = clampInt(
         Number(location.bufferMinutes ?? 0),
@@ -553,7 +557,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
         throwCode('BAD_BUFFER')
       }
 
-      if (nextDuration != null && (nextDuration < 15 || nextDuration > MAX_SLOT_DURATION_MINUTES)) {
+      if (
+        nextDuration != null &&
+        (nextDuration < 15 || nextDuration > MAX_SLOT_DURATION_MINUTES)
+      ) {
         throwCode('BAD_DURATION')
       }
 
@@ -625,7 +632,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
           }
 
           const isMobile = existing.locationType === ServiceLocationType.MOBILE
-          const modeAllowed = isMobile ? offering.offersMobile : offering.offersInSalon
+          const modeAllowed = isMobile
+            ? offering.offersMobile
+            : offering.offersInSalon
 
           const rawDuration = isMobile
             ? Number(
@@ -759,7 +768,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         }
       }
 
-      const bookingConflict = await hasBookingConflict({
+      await assertNoBookingConflict({
         tx,
         professionalId: existing.professionalId,
         requestedStart: finalStart,
@@ -767,11 +776,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         excludeBookingId: existing.id,
       })
 
-      if (bookingConflict) {
-        throwCode('CONFLICT')
-      }
-
-      const blockConflict = await findCalendarBlockConflict({
+      await assertNoCalendarBlockConflict({
         tx,
         professionalId: existing.professionalId,
         locationId: location.id,
@@ -779,16 +784,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
         requestedEnd: finalEnd,
       })
 
-      if (blockConflict) {
-        throwCode('BLOCKED')
-      }
-
       const holdConflict = await hasHoldConflict({
         tx,
         professionalId: existing.professionalId,
         requestedStart: finalStart,
         requestedEnd: finalEnd,
-        defaultBufferMinutes: locationBufferMinutes,
+        defaultBufferMinutes: finalBuffer,
         fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
       })
 
@@ -905,7 +906,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (message === 'CANNOT_EDIT_COMPLETED') {
       return jsonFail(409, 'Completed bookings cannot be edited.')
     }
-    if (message === 'CONFLICT') return jsonFail(409, 'That time is not available.')
+    if (message === 'CONFLICT' || message === 'TIME_NOT_AVAILABLE') {
+      return jsonFail(409, 'That time is not available.')
+    }
     if (message === 'BLOCKED') {
       return jsonFail(409, 'That time is blocked on your calendar.')
     }

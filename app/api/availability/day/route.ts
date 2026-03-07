@@ -1,9 +1,14 @@
 // app/api/availability/day/route.ts
 import { prisma } from '@/lib/prisma'
-import { Prisma, BookingStatus, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+import {
+  Prisma,
+  ProfessionalLocationType,
+  ServiceLocationType,
+} from '@prisma/client'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
 import { getRedis } from '@/lib/redis'
 import { createHash } from 'crypto'
 import {
@@ -79,12 +84,6 @@ const redis = getRedis()
 function toInt(value: string | null, fallback: number): number {
   const n = Number(value)
   return Number.isFinite(n) ? Math.trunc(n) : fallback
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return min
-  return Math.min(Math.max(Math.trunc(parsed), min), max)
 }
 
 function clampFloat(value: number, min: number, max: number): number {
@@ -216,8 +215,8 @@ function isSchedulingReadyLocation(
 
   const tz =
     typeof location.timeZone === 'string' ? location.timeZone.trim() : ''
-  if (!tz || !isValidIanaTimeZone(tz)) return false
 
+  if (!tz || !isValidIanaTimeZone(tz)) return false
   if (!isRecord(location.workingHours)) return false
 
   return true
@@ -228,12 +227,10 @@ async function pickAvailabilityLocation(args: {
   requestedLocationId?: string | null
   locationType: ServiceLocationType
 }): Promise<AvailabilityLocation | null> {
-  const professionalId = typeof args.professionalId === 'string'
-    ? args.professionalId.trim()
-    : ''
-  const requestedLocationId = typeof args.requestedLocationId === 'string'
-    ? args.requestedLocationId.trim()
-    : ''
+  const professionalId =
+    typeof args.professionalId === 'string' ? args.professionalId.trim() : ''
+  const requestedLocationId =
+    typeof args.requestedLocationId === 'string' ? args.requestedLocationId.trim() : ''
 
   if (!professionalId) return null
 
@@ -267,6 +264,35 @@ async function pickAvailabilityLocation(args: {
   return candidates.find(isSchedulingReadyLocation) ?? null
 }
 
+function parseCachedBusyIntervals(
+  value: unknown,
+): BusyInterval[] | null {
+  if (!isRecord(value) || !Array.isArray(value.busy)) return null
+
+  const intervals: BusyInterval[] = []
+
+  for (const row of value.busy) {
+    if (!isRecord(row)) continue
+
+    const startRaw = pickString(row.start)
+    const endRaw = pickString(row.end)
+    if (!startRaw || !endRaw) continue
+
+    const start = new Date(startRaw)
+    const end = new Date(endRaw)
+
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+      continue
+    }
+
+    if (end.getTime() <= start.getTime()) continue
+
+    intervals.push({ start, end })
+  }
+
+  return intervals
+}
+
 async function loadBusyIntervals(args: {
   professionalId: string
   locationId: string
@@ -292,7 +318,7 @@ async function loadBusyIntervals(args: {
   }
 
   const key = [
-    'avail:busy:v3',
+    'avail:busy:v4',
     args.professionalId,
     args.locationId,
     args.windowStartUtc.toISOString(),
@@ -301,12 +327,10 @@ async function loadBusyIntervals(args: {
     String(args.fallbackDurationMinutes ?? ''),
   ].join(':')
 
-  const hit = await cacheGetJson<{ busy: Array<{ start: string; end: string }> }>(key)
-  if (hit && Array.isArray(hit.busy)) {
-    return hit.busy.map((x) => ({
-      start: new Date(x.start),
-      end: new Date(x.end),
-    }))
+  const hit = await cacheGetJson<unknown>(key)
+  const parsedHit = parseCachedBusyIntervals(hit)
+  if (parsedHit) {
+    return parsedHit
   }
 
   const busy = await loadBusyIntervalsForWindow({
@@ -344,8 +368,20 @@ async function computeDaySlotsFast(args: {
   busy: BusyInterval[]
   debug?: boolean
 }): Promise<
-  | { ok: true; slots: string[]; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
-  | { ok: false; error: string; dayStartUtc: Date; dayEndExclusiveUtc: Date; debug?: unknown }
+  | {
+      ok: true
+      slots: string[]
+      dayStartUtc: Date
+      dayEndExclusiveUtc: Date
+      debug?: unknown
+    }
+  | {
+      ok: false
+      error: string
+      dayStartUtc: Date
+      dayEndExclusiveUtc: Date
+      debug?: unknown
+    }
 > {
   const {
     dateYMD,
@@ -409,8 +445,16 @@ async function computeDaySlotsFast(args: {
   }
 
   const step = normalizeStepMinutes(stepMinutes, 30)
-  const dur = clampInt(Number(durationMinutes || DEFAULT_DURATION_MINUTES), 15, MAX_SLOT_DURATION_MINUTES)
-  const buf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
+  const dur = clampInt(
+    Number(durationMinutes || DEFAULT_DURATION_MINUTES),
+    15,
+    MAX_SLOT_DURATION_MINUTES,
+  )
+  const buf = clampInt(
+    Number(locationBufferMinutes ?? 0) || 0,
+    0,
+    MAX_BUFFER_MINUTES,
+  )
 
   const cutoffUtc = addMinutes(
     nowUtc,
@@ -726,7 +770,6 @@ export async function GET(req: Request) {
     const dateStr = pickString(searchParams.get('date'))
 
     const addOnIds = parseCommaIds(searchParams.get('addOnIds')).sort()
-
     const debug = pickString(searchParams.get('debug')) === '1'
 
     const stepRaw =
@@ -842,6 +885,7 @@ export async function GET(req: Request) {
 
     const locationId = location.id
     const timeZone = sanitizeTimeZone(location.timeZone, 'UTC')
+
     if (!isValidIanaTimeZone(timeZone)) {
       return jsonFail(
         400,
@@ -977,7 +1021,7 @@ export async function GET(req: Request) {
       const cacheKey = debug
         ? null
         : [
-            'avail:summary:v3',
+            'avail:summary:v4',
             professionalId,
             serviceId,
             locationId,
@@ -1132,7 +1176,11 @@ export async function GET(req: Request) {
       }
 
       if (cacheKey) {
-        void cacheSetJson(cacheKey, { ...payload, mediaId: null }, TTL_SUMMARY_SECONDS)
+        void cacheSetJson(
+          cacheKey,
+          { ...payload, mediaId: null },
+          TTL_SUMMARY_SECONDS,
+        )
       }
 
       return jsonOk(payload)
@@ -1158,7 +1206,7 @@ export async function GET(req: Request) {
     const dayCacheKey = debug
       ? null
       : [
-          'avail:day:v3',
+          'avail:day:v4',
           professionalId,
           serviceId,
           locationId,

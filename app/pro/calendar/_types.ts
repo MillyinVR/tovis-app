@@ -2,24 +2,37 @@
 import type { IanaTimeZone } from '@/lib/timeZone'
 
 export type ViewMode = 'day' | 'week' | 'month'
+export type EntityType = 'booking' | 'block'
 
-export type CalendarStatus =
+export type WeekdayKey =
+  | 'sun'
+  | 'mon'
+  | 'tue'
+  | 'wed'
+  | 'thu'
+  | 'fri'
+  | 'sat'
+
+export type ServiceLocationType =
+  | 'SALON'
+  | 'MOBILE'
+  | (string & {})
+
+export type BookingCalendarStatus =
   | 'PENDING'
   | 'ACCEPTED'
   | 'COMPLETED'
   | 'CANCELLED'
   | 'WAITLIST'
-  | 'BLOCKED'
+  | 'UNKNOWN'
   | (string & {})
 
-export type EntityType = 'booking' | 'block'
-
-export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
+export type CalendarStatus = BookingCalendarStatus | 'BLOCKED'
 
 export type WorkingHoursDay = {
   enabled: boolean
   start: string // "HH:MM" (24h)
-  end: string   // "HH:MM" (24h)
+  end: string // "HH:MM" (24h)
 }
 
 export type WorkingHoursJson = Record<WeekdayKey, WorkingHoursDay> | null
@@ -41,9 +54,8 @@ export type CalendarStats =
  * - offeringId = optional active offering id
  * - durationMinutes = display/helper duration
  *
- * Keep this flexible for now, because the hook is still loading the existing
- * /api/pro/services payload and we will tighten it further when we wire the
- * edit modal to offering-driven service items.
+ * Keep this flexible for now because the edit flow is still normalizing
+ * selected services into booking service items.
  */
 export type ServiceOption = {
   id: string
@@ -52,9 +64,10 @@ export type ServiceOption = {
   offeringId?: string
   priceStartingAt?: string | null
 }
+
 /**
  * Booking service item returned by GET /api/pro/bookings/[id].
- * This is now the real source of truth for editable booking services.
+ * This is the source of truth for editable booking services.
  */
 export type BookingServiceItem = {
   id: string
@@ -68,19 +81,21 @@ export type BookingServiceItem = {
 }
 
 /**
- * Booking details for the edit modal.
+ * Booking details used by the edit modal.
  *
- * Important:
- * - Do not pretend a booking is single-service anymore.
- * - serviceItems drives display + future edit payload construction.
- * - totalDurationMinutes remains the persisted booking duration.
+ * Notes:
+ * - serviceItems is the actual editable unit
+ * - totalDurationMinutes is still the persisted booking duration
+ * - locationId is optional here for compatibility while the booking GET
+ *   route is still being normalized across the stack
  */
 export type BookingDetails = {
   id: string
   status: string
   scheduledFor: string // ISO string for a UTC instant
-  endsAt: string       // ISO string for a UTC instant
-  locationType?: 'SALON' | 'MOBILE' | (string & {})
+  endsAt: string // ISO string for a UTC instant
+  locationId?: string | null
+  locationType?: ServiceLocationType
   totalDurationMinutes: number
   durationMinutes?: number
   bufferMinutes?: number
@@ -94,6 +109,20 @@ export type BookingDetails = {
   serviceItems: BookingServiceItem[]
 }
 
+export type CalendarServiceItem = {
+  id: string
+  name: string | null
+  durationMinutes: number
+  price: unknown | null
+  sortOrder: number
+}
+
+export type BookingEventDetails = {
+  serviceName: string
+  bufferMinutes: number
+  serviceItems: CalendarServiceItem[]
+}
+
 export type BookingCalendarEvent = {
   kind: 'BOOKING'
   id: string
@@ -101,21 +130,11 @@ export type BookingCalendarEvent = {
   endsAt: string
   title: string
   clientName: string
-  status: CalendarStatus
+  status: BookingCalendarStatus
   locationId: string
-  locationType?: 'SALON' | 'MOBILE' | (string & {})
+  locationType: ServiceLocationType
   durationMinutes?: number
-  details?: {
-    serviceName: string
-    bufferMinutes: number
-    serviceItems: {
-      id: string
-      name: string | null
-      durationMinutes: number
-      price: unknown | null
-      sortOrder: number
-    }[]
-  }
+  details: BookingEventDetails
   note?: never
   blockId?: never
 }
@@ -128,13 +147,14 @@ export type BlockCalendarEvent = {
   endsAt: string
   title: string
   clientName: string
-  status: 'BLOCKED' | CalendarStatus
+  status: 'BLOCKED'
   durationMinutes?: number
-  note?: string | null
-  locationId?: string | null
+  note: string | null
+  locationId: string | null
 }
 
 export type CalendarEvent = BookingCalendarEvent | BlockCalendarEvent
+
 export type PendingChange =
   | {
       kind: 'resize'

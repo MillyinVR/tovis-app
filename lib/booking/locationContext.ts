@@ -42,6 +42,7 @@ type ResolveBookingLocationContextArgs = {
   holdLocationTimeZone?: string | null
   fallbackTimeZone?: string
   requireValidTimeZone?: boolean
+  allowFallback?: boolean
 }
 
 type ResolveBookingLocationContextResult =
@@ -138,6 +139,7 @@ export async function resolveBookingLocationContext(
     holdLocationTimeZone = null,
     fallbackTimeZone = 'UTC',
     requireValidTimeZone = true,
+    allowFallback = true,
   } = args
 
   const location = await pickBookableLocation({
@@ -145,6 +147,7 @@ export async function resolveBookingLocationContext(
     professionalId,
     requestedLocationId,
     locationType,
+    allowFallback,
   })
 
   if (!location) {

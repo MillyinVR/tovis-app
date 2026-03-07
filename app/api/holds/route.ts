@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
         locationType,
         fallbackTimeZone: 'UTC',
         requireValidTimeZone: true,
+        allowFallback: !requestedLocationId,
       })
 
       if (!locationContextResult.ok) {
