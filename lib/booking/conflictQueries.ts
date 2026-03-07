@@ -1,4 +1,28 @@
 // lib/booking/conflictQueries.ts
+
+/**
+ * Booking / availability conflict contract
+ *
+ * This file is the single source of truth for overlap behavior:
+ *
+ * - Bookings are PRO-WIDE occupancy.
+ *   A professional cannot be double-booked across different locations
+ *   or across different booking modes (SALON vs MOBILE) at the same time.
+ *
+ * - Holds are also PRO-WIDE occupancy.
+ *   A held time blocks that professional regardless of the client-facing mode/location view.
+ *
+ * - Calendar blocks are LOCATION-AWARE or GLOBAL.
+ *   A block only applies when:
+ *   - it matches the selected locationId, or
+ *   - it is global (locationId === null).
+ *
+ * - Client-facing availability is LOCATION/MODE-SCOPED for visibility,
+ *   but must still consume PRO-WIDE booking and hold occupancy when determining
+ *   whether a slot is actually free.
+ *
+ * If you change these rules, update the tests first.
+ */
 import { prisma } from '@/lib/prisma'
 import { BookingStatus, Prisma } from '@prisma/client'
 import {
