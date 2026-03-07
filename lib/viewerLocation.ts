@@ -1,5 +1,7 @@
 // lib/viewerLocation.ts
 import { isRecord } from '@/lib/guards'
+import { clampInt, pickNumber, pickString } from '@/lib/pick'
+
 export type ViewerLocation = {
   label: string
   placeId: string | null
@@ -23,20 +25,6 @@ export const VIEWER_RADIUS_MIN_MILES = 5
 export const VIEWER_RADIUS_MAX_MILES = 50
 export const VIEWER_RADIUS_DEFAULT_MILES = 15
 
-
-function pickString(x: unknown): string | null {
-  return typeof x === 'string' && x.trim() ? x.trim() : null
-}
-
-function pickNumber(x: unknown): number | null {
-  return typeof x === 'number' && Number.isFinite(x) ? x : null
-}
-
-function clampInt(n: number, min: number, max: number) {
-  const x = Math.trunc(n)
-  return Math.min(Math.max(x, min), max)
-}
-
 export function normalizeViewerLocation(raw: unknown): ViewerLocation | null {
   if (!isRecord(raw)) return null
 
@@ -45,24 +33,43 @@ export function normalizeViewerLocation(raw: unknown): ViewerLocation | null {
   const lng = pickNumber(raw.lng)
   const radiusMiles = pickNumber(raw.radiusMiles)
   const updatedAtMs = pickNumber(raw.updatedAtMs)
-  const placeId = raw.placeId == null ? null : pickString(raw.placeId)
 
-  if (!label || lat == null || lng == null || radiusMiles == null || updatedAtMs == null) return null
+  const placeId =
+    raw.placeId == null ? null : pickString(raw.placeId)
+
+  if (
+    !label ||
+    lat == null ||
+    lng == null ||
+    radiusMiles == null ||
+    updatedAtMs == null
+  ) {
+    return null
+  }
 
   return {
     label,
     lat,
     lng,
-    radiusMiles: clampInt(radiusMiles, VIEWER_RADIUS_MIN_MILES, VIEWER_RADIUS_MAX_MILES),
+    radiusMiles: clampInt(
+      radiusMiles,
+      VIEWER_RADIUS_MIN_MILES,
+      VIEWER_RADIUS_MAX_MILES,
+    ),
     updatedAtMs,
     placeId: placeId ?? null,
   }
 }
 
-function dispatchViewerLocationEvent(v: ViewerLocation | null) {
+function dispatchViewerLocationEvent(value: ViewerLocation | null) {
   if (typeof window === 'undefined') return
+
   try {
-    window.dispatchEvent(new CustomEvent(VIEWER_LOCATION_EVENT, { detail: v }))
+    window.dispatchEvent(
+      new CustomEvent<ViewerLocation | null>(VIEWER_LOCATION_EVENT, {
+        detail: value,
+      }),
+    )
   } catch {
     // ignore
   }
@@ -70,9 +77,11 @@ function dispatchViewerLocationEvent(v: ViewerLocation | null) {
 
 export function loadViewerLocation(): ViewerLocation | null {
   if (typeof window === 'undefined') return null
+
   try {
     const raw = window.localStorage.getItem(VIEWER_LOCATION_STORAGE_KEY)
     if (!raw) return null
+
     const parsed: unknown = JSON.parse(raw)
     return normalizeViewerLocation(parsed)
   } catch {
@@ -80,16 +89,22 @@ export function loadViewerLocation(): ViewerLocation | null {
   }
 }
 
-export function saveViewerLocation(v: ViewerLocation | null) {
+export function saveViewerLocation(value: ViewerLocation | null) {
   if (typeof window === 'undefined') return
+
   try {
-    if (!v) {
+    if (!value) {
       window.localStorage.removeItem(VIEWER_LOCATION_STORAGE_KEY)
       dispatchViewerLocationEvent(null)
       return
     }
-    window.localStorage.setItem(VIEWER_LOCATION_STORAGE_KEY, JSON.stringify(v))
-    dispatchViewerLocationEvent(v)
+
+    window.localStorage.setItem(
+      VIEWER_LOCATION_STORAGE_KEY,
+      JSON.stringify(value),
+    )
+
+    dispatchViewerLocationEvent(value)
   } catch {
     // ignore
   }
@@ -126,60 +141,59 @@ export function clearViewerLocation() {
 }
 
 export function getViewerParams(): ViewerParams | null {
-  const v = loadViewerLocation()
-  if (!v) return null
-  return { lat: v.lat, lng: v.lng, radiusMiles: v.radiusMiles, placeId: v.placeId }
+  const value = loadViewerLocation()
+  if (!value) return null
+
+  return {
+    lat: value.lat,
+    lng: value.lng,
+    radiusMiles: value.radiusMiles,
+    placeId: value.placeId,
+  }
 }
 
 /**
  * Subscribe to viewer location changes.
  * Fires when:
- * - setViewerLocation/clearViewerLocation/saveViewerLocation is called
- * - localStorage changes in another tab (storage event)
- *
- * Returns an unsubscribe function.
+ * - saveViewerLocation / setViewerLocation / clearViewerLocation is called
+ * - localStorage changes in another tab
  */
-export function subscribeViewerLocation(onChange: (v: ViewerLocation | null) => void): () => void {
+export function subscribeViewerLocation(
+  onChange: (value: ViewerLocation | null) => void,
+): () => void {
   if (typeof window === 'undefined') return () => {}
 
-  const onCustomEvent = (e: Event) => {
-    // Local, justified cast: we emit CustomEvent.detail in dispatchViewerLocationEvent.
-    const ce = e as CustomEvent<unknown>
-    const detail = ce.detail
+  const onCustomEvent = (event: Event) => {
+    if (!(event instanceof CustomEvent)) return
 
-    if (detail == null) {
-      onChange(null)
-      return
-    }
-
-    const normalized = normalizeViewerLocation(detail)
-    if (normalized) onChange(normalized)
+    const normalized = normalizeViewerLocation(event.detail)
+    onChange(normalized)
   }
 
-  const onStorage = (e: StorageEvent) => {
-    if (e.key !== VIEWER_LOCATION_STORAGE_KEY) return
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== VIEWER_LOCATION_STORAGE_KEY) return
     onChange(loadViewerLocation())
   }
 
-  window.addEventListener(VIEWER_LOCATION_EVENT, onCustomEvent as EventListener)
+  window.addEventListener(VIEWER_LOCATION_EVENT, onCustomEvent)
   window.addEventListener('storage', onStorage)
 
   return () => {
-    window.removeEventListener(VIEWER_LOCATION_EVENT, onCustomEvent as EventListener)
+    window.removeEventListener(VIEWER_LOCATION_EVENT, onCustomEvent)
     window.removeEventListener('storage', onStorage)
   }
 }
 
-/**
- * Helper for wiring into AvailabilityDrawer context cleanly.
- */
-export function viewerLocationToDrawerContextFields(v: ViewerLocation | null) {
-  if (!v) return {}
+export function viewerLocationToDrawerContextFields(
+  value: ViewerLocation | null,
+) {
+  if (!value) return {}
+
   return {
-    viewerLat: v.lat,
-    viewerLng: v.lng,
-    viewerRadiusMiles: v.radiusMiles,
-    viewerPlaceId: v.placeId,
-    viewerLocationLabel: v.label,
+    viewerLat: value.lat,
+    viewerLng: value.lng,
+    viewerRadiusMiles: value.radiusMiles,
+    viewerPlaceId: value.placeId,
+    viewerLocationLabel: value.label,
   } as const
 }

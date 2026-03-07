@@ -1,5 +1,4 @@
 // lib/pick.ts
-
 const TRUE_SET = new Set(['true', '1', 'yes', 'on'])
 const FALSE_SET = new Set(['false', '0', 'no', 'off'])
 
@@ -16,7 +15,6 @@ export function pickStringOrEmpty(v: unknown): string {
 export function pickNonEmptyString(v: unknown): string | null {
   return pickString(v)
 }
-
 
 export function pickNumber(v: unknown): number | null {
   const n =
@@ -36,18 +34,29 @@ export function pickInt(v: unknown): number | null {
 
 /**
  * Clamp integer.
+ *
  * Overloads:
  * - clampInt(value, min, max) -> fallback=min
  * - clampInt(value, fallback, min, max)
  */
-export function clampInt(n: unknown, min: number, max: number): number
-export function clampInt(n: unknown, fallback: number, min: number, max: number): number
-export function clampInt(n: unknown, a: number, b: number, c?: number): number {
+export function clampInt(value: unknown, min: number, max: number): number
+export function clampInt(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number
+export function clampInt(
+  value: unknown,
+  a: number,
+  b: number,
+  c?: number,
+): number {
   const fallback = c === undefined ? a : a
   const min = c === undefined ? a : b
   const max = c === undefined ? b : c
 
-  const raw = pickInt(n)
+  const raw = pickInt(value)
   if (raw == null) return fallback
   return Math.min(Math.max(raw, min), max)
 }
@@ -72,26 +81,32 @@ export function pickMethod(v: unknown): string | null {
 export function pickStateCode(v: unknown): string | null {
   const s = pickString(v)
   if (!s) return null
+
   const up = s.toUpperCase().replace(/[^A-Z]/g, '')
   if (up.length < 2) return null
+
   return up.slice(0, 2)
 }
 
-export function pickEnum<T extends string>(v: unknown, allowed: readonly T[]): T | null {
+export function pickEnum<T extends string>(
+  v: unknown,
+  allowed: readonly T[],
+): T | null {
   const s = pickString(v)
   if (!s) return null
 
-  const exact = allowed.find((a) => a === s)
+  const exact = allowed.find((item) => item === s)
   if (exact) return exact
 
-  const up = s.toUpperCase()
-  const hit = allowed.find((a) => a.toUpperCase() === up)
-  return hit ?? null
+  const upper = s.toUpperCase()
+  const insensitive = allowed.find((item) => item.toUpperCase() === upper)
+  return insensitive ?? null
 }
 
 export function pickIsoDate(v: unknown): Date | null {
   const s = pickString(v)
   if (!s) return null
+
   const d = new Date(s)
   return Number.isNaN(d.getTime()) ? null : d
 }

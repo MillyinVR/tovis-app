@@ -1,28 +1,19 @@
 // app/api/offerings/add-ons/route.ts
 import { prisma } from '@/lib/prisma'
-import { moneyToString } from '@/lib/money'
-import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { ServiceLocationType } from '@prisma/client'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { moneyToString } from '@/lib/money'
+import {
+  normalizeLocationType,
+  pickModeDurationMinutes,
+} from '@/lib/booking/locationContext'
+import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
 
 export const dynamic = 'force-dynamic'
 
-function cleanParam(v: string | null): string | null {
-  const s = (v ?? '').trim()
-  return s.length ? s : null
-}
-
-function parseLocationType(v: string | null): ServiceLocationType | null {
-  const s = (v ?? '').trim().toUpperCase()
-  if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
-  if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
-  return null
-}
-
-function toSafePositiveInt(v: unknown, fallback = 0) {
-  const n = typeof v === 'number' ? v : Number(v)
-  if (!Number.isFinite(n)) return fallback
-  const x = Math.trunc(n)
-  return x > 0 ? x : fallback
+function cleanParam(value: string | null): string | null {
+  const trimmed = (value ?? '').trim()
+  return trimmed.length ? trimmed : null
 }
 
 export async function GET(req: Request) {
@@ -30,7 +21,9 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
 
     const offeringId = cleanParam(url.searchParams.get('offeringId'))
-    const locationType = parseLocationType(url.searchParams.get('locationType'))
+    const locationType = normalizeLocationType(
+      url.searchParams.get('locationType'),
+    )
 
     if (!offeringId || !locationType) {
       return jsonFail(400, 'Missing or invalid offeringId or locationType.')
@@ -63,11 +56,17 @@ export async function GET(req: Request) {
       return jsonFail(404, 'Offering not found.')
     }
 
-    if (locationType === ServiceLocationType.SALON && !offering.offersInSalon) {
+    if (
+      locationType === ServiceLocationType.SALON &&
+      !offering.offersInSalon
+    ) {
       return jsonFail(400, 'This offering does not support salon bookings.')
     }
 
-    if (locationType === ServiceLocationType.MOBILE && !offering.offersMobile) {
+    if (
+      locationType === ServiceLocationType.MOBILE &&
+      !offering.offersMobile
+    ) {
       return jsonFail(400, 'This offering does not support mobile bookings.')
     }
 
@@ -102,7 +101,9 @@ export async function GET(req: Request) {
       take: 200,
     })
 
-    const addOnServiceIds = Array.from(new Set(addOnLinks.map((x) => x.addOnServiceId)))
+    const addOnServiceIds = Array.from(
+      new Set(addOnLinks.map((link) => link.addOnServiceId)),
+    )
 
     const proOfferings = addOnServiceIds.length
       ? await prisma.professionalServiceOffering.findMany({
@@ -122,37 +123,58 @@ export async function GET(req: Request) {
         })
       : []
 
-    const proOfferingByServiceId = new Map(proOfferings.map((row) => [row.serviceId, row]))
+    const proOfferingByServiceId = new Map(
+      proOfferings.map((row) => [row.serviceId, row]),
+    )
 
-    const addOns = addOnLinks.map((link) => {
-      const svc = link.addOnService
-      const proOff = proOfferingByServiceId.get(svc.id) ?? null
+    const addOns = addOnLinks.flatMap((link) => {
+      const service = link.addOnService
+      const proOffering = proOfferingByServiceId.get(service.id) ?? null
 
-      const durationRaw =
-        link.durationOverrideMinutes ??
-        (locationType === ServiceLocationType.MOBILE
-          ? proOff?.mobileDurationMinutes
-          : proOff?.salonDurationMinutes) ??
-        svc.defaultDurationMinutes ??
-        0
+      const durationMinutes = pickModeDurationMinutes({
+        locationType,
+        salonDurationMinutes:
+          link.durationOverrideMinutes ??
+          proOffering?.salonDurationMinutes ??
+          service.defaultDurationMinutes ??
+          null,
+        mobileDurationMinutes:
+          link.durationOverrideMinutes ??
+          proOffering?.mobileDurationMinutes ??
+          service.defaultDurationMinutes ??
+          null,
+        fallbackDurationMinutes:
+          service.defaultDurationMinutes ?? DEFAULT_DURATION_MINUTES,
+      })
 
       const priceRaw =
         link.priceOverride ??
         (locationType === ServiceLocationType.MOBILE
-          ? proOff?.mobilePriceStartingAt
-          : proOff?.salonPriceStartingAt) ??
-        svc.minPrice
+          ? proOffering?.mobilePriceStartingAt
+          : proOffering?.salonPriceStartingAt) ??
+        service.minPrice
 
-      return {
-        id: link.id, // OfferingAddOn.id
-        serviceId: svc.id,
-        title: svc.name,
-        group: svc.addOnGroup ?? null,
-        sortOrder: link.sortOrder ?? 0,
-        isRecommended: Boolean(link.isRecommended),
-        minutes: toSafePositiveInt(durationRaw, 0),
-        price: moneyToString(priceRaw) ?? '0.00',
+      if (priceRaw == null || durationMinutes <= 0) {
+        return []
       }
+
+      const price = moneyToString(priceRaw)
+      if (!price) {
+        return []
+      }
+
+      return [
+        {
+          id: link.id,
+          serviceId: service.id,
+          title: service.name,
+          group: service.addOnGroup ?? null,
+          sortOrder: link.sortOrder ?? 0,
+          isRecommended: Boolean(link.isRecommended),
+          minutes: durationMinutes,
+          price,
+        },
+      ]
     })
 
     return jsonOk({

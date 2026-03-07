@@ -22,7 +22,13 @@ export function asNumber(v: unknown): number | null {
 }
 
 export function asInt(v: unknown): number | null {
-  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : Number.NaN
+  const n =
+    typeof v === 'number'
+      ? v
+      : typeof v === 'string'
+        ? Number(v.trim())
+        : Number.NaN
+
   return Number.isFinite(n) ? Math.trunc(n) : null
 }
 
@@ -41,6 +47,6 @@ export function hasOwnKey<K extends string>(
   return Object.prototype.hasOwnProperty.call(obj, key)
 }
 
-// Back-compat: UI imports clampInt from guards sometimes.
-// Keep it, but source from lib/pick (single implementation).
+// Back-compat: some files import clampInt from guards.
+// Keep one implementation only.
 export { clampInt } from '@/lib/pick'

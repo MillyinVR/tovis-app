@@ -1,8 +1,9 @@
 // lib/booking/conflicts.ts
 import type { ServiceLocationType } from '@prisma/client'
+import { clampInt } from '@/lib/pick'
 import {
   DEFAULT_DURATION_MINUTES,
-  MAX_BOOKING_BUFFER_MINUTES,
+  MAX_BUFFER_MINUTES,
   MAX_OTHER_OVERLAP_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
@@ -12,22 +13,15 @@ export type BusyInterval = {
   end: Date
 }
 
-type BookingLike = {
+export type BookingLike = {
   scheduledFor: Date
   totalDurationMinutes: number | null
   bufferMinutes: number | null
 }
 
-type HoldLike = {
+export type HoldLike = {
   scheduledFor: Date
   locationType: ServiceLocationType | string
-  locationId: string | null
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return min
-  return Math.max(min, Math.min(max, Math.trunc(parsed)))
 }
 
 export function normalizeToMinute(date: Date): Date {
@@ -54,21 +48,30 @@ export function durationOrFallback(
   fallback = DEFAULT_DURATION_MINUTES,
 ): number {
   const parsed = Number(duration ?? 0)
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return clampInt(fallback, 15, MAX_SLOT_DURATION_MINUTES)
+  }
+
   return clampInt(parsed, 15, MAX_SLOT_DURATION_MINUTES)
 }
 
 export function bufferOrZero(buffer: unknown): number {
-  return clampInt(Number(buffer ?? 0) || 0, 0, MAX_BOOKING_BUFFER_MINUTES)
+  return clampInt(Number(buffer ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
 }
 
 export function getConflictWindowStart(start: Date): Date {
   return addMinutes(start, -MAX_OTHER_OVERLAP_MINUTES)
 }
 
-export function bookingToBusyInterval(booking: BookingLike): BusyInterval {
+export function bookingToBusyInterval(
+  booking: BookingLike,
+  fallbackDurationMinutes = DEFAULT_DURATION_MINUTES,
+): BusyInterval {
   const start = normalizeToMinute(new Date(booking.scheduledFor))
-  const duration = durationOrFallback(booking.totalDurationMinutes)
+  const duration = durationOrFallback(
+    booking.totalDurationMinutes,
+    fallbackDurationMinutes,
+  )
   const buffer = bufferOrZero(booking.bufferMinutes)
 
   return {
@@ -93,11 +96,15 @@ export function holdToBusyInterval(args: {
   } = args
 
   const start = normalizeToMinute(new Date(hold.scheduledFor))
-  const isMobile =
-    typeof hold.locationType === 'string' &&
-    hold.locationType.trim().toUpperCase() === 'MOBILE'
+  const normalizedLocationType = String(hold.locationType ?? '')
+    .trim()
+    .toUpperCase()
 
-  const rawDuration = isMobile ? mobileDurationMinutes : salonDurationMinutes
+  const rawDuration =
+    normalizedLocationType === 'MOBILE'
+      ? mobileDurationMinutes
+      : salonDurationMinutes
+
   const duration = durationOrFallback(rawDuration, fallbackDurationMinutes)
   const safeBuffer = bufferOrZero(bufferMinutes)
 
@@ -141,17 +148,25 @@ export function mergeBusyIntervals(intervals: BusyInterval[]): BusyInterval[] {
   return merged
 }
 
+/**
+ * Assumes busyIntervals are already sorted by start time.
+ * Best used with mergeBusyIntervals().
+ */
 export function hasBusyConflict(
   busyIntervals: BusyInterval[],
   requestedStart: Date,
   requestedEnd: Date,
 ): boolean {
   for (const interval of busyIntervals) {
-    if (interval.start.getTime() >= requestedEnd.getTime()) return false
+    if (interval.start.getTime() >= requestedEnd.getTime()) {
+      return false
+    }
+
     if (overlaps(interval.start, interval.end, requestedStart, requestedEnd)) {
       return true
     }
   }
+
   return false
 }
 

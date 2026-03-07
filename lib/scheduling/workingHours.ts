@@ -1,7 +1,20 @@
-import { isRecord } from '@/lib/guards'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+// lib/scheduling/workingHours.ts
 
-export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
+import { isRecord } from '@/lib/guards'
+import {
+  getZonedParts,
+  minutesSinceMidnightInTimeZone,
+  sanitizeTimeZone,
+} from '@/lib/timeZone'
+
+export type WeekdayKey =
+  | 'sun'
+  | 'mon'
+  | 'tue'
+  | 'wed'
+  | 'thu'
+  | 'fri'
+  | 'sat'
 
 export type WorkingHoursDay = {
   enabled: boolean
@@ -21,6 +34,16 @@ export const WEEKDAY_KEYS: readonly WeekdayKey[] = [
   'sat',
 ] as const
 
+const WEEKDAY_SHORT_TO_KEY: Record<string, WeekdayKey> = {
+  Sun: 'sun',
+  Mon: 'mon',
+  Tue: 'tue',
+  Wed: 'wed',
+  Thu: 'thu',
+  Fri: 'fri',
+  Sat: 'sat',
+}
+
 export type ParsedHHMM = {
   hh: number
   mm: number
@@ -29,6 +52,18 @@ export type ParsedHHMM = {
 export type WorkingWindowResult =
   | { ok: true; key: WeekdayKey; startMinutes: number; endMinutes: number }
   | { ok: false; reason: 'MISSING' | 'DISABLED' | 'MISCONFIGURED' }
+
+export type WorkingHoursRangeCheckResult =
+  | { ok: true; key: WeekdayKey; startMinutes: number; endMinutes: number }
+  | {
+      ok: false
+      reason:
+        | 'MISSING'
+        | 'DISABLED'
+        | 'MISCONFIGURED'
+        | 'CROSS_DAY'
+        | 'OUTSIDE'
+    }
 
 /**
  * Strict HH:MM only.
@@ -91,17 +126,7 @@ function weekdayKeyForDate(day: Date, timeZone: string): WeekdayKey | null {
     weekday: 'short',
   }).format(day)
 
-  const map: Record<string, WeekdayKey> = {
-    Sun: 'sun',
-    Mon: 'mon',
-    Tue: 'tue',
-    Wed: 'wed',
-    Thu: 'thu',
-    Fri: 'fri',
-    Sat: 'sat',
-  }
-
-  return map[short] ?? null
+  return WEEKDAY_SHORT_TO_KEY[short] ?? null
 }
 
 /**
@@ -126,12 +151,12 @@ export function getWorkingWindowForDay(
     return { ok: false, reason: 'MISCONFIGURED' }
   }
 
-  if (cfgUnknown.enabled === false) {
-    return { ok: false, reason: 'DISABLED' }
-  }
-
   if (typeof cfgUnknown.enabled !== 'boolean') {
     return { ok: false, reason: 'MISCONFIGURED' }
+  }
+
+  if (cfgUnknown.enabled === false) {
+    return { ok: false, reason: 'DISABLED' }
   }
 
   const startMinutes = hhmmToMinutes(cfgUnknown.start)
@@ -160,8 +185,78 @@ export function isOutsideWorkingHours(args: {
   workingHours: unknown
   timeZone: string
 }): boolean {
-  const window = getWorkingWindowForDay(args.day, args.workingHours, args.timeZone)
+  const window = getWorkingWindowForDay(
+    args.day,
+    args.workingHours,
+    args.timeZone,
+  )
+
   if (!window.ok) return true
 
-  return args.startMinutes < window.startMinutes || args.endMinutes > window.endMinutes
+  return (
+    args.startMinutes < window.startMinutes ||
+    args.endMinutes > window.endMinutes
+  )
+}
+
+/**
+ * Shared booking/span validation:
+ * - workingHours must exist and be well-formed
+ * - start/end must land on the same local day
+ * - requested span must fit inside that day's working window
+ *
+ * Routes can map the result reason to user-facing copy.
+ */
+export function checkWorkingHoursRange(args: {
+  scheduledStartUtc: Date
+  scheduledEndUtc: Date
+  workingHours: unknown
+  timeZone: string
+}): WorkingHoursRangeCheckResult {
+  const {
+    scheduledStartUtc,
+    scheduledEndUtc,
+    workingHours,
+    timeZone,
+  } = args
+
+  if (!isRecord(workingHours)) {
+    return { ok: false, reason: 'MISSING' }
+  }
+
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+
+  const startParts = getZonedParts(scheduledStartUtc, tz)
+  const endParts = getZonedParts(scheduledEndUtc, tz)
+
+  const sameLocalDay =
+    startParts.year === endParts.year &&
+    startParts.month === endParts.month &&
+    startParts.day === endParts.day
+
+  if (!sameLocalDay) {
+    return { ok: false, reason: 'CROSS_DAY' }
+  }
+
+  const window = getWorkingWindowForDay(scheduledStartUtc, workingHours, tz)
+  if (!window.ok) {
+    return window
+  }
+
+  const startMinutes = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
+  const endMinutes = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
+
+  if (
+    startMinutes < window.startMinutes ||
+    endMinutes > window.endMinutes
+  ) {
+    return { ok: false, reason: 'OUTSIDE' }
+  }
+
+  return {
+    ok: true,
+    key: window.key,
+    startMinutes: window.startMinutes,
+    endMinutes: window.endMinutes,
+  }
 }
