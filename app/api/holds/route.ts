@@ -3,13 +3,14 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma, type ServiceLocationType, BookingStatus } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
-import { getZonedParts, minutesSinceMidnightInTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { getZonedParts, minutesSinceMidnightInTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { isRecord } from '@/lib/guards'
 export const dynamic = 'force-dynamic'
 
+const MAX_OTHER_OVERLAP_MINUTES = 12 * 60 + 180
 /**
  * How long a client "hold" lasts before expiring.
  * Keep short to reduce dead-time on the calendar.
@@ -87,7 +88,7 @@ function ensureWithinWorkingHours(args: {
 }): { ok: true } | { ok: false; error: string } {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
 
-  if (!isRecord(workingHours)) {
+if (!isRecord(workingHours)) {
   return { ok: false, error: 'This professional has not set working hours yet.' }
 }
 
@@ -122,44 +123,6 @@ function ensureWithinWorkingHours(args: {
 }
 
 
-/**
- * Month-boundary-safe YMD +1 (UTC noon to avoid DST edge weirdness)
- */
-function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
-  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
-}
-
-/**
- * Day window in UTC for the LOCAL day (in appt tz) that contains instantUtc.
- */
-function getDayWindowUtcFromUtcInstant(args: { instantUtc: Date; timeZone: string }) {
-  const tz = sanitizeTimeZone(args.timeZone, 'UTC') || 'UTC'
-  const parts = getZonedParts(args.instantUtc, tz)
-
-  const dayStartUtc = zonedTimeToUtc({
-    year: parts.year,
-    month: parts.month,
-    day: parts.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone: tz,
-  })
-
-  const next = addDaysToYMD(parts.year, parts.month, parts.day, 1)
-  const dayEndExclusiveUtc = zonedTimeToUtc({
-    year: next.year,
-    month: next.month,
-    day: next.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone: tz,
-  })
-
-  return { dayStartUtc, dayEndExclusiveUtc }
-}
 
 function decimalToNumber(v: unknown): number | undefined {
   if (v == null) return undefined
@@ -193,6 +156,7 @@ export async function POST(req: NextRequest) {
 
     const now = new Date()
     const requestedStart = normalizeToMinute(scheduledForParsed)
+    const earliestStart = addMinutes(requestedStart, -MAX_OTHER_OVERLAP_MINUTES)
 
     // basic sanity: not in the past (real lead-time comes from location below)
     if (requestedStart.getTime() < now.getTime() + 60_000) {
@@ -248,9 +212,9 @@ export async function POST(req: NextRequest) {
       const apptTz = sanitizeTimeZone(tzRes.timeZone, 'UTC') || 'UTC'
 
       const stepMinutes = normalizeStepMinutes(loc.stepMinutes, 15)
-      const leadTimeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 0) || 0, 0, 24 * 60) // cap at 24h for sanity
-      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365) || 365, 1, 3650)
-      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, 180)
+      const leadTimeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 0), 0, 24 * 60)
+      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365), 1, 3650)
+      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0), 0, 180)
 
       // enforce lead-time + max-days-ahead
       if (requestedStart.getTime() < now.getTime() + leadTimeMinutes * 60_000) {
@@ -303,18 +267,10 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 409, error: 'That time is blocked. Try another slot.' }
       }
 
-      // Bound queries to the local day in appt tz
-      const { dayStartUtc, dayEndExclusiveUtc } = getDayWindowUtcFromUtcInstant({
-        instantUtc: requestedStart,
-        timeZone: apptTz,
-      })
-
-      // booking conflicts (same location)
       const existingBookings = await tx.booking.findMany({
         where: {
           professionalId: offering.professionalId,
-          locationId: loc.id,
-          scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
+          scheduledFor: { gte: earliestStart, lt: requestedEnd },
           NOT: { status: BookingStatus.CANCELLED },
         },
         select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
@@ -322,7 +278,6 @@ export async function POST(req: NextRequest) {
       })
 
       const bookingConflict = existingBookings.some((b) => {
-        if (b.status === BookingStatus.CANCELLED) return false
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
         const bDur = clampInt(Number(b.totalDurationMinutes ?? 0) || 60, 15, 12 * 60)
         const bBuf = clampInt(Number(b.bufferMinutes ?? 0) || 0, 0, 180)
@@ -333,18 +288,29 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 409, error: 'That time was just taken.' }
       }
 
-      // hold conflicts (overlap-aware, not just same start)
       const holds = await tx.bookingHold.findMany({
         where: {
           professionalId: offering.professionalId,
-          locationId: loc.id,
-          locationType,
           expiresAt: { gt: now },
-          scheduledFor: { gte: dayStartUtc, lt: dayEndExclusiveUtc },
+          scheduledFor: { gte: earliestStart, lt: requestedEnd },
         },
-        select: { scheduledFor: true, offeringId: true },
+        select: { scheduledFor: true, offeringId: true, locationId: true, locationType: true },
         take: 3000,
       })
+
+      const holdLocationIds = Array.from(new Set(holds.map((h) => h.locationId))).slice(0, 2000)
+
+      const holdLocations = holdLocationIds.length
+        ? await tx.professionalLocation.findMany({
+            where: { id: { in: holdLocationIds } },
+            select: { id: true, bufferMinutes: true },
+            take: 2000,
+          })
+        : []
+
+      const holdBufferByLocationId = new Map(
+        holdLocations.map((l) => [l.id, clampInt(Number(l.bufferMinutes ?? 0) || 0, 0, 180)]),
+      )
 
       if (holds.length) {
         const holdOfferingIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 2000)
@@ -356,20 +322,24 @@ export async function POST(req: NextRequest) {
         const byId = new Map(holdOfferings.map((o) => [o.id, o]))
 
         const holdConflict = holds.some((h) => {
-          const o = byId.get(h.offeringId)
-          const hDur = clampInt(
-            pickDurationMinutes({
-              locationType,
-              salonDurationMinutes: o?.salonDurationMinutes ?? null,
-              mobileDurationMinutes: o?.mobileDurationMinutes ?? null,
-            }),
-            15,
-            12 * 60,
-          )
-          const hStart = normalizeToMinute(new Date(h.scheduledFor))
-          const hEnd = addMinutes(hStart, hDur + bufferMinutes)
-          return overlaps(hStart, hEnd, requestedStart, requestedEnd)
-        })
+        const o = byId.get(h.offeringId)
+
+        const hDur = clampInt(
+          pickDurationMinutes({
+            locationType: h.locationType,
+            salonDurationMinutes: o?.salonDurationMinutes ?? null,
+            mobileDurationMinutes: o?.mobileDurationMinutes ?? null,
+          }),
+          15,
+          12 * 60,
+        )
+
+        const hStart = normalizeToMinute(new Date(h.scheduledFor))
+        const hBuf = holdBufferByLocationId.get(h.locationId) ?? bufferMinutes
+        const hEnd = addMinutes(hStart, hDur + hBuf)
+
+        return overlaps(hStart, hEnd, requestedStart, requestedEnd)
+      })
 
         if (holdConflict) {
           return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
@@ -412,7 +382,6 @@ export async function POST(req: NextRequest) {
 
         return { ok: true as const, status: 201, hold }
       } catch (e: unknown) {
-        // Race-safe fallback for @@unique([locationId, scheduledFor])
         const err = e as { code?: unknown }
         if (err?.code === 'P2002') {
           return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }

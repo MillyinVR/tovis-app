@@ -292,7 +292,6 @@ export async function POST(req: Request, { params }: Ctx) {
       const otherBookings = await tx.booking.findMany({
         where: {
           professionalId: booking.professionalId,
-          locationId: loc.id,
           id: { not: booking.id },
           scheduledFor: { gte: earliestStart, lt: newEnd },
           NOT: { status: BookingStatus.CANCELLED },
@@ -330,7 +329,6 @@ export async function POST(req: Request, { params }: Ctx) {
       const otherHolds = await tx.bookingHold.findMany({
         where: {
           professionalId: booking.professionalId,
-          locationId: loc.id,
           expiresAt: { gt: now },
           scheduledFor: { gte: earliestStart, lt: newEnd },
         },
@@ -338,6 +336,7 @@ export async function POST(req: Request, { params }: Ctx) {
           id: true,
           scheduledFor: true,
           offeringId: true,
+          locationId: true,
           locationType: true,
         },
         take: 2000,
@@ -358,6 +357,25 @@ export async function POST(req: Request, { params }: Ctx) {
 
         const offerById = new Map(offerRows.map((row) => [row.id, row]))
 
+        const holdLocationIds = Array.from(new Set(otherHolds.map((h) => h.locationId))).slice(0, 2000)
+
+        const holdLocations = holdLocationIds.length
+          ? await tx.professionalLocation.findMany({
+              where: { id: { in: holdLocationIds } },
+              select: {
+                id: true,
+                bufferMinutes: true,
+              },
+              take: 2000,
+            })
+          : []
+
+        const holdBufferByLocationId = new Map(
+          holdLocations.map((loc) => [
+            loc.id,
+            clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES),
+          ]),
+        )
         const hasHoldConflict = otherHolds.some((h) => {
           if (h.id === hold.id) return false
 
@@ -374,7 +392,8 @@ export async function POST(req: Request, { params }: Ctx) {
               : 60
 
           const hStart = normalizeToMinute(new Date(h.scheduledFor))
-          const hEnd = addMinutes(hStart, holdDuration + locationBufferMinutes)
+          const hBuf = holdBufferByLocationId.get(h.locationId) ?? locationBufferMinutes
+          const hEnd = addMinutes(hStart, holdDuration + hBuf)
 
           return overlaps(hStart, hEnd, newStart, newEnd)
         })

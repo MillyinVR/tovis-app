@@ -1,6 +1,6 @@
 // app/api/availability/day/route.ts
 import { prisma } from '@/lib/prisma'
-import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+import { BookingStatus, Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import type { BookableLocation } from '@/lib/booking/pickLocation'
 import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone } from '@/lib/timeZone'
@@ -15,8 +15,6 @@ export const dynamic = 'force-dynamic'
 // If you’re on Next “edge” runtime, you MUST remove crypto usage and I’ll adjust hashing.
 // export const runtime = 'nodejs'
 
-type WorkingHoursDay = { enabled?: boolean; start?: string; end?: string }
-type WorkingHours = Record<string, WorkingHoursDay>
 type BusyInterval = { start: Date; end: Date }
 
 const MAX_SLOT_DURATION_MINUTES = 12 * 60
@@ -225,9 +223,8 @@ async function loadBusyIntervalsUncached(args: {
     prisma.booking.findMany({
       where: {
         professionalId,
-        locationId,
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
-        NOT: { status: 'CANCELLED' },
+        NOT: { status: BookingStatus.CANCELLED },
       },
       select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
       take: 5000,
@@ -236,11 +233,10 @@ async function loadBusyIntervalsUncached(args: {
     prisma.bookingHold.findMany({
       where: {
         professionalId,
-        locationId,
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
         expiresAt: { gt: nowUtc },
       },
-      select: { id: true, scheduledFor: true, expiresAt: true, offeringId: true, locationType: true },
+      select: { id: true, scheduledFor: true, expiresAt: true, offeringId: true, locationType: true, locationId: true },
       take: 5000,
     }),
 
@@ -267,16 +263,37 @@ async function loadBusyIntervalsUncached(args: {
 
   const holdOfferingById = new Map(holdOfferings.map((o) => [o.id, o]))
 
+  const holdLocationIds = Array.from(new Set(holds.map((h) => h.locationId))).slice(0, 5000)
+
+  const holdLocations = holdLocationIds.length
+    ? await prisma.professionalLocation.findMany({
+        where: { id: { in: holdLocationIds } },
+        select: { id: true, bufferMinutes: true },
+        take: 5000,
+      })
+    : []
+
+  const holdBufferByLocationId = new Map(
+    holdLocations.map((l) => [
+      l.id,
+      clampInt(Number(l.bufferMinutes ?? 0) || 0, 0, MAX_LOCATION_BUFFER_MINUTES),
+    ]),
+  )
+
   const busy: BusyInterval[] = [
-    ...bookings
-      .filter((b) => String(b.status ?? '').toUpperCase() !== 'CANCELLED')
-      .map((b) => {
+    ...bookings.map((b) => {
         const start = normalizeToMinute(new Date(b.scheduledFor))
         const baseDur = Number(b.totalDurationMinutes ?? fallbackDurationMinutes)
-        const dur = Number.isFinite(baseDur) && baseDur > 0 ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES) : fallbackDurationMinutes
+        const dur =
+          Number.isFinite(baseDur) && baseDur > 0
+            ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES)
+            : fallbackDurationMinutes
 
         const bBufRaw = Number(b.bufferMinutes ?? locBuf)
-        const bBuf = Number.isFinite(bBufRaw) ? clampInt(bBufRaw, 0, MAX_LOCATION_BUFFER_MINUTES) : locBuf
+        const bBuf =
+          Number.isFinite(bBufRaw)
+            ? clampInt(bBufRaw, 0, MAX_LOCATION_BUFFER_MINUTES)
+            : locBuf
 
         return { start, end: addMinutes(start, dur + bBuf) }
       }),
@@ -287,12 +304,20 @@ async function loadBusyIntervalsUncached(args: {
         const start = normalizeToMinute(new Date(h.scheduledFor))
         const off = holdOfferingById.get(h.offeringId) || null
 
-        const durRaw = h.locationType === ServiceLocationType.MOBILE ? off?.mobileDurationMinutes : off?.salonDurationMinutes
+        const durRaw =
+          h.locationType === ServiceLocationType.MOBILE
+            ? off?.mobileDurationMinutes
+            : off?.salonDurationMinutes
 
         const baseDur = Number(durRaw ?? fallbackDurationMinutes)
-        const dur = Number.isFinite(baseDur) && baseDur > 0 ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES) : fallbackDurationMinutes
+        const dur =
+          Number.isFinite(baseDur) && baseDur > 0
+            ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES)
+            : fallbackDurationMinutes
 
-        return { start, end: addMinutes(start, dur + locBuf) }
+        const holdBuf = holdBufferByLocationId.get(h.locationId) ?? locBuf
+
+        return { start, end: addMinutes(start, dur + holdBuf) }
       }),
 
     ...blocks.map((bl) => ({ start: new Date(bl.startsAt), end: new Date(bl.endsAt) })),
@@ -318,7 +343,7 @@ async function loadBusyIntervals(args: {
   }
 
   const key = [
-    'avail:busy:v1',
+    'avail:busy:v2',
     args.professionalId,
     args.locationId,
     args.windowStartUtc.toISOString(),
@@ -759,32 +784,41 @@ export async function GET(req: Request) {
       return jsonFail(400, 'This service is not bookable.')
     }
 
+    const clientExplicitlyRequestedLocationType = requestedLocationType != null
+
     let loc: BookableLocation | null = await pickBookableLocation({
       professionalId,
       requestedLocationId,
       locationType: effectiveLocationType,
     })
 
-    if (!loc) {
-      const canTryMobile = effectiveLocationType === ServiceLocationType.SALON && Boolean(offering.offersMobile)
-      const canTrySalon = effectiveLocationType === ServiceLocationType.MOBILE && Boolean(offering.offersInSalon)
+    if (!loc && !clientExplicitlyRequestedLocationType) {
+      const fallbackType =
+        effectiveLocationType === ServiceLocationType.SALON
+          ? ServiceLocationType.MOBILE
+          : ServiceLocationType.SALON
 
-      if (canTryMobile) {
-        const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: ServiceLocationType.MOBILE })
+      const fallbackAllowed =
+        fallbackType === ServiceLocationType.SALON
+          ? Boolean(offering.offersInSalon)
+          : Boolean(offering.offersMobile)
+
+      if (fallbackAllowed) {
+        const alt = await pickBookableLocation({
+          professionalId,
+          requestedLocationId: null,
+          locationType: fallbackType,
+        })
         if (alt) {
           loc = alt
-          effectiveLocationType = ServiceLocationType.MOBILE
-        }
-      } else if (canTrySalon) {
-        const alt = await pickBookableLocation({ professionalId, requestedLocationId: null, locationType: ServiceLocationType.SALON })
-        if (alt) {
-          loc = alt
-          effectiveLocationType = ServiceLocationType.SALON
+          effectiveLocationType = fallbackType
         }
       }
     }
 
-    if (!loc) return jsonFail(400, 'No bookable location found.')
+    if (!loc) {
+      return jsonFail(400, 'No bookable location found for the selected booking type.')
+    }
 
     const locId = loc.id
     const timeZone = sanitizeTimeZone(loc.timeZone, 'UTC')
@@ -797,11 +831,14 @@ export async function GET(req: Request) {
     const defaultStepMinutes = normalizeStepMinutes(loc.stepMinutes, 30)
     const stepMinutes = debug && stepRaw ? normalizeStepMinutes(stepRaw, defaultStepMinutes) : defaultStepMinutes
 
-    const defaultLead = clampInt(Number(loc.advanceNoticeMinutes ?? 15) || 15, 0, MAX_LEAD_MINUTES)
-    const leadTimeMinutes = leadRaw ? clampInt(toInt(leadRaw, defaultLead), 0, MAX_LEAD_MINUTES) : defaultLead
+    const defaultLead = clampInt(Number(loc.advanceNoticeMinutes ?? 15), 0, MAX_LEAD_MINUTES)
+    const locationBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0), 0, MAX_LOCATION_BUFFER_MINUTES)
+    const leadTimeMinutes =
+        debug && leadRaw
+          ? clampInt(toInt(leadRaw, defaultLead), 0, MAX_LEAD_MINUTES)
+          : defaultLead
 
-    const locationBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 15) || 15, 0, MAX_LOCATION_BUFFER_MINUTES)
-    const maxAdvanceDays = clampInt(Number(loc.maxDaysAhead ?? 365) || 365, 1, MAX_DAYS_AHEAD)
+    const maxAdvanceDays = clampInt(Number(loc.maxDaysAhead ?? 365), 1, MAX_DAYS_AHEAD)
 
     // Base duration
     let durationMinutes = pickModeDurationMinutes(
@@ -878,7 +915,7 @@ export async function GET(req: Request) {
       const cacheKey = debug
         ? null
         : [
-            'avail:summary:v1',
+            'avail:summary:v2',
             professionalId,
             serviceId,
             locId,
@@ -1029,7 +1066,7 @@ export async function GET(req: Request) {
     const dayCacheKey = debug
       ? null
       : [
-          'avail:day:v1',
+          'avail:day:v2',
           professionalId,
           serviceId,
           locId,

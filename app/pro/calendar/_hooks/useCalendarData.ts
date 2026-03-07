@@ -150,6 +150,30 @@ function serviceItemsLabel(items: BookingServiceItem[]): string {
    Parsing helpers (no casts, match _types.ts)
 --------------------------------------------- */
 
+function parseCalendarServiceItem(v: unknown): {
+  id: string
+  name: string | null
+  durationMinutes: number
+  price: unknown
+  sortOrder: number
+} | null {
+  if (!isRecord(v)) return null
+
+  const id = pickString(v.id)
+  const sortOrder = pickNumber(v.sortOrder)
+  const durationMinutes = pickNumber(v.durationMinutes)
+
+  if (!id || sortOrder == null || durationMinutes == null) return null
+
+  return {
+    id,
+    name: pickString(v.name) ?? null,
+    durationMinutes,
+    price: 'price' in v ? v.price : null,
+    sortOrder,
+  }
+}
+
 function parseCalendarEvent(v: unknown): CalendarEvent | null {
   if (!isRecord(v)) return null
 
@@ -168,6 +192,40 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
   const durationMinutes = dur != null && dur > 0 ? dur : undefined
 
   if (kind === 'BOOKING') {
+    const locationId = pickString(v.locationId)
+    if (!locationId) return null
+
+    const locationTypeRaw = pickString(v.locationType)
+    const locationType =
+      locationTypeRaw === 'SALON' || locationTypeRaw === 'MOBILE'
+        ? locationTypeRaw
+        : locationTypeRaw ?? ''
+
+    const serviceItems =
+      isRecord(v.details) && Array.isArray(v.details.serviceItems)
+        ? v.details.serviceItems.reduce<
+            {
+              id: string
+              name: string | null
+              durationMinutes: number
+              price: unknown
+              sortOrder: number
+            }[]
+          >((acc, row) => {
+            const item = parseCalendarServiceItem(row)
+            if (item) acc.push(item)
+            return acc
+          }, [])
+        : []
+
+    const details = {
+      serviceName:
+        isRecord(v.details) ? pickString(v.details.serviceName) ?? title : title,
+      bufferMinutes:
+        isRecord(v.details) ? pickNumber(v.details.bufferMinutes) ?? 0 : 0,
+      serviceItems,
+    }
+
     return {
       kind: 'BOOKING',
       id,
@@ -176,6 +234,9 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
       title,
       clientName,
       status,
+      locationId,
+      locationType,
+      details,
       ...(durationMinutes != null ? { durationMinutes } : {}),
     }
   }
@@ -186,6 +247,8 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
     if (!blockId) return null
 
     const note = v.note === null ? null : pickString(v.note)
+    const locationId = v.locationId === null ? null : pickString(v.locationId)
+
     return {
       kind: 'BLOCK',
       id,
@@ -196,6 +259,7 @@ function parseCalendarEvent(v: unknown): CalendarEvent | null {
       clientName,
       status,
       note: note ?? null,
+      locationId: locationId ?? null,
       ...(durationMinutes != null ? { durationMinutes } : {}),
     }
   }

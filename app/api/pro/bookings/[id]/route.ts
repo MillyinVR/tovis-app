@@ -62,7 +62,6 @@ function addMinutes(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60_000)
 }
 
-/** existingStart < requestedEnd AND existingEnd > requestedStart */
 function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
   return aStart < bEnd && aEnd > bStart
 }
@@ -120,7 +119,12 @@ function moneyToCents(value: unknown): number {
     return moneyStringToCents(value)
   }
 
-  if (typeof value === 'object' && value !== null && 'toString' in value && typeof value.toString === 'function') {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toString' in value &&
+    typeof value.toString === 'function'
+  ) {
     return moneyStringToCents(value.toString())
   }
 
@@ -216,9 +220,7 @@ async function createClientNotification(args: {
   })
 }
 
-function parseServiceItemsInput(
-  rawItems: unknown[] | null,
-): RequestedServiceItemInput[] | null {
+function parseServiceItemsInput(rawItems: unknown[] | null): RequestedServiceItemInput[] | null {
   if (rawItems == null) return null
   if (!rawItems.length) throw new Error('BAD_ITEMS')
 
@@ -609,111 +611,123 @@ export async function PATCH(req: Request, ctx: Ctx) {
       let nextBookingOfferingId: string | null = null
 
       if (parsedServiceItems) {
-      const offeringIds = Array.from(
-        new Set(parsedServiceItems.map((item) => item.offeringId)),
-      ).slice(0, 50)
+        const offeringIds = Array.from(new Set(parsedServiceItems.map((item) => item.offeringId))).slice(0, 50)
 
-      const offerings = await tx.professionalServiceOffering.findMany({
-        where: {
-          id: { in: offeringIds },
-          professionalId: existing.professionalId,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          serviceId: true,
-          offersInSalon: true,
-          offersMobile: true,
-          salonDurationMinutes: true,
-          mobileDurationMinutes: true,
-          salonPriceStartingAt: true,
-          mobilePriceStartingAt: true,
-          service: {
-            select: {
-              defaultDurationMinutes: true,
+        const offerings = await tx.professionalServiceOffering.findMany({
+          where: {
+            id: { in: offeringIds },
+            professionalId: existing.professionalId,
+            isActive: true,
+          },
+          select: {
+            id: true,
+            serviceId: true,
+            offersInSalon: true,
+            offersMobile: true,
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+            salonPriceStartingAt: true,
+            mobilePriceStartingAt: true,
+            service: {
+              select: {
+                defaultDurationMinutes: true,
+              },
             },
           },
-        },
-        take: 100,
-      })
+          take: 100,
+        })
 
-      const offeringById = new Map(
-        offerings.map((offering) => [offering.id, offering]),
-      )
+        const offeringById = new Map(offerings.map((offering) => [offering.id, offering]))
 
-      const normalizedServiceItems: NormalizedServiceItemInput[] = parsedServiceItems.map((item, index) => {
-        const offering = offeringById.get(item.offeringId)
-        if (!offering) {
-          throw new Error('BAD_ITEMS')
-        }
+        const normalizedServiceItems: NormalizedServiceItemInput[] = parsedServiceItems.map((item, index) => {
+          const offering = offeringById.get(item.offeringId)
+          if (!offering) {
+            throw new Error('BAD_ITEMS')
+          }
 
-        if (offering.serviceId !== item.serviceId) {
-          throw new Error('BAD_ITEMS')
-        }
+          if (offering.serviceId !== item.serviceId) {
+            throw new Error('BAD_ITEMS')
+          }
 
-        const isMobile = existing.locationType === ServiceLocationType.MOBILE
-        const modeAllowed = isMobile ? offering.offersMobile : offering.offersInSalon
+          const isMobile = existing.locationType === ServiceLocationType.MOBILE
+          const modeAllowed = isMobile ? offering.offersMobile : offering.offersInSalon
 
-        const rawDuration = isMobile
-          ? Number(offering.mobileDurationMinutes ?? offering.service.defaultDurationMinutes ?? 0)
-          : Number(offering.salonDurationMinutes ?? offering.service.defaultDurationMinutes ?? 0)
+          const rawDuration = isMobile
+            ? Number(offering.mobileDurationMinutes ?? offering.service.defaultDurationMinutes ?? 0)
+            : Number(offering.salonDurationMinutes ?? offering.service.defaultDurationMinutes ?? 0)
 
-        const rawPrice = isMobile
-          ? offering.mobilePriceStartingAt
-          : offering.salonPriceStartingAt
+          const rawPrice = isMobile
+            ? offering.mobilePriceStartingAt
+            : offering.salonPriceStartingAt
 
-        if (!modeAllowed) {
-          throw new Error('BAD_ITEMS')
-        }
+          if (!modeAllowed) {
+            throw new Error('BAD_ITEMS')
+          }
 
-        if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
-          throw new Error('BAD_ITEMS')
-        }
+          if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
+            throw new Error('BAD_ITEMS')
+          }
 
-        if (rawPrice == null) {
-          throw new Error('BAD_ITEMS')
-        }
+          if (rawPrice == null) {
+            throw new Error('BAD_ITEMS')
+          }
 
-        return {
-          serviceId: item.serviceId,
-          offeringId: item.offeringId,
-          durationMinutesSnapshot: clamp(
-            snapToStep(rawDuration, stepMinutes),
-            15,
-            MAX_SLOT_DURATION_MINUTES,
-          ),
-          priceSnapshot: centsToDecimal(moneyToCents(rawPrice)),
-          sortOrder: index,
-        }
-      })
-
-      await tx.bookingServiceItem.deleteMany({
-        where: { bookingId: existing.id },
-      })
-
-      const baseItem = normalizedServiceItems[0]
-      if (!baseItem) {
-        throw new Error('BAD_ITEMS')
-      }
-
-      for (const [index, item] of normalizedServiceItems.entries()) {
-        await tx.bookingServiceItem.create({
-          data: {
-            bookingId: existing.id,
+          return {
             serviceId: item.serviceId,
             offeringId: item.offeringId,
-            itemType: index === 0 ? BookingServiceItemType.BASE : BookingServiceItemType.ADD_ON,
-            parentItemId: null,
-            priceSnapshot: item.priceSnapshot,
-            durationMinutesSnapshot: item.durationMinutesSnapshot,
-            sortOrder: item.sortOrder,
-          },
+            durationMinutesSnapshot: clamp(
+              snapToStep(rawDuration, stepMinutes),
+              15,
+              MAX_SLOT_DURATION_MINUTES,
+            ),
+            priceSnapshot: centsToDecimal(moneyToCents(rawPrice)),
+            sortOrder: index,
+          }
         })
-      }
 
-      nextBookingServiceId = baseItem.serviceId
-      nextBookingOfferingId = baseItem.offeringId
-    }
+        await tx.bookingServiceItem.deleteMany({
+          where: { bookingId: existing.id },
+        })
+
+        const baseItem = normalizedServiceItems[0]
+        if (!baseItem) {
+          throw new Error('BAD_ITEMS')
+        }
+
+        const createdBaseItem = await tx.bookingServiceItem.create({
+          data: {
+            bookingId: existing.id,
+            serviceId: baseItem.serviceId,
+            offeringId: baseItem.offeringId,
+            itemType: BookingServiceItemType.BASE,
+            parentItemId: null,
+            priceSnapshot: baseItem.priceSnapshot,
+            durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
+            sortOrder: 0,
+          },
+          select: { id: true },
+        })
+
+        const addOnItems = normalizedServiceItems.slice(1)
+        if (addOnItems.length) {
+          await tx.bookingServiceItem.createMany({
+            data: addOnItems.map((item, index) => ({
+              bookingId: existing.id,
+              serviceId: item.serviceId,
+              offeringId: item.offeringId,
+              itemType: BookingServiceItemType.ADD_ON,
+              parentItemId: createdBaseItem.id,
+              priceSnapshot: item.priceSnapshot,
+              durationMinutesSnapshot: item.durationMinutesSnapshot,
+              sortOrder: 100 + index,
+              notes: 'MANUAL_ADDON',
+            })),
+          })
+        }
+
+        nextBookingServiceId = baseItem.serviceId
+        nextBookingOfferingId = baseItem.offeringId
+      }
 
       const itemsNow = await tx.bookingServiceItem.findMany({
         where: { bookingId: existing.id },
@@ -747,10 +761,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
         (sum, item) => sum + Number(item.durationMinutesSnapshot ?? 0),
         0,
       )
-      // Duration contract:
-      // - serviceItems update => computed service duration is authoritative
-      // - explicit duration may be used only when serviceItems are not being edited
-      // - conflicting explicit duration + serviceItems is rejected
 
       const existingDurationFallback = durationOrFallback(existing.totalDurationMinutes)
 
@@ -804,7 +814,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
       const otherBookings = await tx.booking.findMany({
         where: {
           professionalId: existing.professionalId,
-          locationId: location.id,
           id: { not: existing.id },
           scheduledFor: { gte: earliestStart, lt: finalEnd },
           NOT: { status: BookingStatus.CANCELLED },
@@ -846,7 +855,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
       const holds = await tx.bookingHold.findMany({
         where: {
           professionalId: existing.professionalId,
-          locationId: location.id,
           expiresAt: { gt: new Date() },
           scheduledFor: { gte: earliestStart, lt: finalEnd },
         },
@@ -854,16 +862,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
           id: true,
           scheduledFor: true,
           offeringId: true,
+          locationId: true,
           locationType: true,
         },
         take: 1000,
       })
 
       if (holds.length > 0) {
-        const offeringIds = Array.from(new Set(holds.map((hold) => hold.offeringId))).slice(0, 2000)
+        const heldOfferingIds = Array.from(new Set(holds.map((hold) => hold.offeringId))).slice(0, 2000)
 
         const heldOfferings = await tx.professionalServiceOffering.findMany({
-          where: { id: { in: offeringIds } },
+          where: { id: { in: heldOfferingIds } },
           select: {
             id: true,
             salonDurationMinutes: true,
@@ -874,6 +883,26 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
         const heldOfferingById = new Map(
           heldOfferings.map((offering) => [offering.id, offering]),
+        )
+
+        const heldLocationIds = Array.from(new Set(holds.map((hold) => hold.locationId))).slice(0, 2000)
+
+        const heldLocations = heldLocationIds.length
+          ? await tx.professionalLocation.findMany({
+              where: { id: { in: heldLocationIds } },
+              select: {
+                id: true,
+                bufferMinutes: true,
+              },
+              take: 2000,
+            })
+          : []
+
+        const heldBufferByLocationId = new Map(
+          heldLocations.map((loc) => [
+            loc.id,
+            clamp(Number(loc.bufferMinutes ?? 0), 0, MAX_BOOKING_BUFFER_MINUTES),
+          ]),
         )
 
         const hasHoldConflict = holds.some((hold) => {
@@ -890,7 +919,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
               : DEFAULT_DURATION_MINUTES
 
           const holdStart = normalizeToMinute(new Date(hold.scheduledFor))
-          const holdEnd = addMinutes(holdStart, heldDuration + locationBufferMinutes)
+          const holdBuffer = heldBufferByLocationId.get(hold.locationId) ?? locationBufferMinutes
+          const holdEnd = addMinutes(holdStart, heldDuration + holdBuffer)
 
           return overlaps(holdStart, holdEnd, finalStart, finalEnd)
         })
@@ -995,8 +1025,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, `Start time must be on a ${message.slice(5)}-minute boundary.`)
     }
     if (message === 'DURATION_MISMATCH') {
-        return jsonFail(400, 'Duration does not match selected services.')
-      }
+      return jsonFail(400, 'Duration does not match selected services.')
+    }
     if (message === 'BAD_START') return jsonFail(400, 'Invalid scheduledFor.')
 
     console.error('PATCH /api/pro/bookings/[id] error:', error)

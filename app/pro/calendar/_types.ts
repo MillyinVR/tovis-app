@@ -94,28 +94,36 @@ export type BookingDetails = {
   serviceItems: BookingServiceItem[]
 }
 
-/**
- * Calendar event union.
- * - BLOCK events carry block-only fields
- * - BOOKING events do not
- */
 export type BookingCalendarEvent = {
   kind: 'BOOKING'
   id: string
-  startsAt: string // ISO string for a UTC instant
-  endsAt: string   // ISO string for a UTC instant
+  startsAt: string
+  endsAt: string
   title: string
   clientName: string
   status: CalendarStatus
+  locationId: string
+  locationType?: 'SALON' | 'MOBILE' | (string & {})
   durationMinutes?: number
+  details?: {
+    serviceName: string
+    bufferMinutes: number
+    serviceItems: {
+      id: string
+      name: string | null
+      durationMinutes: number
+      price: unknown | null
+      sortOrder: number
+    }[]
+  }
   note?: never
   blockId?: never
 }
 
 export type BlockCalendarEvent = {
   kind: 'BLOCK'
-  id: string // UI id (often "block:xyz")
-  blockId: string // real DB id used by API routes
+  id: string
+  blockId: string
   startsAt: string
   endsAt: string
   title: string
@@ -123,10 +131,10 @@ export type BlockCalendarEvent = {
   status: 'BLOCKED' | CalendarStatus
   durationMinutes?: number
   note?: string | null
+  locationId?: string | null
 }
 
 export type CalendarEvent = BookingCalendarEvent | BlockCalendarEvent
-
 export type PendingChange =
   | {
       kind: 'resize'

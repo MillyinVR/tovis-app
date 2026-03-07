@@ -19,7 +19,7 @@ import { isRecord } from '@/lib/guards'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
-
+const MAX_SLOT_DURATION_MINUTES = 12 * 60
 type FinalizeBookingBody = {
   offeringId?: unknown
   holdId?: unknown
@@ -79,6 +79,20 @@ function normalizeLocationTypeStrict(v: unknown): ServiceLocationType | null {
   return null
 }
 
+function normalizeStepMinutes(input: unknown, fallback: number) {
+  const n = typeof input === 'number' ? input : Number(input)
+  const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
+
+  const allowed = new Set([5, 10, 15, 20, 30, 60])
+  if (allowed.has(raw)) return raw
+
+  if (raw <= 5) return 5
+  if (raw <= 10) return 10
+  if (raw <= 15) return 15
+  if (raw <= 20) return 20
+  if (raw <= 30) return 30
+  return 60
+}
 
 function ensureWithinWorkingHours(args: {
   scheduledStartUtc: Date
@@ -325,10 +339,10 @@ export async function POST(request: Request) {
       const tzOk = isValidIanaTimeZone(apptTz)
       if (!tzOk) throw new Error('TIMEZONE_REQUIRED')
 
-      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, 180)
-      const stepMinutes = clampInt(Number(loc.stepMinutes ?? 15) || 15, 5, 60)
-      const advanceNoticeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 15) || 15, 0, 24 * 60)
-      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365) || 365, 1, 3650)
+      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0), 0, 180)
+      const stepMinutes = normalizeStepMinutes(loc.stepMinutes, 15)
+      const advanceNoticeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 15), 0, 24 * 60)
+      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365), 1, 3650)
 
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
       if (!Number.isFinite(requestedStart.getTime())) throw new Error('TIME_IN_PAST')
@@ -437,7 +451,11 @@ export async function POST(request: Request) {
       const subtotal = basePrice.add(addOnsPriceTotal)
 
       const addOnsDurationTotal = resolvedAddOns.reduce((sum, a) => sum + a.durationMinutesSnapshot, 0)
-      const totalDurationMinutes = baseDurationMinutes + addOnsDurationTotal
+      const totalDurationMinutes = clampInt(
+        baseDurationMinutes + addOnsDurationTotal,
+        15,
+        MAX_SLOT_DURATION_MINUTES,
+      )
 
       // ✅ IMPORTANT: include buffer in the reserved window (WH + conflicts)
       const requestedEnd = addMinutes(requestedStart, totalDurationMinutes + bufferMinutes)
@@ -466,11 +484,9 @@ export async function POST(request: Request) {
       const MAX_OTHER_OVERLAP_MINUTES = 12 * 60 + 180
       const earliestStart = addMinutes(requestedStart, -MAX_OTHER_OVERLAP_MINUTES)
 
-      // Bookings (location-scoped)
       const existingBookings = await tx.booking.findMany({
         where: {
           professionalId: offering.professionalId,
-          locationId: loc.id,
           scheduledFor: { gte: earliestStart, lt: requestedEnd },
           NOT: { status: BookingStatus.CANCELLED },
         },
@@ -479,7 +495,6 @@ export async function POST(request: Request) {
       })
 
       const hasBookingConflict = existingBookings.some((b) => {
-        if (b.status === BookingStatus.CANCELLED) return false
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
         const bDur = Number(b.totalDurationMinutes ?? 0) > 0 ? Number(b.totalDurationMinutes) : 60
         const bBuf = Math.max(0, Number(b.bufferMinutes ?? 0))
@@ -492,11 +507,10 @@ export async function POST(request: Request) {
       const otherHolds = await tx.bookingHold.findMany({
         where: {
           professionalId: offering.professionalId,
-          locationId: loc.id,
           expiresAt: { gt: now },
           scheduledFor: { gte: earliestStart, lt: requestedEnd },
         },
-        select: { id: true, scheduledFor: true, offeringId: true },
+        select: { id: true, scheduledFor: true, offeringId: true, locationId: true, locationType: true },
         take: 2000,
       })
 
@@ -508,14 +522,33 @@ export async function POST(request: Request) {
           take: 2000,
         })
         const byId = new Map(offerRows.map((o) => [o.id, o]))
+        const holdLocationIds = Array.from(new Set(otherHolds.map((h) => h.locationId))).slice(0, 2000)
 
+        const holdLocations = holdLocationIds.length
+          ? await tx.professionalLocation.findMany({
+              where: { id: { in: holdLocationIds } },
+              select: { id: true, bufferMinutes: true },
+              take: 2000,
+            })
+          : []
+
+        const holdBufferByLocationId = new Map(
+          holdLocations.map((l) => [l.id, clampInt(Number(l.bufferMinutes ?? 0) || 0, 0, 180)]),
+        )
         const hasHoldConflict = otherHolds.some((h) => {
           if (h.id === hold.id) return false
+
           const o = byId.get(h.offeringId)
-          const durRaw = locationType === 'MOBILE' ? o?.mobileDurationMinutes : o?.salonDurationMinutes
+          const durRaw =
+            h.locationType === 'MOBILE'
+              ? o?.mobileDurationMinutes
+              : o?.salonDurationMinutes
+
           const hDur = Number(durRaw ?? 0) > 0 ? Number(durRaw) : 60
           const hStart = normalizeToMinute(new Date(h.scheduledFor))
-          const hEnd = addMinutes(hStart, hDur + bufferMinutes)
+          const hBuf = holdBufferByLocationId.get(h.locationId) ?? bufferMinutes
+          const hEnd = addMinutes(hStart, hDur + hBuf)
+
           return overlaps(hStart, hEnd, requestedStart, requestedEnd)
         })
 
@@ -528,32 +561,41 @@ export async function POST(request: Request) {
           ? ({ formattedAddress: loc.formattedAddress.trim() } satisfies Prisma.InputJsonObject)
           : undefined)
 
-      const created = await tx.booking.create({
-        data: {
-          clientId,
-          professionalId: offering.professionalId,
-          serviceId: offering.serviceId,
-          offeringId: offering.id,
+      let created: { id: string; status: BookingStatus; scheduledFor: Date; professionalId: string }
 
-          scheduledFor: requestedStart,
-          status: initialStatus,
+      try {
+        created = await tx.booking.create({
+          data: {
+            clientId,
+            professionalId: offering.professionalId,
+            serviceId: offering.serviceId,
+            offeringId: offering.id,
 
-          source,
-          locationType,
-          rebookOfBookingId: rebookOfBookingIdForCreate,
+            scheduledFor: requestedStart,
+            status: initialStatus,
 
-          subtotalSnapshot: subtotal,
-          totalDurationMinutes,
-          bufferMinutes,
+            source,
+            locationType,
+            rebookOfBookingId: rebookOfBookingIdForCreate,
 
-          locationId: loc.id,
-          locationTimeZone: apptTz,
-          locationAddressSnapshot: addressSnapshot,
-          locationLatSnapshot: hold.locationLatSnapshot ?? decimalToNumber(loc.lat),
-          locationLngSnapshot: hold.locationLngSnapshot ?? decimalToNumber(loc.lng),
-        },
-        select: { id: true, status: true, scheduledFor: true, professionalId: true },
-      })
+            subtotalSnapshot: subtotal,
+            totalDurationMinutes,
+            bufferMinutes,
+
+            locationId: loc.id,
+            locationTimeZone: apptTz,
+            locationAddressSnapshot: addressSnapshot,
+            locationLatSnapshot: hold.locationLatSnapshot ?? decimalToNumber(loc.lat),
+            locationLngSnapshot: hold.locationLngSnapshot ?? decimalToNumber(loc.lng),
+          },
+          select: { id: true, status: true, scheduledFor: true, professionalId: true },
+        })
+      } catch (e: unknown) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          throw new Error('TIME_NOT_AVAILABLE')
+        }
+        throw e
+      }
 
       const baseItem = await tx.bookingServiceItem.create({
         data: {

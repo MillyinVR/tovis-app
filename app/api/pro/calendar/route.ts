@@ -181,13 +181,11 @@ export async function GET(req: Request) {
     const safeToExclusive =
       spanDays > maxSpanDays ? new Date(from.getTime() + maxSpanDays * 24 * 60 * 60_000) : toExclusive
 
-    // ✅ NEW: bookings filtered to selectedLocation.id
+    // Load all bookings for the pro so cross-location conflicts stay visible in calendar view
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        locationId: selectedLocation.id,
         scheduledFor: { gte: from, lt: safeToExclusive },
-        // Use literal enum value (matches schema.prisma), no Prisma enum import needed.
         NOT: { status: 'CANCELLED' },
       },
       select: {

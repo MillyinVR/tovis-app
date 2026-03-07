@@ -88,11 +88,12 @@ function snapToStep(value: number, stepMinutes: number): number {
   return Math.round(value / step) * step
 }
 
-function normalizeLocationType(value: unknown): ServiceLocationType {
+function normalizeLocationType(value: unknown): ServiceLocationType | null {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
-  return normalized === 'MOBILE' ? ServiceLocationType.MOBILE : ServiceLocationType.SALON
+  if (normalized === 'SALON') return ServiceLocationType.SALON
+  if (normalized === 'MOBILE') return ServiceLocationType.MOBILE
+  return null
 }
-
 function pickBool(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null
 }
@@ -254,6 +255,7 @@ export async function POST(req: Request) {
 
     const locationId = pickString(body.locationId)
     const locationType = normalizeLocationType(body.locationType)
+if (!locationType) return jsonFail(400, 'Missing or invalid locationType.')
 
     const serviceIds = Array.from(new Set(toStringArray(body.serviceIds))).slice(0, 10)
     const allowOutsideWorkingHours = pickBool(body.allowOutsideWorkingHours) ?? false
@@ -474,7 +476,6 @@ export async function POST(req: Request) {
     const existingBookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        locationId: location.id,
         scheduledFor: { gte: earliestStart, lt: scheduledEnd },
         NOT: { status: BookingStatus.CANCELLED },
       },
@@ -508,7 +509,6 @@ export async function POST(req: Request) {
     const activeHolds = await prisma.bookingHold.findMany({
       where: {
         professionalId,
-        locationId: location.id,
         expiresAt: { gt: new Date() },
         scheduledFor: { gte: earliestStart, lt: scheduledEnd },
       },
@@ -516,6 +516,7 @@ export async function POST(req: Request) {
         id: true,
         scheduledFor: true,
         offeringId: true,
+        locationId: true,
         locationType: true,
       },
       take: 2000,
@@ -535,7 +536,22 @@ export async function POST(req: Request) {
       })
 
       const heldOfferingById = new Map(heldOfferings.map((offering) => [offering.id, offering]))
+const heldLocationIds = Array.from(new Set(activeHolds.map((hold) => hold.locationId))).slice(0, 2000)
 
+const heldLocations = heldLocationIds.length
+  ? await prisma.professionalLocation.findMany({
+      where: { id: { in: heldLocationIds } },
+      select: {
+        id: true,
+        bufferMinutes: true,
+      },
+      take: 2000,
+    })
+  : []
+
+const heldBufferByLocationId = new Map(
+  heldLocations.map((loc) => [loc.id, clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)]),
+)
       const hasHoldConflict = activeHolds.some((hold) => {
         const heldOffering = heldOfferingById.get(hold.offeringId)
         const rawHeldDuration =
@@ -550,8 +566,10 @@ export async function POST(req: Request) {
             : DEFAULT_FALLBACK_DURATION_MINUTES
 
         const holdStart = normalizeToMinute(new Date(hold.scheduledFor))
-        const holdEnd = addMinutes(holdStart, heldDuration + locationBufferMinutes)
+        const holdBuffer = heldBufferByLocationId.get(hold.locationId) ?? locationBufferMinutes
+        const holdEnd = addMinutes(holdStart, heldDuration + holdBuffer)
 
+        
         return overlaps(holdStart, holdEnd, scheduledStart, scheduledEnd)
       })
 
@@ -570,38 +588,42 @@ export async function POST(req: Request) {
     }
 
     const createdBooking = await prisma.$transaction(async (tx) => {
-      const booking = await tx.booking.create({
-        data: {
-          professionalId,
-          clientId,
+      let booking
 
-          serviceId: baseItem.serviceId,
-          offeringId: baseItem.offeringId,
-
-          scheduledFor: scheduledStart,
-          status: BookingStatus.ACCEPTED,
-
-          locationType,
-          locationId: location.id,
-          locationTimeZone: appointmentTimeZone,
-          locationAddressSnapshot,
-          locationLatSnapshot,
-          locationLngSnapshot,
-
-          internalNotes: internalNotes ?? null,
-
-          bufferMinutes,
-          totalDurationMinutes,
-          subtotalSnapshot: new Prisma.Decimal(centsToMoneyString(computedSubtotalCents)),
-        },
-        select: {
-          id: true,
-          scheduledFor: true,
-          totalDurationMinutes: true,
-          bufferMinutes: true,
-          status: true,
-        },
-      })
+      try {
+        booking = await tx.booking.create({
+          data: {
+            professionalId,
+            clientId,
+            serviceId: baseItem.serviceId,
+            offeringId: baseItem.offeringId,
+            scheduledFor: scheduledStart,
+            status: BookingStatus.ACCEPTED,
+            locationType,
+            locationId: location.id,
+            locationTimeZone: appointmentTimeZone,
+            locationAddressSnapshot,
+            locationLatSnapshot,
+            locationLngSnapshot,
+            internalNotes: internalNotes ?? null,
+            bufferMinutes,
+            totalDurationMinutes,
+            subtotalSnapshot: new Prisma.Decimal(centsToMoneyString(computedSubtotalCents)),
+          },
+          select: {
+            id: true,
+            scheduledFor: true,
+            totalDurationMinutes: true,
+            bufferMinutes: true,
+            status: true,
+          },
+        })
+      } catch (e: unknown) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          throw new Error('TIME_NOT_AVAILABLE')
+        }
+        throw e
+      }
 
       const createdBaseItem = await tx.bookingServiceItem.create({
         data: {
@@ -666,6 +688,9 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : ''
 
+    if (message === 'TIME_NOT_AVAILABLE') {
+      return jsonFail(409, 'That time is not available.')
+    }
     if (message === 'PRICING_NOT_SET') {
       return jsonFail(409, 'Pricing is not set for one or more selected services.')
     }
