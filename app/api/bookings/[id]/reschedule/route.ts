@@ -1,6 +1,6 @@
 // app/api/bookings/[id]/reschedule/route.ts
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, Prisma, type ServiceLocationType } from '@prisma/client'
+import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
@@ -9,6 +9,7 @@ import {
   DEFAULT_TIME_ZONE,
   getZonedParts,
   minutesSinceMidnightInTimeZone,
+  isValidIanaTimeZone,
 } from '@/lib/timeZone'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { isRecord } from '@/lib/guards'
@@ -17,14 +18,47 @@ import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-type LocationType = Extract<ServiceLocationType, 'SALON' | 'MOBILE'>
 
 const MAX_SLOT_DURATION_MINUTES = 12 * 60
 const MAX_BUFFER_MINUTES = 180
 const MAX_OTHER_OVERLAP_MINUTES = MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
+const MAX_ADVANCE_NOTICE_MINUTES = 24 * 60
+const MAX_DAYS_AHEAD = 3650
+const DEFAULT_DURATION_MINUTES = 60
 
-function isLocationType(x: unknown): x is LocationType {
-  return x === 'SALON' || x === 'MOBILE'
+type RescheduleErrorCode =
+  | 'BOOKING_NOT_FOUND'
+  | 'FORBIDDEN'
+  | 'BOOKING_NOT_RESCHEDULABLE'
+  | 'BOOKING_ALREADY_STARTED'
+  | 'BOOKING_MISSING_OFFERING'
+  | 'OFFERING_NOT_FOUND'
+  | 'MODE_NOT_SUPPORTED'
+  | 'HOLD_NOT_FOUND'
+  | 'HOLD_FORBIDDEN'
+  | 'HOLD_EXPIRED'
+  | 'HOLD_PRO_MISMATCH'
+  | 'HOLD_OFFERING_MISMATCH'
+  | 'HOLD_LOCATIONTYPE_MISMATCH'
+  | 'HOLD_MISSING_LOCATION'
+  | 'LOCATION_NOT_FOUND'
+  | 'TIMEZONE_REQUIRED'
+  | 'HOLD_TIME_INVALID'
+  | 'TIME_IN_PAST'
+  | 'TOO_FAR'
+  | 'BLOCKED'
+  | 'TIME_NOT_AVAILABLE'
+  | 'INVALID_DURATION'
+
+function throwCode(code: RescheduleErrorCode): never {
+  throw new Error(code)
+}
+
+function normalizeLocationTypeStrict(v: unknown): ServiceLocationType | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return ServiceLocationType.SALON
+  if (s === 'MOBILE') return ServiceLocationType.MOBILE
+  return null
 }
 
 function addMinutes(date: Date, minutes: number) {
@@ -37,19 +71,52 @@ function normalizeToMinute(d: Date) {
   return x
 }
 
+function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
+  return aStart < bEnd && aEnd > bStart
+}
+
 function clampInt(n: number, min: number, max: number) {
   const x = Math.trunc(Number(n))
   if (!Number.isFinite(x)) return min
   return Math.max(min, Math.min(max, x))
 }
 
+function normalizeStepMinutes(input: unknown, fallback: number) {
+  const n = typeof input === 'number' ? input : Number(input)
+  const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
+
+  const allowed = new Set([5, 10, 15, 20, 30, 60])
+  if (allowed.has(raw)) return raw
+
+  if (raw <= 5) return 5
+  if (raw <= 10) return 10
+  if (raw <= 15) return 15
+  if (raw <= 20) return 20
+  if (raw <= 30) return 30
+  return 60
+}
+
 function decimalToNumber(v: unknown): number | undefined {
   if (v == null) return undefined
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
-  if (typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
-    const n = (v as { toNumber: () => number }).toNumber()
-    return Number.isFinite(n) ? n : undefined
+
+  if (typeof v === 'number') {
+    return Number.isFinite(v) ? v : undefined
   }
+
+  if (typeof v === 'object' && v !== null) {
+    const maybeToNumber = (v as { toNumber?: unknown }).toNumber
+    if (typeof maybeToNumber === 'function') {
+      const n = maybeToNumber.call(v) as number
+      return Number.isFinite(n) ? n : undefined
+    }
+
+    const maybeToString = (v as { toString?: unknown }).toString
+    if (typeof maybeToString === 'function') {
+      const n = Number(String(maybeToString.call(v)))
+      return Number.isFinite(n) ? n : undefined
+    }
+  }
+
   return undefined
 }
 
@@ -99,8 +166,33 @@ function ensureWithinWorkingHours(args: {
   return { ok: true }
 }
 
-function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-  return aStart < bEnd && aEnd > bStart
+function buildAddressSnapshot(formattedAddress: string | null | undefined): Prisma.InputJsonValue | undefined {
+  const value = typeof formattedAddress === 'string' ? formattedAddress.trim() : ''
+  if (!value) return undefined
+  return { formattedAddress: value } satisfies Prisma.InputJsonObject
+}
+
+function extractFormattedAddressFromSnapshot(value: Prisma.JsonValue | null | undefined): string | null {
+  if (!isRecord(value)) return null
+  const raw = value.formattedAddress
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed || null
+}
+
+function pickHoldDurationMinutes(args: {
+  locationType: ServiceLocationType
+  salonDurationMinutes: number | null
+  mobileDurationMinutes: number | null
+}) {
+  const raw =
+    args.locationType === ServiceLocationType.MOBILE
+      ? args.mobileDurationMinutes
+      : args.salonDurationMinutes
+
+  const n = Number(raw ?? 0)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_DURATION_MINUTES
+  return clampInt(n, 15, MAX_SLOT_DURATION_MINUTES)
 }
 
 export async function POST(req: Request, { params }: Ctx) {
@@ -119,76 +211,101 @@ export async function POST(req: Request, { params }: Ctx) {
     const holdId = pickString(body.holdId)
     if (!holdId) return jsonFail(400, 'Missing holdId.')
 
-    const requestedLocationTypeRaw = pickString(body.locationType)
-    if (requestedLocationTypeRaw && !isLocationType(requestedLocationTypeRaw)) {
+    const hasLocationType = Object.prototype.hasOwnProperty.call(body, 'locationType')
+    const requestedLocationType = hasLocationType ? normalizeLocationTypeStrict(body.locationType) : null
+    if (hasLocationType && requestedLocationType == null) {
       return jsonFail(400, 'Missing or invalid locationType.')
     }
-    const requestedLocationType = requestedLocationTypeRaw ?? null
 
     const now = new Date()
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        status: true,
-        clientId: true,
-        professionalId: true,
-        startedAt: true,
-        finishedAt: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-        locationId: true,
-        locationTimeZone: true,
-      },
-    })
-
-    if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
-
-    if (booking.status === BookingStatus.COMPLETED || booking.status === BookingStatus.CANCELLED) {
-      return jsonFail(409, 'This booking cannot be rescheduled.')
-    }
-    if (booking.startedAt || booking.finishedAt) {
-      return jsonFail(409, 'This booking has started and cannot be rescheduled.')
-    }
-
-    const rawDuration = Number(booking.totalDurationMinutes ?? 0)
-    if (!Number.isFinite(rawDuration) || rawDuration < 15 || rawDuration > MAX_SLOT_DURATION_MINUTES) {
-      return jsonFail(409, 'This booking has an invalid duration and cannot be rescheduled.')
-    }
-    const totalDurationMinutes = rawDuration
-
     const result = await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        select: {
+          id: true,
+          status: true,
+          clientId: true,
+          professionalId: true,
+          offeringId: true,
+          startedAt: true,
+          finishedAt: true,
+          totalDurationMinutes: true,
+          bufferMinutes: true,
+        },
+      })
+
+      if (!booking) throwCode('BOOKING_NOT_FOUND')
+      if (booking.clientId !== clientId) throwCode('FORBIDDEN')
+
+      if (booking.status === BookingStatus.COMPLETED || booking.status === BookingStatus.CANCELLED) {
+        throwCode('BOOKING_NOT_RESCHEDULABLE')
+      }
+
+      if (booking.startedAt || booking.finishedAt) {
+        throwCode('BOOKING_ALREADY_STARTED')
+      }
+
+      if (!booking.offeringId) {
+        throwCode('BOOKING_MISSING_OFFERING')
+      }
+
+      const bookingOffering = await tx.professionalServiceOffering.findUnique({
+        where: { id: booking.offeringId },
+        select: {
+          id: true,
+          offersInSalon: true,
+          offersMobile: true,
+        },
+      })
+
+      if (!bookingOffering) {
+        throwCode('OFFERING_NOT_FOUND')
+      }
+
+      const rawDuration = Number(booking.totalDurationMinutes ?? 0)
+      if (!Number.isFinite(rawDuration) || rawDuration < 15 || rawDuration > MAX_SLOT_DURATION_MINUTES) {
+        throwCode('INVALID_DURATION')
+      }
+      const totalDurationMinutes = rawDuration
+
       const hold = await tx.bookingHold.findUnique({
         where: { id: holdId },
         select: {
           id: true,
           clientId: true,
           professionalId: true,
+          offeringId: true,
           scheduledFor: true,
           expiresAt: true,
           locationType: true,
           locationId: true,
+          locationTimeZone: true,
+          locationAddressSnapshot: true,
+          locationLatSnapshot: true,
+          locationLngSnapshot: true,
         },
       })
 
-      if (!hold) return { ok: false as const, status: 404, error: 'Hold not found. Please pick a new time.' }
-      if (!hold.clientId || hold.clientId !== clientId) {
-        return { ok: false as const, status: 403, error: 'Hold does not belong to you.' }
-      }
-      if (hold.expiresAt.getTime() <= now.getTime()) {
-        return { ok: false as const, status: 409, error: 'Hold expired. Please pick a new time.' }
-      }
-      if (hold.professionalId !== booking.professionalId) {
-        return { ok: false as const, status: 409, error: 'Hold is for a different professional.' }
-      }
+      if (!hold) throwCode('HOLD_NOT_FOUND')
+      if (hold.clientId !== clientId) throwCode('HOLD_FORBIDDEN')
+      if (hold.expiresAt.getTime() <= now.getTime()) throwCode('HOLD_EXPIRED')
+      if (hold.professionalId !== booking.professionalId) throwCode('HOLD_PRO_MISMATCH')
+      if (hold.offeringId !== booking.offeringId) throwCode('HOLD_OFFERING_MISMATCH')
+
       if (requestedLocationType && hold.locationType !== requestedLocationType) {
-        return { ok: false as const, status: 409, error: 'Hold locationType does not match.' }
+        throwCode('HOLD_LOCATIONTYPE_MISMATCH')
       }
-      if (!hold.locationId) {
-        return { ok: false as const, status: 409, error: 'Hold is missing location info. Please pick a new slot.' }
+
+      if (hold.locationType === ServiceLocationType.SALON && !bookingOffering.offersInSalon) {
+        throwCode('MODE_NOT_SUPPORTED')
       }
+
+      if (hold.locationType === ServiceLocationType.MOBILE && !bookingOffering.offersMobile) {
+        throwCode('MODE_NOT_SUPPORTED')
+      }
+
+      if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
 
       const loc = await tx.professionalLocation.findFirst({
         where: {
@@ -210,51 +327,44 @@ export async function POST(req: Request, { params }: Ctx) {
         },
       })
 
-      if (!loc) {
-        return { ok: false as const, status: 409, error: 'This location is no longer available.' }
-      }
+      if (!loc) throwCode('LOCATION_NOT_FOUND')
 
       const tzRes = await resolveApptTimeZone({
+        holdLocationTimeZone: hold.locationTimeZone,
         location: { id: loc.id, timeZone: loc.timeZone },
         professionalId: booking.professionalId,
         fallback: DEFAULT_TIME_ZONE,
         requireValid: true,
       })
-      if (!tzRes.ok) {
-        return { ok: false as const, status: 409, error: 'This location is missing a valid timezone.' }
-      }
 
-      const apptTz = tzRes.timeZone
-      const locationBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
-      const finalBufferMinutes = clampInt(
-        Number(loc.bufferMinutes ?? booking.bufferMinutes ?? 0) || 0,
+      if (!tzRes.ok) throwCode('TIMEZONE_REQUIRED')
+
+      const apptTz = sanitizeTimeZone(tzRes.timeZone, DEFAULT_TIME_ZONE)
+      if (!isValidIanaTimeZone(apptTz)) throwCode('TIMEZONE_REQUIRED')
+
+      const finalBufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES)
+      const stepMinutes = normalizeStepMinutes(loc.stepMinutes, 15)
+      const advanceNoticeMinutes = clampInt(
+        Number(loc.advanceNoticeMinutes ?? 15),
         0,
-        MAX_BUFFER_MINUTES,
+        MAX_ADVANCE_NOTICE_MINUTES,
       )
-      const stepMinutes = clampInt(Number(loc.stepMinutes ?? 15) || 15, 5, 60)
-      const advanceNoticeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 15) || 15, 0, 24 * 60)
-      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365) || 365, 1, 3650)
+      const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365), 1, MAX_DAYS_AHEAD)
 
       const newStart = normalizeToMinute(new Date(hold.scheduledFor))
-      if (!Number.isFinite(newStart.getTime())) {
-        return { ok: false as const, status: 400, error: 'Hold time is invalid. Please pick a new slot.' }
-      }
+      if (!Number.isFinite(newStart.getTime())) throwCode('HOLD_TIME_INVALID')
 
       if (newStart.getTime() < now.getTime() + advanceNoticeMinutes * 60_000) {
-        return { ok: false as const, status: 400, error: 'Please select a future time.' }
+        throwCode('TIME_IN_PAST')
       }
 
       if (newStart.getTime() > now.getTime() + maxDaysAhead * 24 * 60 * 60_000) {
-        return { ok: false as const, status: 400, error: 'That date is too far in the future.' }
+        throwCode('TOO_FAR')
       }
 
       const startMin = minutesSinceMidnightInTimeZone(newStart, apptTz)
       if (startMin % stepMinutes !== 0) {
-        return {
-          ok: false as const,
-          status: 400,
-          error: `Start time must be on a ${stepMinutes}-minute boundary.`,
-        }
+        throw new Error(`STEP:${stepMinutes}`)
       }
 
       const newEnd = addMinutes(newStart, totalDurationMinutes + finalBufferMinutes)
@@ -265,8 +375,9 @@ export async function POST(req: Request, { params }: Ctx) {
         workingHours: loc.workingHours,
         timeZone: apptTz,
       })
+
       if (!whCheck.ok) {
-        return { ok: false as const, status: 400, error: whCheck.error }
+        throw new Error(`WH:${whCheck.error}`)
       }
 
       const blockConflict = await tx.calendarBlock.findFirst({
@@ -279,13 +390,7 @@ export async function POST(req: Request, { params }: Ctx) {
         select: { id: true },
       })
 
-      if (blockConflict) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'That time is blocked. Please choose a new slot.',
-        }
-      }
+      if (blockConflict) throwCode('BLOCKED')
 
       const earliestStart = addMinutes(newStart, -MAX_OTHER_OVERLAP_MINUTES)
 
@@ -294,7 +399,7 @@ export async function POST(req: Request, { params }: Ctx) {
           professionalId: booking.professionalId,
           id: { not: booking.id },
           scheduledFor: { gte: earliestStart, lt: newEnd },
-          NOT: { status: BookingStatus.CANCELLED },
+          status: { not: BookingStatus.CANCELLED },
         },
         select: {
           scheduledFor: true,
@@ -304,27 +409,20 @@ export async function POST(req: Request, { params }: Ctx) {
         take: 2000,
       })
 
-      const hasBookingConflict = otherBookings.some((b) => {
-        const bStart = normalizeToMinute(new Date(b.scheduledFor))
-        const bDurRaw = Number(b.totalDurationMinutes ?? 0)
-        const bDur =
-          Number.isFinite(bDurRaw) && bDurRaw > 0
-            ? clampInt(bDurRaw, 15, MAX_SLOT_DURATION_MINUTES)
-            : 60
+      const hasBookingConflict = otherBookings.some((row) => {
+        const otherStart = normalizeToMinute(new Date(row.scheduledFor))
+        const otherDurationRaw = Number(row.totalDurationMinutes ?? 0)
+        const otherDuration =
+          Number.isFinite(otherDurationRaw) && otherDurationRaw > 0
+            ? clampInt(otherDurationRaw, 15, MAX_SLOT_DURATION_MINUTES)
+            : DEFAULT_DURATION_MINUTES
+        const otherBuffer = clampInt(Number(row.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES)
+        const otherEnd = addMinutes(otherStart, otherDuration + otherBuffer)
 
-        const bBuf = clampInt(Number(b.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
-        const bEnd = addMinutes(bStart, bDur + bBuf)
-
-        return overlaps(bStart, bEnd, newStart, newEnd)
+        return overlaps(otherStart, otherEnd, newStart, newEnd)
       })
 
-      if (hasBookingConflict) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'That time is no longer available. Please choose a new slot.',
-        }
-      }
+      if (hasBookingConflict) throwCode('TIME_NOT_AVAILABLE')
 
       const otherHolds = await tx.bookingHold.findMany({
         where: {
@@ -343,25 +441,33 @@ export async function POST(req: Request, { params }: Ctx) {
       })
 
       if (otherHolds.length) {
-        const offeringIds = Array.from(new Set(otherHolds.map((h) => h.offeringId))).slice(0, 2000)
+        const otherHoldOfferingIds = Array.from(new Set(otherHolds.map((row) => row.offeringId)))
 
-        const offerRows = await tx.professionalServiceOffering.findMany({
-          where: { id: { in: offeringIds } },
-          select: {
-            id: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-          },
-          take: 2000,
-        })
+        const holdOfferings = otherHoldOfferingIds.length
+          ? await tx.professionalServiceOffering.findMany({
+              where: { id: { in: otherHoldOfferingIds } },
+              select: {
+                id: true,
+                salonDurationMinutes: true,
+                mobileDurationMinutes: true,
+              },
+              take: 2000,
+            })
+          : []
 
-        const offerById = new Map(offerRows.map((row) => [row.id, row]))
+        const holdOfferingById = new Map(holdOfferings.map((row) => [row.id, row]))
 
-        const holdLocationIds = Array.from(new Set(otherHolds.map((h) => h.locationId))).slice(0, 2000)
+        const otherHoldLocationIds = Array.from(
+          new Set(
+            otherHolds
+              .map((row) => row.locationId)
+              .filter((value): value is string => typeof value === 'string' && value.length > 0),
+          ),
+        )
 
-        const holdLocations = holdLocationIds.length
+        const holdLocations = otherHoldLocationIds.length
           ? await tx.professionalLocation.findMany({
-              where: { id: { in: holdLocationIds } },
+              where: { id: { in: otherHoldLocationIds } },
               select: {
                 id: true,
                 bufferMinutes: true,
@@ -371,41 +477,34 @@ export async function POST(req: Request, { params }: Ctx) {
           : []
 
         const holdBufferByLocationId = new Map(
-          holdLocations.map((loc) => [
-            loc.id,
-            clampInt(Number(loc.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES),
+          holdLocations.map((row) => [
+            row.id,
+            clampInt(Number(row.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES),
           ]),
         )
-        const hasHoldConflict = otherHolds.some((h) => {
-          if (h.id === hold.id) return false
 
-          const offering = offerById.get(h.offeringId)
-          const durRaw =
-            h.locationType === 'MOBILE'
-              ? offering?.mobileDurationMinutes
-              : offering?.salonDurationMinutes
+        const hasHoldConflict = otherHolds.some((row) => {
+          if (row.id === hold.id) return false
 
-          const base = Number(durRaw ?? 0)
-          const holdDuration =
-            Number.isFinite(base) && base > 0
-              ? clampInt(base, 15, MAX_SLOT_DURATION_MINUTES)
-              : 60
+          const holdOffering = holdOfferingById.get(row.offeringId)
+          const otherDuration = pickHoldDurationMinutes({
+            locationType: row.locationType,
+            salonDurationMinutes: holdOffering?.salonDurationMinutes ?? null,
+            mobileDurationMinutes: holdOffering?.mobileDurationMinutes ?? null,
+          })
 
-          const hStart = normalizeToMinute(new Date(h.scheduledFor))
-          const hBuf = holdBufferByLocationId.get(h.locationId) ?? locationBufferMinutes
-          const hEnd = addMinutes(hStart, holdDuration + hBuf)
+          const otherStart = normalizeToMinute(new Date(row.scheduledFor))
+          const otherBuffer = holdBufferByLocationId.get(row.locationId ?? '') ?? finalBufferMinutes
+          const otherEnd = addMinutes(otherStart, otherDuration + otherBuffer)
 
-          return overlaps(hStart, hEnd, newStart, newEnd)
+          return overlaps(otherStart, otherEnd, newStart, newEnd)
         })
 
-        if (hasHoldConflict) {
-          return {
-            ok: false as const,
-            status: 409,
-            error: 'That time is no longer available. Please choose a new slot.',
-          }
-        }
+        if (hasHoldConflict) throwCode('TIME_NOT_AVAILABLE')
       }
+
+      const formattedAddressFromHold = extractFormattedAddressFromSnapshot(hold.locationAddressSnapshot)
+      const locationAddressSnapshot = buildAddressSnapshot(formattedAddressFromHold ?? loc.formattedAddress)
 
       const updated = await tx.booking.update({
         where: { id: booking.id },
@@ -415,12 +514,9 @@ export async function POST(req: Request, { params }: Ctx) {
           bufferMinutes: finalBufferMinutes,
           locationId: loc.id,
           locationTimeZone: apptTz,
-          locationAddressSnapshot:
-            typeof loc.formattedAddress === 'string' && loc.formattedAddress.trim()
-              ? ({ formattedAddress: loc.formattedAddress.trim() } satisfies Prisma.InputJsonObject)
-              : undefined,
-          locationLatSnapshot: decimalToNumber(loc.lat),
-          locationLngSnapshot: decimalToNumber(loc.lng),
+          locationAddressSnapshot,
+          locationLatSnapshot: hold.locationLatSnapshot ?? decimalToNumber(loc.lat),
+          locationLngSnapshot: hold.locationLngSnapshot ?? decimalToNumber(loc.lng),
         },
         select: {
           id: true,
@@ -435,28 +531,96 @@ export async function POST(req: Request, { params }: Ctx) {
 
       await tx.bookingHold.delete({ where: { id: hold.id } })
 
-      return { ok: true as const, updated }
+      return updated
     })
-
-    if (!result.ok) {
-      return jsonFail(result.status, result.error)
-    }
 
     return jsonOk(
       {
         booking: {
-          id: result.updated.id,
-          status: result.updated.status,
-          scheduledFor: new Date(result.updated.scheduledFor).toISOString(),
-          locationType: result.updated.locationType,
-          bufferMinutes: result.updated.bufferMinutes ?? 0,
-          totalDurationMinutes: result.updated.totalDurationMinutes ?? 0,
-          locationTimeZone: result.updated.locationTimeZone ?? null,
+          id: result.id,
+          status: result.status,
+          scheduledFor: new Date(result.scheduledFor).toISOString(),
+          locationType: result.locationType,
+          bufferMinutes: result.bufferMinutes ?? 0,
+          totalDurationMinutes: result.totalDurationMinutes ?? 0,
+          locationTimeZone: result.locationTimeZone ?? null,
         },
       },
       200,
     )
   } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+
+    if (msg === 'BOOKING_NOT_FOUND') {
+      return jsonFail(404, 'Booking not found.')
+    }
+    if (msg === 'FORBIDDEN') {
+      return jsonFail(403, 'Forbidden.')
+    }
+    if (msg === 'BOOKING_NOT_RESCHEDULABLE') {
+      return jsonFail(409, 'This booking cannot be rescheduled.')
+    }
+    if (msg === 'BOOKING_ALREADY_STARTED') {
+      return jsonFail(409, 'This booking has started and cannot be rescheduled.')
+    }
+    if (msg === 'BOOKING_MISSING_OFFERING' || msg === 'OFFERING_NOT_FOUND') {
+      return jsonFail(409, 'This booking is missing offering info and cannot be rescheduled.')
+    }
+    if (msg === 'MODE_NOT_SUPPORTED') {
+      return jsonFail(409, 'This booking does not support that location type.')
+    }
+    if (msg === 'HOLD_NOT_FOUND') {
+      return jsonFail(404, 'Hold not found. Please pick a new time.')
+    }
+    if (msg === 'HOLD_FORBIDDEN') {
+      return jsonFail(403, 'Hold does not belong to you.')
+    }
+    if (msg === 'HOLD_EXPIRED') {
+      return jsonFail(409, 'Hold expired. Please pick a new time.')
+    }
+    if (msg === 'HOLD_PRO_MISMATCH') {
+      return jsonFail(409, 'Hold is for a different professional.')
+    }
+    if (msg === 'HOLD_OFFERING_MISMATCH') {
+      return jsonFail(409, 'Hold is for a different service.')
+    }
+    if (msg === 'HOLD_LOCATIONTYPE_MISMATCH') {
+      return jsonFail(409, 'Hold locationType does not match.')
+    }
+    if (msg === 'HOLD_MISSING_LOCATION') {
+      return jsonFail(409, 'Hold is missing location info. Please pick a new slot.')
+    }
+    if (msg === 'LOCATION_NOT_FOUND') {
+      return jsonFail(409, 'This location is no longer available.')
+    }
+    if (msg === 'TIMEZONE_REQUIRED') {
+      return jsonFail(409, 'This location is missing a valid timezone.')
+    }
+    if (msg === 'HOLD_TIME_INVALID') {
+      return jsonFail(400, 'Hold time is invalid. Please pick a new slot.')
+    }
+    if (msg === 'TIME_IN_PAST') {
+      return jsonFail(400, 'Please select a future time.')
+    }
+    if (msg === 'TOO_FAR') {
+      return jsonFail(400, 'That date is too far in the future.')
+    }
+    if (msg === 'BLOCKED') {
+      return jsonFail(409, 'That time is blocked. Please choose a new slot.')
+    }
+    if (msg === 'TIME_NOT_AVAILABLE') {
+      return jsonFail(409, 'That time is no longer available. Please choose a new slot.')
+    }
+    if (msg === 'INVALID_DURATION') {
+      return jsonFail(409, 'This booking has an invalid duration and cannot be rescheduled.')
+    }
+    if (msg.startsWith('STEP:')) {
+      return jsonFail(400, `Start time must be on a ${msg.slice(5)}-minute boundary.`)
+    }
+    if (msg.startsWith('WH:')) {
+      return jsonFail(400, msg.slice(3) || 'That time is outside working hours.')
+    }
+
     console.error('POST /api/bookings/[id]/reschedule error', e)
     return jsonFail(500, 'Failed to reschedule booking.')
   }

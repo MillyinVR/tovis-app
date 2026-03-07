@@ -2,14 +2,19 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { OpeningStatus } from '@prisma/client'
+import { OpeningStatus, Prisma } from '@prisma/client'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
-function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.trunc(n)))
-}
+const DEFAULT_HOURS = 48
+const MIN_HOURS = 1
+const MAX_HOURS = 168
+const DEFAULT_TAKE = 50
+const MIN_TAKE = 1
+const MAX_TAKE = 100
+const PAGE_SIZE = 200
+const MAX_PAGES = 5
 
 type DisableKey =
   | 'disableMon'
@@ -20,10 +25,99 @@ type DisableKey =
   | 'disableSat'
   | 'disableSun'
 
-function weekdayDisableKeyInTimeZone(d: Date, timeZone: string): DisableKey {
+const openingSelect = {
+  id: true,
+  startAt: true,
+  endAt: true,
+  discountPct: true,
+  note: true,
+  offeringId: true,
+  serviceId: true,
+
+  timeZone: true,
+  locationType: true,
+  locationId: true,
+
+  service: {
+    select: {
+      name: true,
+    },
+  },
+  location: {
+    select: {
+      city: true,
+      state: true,
+      formattedAddress: true,
+    },
+  },
+  professional: {
+    select: {
+      id: true,
+      businessName: true,
+      handle: true,
+      avatarUrl: true,
+      professionType: true,
+      location: true,
+      lastMinuteSettings: {
+        select: {
+          disableMon: true,
+          disableTue: true,
+          disableWed: true,
+          disableThu: true,
+          disableFri: true,
+          disableSat: true,
+          disableSun: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.LastMinuteOpeningSelect
+
+type OpeningQueryRow = Prisma.LastMinuteOpeningGetPayload<{
+  select: typeof openingSelect
+}>
+
+type OpeningDto = {
+  id: string
+  startAt: string
+  endAt: string | null
+  discountPct: number | null
+  note: string | null
+  offeringId: string | null
+  serviceId: string | null
+  service: { name: string } | null
+  location: {
+    id: string
+    type: OpeningQueryRow['locationType']
+    timeZone: string
+    city: string | null
+    state: string | null
+    formattedAddress: string | null
+  }
+  professional: {
+    id: string
+    businessName: string | null
+    handle: string | null
+    avatarUrl: string | null
+    professionType: string | null
+    locationLabel: string | null
+  }
+}
+
+function clampInt(value: number, min: number, max: number) {
+  const n = Math.trunc(Number(value))
+  if (!Number.isFinite(n)) return min
+  return Math.max(min, Math.min(max, n))
+}
+
+function weekdayDisableKeyInTimeZone(date: Date, timeZone: string): DisableKey {
   const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(d)
-  switch (wd) {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'short',
+  }).format(date)
+
+  switch (weekday) {
     case 'Sun':
       return 'disableSun'
     case 'Mon':
@@ -41,6 +135,112 @@ function weekdayDisableKeyInTimeZone(d: Date, timeZone: string): DisableKey {
   }
 }
 
+function parseHours(args: { hoursParam: string | null; daysParam: string | null }) {
+  const { hoursParam, daysParam } = args
+
+  if (hoursParam) {
+    const hours = Number(hoursParam)
+    if (Number.isFinite(hours)) {
+      return clampInt(hours, MIN_HOURS, MAX_HOURS)
+    }
+  }
+
+  if (daysParam) {
+    const days = Number(daysParam)
+    if (Number.isFinite(days)) {
+      return clampInt(days * 24, MIN_HOURS, MAX_HOURS)
+    }
+  }
+
+  return DEFAULT_HOURS
+}
+
+function parseTake(takeParam: string | null) {
+  const raw = Number(takeParam ?? DEFAULT_TAKE)
+  if (!Number.isFinite(raw)) return DEFAULT_TAKE
+  return clampInt(raw, MIN_TAKE, MAX_TAKE)
+}
+
+function buildOpeningsWhere(args: {
+  now: Date
+  horizon: Date
+  cursor: { startAt: Date; id: string } | null
+}): Prisma.LastMinuteOpeningWhereInput {
+  const { now, horizon, cursor } = args
+
+  const baseConditions: Prisma.LastMinuteOpeningWhereInput[] = [
+    {
+      status: OpeningStatus.ACTIVE,
+      startAt: { gte: now, lte: horizon },
+      professional: {
+        lastMinuteSettings: {
+          is: { enabled: true },
+        },
+      },
+    },
+    {
+      OR: [{ offeringId: null }, { offering: { is: { isActive: true } } }],
+    },
+  ]
+
+  if (!cursor) {
+    return { AND: baseConditions }
+  }
+
+  const afterCursor: Prisma.LastMinuteOpeningWhereInput = {
+    OR: [
+      { startAt: { gt: cursor.startAt } },
+      {
+        AND: [{ startAt: cursor.startAt }, { id: { gt: cursor.id } }],
+      },
+    ],
+  }
+
+  return {
+    AND: [...baseConditions, afterCursor],
+  }
+}
+
+function openingIsAllowedByWeekday(row: OpeningQueryRow) {
+  const settings = row.professional.lastMinuteSettings
+  if (!settings) return true
+
+  const key = weekdayDisableKeyInTimeZone(row.startAt, row.timeZone)
+  return !settings[key]
+}
+
+function mapOpening(row: OpeningQueryRow): OpeningDto {
+  return {
+    id: row.id,
+    startAt: row.startAt.toISOString(),
+    endAt: row.endAt ? row.endAt.toISOString() : null,
+    discountPct: row.discountPct ?? null,
+    note: row.note ?? null,
+
+    offeringId: row.offeringId ?? null,
+    serviceId: row.serviceId ?? null,
+    service: row.service ? { name: row.service.name } : null,
+
+    location: {
+      id: row.locationId,
+      type: row.locationType,
+      timeZone: row.timeZone,
+      city: row.location?.city ?? null,
+      state: row.location?.state ?? null,
+      formattedAddress: row.location?.formattedAddress ?? null,
+    },
+
+    professional: {
+      id: row.professional.id,
+      businessName: row.professional.businessName ?? null,
+      handle: row.professional.handle ?? null,
+      avatarUrl: row.professional.avatarUrl ?? null,
+      professionType: row.professional.professionType ?? null,
+      locationLabel: row.professional.location ?? null,
+    },
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -48,123 +248,57 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url)
 
-    const hoursParam = pickString(url.searchParams.get('hours'))
-    const daysParam = pickString(url.searchParams.get('days'))
-    const takeParam = pickString(url.searchParams.get('take'))
+    const hours = parseHours({
+      hoursParam: pickString(url.searchParams.get('hours')),
+      daysParam: pickString(url.searchParams.get('days')),
+    })
 
-    let hours = 48
-    if (hoursParam) {
-      const h = Number(hoursParam)
-      if (Number.isFinite(h)) hours = clampInt(h, 1, 168)
-    } else if (daysParam) {
-      const d = Number(daysParam)
-      if (Number.isFinite(d)) hours = clampInt(d * 24, 1, 168)
-    }
-
-    const take = (() => {
-      const t = Number(takeParam ?? 50)
-      return Number.isFinite(t) ? clampInt(t, 1, 100) : 50
-    })()
+    const take = parseTake(pickString(url.searchParams.get('take')))
 
     const now = new Date()
-    const horizon = new Date(Date.now() + hours * 60 * 60_000)
+    const horizon = new Date(now.getTime() + hours * 60 * 60_000)
 
-    const rows = await prisma.lastMinuteOpening.findMany({
-      where: {
-        status: OpeningStatus.ACTIVE,
-        startAt: { gte: now, lte: horizon },
-        professional: { lastMinuteSettings: { is: { enabled: true } } },
-        OR: [{ offeringId: null }, { offering: { is: { isActive: true } } }],
-      },
-      orderBy: { startAt: 'asc' },
-      take: take * 2, // grab extra so filtering doesn’t starve the list
-      select: {
-        id: true,
-        startAt: true,
-        endAt: true,
-        discountPct: true,
-        note: true,
-        offeringId: true,
-        serviceId: true,
+    const openings: OpeningDto[] = []
+    let cursor: { startAt: Date; id: string } | null = null
 
-        // ✅ single source of truth fields
-        timeZone: true,
-        locationType: true,
-        locationId: true,
+    for (let pageIndex = 0; pageIndex < MAX_PAGES && openings.length < take; pageIndex += 1) {
+      const rows: OpeningQueryRow[] = await prisma.lastMinuteOpening.findMany({
+        where: buildOpeningsWhere({ now, horizon, cursor }),
+        orderBy: [{ startAt: 'asc' }, { id: 'asc' }],
+        take: PAGE_SIZE,
+        select: openingSelect,
+      })
 
-        service: { select: { name: true } },
-        location: {
-          select: {
-            city: true,
-            state: true,
-            formattedAddress: true,
-          },
-        },
-        professional: {
-          select: {
-            id: true,
-            businessName: true,
-            handle: true,
-            avatarUrl: true,
-            professionType: true,
-            location: true, // display string
-            lastMinuteSettings: {
-              select: {
-                disableMon: true,
-                disableTue: true,
-                disableWed: true,
-                disableThu: true,
-                disableFri: true,
-                disableSat: true,
-                disableSun: true,
-              },
-            },
-          },
-        },
+      if (rows.length === 0) break
+
+      for (const row of rows) {
+        if (!openingIsAllowedByWeekday(row)) continue
+
+        openings.push(mapOpening(row))
+        if (openings.length >= take) break
+      }
+
+      const lastRow = rows.at(-1)
+      if (!lastRow) break
+
+      cursor = {
+        startAt: lastRow.startAt,
+        id: lastRow.id,
+      }
+
+      if (rows.length < PAGE_SIZE) break
+    }
+
+    return jsonOk({
+      openings,
+      meta: {
+        hours,
+        take,
+        returned: openings.length,
       },
     })
-
-    // Filter out openings that fall on a disabled weekday (evaluated in the OPENING timezone)
-    const filtered = rows.filter((o) => {
-      const s = o.professional.lastMinuteSettings
-      if (!s) return true
-      const key = weekdayDisableKeyInTimeZone(o.startAt, o.timeZone)
-      return !s[key]
-    })
-
-    const openings = filtered.slice(0, take).map((o) => ({
-      id: o.id,
-      startAt: o.startAt.toISOString(),
-      endAt: o.endAt ? o.endAt.toISOString() : null,
-      discountPct: o.discountPct ?? null,
-      note: o.note ?? null,
-      offeringId: o.offeringId ?? null,
-      serviceId: o.serviceId ?? null,
-      serviceName: o.service?.name ?? null,
-
-      // ✅ truth
-      timeZone: o.timeZone,
-      locationType: o.locationType,
-      locationId: o.locationId,
-
-      professional: {
-        id: o.professional.id,
-        businessName: o.professional.businessName ?? null,
-        handle: o.professional.handle ?? null,
-        avatarUrl: o.professional.avatarUrl ?? null,
-        professionType: o.professional.professionType ?? null,
-        location: o.professional.location ?? null,
-      },
-
-      // ✅ truth location (from ProfessionalLocation)
-      city: o.location.city ?? null,
-      state: o.location.state ?? null,
-      formattedAddress: o.location.formattedAddress ?? null,
-    }))
-
-    return jsonOk({ openings })
   } catch (e) {
     console.error('GET /api/openings error', e)
-    return jsonFail(500, 'Internal server error')
+    return jsonFail(500, 'Internal server error.')
   }
 }

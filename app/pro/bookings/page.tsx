@@ -1,12 +1,13 @@
 // app/pro/bookings/page.tsx
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { BookingServiceItemType, Prisma } from '@prisma/client'
+import type { BookingStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
-import { Prisma } from '@prisma/client'
 import ClientNameLink from '@/app/_components/ClientNameLink'
-
 import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
@@ -21,6 +22,61 @@ export const dynamic = 'force-dynamic'
 
 type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SearchParams = Record<string, string | string[] | undefined>
+const BOOKING_STATUS = {
+  PENDING: 'PENDING',
+  ACCEPTED: 'ACCEPTED',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const satisfies Record<Exclude<StatusFilter, 'ALL'>, BookingStatus>
+
+const bookingSelect = {
+  id: true,
+  status: true,
+  scheduledFor: true,
+  startedAt: true,
+  finishedAt: true,
+  locationTimeZone: true,
+
+  totalDurationMinutes: true,
+  subtotalSnapshot: true,
+  totalAmount: true,
+  discountAmount: true,
+  taxAmount: true,
+  tipAmount: true,
+
+  service: {
+    select: {
+      name: true,
+    },
+  },
+
+  serviceItems: {
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      itemType: true,
+      sortOrder: true,
+      service: { select: { name: true } },
+      priceSnapshot: true,
+      durationMinutesSnapshot: true,
+      parentItemId: true,
+    },
+    take: 50,
+  },
+
+  client: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      user: { select: { email: true } },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+type ServiceItemRow = BookingRow['serviceItems'][number]
 
 function firstParam(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
@@ -28,7 +84,9 @@ function firstParam(v: string | string[] | undefined): string {
 
 function normalizeStatusFilter(raw: unknown): StatusFilter {
   const s = String(raw || '').toUpperCase().trim()
-  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') return s
+  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') {
+    return s
+  }
   return 'ALL'
 }
 
@@ -50,6 +108,15 @@ function formatStatus(status: string) {
 function durationLabel(totalDurationMinutes: unknown): number {
   const n = Number(totalDurationMinutes ?? 0)
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+}
+
+function sumDecimal(values: Prisma.Decimal[]) {
+  return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
+}
+
+function formatMoneyOrNull(v: Prisma.Decimal | null | undefined): string | null {
+  if (v == null) return null
+  return moneyToString(v)
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -83,12 +150,13 @@ function FilterPills({ active }: { active: StatusFilter }) {
 
   return (
     <div className="flex flex-wrap gap-2">
-      {pills.map((p) => {
-        const isActive = active === p.key
-        const href = p.key === 'ALL' ? '/pro/bookings' : `/pro/bookings?status=${encodeURIComponent(p.key)}`
+      {pills.map((pill) => {
+        const isActive = active === pill.key
+        const href = pill.key === 'ALL' ? '/pro/bookings' : `/pro/bookings?status=${encodeURIComponent(pill.key)}`
+
         return (
-          <a
-            key={p.key}
+          <Link
+            key={pill.key}
             href={href}
             className={[
               'rounded-full border px-4 py-2 text-[12px] font-black transition',
@@ -97,32 +165,31 @@ function FilterPills({ active }: { active: StatusFilter }) {
                 : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
             ].join(' ')}
           >
-            {p.label}
-          </a>
+            {pill.label}
+          </Link>
         )
       })}
     </div>
   )
 }
 
-
 async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown): Promise<string> {
-  const primary = await prisma.professionalLocation.findFirst({
-    where: { professionalId: proId, isBookable: true, isPrimary: true },
-    select: { timeZone: true },
-  })
-
-  const primaryTz = pickTimeZoneOrNull(primary?.timeZone)
-  if (primaryTz) return primaryTz
-
-  const any = await prisma.professionalLocation.findFirst({
-    where: { professionalId: proId, isBookable: true },
+  const locations = await prisma.professionalLocation.findMany({
+    where: {
+      professionalId: proId,
+      isBookable: true,
+    },
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: { timeZone: true },
+    select: {
+      timeZone: true,
+    },
+    take: 50,
   })
 
-  const anyTz = pickTimeZoneOrNull(any?.timeZone)
-  if (anyTz) return anyTz
+  for (const location of locations) {
+    const tz = pickTimeZoneOrNull(location.timeZone)
+    if (tz) return tz
+  }
 
   const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
   if (proTz) return proTz
@@ -130,11 +197,6 @@ async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown
   return DEFAULT_TIME_ZONE
 }
 
-/**
- * Row display timezone:
- * Prefer booking.locationTimeZone snapshot (appointment truth),
- * else fall back to scheduleTz (validated/sanitized to UTC).
- */
 function bookingDisplayTimeZone(bookingLocationTimeZone: unknown, scheduleTz: string) {
   const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
   if (bookingTz) return bookingTz
@@ -146,110 +208,90 @@ function formatWhenForRow(date: Date, tz: string) {
   return formatAppointmentWhen(date, safe)
 }
 
-/**
- * DST-safe boundaries:
- * "Today" and "Tomorrow" are computed as local day-starts in scheduleTz,
- * converted to UTC instants via zonedTimeToUtc.
- */
 function computeTodayTomorrowBoundsUtc(nowUtc: Date, scheduleTz: string) {
   const tz = sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
-  const p = getZonedParts(nowUtc, tz)
+  const parts = getZonedParts(nowUtc, tz)
 
   const startOfTodayUtc = zonedTimeToUtc({
-    year: p.year,
-    month: p.month,
-    day: p.day,
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
     hour: 0,
     minute: 0,
     second: 0,
     timeZone: tz,
   })
 
-  // ✅ no "+24h" — day+1 in local calendar time, DST-safe
   const startOfTomorrowUtc = zonedTimeToUtc({
-    year: p.year,
-    month: p.month,
-    day: p.day + 1,
+    year: parts.year,
+    month: parts.month,
+    day: parts.day + 1,
     hour: 0,
     minute: 0,
     second: 0,
     timeZone: tz,
   })
 
-  return { startOfTodayUtc, startOfTomorrowUtc, tz }
+  return { startOfTodayUtc, startOfTomorrowUtc }
 }
 
-// ✅ Strongly-typed select (includes add-ons + booking tz snapshot)
-const bookingSelect = {
-  id: true,
-  status: true,
-  scheduledFor: true,
-  startedAt: true,
-  finishedAt: true,
+function getBaseAndAddOnNames(booking: BookingRow) {
+  const items = Array.isArray(booking.serviceItems) ? booking.serviceItems : []
 
-  // ✅ booking snapshot tz (preferred for display)
-  locationTimeZone: true,
+  const baseItem =
+    items.find((item) => item.itemType === BookingServiceItemType.BASE) ??
+    items[0] ??
+    null
 
-  totalDurationMinutes: true,
-  subtotalSnapshot: true,
-  totalAmount: true,
-  discountAmount: true,
-  taxAmount: true,
-  tipAmount: true,
+  const addOnItems = items.filter((item) => item.itemType === BookingServiceItemType.ADD_ON)
 
-  service: { select: { name: true } },
+  const baseName = baseItem?.service?.name ?? booking.service?.name ?? 'Service'
+  const addOnNames = addOnItems
+    .map((item) => item.service?.name ?? '')
+    .map((name) => name.trim())
+    .filter(Boolean)
 
-  serviceItems: {
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-    select: {
-      id: true,
-      itemType: true, // "BASE" | "ADD_ON"
-      sortOrder: true,
-      service: { select: { name: true } },
-      priceSnapshot: true,
-      durationMinutesSnapshot: true,
-      parentItemId: true,
-    },
-    take: 50,
-  },
+  return { baseName, addOnNames }
+}
 
-  client: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      user: { select: { email: true } },
-    },
-  },
-} satisfies Prisma.BookingSelect
+function computeFallbackSubtotal(booking: BookingRow): Prisma.Decimal | null {
+  const items = Array.isArray(booking.serviceItems) ? booking.serviceItems : []
+  if (!items.length) return null
+  return sumDecimal(items.map((item) => item.priceSnapshot))
+}
 
-type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
-
-function PriceBlock({ b }: { b: BookingRow }) {
-  const explicitTotal = b.totalAmount ?? null
-
-  const subtotal = b.subtotalSnapshot
-  const discount = b.discountAmount ?? null
-  const tax = b.taxAmount ?? null
-  const tip = b.tipAmount ?? null
-
-  if (explicitTotal) {
-    return <div className="text-[12px] text-textSecondary">Total: ${moneyToString(explicitTotal) ?? '0.00'}</div>
+function PriceBlock({ booking }: { booking: BookingRow }) {
+  const explicitTotal = booking.totalAmount ?? null
+  if (explicitTotal != null) {
+    return (
+      <div className="text-[12px] text-textSecondary">
+        Total: ${formatMoneyOrNull(explicitTotal) ?? '0.00'}
+      </div>
+    )
   }
 
-  const z = new Prisma.Decimal(0)
-  const computed = subtotal.minus(discount ?? z).plus(tax ?? z).plus(tip ?? z)
+  const subtotal = booking.subtotalSnapshot ?? computeFallbackSubtotal(booking)
+  if (subtotal == null) {
+    return <div className="text-[12px] text-textSecondary">Total unavailable</div>
+  }
 
-  const subtotalStr = moneyToString(subtotal) ?? '0.00'
-  const totalStr = moneyToString(computed) ?? subtotalStr
+  const zero = new Prisma.Decimal(0)
+  const discount = booking.discountAmount ?? null
+  const tax = booking.taxAmount ?? null
+  const tip = booking.tipAmount ?? null
 
-  const discountStr = discount ? moneyToString(discount) : null
-  const taxStr = tax ? moneyToString(tax) : null
-  const tipStr = tip ? moneyToString(tip) : null
+  const computedTotal = subtotal.minus(discount ?? zero).plus(tax ?? zero).plus(tip ?? zero)
+
+  const subtotalStr = formatMoneyOrNull(subtotal) ?? '0.00'
+  const totalStr = formatMoneyOrNull(computedTotal) ?? subtotalStr
+  const discountStr = discount != null ? formatMoneyOrNull(discount) : null
+  const taxStr = tax != null ? formatMoneyOrNull(tax) : null
+  const tipStr = tip != null ? formatMoneyOrNull(tip) : null
 
   const hasModifiers = Boolean(discountStr || taxStr || tipStr)
-  if (!hasModifiers) return <div className="text-[12px] text-textSecondary">Total: ${subtotalStr}</div>
+  if (!hasModifiers) {
+    return <div className="text-[12px] text-textSecondary">Total: ${subtotalStr}</div>
+  }
 
   return (
     <div className="grid gap-1 text-[12px] text-textSecondary">
@@ -262,22 +304,6 @@ function PriceBlock({ b }: { b: BookingRow }) {
   )
 }
 
-function getBaseAndAddOnNames(b: BookingRow) {
-  const items = Array.isArray(b.serviceItems) ? b.serviceItems : []
-
-  const base =
-    items.find((x) => String((x as any).itemType || '').toUpperCase() === 'BASE') ??
-    items.sort((a, c) => (a.sortOrder ?? 0) - (c.sortOrder ?? 0))[0] ??
-    null
-
-  const addOns = items.filter((x) => String((x as any).itemType || '').toUpperCase() === 'ADD_ON')
-
-  const baseName = base?.service?.name ?? b.service?.name ?? 'Service'
-  const addOnNames = addOns.map((x) => x.service?.name ?? '').map((s) => s.trim()).filter(Boolean)
-
-  return { baseName, addOnNames }
-}
-
 function Section({
   title,
   items,
@@ -287,7 +313,7 @@ function Section({
   title: string
   items: BookingRow[]
   scheduleTz: string
-  visibleClientIdSet: Set<string>
+  visibleClientIdSet: ReadonlySet<string>
 }) {
   return (
     <section className="grid gap-3">
@@ -302,66 +328,62 @@ function Section({
         </div>
       ) : (
         <div className="grid gap-3">
-          {items.map((b) => {
-            const dur = durationLabel(b.totalDurationMinutes)
-            const canLinkClient = visibleClientIdSet.has(String(b.client.id))
-
-            const rowTz = bookingDisplayTimeZone(b.locationTimeZone, scheduleTz)
+          {items.map((booking) => {
+            const dur = durationLabel(booking.totalDurationMinutes)
+            const canLinkClient = visibleClientIdSet.has(String(booking.client.id))
+            const rowTz = bookingDisplayTimeZone(booking.locationTimeZone, scheduleTz)
+            const { baseName, addOnNames } = getBaseAndAddOnNames(booking)
 
             return (
-              <div key={b.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+              <div key={booking.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      {(() => {
-                        const { baseName, addOnNames } = getBaseAndAddOnNames(b)
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] font-black text-textPrimary">{baseName}</div>
 
-                        return (
-                          <div className="min-w-0">
-                            <div className="truncate text-[13px] font-black text-textPrimary">{baseName}</div>
-
-                            {addOnNames.length ? (
-                              <div className="mt-1 truncate text-[12px] text-textSecondary">+ {addOnNames.join(', ')}</div>
-                            ) : null}
+                        {addOnNames.length ? (
+                          <div className="mt-1 truncate text-[12px] text-textSecondary">
+                            + {addOnNames.join(', ')}
                           </div>
-                        )
-                      })()}
+                        ) : null}
+                      </div>
 
-                      <StatusPill status={b.status} />
+                      <StatusPill status={booking.status} />
                     </div>
 
                     <div className="mt-1 text-[12px] text-textSecondary">
-                      <ClientNameLink canLink={canLinkClient} clientId={b.client.id}>
-                        {b.client.firstName} {b.client.lastName}
+                      <ClientNameLink canLink={canLinkClient} clientId={booking.client.id}>
+                        {booking.client.firstName} {booking.client.lastName}
                       </ClientNameLink>
-                      {b.client.user?.email ? ` • ${b.client.user.email}` : ''}
-                      {b.client.phone ? ` • ${b.client.phone}` : ''}
+                      {booking.client.user?.email ? ` • ${booking.client.user.email}` : ''}
+                      {booking.client.phone ? ` • ${booking.client.phone}` : ''}
                     </div>
 
                     <div className="mt-2 text-[12px] text-textSecondary">
-                      {formatWhenForRow(b.scheduledFor, rowTz)}
+                      {formatWhenForRow(booking.scheduledFor, rowTz)}
                       {dur ? ` • ${dur} min` : ''}
                     </div>
 
                     <div className="mt-2">
-                      <PriceBlock b={b} />
+                      <PriceBlock booking={booking} />
                     </div>
 
-                    <a
-                      href={`/pro/bookings/${encodeURIComponent(b.id)}`}
+                    <Link
+                      href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
                       className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
                     >
                       Details &amp; aftercare
-                    </a>
+                    </Link>
                   </div>
 
                   <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
                     <BookingActions
-                      bookingId={b.id}
-                      currentStatus={b.status}
-                      startedAt={b.startedAt ? b.startedAt.toISOString() : null}
-                      finishedAt={b.finishedAt ? b.finishedAt.toISOString() : null}
-                      timeZone={rowTz} // ✅ booking snapshot preferred
+                      bookingId={booking.id}
+                      currentStatus={booking.status}
+                      startedAt={booking.startedAt ? booking.startedAt.toISOString() : null}
+                      finishedAt={booking.finishedAt ? booking.finishedAt.toISOString() : null}
+                      timeZone={rowTz}
                     />
                   </div>
                 </div>
@@ -384,54 +406,84 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
   const statusFilter = normalizeStatusFilter(firstParam(sp.status))
 
   const proId = user.professionalProfile.id
-
-  // ✅ schedule timezone for “Today/Upcoming/Past” buckets (never LA fallback)
   const scheduleTz = await resolveProScheduleTimeZone(proId, user.professionalProfile.timeZone)
 
-  // ✅ DST-safe “Today” boundaries anchored to scheduleTz
   const nowUtc = new Date()
   const { startOfTodayUtc, startOfTomorrowUtc } = computeTodayTomorrowBoundsUtc(nowUtc, scheduleTz)
 
-  const statusWhere = statusFilter === 'ALL' ? {} : { status: statusFilter }
-
-  /**
-   * ✅ Build visibility Set once:
-   * Pro can link to client chart only if they have:
-   * - PENDING booking, OR
-   * - booking in progress, OR
-   * - ACCEPTED upcoming booking
-   */
   const now = new Date()
   const visibleClientRows = await prisma.booking.findMany({
     where: {
       professionalId: proId,
       OR: [
-        { status: 'PENDING' },
+        { status: BOOKING_STATUS.PENDING },
         { startedAt: { not: null }, finishedAt: null },
-        { status: 'ACCEPTED', scheduledFor: { gte: now } },
+        { status: BOOKING_STATUS.ACCEPTED, scheduledFor: { gte: now } },
       ],
     },
     select: { clientId: true },
     take: 2000,
   })
-  const visibleClientIdSet = new Set<string>(visibleClientRows.map((r) => String(r.clientId)))
 
-  const [todayBookings, upcomingBookings, pastBookings] = await Promise.all([
-    prisma.booking.findMany({
-      where: { professionalId: proId, ...statusWhere, scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc } },
-      orderBy: { scheduledFor: 'asc' },
-      select: bookingSelect,
-    }),
-    prisma.booking.findMany({
-      where: { professionalId: proId, ...statusWhere, scheduledFor: { gte: startOfTomorrowUtc } },
-      orderBy: { scheduledFor: 'asc' },
-      select: bookingSelect,
-    }),
-    prisma.booking.findMany({
-      where: { professionalId: proId, ...statusWhere, scheduledFor: { lt: startOfTodayUtc } },
-      orderBy: { scheduledFor: 'desc' },
-      select: bookingSelect,
-    }),
+  const visibleClientIdSet = new Set<string>(visibleClientRows.map((row) => String(row.clientId)))
+
+  const nonCancelledStatusWhere:
+    | { status: { not: BookingStatus } }
+    | { status: BookingStatus }
+    | null =
+    statusFilter === 'ALL'
+      ? { status: { not: BOOKING_STATUS.CANCELLED } }
+      : statusFilter === 'CANCELLED'
+        ? null
+        : { status: statusFilter }
+  const activeBucketsPromise: Promise<[BookingRow[], BookingRow[], BookingRow[]]> =
+    nonCancelledStatusWhere == null
+      ? Promise.resolve([[], [], []])
+      : Promise.all([
+          prisma.booking.findMany({
+            where: {
+              professionalId: proId,
+              ...nonCancelledStatusWhere,
+              scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc },
+            },
+            orderBy: { scheduledFor: 'asc' },
+            select: bookingSelect,
+          }),
+          prisma.booking.findMany({
+            where: {
+              professionalId: proId,
+              ...nonCancelledStatusWhere,
+              scheduledFor: { gte: startOfTomorrowUtc },
+            },
+            orderBy: { scheduledFor: 'asc' },
+            select: bookingSelect,
+          }),
+          prisma.booking.findMany({
+            where: {
+              professionalId: proId,
+              ...nonCancelledStatusWhere,
+              scheduledFor: { lt: startOfTodayUtc },
+            },
+            orderBy: { scheduledFor: 'desc' },
+            select: bookingSelect,
+          }),
+        ])
+
+  const cancelledBookingsPromise: Promise<BookingRow[]> =
+    statusFilter === 'ALL' || statusFilter === 'CANCELLED'
+      ? prisma.booking.findMany({
+          where: {
+            professionalId: proId,
+            status: BOOKING_STATUS.CANCELLED,
+          },
+          orderBy: { scheduledFor: 'desc' },
+          select: bookingSelect,
+        })
+      : Promise.resolve([])
+
+  const [[todayBookings, upcomingBookings, pastBookings], cancelledBookings] = await Promise.all([
+    activeBucketsPromise,
+    cancelledBookingsPromise,
   ])
 
   const showTz = pickTimeZoneOrNull(scheduleTz)
@@ -443,17 +495,17 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
           <div>
             <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
             <div className="mt-1 text-[12px] text-textSecondary">
-              Today, upcoming, and past.
+              Today, upcoming, past, and cancelled.
               {showTz ? <span className="text-textSecondary/70"> ({showTz})</span> : null}
             </div>
           </div>
 
-          <a
+          <Link
             href="/pro/bookings/new"
             className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
           >
             + New booking
-          </a>
+          </Link>
         </div>
 
         <div className="mt-4">
@@ -463,9 +515,37 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       </header>
 
       <div className="grid gap-6">
-        <Section title="Today" items={todayBookings} scheduleTz={scheduleTz} visibleClientIdSet={visibleClientIdSet} />
-        <Section title="Upcoming" items={upcomingBookings} scheduleTz={scheduleTz} visibleClientIdSet={visibleClientIdSet} />
-        <Section title="Past" items={pastBookings} scheduleTz={scheduleTz} visibleClientIdSet={visibleClientIdSet} />
+        {statusFilter !== 'CANCELLED' ? (
+          <>
+            <Section
+              title="Today"
+              items={todayBookings}
+              scheduleTz={scheduleTz}
+              visibleClientIdSet={visibleClientIdSet}
+            />
+            <Section
+              title="Upcoming"
+              items={upcomingBookings}
+              scheduleTz={scheduleTz}
+              visibleClientIdSet={visibleClientIdSet}
+            />
+            <Section
+              title="Past"
+              items={pastBookings}
+              scheduleTz={scheduleTz}
+              visibleClientIdSet={visibleClientIdSet}
+            />
+          </>
+        ) : null}
+
+        {statusFilter === 'ALL' || statusFilter === 'CANCELLED' ? (
+          <Section
+            title="Cancelled"
+            items={cancelledBookings}
+            scheduleTz={scheduleTz}
+            visibleClientIdSet={visibleClientIdSet}
+          />
+        ) : null}
       </div>
     </main>
   )

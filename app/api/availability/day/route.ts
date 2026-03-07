@@ -1,6 +1,7 @@
 // app/api/availability/day/route.ts
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+import { Prisma } from '@prisma/client'
+import type { BookingStatus, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import type { BookableLocation } from '@/lib/booking/pickLocation'
 import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, isValidIanaTimeZone } from '@/lib/timeZone'
@@ -10,6 +11,22 @@ import { isRecord } from '@/lib/guards'
 import { getRedis } from '@/lib/redis'
 import { createHash } from 'crypto'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+
+const BOOKING_STATUS = {
+  CANCELLED: 'CANCELLED',
+} as const satisfies Record<'CANCELLED', BookingStatus>
+
+const SERVICE_LOCATION = {
+  SALON: 'SALON',
+  MOBILE: 'MOBILE',
+} as const satisfies Record<'SALON' | 'MOBILE', ServiceLocationType>
+
+const PROFESSIONAL_LOCATION = {
+  SALON: 'SALON',
+  SUITE: 'SUITE',
+  MOBILE_BASE: 'MOBILE_BASE',
+} as const satisfies Record<'SALON' | 'SUITE' | 'MOBILE_BASE', ProfessionalLocationType>
+
 
 export const dynamic = 'force-dynamic'
 // If you’re on Next “edge” runtime, you MUST remove crypto usage and I’ll adjust hashing.
@@ -59,8 +76,8 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
-  if (s === 'SALON') return ServiceLocationType.SALON
-  if (s === 'MOBILE') return ServiceLocationType.MOBILE
+  if (s === SERVICE_LOCATION.SALON) return SERVICE_LOCATION.SALON
+  if (s === SERVICE_LOCATION.MOBILE) return SERVICE_LOCATION.MOBILE
   return null
 }
 
@@ -111,8 +128,12 @@ function pickModeDurationMinutes(
   offering: { salonDurationMinutes: number | null; mobileDurationMinutes: number | null },
   locationType: ServiceLocationType,
 ) {
-  const d = locationType === ServiceLocationType.MOBILE ? offering.mobileDurationMinutes : offering.salonDurationMinutes
-  const n = Number(d ?? 0)
+  const raw =
+    locationType === SERVICE_LOCATION.MOBILE
+      ? offering.mobileDurationMinutes
+      : offering.salonDurationMinutes
+
+  const n = Number(raw ?? 0)
   const base = Number.isFinite(n) && n > 0 ? n : 60
   return clampInt(base, 15, MAX_SLOT_DURATION_MINUTES)
 }
@@ -123,10 +144,11 @@ function pickEffectiveLocationType(args: {
   offersMobile: boolean
 }): ServiceLocationType | null {
   const { requested, offersInSalon, offersMobile } = args
-  if (requested === ServiceLocationType.SALON && offersInSalon) return ServiceLocationType.SALON
-  if (requested === ServiceLocationType.MOBILE && offersMobile) return ServiceLocationType.MOBILE
-  if (offersInSalon) return ServiceLocationType.SALON
-  if (offersMobile) return ServiceLocationType.MOBILE
+
+  if (requested === SERVICE_LOCATION.SALON && offersInSalon) return SERVICE_LOCATION.SALON
+  if (requested === SERVICE_LOCATION.MOBILE && offersMobile) return SERVICE_LOCATION.MOBILE
+  if (offersInSalon) return SERVICE_LOCATION.SALON
+  if (offersMobile) return SERVICE_LOCATION.MOBILE
   return null
 }
 
@@ -215,7 +237,15 @@ async function loadBusyIntervalsUncached(args: {
   fallbackDurationMinutes: number
   locationBufferMinutes: number
 }) {
-  const { professionalId, locationId, windowStartUtc, windowEndUtc, nowUtc, fallbackDurationMinutes, locationBufferMinutes } = args
+  const {
+    professionalId,
+    locationId,
+    windowStartUtc,
+    windowEndUtc,
+    nowUtc,
+    fallbackDurationMinutes,
+    locationBufferMinutes,
+  } = args
 
   const locBuf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_LOCATION_BUFFER_MINUTES)
 
@@ -224,9 +254,13 @@ async function loadBusyIntervalsUncached(args: {
       where: {
         professionalId,
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
-        NOT: { status: BookingStatus.CANCELLED },
+        status: { not: BOOKING_STATUS.CANCELLED },
       },
-      select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+      select: {
+        scheduledFor: true,
+        totalDurationMinutes: true,
+        bufferMinutes: true,
+      },
       take: 5000,
     }),
 
@@ -236,7 +270,13 @@ async function loadBusyIntervalsUncached(args: {
         scheduledFor: { gte: windowStartUtc, lt: windowEndUtc },
         expiresAt: { gt: nowUtc },
       },
-      select: { id: true, scheduledFor: true, expiresAt: true, offeringId: true, locationType: true, locationId: true },
+      select: {
+        scheduledFor: true,
+        expiresAt: true,
+        offeringId: true,
+        locationType: true,
+        locationId: true,
+      },
       take: 5000,
     }),
 
@@ -253,17 +293,28 @@ async function loadBusyIntervalsUncached(args: {
   ])
 
   const holdOfferingIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 5000)
+
   const holdOfferings = holdOfferingIds.length
     ? await prisma.professionalServiceOffering.findMany({
         where: { id: { in: holdOfferingIds } },
-        select: { id: true, salonDurationMinutes: true, mobileDurationMinutes: true },
+        select: {
+          id: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+        },
         take: 5000,
       })
     : []
 
   const holdOfferingById = new Map(holdOfferings.map((o) => [o.id, o]))
 
-  const holdLocationIds = Array.from(new Set(holds.map((h) => h.locationId))).slice(0, 5000)
+  const holdLocationIds = Array.from(
+    new Set(
+      holds
+        .map((h) => h.locationId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ).slice(0, 5000)
 
   const holdLocations = holdLocationIds.length
     ? await prisma.professionalLocation.findMany({
@@ -282,30 +333,31 @@ async function loadBusyIntervalsUncached(args: {
 
   const busy: BusyInterval[] = [
     ...bookings.map((b) => {
-        const start = normalizeToMinute(new Date(b.scheduledFor))
-        const baseDur = Number(b.totalDurationMinutes ?? fallbackDurationMinutes)
-        const dur =
-          Number.isFinite(baseDur) && baseDur > 0
-            ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES)
-            : fallbackDurationMinutes
+      const start = normalizeToMinute(new Date(b.scheduledFor))
 
-        const bBufRaw = Number(b.bufferMinutes ?? locBuf)
-        const bBuf =
-          Number.isFinite(bBufRaw)
-            ? clampInt(bBufRaw, 0, MAX_LOCATION_BUFFER_MINUTES)
-            : locBuf
+      const baseDur = Number(b.totalDurationMinutes ?? fallbackDurationMinutes)
+      const dur =
+        Number.isFinite(baseDur) && baseDur > 0
+          ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES)
+          : fallbackDurationMinutes
 
-        return { start, end: addMinutes(start, dur + bBuf) }
-      }),
+      const bBufRaw = Number(b.bufferMinutes ?? locBuf)
+      const bBuf =
+        Number.isFinite(bBufRaw)
+          ? clampInt(bBufRaw, 0, MAX_LOCATION_BUFFER_MINUTES)
+          : locBuf
+
+      return { start, end: addMinutes(start, dur + bBuf) }
+    }),
 
     ...holds
       .filter((h) => new Date(h.expiresAt).getTime() > nowUtc.getTime())
       .map((h) => {
         const start = normalizeToMinute(new Date(h.scheduledFor))
-        const off = holdOfferingById.get(h.offeringId) || null
+        const off = holdOfferingById.get(h.offeringId) ?? null
 
         const durRaw =
-          h.locationType === ServiceLocationType.MOBILE
+          h.locationType === SERVICE_LOCATION.MOBILE
             ? off?.mobileDurationMinutes
             : off?.salonDurationMinutes
 
@@ -315,12 +367,15 @@ async function loadBusyIntervalsUncached(args: {
             ? clampInt(baseDur, 15, MAX_SLOT_DURATION_MINUTES)
             : fallbackDurationMinutes
 
-        const holdBuf = holdBufferByLocationId.get(h.locationId) ?? locBuf
+        const holdBuf = holdBufferByLocationId.get(h.locationId ?? '') ?? locBuf
 
         return { start, end: addMinutes(start, dur + holdBuf) }
       }),
 
-    ...blocks.map((bl) => ({ start: new Date(bl.startsAt), end: new Date(bl.endsAt) })),
+    ...blocks.map((bl) => ({
+      start: new Date(bl.startsAt),
+      end: new Date(bl.endsAt),
+    })),
   ]
 
   return mergeBusyIntervals(busy)
@@ -526,9 +581,9 @@ function boundsForRadiusMiles(centerLat: number, centerLng: number, radiusMiles:
 }
 
 function allowedProfessionalTypes(locationType: ServiceLocationType): ProfessionalLocationType[] {
-  return locationType === ServiceLocationType.MOBILE
-    ? [ProfessionalLocationType.MOBILE_BASE]
-    : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
+  return locationType === SERVICE_LOCATION.MOBILE
+    ? [PROFESSIONAL_LOCATION.MOBILE_BASE]
+    : [PROFESSIONAL_LOCATION.SALON, PROFESSIONAL_LOCATION.SUITE]
 }
 
 function parseFloatParam(v: string | null) {
@@ -663,7 +718,7 @@ async function loadOtherProsNearby(args: {
       professionalId: { in: proIds },
       serviceId,
       isActive: true,
-      ...(locationType === ServiceLocationType.MOBILE ? { offersMobile: true } : { offersInSalon: true }),
+      ...(locationType === SERVICE_LOCATION.MOBILE ? { offersMobile: true } : { offersInSalon: true }),
     },
     select: {
       id: true,
@@ -794,12 +849,12 @@ export async function GET(req: Request) {
 
     if (!loc && !clientExplicitlyRequestedLocationType) {
       const fallbackType =
-        effectiveLocationType === ServiceLocationType.SALON
-          ? ServiceLocationType.MOBILE
-          : ServiceLocationType.SALON
+        effectiveLocationType === SERVICE_LOCATION.SALON
+          ? SERVICE_LOCATION.MOBILE
+          : SERVICE_LOCATION.SALON
 
       const fallbackAllowed =
-        fallbackType === ServiceLocationType.SALON
+        fallbackType === SERVICE_LOCATION.SALON
           ? Boolean(offering.offersInSalon)
           : Boolean(offering.offersMobile)
 
@@ -883,7 +938,7 @@ export async function GET(req: Request) {
         const proOff = byServiceId.get(x.addOnServiceId) || null
         const durRaw =
           x.durationOverrideMinutes ??
-          (effectiveLocationType === ServiceLocationType.MOBILE ? proOff?.mobileDurationMinutes : proOff?.salonDurationMinutes) ??
+          (effectiveLocationType === SERVICE_LOCATION.MOBILE ? proOff?.mobileDurationMinutes : proOff?.salonDurationMinutes) ??
           x.addOnService.defaultDurationMinutes ??
           0
 

@@ -1,16 +1,67 @@
 // app/api/pro/services/route.ts
 import { prisma } from '@/lib/prisma'
+import { ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
-type RequestedLocationType = 'SALON' | 'MOBILE' | null
-
-function normalizeLocationType(raw: string | null): RequestedLocationType {
+function normalizeLocationType(raw: string | null): ServiceLocationType | null {
   const value = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
-  if (value === 'SALON') return 'SALON'
-  if (value === 'MOBILE') return 'MOBILE'
+  if (value === ServiceLocationType.SALON) return ServiceLocationType.SALON
+  if (value === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
   return null
+}
+
+function getSupportedLocationTypes(args: {
+  salonEnabled: boolean
+  mobileEnabled: boolean
+}): ServiceLocationType[] {
+  const supported: ServiceLocationType[] = []
+
+  if (args.salonEnabled) supported.push(ServiceLocationType.SALON)
+  if (args.mobileEnabled) supported.push(ServiceLocationType.MOBILE)
+
+  return supported
+}
+
+function resolveSelectedLocationType(args: {
+  requested: ServiceLocationType | null
+  supported: ServiceLocationType[]
+}): ServiceLocationType | null {
+  const { requested, supported } = args
+
+  if (requested) {
+    return supported.includes(requested) ? requested : null
+  }
+
+  if (supported.length === 1) {
+    return supported[0]
+  }
+
+  return null
+}
+
+function normalizeDuration(raw: number | null | undefined, fallback: number | null | undefined) {
+  const value = raw ?? fallback ?? null
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function buildModeDetails(args: {
+  enabledByOffering: boolean
+  durationMinutes: number | null
+  priceStartingAt: string | null
+}) {
+  const enabled =
+    args.enabledByOffering &&
+    args.durationMinutes != null &&
+    args.priceStartingAt != null
+
+  return {
+    enabled,
+    durationMinutes: enabled ? args.durationMinutes : null,
+    priceStartingAt: enabled ? args.priceStartingAt : null,
+  }
 }
 
 export async function GET(req: Request) {
@@ -20,10 +71,11 @@ export async function GET(req: Request) {
 
     const professionalId = auth.professionalId
     const { searchParams } = new URL(req.url)
-    const rawLocationType = searchParams.get('locationType')
-    const locationType = normalizeLocationType(rawLocationType)
 
-    if (rawLocationType && !locationType) {
+    const rawLocationType = searchParams.get('locationType')
+    const requestedLocationType = normalizeLocationType(rawLocationType)
+
+    if (rawLocationType && !requestedLocationType) {
       return jsonFail(400, 'Invalid locationType. Use SALON or MOBILE.')
     }
 
@@ -31,7 +83,6 @@ export async function GET(req: Request) {
       where: {
         professionalId,
         isActive: true,
-        service: { isActive: true },
       },
       select: {
         id: true,
@@ -46,7 +97,13 @@ export async function GET(req: Request) {
           select: {
             id: true,
             name: true,
+            isActive: true,
             defaultDurationMinutes: true,
+            category: {
+              select: {
+                isActive: true,
+              },
+            },
           },
         },
       },
@@ -54,72 +111,102 @@ export async function GET(req: Request) {
       take: 500,
     })
 
-    const services = offerings.flatMap((o) => {
-      const salonDuration =
-        o.salonDurationMinutes ?? o.service.defaultDurationMinutes ?? null
-      const mobileDuration =
-        o.mobileDurationMinutes ?? o.service.defaultDurationMinutes ?? null
+    const services = offerings
+      .map((offering) => {
+        const serviceIsAvailable =
+          Boolean(offering.service.isActive) &&
+          Boolean(offering.service.category?.isActive)
 
-      const salonPriceStartingAt =
-        o.salonPriceStartingAt != null ? o.salonPriceStartingAt.toString() : null
-      const mobilePriceStartingAt =
-        o.mobilePriceStartingAt != null ? o.mobilePriceStartingAt.toString() : null
+        if (!serviceIsAvailable) {
+          return null
+        }
 
-      const canBookSalon =
-        o.offersInSalon && salonDuration != null && salonPriceStartingAt != null
-      const canBookMobile =
-        o.offersMobile && mobileDuration != null && mobilePriceStartingAt != null
+        const salonDurationMinutes = normalizeDuration(
+          offering.salonDurationMinutes,
+          offering.service.defaultDurationMinutes,
+        )
+        const mobileDurationMinutes = normalizeDuration(
+          offering.mobileDurationMinutes,
+          offering.service.defaultDurationMinutes,
+        )
 
-      if (locationType === 'SALON' && !canBookSalon) return []
-      if (locationType === 'MOBILE' && !canBookMobile) return []
+        const salonPriceStartingAt =
+          offering.salonPriceStartingAt != null
+            ? moneyToString(offering.salonPriceStartingAt)
+            : null
 
-      const durationMinutes =
-        locationType === 'SALON'
-          ? salonDuration
-          : locationType === 'MOBILE'
-            ? mobileDuration
-            : canBookSalon
-              ? salonDuration
-              : canBookMobile
-                ? mobileDuration
-                : null
+        const mobilePriceStartingAt =
+          offering.mobilePriceStartingAt != null
+            ? moneyToString(offering.mobilePriceStartingAt)
+            : null
 
-      const priceStartingAt =
-        locationType === 'SALON'
-          ? salonPriceStartingAt
-          : locationType === 'MOBILE'
-            ? mobilePriceStartingAt
-            : canBookSalon
-              ? salonPriceStartingAt
-              : canBookMobile
-                ? mobilePriceStartingAt
-                : null
+        const salon = buildModeDetails({
+          enabledByOffering: Boolean(offering.offersInSalon),
+          durationMinutes: salonDurationMinutes,
+          priceStartingAt: salonPriceStartingAt,
+        })
 
-      return [
-        {
-          id: String(o.serviceId),
-          name: o.service.name,
-          offeringId: String(o.id),
+        const mobile = buildModeDetails({
+          enabledByOffering: Boolean(offering.offersMobile),
+          durationMinutes: mobileDurationMinutes,
+          priceStartingAt: mobilePriceStartingAt,
+        })
 
-          // mode-aware values for the current caller
-          durationMinutes,
-          priceStartingAt,
+        const supportedLocationTypes = getSupportedLocationTypes({
+          salonEnabled: salon.enabled,
+          mobileEnabled: mobile.enabled,
+        })
 
-          // keep both modes available so callers can evolve without another route change
-          offersInSalon: canBookSalon,
-          offersMobile: canBookMobile,
-          salonDurationMinutes: canBookSalon ? salonDuration : null,
-          mobileDurationMinutes: canBookMobile ? mobileDuration : null,
-          salonPriceStartingAt: canBookSalon ? salonPriceStartingAt : null,
-          mobilePriceStartingAt: canBookMobile ? mobilePriceStartingAt : null,
-        },
-      ]
-    })
+        if (supportedLocationTypes.length === 0) {
+          return null
+        }
+
+        if (requestedLocationType && !supportedLocationTypes.includes(requestedLocationType)) {
+          return null
+        }
+
+        const selectedLocationType = resolveSelectedLocationType({
+          requested: requestedLocationType,
+          supported: supportedLocationTypes,
+        })
+
+        const requiresLocationTypeSelection =
+          selectedLocationType == null && supportedLocationTypes.length > 1
+
+        const selectedMode =
+          selectedLocationType === ServiceLocationType.SALON
+            ? {
+                locationType: ServiceLocationType.SALON,
+                durationMinutes: salon.durationMinutes,
+                priceStartingAt: salon.priceStartingAt,
+              }
+            : selectedLocationType === ServiceLocationType.MOBILE
+              ? {
+                  locationType: ServiceLocationType.MOBILE,
+                  durationMinutes: mobile.durationMinutes,
+                  priceStartingAt: mobile.priceStartingAt,
+                }
+              : null
+
+        return {
+          serviceId: offering.service.id,
+          name: offering.service.name,
+          offeringId: offering.id,
+
+          supportedLocationTypes,
+          selectedLocationType,
+          requiresLocationTypeSelection,
+          selectedMode,
+
+          salon,
+          mobile,
+        }
+      })
+      .filter((service): service is NonNullable<typeof service> => service !== null)
 
     return jsonOk(
       {
-        ok: true,
-        locationType,
+        locationType: requestedLocationType,
         services,
       },
       200,

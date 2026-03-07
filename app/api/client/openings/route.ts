@@ -1,7 +1,8 @@
 // app/api/client/openings/route.ts
 import { prisma } from '@/lib/prisma'
-import { OpeningStatus, ServiceLocationType } from '@prisma/client'
+import { OpeningStatus, Prisma, ServiceLocationType } from '@prisma/client'
 import { requireClient, pickString, upper, jsonFail, jsonOk } from '@/app/api/_utils'
+import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,43 +13,65 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
   return null
 }
 
-function pickEffectiveLocationType(args: {
-  requested: ServiceLocationType | null
+type OfferingModeFields = {
+  salonPriceStartingAt: Prisma.Decimal | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: Prisma.Decimal | null
+  mobileDurationMinutes: number | null
+}
+function getSupportedLocationTypes(args: {
   offersInSalon: boolean
   offersMobile: boolean
+}): ServiceLocationType[] {
+  const supported: ServiceLocationType[] = []
+
+  if (args.offersInSalon) supported.push(ServiceLocationType.SALON)
+  if (args.offersMobile) supported.push(ServiceLocationType.MOBILE)
+
+  return supported
+}
+
+function formatMoneyOrNull(value: Prisma.Decimal | null) {
+  return value ? moneyToString(value) : null
+}
+
+function resolveSelectedLocationType(args: {
+  requested: ServiceLocationType | null
+  supported: ServiceLocationType[]
 }): ServiceLocationType | null {
-  const { requested, offersInSalon, offersMobile } = args
-  if (requested === ServiceLocationType.SALON && offersInSalon) return ServiceLocationType.SALON
-  if (requested === ServiceLocationType.MOBILE && offersMobile) return ServiceLocationType.MOBILE
-  if (offersInSalon) return ServiceLocationType.SALON
-  if (offersMobile) return ServiceLocationType.MOBILE
+  const { requested, supported } = args
+
+  if (requested) {
+    return supported.includes(requested) ? requested : null
+  }
+
+  if (supported.length === 1) {
+    return supported[0]
+  }
+
   return null
 }
 
-type OfferingModeFields = {
-  salonPriceStartingAt: unknown | null
-  salonDurationMinutes: number | null
-  mobilePriceStartingAt: unknown | null
-  mobileDurationMinutes: number | null
-}
+function buildModeDetails(offering: OfferingModeFields, locationType: ServiceLocationType) {
+  const rawPrice =
+    locationType === ServiceLocationType.MOBILE
+      ? offering.mobilePriceStartingAt
+      : offering.salonPriceStartingAt
 
-function pickModeFields(offering: OfferingModeFields, locationType: ServiceLocationType) {
-  const priceStartingAt =
-    locationType === ServiceLocationType.MOBILE ? offering.mobilePriceStartingAt : offering.salonPriceStartingAt
+  const rawDuration =
+    locationType === ServiceLocationType.MOBILE
+      ? offering.mobileDurationMinutes
+      : offering.salonDurationMinutes
+
   const durationMinutes =
-    locationType === ServiceLocationType.MOBILE ? offering.mobileDurationMinutes : offering.salonDurationMinutes
+    typeof rawDuration === 'number' && Number.isFinite(rawDuration) && rawDuration > 0
+      ? rawDuration
+      : null
 
   return {
-    priceStartingAt: priceStartingAt ?? null,
-    durationMinutes: durationMinutes ?? null,
+    priceStartingAt: formatMoneyOrNull(rawPrice),
+    durationMinutes,
   }
-}
-
-function pickConservativeDuration(offering: { salonDurationMinutes: number | null; mobileDurationMinutes: number | null }) {
-  const a = Number(offering.salonDurationMinutes ?? 0)
-  const b = Number(offering.mobileDurationMinutes ?? 0)
-  const m = Math.max(a, b)
-  return Number.isFinite(m) && m > 0 ? m : 60
 }
 
 export async function GET(req: Request) {
@@ -75,7 +98,14 @@ export async function GET(req: Request) {
       },
       orderBy: { sentAt: 'desc' },
       take: 50,
-      include: {
+      select: {
+        id: true,
+        tier: true,
+        sentAt: true,
+        deliveredAt: true,
+        openedAt: true,
+        clickedAt: true,
+        bookedAt: true,
         opening: {
           select: {
             id: true,
@@ -90,10 +120,15 @@ export async function GET(req: Request) {
                 businessName: true,
                 avatarUrl: true,
                 location: true,
-                timeZone: true, // display only
+                timeZone: true,
               },
             },
-            service: { select: { id: true, name: true } },
+            service: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
             offering: {
               select: {
                 id: true,
@@ -112,78 +147,144 @@ export async function GET(req: Request) {
     })
 
     const normalized = notifications
-      .map((n) => {
-        const o = n.opening
-        if (!o) return null
+      .map((notification) => {
+        const opening = notification.opening
+        if (!opening) return null
 
-        const off = o.offering
-        const pro = o.professional
+        const offering = opening.offering
+        const professional = opening.professional
 
-        const effectiveLocationType: ServiceLocationType | null = off
-          ? pickEffectiveLocationType({
-              requested: requestedLocationType,
-              offersInSalon: Boolean(off.offersInSalon),
-              offersMobile: Boolean(off.offersMobile),
-            })
-          : requestedLocationType
+        if (!offering) {
+          return {
+            id: notification.id,
+            tier: notification.tier,
+            sentAt: notification.sentAt.toISOString(),
+            deliveredAt: notification.deliveredAt ? notification.deliveredAt.toISOString() : null,
+            openedAt: notification.openedAt ? notification.openedAt.toISOString() : null,
+            clickedAt: notification.clickedAt ? notification.clickedAt.toISOString() : null,
+            bookedAt: notification.bookedAt ? notification.bookedAt.toISOString() : null,
 
-        let priceStartingAt: unknown | null = null
-        let durationMinutes: number | null = null
-
-        if (off && effectiveLocationType) {
-          const picked = pickModeFields(off, effectiveLocationType)
-          priceStartingAt = picked.priceStartingAt
-          durationMinutes = picked.durationMinutes
-          if (durationMinutes == null) durationMinutes = pickConservativeDuration(off)
-        } else if (off) {
-          durationMinutes = pickConservativeDuration(off)
+            opening: {
+              id: opening.id,
+              status: opening.status,
+              startAt: opening.startAt.toISOString(),
+              endAt: opening.endAt ? opening.endAt.toISOString() : null,
+              discountPct: opening.discountPct ?? null,
+              note: opening.note ?? null,
+              service: opening.service
+                ? {
+                    id: opening.service.id,
+                    name: opening.service.name,
+                  }
+                : null,
+              professional: professional
+                ? {
+                    id: professional.id,
+                    businessName: professional.businessName ?? null,
+                    avatarUrl: professional.avatarUrl ?? null,
+                    location: professional.location ?? null,
+                    timeZone: professional.timeZone ?? null,
+                  }
+                : null,
+              offering: null,
+            },
+          }
         }
 
+        const supportedLocationTypes = getSupportedLocationTypes({
+          offersInSalon: Boolean(offering.offersInSalon),
+          offersMobile: Boolean(offering.offersMobile),
+        })
+
+        if (supportedLocationTypes.length === 0) {
+          return null
+        }
+
+        if (requestedLocationType && !supportedLocationTypes.includes(requestedLocationType)) {
+          return null
+        }
+
+        const selectedLocationType = resolveSelectedLocationType({
+          requested: requestedLocationType,
+          supported: supportedLocationTypes,
+        })
+
+        const requiresLocationTypeSelection =
+          selectedLocationType == null && supportedLocationTypes.length > 1
+
+        const salon = {
+          enabled: Boolean(offering.offersInSalon),
+          ...buildModeDetails(offering, ServiceLocationType.SALON),
+        }
+
+        const mobile = {
+          enabled: Boolean(offering.offersMobile),
+          ...buildModeDetails(offering, ServiceLocationType.MOBILE),
+        }
+
+        const selectedMode =
+          selectedLocationType === ServiceLocationType.SALON
+            ? {
+                locationType: ServiceLocationType.SALON,
+                priceStartingAt: salon.priceStartingAt,
+                durationMinutes: salon.durationMinutes,
+              }
+            : selectedLocationType === ServiceLocationType.MOBILE
+              ? {
+                  locationType: ServiceLocationType.MOBILE,
+                  priceStartingAt: mobile.priceStartingAt,
+                  durationMinutes: mobile.durationMinutes,
+                }
+              : null
+
         return {
-          id: n.id,
-          tier: n.tier,
-          sentAt: n.sentAt.toISOString(),
-          deliveredAt: n.deliveredAt ? n.deliveredAt.toISOString() : null,
-          openedAt: n.openedAt ? n.openedAt.toISOString() : null,
-          clickedAt: n.clickedAt ? n.clickedAt.toISOString() : null,
-          bookedAt: n.bookedAt ? n.bookedAt.toISOString() : null,
+          id: notification.id,
+          tier: notification.tier,
+          sentAt: notification.sentAt.toISOString(),
+          deliveredAt: notification.deliveredAt ? notification.deliveredAt.toISOString() : null,
+          openedAt: notification.openedAt ? notification.openedAt.toISOString() : null,
+          clickedAt: notification.clickedAt ? notification.clickedAt.toISOString() : null,
+          bookedAt: notification.bookedAt ? notification.bookedAt.toISOString() : null,
 
           opening: {
-            id: o.id,
-            status: o.status,
-            startAt: o.startAt.toISOString(),
-            endAt: o.endAt ? o.endAt.toISOString() : null,
-            discountPct: o.discountPct ?? null,
-            note: o.note ?? null,
+            id: opening.id,
+            status: opening.status,
+            startAt: opening.startAt.toISOString(),
+            endAt: opening.endAt ? opening.endAt.toISOString() : null,
+            discountPct: opening.discountPct ?? null,
+            note: opening.note ?? null,
 
-            service: o.service ? { id: o.service.id, name: o.service.name } : null,
-
-            professional: pro
+            service: opening.service
               ? {
-                  id: pro.id,
-                  businessName: pro.businessName ?? null,
-                  avatarUrl: pro.avatarUrl ?? null,
-                  location: pro.location ?? null,
-                  timeZone: pro.timeZone ?? null,
+                  id: opening.service.id,
+                  name: opening.service.name,
                 }
               : null,
 
-            offering: off
+            professional: professional
               ? {
-                  id: off.id,
-                  title: off.title ?? null,
-                  offersInSalon: Boolean(off.offersInSalon),
-                  offersMobile: Boolean(off.offersMobile),
-
-                  locationType: effectiveLocationType ?? null,
-                  priceStartingAt,
-                  durationMinutes,
+                  id: professional.id,
+                  businessName: professional.businessName ?? null,
+                  avatarUrl: professional.avatarUrl ?? null,
+                  location: professional.location ?? null,
+                  timeZone: professional.timeZone ?? null,
                 }
               : null,
+
+            offering: {
+              id: offering.id,
+              title: offering.title ?? null,
+              supportedLocationTypes,
+              selectedLocationType,
+              requiresLocationTypeSelection,
+              selectedMode,
+              salon,
+              mobile,
+            },
           },
         }
       })
-      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .filter((value): value is NonNullable<typeof value> => value !== null)
 
     return jsonOk({ notifications: normalized })
   } catch (e) {

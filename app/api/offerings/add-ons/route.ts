@@ -6,22 +6,23 @@ import { ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-type LocationTypeKey = 'SALON' | 'MOBILE'
-
 function cleanParam(v: string | null): string | null {
   const s = (v ?? '').trim()
   return s.length ? s : null
 }
 
-function parseLocationType(v: string | null): LocationTypeKey | null {
+function parseLocationType(v: string | null): ServiceLocationType | null {
   const s = (v ?? '').trim().toUpperCase()
-  if (s === 'SALON') return 'SALON'
-  if (s === 'MOBILE') return 'MOBILE'
+  if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
+  if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
   return null
 }
 
-function toPrismaLocationType(v: LocationTypeKey): ServiceLocationType {
-  return v === 'SALON' ? ServiceLocationType.SALON : ServiceLocationType.MOBILE
+function toSafePositiveInt(v: unknown, fallback = 0) {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return fallback
+  const x = Math.trunc(n)
+  return x > 0 ? x : fallback
 }
 
 export async function GET(req: Request) {
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
     const locationType = parseLocationType(url.searchParams.get('locationType'))
 
     if (!offeringId || !locationType) {
-      return jsonFail(400, 'Missing or invalid offeringId or locationType')
+      return jsonFail(400, 'Missing or invalid offeringId or locationType.')
     }
 
     const offering = await prisma.professionalServiceOffering.findUnique({
@@ -41,25 +42,52 @@ export async function GET(req: Request) {
         id: true,
         isActive: true,
         professionalId: true,
-        professional: { select: { id: true, businessName: true } },
-        service: { select: { id: true, name: true } },
+        offersInSalon: true,
+        offersMobile: true,
+        professional: {
+          select: {
+            id: true,
+            businessName: true,
+          },
+        },
+        service: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     })
 
     if (!offering || !offering.isActive) {
-      return jsonFail(404, 'Offering not found')
+      return jsonFail(404, 'Offering not found.')
     }
 
-    const locEnum = toPrismaLocationType(locationType)
+    if (locationType === ServiceLocationType.SALON && !offering.offersInSalon) {
+      return jsonFail(400, 'This offering does not support salon bookings.')
+    }
+
+    if (locationType === ServiceLocationType.MOBILE && !offering.offersMobile) {
+      return jsonFail(400, 'This offering does not support mobile bookings.')
+    }
 
     const addOnLinks = await prisma.offeringAddOn.findMany({
       where: {
-        offeringId,
+        offeringId: offering.id,
         isActive: true,
-        OR: [{ locationType: null }, { locationType: locEnum }],
-        addOnService: { isActive: true, isAddOnEligible: true },
+        OR: [{ locationType: null }, { locationType }],
+        addOnService: {
+          isActive: true,
+          isAddOnEligible: true,
+        },
       },
-      include: {
+      select: {
+        id: true,
+        addOnServiceId: true,
+        sortOrder: true,
+        isRecommended: true,
+        priceOverride: true,
+        durationOverrideMinutes: true,
         addOnService: {
           select: {
             id: true,
@@ -74,7 +102,7 @@ export async function GET(req: Request) {
       take: 200,
     })
 
-    const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
+    const addOnServiceIds = Array.from(new Set(addOnLinks.map((x) => x.addOnServiceId)))
 
     const proOfferings = addOnServiceIds.length
       ? await prisma.professionalServiceOffering.findMany({
@@ -94,37 +122,36 @@ export async function GET(req: Request) {
         })
       : []
 
-    const byServiceId = new Map(proOfferings.map((o) => [o.serviceId, o]))
+    const proOfferingByServiceId = new Map(proOfferings.map((row) => [row.serviceId, row]))
 
-    const addOns = addOnLinks.map((x) => {
-      const svc = x.addOnService
-      const proOff = byServiceId.get(svc.id) ?? null
+    const addOns = addOnLinks.map((link) => {
+      const svc = link.addOnService
+      const proOff = proOfferingByServiceId.get(svc.id) ?? null
 
-      const minutesRaw =
-        x.durationOverrideMinutes ??
-        (locationType === 'SALON' ? proOff?.salonDurationMinutes : proOff?.mobileDurationMinutes) ??
+      const durationRaw =
+        link.durationOverrideMinutes ??
+        (locationType === ServiceLocationType.MOBILE
+          ? proOff?.mobileDurationMinutes
+          : proOff?.salonDurationMinutes) ??
         svc.defaultDurationMinutes ??
         0
 
-      const minutes = Number(minutesRaw)
-      const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 0
-
-      const priceDec =
-        x.priceOverride ??
-        (locationType === 'SALON' ? proOff?.salonPriceStartingAt : proOff?.mobilePriceStartingAt) ??
+      const priceRaw =
+        link.priceOverride ??
+        (locationType === ServiceLocationType.MOBILE
+          ? proOff?.mobilePriceStartingAt
+          : proOff?.salonPriceStartingAt) ??
         svc.minPrice
 
-      const price = moneyToString(priceDec) ?? '0.00'
-
       return {
-        id: x.id, // OfferingAddOn.id ✅
+        id: link.id, // OfferingAddOn.id
         serviceId: svc.id,
         title: svc.name,
         group: svc.addOnGroup ?? null,
-        sortOrder: x.sortOrder,
-        isRecommended: Boolean(x.isRecommended),
-        minutes: safeMinutes,
-        price, // "25.00"
+        sortOrder: link.sortOrder ?? 0,
+        isRecommended: Boolean(link.isRecommended),
+        minutes: toSafePositiveInt(durationRaw, 0),
+        price: moneyToString(priceRaw) ?? '0.00',
       }
     })
 
@@ -133,16 +160,23 @@ export async function GET(req: Request) {
       locationType,
       offering: {
         id: offering.id,
-        service: offering.service ? { id: offering.service.id, name: offering.service.name } : null,
+        service: offering.service
+          ? {
+              id: offering.service.id,
+              name: offering.service.name,
+            }
+          : null,
         professional: offering.professional
-          ? { id: offering.professional.id, businessName: offering.professional.businessName ?? null }
+          ? {
+              id: offering.professional.id,
+              businessName: offering.professional.businessName ?? null,
+            }
           : null,
       },
       addOns,
     })
   } catch (err: unknown) {
     console.error('GET /api/offerings/add-ons error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    return jsonFail(500, 'Internal server error.')
   }
 }

@@ -1,9 +1,9 @@
 // app/api/bookings/[id]/cancel/route.ts
-import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { pickString } from '@/app/api/_utils/pick'
-import type { Role } from '@prisma/client'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { BookingStatus, Role, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,20 +11,20 @@ type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
 
 function isAdminRole(role: Role) {
-  return role === 'ADMIN'
+  return role === Role.ADMIN
 }
 
 export async function POST(_req: Request, ctx: Ctx) {
   try {
-    // ✅ logged-in + must be one of CLIENT/PRO/ADMIN
-    const auth = await requireUser({ roles: ['CLIENT', 'PRO', 'ADMIN'] })
+    const auth = await requireUser({ roles: [Role.CLIENT, Role.PRO, Role.ADMIN] })
     if (!auth.ok) return auth.res
-    const user = auth.user
 
-    const { id } = await Promise.resolve(ctx.params)
-    const bookingId = pickString(id)
+    const user = auth.user
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
+
     if (!bookingId) {
-      return NextResponse.json({ ok: false, error: 'Missing booking id' }, { status: 400 })
+      return jsonFail(400, 'Missing booking id.')
     }
 
     const booking = await prisma.booking.findUnique({
@@ -34,51 +34,67 @@ export async function POST(_req: Request, ctx: Ctx) {
         status: true,
         clientId: true,
         professionalId: true,
+        startedAt: true,
+        finishedAt: true,
+        sessionStep: true,
       },
     })
+
     if (!booking) {
-      return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 })
+      return jsonFail(404, 'Booking not found.')
     }
 
     const clientId = user.clientProfile?.id ?? null
     const proId = user.professionalProfile?.id ?? null
 
-    const isOwnerClient = Boolean(clientId && booking.clientId === clientId)
-    const isOwnerPro = Boolean(proId && booking.professionalId === proId)
+    const isOwnerClient = clientId === booking.clientId
+    const isOwnerPro = proId === booking.professionalId
     const isAdmin = isAdminRole(user.role)
 
-    // ✅ Must be admin OR owner (client/pro)
     if (!isAdmin && !isOwnerClient && !isOwnerPro) {
-      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+      return jsonFail(403, 'Forbidden.')
     }
 
-    // ✅ business rules
-    if (booking.status === 'COMPLETED') {
-      return NextResponse.json(
-        { ok: false, error: 'Completed bookings cannot be cancelled.' },
-        { status: 409 },
+    if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+      return jsonFail(409, 'Completed bookings cannot be cancelled.')
+    }
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      return jsonOk(
+        {
+          id: booking.id,
+          status: booking.status,
+          sessionStep: booking.sessionStep ?? SessionStep.NONE,
+        },
+        200,
       )
     }
 
-    // ✅ idempotent success
-    if (booking.status === 'CANCELLED') {
-      return NextResponse.json({ ok: true, id: booking.id, status: booking.status }, { status: 200 })
-    }
-
     const updated = await prisma.booking.update({
-      where: { id: bookingId },
+      where: { id: booking.id },
       data: {
-        status: 'CANCELLED',
-        sessionStep: 'NONE' as any,
+        status: BookingStatus.CANCELLED,
+        sessionStep: SessionStep.NONE,
         startedAt: null,
         finishedAt: null,
-      } as any,
-      select: { id: true, status: true },
+      },
+      select: {
+        id: true,
+        status: true,
+        sessionStep: true,
+      },
     })
 
-    return NextResponse.json({ ok: true, id: updated.id, status: updated.status }, { status: 200 })
+    return jsonOk(
+      {
+        id: updated.id,
+        status: updated.status,
+        sessionStep: updated.sessionStep,
+      },
+      200,
+    )
   } catch (e) {
     console.error('POST /api/bookings/[id]/cancel error', e)
-    return NextResponse.json({ ok: false, error: 'Failed to cancel booking.' }, { status: 500 })
+    return jsonFail(500, 'Failed to cancel booking.')
   }
 }

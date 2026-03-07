@@ -7,7 +7,6 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { messageStartHref } from '@/lib/messages'
-
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -16,8 +15,84 @@ type PageProps = {
   params: { id: string } | Promise<{ id: string }>
 }
 
+const bookingReceiptSelect = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  offeringId: true,
+
+  scheduledFor: true,
+  status: true,
+  source: true,
+  locationType: true,
+
+  subtotalSnapshot: true,
+  totalDurationMinutes: true,
+
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+  locationLatSnapshot: true,
+  locationLngSnapshot: true,
+
+  location: {
+    select: {
+      id: true,
+      name: true,
+      formattedAddress: true,
+      city: true,
+      state: true,
+      placeId: true,
+      lat: true,
+      lng: true,
+      timeZone: true,
+    },
+  },
+
+  service: {
+    select: {
+      id: true,
+      name: true,
+      defaultDurationMinutes: true,
+      category: { select: { name: true } },
+    },
+  },
+
+  serviceItems: {
+    orderBy: { sortOrder: 'asc' },
+    select: {
+      id: true,
+      serviceId: true,
+      offeringId: true,
+      priceSnapshot: true,
+      durationMinutesSnapshot: true,
+      sortOrder: true,
+      notes: true,
+      service: { select: { name: true } },
+    },
+  },
+
+  professional: {
+    select: {
+      id: true,
+      businessName: true,
+      timeZone: true,
+      location: true,
+      user: { select: { email: true } },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type BookingReceiptRow = Prisma.BookingGetPayload<{
+  select: typeof bookingReceiptSelect
+}>
+
+type ServiceItemRow = BookingReceiptRow['serviceItems'][number]
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function fmtInTimeZone(dateUtc: Date, timeZone: string) {
-  // ✅ Never LA fallback — sanitize to UTC if invalid
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   return new Intl.DateTimeFormat(undefined, {
     timeZone: tz,
@@ -55,58 +130,66 @@ function friendlyStatus(v: unknown) {
   if (s === 'ACCEPTED') return 'Confirmed'
   if (s === 'CANCELLED') return 'Cancelled'
   if (s === 'COMPLETED') return 'Completed'
+  if (s === 'WAITLIST') return 'Waitlist'
   return s || 'Unknown'
 }
 
-type ServiceItemRow = {
-  id: string
-  serviceId: string
-  offeringId: string | null
-  priceSnapshot: Prisma.Decimal
-  durationMinutesSnapshot: number
-  sortOrder: number
-  notes: string | null
-  service: { name: string }
-}
-
-function isAddOnItem(x: Pick<ServiceItemRow, 'notes' | 'sortOrder'>) {
-  const n = (x.notes || '').trim().toUpperCase()
-  if (n.startsWith('ADDON:')) return true
-  return (x.sortOrder ?? 0) >= 100
+function isAddOnItem(item: Pick<ServiceItemRow, 'notes' | 'sortOrder'>) {
+  const note = (item.notes || '').trim().toUpperCase()
+  if (note.startsWith('ADDON:')) return true
+  return (item.sortOrder ?? 0) >= 100
 }
 
 function sumDecimal(values: Prisma.Decimal[]) {
-  return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
+  return values.reduce((acc, value) => acc.add(value), new Prisma.Decimal(0))
 }
+
 function decimalToNumber(v: unknown): number | null {
   if (v == null) return null
-  if (typeof v === 'number' && Number.isFinite(v)) return v
 
-  // Prisma.Decimal has toNumber()
-  if (typeof (v as any)?.toNumber === 'function') {
-    const n = (v as any).toNumber()
-    return Number.isFinite(n) ? n : null
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    return v
   }
 
-  // fallback for strings
   if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
+    const parsed = Number(v)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  if (typeof v === 'object' && v !== null) {
+    const maybeToNumber = (v as { toNumber?: unknown }).toNumber
+    if (typeof maybeToNumber === 'function') {
+      const parsed = maybeToNumber.call(v) as number
+      return Number.isFinite(parsed) ? parsed : null
+    }
+
+    const maybeToString = (v as { toString?: unknown }).toString
+    if (typeof maybeToString === 'function') {
+      const parsed = Number(String(maybeToString.call(v)))
+      return Number.isFinite(parsed) ? parsed : null
+    }
   }
 
   return null
 }
 
+function pickFormattedAddress(snapshot: Prisma.JsonValue | null | undefined): string | null {
+  if (!isRecord(snapshot)) return null
+
+  const raw = snapshot.formattedAddress
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
 function resolveReceiptTimeZone(args: {
-  bookingLocationTimeZone: unknown
-  bookedLocationTimeZone: unknown
-  proTimeZone: unknown
+  bookingLocationTimeZone: string | null
+  bookedLocationTimeZone: string | null | undefined
+  proTimeZone: string | null | undefined
 }) {
   const bookingTz = pickTimeZoneOrNull(args.bookingLocationTimeZone)
   if (bookingTz) return bookingTz
 
-  const locTz = pickTimeZoneOrNull(args.bookedLocationTimeZone)
-  if (locTz) return locTz
+  const locationTz = pickTimeZoneOrNull(args.bookedLocationTimeZone)
+  if (locationTz) return locationTz
 
   const proTz = pickTimeZoneOrNull(args.proTimeZone)
   if (proTz) return proTz
@@ -114,151 +197,115 @@ function resolveReceiptTimeZone(args: {
   return DEFAULT_TIME_ZONE
 }
 
+function buildBookedLocationLabel(booking: BookingReceiptRow) {
+  const snapshotAddress = pickFormattedAddress(booking.locationAddressSnapshot)
+  if (snapshotAddress) return snapshotAddress
+
+  const bookedLocation = booking.location
+  if (bookedLocation?.formattedAddress?.trim()) return bookedLocation.formattedAddress.trim()
+  if (bookedLocation?.name?.trim()) return bookedLocation.name.trim()
+
+  const cityState = [bookedLocation?.city, bookedLocation?.state].filter(Boolean).join(', ')
+  if (cityState) return cityState
+
+  const professionalLocation = booking.professional?.location?.trim()
+  if (professionalLocation) return professionalLocation
+
+  return null
+}
+
+function buildMapsHref(booking: BookingReceiptRow) {
+  const isSalon = upper(booking.locationType) === 'SALON'
+  if (!isSalon) return null
+
+  const snapshotAddress = pickFormattedAddress(booking.locationAddressSnapshot)
+  const snapshotLat = decimalToNumber(booking.locationLatSnapshot)
+  const snapshotLng = decimalToNumber(booking.locationLngSnapshot)
+  const hasSnapshotTruth = snapshotAddress || snapshotLat != null || snapshotLng != null
+
+  const bookedLocation = booking.location
+
+  return mapsHrefFromLocation({
+    placeId: hasSnapshotTruth ? null : bookedLocation?.placeId ?? null,
+    lat: snapshotLat ?? decimalToNumber(bookedLocation?.lat),
+    lng: snapshotLng ?? decimalToNumber(bookedLocation?.lng),
+    formattedAddress: snapshotAddress ?? bookedLocation?.formattedAddress ?? null,
+    name: hasSnapshotTruth ? null : bookedLocation?.name ?? null,
+  })
+}
+
 export default async function BookingReceiptPage(props: PageProps) {
   const { id } = await Promise.resolve(props.params)
   if (!id || typeof id !== 'string') notFound()
 
   const user = await getCurrentUser().catch(() => null)
-  if (!user) redirect(`/login?from=${encodeURIComponent(`/booking/${id}`)}`)
+  if (!user) {
+    redirect(`/login?from=${encodeURIComponent(`/booking/${id}`)}`)
+  }
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    select: {
-      id: true,
-      clientId: true,
-      professionalId: true,
-      offeringId: true,
-
-      scheduledFor: true,
-      status: true,
-      source: true,
-      locationType: true,
-
-      subtotalSnapshot: true,
-      totalDurationMinutes: true,
-
-      // ✅ booking snapshot timezone (highest truth for the appointment)
-      locationTimeZone: true,
-
-      // ✅ booked location (in case snapshot is missing and we need a fallback)
-      location: {
-        select: {
-          id: true,
-          timeZone: true,
-        },
-      },
-
-      service: {
-        select: {
-          id: true,
-          name: true,
-          defaultDurationMinutes: true,
-          category: { select: { name: true } },
-        },
-      },
-
-      serviceItems: {
-        orderBy: { sortOrder: 'asc' },
-        select: {
-          id: true,
-          serviceId: true,
-          offeringId: true,
-          priceSnapshot: true,
-          durationMinutesSnapshot: true,
-          sortOrder: true,
-          notes: true,
-          service: { select: { name: true } },
-        },
-      },
-
-      professional: {
-        select: {
-          id: true,
-          businessName: true,
-          timeZone: true,
-          user: { select: { email: true } },
-          locations: {
-            where: { isPrimary: true },
-            take: 1,
-            select: {
-              name: true,
-              formattedAddress: true,
-              city: true,
-              state: true,
-              placeId: true,
-              lat: true,
-              lng: true,
-            },
-          },
-        },
-      },
-    },
+    select: bookingReceiptSelect,
   })
 
   if (!booking) notFound()
 
   const isClientViewer = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
   const isProViewer = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
+
   if (!isClientViewer && !isProViewer) notFound()
 
-  const prof = booking.professional
-  const svc = booking.service
+  const professional = booking.professional
+  const service = booking.service
 
-  const proName = prof?.businessName || prof?.user?.email || 'Professional'
-  const serviceName = svc?.name || 'Service'
+  const proName = professional?.businessName || professional?.user?.email || 'Professional'
+  const serviceName = service?.name || 'Service'
 
-  const primaryLoc = prof?.locations?.[0] ?? null
-  const locationLabel =
-    primaryLoc?.formattedAddress?.trim() ||
-    primaryLoc?.name?.trim() ||
-    [primaryLoc?.city, primaryLoc?.state].filter(Boolean).join(', ') ||
-    null
-
-  const isSalon = upper(booking.locationType) === 'SALON'
-  const mapsHref = isSalon
-    ? mapsHrefFromLocation({
-        placeId: primaryLoc?.placeId ?? null,
-        lat: decimalToNumber(primaryLoc?.lat),
-        lng: decimalToNumber(primaryLoc?.lng),
-        formattedAddress: primaryLoc?.formattedAddress ?? null,
-        name: primaryLoc?.name ?? null,
-      })
-    : null
-
-  // ✅ Appointment timezone resolution (no LA fallback)
   const appointmentTz = resolveReceiptTimeZone({
-    bookingLocationTimeZone: (booking as any).locationTimeZone,
-    bookedLocationTimeZone: (booking as any).location?.timeZone,
-    proTimeZone: prof?.timeZone,
+    bookingLocationTimeZone: booking.locationTimeZone,
+    bookedLocationTimeZone: booking.location?.timeZone,
+    proTimeZone: professional?.timeZone,
   })
 
   const when = fmtInTimeZone(new Date(booking.scheduledFor), appointmentTz)
+  const locationLabel = buildBookedLocationLabel(booking)
+  const mapsHref = buildMapsHref(booking)
 
   const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
-  const proProfileHref = prof?.id ? `/professionals/${encodeURIComponent(prof.id)}` : null
-
+  const proProfileHref = professional?.id ? `/professionals/${encodeURIComponent(professional.id)}` : null
   const messageHref =
-    isClientViewer || isProViewer ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id }) : null
+    isClientViewer || isProViewer
+      ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
+      : null
+
+  const dashboardHref = isProViewer ? '/pro/bookings' : '/client/bookings'
+  const dashboardLabel = isProViewer ? 'Go to pro dashboard' : 'Go to dashboard'
 
   const duration =
-    (Number(booking.totalDurationMinutes ?? 0) > 0 ? Number(booking.totalDurationMinutes) : svc?.defaultDurationMinutes) ??
-    null
+    (Number(booking.totalDurationMinutes ?? 0) > 0
+      ? Number(booking.totalDurationMinutes)
+      : service?.defaultDurationMinutes) ?? null
 
   const locationTypeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
   const statusLabel = friendlyStatus(booking.status)
-
   const isWaiting = upper(booking.status) === 'PENDING'
 
-  // ---- line items breakdown ----
-  const items = (booking.serviceItems ?? []) as ServiceItemRow[]
-  const baseItems = items.filter((x) => !isAddOnItem(x))
-  const addOnItems = items.filter((x) => isAddOnItem(x))
+  const items = booking.serviceItems ?? []
+  const baseItems = items.filter((item) => !isAddOnItem(item))
+  const addOnItems = items.filter((item) => isAddOnItem(item))
 
-  const addOnPrice = sumDecimal(addOnItems.map((x) => x.priceSnapshot))
-  const addOnMinutes = addOnItems.reduce((sum, x) => sum + (Number(x.durationMinutesSnapshot) || 0), 0)
+  const addOnPrice = sumDecimal(addOnItems.map((item) => item.priceSnapshot))
+  const addOnMinutes = addOnItems.reduce(
+    (sum, item) => sum + (Number(item.durationMinutesSnapshot) || 0),
+    0,
+  )
 
-  const subtotalLabel = booking.subtotalSnapshot ? moneyToString(booking.subtotalSnapshot) : null
+  const subtotalDecimal =
+    booking.subtotalSnapshot ??
+    (items.length ? sumDecimal(items.map((item) => item.priceSnapshot)) : null)
+
+  const subtotalLabel = subtotalDecimal ? moneyToString(subtotalDecimal) : null
 
   return (
     <main className="mx-auto max-w-180 px-4 pb-24 pt-10 text-textPrimary">
@@ -276,7 +323,12 @@ export default async function BookingReceiptPage(props: PageProps) {
 
             {locationLabel ? (
               mapsHref ? (
-                <a href={mapsHref} target="_blank" rel="noreferrer" className="text-textSecondary hover:opacity-80">
+                <a
+                  href={mapsHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-textSecondary hover:opacity-80"
+                >
                   {' · '}
                   {locationLabel}
                 </a>
@@ -323,30 +375,37 @@ export default async function BookingReceiptPage(props: PageProps) {
           ) : null}
         </div>
 
-        <Link href="/looks" className="text-[12px] font-black text-textPrimary hover:opacity-80">
-          ← Back to Looks
+        <Link href={dashboardHref} className="text-[12px] font-black text-textPrimary hover:opacity-80">
+          ← Back
         </Link>
       </div>
 
-      {/* Booking breakdown (base + add-ons) */}
       {items.length ? (
         <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
           <div className="text-[12px] font-black text-textSecondary">Service breakdown</div>
 
           <div className="mt-3 grid gap-2">
-            {baseItems.map((x) => {
-              const price = moneyToString(x.priceSnapshot) ?? '0.00'
-              const mins = Number(x.durationMinutesSnapshot) || 0
+            {baseItems.map((item) => {
+              const price = moneyToString(item.priceSnapshot) ?? '0.00'
+              const mins = Number(item.durationMinutesSnapshot) || 0
+
               return (
                 <div
-                  key={x.id}
+                  key={item.id}
                   className="flex items-center justify-between rounded-card border border-white/10 bg-bgPrimary/35 px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-[13px] font-black text-textPrimary">{x.service.name}</div>
-                    <div className="mt-1 text-[11px] font-semibold text-textSecondary">{mins} min</div>
+                    <div className="truncate text-[13px] font-black text-textPrimary">
+                      {item.service.name}
+                    </div>
+                    <div className="mt-1 text-[11px] font-semibold text-textSecondary">
+                      {mins} min
+                    </div>
                   </div>
-                  <div className="shrink-0 text-[12px] font-black text-textPrimary">${price}</div>
+
+                  <div className="shrink-0 text-[12px] font-black text-textPrimary">
+                    ${price}
+                  </div>
                 </div>
               )
             })}
@@ -357,19 +416,27 @@ export default async function BookingReceiptPage(props: PageProps) {
               <div className="text-[12px] font-black text-textSecondary">Add-ons</div>
 
               <div className="mt-3 grid gap-2">
-                {addOnItems.map((x) => {
-                  const price = moneyToString(x.priceSnapshot) ?? '0.00'
-                  const mins = Number(x.durationMinutesSnapshot) || 0
+                {addOnItems.map((item) => {
+                  const price = moneyToString(item.priceSnapshot) ?? '0.00'
+                  const mins = Number(item.durationMinutesSnapshot) || 0
+
                   return (
                     <div
-                      key={x.id}
+                      key={item.id}
                       className="flex items-center justify-between rounded-card border border-white/10 bg-bgPrimary/35 px-4 py-3"
                     >
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">{x.service.name}</div>
-                        <div className="mt-1 text-[11px] font-semibold text-textSecondary">+{mins} min</div>
+                        <div className="truncate text-[13px] font-black text-textPrimary">
+                          {item.service.name}
+                        </div>
+                        <div className="mt-1 text-[11px] font-semibold text-textSecondary">
+                          +{mins} min
+                        </div>
                       </div>
-                      <div className="shrink-0 text-[12px] font-black text-textPrimary">${price}</div>
+
+                      <div className="shrink-0 text-[12px] font-black text-textPrimary">
+                        ${price}
+                      </div>
                     </div>
                   )
                 })}
@@ -377,7 +444,10 @@ export default async function BookingReceiptPage(props: PageProps) {
 
               <div className="tovis-glass-soft mt-3 rounded-card border border-white/10 px-4 py-3 text-[12px] font-semibold text-textSecondary">
                 Add-ons total:{' '}
-                <span className="font-black text-textPrimary">${moneyToString(addOnPrice) ?? '0.00'}</span> · Time:{' '}
+                <span className="font-black text-textPrimary">
+                  ${moneyToString(addOnPrice) ?? '0.00'}
+                </span>{' '}
+                · Time:{' '}
                 <span className="font-black text-textPrimary">{addOnMinutes} min</span>
               </div>
             </div>
@@ -389,7 +459,9 @@ export default async function BookingReceiptPage(props: PageProps) {
         <div className="text-[12px] font-black text-textSecondary">Next moves</div>
 
         <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-          {isWaiting ? 'Most pros confirm quickly. You’ll see it update automatically.' : 'You’re all set. Keep this handy for day-of details.'}
+          {isWaiting
+            ? 'Most pros confirm quickly. You’ll see it update automatically.'
+            : 'You’re all set. Keep this handy for day-of details.'}
         </div>
 
         <div className="mt-3 grid gap-2">
@@ -419,10 +491,10 @@ export default async function BookingReceiptPage(props: PageProps) {
           ) : null}
 
           <Link
-            href={isProViewer ? '/pro/bookings' : '/client/bookings'}
+            href={dashboardHref}
             className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
           >
-            Go to dashboard
+            {dashboardLabel}
           </Link>
 
           <div className="text-[12px] text-textSecondary">
@@ -431,9 +503,9 @@ export default async function BookingReceiptPage(props: PageProps) {
         </div>
       </div>
 
-      {svc?.category?.name ? (
+      {service?.category?.name ? (
         <div className="mt-4 text-[12px] text-textSecondary">
-          Category: <span className="font-black text-textPrimary">{svc.category.name}</span>
+          Category: <span className="font-black text-textPrimary">{service.category.name}</span>
         </div>
       ) : null}
     </main>

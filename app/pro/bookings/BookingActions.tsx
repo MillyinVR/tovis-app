@@ -6,8 +6,12 @@ import { useRouter } from 'next/navigation'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { safeJson } from '@/lib/http'
-type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
-type LoadingAction = 'ACCEPT' | 'CANCEL' | 'START' | 'FINISH'
+
+const BOOKING_STATUSES = ['PENDING', 'ACCEPTED', 'COMPLETED', 'CANCELLED'] as const
+type BookingStatus = (typeof BOOKING_STATUSES)[number]
+
+const LOADING_ACTIONS = ['ACCEPT', 'CANCEL', 'START', 'FINISH'] as const
+type LoadingAction = (typeof LOADING_ACTIONS)[number]
 
 type Props = {
   bookingId: string
@@ -17,14 +21,29 @@ type Props = {
 
   /**
    * Appointment timezone (preferred: booking.locationTimeZone).
-   * UI policy: do NOT invent a timezone if missing — hide timestamps instead.
+   * UI policy: do NOT invent a timezone if missing.
    */
   timeZone?: string | null
 }
 
+type JsonObject = Record<string, unknown>
+
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function readString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v : null
+}
+
+function readNestedRecord(obj: unknown, key: string): JsonObject | null {
+  if (!isRecord(obj)) return null
+  const value = obj[key]
+  return isRecord(value) ? value : null
+}
+
 function isBookingStatus(v: unknown): v is BookingStatus {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
-  return s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED'
+  return typeof v === 'string' && (BOOKING_STATUSES as readonly string[]).includes(v.trim().toUpperCase())
 }
 
 function normalizeBookingStatus(v: unknown): BookingStatus {
@@ -41,7 +60,7 @@ function parseIso(iso?: string | null): Date | null {
 
 /**
  * UI formatting:
- * - If tz is missing/invalid, return null (don’t lie)
+ * - If tz is missing/invalid, return null (do not lie)
  * - If date invalid, return null
  */
 function formatWhen(iso: string | null | undefined, timeZone?: string | null) {
@@ -54,45 +73,87 @@ function formatWhen(iso: string | null | undefined, timeZone?: string | null) {
   return formatAppointmentWhen(d, tz)
 }
 
+function errorFromResponse(res: Response, data: unknown) {
+  const root = isRecord(data) ? data : null
+  const error = root ? readString(root.error) : null
+  if (error) return error
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
-  if (typeof data?.message === 'string') return data.message
+  const message = root ? readString(root.message) : null
+  if (message) return message
+
   if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
+  if (res.status === 403) return 'You do not have access to do that.'
   if (res.status === 404) return 'Not found.'
-  if (res.status === 409) return 'That action isn’t allowed right now.'
+  if (res.status === 409) return 'That action is not allowed right now.'
   return `Request failed (${res.status}).`
 }
 
-function extractNextHref(data: any): string | null {
-  const maybe = data?.nextHref ?? data?.booking?.nextHref ?? data?.data?.nextHref
-  return typeof maybe === 'string' && maybe.startsWith('/') && !maybe.startsWith('//') ? maybe : null
+function extractNextHref(data: unknown): string | null {
+  const root = isRecord(data) ? data : null
+  if (!root) return null
+
+  const direct = readString(root.nextHref)
+  if (direct && direct.startsWith('/') && !direct.startsWith('//')) return direct
+
+  const booking = readNestedRecord(root, 'booking')
+  const bookingHref = booking ? readString(booking.nextHref) : null
+  if (bookingHref && bookingHref.startsWith('/') && !bookingHref.startsWith('//')) return bookingHref
+
+  const nestedData = readNestedRecord(root, 'data')
+  const dataHref = nestedData ? readString(nestedData.nextHref) : null
+  if (dataHref && dataHref.startsWith('/') && !dataHref.startsWith('//')) return dataHref
+
+  return null
 }
 
 /**
  * Enforce canonical backend response.
  * We accept:
- *  - data.status
- *  - data.booking.status
- *  - data.data.status
+ * - data.status
+ * - data.booking.status
+ * - data.data.status
  * Anything else is a hard error.
  */
-function extractStatusStrict(data: any): BookingStatus {
-  const candidate =
-    (typeof data?.status === 'string' && data.status) ||
-    (typeof data?.booking?.status === 'string' && data.booking.status) ||
-    (typeof data?.data?.status === 'string' && data.data.status)
+function extractStatusStrict(data: unknown): BookingStatus {
+  const root = isRecord(data) ? data : null
+  const direct = root ? readString(root.status) : null
+  if (direct) return normalizeBookingStatus(direct)
 
-  return normalizeBookingStatus(candidate)
+  const booking = readNestedRecord(root, 'booking')
+  const bookingStatus = booking ? readString(booking.status) : null
+  if (bookingStatus) return normalizeBookingStatus(bookingStatus)
+
+  const nestedData = readNestedRecord(root, 'data')
+  const dataStatus = nestedData ? readString(nestedData.status) : null
+  if (dataStatus) return normalizeBookingStatus(dataStatus)
+
+  throw new Error('Response is missing a valid booking status.')
 }
 
-function extractIso(data: any, key: 'startedAt' | 'finishedAt') {
-  const maybe = data?.[key] ?? data?.booking?.[key] ?? data?.data?.[key]
-  return typeof maybe === 'string' && parseIso(maybe) ? maybe : null
+function extractIso(data: unknown, key: 'startedAt' | 'finishedAt') {
+  const root = isRecord(data) ? data : null
+
+  const direct = root ? readString(root[key]) : null
+  if (direct && parseIso(direct)) return direct
+
+  const booking = readNestedRecord(root, 'booking')
+  const bookingIso = booking ? readString(booking[key]) : null
+  if (bookingIso && parseIso(bookingIso)) return bookingIso
+
+  const nestedData = readNestedRecord(root, 'data')
+  const dataIso = nestedData ? readString(nestedData[key]) : null
+  if (dataIso && parseIso(dataIso)) return dataIso
+
+  return null
 }
 
-export default function BookingActions({ bookingId, currentStatus, startedAt, finishedAt, timeZone }: Props) {
+export default function BookingActions({
+  bookingId,
+  currentStatus,
+  startedAt,
+  finishedAt,
+  timeZone,
+}: Props) {
   const router = useRouter()
 
   const [status, setStatus] = useState<BookingStatus | null>(null)
@@ -110,14 +171,19 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
     try {
       setStatus(normalizeBookingStatus(currentStatus))
       setStatusError(null)
-    } catch (e: any) {
+    } catch (err: unknown) {
       setStatus(null)
-      setStatusError(e?.message || 'Invalid booking status.')
+      setStatusError(err instanceof Error ? err.message : 'Invalid booking status.')
     }
   }, [currentStatus])
 
-  useEffect(() => setLocalStartedAt(startedAt ?? null), [startedAt])
-  useEffect(() => setLocalFinishedAt(finishedAt ?? null), [finishedAt])
+  useEffect(() => {
+    setLocalStartedAt(startedAt ?? null)
+  }, [startedAt])
+
+  useEffect(() => {
+    setLocalFinishedAt(finishedAt ?? null)
+  }, [finishedAt])
 
   useEffect(() => {
     return () => {
@@ -145,10 +211,12 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       setError('Missing booking id.')
       return
     }
+
     if (!status) {
       setError('Booking has an invalid status. Refresh or contact support.')
       return
     }
+
     if (loading) return
 
     if (action === 'CANCEL') {
@@ -192,13 +260,13 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
         })
       }
 
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
+
       if (!res.ok) {
         setError(errorFromResponse(res, data))
         return
       }
 
-      // 🔒 Canonical response enforcement
       const nextStatus = extractStatusStrict(data)
       setStatus(nextStatus)
 
@@ -209,7 +277,7 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
 
       if (action === 'FINISH') {
         const iso = extractIso(data, 'finishedAt')
-        if (iso) setLocalFinishedAt(iso)
+        setLocalFinishedAt(iso ?? new Date().toISOString())
 
         const nextHref = extractNextHref(data)
         if (nextHref) {
@@ -219,10 +287,11 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       }
 
       router.refresh()
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return
+
       console.error(err)
-      setError(err?.message || 'Network error while updating booking.')
+      setError(err instanceof Error ? err.message : 'Network error while updating booking.')
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null
@@ -267,7 +336,9 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
       <div className="text-[12px] text-textSecondary">
         Status: <span className="font-black text-textPrimary">{status}</span>
         {started ? (
-          <span className="ml-2 text-textSecondary">• Started{startedLabel ? ` ${startedLabel}` : ''}</span>
+          <span className="ml-2 text-textSecondary">
+            • Started{startedLabel ? ` ${startedLabel}` : ''}
+          </span>
         ) : null}
       </div>
 
@@ -279,25 +350,45 @@ export default function BookingActions({ bookingId, currentStatus, startedAt, fi
 
       <div className="flex flex-wrap justify-start gap-2 md:justify-end">
         {canAccept ? (
-          <button type="button" onClick={() => run('ACCEPT')} disabled={loading !== null} className={btnPrimary}>
+          <button
+            type="button"
+            onClick={() => run('ACCEPT')}
+            disabled={loading !== null}
+            className={btnPrimary}
+          >
             {loading === 'ACCEPT' ? 'Accepting…' : 'Accept'}
           </button>
         ) : null}
 
         {canCancel ? (
-          <button type="button" onClick={() => run('CANCEL')} disabled={loading !== null} className={btnGhost}>
+          <button
+            type="button"
+            onClick={() => run('CANCEL')}
+            disabled={loading !== null}
+            className={btnGhost}
+          >
             {loading === 'CANCEL' ? 'Cancelling…' : 'Cancel'}
           </button>
         ) : null}
 
         {canStart ? (
-          <button type="button" onClick={() => run('START')} disabled={loading !== null} className={btnGhost}>
+          <button
+            type="button"
+            onClick={() => run('START')}
+            disabled={loading !== null}
+            className={btnGhost}
+          >
             {loading === 'START' ? 'Starting…' : 'Start'}
           </button>
         ) : null}
 
         {canFinish ? (
-          <button type="button" onClick={() => run('FINISH')} disabled={loading !== null} className={btnPrimary}>
+          <button
+            type="button"
+            onClick={() => run('FINISH')}
+            disabled={loading !== null}
+            className={btnPrimary}
+          >
             {loading === 'FINISH' ? 'Finishing…' : 'Finish'}
           </button>
         ) : null}

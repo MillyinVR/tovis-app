@@ -9,13 +9,19 @@ export const dynamic = 'force-dynamic'
 
 type JsonObject = Record<string, unknown>
 
+type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+type WorkingHoursDay = {
+  enabled: boolean
+  start: string
+  end: string
+}
+type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
+
 function isRecord(v: unknown): v is JsonObject {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function trimOrNull(v: unknown): string | null | undefined {
-  // undefined => not provided / invalid type
-  // null => explicit clear
   if (v === undefined) return undefined
   if (v === null) return null
   if (typeof v !== 'string') return undefined
@@ -23,21 +29,44 @@ function trimOrNull(v: unknown): string | null | undefined {
   return t ? t : null
 }
 
-function isPositiveInt(n: number | null) {
+function isPositiveInt(n: number | null): n is number {
   return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
 }
 
-function defaultWorkingHours(): Prisma.JsonObject {
-  const make = (enabled: boolean) => ({ enabled, start: '09:00', end: '17:00' })
-  return {
-    mon: make(true),
-    tue: make(true),
-    wed: make(true),
-    thu: make(true),
-    fri: make(true),
-    sat: make(false),
-    sun: make(false),
+function requirePositiveInt(v: unknown, fieldName: string) {
+  const n = pickInt(v)
+  if (!isPositiveInt(n)) {
+    return { ok: false as const, error: `Invalid ${fieldName}.` }
   }
+  return { ok: true as const, value: n }
+}
+
+function defaultWorkingHours(): WorkingHoursObj {
+  const weekday: WorkingHoursDay = { enabled: true, start: '09:00', end: '17:00' }
+  const weekend: WorkingHoursDay = { enabled: false, start: '09:00', end: '17:00' }
+
+  return {
+    mon: { ...weekday },
+    tue: { ...weekday },
+    wed: { ...weekday },
+    thu: { ...weekday },
+    fri: { ...weekday },
+    sat: { ...weekend },
+    sun: { ...weekend },
+  }
+}
+
+// Prisma JSON boundary cast: plain JSON-safe object.
+function toInputJsonValue(v: WorkingHoursObj): Prisma.InputJsonValue {
+  return v as unknown as Prisma.InputJsonValue
+}
+
+function salonCapableTypes(): readonly ProfessionalLocationType[] {
+  return [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
+}
+
+function mobileCapableTypes(): readonly ProfessionalLocationType[] {
+  return [ProfessionalLocationType.MOBILE_BASE]
 }
 
 function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon' | 'Mobile') {
@@ -67,7 +96,7 @@ function toDto(off: OfferingRow) {
     id: off.id,
     serviceId: off.serviceId,
 
-    title: null as string | null,
+    title: null,
 
     description: off.description ?? null,
     customImageUrl: off.customImageUrl ?? null,
@@ -83,7 +112,6 @@ function toDto(off: OfferingRow) {
 
     isActive: Boolean(off.isActive),
 
-    // service/library flags + display
     serviceName: off.service.name,
     categoryName: off.service.category?.name ?? null,
     serviceDefaultImageUrl: off.service.defaultImageUrl ?? null,
@@ -105,34 +133,56 @@ async function ensureLocationsForOffering(args: {
 }) {
   const { tx, professionalId, offersInSalon, offersMobile } = args
 
-  const neededTypes: ProfessionalLocationType[] = []
-  if (offersInSalon) neededTypes.push(ProfessionalLocationType.SALON)
-  if (offersMobile) neededTypes.push(ProfessionalLocationType.MOBILE_BASE)
-  if (!neededTypes.length) return
+  if (!offersInSalon && !offersMobile) return
+
+  const relevantTypes: ProfessionalLocationType[] = [
+    ...(offersInSalon ? salonCapableTypes() : []),
+    ...(offersMobile ? mobileCapableTypes() : []),
+  ]
 
   const existing = await tx.professionalLocation.findMany({
-    where: { professionalId, type: { in: neededTypes } },
+    where: {
+      professionalId,
+      type: { in: relevantTypes },
+    },
     select: { type: true },
     take: 50,
   })
 
-  const existingTypes = new Set(existing.map((l) => l.type))
+  const existingTypes = new Set(existing.map((location) => location.type))
+  const hasSalonCapableLocation = salonCapableTypes().some((type) => existingTypes.has(type))
+  const hasMobileCapableLocation = existingTypes.has(ProfessionalLocationType.MOBILE_BASE)
 
-  for (const type of neededTypes) {
-    if (existingTypes.has(type)) continue
+  let totalLocationCount = await tx.professionalLocation.count({
+    where: { professionalId },
+  })
 
-    const totalCount = await tx.professionalLocation.count({ where: { professionalId } })
-    const shouldBePrimary = totalCount === 0
-
+  if (offersInSalon && !hasSalonCapableLocation) {
     await tx.professionalLocation.create({
       data: {
         professionalId,
-        type,
-        name: type === ProfessionalLocationType.MOBILE_BASE ? 'Set mobile base' : 'Set salon address',
-        isPrimary: shouldBePrimary,
+        type: ProfessionalLocationType.SALON,
+        name: 'Set salon address',
+        isPrimary: totalLocationCount === 0,
         isBookable: false,
         timeZone: null,
-        workingHours: defaultWorkingHours(),
+        workingHours: toInputJsonValue(defaultWorkingHours()),
+      },
+      select: { id: true },
+    })
+    totalLocationCount += 1
+  }
+
+  if (offersMobile && !hasMobileCapableLocation) {
+    await tx.professionalLocation.create({
+      data: {
+        professionalId,
+        type: ProfessionalLocationType.MOBILE_BASE,
+        name: 'Set mobile base',
+        isPrimary: totalLocationCount === 0,
+        isBookable: false,
+        timeZone: null,
+        workingHours: toInputJsonValue(defaultWorkingHours()),
       },
       select: { id: true },
     })
@@ -177,7 +227,9 @@ export async function POST(request: Request) {
     const serviceId = pickString(body.serviceId)
     if (!serviceId) return jsonFail(400, 'Missing serviceId.')
 
-    const description = Object.prototype.hasOwnProperty.call(body, 'description') ? trimOrNull(body.description) : undefined
+    const description = Object.prototype.hasOwnProperty.call(body, 'description')
+      ? trimOrNull(body.description)
+      : undefined
     if (Object.prototype.hasOwnProperty.call(body, 'description') && description === undefined) {
       return jsonFail(400, 'description must be string or null.')
     }
@@ -189,8 +241,12 @@ export async function POST(request: Request) {
       return jsonFail(400, 'customImageUrl must be string or null.')
     }
 
-    const offersInSalonIn = Object.prototype.hasOwnProperty.call(body, 'offersInSalon') ? pickBool(body.offersInSalon) : null
-    const offersMobileIn = Object.prototype.hasOwnProperty.call(body, 'offersMobile') ? pickBool(body.offersMobile) : null
+    const offersInSalonIn = Object.prototype.hasOwnProperty.call(body, 'offersInSalon')
+      ? pickBool(body.offersInSalon)
+      : null
+    const offersMobileIn = Object.prototype.hasOwnProperty.call(body, 'offersMobile')
+      ? pickBool(body.offersMobile)
+      : null
 
     if (Object.prototype.hasOwnProperty.call(body, 'offersInSalon') && offersInSalonIn === null) {
       return jsonFail(400, 'offersInSalon must be boolean.')
@@ -224,12 +280,20 @@ export async function POST(request: Request) {
       return jsonFail(400, 'This service is currently unavailable.')
     }
 
-    // Validate pricing/durations
-    const salonDur = offersInSalon ? pickInt(body.salonDurationMinutes) : null
-    const mobileDur = offersMobile ? pickInt(body.mobileDurationMinutes) : null
+    let salonDurationMinutes: number | null = null
+    let mobileDurationMinutes: number | null = null
 
-    if (offersInSalon && !isPositiveInt(salonDur)) return jsonFail(400, 'Invalid salonDurationMinutes.')
-    if (offersMobile && !isPositiveInt(mobileDur)) return jsonFail(400, 'Invalid mobileDurationMinutes.')
+    if (offersInSalon) {
+      const parsedSalonDuration = requirePositiveInt(body.salonDurationMinutes, 'salonDurationMinutes')
+      if (!parsedSalonDuration.ok) return jsonFail(400, parsedSalonDuration.error)
+      salonDurationMinutes = parsedSalonDuration.value
+    }
+
+    if (offersMobile) {
+      const parsedMobileDuration = requirePositiveInt(body.mobileDurationMinutes, 'mobileDurationMinutes')
+      if (!parsedMobileDuration.ok) return jsonFail(400, parsedMobileDuration.error)
+      mobileDurationMinutes = parsedMobileDuration.value
+    }
 
     let salonPrice: Prisma.Decimal | null = null
     let mobilePrice: Prisma.Decimal | null = null
@@ -275,12 +339,18 @@ export async function POST(request: Request) {
           offersMobile,
 
           salonPriceStartingAt: offersInSalon ? salonPrice : null,
-          salonDurationMinutes: offersInSalon ? (salonDur as number) : null,
+          salonDurationMinutes: offersInSalon ? salonDurationMinutes : null,
 
           mobilePriceStartingAt: offersMobile ? mobilePrice : null,
-          mobileDurationMinutes: offersMobile ? (mobileDur as number) : null,
+          mobileDurationMinutes: offersMobile ? mobileDurationMinutes : null,
         },
-        include: { service: { include: { category: true } } },
+        include: {
+          service: {
+            include: {
+              category: true,
+            },
+          },
+        },
       })
     })
 

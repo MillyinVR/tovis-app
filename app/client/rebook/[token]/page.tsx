@@ -1,6 +1,7 @@
 // app/client/rebook/[token]/page.tsx
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
+import { BookingSource, BookingStatus, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { sanitizeTimeZone } from '@/lib/timeZone'
@@ -8,20 +9,14 @@ import { formatAppointmentWhen, formatRangeInTimeZone } from '@/lib/formatInTime
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 import { pickString } from '@/lib/pick'
 import { cn } from '@/lib/utils'
-import { BookingSource, BookingStatus } from '@prisma/client'
+
 export const dynamic = 'force-dynamic'
 
-type SearchParamsShape = {
-  recommendedAt?: string
-  windowStart?: string
-  windowEnd?: string
-}
+type SearchParamsInput = Record<string, string | string[] | undefined>
 
-
-function toDate(v: unknown): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(String(v))
-  return Number.isNaN(d.getTime()) ? null : d
+type PageProps = {
+  params: { token: string } | Promise<{ token: string }>
+  searchParams?: SearchParamsInput | Promise<SearchParamsInput | undefined>
 }
 
 type RebookInfo =
@@ -29,6 +24,210 @@ type RebookInfo =
   | { mode: 'RECOMMENDED_WINDOW'; label: string; windowStart: Date; windowEnd: Date }
   | { mode: 'RECOMMENDED_DATE'; label: string; recommendedAt: Date }
   | { mode: 'NONE'; label: null }
+
+const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
+  id: true,
+  clientId: true,
+  professionalId: true,
+  serviceId: true,
+  offeringId: true,
+
+  status: true,
+  source: true,
+  sessionStep: true,
+  scheduledFor: true,
+  finishedAt: true,
+
+  subtotalSnapshot: true,
+  totalDurationMinutes: true,
+  bufferMinutes: true,
+
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+
+  service: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+
+  professional: {
+    select: {
+      id: true,
+      businessName: true,
+      location: true,
+      timeZone: true,
+      user: { select: { email: true } },
+    },
+  },
+
+  location: {
+    select: {
+      id: true,
+      name: true,
+      formattedAddress: true,
+      city: true,
+      state: true,
+      timeZone: true,
+    },
+  },
+
+  serviceItems: {
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    take: 80,
+    select: {
+      id: true,
+      itemType: true,
+      parentItemId: true,
+      sortOrder: true,
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+      serviceId: true,
+      service: { select: { name: true } },
+    },
+  },
+
+  consultationNotes: true,
+  consultationPrice: true,
+  consultationConfirmedAt: true,
+  consultationApproval: {
+    select: {
+      status: true,
+      proposedServicesJson: true,
+      proposedTotal: true,
+      notes: true,
+      approvedAt: true,
+      rejectedAt: true,
+    },
+  },
+})
+
+type RawBooking = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+
+function toDate(v: unknown): Date | null {
+  if (!v) return null
+  const d = v instanceof Date ? v : new Date(String(v))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function pickSearchParam(v: string | string[] | undefined): string | null {
+  if (Array.isArray(v)) return pickString(v[0] ?? null)
+  return pickString(v ?? null)
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function pickSnapshotAddress(snapshot: Prisma.JsonValue | null | undefined): string | null {
+  if (!isRecord(snapshot)) return null
+  const raw = snapshot.formattedAddress
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
+function safeDecimalString(v: unknown): string | null {
+  if (v == null) return null
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+
+  if (typeof v === 'object' && v !== null) {
+    const maybeToString = (v as { toString?: unknown }).toString
+    if (typeof maybeToString === 'function') {
+      const result = maybeToString.call(v)
+      return typeof result === 'string' && result.trim() ? result : String(result)
+    }
+  }
+
+  return null
+}
+
+function safeLocationType(v: unknown): 'SALON' | 'MOBILE' | null {
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+  return null
+}
+
+function buildRawLocationLabel(booking: RawBooking): string | null {
+  const snapshotAddress = pickSnapshotAddress(booking.locationAddressSnapshot)
+  if (snapshotAddress) return snapshotAddress
+
+  if (booking.location?.formattedAddress?.trim()) return booking.location.formattedAddress.trim()
+  if (booking.location?.name?.trim()) return booking.location.name.trim()
+
+  const cityState = [booking.location?.city, booking.location?.state].filter(Boolean).join(', ')
+  if (cityState) return cityState
+
+  const professionalLocation = booking.professional?.location?.trim()
+  if (professionalLocation) return professionalLocation
+
+  return null
+}
+
+function buildFallbackClientBookingDTO(rawBooking: RawBooking): ClientBookingDTO {
+  const fallbackTz = sanitizeTimeZone(
+    rawBooking.locationTimeZone ?? rawBooking.location?.timeZone ?? rawBooking.professional?.timeZone,
+    'UTC',
+  )
+
+  return {
+    id: String(rawBooking.id),
+    status: rawBooking.status ?? null,
+    source: rawBooking.source ?? null,
+    sessionStep: rawBooking.sessionStep ?? null,
+
+    scheduledFor: rawBooking.scheduledFor?.toISOString?.() ?? new Date().toISOString(),
+    totalDurationMinutes: Number(rawBooking.totalDurationMinutes ?? 0),
+    bufferMinutes: Number(rawBooking.bufferMinutes ?? 0),
+
+    subtotalSnapshot: safeDecimalString(rawBooking.subtotalSnapshot),
+
+    locationType: safeLocationType(rawBooking.locationType),
+    locationId: rawBooking.locationId ? String(rawBooking.locationId) : null,
+
+    timeZone: fallbackTz,
+    timeZoneSource: 'FALLBACK',
+
+    locationLabel: buildRawLocationLabel(rawBooking),
+
+    professional: rawBooking.professional
+      ? {
+          id: String(rawBooking.professional.id),
+          businessName: rawBooking.professional.businessName ?? null,
+          location: rawBooking.professional.location ?? null,
+          timeZone: rawBooking.professional.timeZone ?? null,
+        }
+      : null,
+
+    bookedLocation: rawBooking.location
+      ? {
+          id: String(rawBooking.location.id),
+          name: rawBooking.location.name ?? null,
+          formattedAddress: rawBooking.location.formattedAddress ?? null,
+          city: rawBooking.location.city ?? null,
+          state: rawBooking.location.state ?? null,
+          timeZone: rawBooking.location.timeZone ?? null,
+        }
+      : null,
+
+    display: {
+      title: rawBooking.service?.name ?? 'Service',
+      baseName: rawBooking.service?.name ?? 'Service',
+      addOnNames: [],
+      addOnCount: 0,
+    },
+
+    items: [],
+
+    hasUnreadAftercare: false,
+    hasPendingConsultationApproval: false,
+
+    consultation: null,
+  }
+}
 
 function computeRebookInfo(
   aftercare: {
@@ -44,6 +243,7 @@ function computeRebookInfo(
   if (mode === 'BOOKED_NEXT_APPOINTMENT') {
     const d = toDate(aftercare.rebookedFor)
     if (!d) return { mode: 'NONE', label: null }
+
     return {
       mode: 'BOOKED_NEXT_APPOINTMENT',
       label: `Next appointment booked: ${formatAppointmentWhen(d, timeZone)}`,
@@ -65,7 +265,6 @@ function computeRebookInfo(
     return { mode: 'NONE', label: null }
   }
 
-  // Back-compat: single date set without mode
   const legacy = toDate(aftercare.rebookedFor)
   if (legacy) {
     return {
@@ -78,26 +277,15 @@ function computeRebookInfo(
   return { mode: 'NONE', label: null }
 }
 
-
-function safeDecimalString(v: unknown): string | null {
-  if (v == null) return null
-  if (typeof v === 'string') return v
-  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
-  if (typeof v === 'object' && v && typeof (v as any).toString === 'function') return (v as any).toString()
-  return null
-}
-
-
-export default async function ClientRebookFromAftercarePage(props: {
-  params: { token: string }
-  searchParams?: SearchParamsShape
-}) {
-  const publicToken = pickString(props.params.token)
+export default async function ClientRebookFromAftercarePage(props: PageProps) {
+  const resolvedParams = await Promise.resolve(props.params)
+  const publicToken = pickString(resolvedParams?.token)
   if (!publicToken) notFound()
 
-  const recommendedAtFromUrl = pickString(props.searchParams?.recommendedAt)
-  const windowStartFromUrl = pickString(props.searchParams?.windowStart)
-  const windowEndFromUrl = pickString(props.searchParams?.windowEnd)
+  const resolvedSearchParams = (await Promise.resolve(props.searchParams).catch(() => undefined)) ?? {}
+  const recommendedAtFromUrl = pickSearchParam(resolvedSearchParams.recommendedAt)
+  const windowStartFromUrl = pickSearchParam(resolvedSearchParams.windowStart)
+  const windowEndFromUrl = pickSearchParam(resolvedSearchParams.windowEnd)
 
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
@@ -113,80 +301,7 @@ export default async function ClientRebookFromAftercarePage(props: {
       rebookWindowStart: true,
       rebookWindowEnd: true,
       booking: {
-        select: {
-          id: true,
-          clientId: true,
-          professionalId: true,
-          serviceId: true,
-          offeringId: true,
-
-          status: true,
-          source: true,
-          sessionStep: true,
-          scheduledFor: true,
-          finishedAt: true,
-
-          subtotalSnapshot: true,
-          totalDurationMinutes: true,
-          bufferMinutes: true,
-
-          locationType: true,
-          locationId: true,
-          locationTimeZone: true,
-          locationAddressSnapshot: true,
-
-          service: { select: { id: true, name: true } },
-
-          professional: {
-            select: {
-              id: true,
-              businessName: true,
-              location: true,
-              timeZone: true,
-              user: { select: { email: true } },
-            },
-          },
-
-          location: {
-            select: {
-              id: true,
-              name: true,
-              formattedAddress: true,
-              city: true,
-              state: true,
-              timeZone: true,
-            },
-          },
-
-          serviceItems: {
-            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-            take: 80,
-            select: {
-              id: true,
-              itemType: true,
-              parentItemId: true,
-              sortOrder: true,
-              durationMinutesSnapshot: true,
-              priceSnapshot: true,
-              serviceId: true,
-              service: { select: { name: true } },
-            },
-          },
-
-          consultationNotes: true,
-          consultationPrice: true,
-          consultationConfirmedAt: true,
-          consultationApproval: {
-            select: {
-              status: true,
-              proposedServicesJson: true,
-              proposedTotal: true,
-              notes: true,
-              approvedAt: true,
-              rejectedAt: true,
-            },
-          },
-        },
+        select: bookingSelect,
       },
     },
   })
@@ -204,64 +319,9 @@ export default async function ClientRebookFromAftercarePage(props: {
       hasPendingConsultationApproval: false,
     })
   } catch {
-    const fallbackTz = sanitizeTimeZone(rawBooking.locationTimeZone ?? rawBooking.professional?.timeZone, 'UTC')
-
-    dto = {
-      id: String(rawBooking.id),
-      status: (rawBooking.status) ?? null,
-      source: (rawBooking.source) ?? null,
-      sessionStep: (rawBooking.sessionStep) ?? null,
-
-      scheduledFor: (rawBooking.scheduledFor)?.toISOString?.() ?? new Date().toISOString(),
-      totalDurationMinutes: Number(rawBooking.totalDurationMinutes ?? 0),
-      bufferMinutes: Number(rawBooking.bufferMinutes ?? 0),
-
-      subtotalSnapshot: safeDecimalString(rawBooking.subtotalSnapshot),
-
-      locationType: (rawBooking.locationType as any) ?? null,
-      locationId: rawBooking.locationId ? String(rawBooking.locationId) : null,
-
-      timeZone: fallbackTz,
-      timeZoneSource: 'FALLBACK',
-
-      locationLabel: null,
-
-      professional: rawBooking.professional
-        ? {
-            id: String(rawBooking.professional.id),
-            businessName: rawBooking.professional.businessName ?? null,
-            location: rawBooking.professional.location ?? null,
-            timeZone: rawBooking.professional.timeZone ?? null,
-          }
-        : null,
-
-      bookedLocation: rawBooking.location
-        ? {
-            id: String(rawBooking.location.id),
-            name: rawBooking.location.name ?? null,
-            formattedAddress: rawBooking.location.formattedAddress ?? null,
-            city: rawBooking.location.city ?? null,
-            state: rawBooking.location.state ?? null,
-            timeZone: rawBooking.location.timeZone ?? null,
-          }
-        : null,
-
-      display: {
-        title: rawBooking.service?.name ?? 'Service',
-        baseName: rawBooking.service?.name ?? 'Service',
-        addOnNames: [],
-        addOnCount: 0,
-      },
-      items: [],
-
-      hasUnreadAftercare: false,
-      hasPendingConsultationApproval: false,
-
-      consultation: null,
-    }
+    dto = buildFallbackClientBookingDTO(rawBooking)
   }
 
-  // offeringId fallback
   let offeringId = pickString(rawBooking.offeringId)
   if (!offeringId) {
     const fallbackOffering = await prisma.professionalServiceOffering.findFirst({
@@ -272,15 +332,23 @@ export default async function ClientRebookFromAftercarePage(props: {
       },
       select: { id: true },
     })
+
     offeringId = fallbackOffering?.id ?? null
   }
+
   if (!offeringId) notFound()
 
   const appointmentTz = sanitizeTimeZone(dto.timeZone, 'UTC')
+  const proLabel =
+    dto.professional?.businessName ||
+    rawBooking.professional?.businessName ||
+    rawBooking.professional?.user?.email ||
+    'your professional'
 
-  const proLabel = dto.professional?.businessName || rawBooking.professional?.user?.email || 'your professional'
-  const serviceTitle = dto.display?.title || 'Service'
+  const serviceTitle = dto.display?.title || rawBooking.service?.name || 'Service'
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
+  const locationLabel = dto.locationLabel || buildRawLocationLabel(rawBooking)
+  const proId = dto.professional?.id || rawBooking.professionalId
 
   const rebookInfo = computeRebookInfo(
     {
@@ -292,7 +360,7 @@ export default async function ClientRebookFromAftercarePage(props: {
     appointmentTz,
   )
 
-  let nextBooking: { id: string; scheduledFor: Date; status: string } | null = null
+  let nextBooking: { id: string; scheduledFor: Date; status: BookingStatus } | null = null
   if (rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT') {
     try {
       nextBooking = await prisma.booking.findFirst({
@@ -302,7 +370,11 @@ export default async function ClientRebookFromAftercarePage(props: {
           status: { not: BookingStatus.CANCELLED },
         },
         orderBy: { scheduledFor: 'asc' },
-        select: { id: true, scheduledFor: true, status: true },
+        select: {
+          id: true,
+          scheduledFor: true,
+          status: true,
+        },
       })
     } catch {
       nextBooking = null
@@ -316,6 +388,7 @@ export default async function ClientRebookFromAftercarePage(props: {
   })
 
   const bookParams = new URLSearchParams(baseParams)
+
   if (recommendedAtFromUrl) bookParams.set('recommendedAt', recommendedAtFromUrl)
   if (windowStartFromUrl) bookParams.set('windowStart', windowStartFromUrl)
   if (windowEndFromUrl) bookParams.set('windowEnd', windowEndFromUrl)
@@ -330,8 +403,6 @@ export default async function ClientRebookFromAftercarePage(props: {
   }
 
   const bookHref = `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
-  const proId = dto.professional?.id || rawBooking.professionalId
-  const locationLabel = dto.locationLabel || null
 
   return (
     <main className="mx-auto w-full max-w-[720px] px-4 pb-14 pt-16 text-textPrimary">
@@ -352,7 +423,10 @@ export default async function ClientRebookFromAftercarePage(props: {
         <div className="mt-2 text-sm text-textSecondary">
           With{' '}
           {proId ? (
-            <Link href={`/professionals/${encodeURIComponent(proId)}`} className="font-black hover:underline underline-offset-4">
+            <Link
+              href={`/professionals/${encodeURIComponent(proId)}`}
+              className="font-black hover:underline underline-offset-4"
+            >
               {proLabel}
             </Link>
           ) : (

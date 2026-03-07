@@ -1,18 +1,32 @@
 // app/api/holds/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { Prisma, type ServiceLocationType, BookingStatus } from '@prisma/client'
+import { Prisma } from '@prisma/client'
+import type { BookingStatus, ServiceLocationType } from '@prisma/client'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import { getZonedParts, minutesSinceMidnightInTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { isRecord } from '@/lib/guards'
+
 export const dynamic = 'force-dynamic'
 
-const MAX_OTHER_OVERLAP_MINUTES = 12 * 60 + 180
+const BOOKING_STATUS = {
+  CANCELLED: 'CANCELLED',
+} as const satisfies Record<'CANCELLED', BookingStatus>
+
+const SERVICE_LOCATION = {
+  SALON: 'SALON',
+  MOBILE: 'MOBILE',
+} as const satisfies Record<'SALON' | 'MOBILE', ServiceLocationType>
+
+const MAX_SLOT_DURATION_MINUTES = 12 * 60
+const MAX_BUFFER_MINUTES = 180
+const MAX_OTHER_OVERLAP_MINUTES = MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
+
 /**
- * How long a client "hold" lasts before expiring.
+ * How long a client hold lasts before expiring.
  * Keep short to reduce dead-time on the calendar.
  */
 const HOLD_MINUTES = 10
@@ -44,13 +58,14 @@ function normalizeToMinute(d: Date) {
 
 function normalizeLocationType(v: unknown): ServiceLocationType | null {
   const s = upper(v)
-  if (s === 'SALON') return 'SALON'
-  if (s === 'MOBILE') return 'MOBILE'
+  if (s === SERVICE_LOCATION.SALON) return SERVICE_LOCATION.SALON
+  if (s === SERVICE_LOCATION.MOBILE) return SERVICE_LOCATION.MOBILE
   return null
 }
 
 function clampInt(n: number, min: number, max: number) {
-  const x = Math.trunc(n)
+  const x = Math.trunc(Number(n))
+  if (!Number.isFinite(x)) return min
   return Math.min(Math.max(x, min), max)
 }
 
@@ -58,7 +73,6 @@ function normalizeStepMinutes(input: unknown, fallback: number) {
   const n = typeof input === 'number' ? input : Number(input)
   const raw = Number.isFinite(n) ? Math.trunc(n) : fallback
 
-  // keep aligned with your calendar UI expectations
   const allowed = new Set([5, 10, 15, 20, 30, 60])
   if (allowed.has(raw)) return raw
 
@@ -75,7 +89,11 @@ function pickDurationMinutes(args: {
   salonDurationMinutes: number | null
   mobileDurationMinutes: number | null
 }) {
-  const raw = args.locationType === 'MOBILE' ? args.mobileDurationMinutes : args.salonDurationMinutes
+  const raw =
+    args.locationType === SERVICE_LOCATION.MOBILE
+      ? args.mobileDurationMinutes
+      : args.salonDurationMinutes
+
   const n = Number(raw ?? 0)
   return Number.isFinite(n) && n > 0 ? n : 60
 }
@@ -88,15 +106,19 @@ function ensureWithinWorkingHours(args: {
 }): { ok: true } | { ok: false; error: string } {
   const { scheduledStartUtc, scheduledEndUtc, workingHours, timeZone } = args
 
-if (!isRecord(workingHours)) {
-  return { ok: false, error: 'This professional has not set working hours yet.' }
-}
+  if (!isRecord(workingHours)) {
+    return { ok: false, error: 'This professional has not set working hours yet.' }
+  }
 
   const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
 
   const sParts = getZonedParts(scheduledStartUtc, tz)
   const eParts = getZonedParts(scheduledEndUtc, tz)
-  const sameLocalDay = sParts.year === eParts.year && sParts.month === eParts.month && sParts.day === eParts.day
+  const sameLocalDay =
+    sParts.year === eParts.year &&
+    sParts.month === eParts.month &&
+    sParts.day === eParts.day
+
   if (!sameLocalDay) {
     return { ok: false, error: 'That time is outside this professional’s working hours.' }
   }
@@ -122,15 +144,20 @@ if (!isRecord(workingHours)) {
   return { ok: true }
 }
 
-
-
 function decimalToNumber(v: unknown): number | undefined {
   if (v == null) return undefined
   if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
+
   if (typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
     const n = (v as { toNumber: () => number }).toNumber()
     return Number.isFinite(n) ? n : undefined
   }
+
+  if (typeof v === 'object' && typeof (v as { toString?: unknown }).toString === 'function') {
+    const n = Number((v as { toString: () => string }).toString())
+    return Number.isFinite(n) ? n : undefined
+  }
+
   return undefined
 }
 
@@ -152,13 +179,14 @@ export async function POST(req: NextRequest) {
     }
 
     const scheduledForParsed = new Date(scheduledForRaw)
-    if (!isValidDate(scheduledForParsed)) return jsonFail(400, 'Invalid scheduledFor.')
+    if (!isValidDate(scheduledForParsed)) {
+      return jsonFail(400, 'Invalid scheduledFor.')
+    }
 
     const now = new Date()
     const requestedStart = normalizeToMinute(scheduledForParsed)
     const earliestStart = addMinutes(requestedStart, -MAX_OTHER_OVERLAP_MINUTES)
 
-    // basic sanity: not in the past (real lead-time comes from location below)
     if (requestedStart.getTime() < now.getTime() + 60_000) {
       return jsonFail(400, 'Please select a future time.')
     }
@@ -181,11 +209,11 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 404, error: 'Offering not found.' }
       }
 
-      // Ensure offering supports requested booking mode
-      if (locationType === 'SALON' && !offering.offersInSalon) {
+      if (locationType === SERVICE_LOCATION.SALON && !offering.offersInSalon) {
         return { ok: false as const, status: 400, error: 'This service is not available in-salon.' }
       }
-      if (locationType === 'MOBILE' && !offering.offersMobile) {
+
+      if (locationType === SERVICE_LOCATION.MOBILE && !offering.offersMobile) {
         return { ok: false as const, status: 400, error: 'This service is not available for mobile.' }
       }
 
@@ -205,8 +233,13 @@ export async function POST(req: NextRequest) {
         fallback: 'UTC',
         requireValid: true,
       })
+
       if (!tzRes.ok) {
-        return { ok: false as const, status: 400, error: 'This professional must set a valid timezone before taking bookings.' }
+        return {
+          ok: false as const,
+          status: 400,
+          error: 'This professional must set a valid timezone before taking bookings.',
+        }
       }
 
       const apptTz = sanitizeTimeZone(tzRes.timeZone, 'UTC') || 'UTC'
@@ -214,20 +247,23 @@ export async function POST(req: NextRequest) {
       const stepMinutes = normalizeStepMinutes(loc.stepMinutes, 15)
       const leadTimeMinutes = clampInt(Number(loc.advanceNoticeMinutes ?? 0), 0, 24 * 60)
       const maxDaysAhead = clampInt(Number(loc.maxDaysAhead ?? 365), 1, 3650)
-      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0), 0, 180)
+      const bufferMinutes = clampInt(Number(loc.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES)
 
-      // enforce lead-time + max-days-ahead
       if (requestedStart.getTime() < now.getTime() + leadTimeMinutes * 60_000) {
         return { ok: false as const, status: 400, error: 'Please pick a later time.' }
       }
+
       if (requestedStart.getTime() > now.getTime() + maxDaysAhead * 24 * 60 * 60_000) {
         return { ok: false as const, status: 400, error: 'That date is too far in the future.' }
       }
 
-      // enforce step alignment in appointment TZ (authoritative)
       const startMin = minutesSinceMidnightInTimeZone(requestedStart, apptTz)
       if (startMin % stepMinutes !== 0) {
-        return { ok: false as const, status: 400, error: `Start time must be on a ${stepMinutes}-minute boundary.` }
+        return {
+          ok: false as const,
+          status: 400,
+          error: `Start time must be on a ${stepMinutes}-minute boundary.`,
+        }
       }
 
       const durationMinutes = clampInt(
@@ -237,10 +273,9 @@ export async function POST(req: NextRequest) {
           mobileDurationMinutes: offering.mobileDurationMinutes,
         }),
         15,
-        12 * 60,
+        MAX_SLOT_DURATION_MINUTES,
       )
 
-      // IMPORTANT: include buffer in the reserved window
       const requestedEnd = addMinutes(requestedStart, durationMinutes + bufferMinutes)
 
       const whCheck = ensureWithinWorkingHours({
@@ -253,7 +288,6 @@ export async function POST(req: NextRequest) {
         return { ok: false as const, status: 400, error: whCheck.error }
       }
 
-      // blocks conflict (global or location-specific)
       const blocked = await tx.calendarBlock.findFirst({
         where: {
           professionalId: offering.professionalId,
@@ -263,6 +297,7 @@ export async function POST(req: NextRequest) {
         },
         select: { id: true },
       })
+
       if (blocked) {
         return { ok: false as const, status: 409, error: 'That time is blocked. Try another slot.' }
       }
@@ -271,19 +306,24 @@ export async function POST(req: NextRequest) {
         where: {
           professionalId: offering.professionalId,
           scheduledFor: { gte: earliestStart, lt: requestedEnd },
-          NOT: { status: BookingStatus.CANCELLED },
+          status: { not: BOOKING_STATUS.CANCELLED },
         },
-        select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, status: true },
+        select: {
+          scheduledFor: true,
+          totalDurationMinutes: true,
+          bufferMinutes: true,
+        },
         take: 3000,
       })
 
       const bookingConflict = existingBookings.some((b) => {
         const bStart = normalizeToMinute(new Date(b.scheduledFor))
-        const bDur = clampInt(Number(b.totalDurationMinutes ?? 0) || 60, 15, 12 * 60)
-        const bBuf = clampInt(Number(b.bufferMinutes ?? 0) || 0, 0, 180)
+        const bDur = clampInt(Number(b.totalDurationMinutes ?? 0) || 60, 15, MAX_SLOT_DURATION_MINUTES)
+        const bBuf = clampInt(Number(b.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
         const bEnd = addMinutes(bStart, bDur + bBuf)
         return overlaps(bStart, bEnd, requestedStart, requestedEnd)
       })
+
       if (bookingConflict) {
         return { ok: false as const, status: 409, error: 'That time was just taken.' }
       }
@@ -294,11 +334,22 @@ export async function POST(req: NextRequest) {
           expiresAt: { gt: now },
           scheduledFor: { gte: earliestStart, lt: requestedEnd },
         },
-        select: { scheduledFor: true, offeringId: true, locationId: true, locationType: true },
+        select: {
+          scheduledFor: true,
+          offeringId: true,
+          locationId: true,
+          locationType: true,
+        },
         take: 3000,
       })
 
-      const holdLocationIds = Array.from(new Set(holds.map((h) => h.locationId))).slice(0, 2000)
+      const holdLocationIds = Array.from(
+        new Set(
+          holds
+            .map((h) => h.locationId)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ).slice(0, 2000)
 
       const holdLocations = holdLocationIds.length
         ? await tx.professionalLocation.findMany({
@@ -309,40 +360,53 @@ export async function POST(req: NextRequest) {
         : []
 
       const holdBufferByLocationId = new Map(
-        holdLocations.map((l) => [l.id, clampInt(Number(l.bufferMinutes ?? 0) || 0, 0, 180)]),
+        holdLocations.map((l) => [
+          l.id,
+          clampInt(Number(l.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES),
+        ]),
       )
 
       if (holds.length) {
         const holdOfferingIds = Array.from(new Set(holds.map((h) => h.offeringId))).slice(0, 2000)
+
         const holdOfferings = await tx.professionalServiceOffering.findMany({
           where: { id: { in: holdOfferingIds } },
-          select: { id: true, salonDurationMinutes: true, mobileDurationMinutes: true },
+          select: {
+            id: true,
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+          },
           take: 2000,
         })
-        const byId = new Map(holdOfferings.map((o) => [o.id, o]))
+
+        const offeringById = new Map(holdOfferings.map((o) => [o.id, o]))
 
         const holdConflict = holds.some((h) => {
-        const o = byId.get(h.offeringId)
+          const holdOffering = offeringById.get(h.offeringId)
 
-        const hDur = clampInt(
-          pickDurationMinutes({
-            locationType: h.locationType,
-            salonDurationMinutes: o?.salonDurationMinutes ?? null,
-            mobileDurationMinutes: o?.mobileDurationMinutes ?? null,
-          }),
-          15,
-          12 * 60,
-        )
+          const hDur = clampInt(
+            pickDurationMinutes({
+              locationType: h.locationType,
+              salonDurationMinutes: holdOffering?.salonDurationMinutes ?? null,
+              mobileDurationMinutes: holdOffering?.mobileDurationMinutes ?? null,
+            }),
+            15,
+            MAX_SLOT_DURATION_MINUTES,
+          )
 
-        const hStart = normalizeToMinute(new Date(h.scheduledFor))
-        const hBuf = holdBufferByLocationId.get(h.locationId) ?? bufferMinutes
-        const hEnd = addMinutes(hStart, hDur + hBuf)
+          const hStart = normalizeToMinute(new Date(h.scheduledFor))
+          const hBuf = holdBufferByLocationId.get(h.locationId ?? '') ?? bufferMinutes
+          const hEnd = addMinutes(hStart, hDur + hBuf)
 
-        return overlaps(hStart, hEnd, requestedStart, requestedEnd)
-      })
+          return overlaps(hStart, hEnd, requestedStart, requestedEnd)
+        })
 
         if (holdConflict) {
-          return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'Someone is already holding that time. Try another slot.',
+          }
         }
       }
 
@@ -362,10 +426,8 @@ export async function POST(req: NextRequest) {
             scheduledFor: requestedStart,
             expiresAt,
             locationType,
-
             locationId: loc.id,
             locationTimeZone: apptTz,
-
             locationAddressSnapshot: addressSnapshot,
             locationLatSnapshot: decimalToNumber(loc.lat),
             locationLngSnapshot: decimalToNumber(loc.lng),
@@ -382,9 +444,12 @@ export async function POST(req: NextRequest) {
 
         return { ok: true as const, status: 201, hold }
       } catch (e: unknown) {
-        const err = e as { code?: unknown }
-        if (err?.code === 'P2002') {
-          return { ok: false as const, status: 409, error: 'Someone is already holding that time. Try another slot.' }
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'Someone is already holding that time. Try another slot.',
+          }
         }
         throw e
       }

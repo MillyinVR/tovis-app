@@ -1,23 +1,53 @@
 // app/api/calendar/route.ts
 import { NextResponse } from 'next/server'
+import { Role, BookingStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts } from '@/lib/timeZone'
-
 import { pickString } from '@/app/api/_utils/pick'
 import { normalizeEmail } from '@/app/api/_utils/email'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail } from '@/app/api/_utils/responses'
-import type { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function icsEscape(s: string) {
-  return String(s)
+type JsonObject = Record<string, unknown>
+
+function isRecord(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function icsEscape(value: string) {
+  return String(value)
     .replace(/\r/g, '')
     .replace(/\\/g, '\\\\')
     .replace(/\n/g, '\\n')
     .replace(/,/g, '\\,')
     .replace(/;/g, '\\;')
+}
+
+function foldIcsLine(line: string) {
+  const maxLen = 75
+  if (line.length <= maxLen) return line
+
+  const parts: string[] = []
+  let remaining = line
+
+  while (remaining.length > maxLen) {
+    parts.push(remaining.slice(0, maxLen))
+    remaining = ` ${remaining.slice(maxLen)}`
+  }
+
+  parts.push(remaining)
+  return parts.join('\r\n')
+}
+
+function joinIcsLines(lines: Array<string | null | undefined>) {
+  return (
+    lines
+      .filter((line): line is string => typeof line === 'string' && line.length > 0)
+      .map(foldIcsLine)
+      .join('\r\n') + '\r\n'
+  )
 }
 
 function toICSDateUtc(d: Date) {
@@ -43,14 +73,14 @@ function toICSDateInTimeZone(dUtc: Date, timeZone: string) {
 function clientDisplayName(client: { firstName?: string | null; lastName?: string | null } | null) {
   const first = typeof client?.firstName === 'string' ? client.firstName.trim() : ''
   const last = typeof client?.lastName === 'string' ? client.lastName.trim() : ''
-  const name = `${first} ${last}`.trim()
-  return name || 'Client'
+  const fullName = `${first} ${last}`.trim()
+  return fullName || 'Client'
 }
 
 function pickFormattedAddress(snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== 'object') return null
-  const v = (snapshot as any)?.formattedAddress
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+  if (!isRecord(snapshot)) return null
+  const raw = snapshot.formattedAddress
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
 }
 
 function clampDurationMinutes(v: unknown, fallback: number) {
@@ -81,38 +111,35 @@ function requireBookingTimeZone(raw: unknown): { ok: true; timeZone: string } | 
 }
 
 function looksLikeRealLocation(s: string) {
-  const v = s.trim()
-  if (!v) return false
-  const up = v.toUpperCase()
-  if (up === 'N/A' || up === 'NA' || up === 'NONE' || up === 'UNKNOWN') return false
-  if (up.includes('ONLINE') || up.includes('VIRTUAL')) return false
+  const value = s.trim()
+  if (!value) return false
+
+  const upper = value.toUpperCase()
+  if (upper === 'N/A' || upper === 'NA' || upper === 'NONE' || upper === 'UNKNOWN') return false
+  if (upper.includes('ONLINE') || upper.includes('VIRTUAL')) return false
+
   return true
 }
 
-function requireSalonLocation(args: {
+function requireBookingLocation(args: {
   locationType: unknown
   locationAddressSnapshot: unknown
   professionalLocation: unknown
 }): { ok: true; location: string | null } | { ok: false; error: string } {
   const type = typeof args.locationType === 'string' ? args.locationType.trim().toUpperCase() : ''
 
-  // MOBILE (and anything not SALON): location line optional
+  const snapshotAddress = pickFormattedAddress(args.locationAddressSnapshot)
+  const professionalLocation =
+    typeof args.professionalLocation === 'string' && looksLikeRealLocation(args.professionalLocation)
+      ? args.professionalLocation.trim()
+      : null
+
   if (type !== 'SALON') {
-    const addr = pickFormattedAddress(args.locationAddressSnapshot)
-    if (addr) return { ok: true, location: addr }
-
-    const proLoc = typeof args.professionalLocation === 'string' ? args.professionalLocation.trim() : ''
-    if (proLoc && looksLikeRealLocation(proLoc)) return { ok: true, location: proLoc }
-
-    return { ok: true, location: null }
+    return { ok: true, location: snapshotAddress ?? professionalLocation }
   }
 
-  // SALON: must have a usable location line.
-  const addr = pickFormattedAddress(args.locationAddressSnapshot)
-  if (addr) return { ok: true, location: addr }
-
-  const proLoc = typeof args.professionalLocation === 'string' ? args.professionalLocation.trim() : ''
-  if (proLoc && looksLikeRealLocation(proLoc)) return { ok: true, location: proLoc }
+  if (snapshotAddress) return { ok: true, location: snapshotAddress }
+  if (professionalLocation) return { ok: true, location: professionalLocation }
 
   return {
     ok: false,
@@ -122,35 +149,37 @@ function requireSalonLocation(args: {
 }
 
 function isAllowedRole(role: Role) {
-  return role === 'CLIENT' || role === 'PRO' || role === 'ADMIN'
+  return role === Role.CLIENT || role === Role.PRO || role === Role.ADMIN
 }
 
 export async function GET(req: Request) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
-    const user = auth.user
 
-    if (!isAllowedRole(user.role)) return jsonFail(403, 'Forbidden')
+    const user = auth.user
+    if (!isAllowedRole(user.role)) {
+      return jsonFail(403, 'Forbidden.')
+    }
 
     const { searchParams } = new URL(req.url)
     const bookingId = pickString(searchParams.get('bookingId'))
-    if (!bookingId) return jsonFail(400, 'Missing bookingId')
+    if (!bookingId) {
+      return jsonFail(400, 'Missing bookingId.')
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
         id: true,
+        status: true,
         clientId: true,
         professionalId: true,
-
         scheduledFor: true,
         totalDurationMinutes: true,
-
         locationType: true,
         locationTimeZone: true,
         locationAddressSnapshot: true,
-
         professional: {
           select: {
             id: true,
@@ -159,7 +188,9 @@ export async function GET(req: Request) {
             user: { select: { email: true } },
           },
         },
-        service: { select: { name: true } },
+        service: {
+          select: { name: true },
+        },
         client: {
           select: {
             firstName: true,
@@ -170,29 +201,44 @@ export async function GET(req: Request) {
       },
     })
 
-    if (!booking) return jsonFail(404, 'Booking not found')
+    if (!booking) {
+      return jsonFail(404, 'Booking not found.')
+    }
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      return jsonFail(409, 'Cancelled bookings do not have calendar invites.')
+    }
 
     const isClient = Boolean(user.clientProfile?.id && booking.clientId === user.clientProfile.id)
     const isPro = Boolean(user.professionalProfile?.id && booking.professionalId === user.professionalProfile.id)
-    const isAdmin = user.role === 'ADMIN'
-    if (!isAdmin && !isClient && !isPro) return jsonFail(403, 'Forbidden')
+    const isAdmin = user.role === Role.ADMIN
+
+    if (!isAdmin && !isClient && !isPro) {
+      return jsonFail(403, 'Forbidden.')
+    }
 
     const startUtc = new Date(booking.scheduledFor)
-    if (!Number.isFinite(startUtc.getTime())) return jsonFail(500, 'Booking has an invalid scheduled time.')
+    if (!Number.isFinite(startUtc.getTime())) {
+      return jsonFail(500, 'Booking has an invalid scheduled time.')
+    }
 
     const durationMinutes = clampDurationMinutes(booking.totalDurationMinutes, 60)
     const endUtc = new Date(startUtc.getTime() + durationMinutes * 60_000)
 
     const tzRes = requireBookingTimeZone(booking.locationTimeZone)
-    if (!tzRes.ok) return jsonFail(409, tzRes.error)
+    if (!tzRes.ok) {
+      return jsonFail(409, tzRes.error)
+    }
     const appointmentTz = tzRes.timeZone
 
-    const locRes = requireSalonLocation({
+    const locRes = requireBookingLocation({
       locationType: booking.locationType,
       locationAddressSnapshot: booking.locationAddressSnapshot,
       professionalLocation: booking.professional?.location,
     })
-    if (!locRes.ok) return jsonFail(409, locRes.error)
+    if (!locRes.ok) {
+      return jsonFail(409, locRes.error)
+    }
     const location = locRes.location
 
     const serviceName = booking.service?.name || 'Appointment'
@@ -210,21 +256,23 @@ export async function GET(req: Request) {
 
     const uid = `${booking.id}@tovis`
     const dtstamp = toICSDateUtc(new Date())
-
     const dtStartLocal = toICSDateInTimeZone(startUtc, appointmentTz)
     const dtEndLocal = toICSDateInTimeZone(endUtc, appointmentTz)
 
     const proEmail = normalizeEmail(booking.professional?.user?.email)
     const clientEmail = normalizeEmail(booking.client?.user?.email)
 
-    const organizerLine = proEmail ? `ORGANIZER;CN=${icsEscape(proName)}:mailto:${icsEscape(proEmail)}` : null
+    const organizerLine = proEmail
+      ? `ORGANIZER;CN=${icsEscape(proName)}:mailto:${icsEscape(proEmail)}`
+      : null
+
     const attendeeLine = clientEmail
       ? `ATTENDEE;CN=${icsEscape(clientDisplayName(booking.client))};ROLE=REQ-PARTICIPANT;RSVP=FALSE:mailto:${icsEscape(
           clientEmail,
         )}`
       : null
 
-    const ics = [
+    const ics = joinIcsLines([
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//TOVIS//EN',
@@ -245,16 +293,14 @@ export async function GET(req: Request) {
       'SEQUENCE:0',
       'END:VEVENT',
       'END:VCALENDAR',
-      '',
-    ]
-      .filter(Boolean)
-      .join('\r\n')
+    ])
 
     return new NextResponse(ics, {
       status: 200,
       headers: {
-        'Content-Type': 'text/calendar; charset=utf-8',
+        'Content-Type': 'text/calendar; method=REQUEST; charset=utf-8',
         'Content-Disposition': `attachment; filename="tovis-booking-${booking.id}.ics"`,
+        'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
       },
     })
