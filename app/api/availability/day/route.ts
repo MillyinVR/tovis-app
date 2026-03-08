@@ -264,6 +264,128 @@ async function pickAvailabilityLocation(args: {
   return candidates.find(isSchedulingReadyLocation) ?? null
 }
 
+function locationTypeForLocation(
+  location: Pick<AvailabilityLocation, 'type'>,
+): ServiceLocationType {
+  return location.type === ProfessionalLocationType.MOBILE_BASE
+    ? ServiceLocationType.MOBILE
+    : ServiceLocationType.SALON
+}
+
+function offeringSupportsLocationType(args: {
+  locationType: ServiceLocationType
+  offersInSalon: boolean
+  offersMobile: boolean
+}): boolean {
+  return args.locationType === ServiceLocationType.MOBILE
+    ? args.offersMobile
+    : args.offersInSalon
+}
+
+async function pickPrimaryAvailabilityPlacement(args: {
+  professionalId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  requestedLocationId?: string | null
+  requestedLocationType?: ServiceLocationType | null
+}): Promise<
+  | {
+      location: AvailabilityLocation
+      locationType: ServiceLocationType
+    }
+  | null
+> {
+  const professionalId =
+    typeof args.professionalId === 'string' ? args.professionalId.trim() : ''
+  const requestedLocationId =
+    typeof args.requestedLocationId === 'string'
+      ? args.requestedLocationId.trim()
+      : ''
+
+  if (!professionalId) return null
+
+  const allowedTypes: ProfessionalLocationType[] = []
+
+  if (args.offersInSalon) {
+    allowedTypes.push(
+      ProfessionalLocationType.SALON,
+      ProfessionalLocationType.SUITE,
+    )
+  }
+
+  if (args.offersMobile) {
+    allowedTypes.push(ProfessionalLocationType.MOBILE_BASE)
+  }
+
+  if (!allowedTypes.length) return null
+
+  if (requestedLocationId) {
+    const requested = await prisma.professionalLocation.findFirst({
+      where: {
+        id: requestedLocationId,
+        professionalId,
+        isBookable: true,
+        type: { in: allowedTypes },
+      },
+      select: LOCATION_SELECT,
+    })
+
+    if (!isSchedulingReadyLocation(requested)) return null
+
+    const locationType = locationTypeForLocation(requested)
+
+    if (
+      args.requestedLocationType &&
+      args.requestedLocationType !== locationType
+    ) {
+      return null
+    }
+
+    if (
+      !offeringSupportsLocationType({
+        locationType,
+        offersInSalon: args.offersInSalon,
+        offersMobile: args.offersMobile,
+      })
+    ) {
+      return null
+    }
+
+    return { location: requested, locationType }
+  }
+
+  const candidates = await prisma.professionalLocation.findMany({
+    where: {
+      professionalId,
+      isBookable: true,
+      type: { in: allowedTypes },
+    },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    select: LOCATION_SELECT,
+    take: 50,
+  })
+
+  for (const candidate of candidates) {
+    if (!isSchedulingReadyLocation(candidate)) continue
+
+    const locationType = locationTypeForLocation(candidate)
+
+    if (
+      !offeringSupportsLocationType({
+        locationType,
+        offersInSalon: args.offersInSalon,
+        offersMobile: args.offersMobile,
+      })
+    ) {
+      continue
+    }
+
+    return { location: candidate, locationType }
+  }
+
+  return null
+}
+
 function parseCachedBusyIntervals(
   value: unknown,
 ): BusyInterval[] | null {
@@ -831,55 +953,62 @@ export async function GET(req: Request) {
     if (!service) return jsonFail(404, 'Service not found')
     if (!offering) return jsonFail(404, 'Offering not found')
 
-    let effectiveLocationType =
-      pickEffectiveLocationType({
-        requested: requestedLocationType,
-        offersInSalon: Boolean(offering.offersInSalon),
-        offersMobile: Boolean(offering.offersMobile),
-      }) ?? null
-
-    if (!effectiveLocationType) {
-      return jsonFail(400, 'This service is not bookable.')
-    }
+    const offersInSalon = Boolean(offering.offersInSalon)
+    const offersMobile = Boolean(offering.offersMobile)
 
     const clientExplicitlyRequestedPlacement =
       requestedLocationType != null || requestedLocationId != null
 
-    let location = await pickAvailabilityLocation({
-      professionalId,
-      requestedLocationId,
-      locationType: effectiveLocationType,
-    })
+    let effectiveLocationType: ServiceLocationType | null = null
+    let location: AvailabilityLocation | null = null
 
-    if (!location && !clientExplicitlyRequestedPlacement) {
-      const fallbackType =
-        effectiveLocationType === ServiceLocationType.SALON
-          ? ServiceLocationType.MOBILE
-          : ServiceLocationType.SALON
+    if (clientExplicitlyRequestedPlacement) {
+      if (requestedLocationType) {
+        effectiveLocationType =
+          pickEffectiveLocationType({
+            requested: requestedLocationType,
+            offersInSalon,
+            offersMobile,
+          }) ?? null
 
-      const fallbackAllowed =
-        fallbackType === ServiceLocationType.SALON
-          ? Boolean(offering.offersInSalon)
-          : Boolean(offering.offersMobile)
+        if (!effectiveLocationType) {
+          return jsonFail(400, 'This service is not bookable.')
+        }
 
-      if (fallbackAllowed) {
-        const alt = await pickAvailabilityLocation({
+        location = await pickAvailabilityLocation({
           professionalId,
-          requestedLocationId: null,
-          locationType: fallbackType,
+          requestedLocationId,
+          locationType: effectiveLocationType,
+        })
+      } else if (requestedLocationId) {
+        const placement = await pickPrimaryAvailabilityPlacement({
+          professionalId,
+          requestedLocationId,
+          requestedLocationType: null,
+          offersInSalon,
+          offersMobile,
         })
 
-        if (alt) {
-          location = alt
-          effectiveLocationType = fallbackType
-        }
+        location = placement?.location ?? null
+        effectiveLocationType = placement?.locationType ?? null
       }
+    } else {
+      const placement = await pickPrimaryAvailabilityPlacement({
+        professionalId,
+        offersInSalon,
+        offersMobile,
+        requestedLocationId: null,
+        requestedLocationType: null,
+      })
+
+      location = placement?.location ?? null
+      effectiveLocationType = placement?.locationType ?? null
     }
 
-    if (!location) {
+    if (!location || !effectiveLocationType) {
       return jsonFail(
         400,
-        'No scheduling-ready location found for the selected booking type.',
+        'No scheduling-ready location found for this service.',
       )
     }
 

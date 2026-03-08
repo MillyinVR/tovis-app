@@ -22,7 +22,7 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
   normalizeStepMinutes,
@@ -51,7 +51,6 @@ type CreateBookingErrorCode =
   | 'PRICING_NOT_SET'
   | 'BAD_DURATION'
   | 'TIME_NOT_AVAILABLE'
-  | 'TIME_ON_HOLD'
   | 'TIMEZONE_REQUIRED'
 
 function throwCode(code: CreateBookingErrorCode): never {
@@ -322,7 +321,7 @@ export async function POST(req: Request) {
         }
       }
 
-      const conflict = await getTimeRangeConflict({
+      await assertTimeRangeAvailable({
         tx,
         professionalId,
         locationId: location.id,
@@ -331,18 +330,6 @@ export async function POST(req: Request) {
         defaultBufferMinutes: bufferMinutes,
         fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
       })
-
-      if (conflict === 'BLOCKED') {
-        throwCode('BLOCKED')
-      }
-
-      if (conflict === 'BOOKING') {
-        throwCode('TIME_NOT_AVAILABLE')
-      }
-
-      if (conflict === 'HOLD') {
-        throwCode('TIME_ON_HOLD')
-      }
 
       const locationAddressSnapshot = buildAddressSnapshot(location.formattedAddress)
       const locationLatSnapshot = decimalToNumber(location.lat)
@@ -517,10 +504,6 @@ export async function POST(req: Request) {
 
     if (message === 'TIME_NOT_AVAILABLE') {
       return jsonFail(409, 'That time is not available.')
-    }
-
-    if (message === 'TIME_ON_HOLD') {
-      return jsonFail(409, 'That time is currently on hold.')
     }
 
     if (message === 'BLOCKED') {

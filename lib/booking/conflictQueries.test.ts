@@ -1,3 +1,4 @@
+// lib/booking/conflictQueries.test.ts 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const prismaMockFns = vi.hoisted(() => ({

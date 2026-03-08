@@ -70,7 +70,7 @@ export default function ServiceContextCard({
 
             {priceLabel ? (
               <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/35 px-2 py-1">
-                From <span className="ml-1 font-black text-textPrimary">{priceLabel}</span>
+                Starting at <span className="ml-1 font-black text-textPrimary">{priceLabel}</span>
               </span>
             ) : null}
 
@@ -80,11 +80,6 @@ export default function ServiceContextCard({
           </div>
         </div>
 
-        <div className="shrink-0 text-right">
-          <div className="text-[11px] font-semibold text-textSecondary">Tip</div>
-          <div className="mt-1 text-[12px] font-black text-textPrimary">Customize next</div>
-          <div className="mt-0.5 text-[11px] font-semibold text-textSecondary">Add-ons + notes</div>
-        </div>
       </div>
     </div>
   )

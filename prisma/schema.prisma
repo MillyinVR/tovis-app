@@ -871,11 +871,11 @@ model Booking {
   // Booking mode: SALON or MOBILE
   locationType ServiceLocationType
 
-  // ✅ REQUIRED: lock booking to a specific ProfessionalLocation
+  // REQUIRED: lock booking to a specific ProfessionalLocation
   locationId String
   location   ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
-  // ✅ Snapshots that make bookings immutable + timezone safe
+  // Snapshots that make bookings immutable + timezone safe
   locationTimeZone        String? @db.VarChar(64)
   locationAddressSnapshot Json?
   locationLatSnapshot     Float?
@@ -884,7 +884,7 @@ model Booking {
   // Client-friendly display (optional)
   clientTimeZoneAtBooking String? @db.VarChar(64)
 
-  // Pricing + duration (new truth)
+  // Pricing + duration
   subtotalSnapshot Decimal  @db.Decimal(10, 2)
   totalAmount      Decimal? @db.Decimal(10, 2)
   depositAmount    Decimal? @db.Decimal(10, 2)
@@ -895,7 +895,6 @@ model Booking {
   totalDurationMinutes Int
   bufferMinutes        Int @default(0)
 
-  // Source tracking (keep)
   source            BookingSource @default(DISCOVERY)
   rebookOfBookingId String?
 
@@ -910,7 +909,6 @@ model Booking {
   rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
   rebooks  Booking[] @relation("RebookChain")
 
-  // Keep the rest if you use them
   consultation            BookingConsultation?
   consultationNotes       String?
   consultationPrice       Decimal?              @db.Decimal(10, 2)
@@ -938,10 +936,10 @@ model Booking {
   serviceItems            BookingServiceItem[]
   clientProfessionalNotes ClientProfessionalNote[]
 
+  @@unique([professionalId, scheduledFor])
   @@index([professionalId, scheduledFor])
   @@index([clientId, scheduledFor])
   @@index([locationId, scheduledFor])
-  @@unique([professionalId, scheduledFor])
   @@index([professionalId, source])
 }
 
@@ -958,11 +956,9 @@ model BookingHold {
 
   locationType ServiceLocationType
 
-  // ✅ REQUIRED: hold must be tied to a specific location
   locationId String
   location   ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
-  // snapshot timezone (prevents drift)
   locationTimeZone        String? @db.VarChar(64)
   locationAddressSnapshot Json?
   locationLatSnapshot     Float?
@@ -972,9 +968,8 @@ model BookingHold {
   offering     ProfessionalServiceOffering @relation(fields: [offeringId], references: [id])
   professional ProfessionalProfile         @relation("ProHolds", fields: [professionalId], references: [id])
 
-  // Unique per location calendar, not global across pro
-  @@index([locationId, scheduledFor])
   @@unique([professionalId, scheduledFor])
+  @@index([locationId, scheduledFor])
   @@index([professionalId, expiresAt])
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
@@ -987,11 +982,9 @@ model AftercareSummary {
   rebookedFor  DateTime?
   serviceNotes String?
 
-  // ✅ NEW: timeframe-based recommendation (client self-rebooks)
   rebookWindowStart DateTime?
   rebookWindowEnd   DateTime?
 
-  // ✅ NEW: tells UI what to show (simple and explicit)
   rebookMode AftercareRebookMode @default(NONE)
 
   publicToken String @unique @default(cuid())
@@ -1472,6 +1465,7 @@ model CalendarBlock {
   @@index([locationId])
   @@index([professionalId, startsAt])
   @@index([professionalId, endsAt])
+  @@index([professionalId, locationId, startsAt, endsAt])
 }
 
 model NfcCard {

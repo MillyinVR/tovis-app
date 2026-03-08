@@ -36,7 +36,7 @@ import {
   durationOrFallback,
   normalizeToMinute,
 } from '@/lib/booking/conflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import {
   RequestedServiceItemInput,
@@ -685,7 +685,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         }
       }
 
-      const conflict = await getTimeRangeConflict({
+      await assertTimeRangeAvailable({
         tx,
         professionalId: existing.professionalId,
         locationId: location.id,
@@ -695,18 +695,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
         fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
         excludeBookingId: existing.id,
       })
-
-      if (conflict === 'BLOCKED') {
-        throwCode('BLOCKED')
-      }
-
-      if (conflict === 'BOOKING') {
-        throwCode('TIME_NOT_AVAILABLE')
-      }
-
-      if (conflict === 'HOLD') {
-        throwCode('HELD')
-      }
 
       if (normalizedServiceItems) {
         await tx.bookingServiceItem.deleteMany({
@@ -822,9 +810,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
     if (message === 'BLOCKED') {
       return jsonFail(409, 'That time is blocked on your calendar.')
-    }
-    if (message === 'HELD') {
-      return jsonFail(409, 'That time is currently on hold.')
     }
     if (message === 'BAD_ITEMS') return jsonFail(400, 'Invalid service items.')
     if (message === 'BAD_BUFFER') return jsonFail(400, 'Invalid bufferMinutes.')

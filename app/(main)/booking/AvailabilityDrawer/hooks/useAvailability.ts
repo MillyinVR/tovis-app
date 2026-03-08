@@ -3,7 +3,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { AvailabilitySummaryResponse, DrawerContext, ServiceLocationType } from '../types'
+import type {
+  AvailabilitySummaryResponse,
+  DrawerContext,
+  ServiceLocationType,
+} from '../types'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 import { parseAvailabilitySummaryResponse } from '../contract'
@@ -24,16 +28,30 @@ function pickApiError(raw: unknown): string | null {
 function buildQueryKey(args: {
   proId: string
   serviceId: string
-  locationType: ServiceLocationType
+  locationType: ServiceLocationType | null
   mediaId?: string
-  viewer?: { lat: number; lng: number; radiusMiles: number | null; placeId: string | null } | null
+  viewer?: {
+    lat: number
+    lng: number
+    radiusMiles: number | null
+    placeId: string | null
+  } | null
 }) {
   const v = args.viewer
-  const vKey = v ? `|v=${v.lat.toFixed(4)},${v.lng.toFixed(4)},${v.radiusMiles ?? ''},${v.placeId ?? ''}` : ''
-  return `pro=${args.proId}|service=${args.serviceId}|loc=${args.locationType}|media=${args.mediaId || ''}${vKey}`
+  const vKey = v
+    ? `|v=${v.lat.toFixed(4)},${v.lng.toFixed(4)},${v.radiusMiles ?? ''},${v.placeId ?? ''}`
+    : ''
+
+  const locKey = args.locationType ?? 'AUTO'
+
+  return `pro=${args.proId}|service=${args.serviceId}|loc=${locKey}|media=${args.mediaId || ''}${vKey}`
 }
 
-export function useAvailability(open: boolean, context: DrawerContext, locationType: ServiceLocationType) {
+export function useAvailability(
+  open: boolean,
+  context: DrawerContext,
+  locationType: ServiceLocationType | null,
+) {
   const router = useRouter()
 
   const abortRef = useRef<AbortController | null>(null)
@@ -45,25 +63,52 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<AvailabilitySummaryResponse | null>(null)
 
-  const proId = useMemo(() => String(context.professionalId || '').trim(), [context.professionalId])
-  const serviceId = useMemo(() => String(context.serviceId || '').trim(), [context.serviceId])
-  const mediaId = useMemo(() => (context.mediaId ? String(context.mediaId).trim() : ''), [context.mediaId])
+  const proId = useMemo(
+    () => String(context.professionalId || '').trim(),
+    [context.professionalId],
+  )
+
+  const serviceId = useMemo(
+    () => String(context.serviceId || '').trim(),
+    [context.serviceId],
+  )
+
+  const mediaId = useMemo(
+    () => (context.mediaId ? String(context.mediaId).trim() : ''),
+    [context.mediaId],
+  )
 
   const viewer = useMemo(() => {
-    const lat = typeof context.viewerLat === 'number' && Number.isFinite(context.viewerLat) ? context.viewerLat : null
-    const lng = typeof context.viewerLng === 'number' && Number.isFinite(context.viewerLng) ? context.viewerLng : null
+    const lat =
+      typeof context.viewerLat === 'number' && Number.isFinite(context.viewerLat)
+        ? context.viewerLat
+        : null
+
+    const lng =
+      typeof context.viewerLng === 'number' && Number.isFinite(context.viewerLng)
+        ? context.viewerLng
+        : null
+
     if (lat == null || lng == null) return null
 
     const radiusMiles =
-      typeof context.viewerRadiusMiles === 'number' && Number.isFinite(context.viewerRadiusMiles)
+      typeof context.viewerRadiusMiles === 'number' &&
+      Number.isFinite(context.viewerRadiusMiles)
         ? context.viewerRadiusMiles
         : null
 
     const placeId =
-      typeof context.viewerPlaceId === 'string' && context.viewerPlaceId.trim() ? context.viewerPlaceId.trim() : null
+      typeof context.viewerPlaceId === 'string' && context.viewerPlaceId.trim()
+        ? context.viewerPlaceId.trim()
+        : null
 
     return { lat, lng, radiusMiles, placeId }
-  }, [context.viewerLat, context.viewerLng, context.viewerRadiusMiles, context.viewerPlaceId])
+  }, [
+    context.viewerLat,
+    context.viewerLng,
+    context.viewerRadiusMiles,
+    context.viewerPlaceId,
+  ])
 
   const queryKey = useMemo(
     () => buildQueryKey({ proId, serviceId, locationType, mediaId, viewer }),
@@ -86,7 +131,9 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
       const hit = cacheRef.current.get(key)
       const hasUsableData = Boolean(hit?.data)
 
-      if (now - lastRequestAtRef.current < SOFT_THROTTLE_MS && hasUsableData) return
+      if (now - lastRequestAtRef.current < SOFT_THROTTLE_MS && hasUsableData) {
+        return
+      }
       lastRequestAtRef.current = now
 
       abortRef.current?.abort()
@@ -100,14 +147,22 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
       const qs = new URLSearchParams()
       qs.set('professionalId', proId)
       qs.set('serviceId', serviceId)
-      qs.set('locationType', locationType)
+
+      if (locationType) {
+        qs.set('locationType', locationType)
+      }
+
       if (mediaId) qs.set('mediaId', mediaId)
 
       if (viewer) {
         qs.set('viewerLat', String(viewer.lat))
         qs.set('viewerLng', String(viewer.lng))
-        if (viewer.radiusMiles != null) qs.set('radiusMiles', String(viewer.radiusMiles))
-        if (viewer.placeId) qs.set('viewerPlaceId', viewer.placeId)
+        if (viewer.radiusMiles != null) {
+          qs.set('radiusMiles', String(viewer.radiusMiles))
+        }
+        if (viewer.placeId) {
+          qs.set('viewerPlaceId', viewer.placeId)
+        }
       }
 
       try {
@@ -126,20 +181,32 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
         }
 
         if (!res.ok) {
-          throw new Error(pickApiError(raw) ?? `Request failed (${res.status}).`)
+          throw new Error(
+            pickApiError(raw) ?? `Request failed (${res.status}).`,
+          )
         }
 
         const parsed = parseAvailabilitySummaryResponse(raw)
-        if (!parsed) throw new Error('Availability endpoint returned unexpected response.')
+        if (!parsed) {
+          throw new Error(
+            'Availability endpoint returned unexpected response.',
+          )
+        }
 
         if (!parsed.ok) throw new Error(parsed.error)
-        if (parsed.mode !== 'SUMMARY') throw new Error('Availability endpoint returned unexpected response.')
+        if (parsed.mode !== 'SUMMARY') {
+          throw new Error(
+            'Availability endpoint returned unexpected response.',
+          )
+        }
 
         cacheRef.current.set(key, { at: Date.now(), data: parsed })
         setData(parsed)
       } catch (e: unknown) {
         if (e instanceof Error && e.name === 'AbortError') return
-        setError(e instanceof Error ? e.message : 'Failed to load availability.')
+        setError(
+          e instanceof Error ? e.message : 'Failed to load availability.',
+        )
       } finally {
         if (abortRef.current === controller) abortRef.current = null
         if (inFlightKeyRef.current === key) inFlightKeyRef.current = null
@@ -162,7 +229,9 @@ export function useAvailability(open: boolean, context: DrawerContext, locationT
     if (!serviceId) {
       setLoading(false)
       setData(null)
-      setError('No service is linked yet. Ask the pro to attach a service to this look.')
+      setError(
+        'No service is linked yet. Ask the pro to attach a service to this look.',
+      )
       return
     }
 

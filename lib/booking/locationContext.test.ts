@@ -1,3 +1,4 @@
+// lib/booking/locationContext.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 import type { BookableLocation } from '@/lib/booking/pickLocation'
