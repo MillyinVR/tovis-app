@@ -21,7 +21,7 @@ const SOFT_THROTTLE_MS = 800
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
-  const e = (raw as Record<string, unknown>).error
+  const e = raw.error
   return pickString(e)
 }
 

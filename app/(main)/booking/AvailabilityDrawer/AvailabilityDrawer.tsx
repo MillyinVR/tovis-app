@@ -8,7 +8,9 @@ import type {
   AvailabilityOffering,
   AvailabilitySummaryResponse,
   BookingSource,
+  ClientAddressRecord,
   DrawerContext,
+  MobileAddressOption,
   SelectedHold,
   ServiceLocationType,
 } from './types'
@@ -24,6 +26,8 @@ import OtherPros from './components/OtherPros'
 import StickyCTA from './components/StickyCTA'
 import DebugPanel from './components/DebugPanel'
 import DayScroller from './components/DayScroller'
+import MobileAddressSelector from './components/MobileAddressSelector'
+import ClientAddressCreateModal from './components/ClientAddressCreateModal'
 
 import { safeJson } from './utils/safeJson'
 import { redirectToLogin } from './utils/authRedirect'
@@ -207,17 +211,16 @@ function parseDaySlots(
   raw: unknown,
 ): { ok: true; slots: string[] } | { ok: false; error?: string } {
   if (!isRecord(raw)) return { ok: false }
-  if (raw.ok === false)
+  if (raw.ok === false) {
     return { ok: false, error: pickErrorMessage(raw) ?? undefined }
+  }
   if (raw.ok !== true) return { ok: false }
-  if (raw.mode !== 'DAY')
+  if (raw.mode !== 'DAY') {
     return { ok: false, error: 'Unexpected availability response.' }
+  }
 
   const slots = raw.slots
-  if (
-    !Array.isArray(slots) ||
-    !slots.every((s) => typeof s === 'string')
-  ) {
+  if (!Array.isArray(slots) || !slots.every((s) => typeof s === 'string')) {
     return { ok: false, error: 'Slots malformed.' }
   }
 
@@ -230,6 +233,103 @@ function fallbackAllowedMode(args: {
 }): ServiceLocationType {
   if (args.mobile && !args.salon) return 'MOBILE'
   return 'SALON'
+}
+
+function parseClientAddresses(raw: unknown): ClientAddressRecord[] {
+  if (!isRecord(raw)) return []
+
+  const rows = raw.addresses
+  if (!Array.isArray(rows)) return []
+
+  const out: ClientAddressRecord[] = []
+
+  for (const row of rows) {
+    if (!isRecord(row)) continue
+
+    const id = typeof row.id === 'string' ? row.id.trim() : ''
+    const kind =
+      typeof row.kind === 'string' ? row.kind.trim().toUpperCase() : ''
+    const isDefault = Boolean(row.isDefault)
+
+    if (!id) continue
+    if (kind !== 'SEARCH_AREA' && kind !== 'SERVICE_ADDRESS') continue
+
+    out.push({
+      id,
+      kind,
+      label:
+        typeof row.label === 'string' && row.label.trim()
+          ? row.label.trim()
+          : null,
+      formattedAddress:
+        typeof row.formattedAddress === 'string' && row.formattedAddress.trim()
+          ? row.formattedAddress.trim()
+          : null,
+      addressLine1:
+        typeof row.addressLine1 === 'string' && row.addressLine1.trim()
+          ? row.addressLine1.trim()
+          : null,
+      addressLine2:
+        typeof row.addressLine2 === 'string' && row.addressLine2.trim()
+          ? row.addressLine2.trim()
+          : null,
+      city:
+        typeof row.city === 'string' && row.city.trim()
+          ? row.city.trim()
+          : null,
+      state:
+        typeof row.state === 'string' && row.state.trim()
+          ? row.state.trim()
+          : null,
+      postalCode:
+        typeof row.postalCode === 'string' && row.postalCode.trim()
+          ? row.postalCode.trim()
+          : null,
+      countryCode:
+        typeof row.countryCode === 'string' && row.countryCode.trim()
+          ? row.countryCode.trim()
+          : null,
+      placeId:
+        typeof row.placeId === 'string' && row.placeId.trim()
+          ? row.placeId.trim()
+          : null,
+      lat:
+        typeof row.lat === 'number' && Number.isFinite(row.lat)
+          ? row.lat
+          : null,
+      lng:
+        typeof row.lng === 'number' && Number.isFinite(row.lng)
+          ? row.lng
+          : null,
+      isDefault,
+    })
+  }
+
+  return out
+}
+
+function toMobileAddressOptions(
+  addresses: ClientAddressRecord[],
+): MobileAddressOption[] {
+  return addresses
+    .filter((address) => address.kind === 'SERVICE_ADDRESS')
+    .map((address) => ({
+      id: address.id,
+      label: address.label ?? 'Service address',
+      formattedAddress:
+        address.formattedAddress ??
+        [
+          address.addressLine1,
+          address.addressLine2,
+          address.city,
+          address.state,
+          address.postalCode,
+        ]
+          .filter(Boolean)
+          .join(', '),
+      isDefault: address.isDefault,
+    }))
+    .filter((address) => address.formattedAddress.trim().length > 0)
 }
 
 export default function AvailabilityDrawer(props: {
@@ -249,8 +349,6 @@ export default function AvailabilityDrawer(props: {
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
 
-  // NOTE:
-  // This wants hook/API support for null initial mode.
   const [locationType, setLocationType] =
     useState<ServiceLocationType | null>(null)
 
@@ -275,9 +373,7 @@ export default function AvailabilityDrawer(props: {
   )
 
   const activeLocationType: ServiceLocationType =
-    locationType ??
-    summary?.locationType ??
-    fallbackAllowedMode(allowed)
+    locationType ?? summary?.locationType ?? fallbackAllowedMode(allowed)
 
   const [selected, setSelected] = useState<SelectedHold | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
@@ -293,6 +389,18 @@ export default function AvailabilityDrawer(props: {
 
   const [primarySlots, setPrimarySlots] = useState<string[]>([])
   const [otherSlots, setOtherSlots] = useState<Record<string, string[]>>({})
+
+  const [mobileAddresses, setMobileAddresses] = useState<MobileAddressOption[]>(
+    [],
+  )
+  const [loadingMobileAddresses, setLoadingMobileAddresses] = useState(false)
+  const [mobileAddressesError, setMobileAddressesError] = useState<string | null>(
+    null,
+  )
+  const [selectedClientAddressId, setSelectedClientAddressId] = useState<
+    string | null
+  >(null)
+  const [addressCreateOpen, setAddressCreateOpen] = useState(false)
 
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } =
     useHoldTimer(holdUntil)
@@ -311,9 +419,7 @@ export default function AvailabilityDrawer(props: {
   const bookingSource = resolveBookingSource(context)
 
   const canWaitlist = Boolean(
-    summary?.waitlistSupported &&
-      context.professionalId &&
-      effectiveServiceId,
+    summary?.waitlistSupported && context.professionalId && effectiveServiceId,
   )
   const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
 
@@ -371,8 +477,81 @@ export default function AvailabilityDrawer(props: {
       setSelectedDayYMD(null)
       setPrimarySlots([])
       setOtherSlots({})
+      setError(null)
     },
-    [activeLocationType, hardResetUi],
+    [activeLocationType, hardResetUi, setError],
+  )
+
+  const loadMobileAddresses = useCallback(async () => {
+    try {
+      setLoadingMobileAddresses(true)
+      setMobileAddressesError(null)
+
+      const res = await fetch('/api/client/addresses', {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+
+      const raw = await safeJson(res)
+
+      if (res.status === 401) {
+        redirectToLogin(router, 'availability')
+        return null
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          pickErrorMessage(raw) ?? `Failed to load addresses (${res.status}).`,
+        )
+      }
+
+      const parsed = parseClientAddresses(raw)
+      const options = toMobileAddressOptions(parsed)
+
+      setMobileAddresses(options)
+
+      setSelectedClientAddressId((current) => {
+        if (current && options.some((option) => option.id === current)) {
+          return current
+        }
+
+        return (
+          options.find((option) => option.isDefault)?.id ??
+          options[0]?.id ??
+          null
+        )
+      })
+
+      return options
+    } catch (e: unknown) {
+      setMobileAddresses([])
+      setSelectedClientAddressId(null)
+      setMobileAddressesError(
+        e instanceof Error ? e.message : 'Failed to load mobile addresses.',
+      )
+      return null
+    } finally {
+      setLoadingMobileAddresses(false)
+    }
+  }, [router])
+
+  const handleAddressSaved = useCallback(
+    async (address: MobileAddressOption | null) => {
+      const options = await loadMobileAddresses()
+
+      if (address?.id) {
+        setSelectedClientAddressId(address.id)
+      } else if (options?.length) {
+        setSelectedClientAddressId(
+          options.find((option) => option.isDefault)?.id ?? options[0]?.id ?? null,
+        )
+      }
+
+      setMobileAddressesError(null)
+      setAddressCreateOpen(false)
+    },
+    [loadMobileAddresses],
   )
 
   useEffect(() => {
@@ -382,6 +561,11 @@ export default function AvailabilityDrawer(props: {
     setPrimarySlots([])
     setOtherSlots({})
     setLocationType(null)
+    setMobileAddresses([])
+    setLoadingMobileAddresses(false)
+    setMobileAddressesError(null)
+    setSelectedClientAddressId(null)
+    setAddressCreateOpen(false)
     void hardResetUi({ deleteHold: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -393,7 +577,6 @@ export default function AvailabilityDrawer(props: {
     context.source,
   ])
 
-  // First server summary becomes canonical initial mode.
   useEffect(() => {
     if (!open) return
     if (!summary) return
@@ -447,15 +630,17 @@ export default function AvailabilityDrawer(props: {
 
       return cur
     })
-  }, [open, appointmentTz, daysKey])
+  }, [open, appointmentTz, daysKey, days])
 
   useEffect(() => {
     if (!open) return
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       void hardResetUi({ deleteHold: true })
       onClose()
     }
+
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, hardResetUi, onClose])
@@ -475,6 +660,16 @@ export default function AvailabilityDrawer(props: {
     setSelected(null)
     setError('That hold expired. Pick another time.')
   }, [holdExpired, setError])
+
+  useEffect(() => {
+    if (!open) return
+    if (activeLocationType !== 'MOBILE') {
+      setAddressCreateOpen(false)
+      return
+    }
+
+    void loadMobileAddresses()
+  }, [open, activeLocationType, loadMobileAddresses])
 
   function scrollToOtherPros() {
     otherProsRef.current?.scrollIntoView({
@@ -601,6 +796,7 @@ export default function AvailabilityDrawer(props: {
     holding,
     setError,
     othersKey,
+    others,
   ])
 
   useEffect(() => {
@@ -641,6 +837,11 @@ export default function AvailabilityDrawer(props: {
       return
     }
 
+    if (activeLocationType === 'MOBILE' && !selectedClientAddressId) {
+      setError('Choose a mobile service address before selecting a time.')
+      return
+    }
+
     setError(null)
 
     const existingHoldId = selectedHoldIdRef.current
@@ -664,6 +865,8 @@ export default function AvailabilityDrawer(props: {
           scheduledFor: slotISO,
           locationType: activeLocationType,
           locationId,
+          clientAddressId:
+            activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
         }),
       })
 
@@ -730,199 +933,224 @@ export default function AvailabilityDrawer(props: {
   const shouldShowEmpty = !error && !shouldShowLoading && !canRenderSummary
 
   return (
-    <DrawerShell
-      open={open}
-      onClose={() => {
-        void hardResetUi({ deleteHold: true })
-        onClose()
-      }}
-      header={
-        <>
-          <div className="flex items-center justify-center pt-3">
-            <div className="h-1.5 w-10 rounded-full bg-white/20" />
-          </div>
-
-          <div className="sticky top-0 z-10 px-4 pb-3 pt-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-black text-textPrimary">
-                  Availability
-                </div>
-                <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
-                  Pick a time. We hold it for you.
-                  {holdLabel ? (
-                    <span
-                      className={[
-                        'ml-2 font-black',
-                        holdUrgent ? 'text-toneDanger' : 'text-textPrimary',
-                      ].join(' ')}
-                    >
-                      {holdLabel}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  void hardResetUi({ deleteHold: true })
-                  onClose()
-                }}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/40 text-textPrimary hover:bg-white/10"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </>
-      }
-      footer={
-        <StickyCTA
-          canContinue={Boolean(selected?.holdId && holdUntil)}
-          loading={holding}
-          onContinue={onContinue}
-          selectedLine={selectedLine}
-        />
-      }
-    >
-      <div
-        className="looksNoScrollbar overflow-y-auto px-4 pb-4"
-        style={{ paddingBottom: STICKY_CTA_H + 14 }}
-      >
-        {shouldShowLoading ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-            Loading availability…
-          </div>
-        ) : error ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">
-            {error}
-          </div>
-        ) : shouldShowEmpty ? (
-          <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-            No availability found.
-          </div>
-        ) : summary && primary ? (
+    <>
+      <DrawerShell
+        open={open}
+        onClose={() => {
+          void hardResetUi({ deleteHold: true })
+          onClose()
+        }}
+        header={
           <>
-            <ProCard
-              pro={primary}
-              appointmentTz={appointmentTz}
-              viewerTz={viewerTz}
-              statusLine={statusLine}
-              showFallbackActions={false}
-              viewProServicesHref={viewProServicesHref}
-              onScrollToOtherPros={scrollToOtherPros}
-            />
+            <div className="flex items-center justify-center pt-3">
+              <div className="h-1.5 w-10 rounded-full bg-white/20" />
+            </div>
 
-            <ServiceContextCard
-              serviceName={summary.serviceName ?? null}
-              categoryName={summary.serviceCategoryName ?? null}
-              offering={offering}
-              locationType={activeLocationType}
-            />
+            <div className="sticky top-0 z-10 px-4 pb-3 pt-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-black text-textPrimary">
+                    Availability
+                  </div>
+                  <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+                    Pick a time. We hold it for you.
+                    {holdLabel ? (
+                      <span
+                        className={[
+                          'ml-2 font-black',
+                          holdUrgent ? 'text-toneDanger' : 'text-textPrimary',
+                        ].join(' ')}
+                      >
+                        {holdLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
 
-            <AppointmentTypeToggle
-              value={activeLocationType}
-              disabled={holding}
-              allowed={allowed}
-              offering={offering}
-              onChange={(t) => {
-                void resetForLocationModeChange(t)
-              }}
-            />
-
-            {dayScrollerDays.length ? (
-              <DayScroller
-                days={dayScrollerDays}
-                selectedYMD={selectedDayYMD}
-                onSelect={(ymd) => {
-                  void hardResetUi({ deleteHold: true })
-                  setSelectedDayYMD(ymd)
-                }}
-              />
-            ) : null}
-
-            <SlotChips
-              pro={primary}
-              appointmentTz={appointmentTz}
-              holding={holding}
-              selected={selected}
-              period={period}
-              onSelectPeriod={(p) => {
-                void hardResetUi({ deleteHold: true })
-                setPeriod(p)
-              }}
-              slotsForDay={primarySlots}
-              onPick={(proId, offeringId, slotISO) => {
-                void onPickSlot(proId, offeringId, slotISO)
-              }}
-            />
-
-            {showLocalHint && selected?.slotISO ? (
-              <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
-                You’re booking{' '}
-                <span className="font-black text-textPrimary">
-                  {appointmentTz}
-                </span>{' '}
-                time.
-                <span className="ml-2">
-                  Your local time:{' '}
-                  <span className="font-black text-textPrimary">
-                    {fmtInTz(selected.slotISO, viewerTz)}
-                  </span>
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void hardResetUi({ deleteHold: true })
+                    onClose()
+                  }}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/40 text-textPrimary hover:bg-white/10"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
               </div>
-            ) : null}
+            </div>
+          </>
+        }
+        footer={
+          <StickyCTA
+            canContinue={Boolean(selected?.holdId && holdUntil)}
+            loading={holding}
+            onContinue={onContinue}
+            selectedLine={selectedLine}
+          />
+        }
+      >
+        <div
+          className="looksNoScrollbar overflow-y-auto px-4 pb-4"
+          style={{ paddingBottom: STICKY_CTA_H + 14 }}
+        >
+          {shouldShowLoading ? (
+            <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+              Loading availability…
+            </div>
+          ) : error ? (
+            <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">
+              {error}
+            </div>
+          ) : shouldShowEmpty ? (
+            <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+              No availability found.
+            </div>
+          ) : summary && primary ? (
+            <>
+              <ProCard
+                pro={primary}
+                appointmentTz={appointmentTz}
+                viewerTz={viewerTz}
+                statusLine={statusLine}
+                showFallbackActions={false}
+                viewProServicesHref={viewProServicesHref}
+                onScrollToOtherPros={scrollToOtherPros}
+              />
 
-            <WaitlistPanel
-              canWaitlist={canWaitlist}
-              appointmentTz={appointmentTz}
-              context={context}
-              effectiveServiceId={effectiveServiceId}
-              noPrimarySlots={noPrimarySlots}
-            />
+              <ServiceContextCard
+                serviceName={summary.serviceName ?? null}
+                categoryName={summary.serviceCategoryName ?? null}
+                offering={offering}
+                locationType={activeLocationType}
+              />
 
-            <OtherPros
-              others={others.map((p) => ({
-                ...p,
-                slots: otherSlots[p.id] ?? [],
-              }))}
-              effectiveServiceId={effectiveServiceId}
-              viewerTz={viewerTz}
-              appointmentTz={appointmentTz}
-              holding={holding}
-              selected={selected}
-              onPick={(proId, offeringId, slotISO) =>
-                onPickSlot(proId, offeringId, slotISO)
-              }
-              setRef={(el) => {
-                otherProsRef.current = el
-              }}
-            />
-
-            {debug ? (
-              <DebugPanel
-                payload={{
-                  bookingSource,
-                  appointmentTz,
-                  viewerTz,
-                  selected,
-                  holdUntil,
-                  locationType: activeLocationType,
-                  effectiveServiceId,
-                  selectedDayYMD,
-                  period,
-                  primarySlotsCount: primarySlots.length,
-                  offering,
-                  allowed,
-                  raw: data,
+              <AppointmentTypeToggle
+                value={activeLocationType}
+                disabled={holding}
+                allowed={allowed}
+                offering={offering}
+                onChange={(t) => {
+                  void resetForLocationModeChange(t)
                 }}
               />
-            ) : null}
-          </>
-        ) : null}
-      </div>
-    </DrawerShell>
+
+              {activeLocationType === 'MOBILE' ? (
+                <MobileAddressSelector
+                  value={selectedClientAddressId}
+                  options={mobileAddresses}
+                  loading={loadingMobileAddresses}
+                  error={mobileAddressesError}
+                  disabled={holding}
+                  onChange={setSelectedClientAddressId}
+                  onAddAddress={() => setAddressCreateOpen(true)}
+                />
+              ) : null}
+
+              {dayScrollerDays.length ? (
+                <DayScroller
+                  days={dayScrollerDays}
+                  selectedYMD={selectedDayYMD}
+                  onSelect={(ymd) => {
+                    void hardResetUi({ deleteHold: true })
+                    setSelectedDayYMD(ymd)
+                  }}
+                />
+              ) : null}
+
+              <SlotChips
+                pro={primary}
+                appointmentTz={appointmentTz}
+                holding={holding}
+                selected={selected}
+                period={period}
+                onSelectPeriod={(p) => {
+                  void hardResetUi({ deleteHold: true })
+                  setPeriod(p)
+                }}
+                slotsForDay={primarySlots}
+                onPick={(proId, offeringId, slotISO) => {
+                  void onPickSlot(proId, offeringId, slotISO)
+                }}
+              />
+
+              {showLocalHint && selected?.slotISO ? (
+                <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
+                  You’re booking{' '}
+                  <span className="font-black text-textPrimary">
+                    {appointmentTz}
+                  </span>{' '}
+                  time.
+                  <span className="ml-2">
+                    Your local time:{' '}
+                    <span className="font-black text-textPrimary">
+                      {fmtInTz(selected.slotISO, viewerTz)}
+                    </span>
+                  </span>
+                </div>
+              ) : null}
+
+              <WaitlistPanel
+                canWaitlist={canWaitlist}
+                appointmentTz={appointmentTz}
+                context={context}
+                effectiveServiceId={effectiveServiceId}
+                noPrimarySlots={noPrimarySlots}
+              />
+
+              <OtherPros
+                others={others.map((p) => ({
+                  ...p,
+                  slots: otherSlots[p.id] ?? [],
+                }))}
+                effectiveServiceId={effectiveServiceId}
+                viewerTz={viewerTz}
+                appointmentTz={appointmentTz}
+                holding={holding}
+                selected={selected}
+                onPick={(proId, offeringId, slotISO) =>
+                  onPickSlot(proId, offeringId, slotISO)
+                }
+                setRef={(el) => {
+                  otherProsRef.current = el
+                }}
+              />
+
+              {debug ? (
+                <DebugPanel
+                  payload={{
+                    bookingSource,
+                    appointmentTz,
+                    viewerTz,
+                    selected,
+                    holdUntil,
+                    locationType: activeLocationType,
+                    effectiveServiceId,
+                    selectedDayYMD,
+                    period,
+                    primarySlotsCount: primarySlots.length,
+                    offering,
+                    allowed,
+                    selectedClientAddressId,
+                    mobileAddresses,
+                    raw: data,
+                  }}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </DrawerShell>
+
+      <ClientAddressCreateModal
+        open={open && addressCreateOpen}
+        onClose={() => {
+          if (holding) return
+          setAddressCreateOpen(false)
+        }}
+        onSaved={handleAddressSaved}
+      />
+    </>
   )
 }

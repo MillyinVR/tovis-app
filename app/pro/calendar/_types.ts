@@ -53,9 +53,6 @@ export type CalendarStats =
  * - id = service id
  * - offeringId = optional active offering id
  * - durationMinutes = display/helper duration
- *
- * Keep this flexible for now because the edit flow is still normalizing
- * selected services into booking service items.
  */
 export type ServiceOption = {
   id: string
@@ -86,25 +83,33 @@ export type BookingServiceItem = {
  * Notes:
  * - serviceItems is the actual editable unit
  * - totalDurationMinutes is still the persisted booking duration
- * - locationId is optional here for compatibility while the booking GET
- *   route is still being normalized across the stack
+ * - location snapshot fields are optional so the UI can progressively
+ *   support mobile-address rendering without breaking older payloads
  */
 export type BookingDetails = {
   id: string
   status: string
   scheduledFor: string // ISO string for a UTC instant
   endsAt: string // ISO string for a UTC instant
+
   locationId?: string | null
   locationType?: ServiceLocationType
+
+  locationAddressSnapshot?: string | null
+  locationLatSnapshot?: number | null
+  locationLngSnapshot?: number | null
+
   totalDurationMinutes: number
   durationMinutes?: number
   bufferMinutes?: number
   subtotalSnapshot?: string
+
   client: {
     fullName: string
     email: string | null
     phone: string | null
   }
+
   timeZone: IanaTimeZone
   serviceItems: BookingServiceItem[]
 }

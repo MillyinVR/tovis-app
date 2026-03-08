@@ -1,7 +1,7 @@
 // app/api/bookings/finalize/route.ts
-//3726 leave alone
 import { prisma } from '@/lib/prisma'
 import {
+  ClientAddressKind,
   Prisma,
   BookingServiceItemType,
   BookingSource,
@@ -38,8 +38,10 @@ export const dynamic = 'force-dynamic'
 type TxnErrorCode =
   | 'ADDONS_INVALID'
   | 'BLOCKED'
+  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
   | 'HOLD_EXPIRED'
   | 'HOLD_MISMATCH'
+  | 'HOLD_MISSING_CLIENT_ADDRESS'
   | 'HOLD_MISSING_LOCATION'
   | 'HOLD_NOT_FOUND'
   | 'INVALID_DURATION'
@@ -49,7 +51,6 @@ type TxnErrorCode =
   | 'TIME_IN_PAST'
   | 'TIME_NOT_AVAILABLE'
   | 'TOO_FAR'
-
 
 function throwCode(code: TxnErrorCode): never {
   throw new Error(code)
@@ -86,6 +87,45 @@ function pickStringArray(value: unknown): string[] {
 
 function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length
+}
+
+function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      item === null ? null : toInputJsonValue(item),
+    )
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return {}
+  }
+
+  const out: Record<string, Prisma.InputJsonValue | null> = {}
+
+  for (const key of Object.keys(value)) {
+    const child = value[key]
+
+    if (child === undefined) continue
+    out[key] = child === null ? null : toInputJsonValue(child)
+  }
+
+  return out
+}
+
+function toNullableJsonCreateInput(
+  value: Prisma.JsonValue | null | undefined,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+  return toInputJsonValue(value)
 }
 
 export async function POST(request: Request) {
@@ -289,6 +329,10 @@ export async function POST(request: Request) {
           locationAddressSnapshot: true,
           locationLatSnapshot: true,
           locationLngSnapshot: true,
+          clientAddressId: true,
+          clientAddressSnapshot: true,
+          clientAddressLatSnapshot: true,
+          clientAddressLngSnapshot: true,
         },
       })
 
@@ -300,6 +344,25 @@ export async function POST(request: Request) {
       if (hold.professionalId !== offering.professionalId) throwCode('HOLD_MISMATCH')
       if (hold.locationType !== locationType) throwCode('HOLD_MISMATCH')
       if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
+
+      if (hold.locationType === ServiceLocationType.MOBILE) {
+        if (!hold.clientAddressId || !hold.clientAddressSnapshot) {
+          throwCode('HOLD_MISSING_CLIENT_ADDRESS')
+        }
+
+        const ownedClientAddress = await tx.clientAddress.findFirst({
+          where: {
+            id: hold.clientAddressId,
+            clientId,
+            kind: ClientAddressKind.SERVICE_ADDRESS,
+          },
+          select: { id: true },
+        })
+
+        if (!ownedClientAddress) {
+          throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+        }
+      }
 
       const locationContextResult = await resolveBookingLocationContext({
         tx,
@@ -586,6 +649,22 @@ export async function POST(request: Request) {
               decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
             locationLngSnapshot:
               decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+            clientAddressId:
+              hold.locationType === ServiceLocationType.MOBILE
+                ? hold.clientAddressId
+                : null,
+            clientAddressSnapshot:
+              hold.locationType === ServiceLocationType.MOBILE
+                ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
+                : Prisma.JsonNull,
+            clientAddressLatSnapshot:
+              hold.locationType === ServiceLocationType.MOBILE
+                ? decimalToNumber(hold.clientAddressLatSnapshot)
+                : null,
+            clientAddressLngSnapshot:
+              hold.locationType === ServiceLocationType.MOBILE
+                ? decimalToNumber(hold.clientAddressLngSnapshot)
+                : null,
           },
           select: {
             id: true,
@@ -680,6 +759,22 @@ export async function POST(request: Request) {
       return jsonFail(400, 'One or more add-ons are invalid for this booking.', {
         code: 'ADDONS_INVALID',
       })
+    }
+
+    if (message === 'HOLD_MISSING_CLIENT_ADDRESS') {
+      return jsonFail(
+        409,
+        'This mobile hold is missing the service address. Please pick your address and try again.',
+        { code: 'HOLD_MISSING_CLIENT_ADDRESS' },
+      )
+    }
+
+    if (message === 'CLIENT_SERVICE_ADDRESS_REQUIRED') {
+      return jsonFail(
+        400,
+        'Add a mobile service address in your client settings before booking an in-home appointment.',
+        { code: 'CLIENT_SERVICE_ADDRESS_REQUIRED' },
+      )
     }
 
     if (message === 'TIMEZONE_REQUIRED') {

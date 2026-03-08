@@ -504,11 +504,27 @@ function parseBookingDetails(v: unknown): BookingDetails | null {
   const bufferMinutes = pickNumber(v.bufferMinutes) ?? undefined
   const subtotalSnapshot = pickString(v.subtotalSnapshot) ?? undefined
 
+  const locationId =
+    v.locationId === null ? null : (pickString(v.locationId) ?? undefined)
+
   const locationTypeRaw = pickString(v.locationType)
   const locationType =
     locationTypeRaw === 'SALON' || locationTypeRaw === 'MOBILE'
       ? locationTypeRaw
       : undefined
+
+  const locationAddressSnapshot =
+    v.locationAddressSnapshot === null
+      ? null
+      : (pickString(v.locationAddressSnapshot) ?? undefined)
+
+  const rawLat = pickNumber(v.locationLatSnapshot)
+  const locationLatSnapshot =
+    rawLat != null && Number.isFinite(rawLat) ? rawLat : undefined
+
+  const rawLng = pickNumber(v.locationLngSnapshot)
+  const locationLngSnapshot =
+    rawLng != null && Number.isFinite(rawLng) ? rawLng : undefined
 
   const client = v.client
   if (!isRecord(client)) return null
@@ -520,7 +536,14 @@ function parseBookingDetails(v: unknown): BookingDetails | null {
   const tz = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
   const serviceItems = parseBookingServiceItems(v.serviceItems)
 
-  if (!id || !status || !scheduledFor || !endsAt || totalDurationMinutes == null || !fullName) {
+  if (
+    !id ||
+    !status ||
+    !scheduledFor ||
+    !endsAt ||
+    totalDurationMinutes == null ||
+    !fullName
+  ) {
     return null
   }
 
@@ -529,7 +552,13 @@ function parseBookingDetails(v: unknown): BookingDetails | null {
     status,
     scheduledFor,
     endsAt,
+    ...(locationId !== undefined ? { locationId } : {}),
     ...(locationType ? { locationType } : {}),
+    ...(locationAddressSnapshot !== undefined
+      ? { locationAddressSnapshot }
+      : {}),
+    ...(locationLatSnapshot !== undefined ? { locationLatSnapshot } : {}),
+    ...(locationLngSnapshot !== undefined ? { locationLngSnapshot } : {}),
     totalDurationMinutes,
     ...(durationMinutes != null ? { durationMinutes } : {}),
     ...(bufferMinutes != null ? { bufferMinutes } : {}),

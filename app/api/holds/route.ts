@@ -1,6 +1,10 @@
 // app/api/holds/route.ts
 import { NextRequest } from 'next/server'
-import { Prisma, ServiceLocationType } from '@prisma/client'
+import {
+  ClientAddressKind,
+  Prisma,
+  ServiceLocationType,
+} from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
@@ -12,7 +16,10 @@ import {
   pickModeDurationMinutes,
   resolveBookingLocationContext,
 } from '@/lib/booking/locationContext'
-import { buildAddressSnapshot } from '@/lib/booking/snapshots'
+import {
+  buildAddressSnapshot,
+  decimalToNumber,
+} from '@/lib/booking/snapshots'
 import { minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 
@@ -20,6 +27,26 @@ export const dynamic = 'force-dynamic'
 
 function isValidDate(date: Date): boolean {
   return date instanceof Date && Number.isFinite(date.getTime())
+}
+
+async function loadClientServiceAddress(args: {
+  tx: Prisma.TransactionClient
+  clientId: string
+  clientAddressId: string
+}) {
+  return args.tx.clientAddress.findFirst({
+    where: {
+      id: args.clientAddressId,
+      clientId: args.clientId,
+      kind: ClientAddressKind.SERVICE_ADDRESS,
+    },
+    select: {
+      id: true,
+      formattedAddress: true,
+      lat: true,
+      lng: true,
+    },
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -34,11 +61,23 @@ export async function POST(req: NextRequest) {
 
     const offeringId = pickString(body.offeringId)
     const requestedLocationId = pickString(body.locationId)
+    const clientAddressId = pickString(body.clientAddressId)
     const locationType = normalizeLocationType(body.locationType)
     const scheduledForRaw = pickString(body.scheduledFor)
 
     if (!offeringId || !scheduledForRaw || !locationType) {
       return jsonFail(400, 'Missing offeringId, scheduledFor, or locationType.')
+    }
+
+    if (
+      locationType === ServiceLocationType.MOBILE &&
+      !clientAddressId
+    ) {
+      return jsonFail(
+        400,
+        'Select a saved service address before booking a mobile appointment.',
+        { code: 'CLIENT_SERVICE_ADDRESS_REQUIRED' },
+      )
     }
 
     const scheduledForParsed = new Date(scheduledForRaw)
@@ -85,6 +124,37 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      const selectedClientAddress =
+        locationType === ServiceLocationType.MOBILE && clientAddressId
+          ? await loadClientServiceAddress({
+              tx,
+              clientId,
+              clientAddressId,
+            })
+          : null
+
+      if (locationType === ServiceLocationType.MOBILE) {
+        if (!selectedClientAddress) {
+          return {
+            ok: false as const,
+            status: 400,
+            error:
+              'Add or select a valid mobile service address in your client settings before booking an in-home appointment.',
+            code: 'CLIENT_SERVICE_ADDRESS_REQUIRED' as const,
+          }
+        }
+
+        if (!selectedClientAddress.formattedAddress?.trim()) {
+          return {
+            ok: false as const,
+            status: 400,
+            error:
+              'That service address is missing a formatted address. Please update it before booking mobile.',
+            code: 'CLIENT_SERVICE_ADDRESS_INVALID' as const,
+          }
+        }
+      }
+
       const locationContextResult = await resolveBookingLocationContext({
         tx,
         professionalId: offering.professionalId,
@@ -107,7 +177,8 @@ export async function POST(req: NextRequest) {
         return {
           ok: false as const,
           status: 400,
-          error: 'This professional must set a valid timezone before taking bookings.',
+          error:
+            'This professional must set a valid timezone before taking bookings.',
         }
       }
 
@@ -180,43 +251,49 @@ export async function POST(req: NextRequest) {
         }
       }
 
-            const conflict = await getTimeRangeConflict({
-              tx,
-              professionalId: offering.professionalId,
-              locationId: locationContext.locationId,
-              requestedStart,
-              requestedEnd,
-              defaultBufferMinutes: locationContext.bufferMinutes,
-              fallbackDurationMinutes: durationMinutes,
-            })
+      const conflict = await getTimeRangeConflict({
+        tx,
+        professionalId: offering.professionalId,
+        locationId: locationContext.locationId,
+        requestedStart,
+        requestedEnd,
+        defaultBufferMinutes: locationContext.bufferMinutes,
+        fallbackDurationMinutes: durationMinutes,
+      })
 
-            if (conflict === 'BLOCKED') {
-              return {
-                ok: false as const,
-                status: 409,
-                error: 'That time is blocked. Try another slot.',
-              }
-            }
+      if (conflict === 'BLOCKED') {
+        return {
+          ok: false as const,
+          status: 409,
+          error: 'That time is blocked. Try another slot.',
+        }
+      }
 
-            if (conflict === 'BOOKING') {
-              return {
-                ok: false as const,
-                status: 409,
-                error: 'That time was just taken.',
-              }
-            }
+      if (conflict === 'BOOKING') {
+        return {
+          ok: false as const,
+          status: 409,
+          error: 'That time was just taken.',
+        }
+      }
 
-            if (conflict === 'HOLD') {
-              return {
-                ok: false as const,
-                status: 409,
-                error: 'Someone is already holding that time. Try another slot.',
-              }
-            }
+      if (conflict === 'HOLD') {
+        return {
+          ok: false as const,
+          status: 409,
+          error: 'Someone is already holding that time. Try another slot.',
+        }
+      }
 
       const expiresAt = addMinutes(now, HOLD_MINUTES)
-      const addressSnapshot: Prisma.InputJsonValue | undefined =
+
+      const proLocationAddressSnapshot: Prisma.InputJsonValue | undefined =
         buildAddressSnapshot(locationContext.formattedAddress)
+
+      const clientDestinationSnapshot: Prisma.InputJsonValue | undefined =
+        locationType === ServiceLocationType.MOBILE && selectedClientAddress
+          ? buildAddressSnapshot(selectedClientAddress.formattedAddress)
+          : undefined
 
       try {
         const hold = await tx.bookingHold.create({
@@ -229,9 +306,26 @@ export async function POST(req: NextRequest) {
             locationType,
             locationId: locationContext.locationId,
             locationTimeZone: locationContext.timeZone,
-            locationAddressSnapshot: addressSnapshot,
+            locationAddressSnapshot: proLocationAddressSnapshot,
             locationLatSnapshot: locationContext.lat,
             locationLngSnapshot: locationContext.lng,
+
+            clientAddressId:
+              locationType === ServiceLocationType.MOBILE && selectedClientAddress
+                ? selectedClientAddress.id
+                : null,
+            clientAddressSnapshot:
+              locationType === ServiceLocationType.MOBILE
+                ? clientDestinationSnapshot ?? Prisma.JsonNull
+                : Prisma.JsonNull,
+            clientAddressLatSnapshot:
+              locationType === ServiceLocationType.MOBILE && selectedClientAddress
+                ? decimalToNumber(selectedClientAddress.lat)
+                : null,
+            clientAddressLngSnapshot:
+              locationType === ServiceLocationType.MOBILE && selectedClientAddress
+                ? decimalToNumber(selectedClientAddress.lng)
+                : null,
           },
           select: {
             id: true,
@@ -240,6 +334,8 @@ export async function POST(req: NextRequest) {
             locationType: true,
             locationId: true,
             locationTimeZone: true,
+            clientAddressId: true,
+            clientAddressSnapshot: true,
           },
         })
 
@@ -261,7 +357,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (!result.ok) {
-      return jsonFail(result.status, result.error)
+      return jsonFail(result.status, result.error, result.code ? { code: result.code } : undefined)
     }
 
     return jsonOk({ hold: result.hold }, result.status)

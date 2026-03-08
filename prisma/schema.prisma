@@ -218,6 +218,11 @@ enum ViralServiceRequestStatus {
   REJECTED
 }
 
+enum ClientAddressKind {
+  SEARCH_AREA
+  SERVICE_ADDRESS
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -365,13 +370,20 @@ model PhoneVerification {
 }
 
 model ClientProfile {
-  id                   String                      @id @default(cuid())
-  userId               String                      @unique
-  firstName            String                      @default("")
-  lastName             String                      @default("")
-  phone                String?
-  phoneVerifiedAt      DateTime?
-  avatarUrl            String?
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  firstName       String    @default("")
+  lastName        String    @default("")
+  phone           String?
+  phoneVerifiedAt DateTime?
+  avatarUrl       String?
+
+  dateOfBirth DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  addresses ClientAddress[]
+
   intentEvents         ClientIntentEvent[]
   openingNotifications OpeningNotification[]
   notificationSettings ClientNotificationSettings?
@@ -379,17 +391,45 @@ model ClientProfile {
   viralRequests        ViralServiceRequest[]
   alertBanner          String?
 
-  user User @relation(fields: [userId], references: [id])
-
-  bookings      Booking[]
-  bookingHolds  BookingHold[] // ✅ ADD THIS (opposite relation)
-  notes         ClientProfessionalNote[]
-  allergies     ClientAllergy[]
-  reviews       Review[]
-  reminders     Reminder[]
-  notifications ClientNotification[]
-
+  bookings        Booking[]
+  bookingHolds    BookingHold[]
+  notes           ClientProfessionalNote[]
+  allergies       ClientAllergy[]
+  reviews         Review[]
+  reminders       Reminder[]
+  notifications   ClientNotification[]
   waitlistEntries WaitlistEntry[]
+}
+
+model ClientAddress {
+  id        String            @id @default(cuid())
+  clientId  String
+  kind      ClientAddressKind
+  label     String?
+  isDefault Boolean           @default(false)
+
+  formattedAddress String?
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  state            String?
+  postalCode       String?
+  countryCode      String?
+  placeId          String?
+
+  lat Decimal? @db.Decimal(10, 7)
+  lng Decimal? @db.Decimal(10, 7)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  bookings     Booking[]
+  bookingHolds BookingHold[]
+
+  @@index([clientId, kind])
+  @@index([clientId, isDefault])
+  @@index([placeId])
 }
 
 model ProfessionalProfile {
@@ -881,6 +921,14 @@ model Booking {
   locationLatSnapshot     Float?
   locationLngSnapshot     Float?
 
+  // Client destination for mobile bookings
+  clientAddressId String?
+  clientAddress   ClientAddress? @relation(fields: [clientAddressId], references: [id], onDelete: SetNull)
+
+  clientAddressSnapshot    Json?
+  clientAddressLatSnapshot Float?
+  clientAddressLngSnapshot Float?
+
   // Client-friendly display (optional)
   clientTimeZoneAtBooking String? @db.VarChar(64)
 
@@ -941,6 +989,7 @@ model Booking {
   @@index([clientId, scheduledFor])
   @@index([locationId, scheduledFor])
   @@index([professionalId, source])
+  @@index([clientAddressId])
 }
 
 model BookingHold {
@@ -968,11 +1017,20 @@ model BookingHold {
   offering     ProfessionalServiceOffering @relation(fields: [offeringId], references: [id])
   professional ProfessionalProfile         @relation("ProHolds", fields: [professionalId], references: [id])
 
+  // Client destination for mobile bookings
+  clientAddressId String?
+  clientAddress   ClientAddress? @relation(fields: [clientAddressId], references: [id], onDelete: SetNull)
+
+  clientAddressSnapshot    Json?
+  clientAddressLatSnapshot Float?
+  clientAddressLngSnapshot Float?
+
   @@unique([professionalId, scheduledFor])
   @@index([locationId, scheduledFor])
   @@index([professionalId, expiresAt])
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
+  @@index([clientAddressId])
 }
 
 model AftercareSummary {

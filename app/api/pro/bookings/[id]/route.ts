@@ -45,6 +45,10 @@ import {
   snapToStepMinutes,
   sumDecimal,
 } from '@/lib/booking/serviceItems'
+import {
+  decimalToNullableNumber,
+  pickFormattedAddressFromSnapshot,
+} from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 
 export const dynamic = 'force-dynamic'
@@ -125,6 +129,11 @@ function buildBookingOutput(args: {
   status: BookingStatus
   subtotalSnapshot: Prisma.Decimal
   timeZone: string
+  locationId?: string | null
+  locationType?: ServiceLocationType
+  locationAddressSnapshot?: string | null
+  locationLatSnapshot?: number | null
+  locationLngSnapshot?: number | null
 }) {
   const {
     id,
@@ -134,6 +143,11 @@ function buildBookingOutput(args: {
     status,
     subtotalSnapshot,
     timeZone,
+    locationId,
+    locationType,
+    locationAddressSnapshot,
+    locationLatSnapshot,
+    locationLngSnapshot,
   } = args
 
   return {
@@ -149,6 +163,11 @@ function buildBookingOutput(args: {
     status,
     subtotalSnapshot: moneyToFixed2String(subtotalSnapshot),
     timeZone,
+    locationId: locationId ?? null,
+    locationType: locationType ?? null,
+    locationAddressSnapshot: locationAddressSnapshot ?? null,
+    locationLatSnapshot: locationLatSnapshot ?? null,
+    locationLngSnapshot: locationLngSnapshot ?? null,
   }
 }
 
@@ -182,6 +201,9 @@ export async function GET(_req: Request, ctx: Ctx) {
         clientId: true,
         locationId: true,
         locationTimeZone: true,
+        locationAddressSnapshot: true,
+        locationLatSnapshot: true,
+        locationLngSnapshot: true,
         serviceItems: {
           orderBy: { sortOrder: 'asc' },
           select: {
@@ -271,6 +293,15 @@ export async function GET(_req: Request, ctx: Ctx) {
           ).toISOString(),
           locationId: booking.locationId ?? null,
           locationType: booking.locationType,
+          locationAddressSnapshot: pickFormattedAddressFromSnapshot(
+            booking.locationAddressSnapshot,
+          ),
+          locationLatSnapshot: decimalToNullableNumber(
+            booking.locationLatSnapshot,
+          ),
+          locationLngSnapshot: decimalToNullableNumber(
+            booking.locationLngSnapshot,
+          ),
           bufferMinutes,
           durationMinutes: totalDurationMinutes,
           totalDurationMinutes,
@@ -403,6 +434,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
           clientId: true,
           locationId: true,
           locationTimeZone: true,
+          locationAddressSnapshot: true,
+          locationLatSnapshot: true,
+          locationLngSnapshot: true,
           professionalId: true,
           professional: {
             select: { timeZone: true },
@@ -434,6 +468,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
         outputTzResult.ok && isValidIanaTimeZone(outputTzResult.timeZone)
           ? sanitizeTimeZone(outputTzResult.timeZone, 'UTC')
           : 'UTC'
+
+      const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
+        existing.locationAddressSnapshot,
+      )
+      const existingLocationLatSnapshot = decimalToNullableNumber(
+        existing.locationLatSnapshot,
+      )
+      const existingLocationLngSnapshot = decimalToNullableNumber(
+        existing.locationLngSnapshot,
+      )
 
       if (nextStatus === BookingStatus.CANCELLED) {
         const updated = await tx.booking.update({
@@ -471,6 +515,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
           status: updated.status,
           subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
           timeZone: outputTimeZone,
+          locationId: existing.locationId ?? null,
+          locationType: existing.locationType,
+          locationAddressSnapshot: existingLocationAddressSnapshot,
+          locationLatSnapshot: existingLocationLatSnapshot,
+          locationLngSnapshot: existingLocationLngSnapshot,
         })
       }
 
@@ -791,6 +840,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
         status: updated.status,
         subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
         timeZone: appointmentTimeZone,
+        locationId: existing.locationId ?? null,
+        locationType: existing.locationType,
+        locationAddressSnapshot: existingLocationAddressSnapshot,
+        locationLatSnapshot: existingLocationLatSnapshot,
+        locationLngSnapshot: existingLocationLngSnapshot,
       })
     })
 

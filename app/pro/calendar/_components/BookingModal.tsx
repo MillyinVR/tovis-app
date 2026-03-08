@@ -1,10 +1,58 @@
 // app/pro/calendar/_components/BookingModal.tsx
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { BookingDetails, ServiceOption } from '../_types'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
+
+function readBookingLocationMeta(booking: BookingDetails | null): {
+  address: string | null
+  lat: number | null
+  lng: number | null
+} {
+  if (!isRecord(booking)) {
+    return { address: null, lat: null, lng: null }
+  }
+
+  const address = pickString(booking.locationAddressSnapshot) ?? null
+
+  const rawLat = booking.locationLatSnapshot
+  const rawLng = booking.locationLngSnapshot
+
+  const lat =
+    typeof rawLat === 'number' && Number.isFinite(rawLat) ? rawLat : null
+  const lng =
+    typeof rawLng === 'number' && Number.isFinite(rawLng) ? rawLng : null
+
+  return { address, lat, lng }
+}
+
+function mapsHref(args: {
+  address: string | null
+  lat: number | null
+  lng: number | null
+}): string | null {
+  if (args.lat != null && args.lng != null) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      `${args.lat},${args.lng}`,
+    )}`
+  }
+
+  if (args.address) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      args.address,
+    )}`
+  }
+
+  return null
+}
+
+function locationModeLabel(locationType: BookingDetails['locationType']) {
+  return locationType === 'MOBILE' ? 'Mobile' : 'In-salon'
+}
 
 export function BookingModal(props: {
   open: boolean
@@ -84,7 +132,9 @@ export function BookingModal(props: {
   }, [serviceItemsDraft, booking])
 
   const label = useMemo(() => {
-    if (bookingServiceLabel && bookingServiceLabel.trim()) return bookingServiceLabel.trim()
+    if (bookingServiceLabel && bookingServiceLabel.trim()) {
+      return bookingServiceLabel.trim()
+    }
 
     const names = items.map((item) => item.serviceName.trim()).filter(Boolean)
     return names.length ? names.join(' + ') : 'Appointment'
@@ -97,7 +147,34 @@ export function BookingModal(props: {
         ? booking.totalDurationMinutes
         : 60
 
-  const selectedSet = useMemo(() => new Set(selectedDraftServiceIds), [selectedDraftServiceIds])
+  const selectedSet = useMemo(
+    () => new Set(selectedDraftServiceIds),
+    [selectedDraftServiceIds],
+  )
+
+  const locationMeta = useMemo(() => readBookingLocationMeta(booking), [booking])
+
+  const modeLabel = locationModeLabel(booking?.locationType)
+  const mapsUrl = useMemo(
+    () =>
+      mapsHref({
+        address: locationMeta.address,
+        lat: locationMeta.lat,
+        lng: locationMeta.lng,
+      }),
+    [locationMeta.address, locationMeta.lat, locationMeta.lng],
+  )
+
+  useEffect(() => {
+    if (!open) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [open])
 
   function close() {
     if (saving) return
@@ -105,7 +182,11 @@ export function BookingModal(props: {
   }
 
   function toggleService(serviceId: string, checked: boolean) {
-    if (!checked && selectedDraftServiceIds.length === 1 && selectedDraftServiceIds[0] === serviceId) {
+    if (
+      !checked &&
+      selectedDraftServiceIds.length === 1 &&
+      selectedDraftServiceIds[0] === serviceId
+    ) {
       return
     }
 
@@ -119,15 +200,36 @@ export function BookingModal(props: {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-999 flex items-center justify-center bg-black/50 p-4" onClick={close}>
+    <div
+      className="fixed inset-0 z-999 flex items-center justify-center bg-black/75 p-3 sm:p-4"
+      onClick={close}
+    >
       <div
-        className="w-full max-w-170 overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-170 flex-col overflow-hidden rounded-2xl border border-white/12 bg-bgPrimary shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
+        aria-label="Appointment details"
       >
-        <div className="flex items-center justify-between border-b border-white/10 p-4">
-          <div className="text-sm font-extrabold text-textPrimary">Appointment</div>
+        <div className="flex items-center justify-between border-b border-white/10 bg-bgPrimary/95 px-4 py-4 backdrop-blur">
+          <div>
+            <div className="text-sm font-extrabold text-textPrimary">
+              Appointment
+            </div>
+            {booking ? (
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-white/10 bg-bgSecondary px-2.5 py-1 text-[11px] font-extrabold text-textPrimary">
+                  {modeLabel}
+                </span>
+
+                {booking.status ? (
+                  <span className="rounded-full border border-white/10 bg-bgSecondary px-2.5 py-1 text-[11px] font-semibold text-textSecondary">
+                    {booking.status}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
 
           <button
             type="button"
@@ -139,8 +241,12 @@ export function BookingModal(props: {
           </button>
         </div>
 
-        <div className="p-4">
-          {loading ? <div className="text-sm font-semibold text-textSecondary">Loading booking…</div> : null}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+          {loading ? (
+            <div className="text-sm font-semibold text-textSecondary">
+              Loading booking…
+            </div>
+          ) : null}
 
           {error ? (
             <div className="mb-3 rounded-xl border border-white/10 bg-bgSecondary p-3 text-sm font-semibold text-toneDanger">
@@ -150,31 +256,83 @@ export function BookingModal(props: {
 
           {booking ? (
             <>
-              <div className="mb-4 grid gap-2">
-                <div className="text-sm font-extrabold text-textPrimary">{label}</div>
-
-                <div className="text-sm font-semibold text-textSecondary">
-                  <span className="font-black text-textPrimary">Client:</span> {booking.client.fullName}
-                  {booking.client.email ? ` • ${booking.client.email}` : ''}
-                  {booking.client.phone ? ` • ${booking.client.phone}` : ''}
+              <div className="mb-4 grid gap-3">
+                <div className="text-base font-extrabold text-textPrimary">
+                  {label}
                 </div>
 
-                <div className="text-sm font-semibold text-textSecondary">
-                  <span className="font-black text-textPrimary">When:</span>{' '}
-                  <span className="font-semibold text-textPrimary">
-                    {formatAppointmentWhen(new Date(booking.scheduledFor), tz)}
-                  </span>{' '}
-                  <span className="opacity-75">· {tz}</span> ({totalDuration} min)
-                </div>
+                <div className="rounded-2xl border border-white/10 bg-bgSecondary/80 p-3">
+                  <div className="grid gap-2">
+                    <div className="text-sm font-semibold text-textSecondary">
+                      <span className="font-black text-textPrimary">
+                        Client:
+                      </span>{' '}
+                      {booking.client.fullName}
+                      {booking.client.email ? ` • ${booking.client.email}` : ''}
+                      {booking.client.phone ? ` • ${booking.client.phone}` : ''}
+                    </div>
 
-                {typeof booking.subtotalSnapshot === 'string' && booking.subtotalSnapshot.trim() ? (
-                  <div className="text-sm font-semibold text-textSecondary">
-                    <span className="font-black text-textPrimary">Subtotal:</span> ${booking.subtotalSnapshot}
+                    <div className="text-sm font-semibold text-textSecondary">
+                      <span className="font-black text-textPrimary">
+                        When:
+                      </span>{' '}
+                      <span className="font-semibold text-textPrimary">
+                        {formatAppointmentWhen(
+                          new Date(booking.scheduledFor),
+                          tz,
+                        )}
+                      </span>{' '}
+                      <span className="opacity-75">· {tz}</span> (
+                      {totalDuration} min)
+                    </div>
+
+                    <div className="text-sm font-semibold text-textSecondary">
+                      <span className="font-black text-textPrimary">
+                        Mode:
+                      </span>{' '}
+                      {modeLabel}
+                    </div>
+
+                    {booking.locationType === 'MOBILE' ? (
+                      <div className="rounded-xl border border-white/10 bg-bgPrimary/70 p-3">
+                        <div className="text-xs font-black uppercase tracking-wide text-textSecondary">
+                          Mobile destination
+                        </div>
+
+                        <div className="mt-1 text-sm font-semibold text-textPrimary">
+                          {locationMeta.address ||
+                            'Address will appear here when booking location snapshots are returned.'}
+                        </div>
+
+                        {mapsUrl ? (
+                          <div className="mt-3">
+                            <a
+                              href={mapsUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/70"
+                            >
+                              Open in Maps
+                            </a>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {typeof booking.subtotalSnapshot === 'string' &&
+                    booking.subtotalSnapshot.trim() ? (
+                      <div className="text-sm font-semibold text-textSecondary">
+                        <span className="font-black text-textPrimary">
+                          Subtotal:
+                        </span>{' '}
+                        ${booking.subtotalSnapshot}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
+                </div>
 
                 {isPending ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={onApprove}
@@ -197,29 +355,38 @@ export function BookingModal(props: {
               </div>
 
               <div className="border-t border-white/10 pt-4">
-                <div className="mb-2 text-sm font-extrabold text-textPrimary">Edit appointment</div>
+                <div className="mb-2 text-sm font-extrabold text-textPrimary">
+                  Edit appointment
+                </div>
 
                 {editOutside ? (
                   <div className="mb-3 rounded-2xl border border-white/10 bg-bgSecondary p-3 text-sm">
-                    <div className="font-extrabold text-textPrimary">Outside working hours</div>
+                    <div className="font-extrabold text-textPrimary">
+                      Outside working hours
+                    </div>
                     <div className="mt-1 text-sm font-semibold text-textSecondary">
-                      You can still schedule this, but it’s outside your set hours. Toggle override to allow it.
+                      You can still schedule this, but it’s outside your set
+                      hours. Toggle override to allow it.
                     </div>
 
                     <label className="mt-2 flex items-center gap-2 text-sm font-semibold text-textSecondary">
                       <input
                         type="checkbox"
                         checked={allowOutsideHours}
-                        onChange={(e) => onToggleAllowOutsideHours(e.target.checked)}
+                        onChange={(e) =>
+                          onToggleAllowOutsideHours(e.target.checked)
+                        }
                       />
                       Allow outside working hours (pro override)
                     </label>
                   </div>
                 ) : null}
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <div className="mb-1 text-xs font-semibold text-textSecondary">Date</div>
+                    <div className="mb-1 text-xs font-semibold text-textSecondary">
+                      Date
+                    </div>
                     <input
                       type="date"
                       value={reschedDate}
@@ -230,7 +397,9 @@ export function BookingModal(props: {
                   </div>
 
                   <div>
-                    <div className="mb-1 text-xs font-semibold text-textSecondary">Time</div>
+                    <div className="mb-1 text-xs font-semibold text-textSecondary">
+                      Time
+                    </div>
                     <input
                       type="time"
                       step={15 * 60}
@@ -243,7 +412,9 @@ export function BookingModal(props: {
                 </div>
 
                 <div className="mt-3">
-                  <div className="mb-1 text-xs font-semibold text-textSecondary">Select services</div>
+                  <div className="mb-1 text-xs font-semibold text-textSecondary">
+                    Select services
+                  </div>
 
                   {services.length ? (
                     <div className="rounded-2xl border border-white/10 bg-bgSecondary p-3">
@@ -251,11 +422,13 @@ export function BookingModal(props: {
                         {services.map((service) => {
                           const checked = selectedSet.has(service.id)
                           const dur =
-                            typeof service.durationMinutes === 'number' && service.durationMinutes > 0
+                            typeof service.durationMinutes === 'number' &&
+                            service.durationMinutes > 0
                               ? service.durationMinutes
                               : null
                           const price =
-                            typeof service.priceStartingAt === 'string' && service.priceStartingAt.trim()
+                            typeof service.priceStartingAt === 'string' &&
+                            service.priceStartingAt.trim()
                               ? service.priceStartingAt
                               : null
 
@@ -267,7 +440,9 @@ export function BookingModal(props: {
                               <input
                                 type="checkbox"
                                 checked={checked}
-                                onChange={(e) => toggleService(service.id, e.target.checked)}
+                                onChange={(e) =>
+                                  toggleService(service.id, e.target.checked)
+                                }
                                 disabled={saving}
                               />
 
@@ -276,13 +451,13 @@ export function BookingModal(props: {
                                   {service.name}
                                 </div>
                                 <div className="text-xs font-semibold text-textSecondary">
-                                  {dur != null ? `${dur} min` : 'Duration not set'}
+                                  {dur != null
+                                    ? `${dur} min`
+                                    : 'Duration not set'}
                                   {price != null ? ` • $${price}` : ''}
                                 </div>
                               </div>
                             </label>
-
-                            
                           )
                         })}
                       </div>
@@ -296,7 +471,9 @@ export function BookingModal(props: {
 
                 <div className="mt-3">
                   <div className="mb-1 flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-textSecondary">Current service items</div>
+                    <div className="text-xs font-semibold text-textSecondary">
+                      Current service items
+                    </div>
                     {hasDraftServiceItemsChanges ? (
                       <div className="rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-extrabold text-textPrimary">
                         Unsaved service changes
@@ -317,7 +494,9 @@ export function BookingModal(props: {
                                 {item.serviceName}
                               </div>
                               <div className="text-xs font-semibold text-textSecondary">
-                                {item.itemType === 'BASE' ? 'Base service' : 'Add-on'}
+                                {item.itemType === 'BASE'
+                                  ? 'Base service'
+                                  : 'Add-on'}
                               </div>
                             </div>
 
@@ -337,7 +516,9 @@ export function BookingModal(props: {
                 </div>
 
                 <div className="mt-3">
-                  <div className="mb-1 text-xs font-semibold text-textSecondary">Total duration</div>
+                  <div className="mb-1 text-xs font-semibold text-textSecondary">
+                    Total duration
+                  </div>
                   <div className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm font-extrabold text-textPrimary">
                     {totalDuration} minutes
                   </div>
@@ -358,36 +539,42 @@ export function BookingModal(props: {
                     Select at least one service before saving.
                   </div>
                 ) : null}
-
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={close}
-                    disabled={saving}
-                    className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-70"
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={onSave}
-                    disabled={saving || noServicesSelected || (editOutside && !allowOutsideHours)}
-                    className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/70 disabled:opacity-70"
-                    title={
-                      noServicesSelected
-                        ? 'Select at least one service before saving.'
-                        : editOutside && !allowOutsideHours
-                          ? 'Enable override to save outside working hours.'
-                          : ''
-                    }
-                  >
-                    {saving ? 'Saving…' : 'Save changes'}
-                  </button>
-                </div>
               </div>
             </>
           ) : null}
+        </div>
+
+        <div className="border-t border-white/10 bg-bgPrimary/95 px-4 py-4 backdrop-blur">
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={close}
+              disabled={saving}
+              className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-70"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={
+                saving ||
+                noServicesSelected ||
+                (editOutside && !allowOutsideHours)
+              }
+              className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/70 disabled:opacity-70"
+              title={
+                noServicesSelected
+                  ? 'Select at least one service before saving.'
+                  : editOutside && !allowOutsideHours
+                    ? 'Enable override to save outside working hours.'
+                    : ''
+              }
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
