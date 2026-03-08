@@ -1,4 +1,5 @@
 // app/api/bookings/finalize/route.ts
+//3726 leave alone
 import { prisma } from '@/lib/prisma'
 import {
   Prisma,
@@ -9,34 +10,20 @@ import {
   OpeningStatus,
   ServiceLocationType,
 } from '@prisma/client'
-import {
-  sanitizeTimeZone,
-  minutesSinceMidnightInTimeZone,
-  isValidIanaTimeZone,
-} from '@/lib/timeZone'
+import { minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { createProNotification } from '@/lib/notifications/proNotifications'
-import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
-import {
-  MAX_ADVANCE_NOTICE_MINUTES,
-  MAX_BUFFER_MINUTES,
-  MAX_DAYS_AHEAD,
-  MAX_SLOT_DURATION_MINUTES,
-} from '@/lib/booking/constants'
+import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import {
-  findCalendarBlockConflict,
-  hasBookingConflict,
-  hasHoldConflict,
-} from '@/lib/booking/conflictQueries'
+import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
-  normalizeStepMinutes,
   pickModeDurationMinutes,
+  resolveBookingLocationContext,
 } from '@/lib/booking/locationContext'
 import {
   buildAddressSnapshot,
@@ -63,18 +50,6 @@ type TxnErrorCode =
   | 'TIME_NOT_AVAILABLE'
   | 'TOO_FAR'
 
-type ExactHoldLocationContext = {
-  locationId: string
-  timeZone: string
-  stepMinutes: number
-  bufferMinutes: number
-  advanceNoticeMinutes: number
-  maxDaysAhead: number
-  workingHours: unknown
-  formattedAddress: string | null
-  lat: number | undefined
-  lng: number | undefined
-}
 
 function throwCode(code: TxnErrorCode): never {
   throw new Error(code)
@@ -111,83 +86,6 @@ function pickStringArray(value: unknown): string[] {
 
 function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length
-}
-
-function normalizeFormattedAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-async function resolveExactHoldLocationContext(args: {
-  tx: Prisma.TransactionClient
-  professionalId: string
-  locationId: string
-  holdLocationTimeZone: string | null
-}): Promise<
-  | { ok: true; context: ExactHoldLocationContext }
-  | { ok: false; error: 'LOCATION_NOT_FOUND' | 'TIMEZONE_REQUIRED' }
-> {
-  const { tx, professionalId, locationId, holdLocationTimeZone } = args
-
-  const location = await tx.professionalLocation.findFirst({
-    where: {
-      id: locationId,
-      professionalId,
-      isBookable: true,
-    },
-    select: {
-      id: true,
-      timeZone: true,
-      workingHours: true,
-      bufferMinutes: true,
-      stepMinutes: true,
-      advanceNoticeMinutes: true,
-      maxDaysAhead: true,
-      formattedAddress: true,
-      lat: true,
-      lng: true,
-    },
-  })
-
-  if (!location) {
-    return { ok: false, error: 'LOCATION_NOT_FOUND' }
-  }
-
-  const tzResult = await resolveApptTimeZone({
-    holdLocationTimeZone,
-    location: { id: location.id, timeZone: location.timeZone },
-    professionalId,
-    fallback: 'UTC',
-    requireValid: true,
-  })
-
-  if (!tzResult.ok) {
-    return { ok: false, error: 'TIMEZONE_REQUIRED' }
-  }
-
-  const timeZone = sanitizeTimeZone(tzResult.timeZone, 'UTC')
-  if (!isValidIanaTimeZone(timeZone)) {
-    return { ok: false, error: 'TIMEZONE_REQUIRED' }
-  }
-
-  return {
-    ok: true,
-    context: {
-      locationId: location.id,
-      timeZone,
-      stepMinutes: normalizeStepMinutes(location.stepMinutes, 15),
-      bufferMinutes: clampInt(Number(location.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES),
-      advanceNoticeMinutes: clampInt(
-        Number(location.advanceNoticeMinutes ?? 15),
-        0,
-        MAX_ADVANCE_NOTICE_MINUTES,
-      ),
-      maxDaysAhead: clampInt(Number(location.maxDaysAhead ?? 365), 1, MAX_DAYS_AHEAD),
-      workingHours: location.workingHours,
-      formattedAddress: normalizeFormattedAddress(location.formattedAddress),
-      lat: decimalToNumber(location.lat),
-      lng: decimalToNumber(location.lng),
-    },
-  }
 }
 
 export async function POST(request: Request) {
@@ -403,11 +301,15 @@ export async function POST(request: Request) {
       if (hold.locationType !== locationType) throwCode('HOLD_MISMATCH')
       if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
 
-      const locationContextResult = await resolveExactHoldLocationContext({
+      const locationContextResult = await resolveBookingLocationContext({
         tx,
         professionalId: offering.professionalId,
-        locationId: hold.locationId,
+        requestedLocationId: hold.locationId,
+        locationType: hold.locationType,
         holdLocationTimeZone: hold.locationTimeZone,
+        fallbackTimeZone: 'UTC',
+        requireValidTimeZone: true,
+        allowFallback: false,
       })
 
       if (!locationContextResult.ok) {
@@ -632,36 +534,16 @@ export async function POST(request: Request) {
         throw new Error(`WH:${workingHoursCheck.error}`)
       }
 
-      const blockConflict = await findCalendarBlockConflict({
+      await assertTimeRangeAvailable({
         tx,
         professionalId: offering.professionalId,
         locationId: locationContext.locationId,
         requestedStart,
         requestedEnd,
-      })
-
-      if (blockConflict) throwCode('BLOCKED')
-
-      const bookingConflict = await hasBookingConflict({
-        tx,
-        professionalId: offering.professionalId,
-        requestedStart,
-        requestedEnd,
-      })
-
-      if (bookingConflict) throwCode('TIME_NOT_AVAILABLE')
-
-      const holdConflict = await hasHoldConflict({
-        tx,
-        professionalId: offering.professionalId,
-        requestedStart,
-        requestedEnd,
         defaultBufferMinutes: locationContext.bufferMinutes,
-        excludeHoldId: hold.id,
         fallbackDurationMinutes: totalDurationMinutes,
+        excludeHoldId: hold.id,
       })
-
-      if (holdConflict) throwCode('TIME_NOT_AVAILABLE')
 
       const formattedAddressFromHold = pickFormattedAddressFromSnapshot(
         hold.locationAddressSnapshot,

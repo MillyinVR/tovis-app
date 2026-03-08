@@ -36,12 +36,15 @@ import {
   durationOrFallback,
   normalizeToMinute,
 } from '@/lib/booking/conflicts'
-import {
-  assertNoBookingConflict,
-  assertNoCalendarBlockConflict,
-  hasHoldConflict,
-} from '@/lib/booking/conflictQueries'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
+import {
+  RequestedServiceItemInput,
+  buildNormalizedBookingItemsFromRequestedOfferings,
+  computeBookingItemLikeTotals,
+  snapToStepMinutes,
+  sumDecimal,
+} from '@/lib/booking/serviceItems'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 
 export const dynamic = 'force-dynamic'
@@ -52,31 +55,8 @@ type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
 
-type RequestedServiceItemInput = {
-  serviceId: string
-  offeringId: string
-  sortOrder: number
-}
-
-type NormalizedServiceItemInput = {
-  serviceId: string
-  offeringId: string
-  durationMinutesSnapshot: number
-  priceSnapshot: Prisma.Decimal
-  sortOrder: number
-}
-
 function throwCode(code: string): never {
   throw new Error(code)
-}
-
-function snapToStep(value: number, stepMinutes: number): number {
-  const step = clampInt(stepMinutes || 15, 5, 60)
-  return Math.round(value / step) * step
-}
-
-function sumDecimal(values: Prisma.Decimal[]): Prisma.Decimal {
-  return values.reduce((acc, value) => acc.add(value), new Prisma.Decimal(0))
 }
 
 function normalizeRequestedStatus(value: unknown): RequestedStatus | null {
@@ -547,11 +527,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
       const appointmentTimeZone = sanitizeTimeZone(apptTzResult.timeZone, 'UTC')
       const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
-      const locationBufferMinutes = clampInt(
-        Number(location.bufferMinutes ?? 0),
-        0,
-        MAX_BUFFER_MINUTES,
-      )
 
       if (nextBuffer != null && (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)) {
         throwCode('BAD_BUFFER')
@@ -583,10 +558,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
       const finalBuffer =
         nextBuffer != null
-          ? clampInt(snapToStep(nextBuffer, stepMinutes), 0, MAX_BUFFER_MINUTES)
+          ? clampInt(
+              snapToStepMinutes(nextBuffer, stepMinutes),
+              0,
+              MAX_BUFFER_MINUTES,
+            )
           : Math.max(0, Number(existing.bufferMinutes ?? 0))
 
-      let normalizedServiceItems: NormalizedServiceItemInput[] | null = null
+      let normalizedServiceItems:
+        | ReturnType<typeof buildNormalizedBookingItemsFromRequestedOfferings>
+        | null = null
 
       if (parsedRequestedItems) {
         const offeringIds = Array.from(
@@ -621,70 +602,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
           offerings.map((offering) => [offering.id, offering]),
         )
 
-        normalizedServiceItems = parsedRequestedItems.map((item, index) => {
-          const offering = offeringById.get(item.offeringId)
-          if (!offering) {
-            throwCode('BAD_ITEMS')
-          }
-
-          if (offering.serviceId !== item.serviceId) {
-            throwCode('BAD_ITEMS')
-          }
-
-          const isMobile = existing.locationType === ServiceLocationType.MOBILE
-          const modeAllowed = isMobile
-            ? offering.offersMobile
-            : offering.offersInSalon
-
-          const rawDuration = isMobile
-            ? Number(
-                offering.mobileDurationMinutes ??
-                  offering.service.defaultDurationMinutes ??
-                  0,
-              )
-            : Number(
-                offering.salonDurationMinutes ??
-                  offering.service.defaultDurationMinutes ??
-                  0,
-              )
-
-          const rawPrice = isMobile
-            ? offering.mobilePriceStartingAt
-            : offering.salonPriceStartingAt
-
-          if (!modeAllowed) {
-            throwCode('BAD_ITEMS')
-          }
-
-          if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
-            throwCode('BAD_ITEMS')
-          }
-
-          if (rawPrice == null) {
-            throwCode('BAD_ITEMS')
-          }
-
-          return {
-            serviceId: item.serviceId,
-            offeringId: item.offeringId,
-            durationMinutesSnapshot: clampInt(
-              snapToStep(rawDuration, stepMinutes),
-              15,
-              MAX_SLOT_DURATION_MINUTES,
-            ),
-            priceSnapshot: rawPrice,
-            sortOrder: index,
-          }
+        normalizedServiceItems = buildNormalizedBookingItemsFromRequestedOfferings({
+          requestedItems: parsedRequestedItems,
+          locationType: existing.locationType,
+          stepMinutes,
+          offeringById,
+          badItemsCode: 'BAD_ITEMS',
         })
       }
 
       const previewItems =
         normalizedServiceItems?.map((item, index) => ({
-          id: `virtual-${index}`,
-          priceSnapshot: item.priceSnapshot,
-          durationMinutesSnapshot: item.durationMinutesSnapshot,
           serviceId: item.serviceId,
           offeringId: item.offeringId,
+          durationMinutesSnapshot: item.durationMinutesSnapshot,
+          priceSnapshot: item.priceSnapshot,
           itemType:
             index === 0
               ? BookingServiceItemType.BASE
@@ -694,40 +626,25 @@ export async function PATCH(req: Request, ctx: Ctx) {
           where: { bookingId: existing.id },
           orderBy: { sortOrder: 'asc' },
           select: {
-            id: true,
-            priceSnapshot: true,
-            durationMinutesSnapshot: true,
             serviceId: true,
             offeringId: true,
+            priceSnapshot: true,
+            durationMinutesSnapshot: true,
             itemType: true,
           },
         }))
 
-      if (!previewItems.length) {
-        throwCode('BAD_ITEMS')
-      }
-
-      const primaryItem =
-        previewItems.find((item) => item.itemType === BookingServiceItemType.BASE) ??
-        previewItems[0]
-
-      if (!primaryItem) {
-        throwCode('BAD_ITEMS')
-      }
-
-      const computedSubtotal = sumDecimal(
-        previewItems.map((item) => item.priceSnapshot),
-      )
-
-      const computedDuration = previewItems.reduce(
-        (sum, item) => sum + Number(item.durationMinutesSnapshot ?? 0),
-        0,
-      )
+      const {
+        primaryServiceId,
+        primaryOfferingId,
+        computedDurationMinutes,
+        computedSubtotal,
+      } = computeBookingItemLikeTotals(previewItems, 'BAD_ITEMS')
 
       const snappedNextDuration =
         nextDuration != null
           ? clampInt(
-              snapToStep(nextDuration, stepMinutes),
+              snapToStepMinutes(nextDuration, stepMinutes),
               15,
               MAX_SLOT_DURATION_MINUTES,
             )
@@ -736,13 +653,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
       if (
         normalizedServiceItems &&
         snappedNextDuration != null &&
-        snappedNextDuration !== computedDuration
+        snappedNextDuration !== computedDurationMinutes
       ) {
         throwCode('DURATION_MISMATCH')
       }
 
       const finalDuration = normalizedServiceItems
-        ? computedDuration
+        ? computedDurationMinutes
         : snappedNextDuration != null
           ? snappedNextDuration
           : durationOrFallback(existing.totalDurationMinutes)
@@ -768,32 +685,26 @@ export async function PATCH(req: Request, ctx: Ctx) {
         }
       }
 
-      await assertNoBookingConflict({
-        tx,
-        professionalId: existing.professionalId,
-        requestedStart: finalStart,
-        requestedEnd: finalEnd,
-        excludeBookingId: existing.id,
-      })
-
-      await assertNoCalendarBlockConflict({
+      const conflict = await getTimeRangeConflict({
         tx,
         professionalId: existing.professionalId,
         locationId: location.id,
         requestedStart: finalStart,
         requestedEnd: finalEnd,
-      })
-
-      const holdConflict = await hasHoldConflict({
-        tx,
-        professionalId: existing.professionalId,
-        requestedStart: finalStart,
-        requestedEnd: finalEnd,
         defaultBufferMinutes: finalBuffer,
         fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
+        excludeBookingId: existing.id,
       })
 
-      if (holdConflict) {
+      if (conflict === 'BLOCKED') {
+        throwCode('BLOCKED')
+      }
+
+      if (conflict === 'BOOKING') {
+        throwCode('TIME_NOT_AVAILABLE')
+      }
+
+      if (conflict === 'HOLD') {
         throwCode('HELD')
       }
 
@@ -850,8 +761,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
           bufferMinutes: finalBuffer,
           totalDurationMinutes: finalDuration,
           subtotalSnapshot: computedSubtotal,
-          serviceId: primaryItem.serviceId,
-          offeringId: primaryItem.offeringId ?? null,
+          serviceId: primaryServiceId,
+          offeringId: primaryOfferingId,
         },
         select: {
           id: true,

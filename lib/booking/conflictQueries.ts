@@ -93,6 +93,8 @@ type BusyIntervalWindowArgs = {
   take?: number
 }
 
+type TimeRangeConflictCode = 'BLOCKED' | 'BOOKING' | 'HOLD'
+
 function db(tx?: DbClient): DbClient {
   return tx ?? prisma
 }
@@ -285,9 +287,15 @@ export async function assertNoHoldConflict(
 export async function assertTimeRangeAvailable(
   args: TimeRangeAvailabilityArgs,
 ): Promise<void> {
-  await assertNoCalendarBlockConflict(args)
-  await assertNoBookingConflict(args)
-  await assertNoHoldConflict(args)
+  const conflict = await getTimeRangeConflict(args)
+
+  if (conflict === 'BLOCKED') {
+    throw new Error('BLOCKED')
+  }
+
+  if (conflict === 'BOOKING' || conflict === 'HOLD') {
+    throw new Error('TIME_NOT_AVAILABLE')
+  }
 }
 
 export async function loadBusyIntervalsForWindow(
@@ -419,4 +427,58 @@ export async function loadBusyIntervalsForWindow(
   ]
 
   return mergeBusyIntervals(intervals)
+}
+export async function getTimeRangeConflict(
+  args: TimeRangeAvailabilityArgs,
+): Promise<TimeRangeConflictCode | null> {
+  const {
+    tx,
+    professionalId,
+    locationId,
+    requestedStart,
+    requestedEnd,
+    defaultBufferMinutes,
+    fallbackDurationMinutes,
+    excludeBookingId,
+    excludeHoldId,
+    nowUtc,
+    take,
+  } = args
+
+  const blockConflict = await findCalendarBlockConflict({
+    tx,
+    professionalId,
+    locationId,
+    requestedStart,
+    requestedEnd,
+  })
+
+  if (blockConflict) return 'BLOCKED'
+
+  const bookingConflict = await hasBookingConflict({
+    tx,
+    professionalId,
+    requestedStart,
+    requestedEnd,
+    excludeBookingId,
+    take,
+  })
+
+  if (bookingConflict) return 'BOOKING'
+
+  const holdConflict = await hasHoldConflict({
+    tx,
+    professionalId,
+    requestedStart,
+    requestedEnd,
+    defaultBufferMinutes,
+    fallbackDurationMinutes,
+    excludeHoldId,
+    nowUtc,
+    take,
+  })
+
+  if (holdConflict) return 'HOLD'
+
+  return null
 }

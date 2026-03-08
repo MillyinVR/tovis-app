@@ -6,11 +6,7 @@ import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { HOLD_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import {
-  findCalendarBlockConflict,
-  hasBookingConflict,
-  hasHoldConflict,
-} from '@/lib/booking/conflictQueries'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
   pickModeDurationMinutes,
@@ -184,53 +180,39 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const blockConflict = await findCalendarBlockConflict({
-        tx,
-        professionalId: offering.professionalId,
-        locationId: locationContext.locationId,
-        requestedStart,
-        requestedEnd,
-      })
+            const conflict = await getTimeRangeConflict({
+              tx,
+              professionalId: offering.professionalId,
+              locationId: locationContext.locationId,
+              requestedStart,
+              requestedEnd,
+              defaultBufferMinutes: locationContext.bufferMinutes,
+              fallbackDurationMinutes: durationMinutes,
+            })
 
-      if (blockConflict) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'That time is blocked. Try another slot.',
-        }
-      }
+            if (conflict === 'BLOCKED') {
+              return {
+                ok: false as const,
+                status: 409,
+                error: 'That time is blocked. Try another slot.',
+              }
+            }
 
-      const bookingConflict = await hasBookingConflict({
-        tx,
-        professionalId: offering.professionalId,
-        requestedStart,
-        requestedEnd,
-      })
+            if (conflict === 'BOOKING') {
+              return {
+                ok: false as const,
+                status: 409,
+                error: 'That time was just taken.',
+              }
+            }
 
-      if (bookingConflict) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'That time was just taken.',
-        }
-      }
-
-      const holdConflict = await hasHoldConflict({
-        tx,
-        professionalId: offering.professionalId,
-        requestedStart,
-        requestedEnd,
-        defaultBufferMinutes: locationContext.bufferMinutes,
-        fallbackDurationMinutes: durationMinutes,
-      })
-
-      if (holdConflict) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: 'Someone is already holding that time. Try another slot.',
-        }
-      }
+            if (conflict === 'HOLD') {
+              return {
+                ok: false as const,
+                status: 409,
+                error: 'Someone is already holding that time. Try another slot.',
+              }
+            }
 
       const expiresAt = addMinutes(now, HOLD_MINUTES)
       const addressSnapshot: Prisma.InputJsonValue | undefined =

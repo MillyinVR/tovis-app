@@ -22,15 +22,10 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import {
-  assertNoBookingConflict,
-  assertNoCalendarBlockConflict,
-  hasHoldConflict,
-} from '@/lib/booking/conflictQueries'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
   normalizeStepMinutes,
-  pickModeDurationMinutes,
 } from '@/lib/booking/locationContext'
 import {
   buildAddressSnapshot,
@@ -38,6 +33,11 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import {
+  buildNormalizedBookingItemsFromServiceIds,
+  computeBookingItemTotals,
+  snapToStepMinutes,
+} from '@/lib/booking/serviceItems'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,22 +54,8 @@ type CreateBookingErrorCode =
   | 'TIME_ON_HOLD'
   | 'TIMEZONE_REQUIRED'
 
-type BuiltItem = {
-  serviceId: string
-  offeringId: string
-  serviceName: string
-  durationMinutesSnapshot: number
-  priceSnapshot: Prisma.Decimal
-  sortOrder: number
-}
-
 function throwCode(code: CreateBookingErrorCode): never {
   throw new Error(code)
-}
-
-function snapToStep(value: number, stepMinutes: number): number {
-  const step = clampInt(stepMinutes || 15, 5, 60)
-  return Math.round(value / step) * step
 }
 
 function toStringArray(value: unknown): string[] {
@@ -104,98 +90,6 @@ function decimalToCents(value: Prisma.Decimal): number {
   while (frac.length < 2) frac += '0'
 
   return Math.max(0, Number(whole) * 100 + Number(frac || '0'))
-}
-
-function sumDecimal(values: Prisma.Decimal[]): Prisma.Decimal {
-  return values.reduce((acc, value) => acc.add(value), new Prisma.Decimal(0))
-}
-
-function pickModePrice(args: {
-  locationType: ServiceLocationType
-  salonPriceStartingAt: Prisma.Decimal | null
-  mobilePriceStartingAt: Prisma.Decimal | null
-}): Prisma.Decimal | null {
-  return args.locationType === ServiceLocationType.MOBILE
-    ? args.mobilePriceStartingAt
-    : args.salonPriceStartingAt
-}
-
-function buildItems(args: {
-  serviceIds: string[]
-  locationType: ServiceLocationType
-  stepMinutes: number
-  offeringByServiceId: Map<
-    string,
-    {
-      id: string
-      serviceId: string
-      salonPriceStartingAt: Prisma.Decimal | null
-      mobilePriceStartingAt: Prisma.Decimal | null
-      salonDurationMinutes: number | null
-      mobileDurationMinutes: number | null
-    }
-  >
-  serviceById: Map<
-    string,
-    {
-      id: string
-      name: string | null
-      defaultDurationMinutes: number | null
-    }
-  >
-}): BuiltItem[] {
-  const {
-    serviceIds,
-    locationType,
-    stepMinutes,
-    offeringByServiceId,
-    serviceById,
-  } = args
-
-  return serviceIds.map((serviceId, index) => {
-    const offering = offeringByServiceId.get(serviceId)
-    const service = serviceById.get(serviceId)
-
-    if (!offering) throwCode('MISSING_OFFERING')
-    if (!service) throwCode('MISSING_SERVICE')
-
-    const rawDuration = pickModeDurationMinutes({
-      locationType,
-      salonDurationMinutes: offering.salonDurationMinutes,
-      mobileDurationMinutes: offering.mobileDurationMinutes,
-      fallbackDurationMinutes:
-        service.defaultDurationMinutes ?? DEFAULT_DURATION_MINUTES,
-    })
-
-    if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
-      throwCode('BAD_DURATION')
-    }
-
-    const durationMinutesSnapshot = clampInt(
-      snapToStep(rawDuration, stepMinutes),
-      stepMinutes,
-      MAX_SLOT_DURATION_MINUTES,
-    )
-
-    const rawPrice = pickModePrice({
-      locationType,
-      salonPriceStartingAt: offering.salonPriceStartingAt,
-      mobilePriceStartingAt: offering.mobilePriceStartingAt,
-    })
-
-    if (rawPrice == null) {
-      throwCode('PRICING_NOT_SET')
-    }
-
-    return {
-      serviceId,
-      offeringId: offering.id,
-      serviceName: service.name?.trim() || 'Service',
-      durationMinutesSnapshot,
-      priceSnapshot: rawPrice,
-      sortOrder: index,
-    }
-  })
 }
 
 export async function POST(req: Request) {
@@ -310,7 +204,7 @@ export async function POST(req: Request) {
         requestedBufferMinutes == null
           ? locationBufferMinutes
           : clampInt(
-              snapToStep(
+              snapToStepMinutes(
                 clampInt(requestedBufferMinutes, 0, MAX_BUFFER_MINUTES),
                 stepMinutes,
               ),
@@ -352,6 +246,7 @@ export async function POST(req: Request) {
       const offeringByServiceId = new Map(
         offerings.map((offering) => [offering.serviceId, offering]),
       )
+
       const serviceById = new Map(
         services.map((service) => [service.id, service]),
       )
@@ -365,32 +260,37 @@ export async function POST(req: Request) {
         }
       }
 
-      const items = buildItems({
+      const items = buildNormalizedBookingItemsFromServiceIds({
         serviceIds,
         locationType,
         stepMinutes,
         offeringByServiceId,
         serviceById,
+        errors: {
+          missingOffering: 'MISSING_OFFERING',
+          missingService: 'MISSING_SERVICE',
+          pricingNotSet: 'PRICING_NOT_SET',
+          badDuration: 'BAD_DURATION',
+        },
       })
 
-      const computedDurationMinutes = items.reduce(
-        (sum, item) => sum + item.durationMinutesSnapshot,
-        0,
-      )
-
-      const subtotalSnapshot = sumDecimal(items.map((item) => item.priceSnapshot))
+      const {
+        primaryItem,
+        computedDurationMinutes,
+        computedSubtotal,
+      } = computeBookingItemTotals(items, 'MISSING_SERVICE')
 
       const totalDurationMinutes =
         requestedTotalDurationMinutes != null &&
         requestedTotalDurationMinutes >= computedDurationMinutes &&
         requestedTotalDurationMinutes <= MAX_SLOT_DURATION_MINUTES
           ? clampInt(
-              snapToStep(requestedTotalDurationMinutes, stepMinutes),
+              snapToStepMinutes(requestedTotalDurationMinutes, stepMinutes),
               computedDurationMinutes,
               MAX_SLOT_DURATION_MINUTES,
             )
           : clampInt(
-              snapToStep(
+              snapToStepMinutes(
                 computedDurationMinutes || DEFAULT_DURATION_MINUTES,
                 stepMinutes,
               ),
@@ -422,42 +322,31 @@ export async function POST(req: Request) {
         }
       }
 
-      await assertNoCalendarBlockConflict({
+      const conflict = await getTimeRangeConflict({
         tx,
         professionalId,
         locationId: location.id,
-        requestedStart,
-        requestedEnd,
-      })
-
-      await assertNoBookingConflict({
-        tx,
-        professionalId,
-        requestedStart,
-        requestedEnd,
-      })
-
-      const holdConflict = await hasHoldConflict({
-        tx,
-        professionalId,
         requestedStart,
         requestedEnd,
         defaultBufferMinutes: bufferMinutes,
         fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
       })
 
-      if (holdConflict) {
+      if (conflict === 'BLOCKED') {
+        throwCode('BLOCKED')
+      }
+
+      if (conflict === 'BOOKING') {
+        throwCode('TIME_NOT_AVAILABLE')
+      }
+
+      if (conflict === 'HOLD') {
         throwCode('TIME_ON_HOLD')
       }
 
       const locationAddressSnapshot = buildAddressSnapshot(location.formattedAddress)
       const locationLatSnapshot = decimalToNumber(location.lat)
       const locationLngSnapshot = decimalToNumber(location.lng)
-
-      const baseItem = items[0]
-      if (!baseItem) {
-        throwCode('MISSING_SERVICE')
-      }
 
       let booking: {
         id: string
@@ -472,8 +361,8 @@ export async function POST(req: Request) {
           data: {
             professionalId,
             clientId,
-            serviceId: baseItem.serviceId,
-            offeringId: baseItem.offeringId,
+            serviceId: primaryItem.serviceId,
+            offeringId: primaryItem.offeringId,
             scheduledFor: requestedStart,
             status: BookingStatus.ACCEPTED,
             locationType,
@@ -485,7 +374,7 @@ export async function POST(req: Request) {
             internalNotes: internalNotes ?? null,
             bufferMinutes,
             totalDurationMinutes,
-            subtotalSnapshot,
+            subtotalSnapshot: computedSubtotal,
           },
           select: {
             id: true,
@@ -508,11 +397,11 @@ export async function POST(req: Request) {
       const createdBaseItem = await tx.bookingServiceItem.create({
         data: {
           bookingId: booking.id,
-          serviceId: baseItem.serviceId,
-          offeringId: baseItem.offeringId,
+          serviceId: primaryItem.serviceId,
+          offeringId: primaryItem.offeringId,
           itemType: BookingServiceItemType.BASE,
-          priceSnapshot: baseItem.priceSnapshot,
-          durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
+          priceSnapshot: primaryItem.priceSnapshot,
+          durationMinutesSnapshot: primaryItem.durationMinutesSnapshot,
           sortOrder: 0,
         },
         select: { id: true },
@@ -539,7 +428,7 @@ export async function POST(req: Request) {
       return {
         booking,
         items,
-        subtotalSnapshot,
+        subtotalSnapshot: computedSubtotal,
         stepMinutes,
         appointmentTimeZone,
         locationId: location.id,
