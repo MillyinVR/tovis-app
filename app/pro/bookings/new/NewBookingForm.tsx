@@ -3,33 +3,44 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+
 import { moneyToString } from '@/lib/money'
-import { isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import {
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import type {
+  ProBookingNewClientDTO,
+  ProBookingNewOfferingDTO,
+} from '@/lib/dto/proBookingNew'
 
-type Client = {
+type ServiceLocationType = 'SALON' | 'MOBILE'
+type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
+
+type BookableLocationOption = {
   id: string
-  firstName: string
-  lastName: string
-  phone: string | null
-  user: { email: string } | null
+  label: string
+  type: ProfessionalLocationType
+  isBookable: boolean
+  isPrimary: boolean
+  timeZone: string | null
 }
 
-type Offering = {
+type ClientServiceAddressOption = {
   id: string
-  title: string | null
-  price: number
-  durationMinutes: number
-  service: {
-    name: string
-    category: { name: string } | null
-  }
+  label: string
+  formattedAddress: string
+  isDefault: boolean
 }
 
 type Props = {
-  clients: Client[]
-  offerings: Offering[]
+  clients: ProBookingNewClientDTO[]
+  offerings: ProBookingNewOfferingDTO[]
+  locations: BookableLocationOption[]
+  clientAddressesByClientId: Record<string, ClientServiceAddressOption[]>
   defaultClientId?: string
 }
 
@@ -55,15 +66,23 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
 
 function readStringField(data: unknown, key: string): string | null {
   if (!isRecord(data)) return null
-  const v = data[key]
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+  const value = data[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readBookingId(data: unknown): string | null {
+  if (!isRecord(data)) return null
+  const booking = data.booking
+  if (!isRecord(booking)) return null
+  const id = booking.id
+  return typeof id === 'string' && id.trim() ? id.trim() : null
 }
 
 function errorFromResponse(res: Response, data: unknown) {
   const msg = readErrorMessage(data)
   if (msg) return msg
   if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
+  if (res.status === 403) return 'You do not have access to do that.'
   return `Request failed (${res.status}).`
 }
 
@@ -75,50 +94,132 @@ function defaultDatetimeLocal(): string {
   const d = new Date()
   d.setMinutes(0, 0, 0)
   d.setHours(d.getHours() + 1)
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
+    d.getDate(),
+  )}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-/**
- * Parse "YYYY-MM-DDTHH:mm" (from <input type="datetime-local">)
- * into numeric parts. Returns null on invalid.
- */
-function parseDatetimeLocal(value: string): { year: number; month: number; day: number; hour: number; minute: number } | null {
+function parseDatetimeLocal(value: string): {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+} | null {
   if (!value || typeof value !== 'string') return null
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
-  if (!m) return null
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  const hour = Number(m[4])
-  const minute = Number(m[5])
+
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+
   if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+
   return { year, month, day, hour, minute }
 }
 
-/**
- * Convert a datetime-local value (wall clock) to UTC ISO,
- * interpreting the wall clock in the PRO's timezone.
- */
-function toUtcIsoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
+function toUtcIsoFromDatetimeLocalInTimeZone(
+  value: string,
+  timeZone: string,
+): string | null {
   const parts = parseDatetimeLocal(value)
   if (!parts) return null
+
   const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const dUtc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
-  if (!dUtc || Number.isNaN(dUtc.getTime())) return null
-  return dUtc.toISOString()
+  const utcDate = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
+
+  if (Number.isNaN(utcDate.getTime())) return null
+  return utcDate.toISOString()
 }
 
-export default function NewBookingForm({ clients, offerings, defaultClientId }: Props) {
+function pickDisplayPrice(offering: ProBookingNewOfferingDTO, mode: ServiceLocationType): number {
+  if (mode === 'MOBILE') {
+    if (offering.mobilePriceStartingAt != null) return offering.mobilePriceStartingAt
+    if (offering.service.minPrice != null) return offering.service.minPrice
+    return 0
+  }
+
+  if (offering.salonPriceStartingAt != null) return offering.salonPriceStartingAt
+  if (offering.service.minPrice != null) return offering.service.minPrice
+  return 0
+}
+
+function pickDisplayDurationMinutes(
+  offering: ProBookingNewOfferingDTO,
+  mode: ServiceLocationType,
+): number {
+  if (mode === 'MOBILE') {
+    if (offering.mobileDurationMinutes != null) return offering.mobileDurationMinutes
+    if (offering.service.defaultDurationMinutes != null) {
+      return offering.service.defaultDurationMinutes
+    }
+    return 0
+  }
+
+  if (offering.salonDurationMinutes != null) return offering.salonDurationMinutes
+  if (offering.service.defaultDurationMinutes != null) {
+    return offering.service.defaultDurationMinutes
+  }
+  return 0
+}
+
+function locationSupportsMode(
+  location: BookableLocationOption,
+  mode: ServiceLocationType,
+): boolean {
+  if (!location.isBookable) return false
+
+  if (mode === 'MOBILE') {
+    return location.type === 'MOBILE_BASE'
+  }
+
+  return location.type === 'SALON' || location.type === 'SUITE'
+}
+
+function formatClientLabel(client: ProBookingNewClientDTO) {
+  const name =
+    `${client.firstName} ${client.lastName}`.trim() || 'Unnamed client'
+  const email = client.user?.email ? ` • ${client.user.email}` : ''
+  const phone = client.phone ? ` • ${client.phone}` : ''
+  return `${name}${email}${phone}`
+}
+
+function formatOfferingLabel(
+  offering: ProBookingNewOfferingDTO,
+  mode: ServiceLocationType,
+) {
+  const category = offering.service.category?.name
+  const base = offering.title || offering.service.name
+  const price = moneyToString(pickDisplayPrice(offering, mode))
+  const durationMinutes = pickDisplayDurationMinutes(offering, mode)
+
+  return `${category ? `${category} • ` : ''}${base} • $${price} • ${durationMinutes} min`
+}
+
+export default function NewBookingForm({
+  clients,
+  offerings,
+  locations,
+  clientAddressesByClientId,
+  defaultClientId,
+}: Props) {
   const router = useRouter()
 
   const [clientId, setClientId] = useState(defaultClientId ?? '')
   const [offeringId, setOfferingId] = useState('')
+  const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
+  const [locationId, setLocationId] = useState('')
+  const [clientAddressId, setClientAddressId] = useState('')
   const [scheduledAt, setScheduledAt] = useState(() => defaultDatetimeLocal())
+  const [internalNotes, setInternalNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Pro timezone (server truth). Fallback to browser tz, then UTC.
   const [proTimeZone, setProTimeZone] = useState<string>(() => {
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -135,16 +236,18 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
       try {
         const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
         const data = await safeJson(res)
-
-        // Only accept a valid IANA tz string
         const tz = readStringField(data, 'timeZone')
-        if (!cancelled && tz && isValidIanaTimeZone(tz)) setProTimeZone(tz)
+
+        if (!cancelled && tz && isValidIanaTimeZone(tz)) {
+          setProTimeZone(tz)
+        }
       } catch {
-        // ignore, keep fallback
+        // keep fallback
       }
     }
 
     void loadProTz()
+
     return () => {
       cancelled = true
     }
@@ -152,43 +255,152 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
 
   const clientOptions = useMemo(() => clients ?? [], [clients])
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
+  const selectedOffering = useMemo(
+    () => offeringOptions.find((offering) => offering.id === offeringId) ?? null,
+    [offeringOptions, offeringId],
+  )
 
-  function formatClientLabel(c: Client) {
-    const email = c.user?.email ?? ''
-    const phone = c.phone ? ` • ${c.phone}` : ''
-    return `${c.firstName} ${c.lastName}${email ? ` • ${email}` : ''}${phone}`
-  }
+  const allowedModes = useMemo(
+    () => ({
+      salon: Boolean(selectedOffering?.offersInSalon),
+      mobile: Boolean(selectedOffering?.offersMobile),
+    }),
+    [selectedOffering],
+  )
 
-  function formatOfferingLabel(o: Offering) {
-    const cat = o.service.category?.name
-    const base = o.title || o.service.name
-    const price = `$${moneyToString(o.price) ?? '0.00'}`
-    return `${cat ? `${cat} • ` : ''}${base} • ${price} • ${o.durationMinutes} min`
-  }
+  useEffect(() => {
+    if (!selectedOffering) return
+
+    if (locationType === 'SALON' && allowedModes.salon) return
+    if (locationType === 'MOBILE' && allowedModes.mobile) return
+
+    if (allowedModes.salon) {
+      setLocationType('SALON')
+      return
+    }
+
+    if (allowedModes.mobile) {
+      setLocationType('MOBILE')
+    }
+  }, [selectedOffering, allowedModes, locationType])
+
+  const availableLocations = useMemo(
+    () => locations.filter((location) => locationSupportsMode(location, locationType)),
+    [locations, locationType],
+  )
+
+  useEffect(() => {
+    if (!availableLocations.length) {
+      setLocationId('')
+      return
+    }
+
+    setLocationId((current) => {
+      if (current && availableLocations.some((location) => location.id === current)) {
+        return current
+      }
+
+      return (
+        availableLocations.find((location) => location.isPrimary)?.id ??
+        availableLocations[0]?.id ??
+        ''
+      )
+    })
+  }, [availableLocations])
+
+  const selectedClientAddresses = useMemo(() => {
+    if (!clientId) return []
+    return clientAddressesByClientId[clientId] ?? []
+  }, [clientId, clientAddressesByClientId])
+
+  useEffect(() => {
+    if (locationType !== 'MOBILE') {
+      setClientAddressId('')
+      return
+    }
+
+    if (!selectedClientAddresses.length) {
+      setClientAddressId('')
+      return
+    }
+
+    setClientAddressId((current) => {
+      if (
+        current &&
+        selectedClientAddresses.some((address) => address.id === current)
+      ) {
+        return current
+      }
+
+      return (
+        selectedClientAddresses.find((address) => address.isDefault)?.id ??
+        selectedClientAddresses[0]?.id ??
+        ''
+      )
+    })
+  }, [locationType, selectedClientAddresses])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+
     if (loading) return
 
-    if (!clientId || !offeringId || !scheduledAt) {
-      setError('Client, service, and date/time are required.')
+    if (!clientId) {
+      setError('Client is required.')
       return
     }
 
-    // Interpret the chosen wall-clock time in PRO timezone -> store as UTC ISO.
-    const scheduledForISO = toUtcIsoFromDatetimeLocalInTimeZone(scheduledAt, proTimeZone)
+    if (!selectedOffering) {
+      setError('Service is required.')
+      return
+    }
+
+    if (!scheduledAt) {
+      setError('Date and time are required.')
+      return
+    }
+
+    if (!locationType) {
+      setError('Booking mode is required.')
+      return
+    }
+
+    if (!locationId) {
+      setError('Select a bookable location.')
+      return
+    }
+
+    if (locationType === 'MOBILE' && !clientAddressId) {
+      setError('Mobile bookings require a saved client service address.')
+      return
+    }
+
+    const scheduledForISO = toUtcIsoFromDatetimeLocalInTimeZone(
+      scheduledAt,
+      proTimeZone,
+    )
+
     if (!scheduledForISO) {
-      setError('Please choose a valid date/time.')
+      setError('Please choose a valid date and time.')
       return
     }
 
     setLoading(true)
+
     try {
       const res = await fetch('/api/pro/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, offeringId, scheduledFor: scheduledForISO }),
+        body: JSON.stringify({
+          clientId,
+          locationType,
+          locationId,
+          clientAddressId: locationType === 'MOBILE' ? clientAddressId : null,
+          scheduledFor: scheduledForISO,
+          internalNotes: internalNotes.trim() || null,
+          serviceIds: [selectedOffering.service.id],
+        }),
       })
 
       if (res.status === 401) {
@@ -203,9 +415,13 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
         return
       }
 
-      const id = readStringField(data, 'id')
-      if (id) router.push(`/pro/bookings/${encodeURIComponent(id)}`)
-      else router.push('/pro/bookings')
+      const bookingId = readBookingId(data)
+
+      if (bookingId) {
+        router.push(`/pro/bookings/${encodeURIComponent(bookingId)}`)
+      } else {
+        router.push('/pro/bookings')
+      }
 
       router.refresh()
     } catch (err) {
@@ -222,24 +438,39 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
   const helper = 'mt-2 text-[12px] text-textSecondary'
 
   const tzLabel = sanitizeTimeZone(proTimeZone, 'UTC')
+  const mobileUnavailableBecauseNoAddress =
+    locationType === 'MOBILE' && clientId && selectedClientAddresses.length === 0
 
   return (
-    <form onSubmit={handleSubmit} className="tovis-glass grid gap-4 rounded-card border border-white/10 bg-bgSecondary p-4">
+    <form
+      onSubmit={handleSubmit}
+      className="tovis-glass grid gap-4 rounded-card border border-white/10 bg-bgSecondary p-4"
+    >
       <div className="grid gap-2">
         <label htmlFor="client" className={label}>
           Client <span className="text-textSecondary">*</span>
         </label>
 
-        <select id="client" value={clientId} disabled={loading} onChange={(e) => setClientId(e.target.value)} className={field}>
+        <select
+          id="client"
+          value={clientId}
+          disabled={loading}
+          onChange={(e) => setClientId(e.target.value)}
+          className={field}
+        >
           <option value="">Select client</option>
-          {clientOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {formatClientLabel(c)}
+          {clientOptions.map((client) => (
+            <option key={client.id} value={client.id}>
+              {formatClientLabel(client)}
             </option>
           ))}
         </select>
 
-        {defaultClientId ? <div className={helper}>Client preselected from chart. You can change it if needed.</div> : null}
+        {defaultClientId ? (
+          <div className={helper}>
+            Client preselected from chart. You can change it if needed.
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-2">
@@ -255,13 +486,132 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
           className={field}
         >
           <option value="">Select service</option>
-          {offeringOptions.map((o) => (
-            <option key={o.id} value={o.id}>
-              {formatOfferingLabel(o)}
+          {offeringOptions.map((offering) => (
+            <option key={offering.id} value={offering.id}>
+              {formatOfferingLabel(offering, locationType)}
             </option>
           ))}
         </select>
       </div>
+
+      {selectedOffering ? (
+        <div className="grid gap-2">
+          <div className={label}>
+            Booking mode <span className="text-textSecondary">*</span>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              disabled={loading || !allowedModes.salon}
+              onClick={() => setLocationType('SALON')}
+              className={[
+                'rounded-card border px-4 py-3 text-left transition',
+                locationType === 'SALON'
+                  ? 'border-accentPrimary/60 bg-accentPrimary/10'
+                  : 'border-white/10 bg-bgPrimary',
+                !allowedModes.salon || loading
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'hover:border-white/20',
+              ].join(' ')}
+            >
+              <div className="text-[13px] font-black text-textPrimary">Salon</div>
+              <div className="mt-1 text-[12px] text-textSecondary">
+                Book at the pro’s salon or suite location.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              disabled={loading || !allowedModes.mobile}
+              onClick={() => setLocationType('MOBILE')}
+              className={[
+                'rounded-card border px-4 py-3 text-left transition',
+                locationType === 'MOBILE'
+                  ? 'border-accentPrimary/60 bg-accentPrimary/10'
+                  : 'border-white/10 bg-bgPrimary',
+                !allowedModes.mobile || loading
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'hover:border-white/20',
+              ].join(' ')}
+            >
+              <div className="text-[13px] font-black text-textPrimary">Mobile</div>
+              <div className="mt-1 text-[12px] text-textSecondary">
+                Book at the client’s saved service address.
+              </div>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-2">
+        <label htmlFor="location" className={label}>
+          Pro location <span className="text-textSecondary">*</span>
+        </label>
+
+        <select
+          id="location"
+          value={locationId}
+          disabled={loading || availableLocations.length === 0}
+          onChange={(e) => setLocationId(e.target.value)}
+          className={field}
+        >
+          <option value="">
+            {availableLocations.length ? 'Select location' : 'No matching locations'}
+          </option>
+          {availableLocations.map((location) => (
+            <option key={location.id} value={location.id}>
+              {location.label}
+            </option>
+          ))}
+        </select>
+
+        {!availableLocations.length ? (
+          <div className="mt-2 text-[12px] font-black text-toneDanger">
+            No bookable {locationType === 'MOBILE' ? 'mobile' : 'salon'} location is available.
+          </div>
+        ) : null}
+      </div>
+
+      {locationType === 'MOBILE' ? (
+        <div className="grid gap-2">
+          <label htmlFor="clientAddress" className={label}>
+            Client mobile address <span className="text-textSecondary">*</span>
+          </label>
+
+          <select
+            id="clientAddress"
+            value={clientAddressId}
+            disabled={loading || !clientId || selectedClientAddresses.length === 0}
+            onChange={(e) => setClientAddressId(e.target.value)}
+            className={field}
+          >
+            <option value="">
+              {!clientId
+                ? 'Select client first'
+                : selectedClientAddresses.length
+                  ? 'Select client address'
+                  : 'No saved mobile address'}
+            </option>
+
+            {selectedClientAddresses.map((address) => (
+              <option key={address.id} value={address.id}>
+                {address.label} • {address.formattedAddress}
+              </option>
+            ))}
+          </select>
+
+          {mobileUnavailableBecauseNoAddress ? (
+            <div className="mt-2 text-[12px] font-black text-toneDanger">
+              This client does not have a saved service address, so a mobile booking cannot be created yet.
+            </div>
+          ) : (
+            <div className={helper}>
+              Mobile bookings must use a saved client service address.
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div className="grid gap-2">
         <label htmlFor="datetime" className={label}>
@@ -278,11 +628,33 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
         />
 
         <div className={helper}>
-          Shown in your device time, but saved using <span className="font-black">{tzLabel}</span> (pro timezone) as UTC ISO.
+          Shown in your device time, but saved using{' '}
+          <span className="font-black">{tzLabel}</span> as the pro timezone and
+          stored as UTC.
         </div>
       </div>
 
-      {error ? <div className="text-[12px] font-black text-toneDanger">{error}</div> : null}
+      <div className="grid gap-2">
+        <label htmlFor="notes" className={label}>
+          Internal notes
+        </label>
+
+        <textarea
+          id="notes"
+          value={internalNotes}
+          disabled={loading}
+          onChange={(e) => setInternalNotes(e.target.value)}
+          rows={3}
+          placeholder="Optional internal notes for this booking"
+          className={`${field} min-h-[96px] resize-y`}
+        />
+      </div>
+
+      {error ? (
+        <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 px-3 py-2 text-[12px] font-black text-toneDanger">
+          {error}
+        </div>
+      ) : null}
 
       <div className="flex justify-end gap-2">
         <button
@@ -296,7 +668,13 @@ export default function NewBookingForm({ clients, offerings, defaultClientId }: 
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={
+            loading ||
+            !clientId ||
+            !selectedOffering ||
+            !locationId ||
+            (locationType === 'MOBILE' && !clientAddressId)
+          }
           className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
         >
           {loading ? 'Creating…' : 'Create booking'}

@@ -1,45 +1,281 @@
 // app/pro/bookings/new/page.tsx
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { ProfessionalLocationType, Role } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import NewBookingForm from './NewBookingForm'
+import {
+  buildProBookingNewClientDTO,
+  buildProBookingNewOfferingDTO,
+} from '@/lib/dto/proBookingNew'
 
-export default async function NewBookingPage(props: { searchParams: Promise<{ clientId?: string }> }) {
-  const { clientId } = await props.searchParams
+type SearchParams = {
+  clientId?: string
+}
+
+type ClientAddressOption = {
+  id: string
+  label: string
+  formattedAddress: string
+  isDefault: boolean
+}
+
+type ClientAddressesByClientId = Record<string, ClientAddressOption[]>
+
+type BookableLocationOption = {
+  id: string
+  label: string
+  type: 'SALON' | 'SUITE' | 'MOBILE_BASE'
+  isBookable: boolean
+  isPrimary: boolean
+  timeZone: string | null
+}
+
+function normalizeSearchParam(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function buildLocationLabel(location: {
+  type: ProfessionalLocationType
+  formattedAddress: string | null
+  city: string | null
+  isPrimary: boolean
+}) {
+  const modeLabel =
+    location.type === ProfessionalLocationType.MOBILE_BASE
+      ? 'Mobile base'
+      : location.type === ProfessionalLocationType.SUITE
+        ? 'Suite'
+        : 'Salon'
+
+  const place =
+    (typeof location.formattedAddress === 'string' &&
+      location.formattedAddress.trim()) ||
+    (typeof location.city === 'string' && location.city.trim()) ||
+    ''
+
+  const primary = location.isPrimary ? ' • Primary' : ''
+
+  return place ? `${modeLabel} • ${place}${primary}` : `${modeLabel}${primary}`
+}
+
+function buildClientAddressesByClientId(
+  rows: Array<{
+    clientId: string
+    id: string
+    label: string | null
+    formattedAddress: string | null
+    isDefault: boolean
+  }>,
+): ClientAddressesByClientId {
+  const grouped: ClientAddressesByClientId = {}
+
+  for (const row of rows) {
+    const clientId = typeof row.clientId === 'string' ? row.clientId.trim() : ''
+    const id = typeof row.id === 'string' ? row.id.trim() : ''
+    const formattedAddress =
+      typeof row.formattedAddress === 'string' ? row.formattedAddress.trim() : ''
+
+    if (!clientId || !id || !formattedAddress) continue
+
+    const label =
+      typeof row.label === 'string' && row.label.trim()
+        ? row.label.trim()
+        : 'Service address'
+
+    if (!grouped[clientId]) grouped[clientId] = []
+
+    grouped[clientId].push({
+      id,
+      label,
+      formattedAddress,
+      isDefault: Boolean(row.isDefault),
+    })
+  }
+
+  for (const clientId of Object.keys(grouped)) {
+    grouped[clientId].sort((a, b) => {
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
+      return a.label.localeCompare(b.label)
+    })
+  }
+
+  return grouped
+}
+
+export default async function NewBookingPage(props: {
+  searchParams: Promise<SearchParams>
+}) {
+  const searchParams = await props.searchParams
+  const defaultClientId = normalizeSearchParam(searchParams.clientId)
+
   const user = await getCurrentUser()
 
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
+  if (!user || user.role !== Role.PRO || !user.professionalProfile?.id) {
     redirect('/login?from=/pro/bookings/new')
   }
 
-  const db: any = prisma
+  const professionalId = user.professionalProfile.id
 
-  const clients = await db.clientProfile.findMany({
-    include: { user: true },
-    orderBy: { firstName: 'asc' },
-  })
+  const [clientsRaw, offeringsRaw, locationsRaw, clientAddressesRaw] =
+    await Promise.all([
+      prisma.clientProfile.findMany({
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          avatarUrl: true,
+          dateOfBirth: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              role: true,
+              phone: true,
+              phoneVerifiedAt: true,
+            },
+          },
+        },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      }),
 
-  const offerings = await db.professionalServiceOffering.findMany({
-    where: { professionalId: user.professionalProfile.id, isActive: true },
-    include: { service: { include: { category: true } } },
-    orderBy: { service: { name: 'asc' } },
-  })
+      prisma.professionalServiceOffering.findMany({
+        where: {
+          professionalId,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          salonPriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobilePriceStartingAt: true,
+          mobileDurationMinutes: true,
+          offersInSalon: true,
+          offersMobile: true,
+          customImageUrl: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          service: {
+            select: {
+              id: true,
+              name: true,
+              categoryId: true,
+              description: true,
+              defaultDurationMinutes: true,
+              minPrice: true,
+              defaultImageUrl: true,
+              allowMobile: true,
+              isActive: true,
+              isAddOnEligible: true,
+              addOnGroup: true,
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          service: {
+            name: 'asc',
+          },
+        },
+      }),
+
+      prisma.professionalLocation.findMany({
+        where: {
+          professionalId,
+          isBookable: true,
+          type: {
+            in: [
+              ProfessionalLocationType.SALON,
+              ProfessionalLocationType.SUITE,
+              ProfessionalLocationType.MOBILE_BASE,
+            ],
+          },
+        },
+        select: {
+          id: true,
+          type: true,
+          isBookable: true,
+          isPrimary: true,
+          timeZone: true,
+          city: true,
+          formattedAddress: true,
+        },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      }),
+
+      prisma.clientAddress.findMany({
+        where: {
+          kind: 'SERVICE_ADDRESS',
+        },
+        select: {
+          id: true,
+          clientId: true,
+          label: true,
+          formattedAddress: true,
+          isDefault: true,
+        },
+        orderBy: [
+          { clientId: 'asc' },
+          { isDefault: 'desc' },
+          { updatedAt: 'desc' },
+          { createdAt: 'asc' },
+        ],
+      }),
+    ])
+
+  const clients = clientsRaw.map(buildProBookingNewClientDTO)
+  const offerings = offeringsRaw.map(buildProBookingNewOfferingDTO)
+
+  const locations: BookableLocationOption[] = locationsRaw.map((location) => ({
+    id: location.id,
+    label: buildLocationLabel(location),
+    type: location.type,
+    isBookable: location.isBookable,
+    isPrimary: location.isPrimary,
+    timeZone: location.timeZone,
+  }))
+
+  const clientAddressesByClientId =
+    buildClientAddressesByClientId(clientAddressesRaw)
 
   return (
     <main className="mx-auto w-full max-w-215 px-4 pb-24 pt-8">
-      <a href="/pro" className="inline-block text-[12px] font-black text-textSecondary hover:text-textPrimary">
+      <Link
+        href="/pro"
+        className="inline-block text-[12px] font-black text-textSecondary hover:text-textPrimary"
+      >
         ← Back to dashboard
-      </a>
+      </Link>
 
       <div className="mt-3">
-        <h1 className="text-[22px] font-black text-textPrimary">New booking</h1>
+        <h1 className="text-[22px] font-black text-textPrimary">
+          New booking
+        </h1>
         <p className="mt-1 text-[12px] text-textSecondary">
-          Create a booking for a client. You can tweak times and services later.
+          Create a booking for a client and choose whether it is salon or mobile
+          before saving.
         </p>
       </div>
 
       <div className="mt-5">
-        <NewBookingForm clients={clients} offerings={offerings} defaultClientId={clientId} />
+        <NewBookingForm
+          clients={clients}
+          offerings={offerings}
+          locations={locations}
+          clientAddressesByClientId={clientAddressesByClientId}
+          defaultClientId={defaultClientId}
+        />
       </div>
     </main>
   )

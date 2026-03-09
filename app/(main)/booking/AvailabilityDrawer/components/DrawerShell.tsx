@@ -23,7 +23,7 @@ export default function DrawerShell({
   const overlayRootStyle: React.CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 2147483647,
+    zIndex: 2147483648,
     transform: 'none',
   }
 

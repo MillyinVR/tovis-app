@@ -1,6 +1,7 @@
 // app/api/pro/bookings/route.ts
 import { prisma } from '@/lib/prisma'
 import {
+  ClientAddressKind,
   Prisma,
   BookingServiceItemType,
   BookingStatus,
@@ -44,6 +45,8 @@ export const dynamic = 'force-dynamic'
 type CreateBookingErrorCode =
   | 'BLOCKED'
   | 'CLIENT_NOT_FOUND'
+  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
+  | 'CLIENT_SERVICE_ADDRESS_INVALID'
   | 'LOCATION_MODE_MISMATCH'
   | 'LOCATION_NOT_FOUND'
   | 'MISSING_OFFERING'
@@ -91,6 +94,12 @@ function decimalToCents(value: Prisma.Decimal): number {
   return Math.max(0, Number(whole) * 100 + Number(frac || '0'))
 }
 
+function hasNonEmptyAddress(snapshotSource: {
+  formattedAddress: string | null
+}): boolean {
+  return Boolean(snapshotSource.formattedAddress?.trim())
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
@@ -101,6 +110,7 @@ export async function POST(req: Request) {
     const body = isRecord(rawBody) ? rawBody : {}
 
     const clientId = pickString(body.clientId)
+    const clientAddressId = pickString(body.clientAddressId)
     const scheduledFor = toDateOrNull(body.scheduledFor)
     const internalNotes = pickString(body.internalNotes)
 
@@ -118,10 +128,20 @@ export async function POST(req: Request) {
     if (!locationType) return jsonFail(400, 'Missing or invalid locationType.')
     if (!serviceIds.length) return jsonFail(400, 'Select at least one service.')
 
+    if (
+      locationType === ServiceLocationType.MOBILE &&
+      !clientAddressId
+    ) {
+      return jsonFail(
+        400,
+        'Mobile bookings require a saved client service address.',
+      )
+    }
+
     const requestedStart = normalizeToMinute(scheduledFor)
 
     const result = await prisma.$transaction(async (tx) => {
-      const [client, location] = await Promise.all([
+      const [client, location, clientAddress] = await Promise.all([
         tx.clientProfile.findUnique({
           where: { id: clientId },
           select: { id: true },
@@ -144,6 +164,21 @@ export async function POST(req: Request) {
             lng: true,
           },
         }),
+        locationType === ServiceLocationType.MOBILE && clientAddressId
+          ? tx.clientAddress.findFirst({
+              where: {
+                id: clientAddressId,
+                clientId,
+                kind: ClientAddressKind.SERVICE_ADDRESS,
+              },
+              select: {
+                id: true,
+                formattedAddress: true,
+                lat: true,
+                lng: true,
+              },
+            })
+          : Promise.resolve(null),
       ])
 
       if (!client) throwCode('CLIENT_NOT_FOUND')
@@ -161,6 +196,16 @@ export async function POST(req: Request) {
         location.type === ProfessionalLocationType.MOBILE_BASE
       ) {
         throwCode('LOCATION_MODE_MISMATCH')
+      }
+
+      if (locationType === ServiceLocationType.MOBILE) {
+        if (!clientAddress) {
+          throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+        }
+
+        if (!hasNonEmptyAddress(clientAddress)) {
+          throwCode('CLIENT_SERVICE_ADDRESS_INVALID')
+        }
       }
 
       const tzResult = await resolveApptTimeZone({
@@ -335,6 +380,21 @@ export async function POST(req: Request) {
       const locationLatSnapshot = decimalToNumber(location.lat)
       const locationLngSnapshot = decimalToNumber(location.lng)
 
+      const clientAddressSnapshot =
+        locationType === ServiceLocationType.MOBILE && clientAddress
+          ? buildAddressSnapshot(clientAddress.formattedAddress) ?? Prisma.JsonNull
+          : Prisma.JsonNull
+
+      const clientAddressLatSnapshot =
+        locationType === ServiceLocationType.MOBILE && clientAddress
+          ? decimalToNumber(clientAddress.lat)
+          : null
+
+      const clientAddressLngSnapshot =
+        locationType === ServiceLocationType.MOBILE && clientAddress
+          ? decimalToNumber(clientAddress.lng)
+          : null
+
       let booking: {
         id: string
         scheduledFor: Date
@@ -352,12 +412,22 @@ export async function POST(req: Request) {
             offeringId: primaryItem.offeringId,
             scheduledFor: requestedStart,
             status: BookingStatus.ACCEPTED,
+
             locationType,
             locationId: location.id,
             locationTimeZone: appointmentTimeZone,
             locationAddressSnapshot,
             locationLatSnapshot,
             locationLngSnapshot,
+
+            clientAddressId:
+              locationType === ServiceLocationType.MOBILE && clientAddress
+                ? clientAddress.id
+                : null,
+            clientAddressSnapshot,
+            clientAddressLatSnapshot,
+            clientAddressLngSnapshot,
+
             internalNotes: internalNotes ?? null,
             bufferMinutes,
             totalDurationMinutes,
@@ -420,6 +490,10 @@ export async function POST(req: Request) {
         appointmentTimeZone,
         locationId: location.id,
         locationType,
+        clientAddressId:
+          locationType === ServiceLocationType.MOBILE && clientAddress
+            ? clientAddress.id
+            : null,
       }
     })
 
@@ -449,6 +523,7 @@ export async function POST(req: Request) {
           subtotalCents: decimalToCents(result.subtotalSnapshot),
           locationId: result.locationId,
           locationType: result.locationType,
+          clientAddressId: result.clientAddressId,
           stepMinutes: result.stepMinutes,
           timeZone: result.appointmentTimeZone,
         },
@@ -460,6 +535,20 @@ export async function POST(req: Request) {
 
     if (message === 'CLIENT_NOT_FOUND') {
       return jsonFail(404, 'Client not found.')
+    }
+
+    if (message === 'CLIENT_SERVICE_ADDRESS_REQUIRED') {
+      return jsonFail(
+        400,
+        'Mobile bookings require a saved client service address.',
+      )
+    }
+
+    if (message === 'CLIENT_SERVICE_ADDRESS_INVALID') {
+      return jsonFail(
+        400,
+        'The selected client service address is incomplete. Please update it before booking mobile.',
+      )
     }
 
     if (message === 'LOCATION_NOT_FOUND') {

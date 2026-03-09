@@ -3,26 +3,30 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+
 import type {
   AvailabilitySummaryResponse,
   DrawerContext,
   ServiceLocationType,
 } from '../types'
+
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 import { parseAvailabilitySummaryResponse } from '../contract'
+
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 
-type CacheEntry = { at: number; data: AvailabilitySummaryResponse }
+type CacheEntry = {
+  at: number
+  data: AvailabilitySummaryResponse
+}
 
 const CACHE_TTL_MS = 7_500
-const SOFT_THROTTLE_MS = 800
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
-  const e = raw.error
-  return pickString(e)
+  return pickString(raw.error)
 }
 
 function buildQueryKey(args: {
@@ -37,14 +41,21 @@ function buildQueryKey(args: {
     placeId: string | null
   } | null
 }) {
-  const v = args.viewer
-  const vKey = v
-    ? `|v=${v.lat.toFixed(4)},${v.lng.toFixed(4)},${v.radiusMiles ?? ''},${v.placeId ?? ''}`
+  const viewerKey = args.viewer
+    ? `viewer=${args.viewer.lat.toFixed(4)},${args.viewer.lng.toFixed(4)},${
+        args.viewer.radiusMiles ?? ''
+      },${args.viewer.placeId ?? ''}`
     : ''
 
-  const locKey = args.locationType ?? 'AUTO'
-
-  return `pro=${args.proId}|service=${args.serviceId}|loc=${locKey}|media=${args.mediaId || ''}${vKey}`
+  return [
+    `pro=${args.proId}`,
+    `service=${args.serviceId}`,
+    `loc=${args.locationType ?? 'AUTO'}`,
+    `media=${args.mediaId ?? ''}`,
+    viewerKey,
+  ]
+    .filter(Boolean)
+    .join('|')
 }
 
 export function useAvailability(
@@ -56,8 +67,7 @@ export function useAvailability(
 
   const abortRef = useRef<AbortController | null>(null)
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map())
-  const inFlightKeyRef = useRef<string | null>(null)
-  const lastRequestAtRef = useRef<number>(0)
+  const requestSeqRef = useRef(0)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,35 +121,31 @@ export function useAvailability(
   ])
 
   const queryKey = useMemo(
-    () => buildQueryKey({ proId, serviceId, locationType, mediaId, viewer }),
+    () =>
+      buildQueryKey({
+        proId,
+        serviceId,
+        locationType,
+        mediaId,
+        viewer,
+      }),
     [proId, serviceId, locationType, mediaId, viewer],
   )
 
-  const cleanup = useCallback(() => {
+  const clearInFlight = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = null
-    inFlightKeyRef.current = null
   }, [])
 
-  useEffect(() => cleanup, [cleanup])
+  useEffect(() => clearInFlight, [clearInFlight])
 
   const fetchAvailability = useCallback(
     async (key: string) => {
-      if (inFlightKeyRef.current === key) return
+      const seq = ++requestSeqRef.current
 
-      const now = Date.now()
-      const hit = cacheRef.current.get(key)
-      const hasUsableData = Boolean(hit?.data)
-
-      if (now - lastRequestAtRef.current < SOFT_THROTTLE_MS && hasUsableData) {
-        return
-      }
-      lastRequestAtRef.current = now
-
-      abortRef.current?.abort()
+      clearInFlight()
       const controller = new AbortController()
       abortRef.current = controller
-      inFlightKeyRef.current = key
 
       setLoading(true)
       setError(null)
@@ -152,20 +158,25 @@ export function useAvailability(
         qs.set('locationType', locationType)
       }
 
-      if (mediaId) qs.set('mediaId', mediaId)
+      if (mediaId) {
+        qs.set('mediaId', mediaId)
+      }
 
       if (viewer) {
         qs.set('viewerLat', String(viewer.lat))
         qs.set('viewerLng', String(viewer.lng))
+
         if (viewer.radiusMiles != null) {
           qs.set('radiusMiles', String(viewer.radiusMiles))
         }
+
         if (viewer.placeId) {
           qs.set('viewerPlaceId', viewer.placeId)
         }
       }
 
       try {
+        // This route returns SUMMARY when no `date` param is provided.
         const res = await fetch(`/api/availability/day?${qs.toString()}`, {
           method: 'GET',
           cache: 'no-store',
@@ -188,38 +199,54 @@ export function useAvailability(
 
         const parsed = parseAvailabilitySummaryResponse(raw)
         if (!parsed) {
-          throw new Error(
-            'Availability endpoint returned unexpected response.',
-          )
+          throw new Error('Availability endpoint returned unexpected response.')
         }
 
-        if (!parsed.ok) throw new Error(parsed.error)
+        if (!parsed.ok) {
+          throw new Error(parsed.error)
+        }
+
         if (parsed.mode !== 'SUMMARY') {
-          throw new Error(
-            'Availability endpoint returned unexpected response.',
-          )
+          throw new Error('Availability endpoint returned unexpected response.')
         }
 
-        cacheRef.current.set(key, { at: Date.now(), data: parsed })
+        if (seq !== requestSeqRef.current) return
+
+        cacheRef.current.set(key, {
+          at: Date.now(),
+          data: parsed,
+        })
+
         setData(parsed)
       } catch (e: unknown) {
         if (e instanceof Error && e.name === 'AbortError') return
+        if (seq !== requestSeqRef.current) return
+
         setError(
           e instanceof Error ? e.message : 'Failed to load availability.',
         )
       } finally {
-        if (abortRef.current === controller) abortRef.current = null
-        if (inFlightKeyRef.current === key) inFlightKeyRef.current = null
-        setLoading(false)
+        if (abortRef.current === controller) {
+          abortRef.current = null
+        }
+
+        if (seq === requestSeqRef.current) {
+          setLoading(false)
+        }
       }
     },
-    [router, proId, serviceId, locationType, mediaId, viewer],
+    [clearInFlight, router, proId, serviceId, locationType, mediaId, viewer],
   )
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      clearInFlight()
+      setLoading(false)
+      return
+    }
 
     if (!proId) {
+      clearInFlight()
       setLoading(false)
       setData(null)
       setError('Missing professional. Please try again.')
@@ -227,6 +254,7 @@ export function useAvailability(
     }
 
     if (!serviceId) {
+      clearInFlight()
       setLoading(false)
       setData(null)
       setError(
@@ -236,14 +264,22 @@ export function useAvailability(
     }
 
     const hit = cacheRef.current.get(queryKey)
+
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
       setData(hit.data)
-      void fetchAvailability(queryKey)
+      setError(null)
+      setLoading(false)
       return
     }
 
     void fetchAvailability(queryKey)
-  }, [open, proId, serviceId, queryKey, fetchAvailability])
+  }, [open, proId, serviceId, queryKey, fetchAvailability, clearInFlight])
 
-  return { loading, error, data, setError, setData }
+  return {
+    loading,
+    error,
+    data,
+    setError,
+    setData,
+  }
 }
