@@ -1,10 +1,10 @@
 // app/api/pro/bookings/route.ts
 import { prisma } from '@/lib/prisma'
 import {
-  ClientAddressKind,
-  Prisma,
   BookingServiceItemType,
   BookingStatus,
+  ClientAddressKind,
+  Prisma,
   ProfessionalLocationType,
   ServiceLocationType,
 } from '@prisma/client'
@@ -16,7 +16,7 @@ import {
   minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
 } from '@/lib/timeZone'
-import { pickBool, pickInt, clampInt } from '@/lib/pick'
+import { clampInt, pickBool, pickInt } from '@/lib/pick'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
@@ -34,11 +34,7 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
-import {
-  buildNormalizedBookingItemsFromServiceIds,
-  computeBookingItemTotals,
-  snapToStepMinutes,
-} from '@/lib/booking/serviceItems'
+import { snapToStepMinutes } from '@/lib/booking/serviceItems'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,19 +54,6 @@ type CreateBookingErrorCode =
 
 function throwCode(code: CreateBookingErrorCode): never {
   throw new Error(code)
-}
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-
-  return value
-    .map((entry) => {
-      if (typeof entry === 'string') return entry
-      if (entry == null) return ''
-      return String(entry)
-    })
-    .map((s) => s.trim())
-    .filter(Boolean)
 }
 
 function toDateOrNull(value: unknown): Date | null {
@@ -116,17 +99,18 @@ export async function POST(req: Request) {
 
     const locationId = pickString(body.locationId)
     const locationType = normalizeLocationType(body.locationType)
-    const serviceIds = Array.from(new Set(toStringArray(body.serviceIds))).slice(0, 10)
+    const offeringId = pickString(body.offeringId)
 
     const requestedBufferMinutes = pickInt(body.bufferMinutes)
     const requestedTotalDurationMinutes = pickInt(body.totalDurationMinutes)
-    const allowOutsideWorkingHours = pickBool(body.allowOutsideWorkingHours) ?? false
+    const allowOutsideWorkingHours =
+      pickBool(body.allowOutsideWorkingHours) ?? false
 
     if (!clientId) return jsonFail(400, 'Missing clientId.')
     if (!scheduledFor) return jsonFail(400, 'Missing or invalid scheduledFor.')
     if (!locationId) return jsonFail(400, 'Missing locationId.')
     if (!locationType) return jsonFail(400, 'Missing or invalid locationType.')
-    if (!serviceIds.length) return jsonFail(400, 'Select at least one service.')
+    if (!offeringId) return jsonFail(400, 'Missing offeringId.')
 
     if (
       locationType === ServiceLocationType.MOBILE &&
@@ -141,7 +125,7 @@ export async function POST(req: Request) {
     const requestedStart = normalizeToMinute(scheduledFor)
 
     const result = await prisma.$transaction(async (tx) => {
-      const [client, location, clientAddress] = await Promise.all([
+      const [client, location, clientAddress, offering] = await Promise.all([
         tx.clientProfile.findUnique({
           where: { id: clientId },
           select: { id: true },
@@ -179,10 +163,37 @@ export async function POST(req: Request) {
               },
             })
           : Promise.resolve(null),
+        tx.professionalServiceOffering.findFirst({
+          where: {
+            id: offeringId,
+            professionalId,
+            isActive: true,
+          },
+          select: {
+            id: true,
+            serviceId: true,
+            offersInSalon: true,
+            offersMobile: true,
+            salonPriceStartingAt: true,
+            mobilePriceStartingAt: true,
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+            service: {
+              select: {
+                id: true,
+                name: true,
+                minPrice: true,
+                defaultDurationMinutes: true,
+              },
+            },
+          },
+        }),
       ])
 
       if (!client) throwCode('CLIENT_NOT_FOUND')
       if (!location) throwCode('LOCATION_NOT_FOUND')
+      if (!offering) throwCode('MISSING_OFFERING')
+      if (!offering.service) throwCode('MISSING_SERVICE')
 
       if (
         locationType === ServiceLocationType.MOBILE &&
@@ -196,6 +207,20 @@ export async function POST(req: Request) {
         location.type === ProfessionalLocationType.MOBILE_BASE
       ) {
         throwCode('LOCATION_MODE_MISMATCH')
+      }
+
+      if (
+        locationType === ServiceLocationType.MOBILE &&
+        !offering.offersMobile
+      ) {
+        throwCode('MISSING_OFFERING')
+      }
+
+      if (
+        locationType === ServiceLocationType.SALON &&
+        !offering.offersInSalon
+      ) {
+        throwCode('MISSING_OFFERING')
       }
 
       if (locationType === ServiceLocationType.MOBILE) {
@@ -256,73 +281,29 @@ export async function POST(req: Request) {
               MAX_BUFFER_MINUTES,
             )
 
-      const [offerings, services] = await Promise.all([
-        tx.professionalServiceOffering.findMany({
-          where: {
-            professionalId,
-            isActive: true,
-            serviceId: { in: serviceIds },
-            ...(locationType === ServiceLocationType.MOBILE
-              ? { offersMobile: true }
-              : { offersInSalon: true }),
-          },
-          select: {
-            id: true,
-            serviceId: true,
-            salonPriceStartingAt: true,
-            mobilePriceStartingAt: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-          },
-          take: 50,
-        }),
-        tx.service.findMany({
-          where: { id: { in: serviceIds } },
-          select: {
-            id: true,
-            name: true,
-            defaultDurationMinutes: true,
-          },
-          take: 50,
-        }),
-      ])
+      const rawPrice =
+        locationType === ServiceLocationType.MOBILE
+          ? offering.mobilePriceStartingAt ?? offering.service.minPrice
+          : offering.salonPriceStartingAt ?? offering.service.minPrice
 
-      const offeringByServiceId = new Map(
-        offerings.map((offering) => [offering.serviceId, offering]),
-      )
-
-      const serviceById = new Map(
-        services.map((service) => [service.id, service]),
-      )
-
-      for (const serviceId of serviceIds) {
-        if (!offeringByServiceId.has(serviceId)) {
-          throwCode('MISSING_OFFERING')
-        }
-        if (!serviceById.has(serviceId)) {
-          throwCode('MISSING_SERVICE')
-        }
+      if (rawPrice == null) {
+        throwCode('PRICING_NOT_SET')
       }
 
-      const items = buildNormalizedBookingItemsFromServiceIds({
-        serviceIds,
-        locationType,
-        stepMinutes,
-        offeringByServiceId,
-        serviceById,
-        errors: {
-          missingOffering: 'MISSING_OFFERING',
-          missingService: 'MISSING_SERVICE',
-          pricingNotSet: 'PRICING_NOT_SET',
-          badDuration: 'BAD_DURATION',
-        },
-      })
+      const rawDuration =
+        locationType === ServiceLocationType.MOBILE
+          ? offering.mobileDurationMinutes ?? offering.service.defaultDurationMinutes
+          : offering.salonDurationMinutes ?? offering.service.defaultDurationMinutes
 
-      const {
-        primaryItem,
-        computedDurationMinutes,
-        computedSubtotal,
-      } = computeBookingItemTotals(items, 'MISSING_SERVICE')
+      if (rawDuration == null || rawDuration <= 0) {
+        throwCode('BAD_DURATION')
+      }
+
+      const computedDurationMinutes = clampInt(
+        snapToStepMinutes(rawDuration, stepMinutes),
+        stepMinutes,
+        MAX_SLOT_DURATION_MINUTES,
+      )
 
       const totalDurationMinutes =
         requestedTotalDurationMinutes != null &&
@@ -395,6 +376,8 @@ export async function POST(req: Request) {
           ? decimalToNumber(clientAddress.lng)
           : null
 
+      const subtotalSnapshot = rawPrice
+
       let booking: {
         id: string
         scheduledFor: Date
@@ -408,8 +391,8 @@ export async function POST(req: Request) {
           data: {
             professionalId,
             clientId,
-            serviceId: primaryItem.serviceId,
-            offeringId: primaryItem.offeringId,
+            serviceId: offering.serviceId,
+            offeringId: offering.id,
             scheduledFor: requestedStart,
             status: BookingStatus.ACCEPTED,
 
@@ -431,7 +414,7 @@ export async function POST(req: Request) {
             internalNotes: internalNotes ?? null,
             bufferMinutes,
             totalDurationMinutes,
-            subtotalSnapshot: computedSubtotal,
+            subtotalSnapshot,
           },
           select: {
             id: true,
@@ -451,41 +434,21 @@ export async function POST(req: Request) {
         throw error
       }
 
-      const createdBaseItem = await tx.bookingServiceItem.create({
+      await tx.bookingServiceItem.create({
         data: {
           bookingId: booking.id,
-          serviceId: primaryItem.serviceId,
-          offeringId: primaryItem.offeringId,
+          serviceId: offering.serviceId,
+          offeringId: offering.id,
           itemType: BookingServiceItemType.BASE,
-          priceSnapshot: primaryItem.priceSnapshot,
-          durationMinutesSnapshot: primaryItem.durationMinutesSnapshot,
+          priceSnapshot: rawPrice,
+          durationMinutesSnapshot: computedDurationMinutes,
           sortOrder: 0,
         },
-        select: { id: true },
       })
-
-      const addOnItems = items.slice(1)
-
-      if (addOnItems.length) {
-        await tx.bookingServiceItem.createMany({
-          data: addOnItems.map((item, index) => ({
-            bookingId: booking.id,
-            serviceId: item.serviceId,
-            offeringId: item.offeringId,
-            itemType: BookingServiceItemType.ADD_ON,
-            parentItemId: createdBaseItem.id,
-            priceSnapshot: item.priceSnapshot,
-            durationMinutesSnapshot: item.durationMinutesSnapshot,
-            sortOrder: 100 + index,
-            notes: 'MANUAL_ADDON',
-          })),
-        })
-      }
 
       return {
         booking,
-        items,
-        subtotalSnapshot: computedSubtotal,
+        subtotalSnapshot,
         stepMinutes,
         appointmentTimeZone,
         locationId: location.id,
@@ -494,6 +457,7 @@ export async function POST(req: Request) {
           locationType === ServiceLocationType.MOBILE && clientAddress
             ? clientAddress.id
             : null,
+        serviceName: offering.service.name || 'Appointment',
       }
     })
 
@@ -502,10 +466,6 @@ export async function POST(req: Request) {
       Number(result.booking.totalDurationMinutes) +
         Number(result.booking.bufferMinutes),
     )
-
-    const serviceName =
-      result.items.map((item) => item.serviceName).filter(Boolean).join(' + ') ||
-      'Appointment'
 
     return jsonOk(
       {
@@ -516,7 +476,7 @@ export async function POST(req: Request) {
           totalDurationMinutes: Number(result.booking.totalDurationMinutes),
           bufferMinutes: Number(result.booking.bufferMinutes),
           status: result.booking.status,
-          serviceName,
+          serviceName: result.serviceName,
           subtotalSnapshot:
             moneyToString(result.subtotalSnapshot) ??
             result.subtotalSnapshot.toString(),
@@ -562,26 +522,20 @@ export async function POST(req: Request) {
     if (message === 'MISSING_OFFERING') {
       return jsonFail(
         400,
-        'One or more selected services are not available for this professional/location type.',
+        'The selected offering is not available for this professional/location type.',
       )
     }
 
     if (message === 'MISSING_SERVICE') {
-      return jsonFail(400, 'One or more selected services could not be found.')
+      return jsonFail(400, 'The selected service could not be found.')
     }
 
     if (message === 'PRICING_NOT_SET') {
-      return jsonFail(
-        409,
-        'Pricing is not set for one or more selected services.',
-      )
+      return jsonFail(409, 'Pricing is not set for the selected offering.')
     }
 
     if (message === 'BAD_DURATION') {
-      return jsonFail(
-        409,
-        'Duration is not set for one or more selected services.',
-      )
+      return jsonFail(409, 'Duration is not set for the selected offering.')
     }
 
     if (message === 'TIMEZONE_REQUIRED') {

@@ -1,8 +1,8 @@
+// app/pro/calendar/page.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
 
-import CreateBookingModal from './CreateBookingModal'
 import BlockTimeModal from './BlockTimeModal'
 import EditBlockModal from './EditBlockModal'
 import WorkingHoursTabs from './WorkingHoursTabs'
@@ -114,12 +114,16 @@ export default function ProCalendarPage() {
     }
 
     if (view === 'week') {
-      const weekStartNoon = startOfWeekAnchorNoonInTimeZone(anchoredCurrentDate, tz)
+      const weekStartNoon = startOfWeekAnchorNoonInTimeZone(
+        anchoredCurrentDate,
+        tz,
+      )
       const weekStartDayStartUtc = startOfDayUtcInTimeZone(weekStartNoon, tz)
 
       return Array.from(
         { length: 7 },
-        (_, i) => new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000),
+        (_, i) =>
+          new Date(weekStartDayStartUtc.getTime() + i * 24 * 60 * 60_000),
       )
     }
 
@@ -132,7 +136,8 @@ export default function ProCalendarPage() {
 
     return Array.from(
       { length: 42 },
-      (_, i) => new Date(firstGridDayStartUtc.getTime() + i * 24 * 60 * 60_000),
+      (_, i) =>
+        new Date(firstGridDayStartUtc.getTime() + i * 24 * 60 * 60_000),
     )
   }, [view, anchoredCurrentDate, calendarTimeZone])
 
@@ -321,20 +326,6 @@ export default function ProCalendarPage() {
           }}
         />
       )}
-
-      <CreateBookingModal
-        open={cal.createOpen}
-        onClose={() => cal.setCreateOpen(false)}
-        workingHours={cal.workingHoursActive}
-        initialStart={cal.createInitialStart}
-        timeZone={activeLocationTimeZone}
-        services={cal.services}
-        onCreated={() => cal.reload()}
-        locationId={cal.activeLocationId ?? ''}
-        locationType={cal.activeLocationType}
-        locationLabel={cal.activeLocationLabel}
-        stepMinutes={cal.activeStepMinutes}
-      />
 
       <BlockTimeModal
         open={cal.blockCreateOpen}

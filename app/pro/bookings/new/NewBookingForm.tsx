@@ -42,6 +42,11 @@ type Props = {
   locations: BookableLocationOption[]
   clientAddressesByClientId: Record<string, ClientServiceAddressOption[]>
   defaultClientId?: string
+  defaultOfferingId?: string
+  defaultLocationId?: string
+  defaultLocationType?: ServiceLocationType
+  defaultScheduledAt?: string
+  cancelHref?: string
 }
 
 function currentPathWithQuery() {
@@ -137,15 +142,26 @@ function toUtcIsoFromDatetimeLocalInTimeZone(
   return utcDate.toISOString()
 }
 
-function pickDisplayPrice(offering: ProBookingNewOfferingDTO, mode: ServiceLocationType): number {
+function pickDisplayPrice(
+  offering: ProBookingNewOfferingDTO,
+  mode: ServiceLocationType,
+): number {
   if (mode === 'MOBILE') {
-    if (offering.mobilePriceStartingAt != null) return offering.mobilePriceStartingAt
-    if (offering.service.minPrice != null) return offering.service.minPrice
+    if (offering.mobilePriceStartingAt != null) {
+      return offering.mobilePriceStartingAt
+    }
+    if (offering.service.minPrice != null) {
+      return offering.service.minPrice
+    }
     return 0
   }
 
-  if (offering.salonPriceStartingAt != null) return offering.salonPriceStartingAt
-  if (offering.service.minPrice != null) return offering.service.minPrice
+  if (offering.salonPriceStartingAt != null) {
+    return offering.salonPriceStartingAt
+  }
+  if (offering.service.minPrice != null) {
+    return offering.service.minPrice
+  }
   return 0
 }
 
@@ -154,14 +170,18 @@ function pickDisplayDurationMinutes(
   mode: ServiceLocationType,
 ): number {
   if (mode === 'MOBILE') {
-    if (offering.mobileDurationMinutes != null) return offering.mobileDurationMinutes
+    if (offering.mobileDurationMinutes != null) {
+      return offering.mobileDurationMinutes
+    }
     if (offering.service.defaultDurationMinutes != null) {
       return offering.service.defaultDurationMinutes
     }
     return 0
   }
 
-  if (offering.salonDurationMinutes != null) return offering.salonDurationMinutes
+  if (offering.salonDurationMinutes != null) {
+    return offering.salonDurationMinutes
+  }
   if (offering.service.defaultDurationMinutes != null) {
     return offering.service.defaultDurationMinutes
   }
@@ -179,6 +199,21 @@ function locationSupportsMode(
   }
 
   return location.type === 'SALON' || location.type === 'SUITE'
+}
+
+function offeringSupportsMode(
+  offering: ProBookingNewOfferingDTO,
+  mode: ServiceLocationType,
+): boolean {
+  return mode === 'MOBILE'
+    ? Boolean(offering.offersMobile)
+    : Boolean(offering.offersInSalon)
+}
+
+function normalizeDefaultLocationType(
+  value: ServiceLocationType | undefined,
+): ServiceLocationType {
+  return value === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
 function formatClientLabel(client: ProBookingNewClientDTO) {
@@ -207,15 +242,24 @@ export default function NewBookingForm({
   locations,
   clientAddressesByClientId,
   defaultClientId,
+  defaultOfferingId,
+  defaultLocationId,
+  defaultLocationType,
+  defaultScheduledAt,
+  cancelHref = '/pro/bookings',
 }: Props) {
   const router = useRouter()
 
   const [clientId, setClientId] = useState(defaultClientId ?? '')
-  const [offeringId, setOfferingId] = useState('')
-  const [locationType, setLocationType] = useState<ServiceLocationType>('SALON')
-  const [locationId, setLocationId] = useState('')
+  const [offeringId, setOfferingId] = useState(defaultOfferingId ?? '')
+  const [locationType, setLocationType] = useState<ServiceLocationType>(
+    normalizeDefaultLocationType(defaultLocationType),
+  )
+  const [locationId, setLocationId] = useState(defaultLocationId ?? '')
   const [clientAddressId, setClientAddressId] = useState('')
-  const [scheduledAt, setScheduledAt] = useState(() => defaultDatetimeLocal())
+  const [scheduledAt, setScheduledAt] = useState(
+    defaultScheduledAt ?? defaultDatetimeLocal(),
+  )
   const [internalNotes, setInternalNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -255,6 +299,7 @@ export default function NewBookingForm({
 
   const clientOptions = useMemo(() => clients ?? [], [clients])
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
+
   const selectedOffering = useMemo(
     () => offeringOptions.find((offering) => offering.id === offeringId) ?? null,
     [offeringOptions, offeringId],
@@ -284,8 +329,29 @@ export default function NewBookingForm({
     }
   }, [selectedOffering, allowedModes, locationType])
 
+  const visibleOfferings = useMemo(
+    () =>
+      offeringOptions.filter((offering) =>
+        offeringSupportsMode(offering, locationType),
+      ),
+    [offeringOptions, locationType],
+  )
+
+  useEffect(() => {
+    if (!offeringId) return
+    if (
+      visibleOfferings.some((offering) => offering.id === offeringId)
+    ) {
+      return
+    }
+    setOfferingId('')
+  }, [visibleOfferings, offeringId])
+
   const availableLocations = useMemo(
-    () => locations.filter((location) => locationSupportsMode(location, locationType)),
+    () =>
+      locations.filter((location) =>
+        locationSupportsMode(location, locationType),
+      ),
     [locations, locationType],
   )
 
@@ -296,7 +362,10 @@ export default function NewBookingForm({
     }
 
     setLocationId((current) => {
-      if (current && availableLocations.some((location) => location.id === current)) {
+      if (
+        current &&
+        availableLocations.some((location) => location.id === current)
+      ) {
         return current
       }
 
@@ -361,11 +430,6 @@ export default function NewBookingForm({
       return
     }
 
-    if (!locationType) {
-      setError('Booking mode is required.')
-      return
-    }
-
     if (!locationId) {
       setError('Select a bookable location.')
       return
@@ -394,12 +458,12 @@ export default function NewBookingForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clientId,
+          offeringId: selectedOffering.id,
           locationType,
           locationId,
           clientAddressId: locationType === 'MOBILE' ? clientAddressId : null,
           scheduledFor: scheduledForISO,
           internalNotes: internalNotes.trim() || null,
-          serviceIds: [selectedOffering.service.id],
         }),
       })
 
@@ -468,9 +532,53 @@ export default function NewBookingForm({
 
         {defaultClientId ? (
           <div className={helper}>
-            Client preselected from chart. You can change it if needed.
+            Client preselected. You can change it if needed.
           </div>
         ) : null}
+      </div>
+
+      <div className="grid gap-2">
+        <div className={label}>
+          Booking mode <span className="text-textSecondary">*</span>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => setLocationType('SALON')}
+            className={[
+              'rounded-card border px-4 py-3 text-left transition',
+              locationType === 'SALON'
+                ? 'border-accentPrimary/60 bg-accentPrimary/10'
+                : 'border-white/10 bg-bgPrimary hover:border-white/20',
+              loading ? 'cursor-not-allowed opacity-50' : '',
+            ].join(' ')}
+          >
+            <div className="text-[13px] font-black text-textPrimary">Salon</div>
+            <div className="mt-1 text-[12px] text-textSecondary">
+              Book at the pro’s salon or suite location.
+            </div>
+          </button>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => setLocationType('MOBILE')}
+            className={[
+              'rounded-card border px-4 py-3 text-left transition',
+              locationType === 'MOBILE'
+                ? 'border-accentPrimary/60 bg-accentPrimary/10'
+                : 'border-white/10 bg-bgPrimary hover:border-white/20',
+              loading ? 'cursor-not-allowed opacity-50' : '',
+            ].join(' ')}
+          >
+            <div className="text-[13px] font-black text-textPrimary">Mobile</div>
+            <div className="mt-1 text-[12px] text-textSecondary">
+              Book at the client’s saved service address.
+            </div>
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-2">
@@ -485,64 +593,22 @@ export default function NewBookingForm({
           onChange={(e) => setOfferingId(e.target.value)}
           className={field}
         >
-          <option value="">Select service</option>
-          {offeringOptions.map((offering) => (
+          <option value="">
+            {visibleOfferings.length ? 'Select service' : 'No services for this mode'}
+          </option>
+          {visibleOfferings.map((offering) => (
             <option key={offering.id} value={offering.id}>
               {formatOfferingLabel(offering, locationType)}
             </option>
           ))}
         </select>
+
+        {!visibleOfferings.length ? (
+          <div className="mt-2 text-[12px] font-black text-toneDanger">
+            No active offerings are available for this booking mode.
+          </div>
+        ) : null}
       </div>
-
-      {selectedOffering ? (
-        <div className="grid gap-2">
-          <div className={label}>
-            Booking mode <span className="text-textSecondary">*</span>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              disabled={loading || !allowedModes.salon}
-              onClick={() => setLocationType('SALON')}
-              className={[
-                'rounded-card border px-4 py-3 text-left transition',
-                locationType === 'SALON'
-                  ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                  : 'border-white/10 bg-bgPrimary',
-                !allowedModes.salon || loading
-                  ? 'cursor-not-allowed opacity-50'
-                  : 'hover:border-white/20',
-              ].join(' ')}
-            >
-              <div className="text-[13px] font-black text-textPrimary">Salon</div>
-              <div className="mt-1 text-[12px] text-textSecondary">
-                Book at the pro’s salon or suite location.
-              </div>
-            </button>
-
-            <button
-              type="button"
-              disabled={loading || !allowedModes.mobile}
-              onClick={() => setLocationType('MOBILE')}
-              className={[
-                'rounded-card border px-4 py-3 text-left transition',
-                locationType === 'MOBILE'
-                  ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                  : 'border-white/10 bg-bgPrimary',
-                !allowedModes.mobile || loading
-                  ? 'cursor-not-allowed opacity-50'
-                  : 'hover:border-white/20',
-              ].join(' ')}
-            >
-              <div className="text-[13px] font-black text-textPrimary">Mobile</div>
-              <div className="mt-1 text-[12px] text-textSecondary">
-                Book at the client’s saved service address.
-              </div>
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       <div className="grid gap-2">
         <label htmlFor="location" className={label}>
@@ -629,8 +695,7 @@ export default function NewBookingForm({
 
         <div className={helper}>
           Shown in your device time, but saved using{' '}
-          <span className="font-black">{tzLabel}</span> as the pro timezone and
-          stored as UTC.
+          <span className="font-black">{tzLabel}</span> as the pro timezone and stored as UTC.
         </div>
       </div>
 
@@ -659,7 +724,7 @@ export default function NewBookingForm({
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={() => router.push(cancelHref)}
           disabled={loading}
           className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
         >

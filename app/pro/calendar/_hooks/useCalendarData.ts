@@ -9,6 +9,7 @@ import {
   useState,
   type DragEvent,
 } from 'react'
+import { useRouter } from 'next/navigation'
 import type {
   BookingDetails,
   BookingServiceItem,
@@ -134,6 +135,10 @@ function toDateInputValueInTimeZone(dateUtc: Date, tz: string) {
 function toTimeInputValueInTimeZone(dateUtc: Date, tz: string) {
   const p = getZonedParts(dateUtc, tz)
   return `${pad2(p.hour)}:${pad2(p.minute)}`
+}
+
+function toDatetimeLocalValueInTimeZone(dateUtc: Date, tz: string) {
+  return `${toDateInputValueInTimeZone(dateUtc, tz)}T${toTimeInputValueInTimeZone(dateUtc, tz)}`
 }
 
 function parseWorkingHoursDay(v: unknown): WorkingHoursDay | null {
@@ -658,6 +663,7 @@ function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
 }
 
 export function useCalendarData({ view, currentDate }: Args) {
+  const router = useRouter()
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const eventsRef = useRef<CalendarEvent[]>([])
 
@@ -781,9 +787,6 @@ export function useCalendarData({ view, currentDate }: Args) {
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [applyingChange, setApplyingChange] = useState(false)
-
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createInitialStart, setCreateInitialStart] = useState<Date>(new Date())
 
   const [blockCreateOpen, setBlockCreateOpen] = useState(false)
   const [blockCreateInitialStart, setBlockCreateInitialStart] = useState<Date>(new Date())
@@ -1548,7 +1551,7 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   async function openBooking(id: string) {
-    if (confirmOpen || pendingChange || createOpen) return
+    if (confirmOpen || pendingChange) return
     if (managementOpen) return
     if (blockCreateOpen || editBlockOpen) return
 
@@ -1989,18 +1992,30 @@ export function useCalendarData({ view, currentDate }: Args) {
     if (confirmOpen || pendingChange || openBookingId) return
     if (managementOpen) return
     if (blockCreateOpen || editBlockOpen) return
+    if (!activeLocationId) {
+      setError('Select a location first.')
+      setTimeout(() => setError(null), 3000)
+      return
+    }
 
     const y = clientY - columnTop
     const mins = snapMinutes(y / PX_PER_MINUTE, activeStepMinutes)
 
-    const tz = activeLocation?.timeZone && isValidIanaTimeZone(activeLocation.timeZone)
-      ? sanitizeTimeZone(activeLocation.timeZone, timeZone)
-      : sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+    const tz =
+      activeLocation?.timeZone && isValidIanaTimeZone(activeLocation.timeZone)
+        ? sanitizeTimeZone(activeLocation.timeZone, timeZone)
+        : sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
     const startUtc = utcFromDayAndMinutesInTimeZone(day, mins, tz)
+    const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, tz)
 
-    setCreateInitialStart(startUtc)
-    setCreateOpen(true)
+    const qs = new URLSearchParams({
+      locationId: activeLocationId,
+      locationType: activeLocationType,
+      scheduledAt,
+    })
+
+    router.push(`/pro/bookings/new?${qs.toString()}`)
   }
 
   function openBookingOrBlock(id: string) {
@@ -2020,7 +2035,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     confirmOpen ||
       pendingChange ||
       openBookingId ||
-      createOpen ||
       managementOpen ||
       blockCreateOpen ||
       editBlockOpen,
@@ -2084,10 +2098,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     savingAutoAccept,
     toggleAutoAccept,
 
-    createOpen,
-    setCreateOpen,
-    createInitialStart,
-    setCreateInitialStart,
 
     blockCreateOpen,
     setBlockCreateOpen,

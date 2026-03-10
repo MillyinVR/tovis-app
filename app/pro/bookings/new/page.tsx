@@ -13,6 +13,10 @@ import {
 
 type SearchParams = {
   clientId?: string
+  offeringId?: string
+  locationId?: string
+  locationType?: string
+  scheduledAt?: string
 }
 
 type ClientAddressOption = {
@@ -33,8 +37,26 @@ type BookableLocationOption = {
   timeZone: string | null
 }
 
+type ServiceLocationType = 'SALON' | 'MOBILE'
+
 function normalizeSearchParam(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function normalizeLocationTypeParam(
+  value: unknown,
+): ServiceLocationType | undefined {
+  const normalized = normalizeSearchParam(value)?.toUpperCase()
+  if (normalized === 'SALON') return 'SALON'
+  if (normalized === 'MOBILE') return 'MOBILE'
+  return undefined
+}
+
+function normalizeDatetimeLocalParam(value: unknown): string | undefined {
+  const raw = normalizeSearchParam(value)
+  if (!raw) return undefined
+
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? raw : undefined
 }
 
 function buildLocationLabel(location: {
@@ -109,7 +131,12 @@ export default async function NewBookingPage(props: {
   searchParams: Promise<SearchParams>
 }) {
   const searchParams = await props.searchParams
+
   const defaultClientId = normalizeSearchParam(searchParams.clientId)
+  const defaultOfferingId = normalizeSearchParam(searchParams.offeringId)
+  const defaultLocationId = normalizeSearchParam(searchParams.locationId)
+  const defaultLocationType = normalizeLocationTypeParam(searchParams.locationType)
+  const defaultScheduledAt = normalizeDatetimeLocalParam(searchParams.scheduledAt)
 
   const user = await getCurrentUser()
 
@@ -275,6 +302,11 @@ export default async function NewBookingPage(props: {
           locations={locations}
           clientAddressesByClientId={clientAddressesByClientId}
           defaultClientId={defaultClientId}
+          defaultOfferingId={defaultOfferingId}
+          defaultLocationId={defaultLocationId}
+          defaultLocationType={defaultLocationType}
+          defaultScheduledAt={defaultScheduledAt}
+          cancelHref="/pro/bookings"
         />
       </div>
     </main>
