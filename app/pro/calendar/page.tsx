@@ -1,4 +1,3 @@
-// app/pro/calendar/page.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -84,7 +83,11 @@ export default function ProCalendarPage() {
 
   const activeLocationTimeZone = useMemo(() => {
     const raw = cal.activeLocation?.timeZone
-    if (typeof raw === 'string' && raw.trim() && isValidIanaTimeZone(raw.trim())) {
+    if (
+      typeof raw === 'string' &&
+      raw.trim() &&
+      isValidIanaTimeZone(raw.trim())
+    ) {
       return sanitizeTimeZone(raw.trim(), calendarTimeZone)
     }
     return calendarTimeZone
@@ -221,8 +224,8 @@ export default function ProCalendarPage() {
             <WorkingHoursTabs
               canSalon={Boolean(cal.canSalon)}
               canMobile={Boolean(cal.canMobile)}
-              activeLocationType={cal.activeLocationType}
-              onChangeLocationType={(next) => cal.setActiveLocationType(next)}
+              activeEditorType={cal.hoursEditorLocationType}
+              onChangeEditorType={cal.setHoursEditorLocationType}
               onSavedAny={() => cal.reload()}
             />
           </div>
@@ -294,6 +297,7 @@ export default function ProCalendarPage() {
           workingHoursSalon={cal.workingHoursSalon}
           workingHoursMobile={cal.workingHoursMobile}
           activeLocationType={cal.activeLocationType}
+          stepMinutes={cal.activeStepMinutes}
           timeZone={calendarTimeZone}
           onClickEvent={cal.openBookingOrBlock}
           onCreateForClick={cal.openCreateForClick}
@@ -329,7 +333,7 @@ export default function ProCalendarPage() {
         locationId={cal.activeLocationId ?? ''}
         locationType={cal.activeLocationType}
         locationLabel={cal.activeLocationLabel}
-        stepMinutes={cal.activeLocation?.stepMinutes ?? undefined}
+        stepMinutes={cal.activeStepMinutes}
       />
 
       <BlockTimeModal
@@ -339,7 +343,7 @@ export default function ProCalendarPage() {
         timeZone={activeLocationTimeZone}
         locationId={cal.activeLocationId}
         locationLabel={cal.activeLocationLabel}
-        stepMinutes={cal.activeLocation?.stepMinutes ?? undefined}
+        stepMinutes={cal.activeStepMinutes}
         onCreated={() => cal.reload()}
       />
 
@@ -347,6 +351,7 @@ export default function ProCalendarPage() {
         open={cal.editBlockOpen}
         blockId={cal.editBlockId}
         timeZone={activeLocationTimeZone}
+        stepMinutes={cal.activeStepMinutes}
         onClose={() => {
           cal.setEditBlockOpen(false)
           cal.setEditBlockId(null)

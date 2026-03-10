@@ -9,7 +9,12 @@ import {
   minutesSinceMidnightInTimeZone,
   zonedTimeToUtc,
 } from '@/lib/timeZone'
-import { computeDurationMinutesFromIso } from './_utils/calendarMath'
+import {
+  computeDurationMinutesFromIso,
+  normalizeStepMinutes,
+  roundDurationMinutes,
+  MAX_DURATION,
+} from './_utils/calendarMath'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
@@ -19,6 +24,7 @@ type Props = {
   open: boolean
   blockId: string | null
   timeZone: string
+  stepMinutes?: number | null
   onClose: () => void
   onSaved: () => void
 }
@@ -30,19 +36,10 @@ type BlockDto = {
   note?: string | null
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
-}
-
 function toTimeInputValueFromMinutes(minutes: number) {
   const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
   const mm = String(minutes % 60).padStart(2, '0')
   return `${hh}:${mm}`
-}
-
-function roundTo15(mins: number) {
-  const snapped = Math.round(mins / 15) * 15
-  return clamp(snapped, 15, 12 * 60)
 }
 
 function parseYmd(ymd: string) {
@@ -55,7 +52,6 @@ function parseBlockDto(data: unknown): BlockDto | null {
   if (!isRecord(data)) return null
 
   const raw = isRecord(data.block) ? data.block : data
-
   if (!isRecord(raw)) return null
 
   const id = pickStringOrEmpty(raw.id)
@@ -63,14 +59,22 @@ function parseBlockDto(data: unknown): BlockDto | null {
   const endsAt = pickStringOrEmpty(raw.endsAt)
   if (!id || !startsAt || !endsAt) return null
 
-  const note = typeof raw.note === 'string' ? raw.note : raw.note == null ? null : String(raw.note)
+  const note =
+    typeof raw.note === 'string' ? raw.note : raw.note == null ? null : String(raw.note)
 
   return { id, startsAt, endsAt, note }
 }
 
-export default function EditBlockModal({ open, blockId, timeZone, onClose, onSaved }: Props) {
-  // ✅ Never LA. Fallback only to DEFAULT_TIME_ZONE.
+export default function EditBlockModal({
+  open,
+  blockId,
+  timeZone,
+  stepMinutes,
+  onClose,
+  onSaved,
+}: Props) {
   const tz = useMemo(() => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), [timeZone])
+  const step = useMemo(() => normalizeStepMinutes(stepMinutes), [stepMinutes])
 
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -103,7 +107,9 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       setError(null)
 
       try {
-        const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { cache: 'no-store' })
+        const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
+          cache: 'no-store',
+        })
         const data = await safeJson(res)
 
         if (!res.ok) {
@@ -124,12 +130,17 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
         const startMins = minutesSinceMidnightInTimeZone(start, tz)
         setStartTime(toTimeInputValueFromMinutes(startMins))
 
-        const dur = roundTo15(computeDurationMinutesFromIso(b.startsAt, b.endsAt))
+        const dur = roundDurationMinutes(
+          computeDurationMinutesFromIso(b.startsAt, b.endsAt),
+          step,
+        )
         setDurationMinutes(dur)
 
         setNote((b.note ?? '').toString())
       } catch (e: unknown) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load block.')
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Failed to load block.')
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -138,7 +149,7 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
     return () => {
       cancelled = true
     }
-  }, [open, blockId, tz])
+  }, [open, blockId, tz, step])
 
   async function save() {
     if (!blockId) return
@@ -155,7 +166,7 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       const parsed = parseHHMM(startTime)
       if (!parsed) throw new Error('Pick a valid start time.')
 
-      const dur = roundTo15(Number(durationMinutes || 60))
+      const dur = roundDurationMinutes(Number(durationMinutes || 60), step)
 
       const startUtc = zonedTimeToUtc({
         year: d.year,
@@ -170,7 +181,9 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
       if (!Number.isFinite(startUtc.getTime())) throw new Error('Invalid start time.')
 
       const endUtc = new Date(startUtc.getTime() + dur * 60_000)
-      if (endUtc.getTime() <= startUtc.getTime()) throw new Error('End time must be after start time.')
+      if (endUtc.getTime() <= startUtc.getTime()) {
+        throw new Error('End time must be after start time.')
+      }
 
       const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
         method: 'PATCH',
@@ -202,7 +215,9 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
     setError(null)
 
     try {
-      const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
+        method: 'DELETE',
+      })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to delete.')
 
@@ -218,14 +233,16 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-1400 flex items-center justify-center bg-black/50 p-4" onClick={close}>
+    <div
+      className="fixed inset-0 z-1400 flex items-center justify-center bg-black/50 p-4"
+      onClick={close}
+    >
       <div
         className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        {/* header */}
         <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-bgSecondary px-4 py-3">
           <div className="text-sm font-extrabold text-textPrimary">Blocked time</div>
           <button
@@ -238,7 +255,6 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
           </button>
         </div>
 
-        {/* body */}
         <div className="px-4 py-4">
           {!blockId && <div className="text-xs text-textSecondary">No block selected.</div>}
 
@@ -256,6 +272,10 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
                 Timezone: <span className="font-semibold text-textPrimary">{tz}</span>
               </div>
 
+              <div className="mb-3 text-xs text-textSecondary">
+                Step size: <span className="font-semibold text-textPrimary">{step} min</span>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Date</div>
@@ -268,10 +288,12 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
                 </div>
 
                 <div>
-                  <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Start time</div>
+                  <div className="mb-1 text-[11px] font-extrabold text-textSecondary">
+                    Start time
+                  </div>
                   <input
                     type="time"
-                    step={15 * 60}
+                    step={step * 60}
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 focus:border-white/20"
@@ -280,12 +302,14 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
               </div>
 
               <div className="mt-3">
-                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Duration (minutes)</div>
+                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">
+                  Duration (minutes)
+                </div>
                 <input
                   type="number"
-                  step={15}
-                  min={15}
-                  max={720}
+                  step={step}
+                  min={step}
+                  max={MAX_DURATION}
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(Number(e.target.value))}
                   className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 focus:border-white/20"
@@ -293,7 +317,9 @@ export default function EditBlockModal({ open, blockId, timeZone, onClose, onSav
               </div>
 
               <div className="mt-3">
-                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Note (optional)</div>
+                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">
+                  Note (optional)
+                </div>
                 <input
                   type="text"
                   value={note}

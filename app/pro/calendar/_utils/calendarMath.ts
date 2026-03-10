@@ -7,18 +7,34 @@ import {
 } from '@/lib/scheduling/workingHours'
 
 export const PX_PER_MINUTE = 1.5
-export const SNAP_MINUTES = 15
-export const MIN_DURATION = 15
+
+/**
+ * Default fallback only when a location-specific step is missing or invalid.
+ */
+export const DEFAULT_STEP_MINUTES = 15
+export const MIN_STEP_MINUTES = 5
+export const MAX_STEP_MINUTES = 60
 export const MAX_DURATION = 12 * 60
 
-export function snapMinutes(mins: number) {
-  const snapped = Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES
-  return clamp(snapped, 0, 24 * 60 - SNAP_MINUTES)
+export function normalizeStepMinutes(stepMinutes?: number | null): number {
+  const raw =
+    typeof stepMinutes === 'number' && Number.isFinite(stepMinutes)
+      ? Math.trunc(stepMinutes)
+      : DEFAULT_STEP_MINUTES
+
+  return clamp(raw, MIN_STEP_MINUTES, MAX_STEP_MINUTES)
 }
 
-export function roundTo15(mins: number) {
-  const snapped = Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES
-  return clamp(snapped, MIN_DURATION, MAX_DURATION)
+export function snapMinutes(mins: number, stepMinutes?: number | null) {
+  const step = normalizeStepMinutes(stepMinutes)
+  const snapped = Math.round(mins / step) * step
+  return clamp(snapped, 0, 24 * 60 - step)
+}
+
+export function roundDurationMinutes(mins: number, stepMinutes?: number | null) {
+  const step = normalizeStepMinutes(stepMinutes)
+  const snapped = Math.round(mins / step) * step
+  return clamp(snapped, step, MAX_DURATION)
 }
 
 export function computeDurationMinutesFromIso(
@@ -80,13 +96,18 @@ export function extractBlockId(ev: CalendarEvent) {
   return null
 }
 
-export function blockToEvent(b: BlockRow): CalendarEvent {
+export function blockToEvent(
+  b: BlockRow,
+  options?: { stepMinutes?: number | null },
+): CalendarEvent {
   const s = new Date(b.startsAt)
   const e = new Date(b.endsAt)
   const note = b.note ?? null
-  const durationMinutes = Math.max(
-    15,
-    Math.round((e.getTime() - s.getTime()) / 60_000),
+
+  const rawDurationMinutes = Math.round((e.getTime() - s.getTime()) / 60_000)
+  const durationMinutes = roundDurationMinutes(
+    rawDurationMinutes,
+    options?.stepMinutes,
   )
 
   return {

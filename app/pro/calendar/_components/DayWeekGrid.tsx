@@ -3,7 +3,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import type { CalendarEvent, ViewMode, WorkingHoursJson, EntityType } from '../_types'
+import type {
+  CalendarEvent,
+  ViewMode,
+  WorkingHoursJson,
+  EntityType,
+} from '../_types'
 import { minutesSinceMidnightInTimeZone, ymdInTimeZone } from '../_utils/date'
 import { PX_PER_MINUTE } from '../_utils/calendarMath'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
@@ -32,6 +37,7 @@ export function DayWeekGrid(props: {
   workingHoursSalon: WorkingHoursJson
   workingHoursMobile: WorkingHoursJson
   activeLocationType?: 'SALON' | 'MOBILE'
+  stepMinutes: number
   timeZone: string
   onClickEvent: (id: string) => void
   onCreateForClick: (day: Date, clientY: number, columnTop: number) => void
@@ -55,6 +61,7 @@ export function DayWeekGrid(props: {
     workingHoursSalon,
     workingHoursMobile,
     activeLocationType = 'SALON',
+    stepMinutes,
     timeZone: timeZoneRaw,
     onClickEvent,
     onCreateForClick,
@@ -105,7 +112,10 @@ export function DayWeekGrid(props: {
     [visibleDays, timeZone],
   )
 
-  const todayIsInView = useMemo(() => visibleYmds.includes(todayYmd), [visibleYmds, todayYmd])
+  const todayIsInView = useMemo(
+    () => visibleYmds.includes(todayYmd),
+    [visibleYmds, todayYmd],
+  )
   const showNow = tzResolved && todayIsInView
 
   const gridCols = useMemo(
@@ -127,14 +137,16 @@ export function DayWeekGrid(props: {
       overlay={<NowLineOverlay topPx={nowTopPx + headerH} show={showNow} />}
     >
       <div ref={headerRef} className="sticky top-0 z-[200]">
-        {/* ✅ no extra bg wash here — DayHeaderRow handles its own surface */}
         <div className="backdrop-blur-md">
-          <DayHeaderRow visibleDays={visibleDays} timeZone={timeZone} todayYmd={todayYmd} gridCols={gridCols} />
+          <DayHeaderRow
+            visibleDays={visibleDays}
+            timeZone={timeZone}
+            todayYmd={todayYmd}
+            gridCols={gridCols}
+          />
         </div>
 
         <div className="h-px bg-white/10" />
-
-        {/* keep the shadow cue, but slightly lighter so it doesn’t gray the top */}
         <div className="h-2 bg-gradient-to-b from-black/18 to-transparent" />
       </div>
 
@@ -153,6 +165,7 @@ export function DayWeekGrid(props: {
             workingHoursSalon={workingHoursSalon}
             workingHoursMobile={workingHoursMobile}
             activeLocationType={activeLocationType}
+            stepMinutes={stepMinutes}
             isBusy={isBusy}
             suppressClickRef={suppressClickRef}
             onClickEvent={onClickEvent}

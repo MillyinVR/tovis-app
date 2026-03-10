@@ -4,13 +4,26 @@
 import { useMemo, useState } from 'react'
 import type { WaitlistLike } from './_helpers'
 import { prettyWhen, waitlistLocationLabel } from './_helpers'
-import { isValidIanaTimeZone, sanitizeTimeZone, getZonedParts, zonedTimeToUtc } from '@/lib/timeZone'
+import {
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  getZonedParts,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
 import ProProfileLink from './ProProfileLink'
+import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
 
 type Props = {
   items: WaitlistLike[]
   onChanged?: () => void
 }
+
+const DEFAULT_BROWSER_TIME_ZONE = 'UTC'
+const DEFAULT_FLEX_MINUTES = 60
+const MIN_FLEX_MINUTES = 15
+const MAX_FLEX_MINUTES = 24 * 60
 
 function getBrowserTimeZone(): string {
   try {
@@ -19,12 +32,12 @@ function getBrowserTimeZone(): string {
   } catch {
     // ignore
   }
-  return 'UTC'
+  return DEFAULT_BROWSER_TIME_ZONE
 }
 
-function clampMinutes(n: number) {
-  if (!Number.isFinite(n)) return 60
-  return Math.max(15, Math.min(24 * 60, Math.floor(n)))
+function clampFlexMinutes(n: number) {
+  if (!Number.isFinite(n)) return DEFAULT_FLEX_MINUTES
+  return Math.min(MAX_FLEX_MINUTES, Math.max(MIN_FLEX_MINUTES, Math.floor(n)))
 }
 
 function toDate(v: unknown): Date | null {
@@ -40,7 +53,7 @@ function toDate(v: unknown): Date | null {
 function toDatetimeLocalValueInTimeZone(isoUtc: string, timeZone: string) {
   const d = toDate(isoUtc)
   if (!d) return ''
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_BROWSER_TIME_ZONE)
   const p = getZonedParts(d, tz)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
@@ -63,9 +76,21 @@ function datetimeLocalToIsoInTimeZone(value: string, timeZone: string) {
   if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_BROWSER_TIME_ZONE)
+  const utc = zonedTimeToUtc({
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second: 0,
+    timeZone: tz,
+  })
   return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
+}
+
+function apiErrorMessage(data: unknown, fallback: string) {
+  return readErrorMessage(data) ?? (isRecord(data) ? pickString(data.error) : null) ?? fallback
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -87,10 +112,13 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
   const [err, setErr] = useState<string | null>(null)
 
   const [desiredForLocal, setDesiredForLocal] = useState<string>('') // datetime-local (wall clock)
-  const [flexMinutes, setFlexMinutes] = useState<number>(60)
+  const [flexMinutes, setFlexMinutes] = useState<number>(DEFAULT_FLEX_MINUTES)
   const [timeBucket, setTimeBucket] = useState<string>('')
 
-  const editingItem = useMemo(() => list.find((x) => x.id === editingId) ?? null, [list, editingId])
+  const editingItem = useMemo(
+    () => list.find((x) => x.id === editingId) ?? null,
+    [list, editingId],
+  )
 
   function openEdit(w: WaitlistLike) {
     setErr(null)
@@ -113,15 +141,15 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
       if (s && e) {
         const span = e.getTime() - s.getTime()
         if (Number.isFinite(span) && span > 0) {
-          setFlexMinutes(clampMinutes(Math.round(span / 2 / 60_000)))
+          setFlexMinutes(clampFlexMinutes(Math.round(span / 2 / 60_000)))
         } else {
-          setFlexMinutes(60)
+          setFlexMinutes(DEFAULT_FLEX_MINUTES)
         }
       } else {
-        setFlexMinutes(60)
+        setFlexMinutes(DEFAULT_FLEX_MINUTES)
       }
     } else {
-      setFlexMinutes(60)
+      setFlexMinutes(DEFAULT_FLEX_MINUTES)
     }
 
     setTimeBucket((w?.preferredTimeBucket ?? '').toString())
@@ -150,18 +178,20 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
         body: JSON.stringify({
           id: editingId,
           desiredFor: desiredForISO,
-          flexibilityMinutes: clampMinutes(flexMinutes),
-          preferredTimeBucket: timeBucket?.trim() ? timeBucket.trim() : null,
+          flexibilityMinutes: clampFlexMinutes(flexMinutes),
+          preferredTimeBucket: timeBucket.trim() ? timeBucket.trim() : null,
         }),
       })
 
-      const data: any = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data?.error || 'Failed to update waitlist.')
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(apiErrorMessage(data, 'Failed to update waitlist.'))
+      }
 
       closeEdit()
       onChanged?.()
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to update waitlist.')
+    } catch (e: unknown) {
+      setErr(errorMessageFromUnknown(e, 'Failed to update waitlist.'))
     } finally {
       setBusyId(null)
     }
@@ -176,13 +206,15 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
       const res = await fetch(`/api/waitlist?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       })
-      const data: any = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data?.error || 'Failed to remove waitlist.')
+      const data: unknown = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(apiErrorMessage(data, 'Failed to remove waitlist.'))
+      }
 
       if (editingId === id) closeEdit()
       onChanged?.()
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to remove waitlist.')
+    } catch (e: unknown) {
+      setErr(errorMessageFromUnknown(e, 'Failed to remove waitlist.'))
     } finally {
       setBusyId(null)
     }
@@ -214,7 +246,10 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
             </div>
 
             <div className="mt-1 text-sm text-textPrimary">
-              <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+              <span
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 <ProProfileLink
                   proId={w?.professional?.id || null}
                   label={w?.professional?.businessName || 'Any professional'}
@@ -264,8 +299,8 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
             {isEditing ? (
               <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
                 <div className="text-xs font-medium text-textSecondary">
-                  Set a preferred time and flexibility. We’ll store a window around it.{' '}
-                  <span className="opacity-75">({sanitizeTimeZone(tz, 'UTC')})</span>
+                  Set a preferred time and flexibility. We’ll store a window around it.{` `}
+                  <span className="opacity-75">({sanitizeTimeZone(tz, DEFAULT_BROWSER_TIME_ZONE)})</span>
                 </div>
 
                 <label className="text-sm font-semibold text-textPrimary">
@@ -284,10 +319,14 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
                   <input
                     type="number"
                     value={flexMinutes}
-                    onChange={(e) => setFlexMinutes(clampMinutes(Number(e.target.value) || 60))}
+                    onChange={(e) =>
+                      setFlexMinutes(
+                        clampFlexMinutes(Number(e.target.value) || DEFAULT_FLEX_MINUTES),
+                      )
+                    }
                     disabled={isBusy}
-                    min={15}
-                    max={24 * 60}
+                    min={MIN_FLEX_MINUTES}
+                    max={MAX_FLEX_MINUTES}
                     className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
                   />
                 </label>
@@ -342,7 +381,9 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
         )
       })}
 
-      {list.length === 0 ? <div className="text-sm font-medium text-textSecondary">No waitlist entries.</div> : null}
+      {list.length === 0 ? (
+        <div className="text-sm font-medium text-textSecondary">No waitlist entries.</div>
+      ) : null}
     </div>
   )
 }

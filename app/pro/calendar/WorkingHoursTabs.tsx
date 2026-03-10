@@ -8,8 +8,8 @@ import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 type Props = {
   canSalon: boolean
   canMobile: boolean
-  activeLocationType?: LocationType
-  onChangeLocationType?: (next: LocationType) => void
+  activeEditorType?: LocationType
+  onChangeEditorType?: (next: LocationType) => void
   onSavedAny?: () => void
 }
 
@@ -87,8 +87,8 @@ function TabButton({
 export default function WorkingHoursTabs({
   canSalon,
   canMobile,
-  activeLocationType,
-  onChangeLocationType,
+  activeEditorType ,
+  onChangeEditorType,
   onSavedAny,
 }: Props) {
   /**
@@ -106,10 +106,10 @@ export default function WorkingHoursTabs({
   }, [canSalon, canMobile])
 
   const [localActive, setLocalActive] = useState<LocationType>(availableTabs[0])
-  const active: LocationType = activeLocationType ?? localActive
+  const active: LocationType = activeEditorType ?? localActive
 
   const setActive = (next: LocationType) => {
-    if (onChangeLocationType) onChangeLocationType(next)
+    if (onChangeEditorType) onChangeEditorType(next)
     else setLocalActive(next)
   }
 

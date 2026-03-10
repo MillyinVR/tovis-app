@@ -12,6 +12,7 @@ import {
   extractBlockId,
   isBlockedEvent,
   snapMinutes,
+  roundDurationMinutes,
 } from '../../_utils/calendarMath'
 import { useDayEvents } from './useDayEvents'
 import { EventCard } from './EventCard'
@@ -76,6 +77,7 @@ export function DayColumn(props: {
   workingHoursSalon: WorkingHoursJson
   workingHoursMobile: WorkingHoursJson
   activeLocationType?: LocationType
+  stepMinutes: number
 
   isBusy: boolean
   suppressClickRef: React.MutableRefObject<boolean>
@@ -102,6 +104,7 @@ export function DayColumn(props: {
     workingHoursSalon,
     workingHoursMobile,
     activeLocationType = 'SALON',
+    stepMinutes,
     isBusy,
     suppressClickRef,
     onClickEvent,
@@ -142,11 +145,15 @@ export function DayColumn(props: {
   const salonEdgeBoost = activeLocationType === 'SALON' ? 'border-amber-200/85' : salonEdge
   const mobileEdgeBoost = activeLocationType === 'MOBILE' ? 'border-teal-200/85' : mobileEdge
 
-  function eventDurationMinutes(ev: CalendarEvent) {
-    if (typeof ev.durationMinutes === 'number' && Number.isFinite(ev.durationMinutes) && ev.durationMinutes > 0) {
-      return Math.max(15, ev.durationMinutes)
-    }
-    return Math.max(15, computeDurationMinutesFromIso(ev.startsAt, ev.endsAt))
+  function eventDurationMinutes(ev: CalendarEvent, stepMinutes: number) {
+    const raw =
+      typeof ev.durationMinutes === 'number' &&
+      Number.isFinite(ev.durationMinutes) &&
+      ev.durationMinutes > 0
+        ? ev.durationMinutes
+        : computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
+
+    return roundDurationMinutes(raw, stepMinutes)
   }
 
   const dayEvents = useDayEvents({ day, timeZone, events })
@@ -277,11 +284,7 @@ export function DayColumn(props: {
           const entityType: EntityType = isBlock ? 'block' : 'booking'
           const apiId = isBlock ? extractBlockId(ev) : ev.id
 
-          const dur =
-            typeof ev.durationMinutes === 'number' && Number.isFinite(ev.durationMinutes) && ev.durationMinutes > 0
-              ? Math.max(15, ev.durationMinutes)
-              : Math.max(15, computeDurationMinutesFromIso(ev.startsAt, ev.endsAt))
-
+          const dur = eventDurationMinutes(ev, stepMinutes)
           const evStart = new Date(ev.startsAt)
           const evEnd = new Date(ev.endsAt)
 
@@ -291,9 +294,15 @@ export function DayColumn(props: {
           const startMinutesRaw = dayYmd === startYmd ? minutesSinceMidnightInTimeZone(evStart, timeZone) : 0
           const endMinutesRaw = dayYmd === endYmdInclusive ? minutesSinceMidnightInTimeZone(evEnd, timeZone) : 24 * 60
 
-          const startMinutes = snapMinutes(startMinutesRaw)
-          const safeEndMinutes = Math.max(startMinutes + 15, Math.min(24 * 60, endMinutesRaw <= startMinutesRaw ? startMinutesRaw + dur : endMinutesRaw))
-          const heightMinutes = Math.max(15, safeEndMinutes - startMinutes)
+          const startMinutes = snapMinutes(startMinutesRaw, stepMinutes)
+          const minEndMinutes = startMinutes + stepMinutes
+          const naturalEndMinutes =
+            endMinutesRaw <= startMinutesRaw ? startMinutesRaw + dur : endMinutesRaw
+          const safeEndMinutes = Math.max(
+            minEndMinutes,
+            Math.min(24 * 60, naturalEndMinutes),
+          )
+          const heightMinutes = Math.max(stepMinutes, safeEndMinutes - startMinutes)
 
           const topPx = startMinutes * PX_PER_MINUTE
           const heightPx = heightMinutes * PX_PER_MINUTE
