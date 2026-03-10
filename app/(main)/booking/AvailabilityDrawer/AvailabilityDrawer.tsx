@@ -39,6 +39,9 @@ import { useDebugFlag } from './hooks/useDebugFlag'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
 const FALLBACK_TZ = 'UTC' as const
+const MOBILE_ADDRESS_REQUIRED_MESSAGE =
+  'Select a saved service address before viewing mobile availability.'
+
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
@@ -372,11 +375,12 @@ export default function AvailabilityDrawer(props: {
     selectedHoldIdRef.current = selected?.holdId ?? null
   }, [selected?.holdId])
 
-  const { loading, error, data, setError } = useAvailability(
-    open,
-    context,
-    locationType,
-  )
+  const {
+    loading,
+    error: availabilityError,
+    data,
+    setError,
+  } = useAvailability(open, context, locationType, selectedClientAddressId)
 
   const summary = isSummary(data) ? data : null
   const primary = summary?.primaryPro ?? null
@@ -384,16 +388,38 @@ export default function AvailabilityDrawer(props: {
   const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
-  const allowed = useMemo(
-    () => ({
-      salon: Boolean(offering.offersInSalon),
-      mobile: Boolean(offering.offersMobile),
-    }),
-    [offering.offersInSalon, offering.offersMobile],
-  )
+  const forcedMobileOnlyGate =
+    !summary && availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
 
-  const activeLocationType: ServiceLocationType =
-    locationType ?? summary?.locationType ?? fallbackAllowedMode(allowed)
+  const allowed = useMemo(() => {
+    if (summary?.offering) {
+      return {
+        salon: Boolean(summary.offering.offersInSalon),
+        mobile: Boolean(summary.offering.offersMobile),
+      }
+    }
+
+    if (forcedMobileOnlyGate) {
+      return {
+        salon: false,
+        mobile: true,
+      }
+    }
+
+    return {
+      salon: Boolean(FALLBACK_OFFERING.offersInSalon),
+      mobile: Boolean(FALLBACK_OFFERING.offersMobile),
+    }
+  }, [summary?.offering, forcedMobileOnlyGate])
+
+  const mobileAddressGateRequested =
+    locationType === 'MOBILE' ||
+    summary?.locationType === 'MOBILE' ||
+    forcedMobileOnlyGate
+
+  const activeLocationType: ServiceLocationType = mobileAddressGateRequested
+    ? 'MOBILE'
+    : locationType ?? summary?.locationType ?? fallbackAllowedMode(allowed)
 
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } =
     useHoldTimer(holdUntil)
@@ -446,11 +472,6 @@ export default function AvailabilityDrawer(props: {
     if (!days.length) return ''
     return days.map((d) => `${d.date}:${d.slotCount}`).join('|')
   }, [days])
-
-  const othersKey = useMemo(() => {
-    if (!others.length) return ''
-    return others.map((p) => p.id).join('|')
-  }, [others])
 
   const dayScrollerDays = useMemo(
     () => buildDayScrollerModel(days, appointmentTz),
@@ -520,7 +541,11 @@ export default function AvailabilityDrawer(props: {
           return current
         }
 
-        return options.find((option) => option.isDefault)?.id ?? options[0]?.id ?? null
+        return (
+          options.find((option) => option.isDefault)?.id ??
+          options[0]?.id ??
+          null
+        )
       })
 
       return options
@@ -544,7 +569,9 @@ export default function AvailabilityDrawer(props: {
         setSelectedClientAddressId(address.id)
       } else if (options?.length) {
         setSelectedClientAddressId(
-          options.find((option) => option.isDefault)?.id ?? options[0]?.id ?? null,
+          options.find((option) => option.isDefault)?.id ??
+            options[0]?.id ??
+            null,
         )
       }
 
@@ -553,6 +580,30 @@ export default function AvailabilityDrawer(props: {
     },
     [loadMobileAddresses],
   )
+
+  useEffect(() => {
+    if (!open) return
+    if (!forcedMobileOnlyGate) return
+    if (locationType === 'MOBILE') return
+
+    setLocationType('MOBILE')
+  }, [open, forcedMobileOnlyGate, locationType])
+
+  useEffect(() => {
+    if (!open) return
+    if (!mobileAddressGateRequested) return
+
+    void hardResetUi({ deleteHold: true })
+    setPrimarySlots([])
+    setOtherSlots({})
+    setError(null)
+  }, [
+    open,
+    mobileAddressGateRequested,
+    selectedClientAddressId,
+    hardResetUi,
+    setError,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -668,13 +719,13 @@ export default function AvailabilityDrawer(props: {
   useEffect(() => {
     if (!open) return
 
-    if (activeLocationType !== 'MOBILE') {
+    if (!mobileAddressGateRequested) {
       setAddressCreateOpen(false)
       return
     }
 
     void loadMobileAddresses()
-  }, [open, activeLocationType, loadMobileAddresses])
+  }, [open, mobileAddressGateRequested, loadMobileAddresses])
 
   function scrollToOtherPros() {
     otherProsRef.current?.scrollIntoView({
@@ -693,6 +744,10 @@ export default function AvailabilityDrawer(props: {
     }) => {
       if (!effectiveServiceId) return []
 
+      if (args.locationType === 'MOBILE' && !selectedClientAddressId) {
+        return []
+      }
+
       const qs = new URLSearchParams({
         professionalId: args.proId,
         serviceId: effectiveServiceId,
@@ -700,6 +755,10 @@ export default function AvailabilityDrawer(props: {
         locationType: args.locationType,
         locationId: args.locationId,
       })
+
+      if (args.locationType === 'MOBILE' && selectedClientAddressId) {
+        qs.set('clientAddressId', selectedClientAddressId)
+      }
 
       if (debug) qs.set('debug', '1')
 
@@ -731,7 +790,7 @@ export default function AvailabilityDrawer(props: {
 
       return parsed.slots
     },
-    [effectiveServiceId, debug, setError],
+    [effectiveServiceId, debug, selectedClientAddressId, setError],
   )
 
   useEffect(() => {
@@ -798,7 +857,6 @@ export default function AvailabilityDrawer(props: {
     fetchDaySlots,
     holding,
     setError,
-    othersKey,
     others,
   ])
 
@@ -936,9 +994,25 @@ export default function AvailabilityDrawer(props: {
 
   if (!open) return null
 
+  const waitingForMobileAddress =
+    open &&
+    mobileAddressGateRequested &&
+    !selectedClientAddressId &&
+    !loadingMobileAddresses
+
+  const displayError =
+    waitingForMobileAddress &&
+    availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
+      ? null
+      : availabilityError
+
   const canRenderSummary = Boolean(summary && primary)
-  const shouldShowLoading = loading && !summary
-  const shouldShowEmpty = !error && !shouldShowLoading && !canRenderSummary
+  const shouldShowLoading = loading && !summary && !waitingForMobileAddress
+  const shouldShowEmpty =
+    !displayError &&
+    !shouldShowLoading &&
+    !canRenderSummary &&
+    !waitingForMobileAddress
 
   return (
     <>
@@ -1007,10 +1081,36 @@ export default function AvailabilityDrawer(props: {
             <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
               Loading availability…
             </div>
-          ) : error ? (
+          ) : displayError ? (
             <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">
-              {error}
+              {displayError}
             </div>
+          ) : waitingForMobileAddress ? (
+            <>
+              <AppointmentTypeToggle
+                value="MOBILE"
+                disabled={holding}
+                allowed={allowed}
+                offering={offering}
+                onChange={(t) => {
+                  void resetForLocationModeChange(t)
+                }}
+              />
+
+              <MobileAddressSelector
+                value={selectedClientAddressId}
+                options={mobileAddresses}
+                loading={loadingMobileAddresses}
+                error={mobileAddressesError}
+                disabled={holding}
+                onChange={setSelectedClientAddressId}
+                onAddAddress={() => setAddressCreateOpen(true)}
+              />
+
+              <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+                Choose a service address to see mobile times.
+              </div>
+            </>
           ) : shouldShowEmpty ? (
             <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
               No availability found.

@@ -19,6 +19,7 @@ import type {
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
+type CancelMode = 'href' | 'back'
 
 type BookableLocationOption = {
   id: string
@@ -47,6 +48,7 @@ type Props = {
   defaultLocationType?: ServiceLocationType
   defaultScheduledAt?: string
   cancelHref?: string
+  cancelMode?: CancelMode
 }
 
 function currentPathWithQuery() {
@@ -247,6 +249,7 @@ export default function NewBookingForm({
   defaultLocationType,
   defaultScheduledAt,
   cancelHref = '/pro/bookings',
+  cancelMode = 'href',
 }: Props) {
   const router = useRouter()
 
@@ -339,9 +342,7 @@ export default function NewBookingForm({
 
   useEffect(() => {
     if (!offeringId) return
-    if (
-      visibleOfferings.some((offering) => offering.id === offeringId)
-    ) {
+    if (visibleOfferings.some((offering) => offering.id === offeringId)) {
       return
     }
     setOfferingId('')
@@ -408,6 +409,17 @@ export default function NewBookingForm({
       )
     })
   }, [locationType, selectedClientAddresses])
+
+  function handleCancel() {
+    if (loading) return
+
+    if (cancelMode === 'back') {
+      router.back()
+      return
+    }
+
+    router.push(cancelHref)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -724,7 +736,7 @@ export default function NewBookingForm({
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          onClick={() => router.push(cancelHref)}
+          onClick={handleCancel}
           disabled={loading}
           className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
         >

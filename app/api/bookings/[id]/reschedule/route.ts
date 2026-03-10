@@ -1,20 +1,25 @@
 // app/api/bookings/[id]/reschedule/route.ts
-//3726 leave alone
+
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, ServiceLocationType } from '@prisma/client'
+import {
+  BookingStatus,
+  ClientAddressKind,
+  Prisma,
+  ServiceLocationType,
+} from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { DEFAULT_TIME_ZONE, minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
-import {
-  MAX_SLOT_DURATION_MINUTES,
-} from '@/lib/booking/constants'
+import { clampInt } from '@/lib/pick'
+import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
 import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
-  resolveBookingLocationContext,
+  resolveValidatedBookingContext,
+  type SchedulingReadinessError,
 } from '@/lib/booking/locationContext'
 import {
   buildAddressSnapshot,
@@ -42,8 +47,16 @@ type RescheduleErrorCode =
   | 'HOLD_OFFERING_MISMATCH'
   | 'HOLD_LOCATIONTYPE_MISMATCH'
   | 'HOLD_MISSING_LOCATION'
+  | 'HOLD_MISSING_CLIENT_ADDRESS'
+  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
+  | 'SALON_LOCATION_ADDRESS_REQUIRED'
   | 'LOCATION_NOT_FOUND'
   | 'TIMEZONE_REQUIRED'
+  | 'WORKING_HOURS_REQUIRED'
+  | 'WORKING_HOURS_INVALID'
+  | 'DURATION_REQUIRED'
+  | 'PRICE_REQUIRED'
+  | 'COORDINATES_REQUIRED'
   | 'HOLD_TIME_INVALID'
   | 'TIME_IN_PAST'
   | 'TOO_FAR'
@@ -53,6 +66,41 @@ type RescheduleErrorCode =
 
 function throwCode(code: RescheduleErrorCode): never {
   throw new Error(code)
+}
+
+function normalizeAddress(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function toNullableJsonCreateInput(
+  value: Prisma.JsonValue | null | undefined,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+  return value as Prisma.InputJsonValue
+}
+
+function mapSchedulingReadinessErrorToRescheduleCode(
+  error: SchedulingReadinessError,
+): RescheduleErrorCode {
+  switch (error) {
+    case 'LOCATION_NOT_FOUND':
+      return 'LOCATION_NOT_FOUND'
+    case 'TIMEZONE_REQUIRED':
+      return 'TIMEZONE_REQUIRED'
+    case 'WORKING_HOURS_REQUIRED':
+      return 'WORKING_HOURS_REQUIRED'
+    case 'WORKING_HOURS_INVALID':
+      return 'WORKING_HOURS_INVALID'
+    case 'MODE_NOT_SUPPORTED':
+      return 'MODE_NOT_SUPPORTED'
+    case 'DURATION_REQUIRED':
+      return 'DURATION_REQUIRED'
+    case 'PRICE_REQUIRED':
+      return 'PRICE_REQUIRED'
+    case 'COORDINATES_REQUIRED':
+      return 'COORDINATES_REQUIRED'
+  }
 }
 
 export async function POST(req: Request, { params }: Ctx) {
@@ -127,6 +175,10 @@ export async function POST(req: Request, { params }: Ctx) {
           id: true,
           offersInSalon: true,
           offersMobile: true,
+          salonPriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobilePriceStartingAt: true,
+          mobileDurationMinutes: true,
         },
       })
 
@@ -143,7 +195,11 @@ export async function POST(req: Request, { params }: Ctx) {
         throwCode('INVALID_DURATION')
       }
 
-      const totalDurationMinutes = Math.trunc(rawDuration)
+      const totalDurationMinutes = clampInt(
+        Math.trunc(rawDuration),
+        15,
+        MAX_SLOT_DURATION_MINUTES,
+      )
 
       const hold = await tx.bookingHold.findUnique({
         where: { id: holdId },
@@ -160,6 +216,10 @@ export async function POST(req: Request, { params }: Ctx) {
           locationAddressSnapshot: true,
           locationLatSnapshot: true,
           locationLngSnapshot: true,
+          clientAddressId: true,
+          clientAddressSnapshot: true,
+          clientAddressLatSnapshot: true,
+          clientAddressLngSnapshot: true,
         },
       })
 
@@ -173,17 +233,32 @@ export async function POST(req: Request, { params }: Ctx) {
         throwCode('HOLD_LOCATIONTYPE_MISMATCH')
       }
 
-      if (hold.locationType === ServiceLocationType.SALON && !bookingOffering.offersInSalon) {
-        throwCode('MODE_NOT_SUPPORTED')
-      }
-
-      if (hold.locationType === ServiceLocationType.MOBILE && !bookingOffering.offersMobile) {
-        throwCode('MODE_NOT_SUPPORTED')
-      }
-
       if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
 
-      const locationContextResult = await resolveBookingLocationContext({
+      if (hold.locationType === ServiceLocationType.MOBILE) {
+        const clientServiceAddressFromHold = pickFormattedAddressFromSnapshot(
+          hold.clientAddressSnapshot,
+        )
+
+        if (!hold.clientAddressId || !clientServiceAddressFromHold) {
+          throwCode('HOLD_MISSING_CLIENT_ADDRESS')
+        }
+
+        const ownedClientAddress = await tx.clientAddress.findFirst({
+          where: {
+            id: hold.clientAddressId,
+            clientId,
+            kind: ClientAddressKind.SERVICE_ADDRESS,
+          },
+          select: { id: true },
+        })
+
+        if (!ownedClientAddress) {
+          throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+        }
+      }
+
+      const validatedContextResult = await resolveValidatedBookingContext({
         tx,
         professionalId: booking.professionalId,
         requestedLocationId: hold.locationId,
@@ -192,13 +267,36 @@ export async function POST(req: Request, { params }: Ctx) {
         fallbackTimeZone: DEFAULT_TIME_ZONE,
         requireValidTimeZone: true,
         allowFallback: false,
+        requireCoordinates: false,
+        offering: {
+          offersInSalon: bookingOffering.offersInSalon,
+          offersMobile: bookingOffering.offersMobile,
+          salonDurationMinutes: bookingOffering.salonDurationMinutes,
+          mobileDurationMinutes: bookingOffering.mobileDurationMinutes,
+          salonPriceStartingAt: bookingOffering.salonPriceStartingAt,
+          mobilePriceStartingAt: bookingOffering.mobilePriceStartingAt,
+        },
       })
 
-      if (!locationContextResult.ok) {
-        throwCode(locationContextResult.error)
+      if (!validatedContextResult.ok) {
+        throwCode(
+          mapSchedulingReadinessErrorToRescheduleCode(
+            validatedContextResult.error,
+          ),
+        )
       }
 
-      const locationContext = locationContextResult.context
+      const locationContext = validatedContextResult.context
+
+      const salonAddressText =
+        hold.locationType === ServiceLocationType.SALON
+          ? pickFormattedAddressFromSnapshot(hold.locationAddressSnapshot) ??
+            normalizeAddress(locationContext.formattedAddress)
+          : null
+
+      if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
+        throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
+      }
 
       const newStart = normalizeToMinute(new Date(hold.scheduledFor))
       if (!Number.isFinite(newStart.getTime())) {
@@ -262,13 +360,12 @@ export async function POST(req: Request, { params }: Ctx) {
         excludeHoldId: hold.id,
       })
 
-      const formattedAddressFromHold = pickFormattedAddressFromSnapshot(
-        hold.locationAddressSnapshot,
-      )
-
-      const locationAddressSnapshot = buildAddressSnapshot(
-        formattedAddressFromHold ?? locationContext.formattedAddress,
-      )
+      const salonLocationAddressSnapshotInput:
+        | Prisma.InputJsonValue
+        | Prisma.NullableJsonNullValueInput =
+        hold.locationType === ServiceLocationType.SALON && salonAddressText
+          ? buildAddressSnapshot(salonAddressText) ?? Prisma.JsonNull
+          : Prisma.JsonNull
 
       const updated = await tx.booking.update({
         where: { id: booking.id },
@@ -278,11 +375,31 @@ export async function POST(req: Request, { params }: Ctx) {
           bufferMinutes: locationContext.bufferMinutes,
           locationId: locationContext.locationId,
           locationTimeZone: locationContext.timeZone,
-          locationAddressSnapshot,
+
+          // SALON destination = pro salon/suite address.
+          // MOBILE destination = clientAddressSnapshot.
+          locationAddressSnapshot: salonLocationAddressSnapshotInput,
           locationLatSnapshot:
             decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
           locationLngSnapshot:
             decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+
+          clientAddressId:
+            hold.locationType === ServiceLocationType.MOBILE
+              ? hold.clientAddressId
+              : null,
+          clientAddressSnapshot:
+            hold.locationType === ServiceLocationType.MOBILE
+              ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
+              : Prisma.JsonNull,
+          clientAddressLatSnapshot:
+            hold.locationType === ServiceLocationType.MOBILE
+              ? decimalToNumber(hold.clientAddressLatSnapshot)
+              : null,
+          clientAddressLngSnapshot:
+            hold.locationType === ServiceLocationType.MOBILE
+              ? decimalToNumber(hold.clientAddressLngSnapshot)
+              : null,
         },
         select: {
           id: true,
@@ -358,11 +475,53 @@ export async function POST(req: Request, { params }: Ctx) {
     if (msg === 'HOLD_MISSING_LOCATION') {
       return jsonFail(409, 'Hold is missing location info. Please pick a new slot.')
     }
+    if (msg === 'HOLD_MISSING_CLIENT_ADDRESS') {
+      return jsonFail(
+        409,
+        'This mobile hold is missing the service address. Please pick a new slot.',
+      )
+    }
+    if (msg === 'CLIENT_SERVICE_ADDRESS_REQUIRED') {
+      return jsonFail(
+        400,
+        'Add a mobile service address in your client settings before rescheduling an in-home appointment.',
+      )
+    }
+    if (msg === 'SALON_LOCATION_ADDRESS_REQUIRED') {
+      return jsonFail(
+        400,
+        'This salon location is missing an address. Please update the professional location before rescheduling.',
+      )
+    }
     if (msg === 'LOCATION_NOT_FOUND') {
       return jsonFail(409, 'This location is no longer available.')
     }
     if (msg === 'TIMEZONE_REQUIRED') {
       return jsonFail(409, 'This location is missing a valid timezone.')
+    }
+    if (msg === 'WORKING_HOURS_REQUIRED') {
+      return jsonFail(400, 'This professional has not set working hours yet.')
+    }
+    if (msg === 'WORKING_HOURS_INVALID') {
+      return jsonFail(400, 'This professional’s working hours are misconfigured.')
+    }
+    if (msg === 'DURATION_REQUIRED') {
+      return jsonFail(
+        409,
+        'This service is missing duration settings and cannot be rescheduled.',
+      )
+    }
+    if (msg === 'PRICE_REQUIRED') {
+      return jsonFail(
+        409,
+        'This service is missing pricing settings and cannot be rescheduled.',
+      )
+    }
+    if (msg === 'COORDINATES_REQUIRED') {
+      return jsonFail(
+        409,
+        'This location is missing coordinates required for this booking flow.',
+      )
     }
     if (msg === 'HOLD_TIME_INVALID') {
       return jsonFail(400, 'Hold time is invalid. Please pick a new slot.')

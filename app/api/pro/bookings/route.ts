@@ -5,20 +5,14 @@ import {
   BookingStatus,
   ClientAddressKind,
   Prisma,
-  ProfessionalLocationType,
   ServiceLocationType,
 } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { moneyToString } from '@/lib/money'
-import {
-  isValidIanaTimeZone,
-  minutesSinceMidnightInTimeZone,
-  sanitizeTimeZone,
-} from '@/lib/timeZone'
+import { minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { clampInt, pickBool, pickInt } from '@/lib/pick'
 import {
-  DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
@@ -26,14 +20,15 @@ import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
 import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
-  normalizeStepMinutes,
+  resolveValidatedBookingContext,
+  type SchedulingReadinessError,
 } from '@/lib/booking/locationContext'
 import {
   buildAddressSnapshot,
+  decimalFromUnknown,
   decimalToNumber,
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { snapToStepMinutes } from '@/lib/booking/serviceItems'
 
 export const dynamic = 'force-dynamic'
@@ -43,14 +38,18 @@ type CreateBookingErrorCode =
   | 'CLIENT_NOT_FOUND'
   | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
   | 'CLIENT_SERVICE_ADDRESS_INVALID'
-  | 'LOCATION_MODE_MISMATCH'
+  | 'SALON_LOCATION_ADDRESS_REQUIRED'
   | 'LOCATION_NOT_FOUND'
   | 'MISSING_OFFERING'
   | 'MISSING_SERVICE'
-  | 'PRICING_NOT_SET'
-  | 'BAD_DURATION'
+  | 'MODE_NOT_SUPPORTED'
+  | 'PRICE_REQUIRED'
+  | 'DURATION_REQUIRED'
   | 'TIME_NOT_AVAILABLE'
   | 'TIMEZONE_REQUIRED'
+  | 'WORKING_HOURS_REQUIRED'
+  | 'WORKING_HOURS_INVALID'
+  | 'COORDINATES_REQUIRED'
 
 function throwCode(code: CreateBookingErrorCode): never {
   throw new Error(code)
@@ -77,10 +76,31 @@ function decimalToCents(value: Prisma.Decimal): number {
   return Math.max(0, Number(whole) * 100 + Number(frac || '0'))
 }
 
-function hasNonEmptyAddress(snapshotSource: {
-  formattedAddress: string | null
-}): boolean {
-  return Boolean(snapshotSource.formattedAddress?.trim())
+function normalizeAddress(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function mapSchedulingReadinessError(
+  error: SchedulingReadinessError,
+): CreateBookingErrorCode {
+  switch (error) {
+    case 'LOCATION_NOT_FOUND':
+      return 'LOCATION_NOT_FOUND'
+    case 'TIMEZONE_REQUIRED':
+      return 'TIMEZONE_REQUIRED'
+    case 'WORKING_HOURS_REQUIRED':
+      return 'WORKING_HOURS_REQUIRED'
+    case 'WORKING_HOURS_INVALID':
+      return 'WORKING_HOURS_INVALID'
+    case 'MODE_NOT_SUPPORTED':
+      return 'MODE_NOT_SUPPORTED'
+    case 'DURATION_REQUIRED':
+      return 'DURATION_REQUIRED'
+    case 'PRICE_REQUIRED':
+      return 'PRICE_REQUIRED'
+    case 'COORDINATES_REQUIRED':
+      return 'COORDINATES_REQUIRED'
+  }
 }
 
 export async function POST(req: Request) {
@@ -125,28 +145,10 @@ export async function POST(req: Request) {
     const requestedStart = normalizeToMinute(scheduledFor)
 
     const result = await prisma.$transaction(async (tx) => {
-      const [client, location, clientAddress, offering] = await Promise.all([
+      const [client, clientAddress, offering] = await Promise.all([
         tx.clientProfile.findUnique({
           where: { id: clientId },
           select: { id: true },
-        }),
-        tx.professionalLocation.findFirst({
-          where: {
-            id: locationId,
-            professionalId,
-            isBookable: true,
-          },
-          select: {
-            id: true,
-            type: true,
-            stepMinutes: true,
-            bufferMinutes: true,
-            timeZone: true,
-            workingHours: true,
-            formattedAddress: true,
-            lat: true,
-            lng: true,
-          },
         }),
         locationType === ServiceLocationType.MOBILE && clientAddressId
           ? tx.clientAddress.findFirst({
@@ -182,8 +184,6 @@ export async function POST(req: Request) {
               select: {
                 id: true,
                 name: true,
-                minPrice: true,
-                defaultDurationMinutes: true,
               },
             },
           },
@@ -191,72 +191,67 @@ export async function POST(req: Request) {
       ])
 
       if (!client) throwCode('CLIENT_NOT_FOUND')
-      if (!location) throwCode('LOCATION_NOT_FOUND')
       if (!offering) throwCode('MISSING_OFFERING')
       if (!offering.service) throwCode('MISSING_SERVICE')
 
-      if (
-        locationType === ServiceLocationType.MOBILE &&
-        location.type !== ProfessionalLocationType.MOBILE_BASE
-      ) {
-        throwCode('LOCATION_MODE_MISMATCH')
-      }
-
-      if (
-        locationType === ServiceLocationType.SALON &&
-        location.type === ProfessionalLocationType.MOBILE_BASE
-      ) {
-        throwCode('LOCATION_MODE_MISMATCH')
-      }
-
-      if (
-        locationType === ServiceLocationType.MOBILE &&
-        !offering.offersMobile
-      ) {
-        throwCode('MISSING_OFFERING')
-      }
-
-      if (
-        locationType === ServiceLocationType.SALON &&
-        !offering.offersInSalon
-      ) {
-        throwCode('MISSING_OFFERING')
-      }
+      const clientServiceAddress =
+        locationType === ServiceLocationType.MOBILE
+          ? normalizeAddress(clientAddress?.formattedAddress)
+          : null
 
       if (locationType === ServiceLocationType.MOBILE) {
         if (!clientAddress) {
           throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
         }
 
-        if (!hasNonEmptyAddress(clientAddress)) {
+        if (!clientServiceAddress) {
           throwCode('CLIENT_SERVICE_ADDRESS_INVALID')
         }
       }
 
-      const tzResult = await resolveApptTimeZone({
-        location: { id: location.id, timeZone: location.timeZone },
+      const validatedContextResult = await resolveValidatedBookingContext({
+        tx,
         professionalId,
-        fallback: 'UTC',
-        requireValid: true,
+        requestedLocationId: locationId,
+        locationType,
+        fallbackTimeZone: 'UTC',
+        requireValidTimeZone: true,
+        allowFallback: false,
+        requireCoordinates: false,
+        offering: {
+          offersInSalon: offering.offersInSalon,
+          offersMobile: offering.offersMobile,
+          salonDurationMinutes: offering.salonDurationMinutes,
+          mobileDurationMinutes: offering.mobileDurationMinutes,
+          salonPriceStartingAt: offering.salonPriceStartingAt,
+          mobilePriceStartingAt: offering.mobilePriceStartingAt,
+        },
       })
 
-      if (!tzResult.ok) {
-        throwCode('TIMEZONE_REQUIRED')
+      if (!validatedContextResult.ok) {
+        throwCode(mapSchedulingReadinessError(validatedContextResult.error))
       }
 
-      const rawResolvedTimeZone =
-        typeof tzResult.timeZone === 'string' ? tzResult.timeZone.trim() : ''
+      const locationContext = validatedContextResult.context
+      const baseDurationMinutes = validatedContextResult.durationMinutes
+      const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
 
-      if (!isValidIanaTimeZone(rawResolvedTimeZone)) {
-        throwCode('TIMEZONE_REQUIRED')
+      const salonLocationAddress =
+        locationType === ServiceLocationType.SALON
+          ? normalizeAddress(locationContext.formattedAddress)
+          : null
+
+      if (
+        locationType === ServiceLocationType.SALON &&
+        !salonLocationAddress
+      ) {
+        throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
       }
 
-      const appointmentTimeZone = sanitizeTimeZone(rawResolvedTimeZone, 'UTC')
-
-      const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
+      const stepMinutes = locationContext.stepMinutes
       const startMinuteOfDay = minutesSinceMidnightInTimeZone(
         requestedStart,
-        appointmentTimeZone,
+        locationContext.timeZone,
       )
 
       if (startMinuteOfDay % stepMinutes !== 0) {
@@ -264,7 +259,7 @@ export async function POST(req: Request) {
       }
 
       const locationBufferMinutes = clampInt(
-        Number(location.bufferMinutes ?? 0),
+        Number(locationContext.bufferMinutes ?? 0),
         0,
         MAX_BUFFER_MINUTES,
       )
@@ -281,26 +276,8 @@ export async function POST(req: Request) {
               MAX_BUFFER_MINUTES,
             )
 
-      const rawPrice =
-        locationType === ServiceLocationType.MOBILE
-          ? offering.mobilePriceStartingAt ?? offering.service.minPrice
-          : offering.salonPriceStartingAt ?? offering.service.minPrice
-
-      if (rawPrice == null) {
-        throwCode('PRICING_NOT_SET')
-      }
-
-      const rawDuration =
-        locationType === ServiceLocationType.MOBILE
-          ? offering.mobileDurationMinutes ?? offering.service.defaultDurationMinutes
-          : offering.salonDurationMinutes ?? offering.service.defaultDurationMinutes
-
-      if (rawDuration == null || rawDuration <= 0) {
-        throwCode('BAD_DURATION')
-      }
-
       const computedDurationMinutes = clampInt(
-        snapToStepMinutes(rawDuration, stepMinutes),
+        snapToStepMinutes(baseDurationMinutes, stepMinutes),
         stepMinutes,
         MAX_SLOT_DURATION_MINUTES,
       )
@@ -314,14 +291,7 @@ export async function POST(req: Request) {
               computedDurationMinutes,
               MAX_SLOT_DURATION_MINUTES,
             )
-          : clampInt(
-              snapToStepMinutes(
-                computedDurationMinutes || DEFAULT_DURATION_MINUTES,
-                stepMinutes,
-              ),
-              stepMinutes,
-              MAX_SLOT_DURATION_MINUTES,
-            )
+          : computedDurationMinutes
 
       const requestedEnd = addMinutes(
         requestedStart,
@@ -332,8 +302,8 @@ export async function POST(req: Request) {
         const workingHoursResult = ensureWithinWorkingHours({
           scheduledStartUtc: requestedStart,
           scheduledEndUtc: requestedEnd,
-          workingHours: location.workingHours,
-          timeZone: appointmentTimeZone,
+          workingHours: locationContext.workingHours,
+          timeZone: locationContext.timeZone,
           fallbackTimeZone: 'UTC',
           messages: {
             missing: 'Working hours are not set yet.',
@@ -350,21 +320,29 @@ export async function POST(req: Request) {
       await assertTimeRangeAvailable({
         tx,
         professionalId,
-        locationId: location.id,
+        locationId: locationContext.locationId,
         requestedStart,
         requestedEnd,
         defaultBufferMinutes: bufferMinutes,
-        fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
+        fallbackDurationMinutes: totalDurationMinutes,
       })
 
-      const locationAddressSnapshot = buildAddressSnapshot(location.formattedAddress)
-      const locationLatSnapshot = decimalToNumber(location.lat)
-      const locationLngSnapshot = decimalToNumber(location.lng)
-
-      const clientAddressSnapshot =
-        locationType === ServiceLocationType.MOBILE && clientAddress
-          ? buildAddressSnapshot(clientAddress.formattedAddress) ?? Prisma.JsonNull
+      const salonLocationAddressSnapshot:
+        | Prisma.InputJsonValue
+        | Prisma.NullableJsonNullValueInput =
+        locationType === ServiceLocationType.SALON && salonLocationAddress
+          ? buildAddressSnapshot(salonLocationAddress) ?? Prisma.JsonNull
           : Prisma.JsonNull
+
+      const clientAddressSnapshot:
+        | Prisma.InputJsonValue
+        | Prisma.NullableJsonNullValueInput =
+        locationType === ServiceLocationType.MOBILE && clientServiceAddress
+          ? buildAddressSnapshot(clientServiceAddress) ?? Prisma.JsonNull
+          : Prisma.JsonNull
+
+      const locationLatSnapshot = locationContext.lat ?? null
+      const locationLngSnapshot = locationContext.lng ?? null
 
       const clientAddressLatSnapshot =
         locationType === ServiceLocationType.MOBILE && clientAddress
@@ -375,8 +353,6 @@ export async function POST(req: Request) {
         locationType === ServiceLocationType.MOBILE && clientAddress
           ? decimalToNumber(clientAddress.lng)
           : null
-
-      const subtotalSnapshot = rawPrice
 
       let booking: {
         id: string
@@ -397,9 +373,12 @@ export async function POST(req: Request) {
             status: BookingStatus.ACCEPTED,
 
             locationType,
-            locationId: location.id,
-            locationTimeZone: appointmentTimeZone,
-            locationAddressSnapshot,
+            locationId: locationContext.locationId,
+            locationTimeZone: locationContext.timeZone,
+
+            // SALON destination = pro salon/suite address.
+            // MOBILE destination = clientAddressSnapshot.
+            locationAddressSnapshot: salonLocationAddressSnapshot,
             locationLatSnapshot,
             locationLngSnapshot,
 
@@ -414,7 +393,7 @@ export async function POST(req: Request) {
             internalNotes: internalNotes ?? null,
             bufferMinutes,
             totalDurationMinutes,
-            subtotalSnapshot,
+            subtotalSnapshot: basePrice,
           },
           select: {
             id: true,
@@ -440,7 +419,7 @@ export async function POST(req: Request) {
           serviceId: offering.serviceId,
           offeringId: offering.id,
           itemType: BookingServiceItemType.BASE,
-          priceSnapshot: rawPrice,
+          priceSnapshot: basePrice,
           durationMinutesSnapshot: computedDurationMinutes,
           sortOrder: 0,
         },
@@ -448,10 +427,10 @@ export async function POST(req: Request) {
 
       return {
         booking,
-        subtotalSnapshot,
+        subtotalSnapshot: basePrice,
         stepMinutes,
-        appointmentTimeZone,
-        locationId: location.id,
+        appointmentTimeZone: locationContext.timeZone,
+        locationId: locationContext.locationId,
         locationType,
         clientAddressId:
           locationType === ServiceLocationType.MOBILE && clientAddress
@@ -511,18 +490,21 @@ export async function POST(req: Request) {
       )
     }
 
-    if (message === 'LOCATION_NOT_FOUND') {
-      return jsonFail(404, 'Location not found or not bookable.')
+    if (message === 'SALON_LOCATION_ADDRESS_REQUIRED') {
+      return jsonFail(
+        400,
+        'This salon location is missing an address. Please update the professional location before booking.',
+      )
     }
 
-    if (message === 'LOCATION_MODE_MISMATCH') {
-      return jsonFail(400, 'This location does not support that booking mode.')
+    if (message === 'LOCATION_NOT_FOUND') {
+      return jsonFail(404, 'Location not found or not bookable.')
     }
 
     if (message === 'MISSING_OFFERING') {
       return jsonFail(
         400,
-        'The selected offering is not available for this professional/location type.',
+        'The selected offering is not available for this professional.',
       )
     }
 
@@ -530,11 +512,15 @@ export async function POST(req: Request) {
       return jsonFail(400, 'The selected service could not be found.')
     }
 
-    if (message === 'PRICING_NOT_SET') {
+    if (message === 'MODE_NOT_SUPPORTED') {
+      return jsonFail(400, 'This offering does not support that booking mode.')
+    }
+
+    if (message === 'PRICE_REQUIRED') {
       return jsonFail(409, 'Pricing is not set for the selected offering.')
     }
 
-    if (message === 'BAD_DURATION') {
+    if (message === 'DURATION_REQUIRED') {
       return jsonFail(409, 'Duration is not set for the selected offering.')
     }
 
@@ -542,6 +528,21 @@ export async function POST(req: Request) {
       return jsonFail(
         400,
         'This location must set a valid timezone before taking bookings.',
+      )
+    }
+
+    if (message === 'WORKING_HOURS_REQUIRED') {
+      return jsonFail(400, 'Working hours are not set yet.')
+    }
+
+    if (message === 'WORKING_HOURS_INVALID') {
+      return jsonFail(400, 'Working hours are misconfigured.')
+    }
+
+    if (message === 'COORDINATES_REQUIRED') {
+      return jsonFail(
+        400,
+        'This location is missing coordinates required for this booking flow.',
       )
     }
 

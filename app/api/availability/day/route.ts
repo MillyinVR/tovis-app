@@ -29,7 +29,9 @@ import {
   normalizeLocationType,
   normalizeStepMinutes,
   pickEffectiveLocationType,
-  pickModeDurationMinutes,
+  resolveValidatedBookingContext,
+  type SchedulingReadinessError,
+  type OfferingSchedulingSnapshot,
 } from '@/lib/booking/locationContext'
 import { decimalToNumber } from '@/lib/booking/snapshots'
 import {
@@ -79,6 +81,36 @@ type OtherProRow = {
   distanceMiles: number
 }
 
+type AvailabilityPlacementErrorCode =
+  | SchedulingReadinessError
+  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
+  | 'SALON_LOCATION_ADDRESS_REQUIRED'
+  | 'NO_SCHEDULING_READY_LOCATION'
+
+type AvailabilityPlacementResult =
+  | {
+      ok: true
+      location: AvailabilityLocation
+      locationId: string
+      locationType: ServiceLocationType
+      timeZone: string
+      workingHours: unknown
+      stepMinutes: number
+      leadTimeMinutes: number
+      locationBufferMinutes: number
+      maxAdvanceDays: number
+      durationMinutes: number
+      priceStartingAt: number
+      formattedAddress: string | null
+      lat: number | undefined
+      lng: number | undefined
+    }
+  | {
+      ok: false
+      code: AvailabilityPlacementErrorCode
+      error: string
+    }
+
 const redis = getRedis()
 
 function toInt(value: string | null, fallback: number): number {
@@ -89,6 +121,10 @@ function toInt(value: string | null, fallback: number): number {
 function clampFloat(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
   return Math.min(Math.max(value, min), max)
+}
+
+function normalizeAddress(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function parseYYYYMMDD(value: unknown) {
@@ -207,63 +243,6 @@ function allowedProfessionalTypes(
     : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
 }
 
-function isSchedulingReadyLocation(
-  location: AvailabilityLocation | null,
-): location is AvailabilityLocation {
-  if (!location?.id) return false
-  if (!location.isBookable) return false
-
-  const tz =
-    typeof location.timeZone === 'string' ? location.timeZone.trim() : ''
-
-  if (!tz || !isValidIanaTimeZone(tz)) return false
-  if (!isRecord(location.workingHours)) return false
-
-  return true
-}
-
-async function pickAvailabilityLocation(args: {
-  professionalId: string
-  requestedLocationId?: string | null
-  locationType: ServiceLocationType
-}): Promise<AvailabilityLocation | null> {
-  const professionalId =
-    typeof args.professionalId === 'string' ? args.professionalId.trim() : ''
-  const requestedLocationId =
-    typeof args.requestedLocationId === 'string' ? args.requestedLocationId.trim() : ''
-
-  if (!professionalId) return null
-
-  const allowedTypes = allowedProfessionalTypes(args.locationType)
-
-  if (requestedLocationId) {
-    const requested = await prisma.professionalLocation.findFirst({
-      where: {
-        id: requestedLocationId,
-        professionalId,
-        isBookable: true,
-        type: { in: allowedTypes },
-      },
-      select: LOCATION_SELECT,
-    })
-
-    return isSchedulingReadyLocation(requested) ? requested : null
-  }
-
-  const candidates = await prisma.professionalLocation.findMany({
-    where: {
-      professionalId,
-      isBookable: true,
-      type: { in: allowedTypes },
-    },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: LOCATION_SELECT,
-    take: 25,
-  })
-
-  return candidates.find(isSchedulingReadyLocation) ?? null
-}
-
 function locationTypeForLocation(
   location: Pick<AvailabilityLocation, 'type'>,
 ): ServiceLocationType {
@@ -272,52 +251,165 @@ function locationTypeForLocation(
     : ServiceLocationType.SALON
 }
 
-function offeringSupportsLocationType(args: {
-  locationType: ServiceLocationType
+function buildOfferingSnapshot(offering: {
   offersInSalon: boolean
   offersMobile: boolean
-}): boolean {
-  return args.locationType === ServiceLocationType.MOBILE
-    ? args.offersMobile
-    : args.offersInSalon
+  salonDurationMinutes: number | null
+  mobileDurationMinutes: number | null
+  salonPriceStartingAt: Prisma.Decimal | null
+  mobilePriceStartingAt: Prisma.Decimal | null
+}): OfferingSchedulingSnapshot {
+  return {
+    offersInSalon: Boolean(offering.offersInSalon),
+    offersMobile: Boolean(offering.offersMobile),
+    salonDurationMinutes: offering.salonDurationMinutes ?? null,
+    mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
+    salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
+    mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
+  }
 }
 
-async function pickPrimaryAvailabilityPlacement(args: {
+function mapPlacementError(code: AvailabilityPlacementErrorCode): string {
+  switch (code) {
+    case 'CLIENT_SERVICE_ADDRESS_REQUIRED':
+      return 'Select a saved service address before viewing mobile availability.'
+    case 'SALON_LOCATION_ADDRESS_REQUIRED':
+      return 'This salon location is missing an address and cannot take bookings.'
+    case 'LOCATION_NOT_FOUND':
+      return 'Location not found or not bookable.'
+    case 'TIMEZONE_REQUIRED':
+      return 'This location must set a valid timezone before taking bookings.'
+    case 'WORKING_HOURS_REQUIRED':
+      return 'Working hours are not set for this location.'
+    case 'WORKING_HOURS_INVALID':
+      return 'Working hours are misconfigured for this location.'
+    case 'MODE_NOT_SUPPORTED':
+      return 'This service is not bookable for the selected appointment type.'
+    case 'DURATION_REQUIRED':
+      return 'Duration is not set for the selected offering.'
+    case 'PRICE_REQUIRED':
+      return 'Pricing is not set for the selected offering.'
+    case 'COORDINATES_REQUIRED':
+      return 'This location is missing coordinates required for this booking flow.'
+    case 'NO_SCHEDULING_READY_LOCATION':
+      return 'No scheduling-ready location found for this service.'
+  }
+}
+
+async function validateAvailabilityPlacement(args: {
   professionalId: string
-  offersInSalon: boolean
-  offersMobile: boolean
-  requestedLocationId?: string | null
-  requestedLocationType?: ServiceLocationType | null
-}): Promise<
-  | {
-      location: AvailabilityLocation
-      locationType: ServiceLocationType
+  requestedLocationId: string | null
+  locationType: ServiceLocationType
+  offering: OfferingSchedulingSnapshot
+  clientAddressId: string | null
+  allowFallback: boolean
+}): Promise<AvailabilityPlacementResult> {
+  const validated = await resolveValidatedBookingContext({
+    professionalId: args.professionalId,
+    requestedLocationId: args.requestedLocationId,
+    locationType: args.locationType,
+    fallbackTimeZone: 'UTC',
+    requireValidTimeZone: true,
+    allowFallback: args.allowFallback,
+    requireCoordinates: false,
+    offering: args.offering,
+  })
+
+  if (!validated.ok) {
+    return {
+      ok: false,
+      code: validated.error,
+      error: mapPlacementError(validated.error),
     }
-  | null
-> {
-  const professionalId =
-    typeof args.professionalId === 'string' ? args.professionalId.trim() : ''
-  const requestedLocationId =
-    typeof args.requestedLocationId === 'string'
-      ? args.requestedLocationId.trim()
-      : ''
-
-  if (!professionalId) return null
-
-  const allowedTypes: ProfessionalLocationType[] = []
-
-  if (args.offersInSalon) {
-    allowedTypes.push(
-      ProfessionalLocationType.SALON,
-      ProfessionalLocationType.SUITE,
-    )
   }
 
-  if (args.offersMobile) {
-    allowedTypes.push(ProfessionalLocationType.MOBILE_BASE)
+  const context = validated.context
+  const formattedAddress = normalizeAddress(context.formattedAddress)
+
+  if (
+    args.locationType === ServiceLocationType.MOBILE &&
+    !args.clientAddressId
+  ) {
+    return {
+      ok: false,
+      code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
+      error: mapPlacementError('CLIENT_SERVICE_ADDRESS_REQUIRED'),
+    }
   }
 
-  if (!allowedTypes.length) return null
+  if (
+    args.locationType === ServiceLocationType.SALON &&
+    !formattedAddress
+  ) {
+    return {
+      ok: false,
+      code: 'SALON_LOCATION_ADDRESS_REQUIRED',
+      error: mapPlacementError('SALON_LOCATION_ADDRESS_REQUIRED'),
+    }
+  }
+
+  return {
+    ok: true,
+    location: context.location,
+    locationId: context.locationId,
+    locationType: args.locationType,
+    timeZone: context.timeZone,
+    workingHours: context.workingHours,
+    stepMinutes: context.stepMinutes,
+    leadTimeMinutes: context.advanceNoticeMinutes,
+    locationBufferMinutes: context.bufferMinutes,
+    maxAdvanceDays: context.maxDaysAhead,
+    durationMinutes: validated.durationMinutes,
+    priceStartingAt: validated.priceStartingAt,
+    formattedAddress,
+    lat: context.lat,
+    lng: context.lng,
+  }
+}
+
+async function resolveAvailabilityPlacement(args: {
+  professionalId: string
+  offering: OfferingSchedulingSnapshot
+  requestedLocationType: ServiceLocationType | null
+  requestedLocationId: string | null
+  clientAddressId: string | null
+}): Promise<AvailabilityPlacementResult> {
+  const professionalId = args.professionalId.trim()
+  const requestedLocationId = args.requestedLocationId?.trim() || null
+
+  if (!professionalId) {
+    return {
+      ok: false,
+      code: 'NO_SCHEDULING_READY_LOCATION',
+      error: mapPlacementError('NO_SCHEDULING_READY_LOCATION'),
+    }
+  }
+
+  if (args.requestedLocationType) {
+    const effectiveLocationType =
+      pickEffectiveLocationType({
+        requested: args.requestedLocationType,
+        offersInSalon: args.offering.offersInSalon,
+        offersMobile: args.offering.offersMobile,
+      }) ?? null
+
+    if (!effectiveLocationType) {
+      return {
+        ok: false,
+        code: 'MODE_NOT_SUPPORTED',
+        error: mapPlacementError('MODE_NOT_SUPPORTED'),
+      }
+    }
+
+    return validateAvailabilityPlacement({
+      professionalId,
+      requestedLocationId,
+      locationType: effectiveLocationType,
+      offering: args.offering,
+      clientAddressId: args.clientAddressId,
+      allowFallback: !requestedLocationId,
+    })
+  }
 
   if (requestedLocationId) {
     const requested = await prisma.professionalLocation.findFirst({
@@ -325,33 +417,49 @@ async function pickPrimaryAvailabilityPlacement(args: {
         id: requestedLocationId,
         professionalId,
         isBookable: true,
-        type: { in: allowedTypes },
       },
       select: LOCATION_SELECT,
     })
 
-    if (!isSchedulingReadyLocation(requested)) return null
+    if (!requested?.id) {
+      return {
+        ok: false,
+        code: 'LOCATION_NOT_FOUND',
+        error: mapPlacementError('LOCATION_NOT_FOUND'),
+      }
+    }
 
     const locationType = locationTypeForLocation(requested)
 
-    if (
-      args.requestedLocationType &&
-      args.requestedLocationType !== locationType
-    ) {
-      return null
-    }
+    return validateAvailabilityPlacement({
+      professionalId,
+      requestedLocationId,
+      locationType,
+      offering: args.offering,
+      clientAddressId: args.clientAddressId,
+      allowFallback: false,
+    })
+  }
 
-    if (
-      !offeringSupportsLocationType({
-        locationType,
-        offersInSalon: args.offersInSalon,
-        offersMobile: args.offersMobile,
-      })
-    ) {
-      return null
-    }
+  const allowedTypes: ProfessionalLocationType[] = []
 
-    return { location: requested, locationType }
+  if (args.offering.offersInSalon) {
+    allowedTypes.push(
+      ProfessionalLocationType.SALON,
+      ProfessionalLocationType.SUITE,
+    )
+  }
+
+  if (args.offering.offersMobile) {
+    allowedTypes.push(ProfessionalLocationType.MOBILE_BASE)
+  }
+
+  if (!allowedTypes.length) {
+    return {
+      ok: false,
+      code: 'MODE_NOT_SUPPORTED',
+      error: mapPlacementError('MODE_NOT_SUPPORTED'),
+    }
   }
 
   const candidates = await prisma.professionalLocation.findMany({
@@ -365,25 +473,39 @@ async function pickPrimaryAvailabilityPlacement(args: {
     take: 50,
   })
 
-  for (const candidate of candidates) {
-    if (!isSchedulingReadyLocation(candidate)) continue
+  let firstMeaningfulError: AvailabilityPlacementResult | null = null
 
+  for (const candidate of candidates) {
     const locationType = locationTypeForLocation(candidate)
 
-    if (
-      !offeringSupportsLocationType({
-        locationType,
-        offersInSalon: args.offersInSalon,
-        offersMobile: args.offersMobile,
-      })
-    ) {
-      continue
+    const attempt = await validateAvailabilityPlacement({
+      professionalId,
+      requestedLocationId: candidate.id,
+      locationType,
+      offering: args.offering,
+      clientAddressId: args.clientAddressId,
+      allowFallback: false,
+    })
+
+    if (attempt.ok) {
+      return attempt
     }
 
-    return { location: candidate, locationType }
+    if (
+      firstMeaningfulError == null &&
+      attempt.code !== 'LOCATION_NOT_FOUND'
+    ) {
+      firstMeaningfulError = attempt
+    }
   }
 
-  return null
+  return (
+    firstMeaningfulError ?? {
+      ok: false,
+      code: 'NO_SCHEDULING_READY_LOCATION',
+      error: mapPlacementError('NO_SCHEDULING_READY_LOCATION'),
+    }
+  )
 }
 
 function parseCachedBusyIntervals(
@@ -725,6 +847,7 @@ async function loadOtherProsNearby(args: {
     select: {
       id: true,
       professionalId: true,
+      type: true,
       timeZone: true,
       workingHours: true,
       lat: true,
@@ -763,6 +886,13 @@ async function loadOtherProsNearby(args: {
 
     if (!location.workingHours || !isRecord(location.workingHours)) continue
 
+    if (
+      locationType === ServiceLocationType.SALON &&
+      !normalizeAddress(location.formattedAddress)
+    ) {
+      continue
+    }
+
     const distanceMiles = haversineMiles(center, { lat, lng })
     if (distanceMiles > radiusMiles) continue
 
@@ -775,7 +905,7 @@ async function loadOtherProsNearby(args: {
         isPrimary: Boolean(location.isPrimary),
         createdAt: location.createdAt,
         city: location.city ?? null,
-        formattedAddress: location.formattedAddress ?? null,
+        formattedAddress: normalizeAddress(location.formattedAddress),
       })
       continue
     }
@@ -797,7 +927,7 @@ async function loadOtherProsNearby(args: {
         isPrimary: Boolean(location.isPrimary),
         createdAt: location.createdAt,
         city: location.city ?? null,
-        formattedAddress: location.formattedAddress ?? null,
+        formattedAddress: normalizeAddress(location.formattedAddress),
       })
     }
   }
@@ -811,8 +941,16 @@ async function loadOtherProsNearby(args: {
       serviceId,
       isActive: true,
       ...(locationType === ServiceLocationType.MOBILE
-        ? { offersMobile: true }
-        : { offersInSalon: true }),
+        ? {
+            offersMobile: true,
+            mobilePriceStartingAt: { not: null },
+            mobileDurationMinutes: { not: null },
+          }
+        : {
+            offersInSalon: true,
+            salonPriceStartingAt: { not: null },
+            salonDurationMinutes: { not: null },
+          }),
     },
     select: {
       id: true,
@@ -884,6 +1022,7 @@ export async function GET(req: Request) {
     const professionalId = pickString(searchParams.get('professionalId'))
     const serviceId = pickString(searchParams.get('serviceId'))
     const mediaId = pickString(searchParams.get('mediaId'))
+    const clientAddressId = pickString(searchParams.get('clientAddressId'))
 
     const requestedLocationType = normalizeLocationType(
       searchParams.get('locationType'),
@@ -953,111 +1092,42 @@ export async function GET(req: Request) {
     if (!service) return jsonFail(404, 'Service not found')
     if (!offering) return jsonFail(404, 'Offering not found')
 
-    const offersInSalon = Boolean(offering.offersInSalon)
-    const offersMobile = Boolean(offering.offersMobile)
+    const offeringSnapshot = buildOfferingSnapshot(offering)
 
-    const clientExplicitlyRequestedPlacement =
-      requestedLocationType != null || requestedLocationId != null
+    const placement = await resolveAvailabilityPlacement({
+      professionalId,
+      offering: offeringSnapshot,
+      requestedLocationType,
+      requestedLocationId,
+      clientAddressId,
+    })
 
-    let effectiveLocationType: ServiceLocationType | null = null
-    let location: AvailabilityLocation | null = null
-
-    if (clientExplicitlyRequestedPlacement) {
-      if (requestedLocationType) {
-        effectiveLocationType =
-          pickEffectiveLocationType({
-            requested: requestedLocationType,
-            offersInSalon,
-            offersMobile,
-          }) ?? null
-
-        if (!effectiveLocationType) {
-          return jsonFail(400, 'This service is not bookable.')
-        }
-
-        location = await pickAvailabilityLocation({
-          professionalId,
-          requestedLocationId,
-          locationType: effectiveLocationType,
-        })
-      } else if (requestedLocationId) {
-        const placement = await pickPrimaryAvailabilityPlacement({
-          professionalId,
-          requestedLocationId,
-          requestedLocationType: null,
-          offersInSalon,
-          offersMobile,
-        })
-
-        location = placement?.location ?? null
-        effectiveLocationType = placement?.locationType ?? null
-      }
-    } else {
-      const placement = await pickPrimaryAvailabilityPlacement({
-        professionalId,
-        offersInSalon,
-        offersMobile,
-        requestedLocationId: null,
-        requestedLocationType: null,
-      })
-
-      location = placement?.location ?? null
-      effectiveLocationType = placement?.locationType ?? null
+    if (!placement.ok) {
+      return jsonFail(400, placement.error)
     }
 
-    if (!location || !effectiveLocationType) {
-      return jsonFail(
-        400,
-        'No scheduling-ready location found for this service.',
-      )
-    }
+    let {
+      location,
+      locationId,
+      locationType: effectiveLocationType,
+      timeZone,
+      workingHours,
+      stepMinutes: defaultStepMinutes,
+      leadTimeMinutes: defaultLead,
+      locationBufferMinutes,
+      maxAdvanceDays,
+      durationMinutes,
+    } = placement
 
-    const locationId = location.id
-    const timeZone = sanitizeTimeZone(location.timeZone, 'UTC')
-
-    if (!isValidIanaTimeZone(timeZone)) {
-      return jsonFail(
-        400,
-        'This location must set a valid timezone before taking bookings.',
-      )
-    }
-
-    const workingHours = location.workingHours
-
-    const defaultStepMinutes = normalizeStepMinutes(location.stepMinutes, 30)
     const stepMinutes =
       debug && stepRaw
         ? normalizeStepMinutes(stepRaw, defaultStepMinutes)
         : defaultStepMinutes
 
-    const defaultLead = clampInt(
-      Number(location.advanceNoticeMinutes ?? 15),
-      0,
-      MAX_LEAD_MINUTES,
-    )
-
-    const locationBufferMinutes = clampInt(
-      Number(location.bufferMinutes ?? 0),
-      0,
-      MAX_BUFFER_MINUTES,
-    )
-
     const leadTimeMinutes =
       debug && leadRaw
         ? clampInt(toInt(leadRaw, defaultLead), 0, MAX_LEAD_MINUTES)
         : defaultLead
-
-    const maxAdvanceDays = clampInt(
-      Number(location.maxDaysAhead ?? 365),
-      1,
-      MAX_BOOKING_DAYS_AHEAD,
-    )
-
-    let durationMinutes = pickModeDurationMinutes({
-      locationType: effectiveLocationType,
-      salonDurationMinutes: offering.salonDurationMinutes,
-      mobileDurationMinutes: offering.mobileDurationMinutes,
-    })
 
     if (addOnIds.length) {
       const addOnLinks = await prisma.offeringAddOn.findMany({
@@ -1150,7 +1220,7 @@ export async function GET(req: Request) {
       const cacheKey = debug
         ? null
         : [
-            'avail:summary:v4',
+            'avail:summary:v5',
             professionalId,
             serviceId,
             locationId,
@@ -1160,7 +1230,15 @@ export async function GET(req: Request) {
             String(leadTimeMinutes),
             String(locationBufferMinutes),
             String(maxAdvanceDays),
-            stableHash({ addOnIds, viewerLat, viewerLng, radiusMiles }),
+            stableHash({
+              addOnIds,
+              viewerLat,
+              viewerLng,
+              radiusMiles,
+              clientAddressId: effectiveLocationType === ServiceLocationType.MOBILE
+                ? clientAddressId
+                : null,
+            }),
           ].join(':')
 
       if (cacheKey) {
@@ -1299,6 +1377,10 @@ export async function GET(req: Request) {
                     : null,
                 usedViewerCenter: Boolean(hasViewer),
                 addOnIds,
+                clientAddressId:
+                  effectiveLocationType === ServiceLocationType.MOBILE
+                    ? clientAddressId || null
+                    : null,
               },
             }
           : {}),
@@ -1335,7 +1417,7 @@ export async function GET(req: Request) {
     const dayCacheKey = debug
       ? null
       : [
-          'avail:day:v4',
+          'avail:day:v5',
           professionalId,
           serviceId,
           locationId,
@@ -1345,7 +1427,14 @@ export async function GET(req: Request) {
           String(stepMinutes),
           String(leadTimeMinutes),
           String(locationBufferMinutes),
-          stableHash({ addOnIds, durationMinutes }),
+          stableHash({
+            addOnIds,
+            durationMinutes,
+            clientAddressId:
+              effectiveLocationType === ServiceLocationType.MOBILE
+                ? clientAddressId
+                : null,
+          }),
         ].join(':')
 
     if (dayCacheKey) {
@@ -1422,7 +1511,16 @@ export async function GET(req: Request) {
       slots: result.slots,
 
       offering: offeringPayload,
-      ...(debug ? { debug: result.debug, addOnIds } : {}),
+      ...(debug
+        ? {
+            debug: result.debug,
+            addOnIds,
+            clientAddressId:
+              effectiveLocationType === ServiceLocationType.MOBILE
+                ? clientAddressId || null
+                : null,
+          }
+        : {}),
     }
 
     if (dayCacheKey) {

@@ -76,7 +76,6 @@ export async function pickBookableLocation(
   const professionalId = cleanId(args.professionalId)
   const requestedLocationId = cleanId(args.requestedLocationId)
   const database = db(args.tx)
-  const allowFallback = args.allowFallback ?? true
 
   if (!professionalId) return null
 
@@ -93,13 +92,7 @@ export async function pickBookableLocation(
       select,
     })
 
-    if (isBookableLocationCandidate(byId)) {
-      return byId
-    }
-
-    if (!allowFallback) {
-      return null
-    }
+    return isBookableLocationCandidate(byId) ? byId : null
   }
 
   const best = await database.professionalLocation.findFirst({

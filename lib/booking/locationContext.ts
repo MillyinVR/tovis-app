@@ -8,7 +8,6 @@ import {
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import {
   ALLOWED_STEP_MINUTES,
-  DEFAULT_DURATION_MINUTES,
   MAX_ADVANCE_NOTICE_MINUTES,
   MAX_BUFFER_MINUTES,
   MAX_DAYS_AHEAD,
@@ -16,6 +15,7 @@ import {
 } from '@/lib/booking/constants'
 import { decimalToNumber } from '@/lib/booking/snapshots'
 import { clampInt } from '@/lib/pick'
+import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
 export type BookingLocationContext = {
@@ -33,6 +33,16 @@ export type BookingLocationContext = {
   lng: number | undefined
 }
 
+export type SchedulingReadinessError =
+  | 'LOCATION_NOT_FOUND'
+  | 'TIMEZONE_REQUIRED'
+  | 'WORKING_HOURS_REQUIRED'
+  | 'WORKING_HOURS_INVALID'
+  | 'MODE_NOT_SUPPORTED'
+  | 'DURATION_REQUIRED'
+  | 'PRICE_REQUIRED'
+  | 'COORDINATES_REQUIRED'
+
 type ResolveBookingLocationContextArgs = {
   tx?: BookingDbClient
   professionalId: string
@@ -48,6 +58,33 @@ type ResolveBookingLocationContextArgs = {
 type ResolveBookingLocationContextResult =
   | { ok: true; context: BookingLocationContext }
   | { ok: false; error: 'LOCATION_NOT_FOUND' | 'TIMEZONE_REQUIRED' }
+
+export type OfferingSchedulingSnapshot = {
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonDurationMinutes: number | null | undefined
+  mobileDurationMinutes: number | null | undefined
+  salonPriceStartingAt: unknown
+  mobilePriceStartingAt: unknown
+}
+
+export type ResolveValidatedBookingContextArgs =
+  ResolveBookingLocationContextArgs & {
+    offering: OfferingSchedulingSnapshot
+    requireCoordinates?: boolean
+  }
+
+export type ResolveValidatedBookingContextResult =
+  | {
+      ok: true
+      context: BookingLocationContext
+      durationMinutes: number
+      priceStartingAt: number
+    }
+  | {
+      ok: false
+      error: SchedulingReadinessError
+    }
 
 const ALLOWED_STEP_SET = new Set<number>(ALLOWED_STEP_MINUTES)
 
@@ -69,12 +106,12 @@ export function pickEffectiveLocationType(args: {
 }): ServiceLocationType | null {
   const { requested, offersInSalon, offersMobile } = args
 
-  if (requested === ServiceLocationType.SALON && offersInSalon) {
-    return ServiceLocationType.SALON
+  if (requested === ServiceLocationType.SALON) {
+    return offersInSalon ? ServiceLocationType.SALON : null
   }
 
-  if (requested === ServiceLocationType.MOBILE && offersMobile) {
-    return ServiceLocationType.MOBILE
+  if (requested === ServiceLocationType.MOBILE) {
+    return offersMobile ? ServiceLocationType.MOBILE : null
   }
 
   if (offersInSalon) return ServiceLocationType.SALON
@@ -97,34 +134,201 @@ export function normalizeStepMinutes(input: unknown, fallback: number): number {
   return 60
 }
 
+function normalizeFormattedAddress(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizePositiveMinutesOrNull(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return null
+
+  const minutes = Math.trunc(parsed)
+  if (minutes <= 0) return null
+
+  return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
+}
+
+function normalizePriceNumberOrNull(value: unknown): number | null {
+  if (value == null) return null
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toString' in value &&
+    typeof value.toString === 'function'
+  ) {
+    const parsed = Number(value.toString())
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return null
+}
+
+function hasSchedulingWorkingHours(value: unknown): boolean {
+  return isRecord(value)
+}
+
+function shouldAllowLocationFallback(args: {
+  requestedLocationId: string | null
+  allowFallback: boolean
+}): boolean {
+  const requestedLocationId =
+    typeof args.requestedLocationId === 'string'
+      ? args.requestedLocationId.trim()
+      : ''
+
+  if (requestedLocationId) {
+    return false
+  }
+
+  return args.allowFallback
+}
+
+export function getModeDurationMinutesOrNull(args: {
+  locationType: ServiceLocationType
+  salonDurationMinutes: number | null | undefined
+  mobileDurationMinutes: number | null | undefined
+}): number | null {
+  const raw =
+    args.locationType === ServiceLocationType.MOBILE
+      ? args.mobileDurationMinutes
+      : args.salonDurationMinutes
+
+  return normalizePositiveMinutesOrNull(raw)
+}
+
+/**
+ * Backward-compatible export name used throughout the repo.
+ * New booking-readiness code should prefer getModeDurationMinutesOrNull().
+ */
 export function pickModeDurationMinutes(args: {
   locationType: ServiceLocationType
   salonDurationMinutes: number | null | undefined
   mobileDurationMinutes: number | null | undefined
   fallbackDurationMinutes?: number
 }): number {
-  const {
-    locationType,
-    salonDurationMinutes,
-    mobileDurationMinutes,
-    fallbackDurationMinutes = DEFAULT_DURATION_MINUTES,
-  } = args
+  const strict = getModeDurationMinutesOrNull(args)
+  if (strict != null) return strict
 
-  const raw =
-    locationType === ServiceLocationType.MOBILE
-      ? mobileDurationMinutes
-      : salonDurationMinutes
-
-  const parsed = Number(raw ?? fallbackDurationMinutes)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return clampInt(fallbackDurationMinutes, 15, MAX_SLOT_DURATION_MINUTES)
-  }
-
-  return clampInt(parsed, 15, MAX_SLOT_DURATION_MINUTES)
+  const fallback = normalizePositiveMinutesOrNull(args.fallbackDurationMinutes)
+  return fallback ?? 30
 }
 
-function normalizeFormattedAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+export function getModePriceStartingAtOrNull(args: {
+  locationType: ServiceLocationType
+  salonPriceStartingAt: unknown
+  mobilePriceStartingAt: unknown
+}): number | null {
+  const raw =
+    args.locationType === ServiceLocationType.MOBILE
+      ? args.mobilePriceStartingAt
+      : args.salonPriceStartingAt
+
+  return normalizePriceNumberOrNull(raw)
+}
+
+export function offeringSupportsLocationType(args: {
+  locationType: ServiceLocationType
+  offersInSalon: boolean
+  offersMobile: boolean
+}): boolean {
+  return args.locationType === ServiceLocationType.MOBILE
+    ? args.offersMobile
+    : args.offersInSalon
+}
+
+export function validateBookingLocationContext(args: {
+  context: BookingLocationContext
+  requireCoordinates?: boolean
+}):
+  | { ok: true }
+  | {
+      ok: false
+      error:
+        | 'TIMEZONE_REQUIRED'
+        | 'WORKING_HOURS_REQUIRED'
+        | 'WORKING_HOURS_INVALID'
+        | 'COORDINATES_REQUIRED'
+    } {
+  const { context, requireCoordinates = false } = args
+
+  if (!context.timeZone || !isValidIanaTimeZone(context.timeZone)) {
+    return { ok: false, error: 'TIMEZONE_REQUIRED' }
+  }
+
+  if (context.workingHours == null) {
+    return { ok: false, error: 'WORKING_HOURS_REQUIRED' }
+  }
+
+  if (!hasSchedulingWorkingHours(context.workingHours)) {
+    return { ok: false, error: 'WORKING_HOURS_INVALID' }
+  }
+
+  if (
+    requireCoordinates &&
+    (typeof context.lat !== 'number' || typeof context.lng !== 'number')
+  ) {
+    return { ok: false, error: 'COORDINATES_REQUIRED' }
+  }
+
+  return { ok: true }
+}
+
+export function validateOfferingScheduling(args: {
+  offering: OfferingSchedulingSnapshot
+  locationType: ServiceLocationType
+}):
+  | { ok: true; durationMinutes: number; priceStartingAt: number }
+  | {
+      ok: false
+      error: 'MODE_NOT_SUPPORTED' | 'DURATION_REQUIRED' | 'PRICE_REQUIRED'
+    } {
+  const { offering, locationType } = args
+
+  if (
+    !offeringSupportsLocationType({
+      locationType,
+      offersInSalon: Boolean(offering.offersInSalon),
+      offersMobile: Boolean(offering.offersMobile),
+    })
+  ) {
+    return { ok: false, error: 'MODE_NOT_SUPPORTED' }
+  }
+
+  const durationMinutes = getModeDurationMinutesOrNull({
+    locationType,
+    salonDurationMinutes: offering.salonDurationMinutes,
+    mobileDurationMinutes: offering.mobileDurationMinutes,
+  })
+
+  if (durationMinutes == null) {
+    return { ok: false, error: 'DURATION_REQUIRED' }
+  }
+
+  const priceStartingAt = getModePriceStartingAtOrNull({
+    locationType,
+    salonPriceStartingAt: offering.salonPriceStartingAt,
+    mobilePriceStartingAt: offering.mobilePriceStartingAt,
+  })
+
+  if (priceStartingAt == null) {
+    return { ok: false, error: 'PRICE_REQUIRED' }
+  }
+
+  return {
+    ok: true,
+    durationMinutes,
+    priceStartingAt,
+  }
 }
 
 export async function resolveBookingLocationContext(
@@ -142,12 +346,17 @@ export async function resolveBookingLocationContext(
     allowFallback = true,
   } = args
 
+  const effectiveAllowFallback = shouldAllowLocationFallback({
+    requestedLocationId,
+    allowFallback,
+  })
+
   const location = await pickBookableLocation({
     tx,
     professionalId,
     requestedLocationId,
     locationType,
-    allowFallback,
+    allowFallback: effectiveAllowFallback,
   })
 
   if (!location) {
@@ -211,5 +420,40 @@ export async function resolveBookingLocationContext(
       lat: decimalToNumber(location.lat),
       lng: decimalToNumber(location.lng),
     },
+  }
+}
+
+export async function resolveValidatedBookingContext(
+  args: ResolveValidatedBookingContextArgs,
+): Promise<ResolveValidatedBookingContextResult> {
+  const locationContextResult = await resolveBookingLocationContext(args)
+
+  if (!locationContextResult.ok) {
+    return locationContextResult
+  }
+
+  const contextValidation = validateBookingLocationContext({
+    context: locationContextResult.context,
+    requireCoordinates: args.requireCoordinates,
+  })
+
+  if (!contextValidation.ok) {
+    return contextValidation
+  }
+
+  const offeringValidation = validateOfferingScheduling({
+    offering: args.offering,
+    locationType: args.locationType,
+  })
+
+  if (!offeringValidation.ok) {
+    return offeringValidation
+  }
+
+  return {
+    ok: true,
+    context: locationContextResult.context,
+    durationMinutes: offeringValidation.durationMinutes,
+    priceStartingAt: offeringValidation.priceStartingAt,
   }
 }

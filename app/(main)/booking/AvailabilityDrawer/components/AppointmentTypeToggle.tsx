@@ -1,4 +1,3 @@
-// app/(main)/booking/AvailabilityDrawer/components/AppointmentTypeToggle.tsx
 'use client'
 
 import type { ServiceLocationType, AvailabilityOffering } from '../types'
@@ -82,15 +81,15 @@ export default function AppointmentTypeToggle({
 
   if (!canSalon && !canMobile) return null
 
-  const modes = (
-    [
-      ...(canSalon ? (['SALON'] as const) : []),
-      ...(canMobile ? (['MOBILE'] as const) : []),
-    ] as const
-  ) satisfies readonly ServiceLocationType[]
+  const modes: ServiceLocationType[] = []
+
+  if (canSalon) modes.push('SALON')
+  if (canMobile) modes.push('MOBILE')
 
   const isSingle = modes.length === 1
-  const effective = isSingle ? modes[0] : value
+  const effective =
+    isSingle || !modes.includes(value) ? modes[0] : value
+
   const isDisabled = Boolean(disabled)
   const active = getModeCopy(effective, offering)
 

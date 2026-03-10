@@ -22,8 +22,8 @@ import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
 import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
 import {
   normalizeLocationType,
-  pickModeDurationMinutes,
-  resolveBookingLocationContext,
+  resolveValidatedBookingContext,
+  type SchedulingReadinessError,
 } from '@/lib/booking/locationContext'
 import {
   buildAddressSnapshot,
@@ -44,16 +44,26 @@ type TxnErrorCode =
   | 'HOLD_MISSING_CLIENT_ADDRESS'
   | 'HOLD_MISSING_LOCATION'
   | 'HOLD_NOT_FOUND'
-  | 'INVALID_DURATION'
   | 'LOCATION_NOT_FOUND'
+  | 'MODE_NOT_SUPPORTED'
+  | 'DURATION_REQUIRED'
+  | 'PRICE_REQUIRED'
+  | 'WORKING_HOURS_REQUIRED'
+  | 'WORKING_HOURS_INVALID'
+  | 'SALON_LOCATION_ADDRESS_REQUIRED'
   | 'OPENING_NOT_AVAILABLE'
   | 'TIMEZONE_REQUIRED'
   | 'TIME_IN_PAST'
   | 'TIME_NOT_AVAILABLE'
   | 'TOO_FAR'
+  | 'COORDINATES_REQUIRED'
 
 function throwCode(code: TxnErrorCode): never {
   throw new Error(code)
+}
+
+function normalizeAddress(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function normalizeSourceLoose(args: {
@@ -126,6 +136,39 @@ function toNullableJsonCreateInput(
   if (value === undefined) return undefined
   if (value === null) return Prisma.JsonNull
   return toInputJsonValue(value)
+}
+
+function normalizePositiveDurationMinutes(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return null
+
+  const minutes = Math.trunc(parsed)
+  if (minutes <= 0) return null
+
+  return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
+}
+
+function mapSchedulingReadinessErrorToTxnCode(
+  error: SchedulingReadinessError,
+): TxnErrorCode {
+  switch (error) {
+    case 'LOCATION_NOT_FOUND':
+      return 'LOCATION_NOT_FOUND'
+    case 'TIMEZONE_REQUIRED':
+      return 'TIMEZONE_REQUIRED'
+    case 'WORKING_HOURS_REQUIRED':
+      return 'WORKING_HOURS_REQUIRED'
+    case 'WORKING_HOURS_INVALID':
+      return 'WORKING_HOURS_INVALID'
+    case 'MODE_NOT_SUPPORTED':
+      return 'MODE_NOT_SUPPORTED'
+    case 'DURATION_REQUIRED':
+      return 'DURATION_REQUIRED'
+    case 'PRICE_REQUIRED':
+      return 'PRICE_REQUIRED'
+    case 'COORDINATES_REQUIRED':
+      return 'COORDINATES_REQUIRED'
+  }
 }
 
 export async function POST(request: Request) {
@@ -205,45 +248,6 @@ export async function POST(request: Request) {
     if (!offering || !offering.isActive) {
       return jsonFail(400, 'Invalid or inactive offering.', {
         code: 'OFFERING_INACTIVE',
-      })
-    }
-
-    if (locationType === ServiceLocationType.SALON && !offering.offersInSalon) {
-      return jsonFail(400, 'This service is not offered in-salon.', {
-        code: 'MODE_NOT_SUPPORTED',
-      })
-    }
-
-    if (locationType === ServiceLocationType.MOBILE && !offering.offersMobile) {
-      return jsonFail(400, 'This service is not offered as mobile.', {
-        code: 'MODE_NOT_SUPPORTED',
-      })
-    }
-
-    const priceStartingAt =
-      locationType === ServiceLocationType.MOBILE
-        ? offering.mobilePriceStartingAt
-        : offering.salonPriceStartingAt
-
-    if (priceStartingAt == null) {
-      return jsonFail(
-        400,
-        `Pricing is not set for ${
-          locationType === ServiceLocationType.MOBILE ? 'mobile' : 'salon'
-        } bookings.`,
-        { code: 'PRICING_NOT_SET' },
-      )
-    }
-
-    const baseDurationMinutes = pickModeDurationMinutes({
-      locationType,
-      salonDurationMinutes: offering.salonDurationMinutes,
-      mobileDurationMinutes: offering.mobileDurationMinutes,
-    })
-
-    if (!Number.isFinite(baseDurationMinutes) || baseDurationMinutes <= 0) {
-      return jsonFail(400, 'Offering duration is invalid for this booking type.', {
-        code: 'INVALID_DURATION',
       })
     }
 
@@ -346,7 +350,11 @@ export async function POST(request: Request) {
       if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
 
       if (hold.locationType === ServiceLocationType.MOBILE) {
-        if (!hold.clientAddressId || !hold.clientAddressSnapshot) {
+        const clientServiceAddressFromHold = pickFormattedAddressFromSnapshot(
+          hold.clientAddressSnapshot,
+        )
+
+        if (!hold.clientAddressId || !clientServiceAddressFromHold) {
           throwCode('HOLD_MISSING_CLIENT_ADDRESS')
         }
 
@@ -364,7 +372,7 @@ export async function POST(request: Request) {
         }
       }
 
-      const locationContextResult = await resolveBookingLocationContext({
+      const validatedContextResult = await resolveValidatedBookingContext({
         tx,
         professionalId: offering.professionalId,
         requestedLocationId: hold.locationId,
@@ -373,13 +381,37 @@ export async function POST(request: Request) {
         fallbackTimeZone: 'UTC',
         requireValidTimeZone: true,
         allowFallback: false,
+        requireCoordinates: false,
+        offering: {
+          offersInSalon: offering.offersInSalon,
+          offersMobile: offering.offersMobile,
+          salonDurationMinutes: offering.salonDurationMinutes,
+          mobileDurationMinutes: offering.mobileDurationMinutes,
+          salonPriceStartingAt: offering.salonPriceStartingAt,
+          mobilePriceStartingAt: offering.mobilePriceStartingAt,
+        },
       })
 
-      if (!locationContextResult.ok) {
-        throwCode(locationContextResult.error)
+      if (!validatedContextResult.ok) {
+        throwCode(mapSchedulingReadinessErrorToTxnCode(validatedContextResult.error))
       }
 
-      const locationContext = locationContextResult.context
+      const locationContext = validatedContextResult.context
+      const baseDurationMinutes = validatedContextResult.durationMinutes
+      const priceStartingAt = validatedContextResult.priceStartingAt
+
+      const salonAddressText =
+        hold.locationType === ServiceLocationType.SALON
+          ? pickFormattedAddressFromSnapshot(hold.locationAddressSnapshot) ??
+            normalizeAddress(locationContext.formattedAddress)
+          : null
+
+      if (
+        hold.locationType === ServiceLocationType.SALON &&
+        !salonAddressText
+      ) {
+        throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
+      }
 
       const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
       if (!Number.isFinite(requestedStart.getTime())) {
@@ -516,19 +548,14 @@ export async function POST(request: Request) {
         const service = row.addOnService
         const proOffering = addOnOfferingByServiceId.get(service.id) ?? null
 
-        const durationMinutesSnapshot = pickModeDurationMinutes({
-          locationType,
-          salonDurationMinutes:
-            row.durationOverrideMinutes ??
-            proOffering?.salonDurationMinutes ??
-            service.defaultDurationMinutes ??
-            null,
-          mobileDurationMinutes:
-            row.durationOverrideMinutes ??
-            proOffering?.mobileDurationMinutes ??
-            service.defaultDurationMinutes ??
-            null,
-        })
+        const durationRaw =
+          row.durationOverrideMinutes ??
+          (locationType === ServiceLocationType.MOBILE
+            ? proOffering?.mobileDurationMinutes
+            : proOffering?.salonDurationMinutes) ??
+          service.defaultDurationMinutes
+
+        const durationMinutesSnapshot = normalizePositiveDurationMinutes(durationRaw)
 
         const priceRaw =
           row.priceOverride ??
@@ -547,10 +574,7 @@ export async function POST(request: Request) {
       })
 
       for (const addOn of resolvedAddOns) {
-        if (
-          !Number.isFinite(addOn.durationMinutesSnapshot) ||
-          addOn.durationMinutesSnapshot <= 0
-        ) {
+        if (addOn.durationMinutesSnapshot == null) {
           throwCode('ADDONS_INVALID')
         }
       }
@@ -565,7 +589,7 @@ export async function POST(request: Request) {
       const subtotal = basePrice.add(addOnsPriceTotal)
 
       const addOnsDurationTotal = resolvedAddOns.reduce(
-        (sum, row) => sum + row.durationMinutesSnapshot,
+        (sum, row) => sum + (row.durationMinutesSnapshot ?? 0),
         0,
       )
 
@@ -608,13 +632,12 @@ export async function POST(request: Request) {
         excludeHoldId: hold.id,
       })
 
-      const formattedAddressFromHold = pickFormattedAddressFromSnapshot(
-        hold.locationAddressSnapshot,
-      )
-
-      const addressSnapshot = buildAddressSnapshot(
-        formattedAddressFromHold ?? locationContext.formattedAddress,
-      )
+      const salonLocationAddressSnapshotInput:
+        | Prisma.InputJsonValue
+        | Prisma.NullableJsonNullValueInput =
+        hold.locationType === ServiceLocationType.SALON && salonAddressText
+          ? buildAddressSnapshot(salonAddressText) ?? Prisma.JsonNull
+          : Prisma.JsonNull
 
       let created: {
         id: string
@@ -644,11 +667,15 @@ export async function POST(request: Request) {
 
             locationId: locationContext.locationId,
             locationTimeZone: locationContext.timeZone,
-            locationAddressSnapshot: addressSnapshot,
+
+            // SALON destination = pro salon/suite address.
+            // MOBILE destination = clientAddressSnapshot, so locationAddressSnapshot stays null.
+            locationAddressSnapshot: salonLocationAddressSnapshotInput,
             locationLatSnapshot:
               decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
             locationLngSnapshot:
               decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+
             clientAddressId:
               hold.locationType === ServiceLocationType.MOBILE
                 ? hold.clientAddressId
@@ -705,7 +732,7 @@ export async function POST(request: Request) {
             itemType: BookingServiceItemType.ADD_ON,
             parentItemId: baseItem.id,
             priceSnapshot: row.priceSnapshot,
-            durationMinutesSnapshot: row.durationMinutesSnapshot,
+            durationMinutesSnapshot: row.durationMinutesSnapshot ?? 0,
             sortOrder: 100 + row.sortOrder,
             notes: `ADDON:${row.offeringAddOnId}`,
           })),
@@ -777,11 +804,67 @@ export async function POST(request: Request) {
       )
     }
 
+    if (message === 'SALON_LOCATION_ADDRESS_REQUIRED') {
+      return jsonFail(
+        400,
+        'This salon location is missing an address. Please update the professional location before booking.',
+        { code: 'SALON_LOCATION_ADDRESS_REQUIRED' },
+      )
+    }
+
     if (message === 'TIMEZONE_REQUIRED') {
       return jsonFail(
         400,
         'This professional must set a valid timezone before taking bookings.',
         { code: 'TIMEZONE_REQUIRED' },
+      )
+    }
+
+    if (message === 'WORKING_HOURS_REQUIRED') {
+      return jsonFail(
+        400,
+        'This professional has not set working hours yet.',
+        { code: 'WORKING_HOURS_REQUIRED' },
+      )
+    }
+
+    if (message === 'WORKING_HOURS_INVALID') {
+      return jsonFail(
+        400,
+        'This professional’s working hours are misconfigured.',
+        { code: 'WORKING_HOURS_INVALID' },
+      )
+    }
+
+    if (message === 'MODE_NOT_SUPPORTED') {
+      return jsonFail(
+        400,
+        'This service is not available for the selected booking type.',
+        { code: 'MODE_NOT_SUPPORTED' },
+      )
+    }
+
+    if (message === 'DURATION_REQUIRED') {
+      return jsonFail(
+        400,
+        'This service is missing duration settings for the selected booking type.',
+        { code: 'DURATION_REQUIRED' },
+      )
+    }
+
+    if (message === 'PRICE_REQUIRED') {
+      return jsonFail(
+        400,
+        'This service is missing pricing for the selected booking type.',
+        { code: 'PRICE_REQUIRED' },
+      )
+    }
+
+    if (message === 'COORDINATES_REQUIRED') {
+      return jsonFail(
+        400,
+        'This location is missing coordinates required for this booking flow.',
+        { code: 'COORDINATES_REQUIRED' },
       )
     }
 

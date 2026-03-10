@@ -34,6 +34,7 @@ function buildQueryKey(args: {
   serviceId: string
   locationType: ServiceLocationType | null
   mediaId?: string
+  clientAddressId?: string | null
   viewer?: {
     lat: number
     lng: number
@@ -52,6 +53,7 @@ function buildQueryKey(args: {
     `service=${args.serviceId}`,
     `loc=${args.locationType ?? 'AUTO'}`,
     `media=${args.mediaId ?? ''}`,
+    `clientAddress=${args.clientAddressId ?? ''}`,
     viewerKey,
   ]
     .filter(Boolean)
@@ -62,6 +64,7 @@ export function useAvailability(
   open: boolean,
   context: DrawerContext,
   locationType: ServiceLocationType | null,
+  clientAddressId?: string | null,
 ) {
   const router = useRouter()
 
@@ -86,6 +89,11 @@ export function useAvailability(
   const mediaId = useMemo(
     () => (context.mediaId ? String(context.mediaId).trim() : ''),
     [context.mediaId],
+  )
+
+  const normalizedClientAddressId = useMemo(
+    () => (clientAddressId ? String(clientAddressId).trim() : ''),
+    [clientAddressId],
   )
 
   const viewer = useMemo(() => {
@@ -120,6 +128,15 @@ export function useAvailability(
     context.viewerPlaceId,
   ])
 
+  const requiresClientAddress =
+    locationType === 'MOBILE'
+
+  const canFetch =
+    Boolean(open) &&
+    Boolean(proId) &&
+    Boolean(serviceId) &&
+    (!requiresClientAddress || Boolean(normalizedClientAddressId))
+
   const queryKey = useMemo(
     () =>
       buildQueryKey({
@@ -127,9 +144,18 @@ export function useAvailability(
         serviceId,
         locationType,
         mediaId,
+        clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
         viewer,
       }),
-    [proId, serviceId, locationType, mediaId, viewer],
+    [
+      proId,
+      serviceId,
+      locationType,
+      mediaId,
+      normalizedClientAddressId,
+      requiresClientAddress,
+      viewer,
+    ],
   )
 
   const clearInFlight = useCallback(() => {
@@ -162,6 +188,10 @@ export function useAvailability(
         qs.set('mediaId', mediaId)
       }
 
+      if (requiresClientAddress && normalizedClientAddressId) {
+        qs.set('clientAddressId', normalizedClientAddressId)
+      }
+
       if (viewer) {
         qs.set('viewerLat', String(viewer.lat))
         qs.set('viewerLng', String(viewer.lng))
@@ -176,7 +206,6 @@ export function useAvailability(
       }
 
       try {
-        // This route returns SUMMARY when no `date` param is provided.
         const res = await fetch(`/api/availability/day?${qs.toString()}`, {
           method: 'GET',
           cache: 'no-store',
@@ -235,13 +264,24 @@ export function useAvailability(
         }
       }
     },
-    [clearInFlight, router, proId, serviceId, locationType, mediaId, viewer],
+    [
+      clearInFlight,
+      router,
+      proId,
+      serviceId,
+      locationType,
+      mediaId,
+      viewer,
+      requiresClientAddress,
+      normalizedClientAddressId,
+    ],
   )
 
   useEffect(() => {
     if (!open) {
       clearInFlight()
       setLoading(false)
+      setError(null)
       return
     }
 
@@ -263,6 +303,14 @@ export function useAvailability(
       return
     }
 
+    if (requiresClientAddress && !normalizedClientAddressId) {
+      clearInFlight()
+      setLoading(false)
+      setData(null)
+      setError(null)
+      return
+    }
+
     const hit = cacheRef.current.get(queryKey)
 
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
@@ -272,8 +320,18 @@ export function useAvailability(
       return
     }
 
+    setData(null)
     void fetchAvailability(queryKey)
-  }, [open, proId, serviceId, queryKey, fetchAvailability, clearInFlight])
+  }, [
+    open,
+    proId,
+    serviceId,
+    queryKey,
+    fetchAvailability,
+    clearInFlight,
+    requiresClientAddress,
+    normalizedClientAddressId,
+  ])
 
   return {
     loading,
