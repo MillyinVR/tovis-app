@@ -36,7 +36,8 @@ import {
   durationOrFallback,
   normalizeToMinute,
 } from '@/lib/booking/conflicts'
-import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import {
   RequestedServiceItemInput,
@@ -602,6 +603,20 @@ export async function PATCH(req: Request, ctx: Ctx) {
       )
 
       if (startMinutes % stepMinutes !== 0) {
+        logBookingConflict({
+          action: 'BOOKING_UPDATE',
+          professionalId: existing.professionalId,
+          locationId: location.id,
+          locationType: existing.locationType,
+          requestedStart: finalStart,
+          requestedEnd: addMinutes(finalStart, 1),
+          conflictType: 'STEP_BOUNDARY',
+          bookingId: existing.id,
+          meta: {
+            route: 'app/api/pro/bookings/[id]/route.ts',
+            stepMinutes,
+          },
+        })
         throw new Error(`STEP:${stepMinutes}`)
       }
 
@@ -730,20 +745,85 @@ export async function PATCH(req: Request, ctx: Ctx) {
         })
 
         if (!workingHoursCheck.ok) {
+          logBookingConflict({
+            action: 'BOOKING_UPDATE',
+            professionalId: existing.professionalId,
+            locationId: location.id,
+            locationType: existing.locationType,
+            requestedStart: finalStart,
+            requestedEnd: finalEnd,
+            conflictType: 'WORKING_HOURS',
+            bookingId: existing.id,
+            meta: {
+              route: 'app/api/pro/bookings/[id]/route.ts',
+              workingHoursError: workingHoursCheck.error,
+            },
+          })
           throw new Error(`WH:${workingHoursCheck.error}`)
         }
       }
 
-      await assertTimeRangeAvailable({
-        tx,
-        professionalId: existing.professionalId,
-        locationId: location.id,
-        requestedStart: finalStart,
-        requestedEnd: finalEnd,
-        defaultBufferMinutes: finalBuffer,
-        fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
-        excludeBookingId: existing.id,
-      })
+            const timeRangeConflict = await getTimeRangeConflict({
+              tx,
+              professionalId: existing.professionalId,
+              locationId: location.id,
+              requestedStart: finalStart,
+              requestedEnd: finalEnd,
+              defaultBufferMinutes: finalBuffer,
+              fallbackDurationMinutes: finalDuration,
+              excludeBookingId: existing.id,
+            })
+
+            if (timeRangeConflict === 'BLOCKED') {
+              logBookingConflict({
+                action: 'BOOKING_UPDATE',
+                professionalId: existing.professionalId,
+                locationId: location.id,
+                locationType: existing.locationType,
+                requestedStart: finalStart,
+                requestedEnd: finalEnd,
+                conflictType: 'BLOCKED',
+                bookingId: existing.id,
+                meta: {
+                  route: 'app/api/pro/bookings/[id]/route.ts',
+                },
+              })
+              throw new Error('BLOCKED')
+            }
+
+            if (timeRangeConflict === 'BOOKING') {
+              logBookingConflict({
+                action: 'BOOKING_UPDATE',
+                professionalId: existing.professionalId,
+                locationId: location.id,
+                locationType: existing.locationType,
+                requestedStart: finalStart,
+                requestedEnd: finalEnd,
+                conflictType: 'BOOKING',
+                bookingId: existing.id,
+                meta: {
+                  route: 'app/api/pro/bookings/[id]/route.ts',
+                },
+              })
+              throw new Error('TIME_NOT_AVAILABLE')
+            }
+
+            if (timeRangeConflict === 'HOLD') {
+              logBookingConflict({
+                action: 'BOOKING_UPDATE',
+                professionalId: existing.professionalId,
+                locationId: location.id,
+                locationType: existing.locationType,
+                requestedStart: finalStart,
+                requestedEnd: finalEnd,
+                conflictType: 'HOLD',
+                bookingId: existing.id,
+                meta: {
+                  route: 'app/api/pro/bookings/[id]/route.ts',
+                },
+              })
+              throw new Error('TIME_NOT_AVAILABLE')
+            }
 
       if (normalizedServiceItems) {
         await tx.bookingServiceItem.deleteMany({

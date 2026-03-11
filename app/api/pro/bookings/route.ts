@@ -17,7 +17,8 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import {
   normalizeLocationType,
   resolveValidatedBookingContext,
@@ -255,6 +256,21 @@ export async function POST(req: Request) {
       )
 
       if (startMinuteOfDay % stepMinutes !== 0) {
+        logBookingConflict({
+          action: 'BOOKING_CREATE',
+          professionalId,
+          locationId: locationContext.locationId,
+          locationType,
+          requestedStart,
+          requestedEnd: addMinutes(requestedStart, 1),
+          conflictType: 'STEP_BOUNDARY',
+          meta: {
+            route: 'app/api/pro/bookings/route.ts',
+            stepMinutes,
+            offeringId,
+            clientId,
+          },
+        })
         throw new Error(`STEP:${stepMinutes}`)
       }
 
@@ -313,19 +329,88 @@ export async function POST(req: Request) {
         })
 
         if (!workingHoursResult.ok) {
+          logBookingConflict({
+            action: 'BOOKING_CREATE',
+            professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'WORKING_HOURS',
+            meta: {
+              route: 'app/api/pro/bookings/route.ts',
+              offeringId,
+              clientId,
+              workingHoursError: workingHoursResult.error,
+            },
+          })
           throw new Error(`WH:${workingHoursResult.error}`)
         }
       }
 
-      await assertTimeRangeAvailable({
-        tx,
-        professionalId,
-        locationId: locationContext.locationId,
-        requestedStart,
-        requestedEnd,
-        defaultBufferMinutes: bufferMinutes,
-        fallbackDurationMinutes: totalDurationMinutes,
-      })
+            const timeRangeConflict = await getTimeRangeConflict({
+              tx,
+              professionalId,
+              locationId: locationContext.locationId,
+              requestedStart,
+              requestedEnd,
+              defaultBufferMinutes: bufferMinutes,
+              fallbackDurationMinutes: totalDurationMinutes,
+            })
+
+            if (timeRangeConflict === 'BLOCKED') {
+              logBookingConflict({
+                action: 'BOOKING_CREATE',
+                professionalId,
+                locationId: locationContext.locationId,
+                locationType,
+                requestedStart,
+                requestedEnd,
+                conflictType: 'BLOCKED',
+                meta: {
+                  route: 'app/api/pro/bookings/route.ts',
+                  offeringId,
+                  clientId,
+                },
+              })
+              throwCode('BLOCKED')
+            }
+
+            if (timeRangeConflict === 'BOOKING') {
+              logBookingConflict({
+                action: 'BOOKING_CREATE',
+                professionalId,
+                locationId: locationContext.locationId,
+                locationType,
+                requestedStart,
+                requestedEnd,
+                conflictType: 'BOOKING',
+                meta: {
+                  route: 'app/api/pro/bookings/route.ts',
+                  offeringId,
+                  clientId,
+                },
+              })
+              throwCode('TIME_NOT_AVAILABLE')
+            }
+
+            if (timeRangeConflict === 'HOLD') {
+              logBookingConflict({
+                action: 'BOOKING_CREATE',
+                professionalId,
+                locationId: locationContext.locationId,
+                locationType,
+                requestedStart,
+                requestedEnd,
+                conflictType: 'HOLD',
+                meta: {
+                  route: 'app/api/pro/bookings/route.ts',
+                  offeringId,
+                  clientId,
+                },
+              })
+              throwCode('TIME_NOT_AVAILABLE')
+            }
 
       const salonLocationAddressSnapshot:
         | Prisma.InputJsonValue
