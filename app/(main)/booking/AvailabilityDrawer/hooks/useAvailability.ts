@@ -22,7 +22,10 @@ type CacheEntry = {
   data: AvailabilitySummaryResponse
 }
 
-const CACHE_TTL_MS = 7_500
+const CACHE_TTL_MS = 45_000
+
+const summaryCache = new Map<string, CacheEntry>()
+const inFlightByKey = new Map<string, Promise<AvailabilitySummaryResponse>>()
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
@@ -43,7 +46,7 @@ function buildQueryKey(args: {
   } | null
 }) {
   const viewerKey = args.viewer
-    ? `viewer=${args.viewer.lat.toFixed(4)},${args.viewer.lng.toFixed(4)},${
+    ? `viewer=${args.viewer.lat.toFixed(3)},${args.viewer.lng.toFixed(3)},${
         args.viewer.radiusMiles ?? ''
       },${args.viewer.placeId ?? ''}`
     : ''
@@ -60,6 +63,18 @@ function buildQueryKey(args: {
     .join('|')
 }
 
+function getFreshCache(key: string): AvailabilitySummaryResponse | null {
+  const hit = summaryCache.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at >= CACHE_TTL_MS) return null
+  return hit.data
+}
+
+function getAnyCache(key: string): AvailabilitySummaryResponse | null {
+  const hit = summaryCache.get(key)
+  return hit ? hit.data : null
+}
+
 export function useAvailability(
   open: boolean,
   context: DrawerContext,
@@ -69,10 +84,10 @@ export function useAvailability(
   const router = useRouter()
 
   const abortRef = useRef<AbortController | null>(null)
-  const cacheRef = useRef<Map<string, CacheEntry>>(new Map())
   const requestSeqRef = useRef(0)
 
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<AvailabilitySummaryResponse | null>(null)
 
@@ -128,11 +143,10 @@ export function useAvailability(
     context.viewerPlaceId,
   ])
 
-  const requiresClientAddress =
-    locationType === 'MOBILE'
+  const requiresClientAddress = locationType === 'MOBILE'
 
   const canFetch =
-    Boolean(open) &&
+    open &&
     Boolean(proId) &&
     Boolean(serviceId) &&
     (!requiresClientAddress || Boolean(normalizedClientAddressId))
@@ -163,18 +177,48 @@ export function useAvailability(
     abortRef.current = null
   }, [])
 
-  useEffect(() => clearInFlight, [clearInFlight])
+  useEffect(() => {
+    return clearInFlight
+  }, [clearInFlight])
 
   const fetchAvailability = useCallback(
-    async (key: string) => {
+    async (key: string, keepExistingData: boolean) => {
       const seq = ++requestSeqRef.current
 
       clearInFlight()
       const controller = new AbortController()
       abortRef.current = controller
 
-      setLoading(true)
+      if (keepExistingData) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+
       setError(null)
+
+      const existingPromise = inFlightByKey.get(key)
+      if (existingPromise) {
+        try {
+          const parsed = await existingPromise
+          if (seq !== requestSeqRef.current) return
+          setData(parsed)
+        } catch (e: unknown) {
+          if (seq !== requestSeqRef.current) return
+          setError(
+            e instanceof Error ? e.message : 'Failed to load availability.',
+          )
+        } finally {
+          if (abortRef.current === controller) {
+            abortRef.current = null
+          }
+          if (seq === requestSeqRef.current) {
+            setLoading(false)
+            setRefreshing(false)
+          }
+        }
+        return
+      }
 
       const qs = new URLSearchParams()
       qs.set('professionalId', proId)
@@ -205,7 +249,7 @@ export function useAvailability(
         }
       }
 
-      try {
+      const promise = (async (): Promise<AvailabilitySummaryResponse> => {
         const res = await fetch(`/api/availability/day?${qs.toString()}`, {
           method: 'GET',
           cache: 'no-store',
@@ -239,13 +283,19 @@ export function useAvailability(
           throw new Error('Availability endpoint returned unexpected response.')
         }
 
-        if (seq !== requestSeqRef.current) return
-
-        cacheRef.current.set(key, {
+        summaryCache.set(key, {
           at: Date.now(),
           data: parsed,
         })
 
+        return parsed
+      })()
+
+      inFlightByKey.set(key, promise)
+
+      try {
+        const parsed = await promise
+        if (seq !== requestSeqRef.current) return
         setData(parsed)
       } catch (e: unknown) {
         if (e instanceof Error && e.name === 'AbortError') return
@@ -255,12 +305,15 @@ export function useAvailability(
           e instanceof Error ? e.message : 'Failed to load availability.',
         )
       } finally {
+        inFlightByKey.delete(key)
+
         if (abortRef.current === controller) {
           abortRef.current = null
         }
 
         if (seq === requestSeqRef.current) {
           setLoading(false)
+          setRefreshing(false)
         }
       }
     },
@@ -281,6 +334,7 @@ export function useAvailability(
     if (!open) {
       clearInFlight()
       setLoading(false)
+      setRefreshing(false)
       setError(null)
       return
     }
@@ -288,6 +342,7 @@ export function useAvailability(
     if (!proId) {
       clearInFlight()
       setLoading(false)
+      setRefreshing(false)
       setData(null)
       setError('Missing professional. Please try again.')
       return
@@ -296,6 +351,7 @@ export function useAvailability(
     if (!serviceId) {
       clearInFlight()
       setLoading(false)
+      setRefreshing(false)
       setData(null)
       setError(
         'No service is linked yet. Ask the pro to attach a service to this look.',
@@ -303,38 +359,47 @@ export function useAvailability(
       return
     }
 
-    if (requiresClientAddress && !normalizedClientAddressId) {
+    if (!canFetch) {
       clearInFlight()
       setLoading(false)
+      setRefreshing(false)
       setData(null)
       setError(null)
       return
     }
 
-    const hit = cacheRef.current.get(queryKey)
-
-    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-      setData(hit.data)
+    const fresh = getFreshCache(queryKey)
+    if (fresh) {
+      setData(fresh)
       setError(null)
       setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
+    const stale = getAnyCache(queryKey)
+    if (stale) {
+      setData(stale)
+      setError(null)
+      void fetchAvailability(queryKey, true)
       return
     }
 
     setData(null)
-    void fetchAvailability(queryKey)
+    void fetchAvailability(queryKey, false)
   }, [
     open,
     proId,
     serviceId,
+    canFetch,
     queryKey,
     fetchAvailability,
     clearInFlight,
-    requiresClientAddress,
-    normalizedClientAddressId,
   ])
 
   return {
     loading,
+    refreshing,
     error,
     data,
     setError,

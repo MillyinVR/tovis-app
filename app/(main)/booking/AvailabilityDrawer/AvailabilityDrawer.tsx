@@ -45,6 +45,7 @@ const MOBILE_ADDRESS_REQUIRED_MESSAGE =
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
+const DAY_SLOT_CACHE_TTL_MS = 30_000
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
@@ -358,6 +359,23 @@ function buildDaySlotCacheKey(args: {
   ].join('|')
 }
 
+function isFreshDaySlotCacheEntry(entry: DaySlotCacheEntry | undefined): boolean {
+  if (!entry) return false
+  return Date.now() - entry.cachedAt < DAY_SLOT_CACHE_TTL_MS
+}
+
+function pruneExpiredDaySlotCache(cache: Record<string, DaySlotCacheEntry>) {
+  const now = Date.now()
+
+  for (const key of Object.keys(cache)) {
+    const entry = cache[key]
+    if (!entry) continue
+    if (now - entry.cachedAt >= DAY_SLOT_CACHE_TTL_MS) {
+      delete cache[key]
+    }
+  }
+}
+
 export default function AvailabilityDrawer(props: {
   open: boolean
   onClose: () => void
@@ -403,6 +421,7 @@ export default function AvailabilityDrawer(props: {
 
   const {
     loading,
+    refreshing,
     error: availabilityError,
     data,
     setError,
@@ -615,50 +634,50 @@ export default function AvailabilityDrawer(props: {
     setLocationType('MOBILE')
   }, [open, forcedMobileOnlyGate, locationType])
 
-    useEffect(() => {
-      if (!open) return
-      if (!mobileAddressGateRequested) return
+  useEffect(() => {
+    if (!open) return
+    if (!mobileAddressGateRequested) return
 
-      void hardResetUi({ deleteHold: true })
-      setError(null)
+    void hardResetUi({ deleteHold: true })
+    setError(null)
 
-      if (!selectedClientAddressId) {
-        setPrimarySlots([])
-        setOtherSlots({})
-      }
-    }, [
-      open,
-      mobileAddressGateRequested,
-      selectedClientAddressId,
-      hardResetUi,
-      setError,
-    ])
-
-    useEffect(() => {
-      if (!open) return
-
-      setSelectedDayYMD(null)
-      setPeriod('AFTERNOON')
+    if (!selectedClientAddressId) {
       setPrimarySlots([])
       setOtherSlots({})
-      setLocationType(null)
-      setMobileAddresses([])
-      setLoadingMobileAddresses(false)
-      setMobileAddressesError(null)
-      setSelectedClientAddressId(null)
-      setAddressCreateOpen(false)
-      daySlotCacheRef.current = {}
+    }
+  }, [
+    open,
+    mobileAddressGateRequested,
+    selectedClientAddressId,
+    hardResetUi,
+    setError,
+  ])
 
-      void hardResetUi({ deleteHold: true })
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-      open,
-      context.mediaId,
-      context.professionalId,
-      context.serviceId,
-      context.offeringId,
-      context.source,
-    ])
+  useEffect(() => {
+    if (!open) return
+
+    setSelectedDayYMD(null)
+    setPeriod('AFTERNOON')
+    setPrimarySlots([])
+    setOtherSlots({})
+    setLocationType(null)
+    setMobileAddresses([])
+    setLoadingMobileAddresses(false)
+    setMobileAddressesError(null)
+    setSelectedClientAddressId(null)
+    setAddressCreateOpen(false)
+    daySlotCacheRef.current = {}
+
+    void hardResetUi({ deleteHold: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open,
+    context.mediaId,
+    context.professionalId,
+    context.serviceId,
+    context.offeringId,
+    context.source,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -764,168 +783,168 @@ export default function AvailabilityDrawer(props: {
     })
   }
 
-    const fetchDaySlots = useCallback(
-      async (args: {
-        proId: string
-        ymd: string
-        locationType: ServiceLocationType
-        locationId: string
-        isPrimary: boolean
-        forceRefresh?: boolean
-      }) => {
-        if (!effectiveServiceId) return []
+  const fetchDaySlots = useCallback(
+    async (args: {
+      proId: string
+      ymd: string
+      locationType: ServiceLocationType
+      locationId: string
+      isPrimary: boolean
+      forceRefresh?: boolean
+    }) => {
+      if (!effectiveServiceId) return []
 
-        if (args.locationType === 'MOBILE' && !selectedClientAddressId) {
-          return []
-        }
-
-        const cacheKey = buildDaySlotCacheKey({
-          proId: args.proId,
-          ymd: args.ymd,
-          locationType: args.locationType,
-          locationId: args.locationId,
-          serviceId: effectiveServiceId,
-          clientAddressId:
-            args.locationType === 'MOBILE' ? selectedClientAddressId : null,
-        })
-
-        if (!args.forceRefresh) {
-          const cached = daySlotCacheRef.current[cacheKey]
-          if (cached) {
-            return cached.slots.slice()
-          }
-        }
-
-        const qs = new URLSearchParams({
-          professionalId: args.proId,
-          serviceId: effectiveServiceId,
-          date: args.ymd,
-          locationType: args.locationType,
-          locationId: args.locationId,
-        })
-
-        if (args.locationType === 'MOBILE' && selectedClientAddressId) {
-          qs.set('clientAddressId', selectedClientAddressId)
-        }
-
-        if (debug) qs.set('debug', '1')
-
-        const res = await fetch(`/api/availability/day?${qs.toString()}`, {
-          method: 'GET',
-          cache: 'no-store',
-        })
-
-        const raw = await safeJson(res)
-
-        if (res.status === 401) return []
-
-        if (!res.ok) {
-          if (args.isPrimary) {
-            setError(
-              pickErrorMessage(raw) ?? `Couldn’t load times (${res.status}).`,
-            )
-          }
-          return []
-        }
-
-        const parsed = parseDaySlots(raw)
-        if (!parsed.ok) {
-          if (args.isPrimary) {
-            setError(parsed.error ?? 'Couldn’t load times.')
-          }
-          return []
-        }
-
-        daySlotCacheRef.current[cacheKey] = {
-          slots: parsed.slots.slice(),
-          cachedAt: Date.now(),
-        }
-
-        return parsed.slots.slice()
-      },
-      [effectiveServiceId, debug, selectedClientAddressId, setError],
-    )
-
-    useEffect(() => {
-  if (!open) return
-  if (!summary) return
-  if (!selectedDayYMD) return
-
-  const currentSummary = summary
-  const currentDayYMD = selectedDayYMD
-  const currentOthers = others
-  const primaryId = currentSummary.primaryPro.id
-  const primaryLocationId = currentSummary.locationId
-
-  let cancelled = false
-
-  async function loadSlotsForSelectedDay() {
-    try {
-      if (!holding) {
-        setError(null)
+      if (args.locationType === 'MOBILE' && !selectedClientAddressId) {
+        return []
       }
 
-      setLoadingPrimarySlots(true)
-      setLoadingOtherSlots(true)
+      pruneExpiredDaySlotCache(daySlotCacheRef.current)
 
-      const primaryDaySlots = await fetchDaySlots({
-        proId: primaryId,
-        ymd: currentDayYMD,
-        locationType: activeLocationType,
-        locationId: primaryLocationId,
-        isPrimary: true,
+      const cacheKey = buildDaySlotCacheKey({
+        proId: args.proId,
+        ymd: args.ymd,
+        locationType: args.locationType,
+        locationId: args.locationId,
+        serviceId: effectiveServiceId,
+        clientAddressId:
+          args.locationType === 'MOBILE' ? selectedClientAddressId : null,
       })
 
-      if (cancelled) return
+      if (!args.forceRefresh) {
+        const cached = daySlotCacheRef.current[cacheKey]
+        if (isFreshDaySlotCacheEntry(cached)) {
+          return cached.slots.slice()
+        }
+      }
 
-      setPrimarySlots(primaryDaySlots)
-      setLoadingPrimarySlots(false)
+      const qs = new URLSearchParams({
+        professionalId: args.proId,
+        serviceId: effectiveServiceId,
+        date: args.ymd,
+        locationType: args.locationType,
+        locationId: args.locationId,
+      })
 
-      for (const pro of currentOthers) {
-        const slots = await fetchDaySlots({
-          proId: pro.id,
+      if (args.locationType === 'MOBILE' && selectedClientAddressId) {
+        qs.set('clientAddressId', selectedClientAddressId)
+      }
+
+      if (debug) qs.set('debug', '1')
+
+      const res = await fetch(`/api/availability/day?${qs.toString()}`, {
+        method: 'GET',
+        cache: 'no-store',
+      })
+
+      const raw = await safeJson(res)
+
+      if (res.status === 401) return []
+
+      if (!res.ok) {
+        if (args.isPrimary) {
+          setError(
+            pickErrorMessage(raw) ?? `Couldn’t load times (${res.status}).`,
+          )
+        }
+        return []
+      }
+
+      const parsed = parseDaySlots(raw)
+      if (!parsed.ok) {
+        if (args.isPrimary) {
+          setError(parsed.error ?? 'Couldn’t load times.')
+        }
+        return []
+      }
+
+      daySlotCacheRef.current[cacheKey] = {
+        slots: parsed.slots.slice(),
+        cachedAt: Date.now(),
+      }
+
+      return parsed.slots.slice()
+    },
+    [effectiveServiceId, debug, selectedClientAddressId, setError],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    if (!summary) return
+    if (!selectedDayYMD) return
+
+    const currentSummary = summary
+    const currentDayYMD = selectedDayYMD
+    const currentOthers = others
+    const primaryId = currentSummary.primaryPro.id
+    const primaryLocationId = currentSummary.locationId
+
+    let cancelled = false
+
+    async function loadSlotsForSelectedDay() {
+      try {
+        if (!holding) {
+          setError(null)
+        }
+
+        setLoadingPrimarySlots(true)
+        setLoadingOtherSlots(true)
+
+        const primaryDaySlots = await fetchDaySlots({
+          proId: primaryId,
           ymd: currentDayYMD,
           locationType: activeLocationType,
-          locationId: pro.locationId,
-          isPrimary: false,
+          locationId: primaryLocationId,
+          isPrimary: true,
         })
 
         if (cancelled) return
 
-        setOtherSlots((prev) => ({
-          ...prev,
-          [pro.id]: slots,
-        }))
+        setPrimarySlots(primaryDaySlots)
+        setLoadingPrimarySlots(false)
+
+        const nextOtherSlots: Record<string, string[]> = {}
+
+        for (const pro of currentOthers) {
+          const slots = await fetchDaySlots({
+            proId: pro.id,
+            ymd: currentDayYMD,
+            locationType: activeLocationType,
+            locationId: pro.locationId,
+            isPrimary: false,
+          })
+
+          if (cancelled) return
+          nextOtherSlots[pro.id] = slots
+        }
+
+        if (cancelled) return
+
+        setOtherSlots(nextOtherSlots)
+        setLoadingOtherSlots(false)
+      } catch {
+        if (cancelled) return
+
+        setLoadingPrimarySlots(false)
+        setLoadingOtherSlots(false)
+        setError('Network error loading times.')
       }
-
-      if (cancelled) return
-      setLoadingOtherSlots(false)
-    } catch {
-      if (cancelled) return
-
-      setPrimarySlots([])
-      setOtherSlots({})
-      setLoadingPrimarySlots(false)
-      setLoadingOtherSlots(false)
-      setError('Network error loading times.')
     }
-  }
 
-  void loadSlotsForSelectedDay()
+    void loadSlotsForSelectedDay()
 
-  return () => {
-    cancelled = true
-  }
-}, [
-  open,
-  summary,
-  selectedDayYMD,
-  activeLocationType,
-  fetchDaySlots,
-  holding,
-  setError,
-  others,
-])
+    return () => {
+      cancelled = true
+    }
+  }, [
+    open,
+    summary,
+    selectedDayYMD,
+    activeLocationType,
+    fetchDaySlots,
+    holding,
+    setError,
+    others,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -1076,7 +1095,8 @@ export default function AvailabilityDrawer(props: {
       : availabilityError
 
   const canRenderSummary = Boolean(summary && primary)
-  const shouldShowLoading = loading && !summary && !waitingForMobileAddress
+  const shouldShowLoading =
+    loading && !canRenderSummary && !waitingForMobileAddress
   const shouldShowEmpty =
     !displayError &&
     !shouldShowLoading &&
@@ -1213,6 +1233,12 @@ export default function AvailabilityDrawer(props: {
                 }}
               />
 
+              {refreshing ? (
+                <div className="mb-3 text-xs font-semibold text-textSecondary">
+                  Refreshing availability…
+                </div>
+              ) : null}
+
               {activeLocationType === 'MOBILE' ? (
                 <MobileAddressSelector
                   value={selectedClientAddressId}
@@ -1236,6 +1262,12 @@ export default function AvailabilityDrawer(props: {
                 />
               ) : null}
 
+              {loadingPrimarySlots ? (
+                <div className="mb-3 text-xs font-semibold text-textSecondary">
+                  Loading times…
+                </div>
+              ) : null}
+
               <SlotChips
                 pro={primary}
                 appointmentTz={appointmentTz}
@@ -1252,11 +1284,11 @@ export default function AvailabilityDrawer(props: {
                 }}
               />
 
-                            {loadingOtherSlots ? (
-                              <div className="mb-3 text-xs font-semibold text-textSecondary">
-                                Loading more pros…
-                              </div>
-                            ) : null}
+              {loadingOtherSlots ? (
+                <div className="mb-3 text-xs font-semibold text-textSecondary">
+                  Loading more pros…
+                </div>
+              ) : null}
 
               {showLocalHint && selected?.slotISO ? (
                 <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
