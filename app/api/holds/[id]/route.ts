@@ -1,5 +1,5 @@
 // app/api/holds/[id]/route.ts
-// app/api/holds/[id]/route.ts
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 
@@ -7,20 +7,24 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: Promise<{ id: string }> | { id: string } }
 
-type HoldRouteRecord = {
-  id: string
-  clientId: string | null
-  professionalId: string
-  offeringId: string
-  scheduledFor: Date
-  expiresAt: Date
-  locationType: string
-  locationId: string | null
-  locationTimeZone: string | null
-  locationAddressSnapshot: unknown
-  locationLatSnapshot: unknown
-  locationLngSnapshot: unknown
-}
+const HOLD_ROUTE_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  offeringId: true,
+  scheduledFor: true,
+  expiresAt: true,
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+  locationLatSnapshot: true,
+  locationLngSnapshot: true,
+} satisfies Prisma.BookingHoldSelect
+
+type HoldRouteRecord = Prisma.BookingHoldGetPayload<{
+  select: typeof HOLD_ROUTE_SELECT
+}>
 
 function isExpired(expiresAt: Date): boolean {
   return expiresAt.getTime() <= Date.now()
@@ -64,20 +68,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 
     const hold = await prisma.bookingHold.findUnique({
       where: { id: holdId },
-      select: {
-        id: true,
-        clientId: true,
-        professionalId: true,
-        offeringId: true,
-        scheduledFor: true,
-        expiresAt: true,
-        locationType: true,
-        locationId: true,
-        locationTimeZone: true,
-        locationAddressSnapshot: true,
-        locationLatSnapshot: true,
-        locationLngSnapshot: true,
-      },
+      select: HOLD_ROUTE_SELECT,
     })
 
     if (!hold) {
