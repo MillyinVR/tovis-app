@@ -841,6 +841,19 @@ export function useCalendarData({ view, currentDate }: Args) {
     return location ? locationTypeFromProfessionalType(location.type) : fallback
   }
 
+    function resolveActiveCalendarTimeZone(fallback?: string) {
+      const fallbackTz = sanitizeTimeZone(
+        fallback ?? timeZoneRef.current,
+        DEFAULT_TIME_ZONE,
+      )
+
+      if (activeLocation?.timeZone && isValidIanaTimeZone(activeLocation.timeZone)) {
+        return sanitizeTimeZone(activeLocation.timeZone, fallbackTz)
+      }
+
+      return fallbackTz
+    }
+
   function resolveBookingSchedulingContext(args: {
     locationId: string | null
     locationType: LocationType
@@ -1248,100 +1261,132 @@ export function useCalendarData({ view, currentDate }: Args) {
     return parseWorkingHoursJson(data.workingHours)
   }
 
-  async function loadCalendar() {
-    const seq = ++loadSeqRef.current
+    async function loadCalendar() {
+      const seq = ++loadSeqRef.current
 
-    try {
-      setLoading(true)
-      setError(null)
+      try {
+        setLoading(true)
+        setError(null)
 
-      const tzGuess = sanitizeTimeZone(timeZoneRef.current, DEFAULT_TIME_ZONE)
+        const requestedLocationId = activeLocationId?.trim() || null
+        const tzGuess = resolveActiveCalendarTimeZone()
 
-      async function fetchCalendarFor(tzForRange: string) {
-        const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, tzForRange)
-        const url = `/api/pro/calendar?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to))}`
+        async function fetchCalendarFor(tzForRange: string) {
+          const safeTz = sanitizeTimeZone(tzForRange, DEFAULT_TIME_ZONE)
+          const { from, to } = rangeForViewUtcInTimeZone(view, currentDate, safeTz)
 
-        const res = await fetch(url, { cache: 'no-store' })
-        const data: unknown = await safeJson(res)
-        return { res, data }
-      }
+          const qs = new URLSearchParams({
+            from: toIso(from),
+            to: toIso(to),
+          })
 
-      let { res, data } = await fetchCalendarFor(tzGuess)
-      if (seq !== loadSeqRef.current) return
+          if (requestedLocationId) {
+            qs.set('locationId', requestedLocationId)
+          }
 
-      if (!res.ok) {
-        setError(apiMessage(data, `Failed to load calendar (${res.status}).`))
-        return
-      }
-
-      const record = isRecord(data) ? data : null
-      const apiTzRaw = record ? pickString(record.timeZone) ?? '' : ''
-      const apiTzValid = isValidIanaTimeZone(apiTzRaw)
-      const nextTz = apiTzValid ? apiTzRaw : DEFAULT_TIME_ZONE
-
-      if (apiTzValid && nextTz !== tzGuess) {
-        const second = await fetchCalendarFor(nextTz)
-        if (seq !== loadSeqRef.current) return
-        if (second.res.ok) {
-          res = second.res
-          data = second.data
+          const res = await fetch(`/api/pro/calendar?${qs.toString()}`, {
+            cache: 'no-store',
+          })
+          const data: unknown = await safeJson(res)
+          return { res, data }
         }
+
+        let { res, data } = await fetchCalendarFor(tzGuess)
+        if (seq !== loadSeqRef.current) return
+
+        if (!res.ok) {
+          setError(apiMessage(data, `Failed to load calendar (${res.status}).`))
+          return
+        }
+
+        const firstRecord = isRecord(data) ? data : null
+        const apiLocation = firstRecord
+          ? parseCalendarRouteLocation(firstRecord.location)
+          : null
+
+        const apiTzRaw = firstRecord ? pickString(firstRecord.timeZone) ?? '' : ''
+        const apiTzValid = isValidIanaTimeZone(apiTzRaw)
+
+        const resolvedApiTz = apiTzValid
+          ? sanitizeTimeZone(apiTzRaw, DEFAULT_TIME_ZONE)
+          : DEFAULT_TIME_ZONE
+
+        const shouldRefetchForApiTz =
+          apiTzValid && resolvedApiTz !== sanitizeTimeZone(tzGuess, DEFAULT_TIME_ZONE)
+
+        if (shouldRefetchForApiTz) {
+          const second = await fetchCalendarFor(resolvedApiTz)
+          if (seq !== loadSeqRef.current) return
+
+          if (second.res.ok) {
+            res = second.res
+            data = second.data
+          }
+        }
+
+        const record = isRecord(data) ? data : null
+        const finalApiLocation = record
+          ? parseCalendarRouteLocation(record.location)
+          : null
+
+        if (finalApiLocation?.id && finalApiLocation.id !== activeLocationId) {
+          setActiveLocationId(finalApiLocation.id)
+        }
+
+        const finalApiTzRaw = record ? pickString(record.timeZone) ?? '' : ''
+        const finalApiTz = isValidIanaTimeZone(finalApiTzRaw)
+          ? sanitizeTimeZone(finalApiTzRaw, DEFAULT_TIME_ZONE)
+          : DEFAULT_TIME_ZONE
+
+        setTimeZone(finalApiTz)
+        setNeedsTimeZoneSetup(Boolean(record?.needsTimeZoneSetup))
+
+        const nextCanSalon = record ? Boolean(record.canSalon ?? true) : true
+        const nextCanMobile = record ? Boolean(record.canMobile ?? false) : false
+
+        setCanSalon(nextCanSalon)
+        setCanMobile(nextCanMobile)
+
+        setStats(record ? parseCalendarStats(record.stats) : null)
+        setAutoAccept(record ? Boolean(record.autoAcceptBookings) : false)
+
+        setManagement(
+          record
+            ? parseManagementLists(record.management)
+            : {
+                todaysBookings: [],
+                pendingRequests: [],
+                waitlistToday: [],
+                blockedToday: [],
+              },
+        )
+
+        const apiEvents = record ? parseCalendarEvents(record.events) : []
+
+        const [nextSalon, nextMobile] = await Promise.all([
+          loadWorkingHoursFor('SALON'),
+          loadWorkingHoursFor('MOBILE'),
+        ])
+
+        if (seq !== loadSeqRef.current) return
+
+        setWorkingHoursSalon(nextSalon)
+        setWorkingHoursMobile(nextMobile)
+
+        const nextEvents = [...apiEvents].sort(
+          (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+        )
+
+        setEvents(nextEvents)
+      } catch (e: unknown) {
+        console.error(e)
+        if (seq === loadSeqRef.current) {
+          setError('Network error loading calendar.')
+        }
+      } finally {
+        if (seq === loadSeqRef.current) setLoading(false)
       }
-
-      const record2 = isRecord(data) ? data : null
-      const apiLocation = record2 ? parseCalendarRouteLocation(record2.location) : null
-
-      if (!activeLocationId && apiLocation?.id) {
-        setActiveLocationId(apiLocation.id)
-      }
-
-      setTimeZone(nextTz)
-      setNeedsTimeZoneSetup(Boolean(record2?.needsTimeZoneSetup))
-
-      const nextCanSalon = record2 ? Boolean(record2.canSalon ?? true) : true
-      const nextCanMobile = record2 ? Boolean(record2.canMobile ?? false) : false
-
-      setCanSalon(nextCanSalon)
-      setCanMobile(nextCanMobile)
-
-      setStats(record2 ? parseCalendarStats(record2.stats) : null)
-      setAutoAccept(record2 ? Boolean(record2.autoAcceptBookings) : false)
-
-      setManagement(
-        record2
-          ? parseManagementLists(record2.management)
-          : {
-              todaysBookings: [],
-              pendingRequests: [],
-              waitlistToday: [],
-              blockedToday: [],
-            },
-      )
-
-      const apiEvents = record2 ? parseCalendarEvents(record2.events) : []
-
-      const [nextSalon, nextMobile] = await Promise.all([
-        loadWorkingHoursFor('SALON'),
-        loadWorkingHoursFor('MOBILE'),
-      ])
-
-      if (seq !== loadSeqRef.current) return
-
-      setWorkingHoursSalon(nextSalon)
-      setWorkingHoursMobile(nextMobile)
-
-      const nextEvents = [...apiEvents].sort(
-        (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
-      )
-
-      setEvents(nextEvents)
-    } catch (e: unknown) {
-      console.error(e)
-      if (seq === loadSeqRef.current) setError('Network error loading calendar.')
-    } finally {
-      if (seq === loadSeqRef.current) setLoading(false)
     }
-  }
 
   useEffect(() => {
     void loadLocationsOnce()
@@ -1353,9 +1398,10 @@ export function useCalendarData({ view, currentDate }: Args) {
   }, [activeLocationType])
 
   useEffect(() => {
+    if (!locationsLoaded && activeLocationId == null) return
     void loadCalendar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, currentDate])
+  }, [view, currentDate, activeLocationId, locationsLoaded])
 
   useEffect(() => {
     if (!locationsLoaded) return
@@ -1439,47 +1485,47 @@ export function useCalendarData({ view, currentDate }: Args) {
     return { id: '', startsAt: startsAtIso, endsAt: endsAtIso, note: note ?? null }
   }
 
-  async function oneClickBlockFullDay(day: Date) {
-    try {
-      if (!activeLocationId) throw new Error('Select a location first.')
+    async function oneClickBlockFullDay(day: Date) {
+      try {
+        if (!activeLocationId) throw new Error('Select a location first.')
 
-      setLoading(true)
-      setError(null)
+        setLoading(true)
+        setError(null)
 
-      const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-      const startUtc = startOfDayUtcInTimeZone(day, tz)
-      const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
+        const tz = resolveActiveCalendarTimeZone()
+        const startUtc = startOfDayUtcInTimeZone(day, tz)
+        const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
 
-      await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
-      await loadCalendar()
-      forceProFooterRefresh()
-    } catch (e: unknown) {
-      console.error(e)
-      setError(errorMessageFromUnknown(e))
-      setTimeout(() => setError(null), 3500)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function openCreateBlockNow() {
-    if (!activeLocationId) {
-      setError('Select a location first.')
-      setTimeout(() => setError(null), 3000)
-      return
+        await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
+        await loadCalendar()
+        forceProFooterRefresh()
+      } catch (e: unknown) {
+        console.error(e)
+        setError(errorMessageFromUnknown(e))
+        window.setTimeout(() => setError(null), 3500)
+      } finally {
+        setLoading(false)
+      }
     }
 
-    const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-    const nowUtc = new Date()
-    const p = getZonedParts(nowUtc, tz)
-    const minutesNow = p.hour * 60 + p.minute
-    const roundedUp = Math.ceil(minutesNow / activeStepMinutes) * activeStepMinutes
-    const rounded = snapMinutes(roundedUp, activeStepMinutes)
-    const startUtc = utcFromDayAndMinutesInTimeZone(nowUtc, rounded, tz)
+    function openCreateBlockNow() {
+      if (!activeLocationId) {
+        setError('Select a location first.')
+        window.setTimeout(() => setError(null), 3000)
+        return
+      }
 
-    setBlockCreateInitialStart(startUtc)
-    setBlockCreateOpen(true)
-  }
+      const tz = resolveActiveCalendarTimeZone()
+      const nowUtc = new Date()
+      const p = getZonedParts(nowUtc, tz)
+      const minutesNow = p.hour * 60 + p.minute
+      const roundedUp = Math.ceil(minutesNow / activeStepMinutes) * activeStepMinutes
+      const rounded = snapMinutes(roundedUp, activeStepMinutes)
+      const startUtc = utcFromDayAndMinutesInTimeZone(nowUtc, rounded, tz)
+
+      setBlockCreateInitialStart(startUtc)
+      setBlockCreateOpen(true)
+    }
 
   function openEditBlockFromEvent(ev: CalendarEvent) {
     if (ev.locationId) {
@@ -1536,7 +1582,7 @@ export function useCalendarData({ view, currentDate }: Args) {
     } catch (e: unknown) {
       console.error(e)
       setManagementActionError(errorMessageFromUnknown(e))
-      setTimeout(() => setManagementActionError(null), 3500)
+      window.setTimeout(() => setManagementActionError(null), 3500)
     } finally {
       setManagementActionBusyId(null)
     }
@@ -1870,7 +1916,7 @@ export function useCalendarData({ view, currentDate }: Args) {
       setConfirmOpen(false)
       setPendingChange(null)
       setError(errorMessageFromUnknown(e))
-      setTimeout(() => setError(null), 3500)
+      window.setTimeout(() => setError(null), 3500)
     } finally {
       setApplyingChange(false)
     }
@@ -1994,17 +2040,14 @@ export function useCalendarData({ view, currentDate }: Args) {
     if (blockCreateOpen || editBlockOpen) return
     if (!activeLocationId) {
       setError('Select a location first.')
-      setTimeout(() => setError(null), 3000)
+      window.setTimeout(() => setError(null), 3000)
       return
     }
 
     const y = clientY - columnTop
     const mins = snapMinutes(y / PX_PER_MINUTE, activeStepMinutes)
 
-    const tz =
-      activeLocation?.timeZone && isValidIanaTimeZone(activeLocation.timeZone)
-        ? sanitizeTimeZone(activeLocation.timeZone, timeZone)
-        : sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+    const tz = resolveActiveCalendarTimeZone()
 
     const startUtc = utcFromDayAndMinutesInTimeZone(day, mins, tz)
     const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, tz)

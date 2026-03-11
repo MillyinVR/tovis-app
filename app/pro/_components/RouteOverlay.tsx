@@ -33,7 +33,7 @@ export default function RouteOverlay(props: {
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
-    setTimeout(() => panelRef.current?.focus(), 0)
+    window.setTimeout(() => panelRef.current?.focus(), 0)
 
     return () => {
       window.removeEventListener('keydown', onKey)

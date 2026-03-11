@@ -156,7 +156,7 @@ describe('resolveBookingLocationContext', () => {
     expect(result.context.locationId).toBe('loc_fallback')
   })
 
-  it('defaults allowFallback to true when omitted', async () => {
+  it('forces allowFallback to false when requestedLocationId is present and allowFallback is omitted', async () => {
     pickBookableLocationMock.mockResolvedValue(
       makeLocation({
         id: 'loc_best',

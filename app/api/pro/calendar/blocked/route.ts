@@ -2,6 +2,10 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { logBookingConflict } from '@/lib/booking/conflictLogging'
+import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import {
   buildBlockConflictWhere,
   clampRange,
@@ -13,6 +17,10 @@ import {
 } from './_shared'
 
 export const dynamic = 'force-dynamic'
+
+function normalizeLocationBufferMinutes(value: unknown): number {
+  return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
+}
 
 export async function GET(req: Request) {
   try {
@@ -97,22 +105,27 @@ export async function POST(req: Request) {
     }
 
     const locationId = locationIdInput.value
-
-    if (locationId) {
-      const location = await prisma.professionalLocation.findFirst({
-        where: {
-          id: locationId,
-          professionalId,
-        },
-        select: { id: true },
-      })
-
-      if (!location) {
-        return jsonFail(404, 'Location not found.')
-      }
+    if (!locationId) {
+      return jsonFail(400, 'Blocked time requires a locationId.')
     }
 
-    const conflict = await prisma.calendarBlock.findFirst({
+    const location = await prisma.professionalLocation.findFirst({
+      where: {
+        id: locationId,
+        professionalId,
+        isBookable: true,
+      },
+      select: {
+        id: true,
+        bufferMinutes: true,
+      },
+    })
+
+    if (!location) {
+      return jsonFail(404, 'Location not found.')
+    }
+
+    const blockConflict = await prisma.calendarBlock.findFirst({
       where: buildBlockConflictWhere({
         professionalId,
         startsAt,
@@ -122,7 +135,64 @@ export async function POST(req: Request) {
       select: { id: true },
     })
 
-    if (conflict) {
+    if (blockConflict) {
+      logBookingConflict({
+        action: 'BLOCK_CREATE',
+        professionalId,
+        locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'BLOCKED',
+        blockId: blockConflict.id,
+      })
+
+      return jsonFail(409, 'That time overlaps an existing block.')
+    }
+
+    const timeRangeConflict = await getTimeRangeConflict({
+      professionalId,
+      locationId,
+      requestedStart: startsAt,
+      requestedEnd: endsAt,
+      defaultBufferMinutes: normalizeLocationBufferMinutes(location.bufferMinutes),
+    })
+
+    if (timeRangeConflict === 'BOOKING') {
+      logBookingConflict({
+        action: 'BLOCK_CREATE',
+        professionalId,
+        locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'BOOKING',
+      })
+
+      return jsonFail(409, 'That time overlaps an existing booking.')
+    }
+
+    if (timeRangeConflict === 'HOLD') {
+      logBookingConflict({
+        action: 'BLOCK_CREATE',
+        professionalId,
+        locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'HOLD',
+      })
+
+      return jsonFail(409, 'That time is temporarily held for booking.')
+    }
+
+    if (timeRangeConflict === 'BLOCKED') {
+      logBookingConflict({
+        action: 'BLOCK_CREATE',
+        professionalId,
+        locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'BLOCKED',
+      })
+
       return jsonFail(409, 'That time overlaps an existing block.')
     }
 

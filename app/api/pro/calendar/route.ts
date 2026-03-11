@@ -83,7 +83,7 @@ function hoursRounded(minutes: number): number {
 }
 
 function toDateOrNull(value: unknown): Date | null {
-  const raw = typeof value === "string" ? value.trim() : ''
+  const raw = typeof value === 'string' ? value.trim() : ''
   if (!raw) return null
 
   const parsed = new Date(raw)
@@ -242,24 +242,29 @@ export async function GET(req: Request) {
     const defaultToExclusive = addDaysUtc(defaultFrom, 90)
 
     const from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
-    const toExclusive = toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
+    const requestedToExclusive =
+      toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
+
+    if (requestedToExclusive.getTime() <= from.getTime()) {
+      return jsonFail(400, '`to` must be after `from`.')
+    }
 
     const maxSpanDays = 370
-    const spanDays = Math.ceil(
-      (toExclusive.getTime() - from.getTime()) / (24 * 60 * 60_000),
+    const maxToExclusive = new Date(
+      from.getTime() + maxSpanDays * 24 * 60 * 60_000,
     )
 
-    const safeToExclusive =
-      spanDays > maxSpanDays
-        ? new Date(from.getTime() + maxSpanDays * 24 * 60 * 60_000)
-        : toExclusive
+    const effectiveToExclusive =
+      requestedToExclusive.getTime() > maxToExclusive.getTime()
+        ? maxToExclusive
+        : requestedToExclusive
 
     // All bookings for the pro stay visible in the pro calendar,
     // regardless of location/mode, so cross-location occupancy is obvious.
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        scheduledFor: { gte: from, lt: safeToExclusive },
+        scheduledFor: { gte: from, lt: effectiveToExclusive },
         NOT: { status: 'CANCELLED' },
       },
       select: {
@@ -299,7 +304,7 @@ export async function GET(req: Request) {
     const blocks = await prisma.calendarBlock.findMany({
       where: {
         professionalId,
-        startsAt: { lt: safeToExclusive },
+        startsAt: { lt: effectiveToExclusive },
         endsAt: { gt: from },
         OR: [{ locationId: selectedLocation.id }, { locationId: null }],
       },
@@ -314,7 +319,9 @@ export async function GET(req: Request) {
       take: 1200,
     })
 
-    const bookingEvents: BookingEvent[] = bookings.map((booking) => {
+    const bookingEvents: BookingEvent[] = bookings.flatMap((booking) => {
+      if (!booking.locationId) return []
+
       const start = new Date(booking.scheduledFor)
       const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
       const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
@@ -352,23 +359,25 @@ export async function GET(req: Request) {
         sortOrder: Number(item.sortOrder ?? 0),
       }))
 
-      return {
-        id: String(booking.id),
-        kind: 'BOOKING',
-        startsAt: start.toISOString(),
-        endsAt: end.toISOString(),
-        title: serviceName,
-        clientName,
-        status: normalizeBookingStatus(booking.status),
-        locationType: normalizeServiceLocationType(booking.locationType),
-        locationId: String(booking.locationId ?? ''),
-        durationMinutes,
-        details: {
-          serviceName,
-          bufferMinutes,
-          serviceItems,
+      return [
+        {
+          id: String(booking.id),
+          kind: 'BOOKING' as const,
+          startsAt: start.toISOString(),
+          endsAt: end.toISOString(),
+          title: serviceName,
+          clientName,
+          status: normalizeBookingStatus(booking.status),
+          locationType: normalizeServiceLocationType(booking.locationType),
+          locationId: booking.locationId,
+          durationMinutes,
+          details: {
+            serviceName,
+            bufferMinutes,
+            serviceItems,
+          },
         },
-      }
+      ]
     })
 
     const blockEvents: BlockEvent[] = blocks.map((block) => {
@@ -428,7 +437,7 @@ export async function GET(req: Request) {
 
     const blockedTodayEvents = blockEvents.filter((event) => isToday(event.startsAt))
     const blockedMinutesToday = blockedTodayEvents.reduce(
-      (sum, event) => sum + (event.durationMinutes || 0),
+      (sum, event) => sum + event.durationMinutes,
       0,
     )
 
@@ -447,16 +456,13 @@ export async function GET(req: Request) {
           timeZone: locationTimeZoneRaw || null,
           timeZoneValid: selectedLocationTimeZoneValid,
         },
-
         timeZone: calendarTimeZone,
         needsTimeZoneSetup,
-
         events,
         canSalon,
         canMobile,
         stats,
         autoAcceptBookings: Boolean(proProfile.autoAcceptBookings),
-
         management: {
           todaysBookings: todaysBookingsEvents,
           pendingRequests: pendingRequestEvents,

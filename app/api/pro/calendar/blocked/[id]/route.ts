@@ -2,6 +2,10 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
+import { hasBookingConflict, hasHoldConflict } from '@/lib/booking/conflictQueries'
+import { logBookingConflict } from '@/lib/booking/conflictLogging'
+import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import {
   buildBlockConflictWhere,
   parseNoteInput,
@@ -13,6 +17,10 @@ import {
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
+
+function normalizeLocationBufferMinutes(value: unknown): number {
+  return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
+}
 
 async function getBlockId(ctx: Ctx): Promise<string | null> {
   const params = await Promise.resolve(ctx.params)
@@ -81,6 +89,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(404, 'Not found.')
     }
 
+    if (!existing.locationId) {
+      return jsonFail(400, 'This block is missing a location and cannot be edited.')
+    }
+
     const hasStartsAt = Object.prototype.hasOwnProperty.call(body, 'startsAt')
     const hasEndsAt = Object.prototype.hasOwnProperty.call(body, 'endsAt')
 
@@ -112,19 +124,91 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, windowError)
     }
 
-    const conflict = await prisma.calendarBlock.findFirst({
+    const location = await prisma.professionalLocation.findFirst({
+      where: {
+        id: existing.locationId,
+        professionalId,
+        isBookable: true,
+      },
+      select: {
+        id: true,
+        bufferMinutes: true,
+      },
+    })
+
+    if (!location) {
+      return jsonFail(404, 'Location not found.')
+    }
+
+    const blockConflict = await prisma.calendarBlock.findFirst({
       where: buildBlockConflictWhere({
         professionalId,
         startsAt,
         endsAt,
-        locationId: existing.locationId ?? null,
+        locationId: existing.locationId,
         excludeBlockId: existing.id,
       }),
       select: { id: true },
     })
 
-    if (conflict) {
+    if (blockConflict) {
+      logBookingConflict({
+        action: 'BLOCK_UPDATE',
+        professionalId,
+        locationId: existing.locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'BLOCKED',
+        blockId: existing.id,
+        meta: {
+          conflictingBlockId: blockConflict.id,
+        },
+      })
+
       return jsonFail(409, 'That time overlaps an existing block.')
+    }
+
+    const defaultBufferMinutes = normalizeLocationBufferMinutes(location.bufferMinutes)
+
+    const bookingConflict = await hasBookingConflict({
+      professionalId,
+      requestedStart: startsAt,
+      requestedEnd: endsAt,
+    })
+
+    if (bookingConflict) {
+      logBookingConflict({
+        action: 'BLOCK_UPDATE',
+        professionalId,
+        locationId: existing.locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'BOOKING',
+        blockId: existing.id,
+      })
+
+      return jsonFail(409, 'That time overlaps an existing booking.')
+    }
+
+    const holdConflict = await hasHoldConflict({
+      professionalId,
+      requestedStart: startsAt,
+      requestedEnd: endsAt,
+      defaultBufferMinutes,
+    })
+
+    if (holdConflict) {
+      logBookingConflict({
+        action: 'BLOCK_UPDATE',
+        professionalId,
+        locationId: existing.locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'HOLD',
+        blockId: existing.id,
+      })
+
+      return jsonFail(409, 'That time is temporarily held for booking.')
     }
 
     const updated = await prisma.calendarBlock.update({

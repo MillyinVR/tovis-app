@@ -437,7 +437,7 @@ export default function SearchClient() {
       return
     }
 
-    const handle = setTimeout(async () => {
+    const handle = window.setTimeout(async () => {
       try {
         setLoading(true)
         setErr(null)
