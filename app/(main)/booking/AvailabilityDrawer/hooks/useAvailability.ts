@@ -23,6 +23,7 @@ type CacheEntry = {
 }
 
 const CACHE_TTL_MS = 45_000
+const MAX_CACHE_ENTRIES = 100
 
 const summaryCache = new Map<string, CacheEntry>()
 const inFlightByKey = new Map<string, Promise<AvailabilitySummaryResponse>>()
@@ -63,10 +64,36 @@ function buildQueryKey(args: {
     .join('|')
 }
 
+function isFresh(entry: CacheEntry): boolean {
+  return Date.now() - entry.at < CACHE_TTL_MS
+}
+
+function pruneCache() {
+  const now = Date.now()
+
+  for (const [key, entry] of summaryCache.entries()) {
+    if (now - entry.at >= CACHE_TTL_MS) {
+      summaryCache.delete(key)
+    }
+  }
+
+  if (summaryCache.size <= MAX_CACHE_ENTRIES) return
+
+  const sorted = Array.from(summaryCache.entries()).sort(
+    (a, b) => a[1].at - b[1].at,
+  )
+
+  const overflow = summaryCache.size - MAX_CACHE_ENTRIES
+  for (let i = 0; i < overflow; i += 1) {
+    const row = sorted[i]
+    if (row) summaryCache.delete(row[0])
+  }
+}
+
 function getFreshCache(key: string): AvailabilitySummaryResponse | null {
   const hit = summaryCache.get(key)
   if (!hit) return null
-  if (Date.now() - hit.at >= CACHE_TTL_MS) return null
+  if (!isFresh(hit)) return null
   return hit.data
 }
 
@@ -82,8 +109,6 @@ export function useAvailability(
   clientAddressId?: string | null,
 ) {
   const router = useRouter()
-
-  const abortRef = useRef<AbortController | null>(null)
   const requestSeqRef = useRef(0)
 
   const [loading, setLoading] = useState(false)
@@ -172,22 +197,9 @@ export function useAvailability(
     ],
   )
 
-  const clearInFlight = useCallback(() => {
-    abortRef.current?.abort()
-    abortRef.current = null
-  }, [])
-
-  useEffect(() => {
-    return clearInFlight
-  }, [clearInFlight])
-
   const fetchAvailability = useCallback(
     async (key: string, keepExistingData: boolean) => {
       const seq = ++requestSeqRef.current
-
-      clearInFlight()
-      const controller = new AbortController()
-      abortRef.current = controller
 
       if (keepExistingData) {
         setRefreshing(true)
@@ -197,118 +209,96 @@ export function useAvailability(
 
       setError(null)
 
-      const existingPromise = inFlightByKey.get(key)
-      if (existingPromise) {
-        try {
-          const parsed = await existingPromise
-          if (seq !== requestSeqRef.current) return
-          setData(parsed)
-        } catch (e: unknown) {
-          if (seq !== requestSeqRef.current) return
-          setError(
-            e instanceof Error ? e.message : 'Failed to load availability.',
-          )
-        } finally {
-          if (abortRef.current === controller) {
-            abortRef.current = null
+      let promise = inFlightByKey.get(key)
+
+      if (!promise) {
+        const qs = new URLSearchParams()
+        qs.set('professionalId', proId)
+        qs.set('serviceId', serviceId)
+
+        if (locationType) {
+          qs.set('locationType', locationType)
+        }
+
+        if (mediaId) {
+          qs.set('mediaId', mediaId)
+        }
+
+        if (requiresClientAddress && normalizedClientAddressId) {
+          qs.set('clientAddressId', normalizedClientAddressId)
+        }
+
+        if (viewer) {
+          qs.set('viewerLat', String(viewer.lat))
+          qs.set('viewerLng', String(viewer.lng))
+
+          if (viewer.radiusMiles != null) {
+            qs.set('radiusMiles', String(viewer.radiusMiles))
           }
-          if (seq === requestSeqRef.current) {
-            setLoading(false)
-            setRefreshing(false)
+
+          if (viewer.placeId) {
+            qs.set('viewerPlaceId', viewer.placeId)
           }
         }
-        return
+
+        promise = (async (): Promise<AvailabilitySummaryResponse> => {
+          const res = await fetch(`/api/availability/day?${qs.toString()}`, {
+            method: 'GET',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          })
+
+          const raw = await safeJson(res)
+
+          if (res.status === 401) {
+            redirectToLogin(router, 'availability')
+            throw new Error('Please log in to view availability.')
+          }
+
+          if (!res.ok) {
+            throw new Error(
+              pickApiError(raw) ?? `Request failed (${res.status}).`,
+            )
+          }
+
+          const parsed = parseAvailabilitySummaryResponse(raw)
+          if (!parsed) {
+            throw new Error('Availability endpoint returned unexpected response.')
+          }
+
+          if (!parsed.ok) {
+            throw new Error(parsed.error)
+          }
+
+          if (parsed.mode !== 'SUMMARY') {
+            throw new Error('Availability endpoint returned unexpected response.')
+          }
+
+          pruneCache()
+          summaryCache.set(key, {
+            at: Date.now(),
+            data: parsed,
+          })
+
+          return parsed
+        })()
+
+        inFlightByKey.set(key, promise)
       }
-
-      const qs = new URLSearchParams()
-      qs.set('professionalId', proId)
-      qs.set('serviceId', serviceId)
-
-      if (locationType) {
-        qs.set('locationType', locationType)
-      }
-
-      if (mediaId) {
-        qs.set('mediaId', mediaId)
-      }
-
-      if (requiresClientAddress && normalizedClientAddressId) {
-        qs.set('clientAddressId', normalizedClientAddressId)
-      }
-
-      if (viewer) {
-        qs.set('viewerLat', String(viewer.lat))
-        qs.set('viewerLng', String(viewer.lng))
-
-        if (viewer.radiusMiles != null) {
-          qs.set('radiusMiles', String(viewer.radiusMiles))
-        }
-
-        if (viewer.placeId) {
-          qs.set('viewerPlaceId', viewer.placeId)
-        }
-      }
-
-      const promise = (async (): Promise<AvailabilitySummaryResponse> => {
-        const res = await fetch(`/api/availability/day?${qs.toString()}`, {
-          method: 'GET',
-          cache: 'no-store',
-          signal: controller.signal,
-          headers: { Accept: 'application/json' },
-        })
-
-        const raw = await safeJson(res)
-
-        if (res.status === 401) {
-          redirectToLogin(router, 'availability')
-          throw new Error('Please log in to view availability.')
-        }
-
-        if (!res.ok) {
-          throw new Error(
-            pickApiError(raw) ?? `Request failed (${res.status}).`,
-          )
-        }
-
-        const parsed = parseAvailabilitySummaryResponse(raw)
-        if (!parsed) {
-          throw new Error('Availability endpoint returned unexpected response.')
-        }
-
-        if (!parsed.ok) {
-          throw new Error(parsed.error)
-        }
-
-        if (parsed.mode !== 'SUMMARY') {
-          throw new Error('Availability endpoint returned unexpected response.')
-        }
-
-        summaryCache.set(key, {
-          at: Date.now(),
-          data: parsed,
-        })
-
-        return parsed
-      })()
-
-      inFlightByKey.set(key, promise)
 
       try {
         const parsed = await promise
         if (seq !== requestSeqRef.current) return
         setData(parsed)
       } catch (e: unknown) {
-        if (e instanceof Error && e.name === 'AbortError') return
         if (seq !== requestSeqRef.current) return
-
         setError(
           e instanceof Error ? e.message : 'Failed to load availability.',
         )
       } finally {
-        inFlightByKey.delete(key)
-
-        if (abortRef.current === controller) {
-          abortRef.current = null
+        const currentPromise = inFlightByKey.get(key)
+        if (currentPromise === promise) {
+          inFlightByKey.delete(key)
         }
 
         if (seq === requestSeqRef.current) {
@@ -318,7 +308,6 @@ export function useAvailability(
       }
     },
     [
-      clearInFlight,
       router,
       proId,
       serviceId,
@@ -331,8 +320,13 @@ export function useAvailability(
   )
 
   useEffect(() => {
+    return () => {
+      requestSeqRef.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
     if (!open) {
-      clearInFlight()
       setLoading(false)
       setRefreshing(false)
       setError(null)
@@ -340,7 +334,6 @@ export function useAvailability(
     }
 
     if (!proId) {
-      clearInFlight()
       setLoading(false)
       setRefreshing(false)
       setData(null)
@@ -349,7 +342,6 @@ export function useAvailability(
     }
 
     if (!serviceId) {
-      clearInFlight()
       setLoading(false)
       setRefreshing(false)
       setData(null)
@@ -360,7 +352,6 @@ export function useAvailability(
     }
 
     if (!canFetch) {
-      clearInFlight()
       setLoading(false)
       setRefreshing(false)
       setData(null)
@@ -394,7 +385,6 @@ export function useAvailability(
     canFetch,
     queryKey,
     fetchAvailability,
-    clearInFlight,
   ])
 
   return {

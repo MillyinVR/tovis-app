@@ -868,83 +868,88 @@ export default function AvailabilityDrawer(props: {
   )
 
   useEffect(() => {
-    if (!open) return
-    if (!summary) return
-    if (!selectedDayYMD) return
+  if (!open) return
+  if (!summary) return
+  if (!selectedDayYMD) return
 
-    const currentSummary = summary
-    const currentDayYMD = selectedDayYMD
-    const currentOthers = others
-    const primaryId = currentSummary.primaryPro.id
-    const primaryLocationId = currentSummary.locationId
+  const currentSummary = summary
+  const currentDayYMD = selectedDayYMD
+  const currentOthers = others
+  const primaryId = currentSummary.primaryPro.id
+  const primaryLocationId = currentSummary.locationId
 
-    let cancelled = false
+  let cancelled = false
 
-    async function loadSlotsForSelectedDay() {
-      try {
-        if (!holding) {
-          setError(null)
-        }
+  async function loadSlotsForSelectedDay() {
+    try {
+      if (!holding) {
+        setError(null)
+      }
 
-        setLoadingPrimarySlots(true)
-        setLoadingOtherSlots(true)
+      setLoadingPrimarySlots(true)
+      setLoadingOtherSlots(true)
+      setOtherSlots({})
 
-        const primaryDaySlots = await fetchDaySlots({
-          proId: primaryId,
+      const primaryDaySlots = await fetchDaySlots({
+        proId: primaryId,
+        ymd: currentDayYMD,
+        locationType: activeLocationType,
+        locationId: primaryLocationId,
+        isPrimary: true,
+      })
+
+      if (cancelled) return
+
+      setPrimarySlots(primaryDaySlots)
+      setLoadingPrimarySlots(false)
+
+      const nextOtherSlots: Record<string, string[]> = {}
+
+      for (const pro of currentOthers) {
+        const slots = await fetchDaySlots({
+          proId: pro.id,
           ymd: currentDayYMD,
           locationType: activeLocationType,
-          locationId: primaryLocationId,
-          isPrimary: true,
+          locationId: pro.locationId,
+          isPrimary: false,
         })
 
         if (cancelled) return
+        nextOtherSlots[pro.id] = slots
+      }
 
-        setPrimarySlots(primaryDaySlots)
-        setLoadingPrimarySlots(false)
+      if (cancelled) return
 
-        const nextOtherSlots: Record<string, string[]> = {}
+      setOtherSlots(nextOtherSlots)
+    } catch {
+      if (cancelled) return
 
-        for (const pro of currentOthers) {
-          const slots = await fetchDaySlots({
-            proId: pro.id,
-            ymd: currentDayYMD,
-            locationType: activeLocationType,
-            locationId: pro.locationId,
-            isPrimary: false,
-          })
-
-          if (cancelled) return
-          nextOtherSlots[pro.id] = slots
-        }
-
-        if (cancelled) return
-
-        setOtherSlots(nextOtherSlots)
-        setLoadingOtherSlots(false)
-      } catch {
-        if (cancelled) return
-
+      setPrimarySlots([])
+      setOtherSlots({})
+      setError('Network error loading times.')
+    } finally {
+      if (!cancelled) {
         setLoadingPrimarySlots(false)
         setLoadingOtherSlots(false)
-        setError('Network error loading times.')
       }
     }
+  }
 
-    void loadSlotsForSelectedDay()
+  void loadSlotsForSelectedDay()
 
-    return () => {
-      cancelled = true
-    }
-  }, [
-    open,
-    summary,
-    selectedDayYMD,
-    activeLocationType,
-    fetchDaySlots,
-    holding,
-    setError,
-    others,
-  ])
+  return () => {
+    cancelled = true
+  }
+}, [
+  open,
+  summary,
+  selectedDayYMD,
+  activeLocationType,
+  fetchDaySlots,
+  holding,
+  setError,
+  others,
+])
 
   useEffect(() => {
     if (!open) return
