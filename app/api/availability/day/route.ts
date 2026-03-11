@@ -44,9 +44,13 @@ import {
 export const dynamic = 'force-dynamic'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
-const TTL_DAY_SECONDS = 60
-const TTL_SUMMARY_SECONDS = 30
-const TTL_BUSY_SECONDS = 45
+
+// Short-lived browsing cache.
+// Final booking correctness is still enforced by holds/conflict checks.
+const TTL_DAY_SECONDS = 90
+const TTL_SUMMARY_SECONDS = 60
+const TTL_BUSY_SECONDS = 60
+const TTL_OTHER_PROS_SECONDS = 120
 
 const LOCATION_SELECT = {
   id: true,
@@ -562,7 +566,7 @@ async function loadBusyIntervals(args: {
   }
 
   const key = [
-    'avail:busy:v4',
+    'avail:busy:v5',
     args.professionalId,
     args.locationId,
     args.windowStartUtc.toISOString(),
@@ -1015,6 +1019,95 @@ async function loadOtherProsNearby(args: {
   return out.slice(0, Math.max(0, limit))
 }
 
+async function loadOtherProsNearbyCached(args: {
+  centerLat: number
+  centerLng: number
+  radiusMiles: number
+  serviceId: string
+  locationType: ServiceLocationType
+  excludeProfessionalId: string
+  limit: number
+  cacheEnabled: boolean
+}): Promise<OtherProRow[]> {
+  if (!args.cacheEnabled || !redis) {
+    return loadOtherProsNearby({
+      centerLat: args.centerLat,
+      centerLng: args.centerLng,
+      radiusMiles: args.radiusMiles,
+      serviceId: args.serviceId,
+      locationType: args.locationType,
+      excludeProfessionalId: args.excludeProfessionalId,
+      limit: args.limit,
+    })
+  }
+
+  const key = [
+    'avail:otherPros:v1',
+    args.serviceId,
+    args.locationType,
+    args.excludeProfessionalId,
+    String(Math.round(args.centerLat * 1000) / 1000),
+    String(Math.round(args.centerLng * 1000) / 1000),
+    String(Math.round(args.radiusMiles * 10) / 10),
+    String(args.limit),
+  ].join(':')
+
+  const hit = await cacheGetJson<unknown>(key)
+  if (Array.isArray(hit)) {
+    const parsed: OtherProRow[] = []
+
+    for (const row of hit) {
+      if (!isRecord(row)) continue
+
+      const id = pickString(row.id)
+      const offeringId = pickString(row.offeringId)
+      const timeZone = pickString(row.timeZone)
+      const locationId = pickString(row.locationId)
+      const distanceMilesRaw =
+        typeof row.distanceMiles === 'number' ? row.distanceMiles : Number.NaN
+
+      if (
+        !id ||
+        !offeringId ||
+        !timeZone ||
+        !locationId ||
+        !Number.isFinite(distanceMilesRaw)
+      ) {
+        continue
+      }
+
+      parsed.push({
+        id,
+        businessName: pickString(row.businessName) ?? null,
+        avatarUrl: pickString(row.avatarUrl) ?? null,
+        location: pickString(row.location) ?? null,
+        offeringId,
+        timeZone,
+        locationId,
+        distanceMiles: distanceMilesRaw,
+      })
+    }
+
+    if (parsed.length > 0) {
+      return parsed
+    }
+  }
+
+  const fresh = await loadOtherProsNearby({
+    centerLat: args.centerLat,
+    centerLng: args.centerLng,
+    radiusMiles: args.radiusMiles,
+    serviceId: args.serviceId,
+    locationType: args.locationType,
+    excludeProfessionalId: args.excludeProfessionalId,
+    limit: args.limit,
+  })
+
+  void cacheSetJson(key, fresh, TTL_OTHER_PROS_SECONDS)
+
+  return fresh
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
@@ -1279,31 +1372,40 @@ export async function GET(req: Request) {
         cache: { enabled: !debug },
       })
 
+      const dayResults = await Promise.all(
+        ymds.map(async (ymd) => {
+          const result = await computeDaySlotsFast({
+            dateYMD: ymd,
+            durationMinutes,
+            stepMinutes,
+            timeZone,
+            workingHours,
+            leadTimeMinutes,
+            locationBufferMinutes,
+            busy,
+            debug: false,
+          })
+
+          return {
+            ymd,
+            result,
+          }
+        }),
+      )
+
       const availableDays: Array<{ date: string; slotCount: number }> = []
       let firstError: string | null = null
 
-      for (const ymd of ymds) {
-        const result = await computeDaySlotsFast({
-          dateYMD: ymd,
-          durationMinutes,
-          stepMinutes,
-          timeZone,
-          workingHours,
-          leadTimeMinutes,
-          locationBufferMinutes,
-          busy,
-          debug: false,
-        })
-
-        if (!result.ok) {
-          firstError = firstError ?? result.error
+      for (const row of dayResults) {
+        if (!row.result.ok) {
+          firstError = firstError ?? row.result.error
           continue
         }
 
-        if (result.slots.length) {
+        if (row.result.slots.length > 0) {
           availableDays.push({
-            date: ymdToString(ymd),
-            slotCount: result.slots.length,
+            date: ymdToString(row.ymd),
+            slotCount: row.result.slots.length,
           })
         }
       }
@@ -1318,7 +1420,7 @@ export async function GET(req: Request) {
 
       const otherPros =
         centerLat != null && centerLng != null
-          ? await loadOtherProsNearby({
+          ? await loadOtherProsNearbyCached({
               centerLat,
               centerLng,
               radiusMiles,
@@ -1326,6 +1428,7 @@ export async function GET(req: Request) {
               locationType: effectiveLocationType,
               excludeProfessionalId: professionalId,
               limit: 6,
+              cacheEnabled: !debug,
             })
           : []
 
