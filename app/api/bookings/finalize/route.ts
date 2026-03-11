@@ -19,7 +19,8 @@ import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import { assertTimeRangeAvailable } from '@/lib/booking/conflictQueries'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import {
   normalizeLocationType,
   resolveValidatedBookingContext,
@@ -57,6 +58,21 @@ type TxnErrorCode =
   | 'TIME_NOT_AVAILABLE'
   | 'TOO_FAR'
   | 'COORDINATES_REQUIRED'
+
+type FinalizeRouteErrorCode =
+  | TxnErrorCode
+  | 'MISSING_LOCATION_TYPE'
+  | 'MISSING_OFFERING'
+  | 'HOLD_MISSING'
+  | 'MISSING_MEDIA_ID'
+  | 'AFTERCARE_TOKEN_MISSING'
+  | 'AFTERCARE_TOKEN_INVALID'
+  | 'AFTERCARE_NOT_COMPLETED'
+  | 'AFTERCARE_CLIENT_MISMATCH'
+  | 'AFTERCARE_OFFERING_MISMATCH'
+  | 'STEP'
+  | 'OUTSIDE_WORKING_HOURS'
+  | 'INTERNAL'
 
 function throwCode(code: TxnErrorCode): never {
   throw new Error(code)
@@ -109,9 +125,7 @@ function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      item === null ? null : toInputJsonValue(item),
-    )
+    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
   }
 
   if (value === null || typeof value !== 'object') {
@@ -122,7 +136,6 @@ function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
 
   for (const key of Object.keys(value)) {
     const child = value[key]
-
     if (child === undefined) continue
     out[key] = child === null ? null : toInputJsonValue(child)
   }
@@ -192,25 +205,25 @@ export async function POST(request: Request) {
     const addOnIds = pickStringArray(body.addOnIds)
     if (hasDuplicates(addOnIds)) {
       return jsonFail(400, 'One or more add-ons are invalid for this booking.', {
-        code: 'ADDONS_INVALID',
+        code: 'ADDONS_INVALID' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (!locationType) {
       return jsonFail(400, 'Missing locationType.', {
-        code: 'MISSING_LOCATION_TYPE',
+        code: 'MISSING_LOCATION_TYPE' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (!offeringId) {
       return jsonFail(400, 'Missing offeringId.', {
-        code: 'MISSING_OFFERING',
+        code: 'MISSING_OFFERING' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (!holdId) {
       return jsonFail(409, 'Missing hold. Please pick a slot again.', {
-        code: 'HOLD_MISSING',
+        code: 'HOLD_MISSING' satisfies FinalizeRouteErrorCode,
       })
     }
 
@@ -222,7 +235,7 @@ export async function POST(request: Request) {
 
     if (source === BookingSource.DISCOVERY && !mediaId) {
       return jsonFail(400, 'Discovery bookings require a mediaId.', {
-        code: 'MISSING_MEDIA_ID',
+        code: 'MISSING_MEDIA_ID' satisfies FinalizeRouteErrorCode,
       })
     }
 
@@ -247,7 +260,7 @@ export async function POST(request: Request) {
 
     if (!offering || !offering.isActive) {
       return jsonFail(400, 'Invalid or inactive offering.', {
-        code: 'OFFERING_INACTIVE',
+        code: 'MISSING_OFFERING' satisfies FinalizeRouteErrorCode,
       })
     }
 
@@ -260,7 +273,7 @@ export async function POST(request: Request) {
     if (source === BookingSource.AFTERCARE) {
       if (!aftercareToken) {
         return jsonFail(400, 'Missing aftercare token.', {
-          code: 'AFTERCARE_TOKEN_MISSING',
+          code: 'AFTERCARE_TOKEN_MISSING' satisfies FinalizeRouteErrorCode,
         })
       }
 
@@ -282,7 +295,7 @@ export async function POST(request: Request) {
 
       if (!aftercare?.booking) {
         return jsonFail(400, 'Invalid aftercare token.', {
-          code: 'AFTERCARE_TOKEN_INVALID',
+          code: 'AFTERCARE_TOKEN_INVALID' satisfies FinalizeRouteErrorCode,
         })
       }
 
@@ -290,13 +303,13 @@ export async function POST(request: Request) {
 
       if (original.status !== BookingStatus.COMPLETED) {
         return jsonFail(409, 'Only COMPLETED bookings can be rebooked.', {
-          code: 'AFTERCARE_NOT_COMPLETED',
+          code: 'AFTERCARE_NOT_COMPLETED' satisfies FinalizeRouteErrorCode,
         })
       }
 
       if (original.clientId !== clientId) {
         return jsonFail(403, 'Aftercare link does not match this client.', {
-          code: 'AFTERCARE_CLIENT_MISMATCH',
+          code: 'AFTERCARE_CLIENT_MISMATCH' satisfies FinalizeRouteErrorCode,
         })
       }
 
@@ -307,7 +320,7 @@ export async function POST(request: Request) {
 
       if (!matchesOffering) {
         return jsonFail(403, 'Aftercare link does not match this offering.', {
-          code: 'AFTERCARE_OFFERING_MISMATCH',
+          code: 'AFTERCARE_OFFERING_MISMATCH' satisfies FinalizeRouteErrorCode,
         })
       }
 
@@ -406,10 +419,7 @@ export async function POST(request: Request) {
             normalizeAddress(locationContext.formattedAddress)
           : null
 
-      if (
-        hold.locationType === ServiceLocationType.SALON &&
-        !salonAddressText
-      ) {
+      if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
         throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
       }
 
@@ -438,6 +448,20 @@ export async function POST(request: Request) {
       )
 
       if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
+        logBookingConflict({
+          action: 'BOOKING_FINALIZE',
+          professionalId: offering.professionalId,
+          locationId: locationContext.locationId,
+          locationType: hold.locationType,
+          requestedStart,
+          requestedEnd: addMinutes(requestedStart, 1),
+          conflictType: 'STEP_BOUNDARY',
+          holdId: hold.id,
+          meta: {
+            route: 'app/api/bookings/finalize/route.ts',
+            stepMinutes: locationContext.stepMinutes,
+          },
+        })
         throw new Error(`STEP:${locationContext.stepMinutes}`)
       }
 
@@ -463,7 +487,10 @@ export async function POST(request: Request) {
         if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) {
           throwCode('OPENING_NOT_AVAILABLE')
         }
-        if (activeOpening.serviceId && activeOpening.serviceId !== offering.serviceId) {
+        if (
+          activeOpening.serviceId &&
+          activeOpening.serviceId !== offering.serviceId
+        ) {
           throwCode('OPENING_NOT_AVAILABLE')
         }
         if (
@@ -618,10 +645,24 @@ export async function POST(request: Request) {
       })
 
       if (!workingHoursCheck.ok) {
+        logBookingConflict({
+          action: 'BOOKING_FINALIZE',
+          professionalId: offering.professionalId,
+          locationId: locationContext.locationId,
+          locationType: hold.locationType,
+          requestedStart,
+          requestedEnd,
+          conflictType: 'WORKING_HOURS',
+          holdId: hold.id,
+          meta: {
+            route: 'app/api/bookings/finalize/route.ts',
+            workingHoursError: workingHoursCheck.error,
+          },
+        })
         throw new Error(`WH:${workingHoursCheck.error}`)
       }
 
-      await assertTimeRangeAvailable({
+      const timeRangeConflict = await getTimeRangeConflict({
         tx,
         professionalId: offering.professionalId,
         locationId: locationContext.locationId,
@@ -631,6 +672,57 @@ export async function POST(request: Request) {
         fallbackDurationMinutes: totalDurationMinutes,
         excludeHoldId: hold.id,
       })
+
+      if (timeRangeConflict === 'BLOCKED') {
+        logBookingConflict({
+          action: 'BOOKING_FINALIZE',
+          professionalId: offering.professionalId,
+          locationId: locationContext.locationId,
+          locationType: hold.locationType,
+          requestedStart,
+          requestedEnd,
+          conflictType: 'BLOCKED',
+          holdId: hold.id,
+          meta: {
+            route: 'app/api/bookings/finalize/route.ts',
+          },
+        })
+        throwCode('BLOCKED')
+      }
+
+      if (timeRangeConflict === 'BOOKING') {
+        logBookingConflict({
+          action: 'BOOKING_FINALIZE',
+          professionalId: offering.professionalId,
+          locationId: locationContext.locationId,
+          locationType: hold.locationType,
+          requestedStart,
+          requestedEnd,
+          conflictType: 'BOOKING',
+          holdId: hold.id,
+          meta: {
+            route: 'app/api/bookings/finalize/route.ts',
+          },
+        })
+        throwCode('TIME_NOT_AVAILABLE')
+      }
+
+      if (timeRangeConflict === 'HOLD') {
+        logBookingConflict({
+          action: 'BOOKING_FINALIZE',
+          professionalId: offering.professionalId,
+          locationId: locationContext.locationId,
+          locationType: hold.locationType,
+          requestedStart,
+          requestedEnd,
+          conflictType: 'HOLD',
+          holdId: hold.id,
+          meta: {
+            route: 'app/api/bookings/finalize/route.ts',
+          },
+        })
+        throwCode('TIME_NOT_AVAILABLE')
+      }
 
       const salonLocationAddressSnapshotInput:
         | Prisma.InputJsonValue
@@ -653,18 +745,14 @@ export async function POST(request: Request) {
             professionalId: offering.professionalId,
             serviceId: offering.serviceId,
             offeringId: offering.id,
-
             scheduledFor: requestedStart,
             status: initialStatus,
-
             source,
             locationType,
             rebookOfBookingId: rebookOfBookingIdForCreate,
-
             subtotalSnapshot: subtotal,
             totalDurationMinutes,
             bufferMinutes: locationContext.bufferMinutes,
-
             locationId: locationContext.locationId,
             locationTimeZone: locationContext.timeZone,
 
@@ -784,7 +872,7 @@ export async function POST(request: Request) {
 
     if (message === 'ADDONS_INVALID') {
       return jsonFail(400, 'One or more add-ons are invalid for this booking.', {
-        code: 'ADDONS_INVALID',
+        code: 'ADDONS_INVALID' satisfies FinalizeRouteErrorCode,
       })
     }
 
@@ -792,7 +880,7 @@ export async function POST(request: Request) {
       return jsonFail(
         409,
         'This mobile hold is missing the service address. Please pick your address and try again.',
-        { code: 'HOLD_MISSING_CLIENT_ADDRESS' },
+        { code: 'HOLD_MISSING_CLIENT_ADDRESS' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -800,7 +888,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'Add a mobile service address in your client settings before booking an in-home appointment.',
-        { code: 'CLIENT_SERVICE_ADDRESS_REQUIRED' },
+        { code: 'CLIENT_SERVICE_ADDRESS_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -808,7 +896,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This salon location is missing an address. Please update the professional location before booking.',
-        { code: 'SALON_LOCATION_ADDRESS_REQUIRED' },
+        { code: 'SALON_LOCATION_ADDRESS_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -816,7 +904,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This professional must set a valid timezone before taking bookings.',
-        { code: 'TIMEZONE_REQUIRED' },
+        { code: 'TIMEZONE_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -824,7 +912,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This professional has not set working hours yet.',
-        { code: 'WORKING_HOURS_REQUIRED' },
+        { code: 'WORKING_HOURS_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -832,7 +920,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This professional’s working hours are misconfigured.',
-        { code: 'WORKING_HOURS_INVALID' },
+        { code: 'WORKING_HOURS_INVALID' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -840,7 +928,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This service is not available for the selected booking type.',
-        { code: 'MODE_NOT_SUPPORTED' },
+        { code: 'MODE_NOT_SUPPORTED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -848,7 +936,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This service is missing duration settings for the selected booking type.',
-        { code: 'DURATION_REQUIRED' },
+        { code: 'DURATION_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -856,7 +944,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This service is missing pricing for the selected booking type.',
-        { code: 'PRICE_REQUIRED' },
+        { code: 'PRICE_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -864,51 +952,55 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         'This location is missing coordinates required for this booking flow.',
-        { code: 'COORDINATES_REQUIRED' },
+        { code: 'COORDINATES_REQUIRED' satisfies FinalizeRouteErrorCode },
       )
     }
 
     if (message === 'OPENING_NOT_AVAILABLE') {
-      return jsonFail(409, 'That opening was just taken. Please pick another slot.', {
-        code: 'OPENING_NOT_AVAILABLE',
-      })
+      return jsonFail(
+        409,
+        'That opening was just taken. Please pick another slot.',
+        { code: 'OPENING_NOT_AVAILABLE' satisfies FinalizeRouteErrorCode },
+      )
     }
 
     if (message === 'TIME_NOT_AVAILABLE') {
       return jsonFail(
         409,
         'That time is no longer available. Please select a different slot.',
-        { code: 'TIME_NOT_AVAILABLE' },
+        { code: 'TIME_NOT_AVAILABLE' satisfies FinalizeRouteErrorCode },
       )
     }
 
     if (message === 'BLOCKED') {
-      return jsonFail(409, 'That time is blocked. Please select a different slot.', {
-        code: 'BLOCKED',
-      })
+      return jsonFail(
+        409,
+        'That time is blocked. Please select a different slot.',
+        { code: 'BLOCKED' satisfies FinalizeRouteErrorCode },
+      )
     }
 
     if (message === 'HOLD_NOT_FOUND') {
       return jsonFail(409, 'Hold not found. Please pick a slot again.', {
-        code: 'HOLD_NOT_FOUND',
+        code: 'HOLD_NOT_FOUND' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (message === 'HOLD_EXPIRED') {
       return jsonFail(409, 'Hold expired. Please pick a slot again.', {
-        code: 'HOLD_EXPIRED',
+        code: 'HOLD_EXPIRED' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (message === 'HOLD_MISMATCH') {
       return jsonFail(409, 'Hold mismatch. Please pick a slot again.', {
-        code: 'HOLD_MISMATCH',
+        code: 'HOLD_MISMATCH' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (message === 'HOLD_MISSING_LOCATION') {
       return jsonFail(409, 'Hold is missing location info. Please pick a slot again.', {
-        code: 'HOLD_MISSING_LOCATION',
+        code: 'HOLD_MISSING_LOCATION' satisfies FinalizeRouteErrorCode,
       })
     }
 
@@ -916,19 +1008,19 @@ export async function POST(request: Request) {
       return jsonFail(
         409,
         'This location is no longer available. Please pick another slot.',
-        { code: 'LOCATION_NOT_FOUND' },
+        { code: 'LOCATION_NOT_FOUND' satisfies FinalizeRouteErrorCode },
       )
     }
 
     if (message === 'TIME_IN_PAST') {
       return jsonFail(400, 'Please select a future time.', {
-        code: 'TIME_IN_PAST',
+        code: 'TIME_IN_PAST' satisfies FinalizeRouteErrorCode,
       })
     }
 
     if (message === 'TOO_FAR') {
       return jsonFail(400, 'That date is too far in the future.', {
-        code: 'TOO_FAR',
+        code: 'TOO_FAR' satisfies FinalizeRouteErrorCode,
       })
     }
 
@@ -936,7 +1028,7 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         `Start time must be on a ${message.slice(5)}-minute boundary.`,
-        { code: 'STEP' },
+        { code: 'STEP' satisfies FinalizeRouteErrorCode },
       )
     }
 
@@ -944,11 +1036,13 @@ export async function POST(request: Request) {
       return jsonFail(
         400,
         message.slice(3) || 'That time is outside working hours.',
-        { code: 'OUTSIDE_WORKING_HOURS' },
+        { code: 'OUTSIDE_WORKING_HOURS' satisfies FinalizeRouteErrorCode },
       )
     }
 
     console.error('POST /api/bookings/finalize error:', error)
-    return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
+    return jsonFail(500, 'Internal server error', {
+      code: 'INTERNAL' satisfies FinalizeRouteErrorCode,
+    })
   }
 }

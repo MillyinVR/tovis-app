@@ -1,4 +1,3 @@
-// app/api/holds/route.ts
 import { NextRequest } from 'next/server'
 import {
   ClientAddressKind,
@@ -11,6 +10,7 @@ import { isRecord } from '@/lib/guards'
 import { HOLD_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import {
   normalizeLocationType,
   resolveValidatedBookingContext,
@@ -159,6 +159,44 @@ async function loadClientServiceAddress(args: {
       formattedAddress: true,
       lat: true,
       lng: true,
+    },
+  })
+}
+
+function logHoldConflict(args: {
+  professionalId: string
+  locationId: string | null
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  conflictType:
+    | 'BLOCKED'
+    | 'BOOKING'
+    | 'HOLD'
+    | 'WORKING_HOURS'
+    | 'STEP_BOUNDARY'
+    | 'TIME_NOT_AVAILABLE'
+  offeringId: string
+  clientId: string
+  clientAddressId?: string | null
+  note?: string
+  meta?: Record<string, unknown>
+}) {
+  logBookingConflict({
+    action: 'BOOKING_CREATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: args.conflictType,
+    note: args.note ?? null,
+    meta: {
+      route: 'app/api/holds/route.ts',
+      offeringId: args.offeringId,
+      clientId: args.clientId,
+      clientAddressId: args.clientAddressId ?? null,
+      ...args.meta,
     },
   })
 }
@@ -340,6 +378,21 @@ export async function POST(req: NextRequest) {
         )
 
         if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
+          logHoldConflict({
+            professionalId: offering.professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'STEP_BOUNDARY',
+            offeringId: offering.id,
+            clientId,
+            clientAddressId,
+            meta: {
+              stepMinutes: locationContext.stepMinutes,
+            },
+          })
+
           return {
             ok: false,
             status: 400,
@@ -361,6 +414,21 @@ export async function POST(req: NextRequest) {
         })
 
         if (!workingHoursCheck.ok) {
+          logHoldConflict({
+            professionalId: offering.professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'WORKING_HOURS',
+            offeringId: offering.id,
+            clientId,
+            clientAddressId,
+            meta: {
+              workingHoursError: workingHoursCheck.error,
+            },
+          })
+
           return {
             ok: false,
             status: 400,
@@ -379,6 +447,18 @@ export async function POST(req: NextRequest) {
         })
 
         if (conflict === 'BLOCKED') {
+          logHoldConflict({
+            professionalId: offering.professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'BLOCKED',
+            offeringId: offering.id,
+            clientId,
+            clientAddressId,
+          })
+
           return {
             ok: false,
             status: 409,
@@ -387,6 +467,18 @@ export async function POST(req: NextRequest) {
         }
 
         if (conflict === 'BOOKING') {
+          logHoldConflict({
+            professionalId: offering.professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'BOOKING',
+            offeringId: offering.id,
+            clientId,
+            clientAddressId,
+          })
+
           return {
             ok: false,
             status: 409,
@@ -395,6 +487,18 @@ export async function POST(req: NextRequest) {
         }
 
         if (conflict === 'HOLD') {
+          logHoldConflict({
+            professionalId: offering.professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'HOLD',
+            offeringId: offering.id,
+            clientId,
+            clientAddressId,
+          })
+
           return {
             ok: false,
             status: 409,
@@ -430,8 +534,6 @@ export async function POST(req: NextRequest) {
               locationId: locationContext.locationId,
               locationTimeZone: locationContext.timeZone,
 
-              // For SALON, this is the actual appointment address.
-              // For MOBILE, the actual destination lives in clientAddressSnapshot.
               locationAddressSnapshot: locationAddressSnapshotInput,
               locationLatSnapshot: locationContext.lat,
               locationLngSnapshot: locationContext.lng,
@@ -475,6 +577,21 @@ export async function POST(req: NextRequest) {
             error instanceof Prisma.PrismaClientKnownRequestError &&
             error.code === 'P2002'
           ) {
+            logHoldConflict({
+              professionalId: offering.professionalId,
+              locationId: locationContext.locationId,
+              locationType,
+              requestedStart,
+              requestedEnd,
+              conflictType: 'HOLD',
+              offeringId: offering.id,
+              clientId,
+              clientAddressId,
+              meta: {
+                prismaCode: error.code,
+              },
+            })
+
             return {
               ok: false,
               status: 409,
