@@ -82,8 +82,9 @@ function makeLocation(args: {
     lat: null,
     lng: null,
     city: null,
-    formattedAddress: null,
-    createdAt: new Date('2025-01-01T00:00:00.000Z'),
+    formattedAddress:
+      args.type === 'MOBILE_BASE' ? null : '123 Main St, Test City, CA 90001',
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
   }
 }
 
@@ -206,6 +207,7 @@ describe('GET /api/availability/day', () => {
       serviceId: 'service-1',
       locationType: 'MOBILE',
       locationId: 'mobile-1',
+      clientAddressId: 'addr-1',
       date: DAY,
     })
 
@@ -233,9 +235,9 @@ describe('GET /api/availability/day', () => {
       serviceId: 'service-1',
       locationType: 'MOBILE',
       locationId: 'mobile-1',
+      clientAddressId: 'addr-1',
       date: DAY,
     })
-
     const body = await response.json()
 
     expect(response.status).toBe(200)

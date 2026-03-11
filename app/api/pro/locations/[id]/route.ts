@@ -7,21 +7,14 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { pickBool, pickNumber, pickString } from '@/lib/pick'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { isRecord, type UnknownRecord, hasOwn } from '@/lib/guards'
+import {
+  normalizeWorkingHours,
+  toInputJsonValue,
+} from '@/lib/scheduling/workingHoursValidation'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { params: Promise<{ id: string }> }
-
-type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue }
-
-function isJsonValue(v: unknown): v is JsonValue {
-  if (v === null) return true
-  const t = typeof v
-  if (t === 'string' || t === 'number' || t === 'boolean') return true
-  if (Array.isArray(v)) return v.every(isJsonValue)
-  if (isRecord(v)) return Object.values(v).every(isJsonValue)
-  return false
-}
 
 async function readParams(ctx: Params) {
   return await ctx.params
@@ -56,6 +49,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
         formattedAddress: true,
         lat: true,
         lng: true,
+        workingHours: true,
       },
     })
 
@@ -63,89 +57,158 @@ export async function PATCH(req: NextRequest, ctx: Params) {
 
     const data: Prisma.ProfessionalLocationUpdateManyMutationInput = {}
 
-    if (hasOwn(body, 'name')) data.name = pickString(body.name)
+    if (hasOwn(body, 'name')) {
+      data.name = pickString(body.name)
+    }
 
     let requestedPrimary: boolean | null = null
     if (hasOwn(body, 'isPrimary')) {
       const b = pickBool(body.isPrimary)
       if (b === null) return jsonFail(400, 'isPrimary must be boolean')
       requestedPrimary = b
+
       if (requestedPrimary === false && existing.isPrimary) {
-        return jsonFail(400, 'Cannot unset primary directly. Set another location as primary instead.')
+        return jsonFail(
+          400,
+          'Cannot unset primary directly. Set another location as primary instead.',
+        )
       }
+
       data.isPrimary = requestedPrimary
     }
 
+    let requestedBookable: boolean | undefined
     if (hasOwn(body, 'isBookable')) {
       const b = pickBool(body.isBookable)
       if (b === null) return jsonFail(400, 'isBookable must be boolean')
+      requestedBookable = b
       data.isBookable = b
     }
 
-    if (hasOwn(body, 'placeId')) data.placeId = pickString(body.placeId)
-    if (hasOwn(body, 'formattedAddress')) data.formattedAddress = pickString(body.formattedAddress)
-    if (hasOwn(body, 'city')) data.city = pickString(body.city)
-    if (hasOwn(body, 'state')) data.state = pickString(body.state)
-    if (hasOwn(body, 'postalCode')) data.postalCode = pickString(body.postalCode)
-    if (hasOwn(body, 'countryCode')) data.countryCode = pickString(body.countryCode)
+    const placeIdIn = hasOwn(body, 'placeId') ? pickString(body.placeId) : undefined
+    if (placeIdIn !== undefined) data.placeId = placeIdIn
 
+    const formattedAddressIn = hasOwn(body, 'formattedAddress')
+      ? pickString(body.formattedAddress)
+      : undefined
+    if (formattedAddressIn !== undefined) data.formattedAddress = formattedAddressIn
+
+    if (hasOwn(body, 'addressLine1')) {
+      data.addressLine1 = pickString(body.addressLine1)
+    }
+
+    if (hasOwn(body, 'addressLine2')) {
+      data.addressLine2 = pickString(body.addressLine2)
+    }
+
+    if (hasOwn(body, 'city')) {
+      data.city = pickString(body.city)
+    }
+
+    if (hasOwn(body, 'state')) {
+      data.state = pickString(body.state)
+    }
+
+    if (hasOwn(body, 'postalCode')) {
+      data.postalCode = pickString(body.postalCode)
+    }
+
+    if (hasOwn(body, 'countryCode')) {
+      data.countryCode = pickString(body.countryCode)
+    }
+
+    let latIn: Prisma.Decimal | null | undefined
     if (hasOwn(body, 'lat')) {
-      if (body.lat === null) data.lat = null
-      else {
+      if (body.lat === null) {
+        latIn = null
+      } else {
         const n = pickNumber(body.lat)
         if (n == null) return jsonFail(400, 'lat must be a number or null')
-        data.lat = new Prisma.Decimal(String(n))
+        latIn = new Prisma.Decimal(String(n))
       }
+
+      data.lat = latIn
     }
 
+    let lngIn: Prisma.Decimal | null | undefined
     if (hasOwn(body, 'lng')) {
-      if (body.lng === null) data.lng = null
-      else {
+      if (body.lng === null) {
+        lngIn = null
+      } else {
         const n = pickNumber(body.lng)
         if (n == null) return jsonFail(400, 'lng must be a number or null')
-        data.lng = new Prisma.Decimal(String(n))
+        lngIn = new Prisma.Decimal(String(n))
       }
+
+      data.lng = lngIn
     }
 
-    if (hasOwn(body, 'timeZone')) {
-      data.timeZone = pickString(body.timeZone)
+    const timeZoneIn = hasOwn(body, 'timeZone') ? pickString(body.timeZone) : undefined
+    if (timeZoneIn !== undefined) {
+      data.timeZone = timeZoneIn
     }
+
+    const workingHoursIn = hasOwn(body, 'workingHours')
+      ? normalizeWorkingHours(body.workingHours)
+      : undefined
 
     if (hasOwn(body, 'workingHours')) {
-      const wh = body.workingHours
-      if (!isJsonValue(wh) || wh === null || Array.isArray(wh) || !isRecord(wh)) {
-        return jsonFail(400, 'workingHours must be a JSON object')
+      if (!workingHoursIn) {
+        return jsonFail(
+          400,
+          'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
+        )
       }
-      data.workingHours = wh
+
+      data.workingHours = toInputJsonValue(workingHoursIn)
     }
 
-    const nextIsBookable = typeof data.isBookable === 'boolean' ? data.isBookable : Boolean(existing.isBookable)
+    const nextIsBookable =
+      typeof requestedBookable === 'boolean'
+        ? requestedBookable
+        : Boolean(existing.isBookable)
 
     const nextTimeZone =
-      typeof data.timeZone === 'string' || data.timeZone === null ? data.timeZone : existing.timeZone ?? null
+      timeZoneIn !== undefined ? timeZoneIn : existing.timeZone ?? null
 
     const nextPlaceId =
-      typeof data.placeId === 'string' || data.placeId === null ? data.placeId : existing.placeId ?? null
+      placeIdIn !== undefined ? placeIdIn : existing.placeId ?? null
 
     const nextFormattedAddress =
-      typeof data.formattedAddress === 'string' || data.formattedAddress === null
-        ? data.formattedAddress
+      formattedAddressIn !== undefined
+        ? formattedAddressIn
         : existing.formattedAddress ?? null
 
-    const nextLat =
-      data.lat === null ? null : data.lat instanceof Prisma.Decimal ? data.lat : existing.lat ?? null
+    const nextLat = latIn !== undefined ? latIn : existing.lat ?? null
+    const nextLng = lngIn !== undefined ? lngIn : existing.lng ?? null
 
-    const nextLng =
-      data.lng === null ? null : data.lng instanceof Prisma.Decimal ? data.lng : existing.lng ?? null
+    const nextWorkingHours =
+      workingHoursIn !== undefined
+        ? workingHoursIn
+        : normalizeWorkingHours(existing.workingHours)
 
     if (nextIsBookable) {
       if (!nextTimeZone || !isValidIanaTimeZone(nextTimeZone)) {
         return jsonFail(400, 'Bookable locations must have a valid IANA timeZone.')
       }
 
+      if (!nextWorkingHours) {
+        return jsonFail(
+          400,
+          'Bookable locations must have valid workingHours with mon..sun, valid HH:MM times, and end after start.',
+        )
+      }
+
+      if (nextLat == null || nextLng == null) {
+        return jsonFail(400, 'Bookable locations must include lat/lng.')
+      }
+
       if (requireAddressForType(existing.type)) {
-        if (!nextPlaceId || !nextFormattedAddress || !nextLat || !nextLng) {
-          return jsonFail(400, 'Salon/Suite locations require placeId + formattedAddress + lat/lng when bookable.')
+        if (!nextPlaceId || !nextFormattedAddress) {
+          return jsonFail(
+            400,
+            'Salon/Suite bookable locations require placeId and formattedAddress.',
+          )
         }
       }
     }
@@ -167,7 +230,13 @@ export async function PATCH(req: NextRequest, ctx: Params) {
 
       return await tx.professionalLocation.findFirst({
         where: { id: locationId, professionalId },
-        select: { id: true, isPrimary: true, isBookable: true, timeZone: true, type: true },
+        select: {
+          id: true,
+          isPrimary: true,
+          isBookable: true,
+          timeZone: true,
+          type: true,
+        },
       })
     })
 
@@ -198,15 +267,27 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
       if (deleted.count !== 1) return jsonFail(404, 'Location not found')
       return jsonOk({})
     } catch (e: unknown) {
-      const code = isRecord(e) ? pickString((e as Record<string, unknown>).code) : null
+      const code = isRecord(e)
+        ? pickString((e as Record<string, unknown>).code)
+        : null
+
       const message =
-        e instanceof Error ? e.message : isRecord(e) ? pickString((e as Record<string, unknown>).message) : null
+        e instanceof Error
+          ? e.message
+          : isRecord(e)
+            ? pickString((e as Record<string, unknown>).message)
+            : null
 
       if (
         code === 'P2003' ||
-        (message && (message.includes('Foreign key constraint') || message.includes('violates foreign key')))
+        (message &&
+          (message.includes('Foreign key constraint') ||
+            message.includes('violates foreign key')))
       ) {
-        return jsonFail(409, 'This location is used by existing bookings and cannot be deleted.')
+        return jsonFail(
+          409,
+          'This location is used by existing bookings and cannot be deleted.',
+        )
       }
 
       throw e

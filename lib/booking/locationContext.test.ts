@@ -147,7 +147,7 @@ describe('resolveBookingLocationContext', () => {
       professionalId: 'pro_1',
       requestedLocationId: 'loc_bad',
       locationType: ServiceLocationType.SALON,
-      allowFallback: true,
+      allowFallback: false,
     })
 
     expect(result.ok).toBe(true)
@@ -179,7 +179,7 @@ describe('resolveBookingLocationContext', () => {
       professionalId: 'pro_1',
       requestedLocationId: 'loc_unknown',
       locationType: ServiceLocationType.SALON,
-      allowFallback: true,
+      allowFallback: false,
     })
 
     expect(result.ok).toBe(true)
