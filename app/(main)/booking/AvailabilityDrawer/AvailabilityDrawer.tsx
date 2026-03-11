@@ -52,8 +52,8 @@ function isRecord(x: unknown): x is Record<string, unknown> {
 
 function pickErrorMessage(raw: unknown): string | null {
   if (!isRecord(raw)) return null
-  const e = raw.error
-  return typeof e === 'string' && e.trim() ? e.trim() : null
+  const value = raw.error
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function periodOfHour(h: number): Period {
@@ -251,16 +251,35 @@ export default function AvailabilityDrawer(props: {
     selectedHoldIdRef.current = selected?.holdId ?? null
   }, [selected?.holdId])
 
+  const requestedMobileAddressGate = locationType === 'MOBILE'
+
+  const {
+    mobileAddresses,
+    loadingMobileAddresses,
+    mobileAddressesError,
+    selectedClientAddressId,
+    setSelectedClientAddressId,
+    addressCreateOpen,
+    setAddressCreateOpen,
+    handleAddressSaved,
+    resetMobileAddressState,
+  } = useMobileAddresses({
+    open,
+    mobileAddressGateRequested: requestedMobileAddressGate,
+    holding,
+  })
+
   const {
     loading,
     refreshing,
     error: availabilityError,
     data,
     setError,
-  } = useAvailability(open, context, locationType, null)
+  } = useAvailability(open, context, locationType, selectedClientAddressId)
 
   const summary = isSummary(data) ? data : null
   const primary = summary?.primaryPro ?? null
+  const others = summary?.otherPros ?? []
   const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
@@ -293,69 +312,32 @@ export default function AvailabilityDrawer(props: {
     summary?.locationType === 'MOBILE' ||
     forcedMobileOnlyGate
 
-  const {
-    mobileAddresses,
-    loadingMobileAddresses,
-    mobileAddressesError,
-    selectedClientAddressId,
-    setSelectedClientAddressId,
-    addressCreateOpen,
-    setAddressCreateOpen,
-    handleAddressSaved,
-    resetMobileAddressState,
-  } = useMobileAddresses({
-    open,
-    mobileAddressGateRequested,
-    holding,
-  })
-
-  const {
-    loading: availabilityLoading,
-    refreshing: availabilityRefreshing,
-    error: resolvedAvailabilityError,
-    data: resolvedAvailabilityData,
-    setError: setAvailabilityError,
-  } = useAvailability(open, context, locationType, selectedClientAddressId)
-
-  const resolvedSummary = isSummary(resolvedAvailabilityData)
-    ? resolvedAvailabilityData
-    : null
-
-  const activeSummary = resolvedSummary ?? summary
-  const activePrimary = activeSummary?.primaryPro ?? null
-  const activeOthers = activeSummary?.otherPros ?? []
-  const activeDays = activeSummary?.availableDays ?? EMPTY_DAYS
-  const activeOffering: AvailabilityOffering =
-    activeSummary?.offering ?? FALLBACK_OFFERING
-
   const activeLocationType: ServiceLocationType = mobileAddressGateRequested
     ? 'MOBILE'
-    : locationType ?? activeSummary?.locationType ?? fallbackAllowedMode(allowed)
+    : locationType ?? summary?.locationType ?? fallbackAllowedMode(allowed)
 
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } =
     useHoldTimer(holdUntil)
 
   const appointmentTz = useMemo(() => {
     const resolved = resolveAppointmentTimeZone({
-      summaryTimeZone: activeSummary?.timeZone,
-      primaryProTimeZone: activePrimary?.timeZone,
+      summaryTimeZone: summary?.timeZone,
+      primaryProTimeZone: primary?.timeZone,
       viewerTimeZone: viewerTz,
     })
     return sanitizeTimeZone(resolved, FALLBACK_TZ)
-  }, [activeSummary?.timeZone, activePrimary?.timeZone, viewerTz])
+  }, [summary?.timeZone, primary?.timeZone, viewerTz])
 
   const showLocalHint = viewerTz !== appointmentTz
-  const effectiveServiceId = activeSummary?.serviceId ?? context.serviceId ?? null
+  const effectiveServiceId = summary?.serviceId ?? context.serviceId ?? null
   const bookingSource = resolveBookingSource(context)
 
   const canWaitlist = Boolean(
-    activeSummary?.waitlistSupported &&
-      context.professionalId &&
-      effectiveServiceId,
+    summary?.waitlistSupported && context.professionalId && effectiveServiceId,
   )
 
-  const viewProServicesHref = activePrimary
-    ? `/professionals/${encodeURIComponent(activePrimary.id)}?tab=services`
+  const viewProServicesHref = primary
+    ? `/professionals/${encodeURIComponent(primary.id)}?tab=services`
     : '/looks'
 
   const statusLine = useMemo(() => {
@@ -364,52 +346,52 @@ export default function AvailabilityDrawer(props: {
   }, [effectiveServiceId])
 
   const resolvedOfferingId = useMemo(() => {
-    if (activeSummary?.offering?.id) return activeSummary.offering.id
+    if (summary?.offering?.id) return summary.offering.id
     return context.offeringId ?? null
-  }, [activeSummary?.offering?.id, context.offeringId])
+  }, [summary?.offering?.id, context.offeringId])
 
   const locationIdByPro = useMemo(() => {
     const map: Record<string, string> = {}
-    if (!activeSummary) return map
+    if (!summary) return map
 
-    map[activeSummary.primaryPro.id] = activeSummary.locationId
-    for (const p of activeSummary.otherPros) {
+    map[summary.primaryPro.id] = summary.locationId
+    for (const p of summary.otherPros) {
       map[p.id] = p.locationId
     }
 
     return map
-  }, [activeSummary])
+  }, [summary])
 
   const daysKey = useMemo(() => {
-    if (!activeDays.length) return ''
-    return activeDays.map((d) => `${d.date}:${d.slotCount}`).join('|')
-  }, [activeDays])
+    if (!days.length) return ''
+    return days.map((d) => `${d.date}:${d.slotCount}`).join('|')
+  }, [days])
 
   const dayScrollerDays = useMemo(
-    () => buildDayScrollerModel(activeDays, appointmentTz),
-    [daysKey, appointmentTz, activeDays],
+    () => buildDayScrollerModel(days, appointmentTz),
+    [daysKey, appointmentTz, days],
   )
 
   const {
-    primarySlots,
-    otherSlots,
-    loadingPrimarySlots,
-    loadingOtherSlots,
-    clearDaySlots,
-    clearDaySlotCache,
-  } = useDaySlots({
-    open,
-    summary: activeSummary,
-    selectedDayYMD,
-    activeLocationType,
-    effectiveServiceId,
-    selectedClientAddressId,
-    debug,
-    holding,
-    setError: setAvailabilityError,
-  })
+  primarySlots,
+  otherSlots,
+  loadingPrimarySlots,
+  loadingOtherSlots,
+  clearDaySlots,
+  clearDaySlotCache,
+} = useDaySlots({
+  open,
+  summary,
+  selectedDayYMD,
+  activeLocationType,
+  effectiveServiceId,
+  selectedClientAddressId,
+  debug,
+  holding,
+  setError,
+})
 
-  const noPrimarySlots = Boolean(activePrimary && primarySlots.length === 0)
+const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
 
   const hardResetUi = useCallback(
     async (args?: { deleteHold?: boolean }) => {
@@ -422,9 +404,9 @@ export default function AvailabilityDrawer(props: {
       setSelected(null)
       setHoldUntil(null)
       setHolding(false)
-      setAvailabilityError(null)
+      setError(null)
     },
-    [setAvailabilityError],
+    [setError],
   )
 
   const resetForLocationModeChange = useCallback(
@@ -436,14 +418,14 @@ export default function AvailabilityDrawer(props: {
       setSelectedDayYMD(null)
       clearDaySlots()
       clearDaySlotCache()
-      setAvailabilityError(null)
+      setError(null)
     },
     [
       activeLocationType,
       hardResetUi,
       clearDaySlots,
       clearDaySlotCache,
-      setAvailabilityError,
+      setError,
     ],
   )
 
@@ -460,7 +442,7 @@ export default function AvailabilityDrawer(props: {
     if (!mobileAddressGateRequested) return
 
     void hardResetUi({ deleteHold: true })
-    setAvailabilityError(null)
+    setError(null)
 
     if (!selectedClientAddressId) {
       clearDaySlots()
@@ -471,7 +453,7 @@ export default function AvailabilityDrawer(props: {
     selectedClientAddressId,
     hardResetUi,
     clearDaySlots,
-    setAvailabilityError,
+    setError,
   ])
 
   useEffect(() => {
@@ -497,19 +479,19 @@ export default function AvailabilityDrawer(props: {
 
   useEffect(() => {
     if (!open) return
-    if (!activeSummary) return
-    if (availabilityLoading) return
+    if (!summary) return
+    if (loading) return
     if (holding) return
     if (selectedHoldIdRef.current) return
 
-    if (locationType == null && activeSummary.locationType) {
-      setLocationType(activeSummary.locationType)
+    if (locationType == null && summary.locationType) {
+      setLocationType(summary.locationType)
     }
-  }, [open, activeSummary, availabilityLoading, holding, locationType])
+  }, [open, summary, loading, holding, locationType])
 
   useEffect(() => {
     if (!open) return
-    if (!activeSummary) return
+    if (!summary) return
 
     if (allowed.salon && allowed.mobile) return
 
@@ -523,7 +505,7 @@ export default function AvailabilityDrawer(props: {
     }
   }, [
     open,
-    activeSummary,
+    summary,
     allowed.salon,
     allowed.mobile,
     activeLocationType,
@@ -534,21 +516,21 @@ export default function AvailabilityDrawer(props: {
     if (!open) return
 
     const fallback = ymdInTz(appointmentTz)
-    const first = activeDays[0]?.date ?? null
+    const first = days[0]?.date ?? null
 
     setSelectedDayYMD((cur) => {
       const nextBase = first ?? fallback
       if (!nextBase) return cur ?? null
       if (!cur) return nextBase
 
-      if (activeDays.length > 0) {
-        const exists = activeDays.some((d) => d.date === cur)
+      if (days.length > 0) {
+        const exists = days.some((d) => d.date === cur)
         return exists ? cur : nextBase
       }
 
       return cur
     })
-  }, [open, appointmentTz, daysKey, activeDays])
+  }, [open, appointmentTz, daysKey, days])
 
   useEffect(() => {
     if (!open) return
@@ -578,8 +560,8 @@ export default function AvailabilityDrawer(props: {
     if (!holdExpired) return
     setHoldUntil(null)
     setSelected(null)
-    setAvailabilityError('That hold expired. Pick another time.')
-  }, [holdExpired, setAvailabilityError])
+    setError('That hold expired. Pick another time.')
+  }, [holdExpired, setError])
 
   useEffect(() => {
     if (!open) return
@@ -623,16 +605,16 @@ export default function AvailabilityDrawer(props: {
 
     const locationId = locationIdByPro[proId]
     if (!locationId) {
-      setAvailabilityError('Missing booking location for that pro. Please try again.')
+      setError('Missing booking location for that pro. Please try again.')
       return
     }
 
     if (activeLocationType === 'MOBILE' && !selectedClientAddressId) {
-      setAvailabilityError('Choose a mobile service address before selecting a time.')
+      setError('Choose a mobile service address before selecting a time.')
       return
     }
 
-    setAvailabilityError(null)
+    setError(null)
 
     const existingHoldId = selectedHoldIdRef.current
     if (existingHoldId) {
@@ -688,7 +670,7 @@ export default function AvailabilityDrawer(props: {
         setLocationType(parsed.locationType)
       }
     } catch (e: unknown) {
-      setAvailabilityError(
+      setError(
         e instanceof Error
           ? e.message
           : 'Failed to hold that time. Try another slot.',
@@ -730,13 +712,13 @@ export default function AvailabilityDrawer(props: {
 
   const displayError =
     waitingForMobileAddress &&
-    resolvedAvailabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
+    availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
       ? null
-      : resolvedAvailabilityError
+      : availabilityError
 
-  const canRenderSummary = Boolean(activeSummary && activePrimary)
+  const canRenderSummary = Boolean(summary && primary)
   const shouldShowLoading =
-    availabilityLoading && !canRenderSummary && !waitingForMobileAddress
+    loading && !canRenderSummary && !waitingForMobileAddress
   const shouldShowEmpty =
     !displayError &&
     !shouldShowLoading &&
@@ -820,7 +802,7 @@ export default function AvailabilityDrawer(props: {
                 value="MOBILE"
                 disabled={holding}
                 allowed={allowed}
-                offering={activeOffering}
+                offering={offering}
                 onChange={(t) => {
                   void resetForLocationModeChange(t)
                 }}
@@ -844,10 +826,10 @@ export default function AvailabilityDrawer(props: {
             <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
               No availability found.
             </div>
-          ) : activeSummary && activePrimary ? (
+          ) : summary && primary ? (
             <>
               <ProCard
-                pro={activePrimary}
+                pro={primary}
                 appointmentTz={appointmentTz}
                 viewerTz={viewerTz}
                 statusLine={statusLine}
@@ -857,9 +839,9 @@ export default function AvailabilityDrawer(props: {
               />
 
               <ServiceContextCard
-                serviceName={activeSummary.serviceName ?? null}
-                categoryName={activeSummary.serviceCategoryName ?? null}
-                offering={activeOffering}
+                serviceName={summary.serviceName ?? null}
+                categoryName={summary.serviceCategoryName ?? null}
+                offering={offering}
                 locationType={activeLocationType}
               />
 
@@ -867,13 +849,13 @@ export default function AvailabilityDrawer(props: {
                 value={activeLocationType}
                 disabled={holding}
                 allowed={allowed}
-                offering={activeOffering}
+                offering={offering}
                 onChange={(t) => {
                   void resetForLocationModeChange(t)
                 }}
               />
 
-              {availabilityRefreshing ? (
+              {refreshing ? (
                 <div className="mb-3 text-xs font-semibold text-textSecondary">
                   Refreshing availability…
                 </div>
@@ -909,7 +891,7 @@ export default function AvailabilityDrawer(props: {
               ) : null}
 
               <SlotChips
-                pro={activePrimary}
+                pro={primary}
                 appointmentTz={appointmentTz}
                 holding={holding}
                 selected={selected}
@@ -955,7 +937,7 @@ export default function AvailabilityDrawer(props: {
               />
 
               <OtherPros
-                others={activeOthers.map((p) => ({
+                others={others.map((p) => ({
                   ...p,
                   slots: otherSlots[p.id] ?? [],
                 }))}
@@ -985,11 +967,11 @@ export default function AvailabilityDrawer(props: {
                     selectedDayYMD,
                     period,
                     primarySlotsCount: primarySlots.length,
-                    offering: activeOffering,
+                    offering,
                     allowed,
                     selectedClientAddressId,
                     mobileAddresses,
-                    raw: resolvedAvailabilityData,
+                    raw: data,
                   }}
                 />
               ) : null}
