@@ -265,8 +265,8 @@ type CachedPlacement = {
   offersMobile: boolean
   salonDurationMinutes: number | null
   mobileDurationMinutes: number | null
-  salonPriceStartingAt: number | null
-  mobilePriceStartingAt: number | null
+  salonPriceStartingAt: string | null
+  mobilePriceStartingAt: string | null
   locationCity: string | null
 }
 
@@ -1241,8 +1241,8 @@ export async function GET(req: Request) {
       offersMobile: boolean
       salonDurationMinutes: number | null
       mobileDurationMinutes: number | null
-      salonPriceStartingAt: number | null
-      mobilePriceStartingAt: number | null
+      salonPriceStartingAt: unknown
+      mobilePriceStartingAt: unknown
     }
 
     if (cachedPlacement) {
@@ -1356,12 +1356,10 @@ export async function GET(req: Request) {
         offersMobile: Boolean(offering.offersMobile),
         salonDurationMinutes: offering.salonDurationMinutes ?? null,
         mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
-        salonPriceStartingAt: offering.salonPriceStartingAt != null
-          ? Number(offering.salonPriceStartingAt)
-          : null,
-        mobilePriceStartingAt: offering.mobilePriceStartingAt != null
-          ? Number(offering.mobilePriceStartingAt)
-          : null,
+        // Keep as Prisma Decimal — it serializes to string via toJSON(),
+        // which the client parser (pickMoneyString) expects.
+        salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
+        mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
       }
 
       // Cache the placement for subsequent requests
@@ -1392,8 +1390,12 @@ export async function GET(req: Request) {
             offersMobile: offeringPayload.offersMobile,
             salonDurationMinutes: offeringPayload.salonDurationMinutes,
             mobileDurationMinutes: offeringPayload.mobileDurationMinutes,
-            salonPriceStartingAt: offeringPayload.salonPriceStartingAt,
-            mobilePriceStartingAt: offeringPayload.mobilePriceStartingAt,
+            salonPriceStartingAt: offeringPayload.salonPriceStartingAt != null
+              ? String(offeringPayload.salonPriceStartingAt)
+              : null,
+            mobilePriceStartingAt: offeringPayload.mobilePriceStartingAt != null
+              ? String(offeringPayload.mobilePriceStartingAt)
+              : null,
             locationCity: placement.location.city ?? null,
           } as CachedPlacement,
           TTL_PLACEMENT_SECONDS,
