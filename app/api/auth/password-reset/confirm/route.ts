@@ -3,7 +3,7 @@
 import { prisma } from '@/lib/prisma'
 import crypto from 'crypto'
 import { hashPassword } from '@/lib/auth'
-import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import { validatePassword } from '@/lib/passwordPolicy'
 
 export const dynamic = 'force-dynamic'
@@ -19,6 +19,10 @@ function sha256(input: string) {
 
 export async function POST(req: Request) {
   try {
+    const identity = await rateLimitIdentity()
+    const rlRes = await enforceRateLimit({ bucket: 'auth:password-reset-confirm', identity })
+    if (rlRes) return rlRes
+
     const body = (await req.json().catch(() => ({}))) as Body
 
     const token = pickString(body.token)

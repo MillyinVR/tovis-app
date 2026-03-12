@@ -4,7 +4,7 @@ import { hashPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { BUCKETS } from '@/lib/storageBuckets'
-import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, normalizeEmail, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import crypto from 'crypto'
 import Twilio from 'twilio'
 import {
@@ -521,6 +521,10 @@ async function verifyCaBbcLicense(args: {
 
 export async function POST(request: Request) {
   try {
+    const identity = await rateLimitIdentity()
+    const rlRes = await enforceRateLimit({ bucket: 'auth:register', identity })
+    if (rlRes) return rlRes
+
     const body = (await request.json().catch(() => ({}))) as RegisterBody
 
     const email = normalizeEmail(body.email)

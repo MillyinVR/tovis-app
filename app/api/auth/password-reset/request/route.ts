@@ -1,7 +1,7 @@
 // app/api/auth/password-reset/request/route.ts
 import { prisma } from '@/lib/prisma'
 import crypto from 'crypto'
-import { jsonOk, normalizeEmail } from '@/app/api/_utils'
+import { jsonOk, normalizeEmail, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +42,10 @@ async function sendPasswordResetEmail(args: { to: string; resetUrl: string }) {
 
 export async function POST(req: Request) {
   try {
+    const identity = await rateLimitIdentity()
+    const rlRes = await enforceRateLimit({ bucket: 'auth:password-reset-request', identity })
+    if (rlRes) return rlRes
+
     const body = (await req.json().catch(() => ({}))) as Body
     const email = normalizeEmail(body.email)
 
