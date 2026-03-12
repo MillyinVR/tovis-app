@@ -12,6 +12,10 @@ export type RateLimitBucket =
   | 'google:proxy'
   | 'messages:send'
   | 'messages:read'
+  | 'auth:login'
+  | 'auth:register'
+  | 'auth:password-reset-request'
+  | 'auth:password-reset-confirm'
 
 type LimitConfig = {
   limit: number
@@ -28,6 +32,11 @@ const LIMITS: Record<RateLimitBucket, LimitConfig> = {
   'google:proxy': { limit: 60, windowSeconds: 60, prefix: 'rl:google:proxy' },
   'messages:send': { limit: 18, windowSeconds: 60, prefix: 'rl:messages:send' },
   'messages:read': { limit: 120, windowSeconds: 60, prefix: 'rl:messages:read' },
+  // Auth endpoints: IP-based, stricter limits to prevent brute force
+  'auth:login': { limit: 10, windowSeconds: 15 * 60, prefix: 'rl:auth:login' },
+  'auth:register': { limit: 5, windowSeconds: 60 * 60, prefix: 'rl:auth:register' },
+  'auth:password-reset-request': { limit: 5, windowSeconds: 15 * 60, prefix: 'rl:auth:pw-reset-req' },
+  'auth:password-reset-confirm': { limit: 10, windowSeconds: 15 * 60, prefix: 'rl:auth:pw-reset-confirm' },
 }
 
 async function getClientIpFromHeaders(): Promise<string | null> {

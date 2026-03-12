@@ -2,7 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { verifyPassword, createToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
-import { jsonFail, jsonOk, pickString, normalizeEmail } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, normalizeEmail, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -66,6 +66,10 @@ function resolveIsHttps(request: Request): boolean {
 
 export async function POST(request: Request) {
   try {
+    const identity = await rateLimitIdentity()
+    const rlRes = await enforceRateLimit({ bucket: 'auth:login', identity })
+    if (rlRes) return rlRes
+
     const body = (await request.json().catch(() => ({}))) as LoginBody
 
     const email = normalizeEmail(body.email)
