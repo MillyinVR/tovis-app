@@ -50,8 +50,8 @@ const MAX_LEAD_MINUTES = 30 * 24 * 60
 const TTL_DAY_SECONDS = 90
 const TTL_SUMMARY_SECONDS = 60
 const TTL_BUSY_SECONDS = 60
-const TTL_OTHER_PROS_SECONDS = 120
-const TTL_PLACEMENT_SECONDS = 120
+const TTL_OTHER_PROS_SECONDS = 600 // nearby pros rarely change — 10 min
+const TTL_PLACEMENT_SECONDS = 600  // placement/location context rarely changes — 10 min
 
 const LOCATION_SELECT = {
   id: true,

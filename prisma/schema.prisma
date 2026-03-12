@@ -563,6 +563,7 @@ model ProfessionalLocation {
   @@index([professionalId, isPrimary])
   @@index([professionalId, isBookable])
   @@index([lat, lng])
+  @@index([isBookable, type, lat, lng])
 }
 
 model AdminActionLog {
@@ -1028,6 +1029,7 @@ model BookingHold {
   @@unique([professionalId, scheduledFor])
   @@index([locationId, scheduledFor])
   @@index([professionalId, expiresAt])
+  @@index([professionalId, scheduledFor, expiresAt])
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
   @@index([clientAddressId])
