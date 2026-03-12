@@ -3,7 +3,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
@@ -254,7 +254,6 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
 }
 
 export default function SignupProClient() {
-  const router = useRouter()
   const sp = useSearchParams()
 
   const ti = sp.get('ti')
@@ -504,12 +503,11 @@ export default function SignupProClient() {
         return
       }
 
-      router.refresh()
-
       const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
-      if (nextUrl) return router.replace(nextUrl)
 
-      router.replace('/pro/services')
+      // Hard navigation so the new auth cookie is sent on the first
+      // server render (matches the pattern in LoginClient).
+      window.location.replace(nextUrl ?? '/pro/services')
     } catch (err: unknown) {
       console.error(err)
       setError('Network error.')
