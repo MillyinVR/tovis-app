@@ -51,6 +51,7 @@ const TTL_DAY_SECONDS = 90
 const TTL_SUMMARY_SECONDS = 60
 const TTL_BUSY_SECONDS = 60
 const TTL_OTHER_PROS_SECONDS = 120
+const TTL_PLACEMENT_SECONDS = 120
 
 const LOCATION_SELECT = {
   id: true,
@@ -237,6 +238,64 @@ async function cacheSetJson(
   } catch {
     // fail-open
   }
+}
+
+type CachedPlacement = {
+  locationId: string
+  locationType: ServiceLocationType
+  timeZone: string
+  workingHours: unknown
+  stepMinutes: number
+  leadTimeMinutes: number
+  locationBufferMinutes: number
+  maxAdvanceDays: number
+  durationMinutes: number
+  priceStartingAt: number
+  formattedAddress: string | null
+  lat: number | undefined
+  lng: number | undefined
+  // Fields needed for the response payload:
+  proBusinessName: string | null
+  proAvatarUrl: string | null
+  proLocation: string | null
+  serviceName: string | null
+  serviceCategory: string | null
+  offeringId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonDurationMinutes: number | null
+  mobileDurationMinutes: number | null
+  salonPriceStartingAt: number | null
+  mobilePriceStartingAt: number | null
+  locationCity: string | null
+}
+
+function buildPlacementCacheKey(args: {
+  professionalId: string
+  serviceId: string
+  locationType: string | null
+  locationId: string | null
+  clientAddressId: string | null
+}): string {
+  return [
+    'avail:placement:v1',
+    args.professionalId,
+    args.serviceId,
+    args.locationType ?? 'AUTO',
+    args.locationId ?? 'AUTO',
+    args.clientAddressId ?? 'none',
+  ].join(':')
+}
+
+function parseCachedPlacement(raw: unknown): CachedPlacement | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.locationId !== 'string') return null
+  if (typeof raw.locationType !== 'string') return null
+  if (typeof raw.timeZone !== 'string') return null
+  if (typeof raw.stepMinutes !== 'number') return null
+  if (typeof raw.durationMinutes !== 'number') return null
+  if (typeof raw.offeringId !== 'string') return null
+  return raw as unknown as CachedPlacement
 }
 
 function allowedProfessionalTypes(
@@ -1143,72 +1202,204 @@ export async function GET(req: Request) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
     }
 
-    const [pro, service, offering] = await Promise.all([
-      prisma.professionalProfile.findUnique({
-        where: { id: professionalId },
-        select: {
-          id: true,
-          businessName: true,
-          avatarUrl: true,
-          location: true,
-        },
-      }),
-      prisma.service.findUnique({
-        where: { id: serviceId },
-        select: {
-          id: true,
-          name: true,
-          category: { select: { name: true } },
-        },
-      }),
-      prisma.professionalServiceOffering.findFirst({
-        where: {
+    // Check placement cache first to skip expensive DB queries on repeat visits
+    const placementCacheKey = debug
+      ? null
+      : buildPlacementCacheKey({
           professionalId,
           serviceId,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          offersInSalon: true,
-          offersMobile: true,
-          salonDurationMinutes: true,
-          mobileDurationMinutes: true,
-          salonPriceStartingAt: true,
-          mobilePriceStartingAt: true,
-        },
-      }),
-    ])
+          locationType: requestedLocationType,
+          locationId: requestedLocationId,
+          clientAddressId,
+        })
 
-    if (!pro) return jsonFail(404, 'Professional not found')
-    if (!service) return jsonFail(404, 'Service not found')
-    if (!offering) return jsonFail(404, 'Offering not found')
+    const cachedPlacement = placementCacheKey
+      ? parseCachedPlacement(await cacheGetJson(placementCacheKey))
+      : null
 
-    const offeringSnapshot = buildOfferingSnapshot(offering)
+    let locationId: string
+    let effectiveLocationType: ServiceLocationType
+    let timeZone: string
+    let workingHours: unknown
+    let defaultStepMinutes: number
+    let defaultLead: number
+    let locationBufferMinutes: number
+    let maxAdvanceDays: number
+    let durationMinutes: number
+    let placementLat: number | undefined
+    let placementLng: number | undefined
 
-    const placement = await resolveAvailabilityPlacement({
-      professionalId,
-      offering: offeringSnapshot,
-      requestedLocationType,
-      requestedLocationId,
-      clientAddressId,
-    })
-
-    if (!placement.ok) {
-      return jsonFail(400, placement.error)
+    let proBusinessName: string | null
+    let proAvatarUrl: string | null
+    let proLocation: string | null
+    let serviceName: string | null
+    let serviceCategoryName: string | null
+    let offeringDbId: string
+    let offeringPayload: {
+      id: string
+      offersInSalon: boolean
+      offersMobile: boolean
+      salonDurationMinutes: number | null
+      mobileDurationMinutes: number | null
+      salonPriceStartingAt: number | null
+      mobilePriceStartingAt: number | null
     }
 
-    let {
-      location,
-      locationId,
-      locationType: effectiveLocationType,
-      timeZone,
-      workingHours,
-      stepMinutes: defaultStepMinutes,
-      leadTimeMinutes: defaultLead,
-      locationBufferMinutes,
-      maxAdvanceDays,
-      durationMinutes,
-    } = placement
+    if (cachedPlacement) {
+      // Fast path: reconstruct everything from cache, zero DB queries
+      locationId = cachedPlacement.locationId
+      effectiveLocationType = cachedPlacement.locationType as ServiceLocationType
+      timeZone = cachedPlacement.timeZone
+      workingHours = cachedPlacement.workingHours
+      defaultStepMinutes = cachedPlacement.stepMinutes
+      defaultLead = cachedPlacement.leadTimeMinutes
+      locationBufferMinutes = cachedPlacement.locationBufferMinutes
+      maxAdvanceDays = cachedPlacement.maxAdvanceDays
+      durationMinutes = cachedPlacement.durationMinutes
+      placementLat = cachedPlacement.lat
+      placementLng = cachedPlacement.lng
+
+      proBusinessName = cachedPlacement.proBusinessName
+      proAvatarUrl = cachedPlacement.proAvatarUrl
+      proLocation = cachedPlacement.proLocation
+      serviceName = cachedPlacement.serviceName
+      serviceCategoryName = cachedPlacement.serviceCategory
+      offeringDbId = cachedPlacement.offeringId
+
+      offeringPayload = {
+        id: cachedPlacement.offeringId,
+        offersInSalon: cachedPlacement.offersInSalon,
+        offersMobile: cachedPlacement.offersMobile,
+        salonDurationMinutes: cachedPlacement.salonDurationMinutes,
+        mobileDurationMinutes: cachedPlacement.mobileDurationMinutes,
+        salonPriceStartingAt: cachedPlacement.salonPriceStartingAt,
+        mobilePriceStartingAt: cachedPlacement.mobilePriceStartingAt,
+      }
+    } else {
+      // Slow path: full DB resolution
+      const [pro, service, offering] = await Promise.all([
+        prisma.professionalProfile.findUnique({
+          where: { id: professionalId },
+          select: {
+            id: true,
+            businessName: true,
+            avatarUrl: true,
+            location: true,
+          },
+        }),
+        prisma.service.findUnique({
+          where: { id: serviceId },
+          select: {
+            id: true,
+            name: true,
+            category: { select: { name: true } },
+          },
+        }),
+        prisma.professionalServiceOffering.findFirst({
+          where: {
+            professionalId,
+            serviceId,
+            isActive: true,
+          },
+          select: {
+            id: true,
+            offersInSalon: true,
+            offersMobile: true,
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+            salonPriceStartingAt: true,
+            mobilePriceStartingAt: true,
+          },
+        }),
+      ])
+
+      if (!pro) return jsonFail(404, 'Professional not found')
+      if (!service) return jsonFail(404, 'Service not found')
+      if (!offering) return jsonFail(404, 'Offering not found')
+
+      const offeringSnapshot = buildOfferingSnapshot(offering)
+
+      const placement = await resolveAvailabilityPlacement({
+        professionalId,
+        offering: offeringSnapshot,
+        requestedLocationType,
+        requestedLocationId,
+        clientAddressId,
+      })
+
+      if (!placement.ok) {
+        return jsonFail(400, placement.error)
+      }
+
+      locationId = placement.locationId
+      effectiveLocationType = placement.locationType
+      timeZone = placement.timeZone
+      workingHours = placement.workingHours
+      defaultStepMinutes = placement.stepMinutes
+      defaultLead = placement.leadTimeMinutes
+      locationBufferMinutes = placement.locationBufferMinutes
+      maxAdvanceDays = placement.maxAdvanceDays
+      durationMinutes = placement.durationMinutes
+      placementLat = placement.lat
+      placementLng = placement.lng
+
+      proBusinessName = pro.businessName ?? null
+      proAvatarUrl = pro.avatarUrl ?? null
+      proLocation = pro.location ?? null
+      serviceName = service.name
+      serviceCategoryName = service.category?.name ?? null
+      offeringDbId = offering.id
+
+      offeringPayload = {
+        id: offering.id,
+        offersInSalon: Boolean(offering.offersInSalon),
+        offersMobile: Boolean(offering.offersMobile),
+        salonDurationMinutes: offering.salonDurationMinutes ?? null,
+        mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
+        salonPriceStartingAt: offering.salonPriceStartingAt != null
+          ? Number(offering.salonPriceStartingAt)
+          : null,
+        mobilePriceStartingAt: offering.mobilePriceStartingAt != null
+          ? Number(offering.mobilePriceStartingAt)
+          : null,
+      }
+
+      // Cache the placement for subsequent requests
+      if (placementCacheKey) {
+        void cacheSetJson(
+          placementCacheKey,
+          {
+            locationId,
+            locationType: effectiveLocationType,
+            timeZone,
+            workingHours,
+            stepMinutes: defaultStepMinutes,
+            leadTimeMinutes: defaultLead,
+            locationBufferMinutes,
+            maxAdvanceDays,
+            durationMinutes,
+            priceStartingAt: placement.priceStartingAt,
+            formattedAddress: placement.formattedAddress,
+            lat: placementLat,
+            lng: placementLng,
+            proBusinessName,
+            proAvatarUrl,
+            proLocation,
+            serviceName,
+            serviceCategory: serviceCategoryName,
+            offeringId: offeringDbId,
+            offersInSalon: offeringPayload.offersInSalon,
+            offersMobile: offeringPayload.offersMobile,
+            salonDurationMinutes: offeringPayload.salonDurationMinutes,
+            mobileDurationMinutes: offeringPayload.mobileDurationMinutes,
+            salonPriceStartingAt: offeringPayload.salonPriceStartingAt,
+            mobilePriceStartingAt: offeringPayload.mobilePriceStartingAt,
+            locationCity: placement.location.city ?? null,
+          } as CachedPlacement,
+          TTL_PLACEMENT_SECONDS,
+        )
+      }
+    }
 
     const stepMinutes =
       debug && stepRaw
@@ -1224,7 +1415,7 @@ export async function GET(req: Request) {
       const addOnLinks = await prisma.offeringAddOn.findMany({
         where: {
           id: { in: addOnIds },
-          offeringId: offering.id,
+          offeringId: offeringDbId,
           isActive: true,
           OR: [{ locationType: null }, { locationType: effectiveLocationType }],
           addOnService: {
@@ -1289,16 +1480,6 @@ export async function GET(req: Request) {
       )
     }
 
-    const offeringPayload = {
-      id: offering.id,
-      offersInSalon: Boolean(offering.offersInSalon),
-      offersMobile: Boolean(offering.offersMobile),
-      salonDurationMinutes: offering.salonDurationMinutes ?? null,
-      mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
-      salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
-      mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
-    }
-
     const nowUtc = new Date()
     const nowParts = getZonedParts(nowUtc, timeZone)
     const todayYMD = {
@@ -1359,8 +1540,8 @@ export async function GET(req: Request) {
         MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES,
       )
 
-      const fallbackLat = decimalToNumber(location.lat)
-      const fallbackLng = decimalToNumber(location.lng)
+      const fallbackLat = placementLat
+      const fallbackLng = placementLng
       const hasViewer =
         typeof viewerLat === 'number' && typeof viewerLng === 'number'
 
@@ -1438,8 +1619,8 @@ export async function GET(req: Request) {
         serviceId,
         professionalId,
 
-        serviceName: service.name,
-        serviceCategoryName: service.category?.name ?? null,
+        serviceName,
+        serviceCategoryName,
 
         locationType: effectiveLocationType,
         locationId,
@@ -1453,11 +1634,11 @@ export async function GET(req: Request) {
         durationMinutes,
 
         primaryPro: {
-          id: pro.id,
-          businessName: pro.businessName ?? null,
-          avatarUrl: pro.avatarUrl ?? null,
-          location: pro.location ?? null,
-          offeringId: offering.id,
+          id: professionalId,
+          businessName: proBusinessName,
+          avatarUrl: proAvatarUrl,
+          location: proLocation,
+          offeringId: offeringDbId,
           isCreator: true as const,
           timeZone,
           locationId,
