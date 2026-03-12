@@ -125,7 +125,22 @@ export function useDaySlots(args: {
 
   const daySlotCacheRef = useRef<Record<string, DaySlotCacheEntry>>({})
 
-  const others = useMemo(() => summary?.otherPros ?? [], [summary])
+  // Derive stable primitives from summary so the effect doesn't re-trigger on
+  // every stale-while-revalidate refresh that returns equivalent data.
+  const primaryId = summary?.primaryPro.id ?? null
+  const primaryLocationId = summary?.locationId ?? null
+  const othersKey = useMemo(
+    () =>
+      summary?.otherPros
+        .map((p) => `${p.id}:${p.locationId}`)
+        .join(',') ?? '',
+    [summary?.otherPros],
+  )
+
+  // Keep a ref to the latest otherPros array so the effect can read it
+  // without depending on the reference itself.
+  const othersRef = useRef(summary?.otherPros ?? [])
+  othersRef.current = summary?.otherPros ?? []
 
   const clearDaySlots = useCallback(() => {
     setPrimarySlots([])
@@ -227,12 +242,11 @@ export function useDaySlots(args: {
   )
 
   useEffect(() => {
-    if (!open || !summary || !selectedDayYMD) return
+    if (!open || !primaryId || !primaryLocationId || !selectedDayYMD) return
 
     const currentDayYMD = selectedDayYMD
-    const primaryId = summary.primaryPro.id
-    const primaryLocationId = summary.locationId
-    const currentOthers = summary.otherPros
+    const currentPrimaryId = primaryId
+    const currentPrimaryLocationId = primaryLocationId
 
     let cancelled = false
 
@@ -244,13 +258,12 @@ export function useDaySlots(args: {
 
         setLoadingPrimarySlots(true)
         setLoadingOtherSlots(true)
-        setOtherSlots({})
 
         const primaryDaySlots = await fetchDaySlots({
-          proId: primaryId,
+          proId: currentPrimaryId,
           ymd: currentDayYMD,
           locationType: activeLocationType,
-          locationId: primaryLocationId,
+          locationId: currentPrimaryLocationId,
           isPrimary: true,
         })
 
@@ -259,6 +272,7 @@ export function useDaySlots(args: {
         setPrimarySlots(primaryDaySlots)
         setLoadingPrimarySlots(false)
 
+        const currentOthers = othersRef.current
         const otherResults = await Promise.all(
           currentOthers.map(async (pro) => {
             const slots = await fetchDaySlots({
@@ -301,13 +315,14 @@ export function useDaySlots(args: {
     }
   }, [
     open,
-    summary,
+    primaryId,
+    primaryLocationId,
     selectedDayYMD,
     activeLocationType,
     fetchDaySlots,
     holding,
     setError,
-    others,
+    othersKey,
   ])
 
   return {
