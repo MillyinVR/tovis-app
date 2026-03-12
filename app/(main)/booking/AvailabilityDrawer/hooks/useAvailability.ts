@@ -326,66 +326,73 @@ export function useAvailability(
   }, [])
 
   useEffect(() => {
-    if (!open) {
-      setLoading(false)
-      setRefreshing(false)
-      setError(null)
-      return
-    }
+  if (!open) {
+    setLoading(false)
+    setRefreshing(false)
+    setError(null)
+    return
+  }
 
-    if (!proId) {
-      setLoading(false)
-      setRefreshing(false)
-      setData(null)
-      setError('Missing professional. Please try again.')
-      return
-    }
-
-    if (!serviceId) {
-      setLoading(false)
-      setRefreshing(false)
-      setData(null)
-      setError(
-        'No service is linked yet. Ask the pro to attach a service to this look.',
-      )
-      return
-    }
-
-    if (!canFetch) {
-      setLoading(false)
-      setRefreshing(false)
-      setData(null)
-      setError(null)
-      return
-    }
-
-    const fresh = getFreshCache(queryKey)
-    if (fresh) {
-      setData(fresh)
-      setError(null)
-      setLoading(false)
-      setRefreshing(false)
-      return
-    }
-
-    const stale = getAnyCache(queryKey)
-    if (stale) {
-      setData(stale)
-      setError(null)
-      void fetchAvailability(queryKey, true)
-      return
-    }
-
+  if (!proId) {
+    setLoading(false)
+    setRefreshing(false)
     setData(null)
-    void fetchAvailability(queryKey, false)
-  }, [
-    open,
-    proId,
-    serviceId,
-    canFetch,
-    queryKey,
-    fetchAvailability,
-  ])
+    setError('Missing professional. Please try again.')
+    return
+  }
+
+  if (!serviceId) {
+    setLoading(false)
+    setRefreshing(false)
+    setData(null)
+    setError(
+      'No service is linked yet. Ask the pro to attach a service to this look.',
+    )
+    return
+  }
+
+  if (!canFetch) {
+    setLoading(false)
+    setRefreshing(false)
+    setData(null)
+    setError(null)
+    return
+  }
+
+  const fresh = getFreshCache(queryKey)
+  if (fresh) {
+    setData(fresh)
+    setError(null)
+    setLoading(false)
+    setRefreshing(false)
+    return
+  }
+
+  const stale = getAnyCache(queryKey)
+  if (stale) {
+    setData(stale)
+    setError(null)
+    void fetchAvailability(queryKey, true)
+    return
+  }
+
+  if (data) {
+    setError(null)
+    void fetchAvailability(queryKey, true)
+    return
+  }
+
+  setData(null)
+  void fetchAvailability(queryKey, false)
+}, [
+  open,
+  proId,
+  serviceId,
+  canFetch,
+  queryKey,
+  fetchAvailability,
+  data,
+])
 
   return {
     loading,

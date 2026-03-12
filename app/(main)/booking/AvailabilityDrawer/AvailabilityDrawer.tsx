@@ -237,6 +237,7 @@ export default function AvailabilityDrawer(props: {
   const [holding, setHolding] = useState(false)
   const [selectedDayYMD, setSelectedDayYMD] = useState<string | null>(null)
   const [period, setPeriod] = useState<Period>('AFTERNOON')
+  const [otherProsRequested, setOtherProsRequested] = useState(false)
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
@@ -377,6 +378,7 @@ export default function AvailabilityDrawer(props: {
     loadingOtherSlots,
     clearDaySlots,
     clearDaySlotCache,
+    loadOtherSlots,
   } = useDaySlots({
     open,
     summary,
@@ -390,6 +392,8 @@ export default function AvailabilityDrawer(props: {
   })
 
   const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
+  const hasOtherPros = others.length > 0
+  const shouldRenderOtherPros = hasOtherPros && otherProsRequested
 
   const hardResetUi = useCallback(
     async (args?: { deleteHold?: boolean }) => {
@@ -414,6 +418,7 @@ export default function AvailabilityDrawer(props: {
       await hardResetUi({ deleteHold: true })
       setLocationType(next)
       setSelectedDayYMD(null)
+      setOtherProsRequested(false)
       clearDaySlots()
       clearDaySlotCache()
       setError(null)
@@ -425,6 +430,29 @@ export default function AvailabilityDrawer(props: {
       clearDaySlotCache,
       setError,
     ],
+  )
+
+  const requestOtherPros = useCallback(
+    (options?: { scroll?: boolean; forceRefresh?: boolean }) => {
+      if (!open) return
+      if (!summary) return
+      if (!selectedDayYMD) return
+      if (!hasOtherPros) return
+
+      setOtherProsRequested(true)
+
+      void loadOtherSlots({ forceRefresh: options?.forceRefresh })
+
+      if (options?.scroll) {
+        window.requestAnimationFrame(() => {
+          otherProsRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          })
+        })
+      }
+    },
+    [open, summary, selectedDayYMD, hasOtherPros, loadOtherSlots],
   )
 
   useEffect(() => {
@@ -443,6 +471,7 @@ export default function AvailabilityDrawer(props: {
     setError(null)
 
     if (!selectedClientAddressId) {
+      setOtherProsRequested(false)
       clearDaySlots()
     }
   }, [
@@ -454,39 +483,26 @@ export default function AvailabilityDrawer(props: {
     setError,
   ])
 
-  useEffect(() => {
-    if (!open) return
+useEffect(() => {
+  if (!open) return
 
-    setSelectedDayYMD(null)
-    setPeriod('AFTERNOON')
-    clearDaySlots()
-    clearDaySlotCache()
-    setLocationType(null)
-    resetMobileAddressState()
+  setSelectedDayYMD(null)
+  setPeriod('AFTERNOON')
+  setOtherProsRequested(false)
+  clearDaySlots()
+  clearDaySlotCache()
+  resetMobileAddressState()
 
-    void hardResetUi({ deleteHold: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    open,
-    context.mediaId,
-    context.professionalId,
-    context.serviceId,
-    context.offeringId,
-    context.source,
-  ])
-
-  useEffect(() => {
-    if (!open) return
-    if (!summary) return
-    if (loading) return
-    if (holding) return
-    if (selectedHoldIdRef.current) return
-
-    if (locationType == null && summary.locationType) {
-      setLocationType(summary.locationType)
-    }
-  }, [open, summary, loading, holding, locationType])
-
+  void hardResetUi({ deleteHold: true })
+}, [
+  open,
+  context.mediaId,
+  context.professionalId,
+  context.serviceId,
+  context.offeringId,
+  context.source,
+])
+  
   useEffect(() => {
     if (!open) return
     if (!summary) return
@@ -586,11 +602,13 @@ export default function AvailabilityDrawer(props: {
     }
   }, [open, primarySlots, appointmentTz, period])
 
+  useEffect(() => {
+    if (!open) return
+    setOtherProsRequested(false)
+  }, [open, selectedDayYMD, activeLocationType, selectedClientAddressId])
+
   function scrollToOtherPros() {
-    otherProsRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    })
+    requestOtherPros({ scroll: true })
   }
 
   async function onPickSlot(
@@ -904,6 +922,21 @@ export default function AvailabilityDrawer(props: {
                 }}
               />
 
+              {hasOtherPros && !otherProsRequested ? (
+                <div className="mb-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      requestOtherPros()
+                    }}
+                    disabled={holding || loadingOtherSlots || !selectedDayYMD}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Show other pros near you
+                  </button>
+                </div>
+              ) : null}
+
               {loadingOtherSlots ? (
                 <div className="mb-3 text-xs font-semibold text-textSecondary">
                   Loading more pros…
@@ -934,23 +967,25 @@ export default function AvailabilityDrawer(props: {
                 noPrimarySlots={noPrimarySlots}
               />
 
-              <OtherPros
-                others={others.map((p) => ({
-                  ...p,
-                  slots: otherSlots[p.id] ?? [],
-                }))}
-                effectiveServiceId={effectiveServiceId}
-                viewerTz={viewerTz}
-                appointmentTz={appointmentTz}
-                holding={holding}
-                selected={selected}
-                onPick={(proId, offeringId, slotISO) => {
-                  void onPickSlot(proId, offeringId, slotISO)
-                }}
-                setRef={(el) => {
-                  otherProsRef.current = el
-                }}
-              />
+              {shouldRenderOtherPros ? (
+                <OtherPros
+                  others={others.map((p) => ({
+                    ...p,
+                    slots: otherSlots[p.id] ?? [],
+                  }))}
+                  effectiveServiceId={effectiveServiceId}
+                  viewerTz={viewerTz}
+                  appointmentTz={appointmentTz}
+                  holding={holding}
+                  selected={selected}
+                  onPick={(proId, offeringId, slotISO) => {
+                    void onPickSlot(proId, offeringId, slotISO)
+                  }}
+                  setRef={(el) => {
+                    otherProsRef.current = el
+                  }}
+                />
+              ) : null}
 
               {debug ? (
                 <DebugPanel
@@ -965,6 +1000,8 @@ export default function AvailabilityDrawer(props: {
                     selectedDayYMD,
                     period,
                     primarySlotsCount: primarySlots.length,
+                    otherProsRequested,
+                    otherProsCount: others.length,
                     offering,
                     allowed,
                     selectedClientAddressId,
