@@ -259,22 +259,25 @@ export function useDaySlots(args: {
         setPrimarySlots(primaryDaySlots)
         setLoadingPrimarySlots(false)
 
-        const nextOtherSlots: Record<string, string[]> = {}
-
-        for (const pro of currentOthers) {
-          const slots = await fetchDaySlots({
-            proId: pro.id,
-            ymd: currentDayYMD,
-            locationType: activeLocationType,
-            locationId: pro.locationId,
-            isPrimary: false,
-          })
-
-          if (cancelled) return
-          nextOtherSlots[pro.id] = slots
-        }
+        const otherResults = await Promise.all(
+          currentOthers.map(async (pro) => {
+            const slots = await fetchDaySlots({
+              proId: pro.id,
+              ymd: currentDayYMD,
+              locationType: activeLocationType,
+              locationId: pro.locationId,
+              isPrimary: false,
+            })
+            return { id: pro.id, slots }
+          }),
+        )
 
         if (cancelled) return
+
+        const nextOtherSlots: Record<string, string[]> = {}
+        for (const { id, slots } of otherResults) {
+          nextOtherSlots[id] = slots
+        }
 
         setOtherSlots(nextOtherSlots)
       } catch {

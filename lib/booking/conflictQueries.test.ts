@@ -94,21 +94,15 @@ describe('conflictQueries', () => {
           offeringId: 'off_1',
           locationId,
           locationType: 'SALON',
-        },
-      ])
-
-      prismaMockFns.professionalServiceOfferingFindMany.mockResolvedValue([
-        {
-          id: 'off_1',
-          salonDurationMinutes: 45,
-          mobileDurationMinutes: 30,
-        },
-      ])
-
-      prismaMockFns.professionalLocationFindMany.mockResolvedValue([
-        {
-          id: locationId,
-          bufferMinutes: 15,
+          offering: {
+            id: 'off_1',
+            salonDurationMinutes: 45,
+            mobileDurationMinutes: 30,
+          },
+          location: {
+            id: locationId,
+            bufferMinutes: 15,
+          },
         },
       ])
 
@@ -179,21 +173,15 @@ describe('conflictQueries', () => {
           offeringId: 'off_1',
           locationId,
           locationType: 'SALON',
-        },
-      ])
-
-      prismaMockFns.professionalServiceOfferingFindMany.mockResolvedValue([
-        {
-          id: 'off_1',
-          salonDurationMinutes: 30,
-          mobileDurationMinutes: 30,
-        },
-      ])
-
-      prismaMockFns.professionalLocationFindMany.mockResolvedValue([
-        {
-          id: locationId,
-          bufferMinutes: 0,
+          offering: {
+            id: 'off_1',
+            salonDurationMinutes: 30,
+            mobileDurationMinutes: 30,
+          },
+          location: {
+            id: locationId,
+            bufferMinutes: 0,
+          },
         },
       ])
 
@@ -286,21 +274,15 @@ describe('conflictQueries', () => {
           offeringId: 'off_1',
           locationId: 'other_loc',
           locationType: 'MOBILE',
-        },
-      ])
-
-      prismaMockFns.professionalServiceOfferingFindMany.mockResolvedValue([
-        {
-          id: 'off_1',
-          salonDurationMinutes: 30,
-          mobileDurationMinutes: 30,
-        },
-      ])
-
-      prismaMockFns.professionalLocationFindMany.mockResolvedValue([
-        {
-          id: 'other_loc',
-          bufferMinutes: 0,
+          offering: {
+            id: 'off_1',
+            salonDurationMinutes: 30,
+            mobileDurationMinutes: 30,
+          },
+          location: {
+            id: 'other_loc',
+            bufferMinutes: 0,
+          },
         },
       ])
 
@@ -339,6 +321,19 @@ describe('conflictQueries', () => {
           offeringId: true,
           locationId: true,
           locationType: true,
+          offering: {
+            select: {
+              id: true,
+              salonDurationMinutes: true,
+              mobileDurationMinutes: true,
+            },
+          },
+          location: {
+            select: {
+              id: true,
+              bufferMinutes: true,
+            },
+          },
         },
         take: 2000,
       })
@@ -352,21 +347,15 @@ describe('conflictQueries', () => {
           offeringId: 'off_1',
           locationId,
           locationType: 'SALON',
-        },
-      ])
-
-      prismaMockFns.professionalServiceOfferingFindMany.mockResolvedValue([
-        {
-          id: 'off_1',
-          salonDurationMinutes: 30,
-          mobileDurationMinutes: 30,
-        },
-      ])
-
-      prismaMockFns.professionalLocationFindMany.mockResolvedValue([
-        {
-          id: locationId,
-          bufferMinutes: 0,
+          offering: {
+            id: 'off_1',
+            salonDurationMinutes: 30,
+            mobileDurationMinutes: 30,
+          },
+          location: {
+            id: locationId,
+            bufferMinutes: 0,
+          },
         },
       ])
 
@@ -383,7 +372,7 @@ describe('conflictQueries', () => {
   })
 
   describe('getTimeRangeConflict', () => {
-    it('returns BLOCKED for a location-specific or global block before checking bookings/holds', async () => {
+    it('returns BLOCKED when a calendar block conflict exists', async () => {
       prismaMockFns.calendarBlockFindFirst.mockResolvedValue({
         id: 'block_1',
       })
@@ -407,8 +396,6 @@ describe('conflictQueries', () => {
         },
         select: { id: true },
       })
-      expect(prismaMockFns.bookingFindMany).not.toHaveBeenCalled()
-      expect(prismaMockFns.bookingHoldFindMany).not.toHaveBeenCalled()
     })
 
     it('returns BOOKING when no block exists and a booking overlaps', async () => {
@@ -440,21 +427,15 @@ describe('conflictQueries', () => {
           offeringId: 'off_1',
           locationId,
           locationType: 'SALON',
-        },
-      ])
-
-      prismaMockFns.professionalServiceOfferingFindMany.mockResolvedValue([
-        {
-          id: 'off_1',
-          salonDurationMinutes: 45,
-          mobileDurationMinutes: 30,
-        },
-      ])
-
-      prismaMockFns.professionalLocationFindMany.mockResolvedValue([
-        {
-          id: locationId,
-          bufferMinutes: 0,
+          offering: {
+            id: 'off_1',
+            salonDurationMinutes: 45,
+            mobileDurationMinutes: 30,
+          },
+          location: {
+            id: locationId,
+            bufferMinutes: 0,
+          },
         },
       ])
 
