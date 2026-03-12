@@ -477,31 +477,29 @@ async function resolveAvailabilityPlacement(args: {
     take: 50,
   })
 
-  let firstMeaningfulError: AvailabilityPlacementResult | null = null
+  // Validate all candidate locations in parallel instead of sequentially
+  const attempts = await Promise.all(
+    candidates.map(async (candidate) => {
+      const locationType = locationTypeForLocation(candidate)
+      return validateAvailabilityPlacement({
+        professionalId,
+        requestedLocationId: candidate.id,
+        locationType,
+        offering: args.offering,
+        clientAddressId: args.clientAddressId,
+        allowFallback: false,
+      })
+    }),
+  )
 
-  for (const candidate of candidates) {
-    const locationType = locationTypeForLocation(candidate)
-
-    const attempt = await validateAvailabilityPlacement({
-      professionalId,
-      requestedLocationId: candidate.id,
-      locationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      allowFallback: false,
-    })
-
-    if (attempt.ok) {
-      return attempt
-    }
-
-    if (
-      firstMeaningfulError == null &&
-      attempt.code !== 'LOCATION_NOT_FOUND'
-    ) {
-      firstMeaningfulError = attempt
-    }
+  // Return the first success (preserves original ordering preference: isPrimary desc, createdAt asc)
+  for (const attempt of attempts) {
+    if (attempt.ok) return attempt
   }
+
+  const firstMeaningfulError = attempts.find(
+    (a) => !a.ok && a.code !== 'LOCATION_NOT_FOUND',
+  )
 
   return (
     firstMeaningfulError ?? {
@@ -1361,16 +1359,39 @@ export async function GET(req: Request) {
         MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES,
       )
 
-      const busy = await loadBusyIntervals({
-        professionalId,
-        locationId,
-        windowStartUtc,
-        windowEndUtc,
-        nowUtc,
-        fallbackDurationMinutes: durationMinutes,
-        locationBufferMinutes,
-        cache: { enabled: !debug },
-      })
+      const fallbackLat = decimalToNumber(location.lat)
+      const fallbackLng = decimalToNumber(location.lng)
+      const hasViewer =
+        typeof viewerLat === 'number' && typeof viewerLng === 'number'
+
+      const centerLat = hasViewer ? viewerLat : fallbackLat
+      const centerLng = hasViewer ? viewerLng : fallbackLng
+
+      // Load busy intervals and other pros concurrently — they are independent
+      const [busy, otherPros] = await Promise.all([
+        loadBusyIntervals({
+          professionalId,
+          locationId,
+          windowStartUtc,
+          windowEndUtc,
+          nowUtc,
+          fallbackDurationMinutes: durationMinutes,
+          locationBufferMinutes,
+          cache: { enabled: !debug },
+        }),
+        centerLat != null && centerLng != null
+          ? loadOtherProsNearbyCached({
+              centerLat,
+              centerLng,
+              radiusMiles,
+              serviceId,
+              locationType: effectiveLocationType,
+              excludeProfessionalId: professionalId,
+              limit: 6,
+              cacheEnabled: !debug,
+            })
+          : Promise.resolve([] as OtherProRow[]),
+      ])
 
       const dayResults = await Promise.all(
         ymds.map(async (ymd) => {
@@ -1409,28 +1430,6 @@ export async function GET(req: Request) {
           })
         }
       }
-
-      const fallbackLat = decimalToNumber(location.lat)
-      const fallbackLng = decimalToNumber(location.lng)
-      const hasViewer =
-        typeof viewerLat === 'number' && typeof viewerLng === 'number'
-
-      const centerLat = hasViewer ? viewerLat : fallbackLat
-      const centerLng = hasViewer ? viewerLng : fallbackLng
-
-      const otherPros =
-        centerLat != null && centerLng != null
-          ? await loadOtherProsNearbyCached({
-              centerLat,
-              centerLng,
-              radiusMiles,
-              serviceId,
-              locationType: effectiveLocationType,
-              excludeProfessionalId: professionalId,
-              limit: 6,
-              cacheEnabled: !debug,
-            })
-          : []
 
       const payload = {
         ok: true,

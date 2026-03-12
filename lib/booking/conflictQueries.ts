@@ -192,63 +192,34 @@ export async function hasHoldConflict(
       offeringId: true,
       locationId: true,
       locationType: true,
+      offering: {
+        select: {
+          id: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+        },
+      },
+      location: {
+        select: {
+          id: true,
+          bufferMinutes: true,
+        },
+      },
     },
     take: normalizeTake(take, 2000),
   })
 
   if (!holds.length) return false
 
-  const offeringIds = Array.from(new Set(holds.map((hold) => hold.offeringId)))
-  const locationIds = Array.from(
-    new Set(
-      holds
-        .map((hold) => hold.locationId)
-        .filter(
-          (value): value is string =>
-            typeof value === 'string' && value.length > 0,
-        ),
-    ),
-  )
-
-  const [offerings, locations] = await Promise.all([
-    offeringIds.length
-      ? db(tx).professionalServiceOffering.findMany({
-          where: { id: { in: offeringIds } },
-          select: {
-            id: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-          },
-          take: normalizeTake(take, 2000),
-        })
-      : Promise.resolve([]),
-    locationIds.length
-      ? db(tx).professionalLocation.findMany({
-          where: { id: { in: locationIds } },
-          select: {
-            id: true,
-            bufferMinutes: true,
-          },
-          take: normalizeTake(take, 2000),
-        })
-      : Promise.resolve([]),
-  ])
-
-  const offeringById = new Map(offerings.map((row) => [row.id, row]))
-  const bufferByLocationId = new Map(
-    locations.map((row) => [row.id, bufferOrZero(row.bufferMinutes)]),
-  )
-
   return holds.some((hold) => {
-    const offering = offeringById.get(hold.offeringId)
     const bufferMinutes =
-      (hold.locationId ? bufferByLocationId.get(hold.locationId) : undefined) ??
+      (hold.location ? bufferOrZero(hold.location.bufferMinutes) : undefined) ??
       bufferOrZero(defaultBufferMinutes)
 
     const interval = holdToBusyInterval({
       hold,
-      salonDurationMinutes: offering?.salonDurationMinutes,
-      mobileDurationMinutes: offering?.mobileDurationMinutes,
+      salonDurationMinutes: hold.offering?.salonDurationMinutes,
+      mobileDurationMinutes: hold.offering?.mobileDurationMinutes,
       fallbackDurationMinutes,
       bufferMinutes,
     })
@@ -343,6 +314,19 @@ export async function loadBusyIntervalsForWindow(
         offeringId: true,
         locationId: true,
         locationType: true,
+        offering: {
+          select: {
+            id: true,
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+          },
+        },
+        location: {
+          select: {
+            id: true,
+            bufferMinutes: true,
+          },
+        },
       },
       take: normalizedTake,
     }),
@@ -361,61 +345,19 @@ export async function loadBusyIntervalsForWindow(
     }),
   ])
 
-  const holdOfferingIds = Array.from(new Set(holds.map((hold) => hold.offeringId)))
-  const holdLocationIds = Array.from(
-    new Set(
-      holds
-        .map((hold) => hold.locationId)
-        .filter(
-          (value): value is string =>
-            typeof value === 'string' && value.length > 0,
-        ),
-    ),
-  )
-
-  const [holdOfferings, holdLocations] = await Promise.all([
-    holdOfferingIds.length
-      ? database.professionalServiceOffering.findMany({
-          where: { id: { in: holdOfferingIds } },
-          select: {
-            id: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-          },
-          take: normalizedTake,
-        })
-      : Promise.resolve([]),
-    holdLocationIds.length
-      ? database.professionalLocation.findMany({
-          where: { id: { in: holdLocationIds } },
-          select: {
-            id: true,
-            bufferMinutes: true,
-          },
-          take: normalizedTake,
-        })
-      : Promise.resolve([]),
-  ])
-
-  const holdOfferingById = new Map(holdOfferings.map((row) => [row.id, row]))
-  const holdBufferByLocationId = new Map(
-    holdLocations.map((row) => [row.id, bufferOrZero(row.bufferMinutes)]),
-  )
-
   const intervals: BusyInterval[] = [
     ...bookings.map((booking) =>
       bookingToBusyInterval(booking, fallbackDurationMinutes),
     ),
     ...holds.map((hold) => {
-      const offering = holdOfferingById.get(hold.offeringId)
       const bufferMinutes =
-        (hold.locationId ? holdBufferByLocationId.get(hold.locationId) : undefined) ??
+        (hold.location ? bufferOrZero(hold.location.bufferMinutes) : undefined) ??
         bufferOrZero(defaultBufferMinutes)
 
       return holdToBusyInterval({
         hold,
-        salonDurationMinutes: offering?.salonDurationMinutes,
-        mobileDurationMinutes: offering?.mobileDurationMinutes,
+        salonDurationMinutes: hold.offering?.salonDurationMinutes,
+        mobileDurationMinutes: hold.offering?.mobileDurationMinutes,
         fallbackDurationMinutes,
         bufferMinutes,
       })
@@ -445,39 +387,38 @@ export async function getTimeRangeConflict(
     take,
   } = args
 
-  const blockConflict = await findCalendarBlockConflict({
-    tx,
-    professionalId,
-    locationId,
-    requestedStart,
-    requestedEnd,
-  })
+  // Run all three conflict checks concurrently
+  const [blockConflict, bookingConflict, holdConflict] = await Promise.all([
+    findCalendarBlockConflict({
+      tx,
+      professionalId,
+      locationId,
+      requestedStart,
+      requestedEnd,
+    }),
+    hasBookingConflict({
+      tx,
+      professionalId,
+      requestedStart,
+      requestedEnd,
+      excludeBookingId,
+      take,
+    }),
+    hasHoldConflict({
+      tx,
+      professionalId,
+      requestedStart,
+      requestedEnd,
+      defaultBufferMinutes,
+      fallbackDurationMinutes,
+      excludeHoldId,
+      nowUtc,
+      take,
+    }),
+  ])
 
   if (blockConflict) return 'BLOCKED'
-
-  const bookingConflict = await hasBookingConflict({
-    tx,
-    professionalId,
-    requestedStart,
-    requestedEnd,
-    excludeBookingId,
-    take,
-  })
-
   if (bookingConflict) return 'BOOKING'
-
-  const holdConflict = await hasHoldConflict({
-    tx,
-    professionalId,
-    requestedStart,
-    requestedEnd,
-    defaultBufferMinutes,
-    fallbackDurationMinutes,
-    excludeHoldId,
-    nowUtc,
-    take,
-  })
-
   if (holdConflict) return 'HOLD'
 
   return null
