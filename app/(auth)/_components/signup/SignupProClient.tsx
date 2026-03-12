@@ -80,9 +80,9 @@ function PrimaryButton({
         'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
         'border border-accentPrimary/35',
         'bg-accentPrimary/26 text-textPrimary',
-        'hover:bg-accentPrimary/30 hover:border-accentPrimary/45',
+        'hover:enabled:bg-accentPrimary/30 hover:enabled:border-accentPrimary/45',
         'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-        loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
+        disabled || loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
       )}
     >
       <span className="relative">{children}</span>
