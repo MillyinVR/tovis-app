@@ -232,11 +232,9 @@ export default function AvailabilityDrawer(props: {
   const [locationType, setLocationType] = useState<ServiceLocationType | null>(
     null,
   )
-
   const [selected, setSelected] = useState<SelectedHold | null>(null)
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [holding, setHolding] = useState(false)
-
   const [selectedDayYMD, setSelectedDayYMD] = useState<string | null>(null)
   const [period, setPeriod] = useState<Period>('AFTERNOON')
 
@@ -369,29 +367,29 @@ export default function AvailabilityDrawer(props: {
 
   const dayScrollerDays = useMemo(
     () => buildDayScrollerModel(days, appointmentTz),
-    [daysKey, appointmentTz, days],
+    [days, daysKey, appointmentTz],
   )
 
   const {
-  primarySlots,
-  otherSlots,
-  loadingPrimarySlots,
-  loadingOtherSlots,
-  clearDaySlots,
-  clearDaySlotCache,
-} = useDaySlots({
-  open,
-  summary,
-  selectedDayYMD,
-  activeLocationType,
-  effectiveServiceId,
-  selectedClientAddressId,
-  debug,
-  holding,
-  setError,
-})
+    primarySlots,
+    otherSlots,
+    loadingPrimarySlots,
+    loadingOtherSlots,
+    clearDaySlots,
+    clearDaySlotCache,
+  } = useDaySlots({
+    open,
+    summary,
+    selectedDayYMD,
+    activeLocationType,
+    effectiveServiceId,
+    selectedClientAddressId,
+    debug,
+    holding,
+    setError,
+  })
 
-const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
+  const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
 
   const hardResetUi = useCallback(
     async (args?: { deleteHold?: boolean }) => {
@@ -946,9 +944,9 @@ const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
                 appointmentTz={appointmentTz}
                 holding={holding}
                 selected={selected}
-                onPick={(proId, offeringId, slotISO) =>
-                  onPickSlot(proId, offeringId, slotISO)
-                }
+                onPick={(proId, offeringId, slotISO) => {
+                  void onPickSlot(proId, offeringId, slotISO)
+                }}
                 setRef={(el) => {
                   otherProsRef.current = el
                 }}

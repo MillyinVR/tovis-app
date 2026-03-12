@@ -4,22 +4,16 @@
 // return shape consumed by page.tsx and its child components.
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type {
-  CalendarEvent,
-  EntityType,
-  ViewMode,
-  WorkingHoursJson,
-} from '../_types'
+import type { CalendarEvent, ViewMode } from '../_types'
 import { startOfMonth, startOfWeek } from '../_utils/date'
 import {
   normalizeStepMinutes,
-  computeDurationMinutesFromIso,
   isBlockedEvent,
+  snapMinutes,
 } from '../_utils/calendarMath'
 import {
-  locationTypeFromProfessionalType,
   locationTypeFromBookingValue,
   type LocationType,
 } from '../_utils/parsers'
@@ -51,14 +45,6 @@ function forceProFooterRefresh() {
   }
 }
 
-function eventDurationMinutes(ev: CalendarEvent) {
-  return typeof ev.durationMinutes === 'number' &&
-    Number.isFinite(ev.durationMinutes) &&
-    ev.durationMinutes > 0
-    ? ev.durationMinutes
-    : computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
-}
-
 export function useCalendarData({ view, currentDate }: Args) {
   const router = useRouter()
 
@@ -66,13 +52,21 @@ export function useCalendarData({ view, currentDate }: Args) {
 
   const loc = useCalendarLocations()
 
+  // ── Calendar fetch ────────────────────────────────────────────────
+  // Note:
+  // resolveActiveCalendarTimeZone closes over `cal.timeZoneRef`.
+  // That is okay because the callback is only used after `cal` exists.
+
   function resolveActiveCalendarTimeZone(fallback?: string) {
     const fallbackTz = sanitizeTimeZone(
       fallback ?? cal.timeZoneRef.current,
       DEFAULT_TIME_ZONE,
     )
 
-    if (loc.activeLocation?.timeZone && isValidIanaTimeZone(loc.activeLocation.timeZone)) {
+    if (
+      loc.activeLocation?.timeZone &&
+      isValidIanaTimeZone(loc.activeLocation.timeZone)
+    ) {
       return sanitizeTimeZone(loc.activeLocation.timeZone, fallbackTz)
     }
 
@@ -93,7 +87,9 @@ export function useCalendarData({ view, currentDate }: Args) {
 
     const resolvedWorkingHours =
       location?.workingHours ??
-      (args.locationType === 'MOBILE' ? cal.workingHoursMobile : cal.workingHoursSalon)
+      (args.locationType === 'MOBILE'
+        ? cal.workingHoursMobile
+        : cal.workingHoursSalon)
 
     const resolvedStepMinutes = normalizeStepMinutes(location?.stepMinutes)
 
@@ -116,7 +112,10 @@ export function useCalendarData({ view, currentDate }: Args) {
     if (ev.locationId) {
       return resolveBookingSchedulingContext({
         locationId: ev.locationId,
-        locationType: loc.resolveLocationTypeFromId(ev.locationId, loc.activeLocationType),
+        locationType: loc.resolveLocationTypeFromId(
+          ev.locationId,
+          loc.activeLocationType,
+        ),
         fallbackTimeZone: cal.timeZoneRef.current,
       })
     }
@@ -127,8 +126,6 @@ export function useCalendarData({ view, currentDate }: Args) {
       stepMinutes: loc.activeStepMinutes,
     }
   }
-
-  // ── Calendar fetch ────────────────────────────────────────────────
 
   const cal = useCalendarFetch({
     view,
@@ -143,12 +140,33 @@ export function useCalendarData({ view, currentDate }: Args) {
     resolveActiveCalendarTimeZone,
   })
 
+  // ── Management panel ──────────────────────────────────────────────
+
+  const mgmt = useManagementPanel({
+    eventsRef: cal.eventsRef,
+    reloadCalendar: cal.loadCalendar,
+    forceProFooterRefresh,
+  })
+
+  // ── Booking modal ─────────────────────────────────────────────────
+
+  const bookingModal = useBookingModal({
+    eventsRef: cal.eventsRef,
+    activeStepMinutes: loc.activeStepMinutes,
+    activeLocationType: loc.activeLocationType,
+    timeZone: cal.timeZone,
+    resolveLocationStepMinutes: loc.resolveLocationStepMinutes,
+    resolveBookingSchedulingContext,
+    reloadCalendar: cal.loadCalendar,
+    forceProFooterRefresh,
+    locations: loc.locations,
+  })
+
   // ── Services (load when active location type changes) ─────────────
 
   useEffect(() => {
     void bookingModal.loadServicesForLocation(loc.activeLocationType)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loc.activeLocationType])
+  }, [bookingModal, loc.activeLocationType])
 
   // ── Confirm change (drag/resize) ─────────────────────────────────
 
@@ -184,44 +202,20 @@ export function useCalendarData({ view, currentDate }: Args) {
     setLoading: cal.setLoading,
   })
 
-  // ── Management panel ──────────────────────────────────────────────
-
-  const mgmt = useManagementPanel({
-    eventsRef: cal.eventsRef,
-    reloadCalendar: cal.loadCalendar,
-    forceProFooterRefresh,
-  })
-
   // Sync management data from calendar fetch
   useEffect(() => {
     mgmt.setManagement(cal.management)
-  }, [cal.management])
-
-  // ── Booking modal ─────────────────────────────────────────────────
-
-  const bookingModal = useBookingModal({
-    eventsRef: cal.eventsRef,
-    activeStepMinutes: loc.activeStepMinutes,
-    activeLocationType: loc.activeLocationType,
-    timeZone: cal.timeZone,
-    resolveLocationStepMinutes: loc.resolveLocationStepMinutes,
-    resolveBookingSchedulingContext,
-    reloadCalendar: cal.loadCalendar,
-    forceProFooterRefresh,
-    locations: loc.locations,
-  })
+  }, [mgmt, cal.management])
 
   // ── Shared UI state ──────────────────────────────────────────────
 
-  const [showHoursForm, setShowHoursForm] = useMemo(() => {
-    // This needs to be regular state, not a memo. Use the pattern from below.
-    return [false, () => {}] as const
-  }, [])
+  const [showHoursForm, setShowHoursForm] = useState(false)
 
   // ── Composite helpers ─────────────────────────────────────────────
 
   function openBookingOrBlock(id: string) {
     const ev = cal.eventsRef.current.find((x) => x.id === id)
+
     if (ev && isBlockedEvent(ev)) {
       const locationId = blocks.openEditBlockFromEvent(ev)
       if (locationId) {
@@ -238,7 +232,14 @@ export function useCalendarData({ view, currentDate }: Args) {
   }
 
   function openCreateForClick(day: Date, clientY: number, columnTop: number) {
-    if (confirm.confirmOpen || confirm.pendingChange || bookingModal.openBookingId) return
+    if (
+      confirm.confirmOpen ||
+      confirm.pendingChange ||
+      bookingModal.openBookingId
+    ) {
+      return
+    }
+
     if (mgmt.managementOpen) return
     if (blocks.blockCreateOpen || blocks.editBlockOpen) return
 
@@ -248,7 +249,6 @@ export function useCalendarData({ view, currentDate }: Args) {
       return
     }
 
-    const { snapMinutes } = require('../_utils/calendarMath')
     const y = clientY - columnTop
     const mins = snapMinutes(y / 1.5, loc.activeStepMinutes) // PX_PER_MINUTE = 1.5
     const tz = resolveActiveCalendarTimeZone()

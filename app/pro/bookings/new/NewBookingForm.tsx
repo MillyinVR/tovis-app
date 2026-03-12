@@ -71,12 +71,6 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-function readStringField(data: unknown, key: string): string | null {
-  if (!isRecord(data)) return null
-  const value = data[key]
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 function readBookingId(data: unknown): string | null {
   if (!isRecord(data)) return null
   const booking = data.booking
@@ -267,39 +261,6 @@ export default function NewBookingForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [proTimeZone, setProTimeZone] = useState<string>(() => {
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-      return isValidIanaTimeZone(tz) ? tz : 'UTC'
-    } catch {
-      return 'UTC'
-    }
-  })
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadProTz() {
-      try {
-        const res = await fetch('/api/pro/calendar', { cache: 'no-store' })
-        const data = await safeJson(res)
-        const tz = readStringField(data, 'timeZone')
-
-        if (!cancelled && tz && isValidIanaTimeZone(tz)) {
-          setProTimeZone(tz)
-        }
-      } catch {
-        // keep fallback
-      }
-    }
-
-    void loadProTz()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   const clientOptions = useMemo(() => clients ?? [], [clients])
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
 
@@ -378,6 +339,16 @@ export default function NewBookingForm({
     })
   }, [availableLocations])
 
+  const selectedLocation = useMemo(
+    () => locations.find((location) => location.id === locationId) ?? null,
+    [locations, locationId],
+  )
+
+  const bookingTimeZone: string = useMemo(() => {
+    const tz = selectedLocation?.timeZone
+    return typeof tz === 'string' && isValidIanaTimeZone(tz) ? tz : 'UTC'
+  }, [selectedLocation])
+
   const selectedClientAddresses = useMemo(() => {
     if (!clientId) return []
     return clientAddressesByClientId[clientId] ?? []
@@ -452,9 +423,24 @@ export default function NewBookingForm({
       return
     }
 
+    if (!offeringSupportsMode(selectedOffering, locationType)) {
+      setError('Selected service does not support this booking mode.')
+      return
+    }
+
+    if (!selectedLocation) {
+      setError('Select a valid location.')
+      return
+    }
+
+    if (!locationSupportsMode(selectedLocation, locationType)) {
+      setError('Selected location does not support this booking mode.')
+      return
+    }
+
     const scheduledForISO = toUtcIsoFromDatetimeLocalInTimeZone(
       scheduledAt,
-      proTimeZone,
+      bookingTimeZone,
     )
 
     if (!scheduledForISO) {
@@ -491,10 +477,10 @@ export default function NewBookingForm({
         return
       }
 
-      const bookingId = readBookingId(data)
+      const nextBookingId = readBookingId(data)
 
-      if (bookingId) {
-        router.push(`/pro/bookings/${encodeURIComponent(bookingId)}`)
+      if (nextBookingId) {
+        router.push(`/pro/bookings/${encodeURIComponent(nextBookingId)}`)
       } else {
         router.push('/pro/bookings')
       }
@@ -513,7 +499,7 @@ export default function NewBookingForm({
   const label = 'text-[12px] font-black text-textPrimary'
   const helper = 'mt-2 text-[12px] text-textSecondary'
 
-  const tzLabel = sanitizeTimeZone(proTimeZone, 'UTC')
+  const tzLabel = sanitizeTimeZone(bookingTimeZone, 'UTC')
   const mobileUnavailableBecauseNoAddress =
     locationType === 'MOBILE' && clientId && selectedClientAddresses.length === 0
 
@@ -606,7 +592,9 @@ export default function NewBookingForm({
           className={field}
         >
           <option value="">
-            {visibleOfferings.length ? 'Select service' : 'No services for this mode'}
+            {visibleOfferings.length
+              ? 'Select service'
+              : 'No services for this mode'}
           </option>
           {visibleOfferings.map((offering) => (
             <option key={offering.id} value={offering.id}>
@@ -635,7 +623,9 @@ export default function NewBookingForm({
           className={field}
         >
           <option value="">
-            {availableLocations.length ? 'Select location' : 'No matching locations'}
+            {availableLocations.length
+              ? 'Select location'
+              : 'No matching locations'}
           </option>
           {availableLocations.map((location) => (
             <option key={location.id} value={location.id}>
@@ -646,7 +636,8 @@ export default function NewBookingForm({
 
         {!availableLocations.length ? (
           <div className="mt-2 text-[12px] font-black text-toneDanger">
-            No bookable {locationType === 'MOBILE' ? 'mobile' : 'salon'} location is available.
+            No bookable {locationType === 'MOBILE' ? 'mobile' : 'salon'} location
+            is available.
           </div>
         ) : null}
       </div>
@@ -681,7 +672,8 @@ export default function NewBookingForm({
 
           {mobileUnavailableBecauseNoAddress ? (
             <div className="mt-2 text-[12px] font-black text-toneDanger">
-              This client does not have a saved service address, so a mobile booking cannot be created yet.
+              This client does not have a saved service address, so a mobile
+              booking cannot be created yet.
             </div>
           ) : (
             <div className={helper}>
@@ -706,8 +698,8 @@ export default function NewBookingForm({
         />
 
         <div className={helper}>
-          Shown in your device time, but saved using{' '}
-          <span className="font-black">{tzLabel}</span> as the pro timezone and stored as UTC.
+          Interpreted in <span className="font-black">{tzLabel}</span> based on
+          the selected booking location, then stored as UTC.
         </div>
       </div>
 

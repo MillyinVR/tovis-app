@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
 type Role = 'CLIENT' | 'PRO' | 'ADMIN'
@@ -19,12 +20,8 @@ type MediaItem = {
   reviewId: string | null
   createdAt: string
   phase: MediaPhase
-
-  // ✅ UI should use these (signed/public HTTP URLs)
   renderUrl: string | null
   renderThumbUrl: string | null
-
-  // Optional debug fields
   url?: string | null
   thumbUrl?: string | null
 }
@@ -41,19 +38,15 @@ type RecommendedProduct = {
 type Props = {
   bookingId: string
   timeZone: string
-
   existingNotes: string
-
   existingRebookedFor: string | null
   existingRebookMode?: RebookMode | null
   existingRebookWindowStart?: string | null
   existingRebookWindowEnd?: string | null
-
   existingMedia: MediaItem[]
   existingRecommendedProducts?: RecommendedProduct[]
 }
 
-// Keep this EXACTLY aligned with useProSession.ts
 const FORCE_EVENT = 'tovis:pro-session:force'
 
 const MAX_PRODUCTS = 10
@@ -81,7 +74,6 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-
 function errorFromResponse(res: Response, data: unknown) {
   const msg = readErrorMessage(data)
   if (msg) return msg
@@ -102,7 +94,11 @@ function clampInt(n: number, min: number, max: number, fallback: number) {
 }
 
 function isRebookMode(x: unknown): x is RebookMode {
-  return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
+  return (
+    x === 'NONE' ||
+    x === 'BOOKED_NEXT_APPOINTMENT' ||
+    x === 'RECOMMENDED_WINDOW'
+  )
 }
 
 function pickString(v: unknown): string {
@@ -121,18 +117,17 @@ function isValidHttpUrl(url: string) {
 }
 
 function safeId() {
-  try {
-    // @ts-ignore
-    return typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
-  } catch {
-    return `${Date.now()}-${Math.random()}`
+  const maybeCrypto = globalThis.crypto
+  if (
+    maybeCrypto &&
+    typeof maybeCrypto === 'object' &&
+    typeof maybeCrypto.randomUUID === 'function'
+  ) {
+    return maybeCrypto.randomUUID()
   }
+  return `${Date.now()}-${Math.random()}`
 }
 
-/**
- * ISO (UTC instant) -> datetime-local string in a given IANA timezone.
- * Output: "YYYY-MM-DDTHH:MM"
- */
 function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -150,10 +145,6 @@ function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): str
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
 }
 
-/**
- * datetime-local string (interpreted in IANA timezone) -> ISO (UTC instant).
- * Input: "YYYY-MM-DDTHH:MM"
- */
 function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
   const v = (value || '').trim()
   if (!v) return null
@@ -174,7 +165,15 @@ function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string
   if (minute < 0 || minute > 59) return null
 
   const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
-  const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
+  const utc = zonedTimeToUtc({
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second: 0,
+    timeZone: tz,
+  })
   if (Number.isNaN(utc.getTime())) return null
   return utc.toISOString()
 }
@@ -182,19 +181,25 @@ function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string
 function cardClass() {
   return 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
 }
+
 function subtleTextClass() {
   return 'text-xs font-semibold text-textSecondary'
 }
+
 function sectionTitleClass() {
   return 'text-xs font-black tracking-wide text-textPrimary'
 }
+
 function pillClass(active: boolean) {
   return [
     'inline-flex items-center rounded-full px-3 py-1 text-xs font-black transition',
     'border border-white/10',
-    active ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+    active
+      ? 'bg-accentPrimary text-bgPrimary'
+      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
   ].join(' ')
 }
+
 function primaryBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
@@ -203,6 +208,7 @@ function primaryBtn(disabled: boolean) {
       : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
   ].join(' ')
 }
+
 function secondaryBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
@@ -211,12 +217,14 @@ function secondaryBtn(disabled: boolean) {
       : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
   ].join(' ')
 }
+
 function inputClass(disabled: boolean) {
   return [
     'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
     disabled ? 'opacity-60 cursor-not-allowed' : 'focus:border-white/20',
   ].join(' ')
 }
+
 function labelClass() {
   return 'block text-xs font-black text-textSecondary mb-1'
 }
@@ -242,9 +250,9 @@ export default function AftercareForm({
   const [productsError, setProductsError] = useState<string | null>(null)
 
   const [rebookMode, setRebookMode] = useState<RebookMode>('NONE')
-  const [rebookAt, setRebookAt] = useState<string>('') // datetime-local in tz
-  const [windowStart, setWindowStart] = useState<string>('') // datetime-local in tz
-  const [windowEnd, setWindowEnd] = useState<string>('') // datetime-local in tz
+  const [rebookAt, setRebookAt] = useState<string>('')
+  const [windowStart, setWindowStart] = useState<string>('')
+  const [windowEnd, setWindowEnd] = useState<string>('')
 
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
   const [rebookDaysBefore, setRebookDaysBefore] = useState('2')
@@ -255,14 +263,16 @@ export default function AftercareForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // separate “saved” vs “sent”
   const [saved, setSaved] = useState(false)
   const [sent, setSent] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    const modeFromProps = existingRebookMode && isRebookMode(existingRebookMode) ? existingRebookMode : null
+    const modeFromProps =
+      existingRebookMode && isRebookMode(existingRebookMode)
+        ? existingRebookMode
+        : null
 
     const inferred: RebookMode =
       modeFromProps ??
@@ -274,11 +284,22 @@ export default function AftercareForm({
 
     setRebookMode(inferred)
 
-    setRebookAt(existingRebookedFor ? isoToDatetimeLocalInTimeZone(existingRebookedFor, tz) : '')
-    setWindowStart(existingRebookWindowStart ? isoToDatetimeLocalInTimeZone(existingRebookWindowStart, tz) : '')
-    setWindowEnd(existingRebookWindowEnd ? isoToDatetimeLocalInTimeZone(existingRebookWindowEnd, tz) : '')
+    setRebookAt(
+      existingRebookedFor
+        ? isoToDatetimeLocalInTimeZone(existingRebookedFor, tz)
+        : '',
+    )
+    setWindowStart(
+      existingRebookWindowStart
+        ? isoToDatetimeLocalInTimeZone(existingRebookWindowStart, tz)
+        : '',
+    )
+    setWindowEnd(
+      existingRebookWindowEnd
+        ? isoToDatetimeLocalInTimeZone(existingRebookWindowEnd, tz)
+        : '',
+    )
 
-    // If a booked date exists, default reminder ON
     setCreateRebookReminder(Boolean(existingRebookedFor))
 
     setProducts(
@@ -289,7 +310,14 @@ export default function AftercareForm({
         note: p.note || '',
       })),
     )
-  }, [existingRebookMode, existingRebookedFor, existingRebookWindowStart, existingRebookWindowEnd, existingRecommendedProducts, tz])
+  }, [
+    existingRebookMode,
+    existingRebookedFor,
+    existingRebookWindowStart,
+    existingRebookWindowEnd,
+    existingRecommendedProducts,
+    tz,
+  ])
 
   useEffect(() => {
     return () => {
@@ -304,12 +332,23 @@ export default function AftercareForm({
   }
 
   const sortedMedia = useMemo(() => {
-    return [...(existingMedia || [])].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    return [...(existingMedia || [])].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
   }, [existingMedia])
 
-  const beforeMedia = useMemo(() => sortedMedia.filter((m) => m.phase === 'BEFORE'), [sortedMedia])
-  const afterMedia = useMemo(() => sortedMedia.filter((m) => m.phase === 'AFTER'), [sortedMedia])
-  const otherMedia = useMemo(() => sortedMedia.filter((m) => m.phase !== 'BEFORE' && m.phase !== 'AFTER'), [sortedMedia])
+  const beforeMedia = useMemo(
+    () => sortedMedia.filter((m) => m.phase === 'BEFORE'),
+    [sortedMedia],
+  )
+  const afterMedia = useMemo(
+    () => sortedMedia.filter((m) => m.phase === 'AFTER'),
+    [sortedMedia],
+  )
+  const otherMedia = useMemo(
+    () => sortedMedia.filter((m) => m.phase !== 'BEFORE' && m.phase !== 'AFTER'),
+    [sortedMedia],
+  )
 
   const hasBookedDate = Boolean(rebookAt.trim())
   const hasWindowStart = Boolean(windowStart.trim())
@@ -323,19 +362,31 @@ export default function AftercareForm({
           if (!startISO || !endISO) return 'Pick both a window start and end.'
           const a = new Date(startISO)
           const b = new Date(endISO)
-          if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 'Window dates are invalid.'
+          if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) {
+            return 'Window dates are invalid.'
+          }
           if (b <= a) return 'Window end must be after window start.'
           return null
         })()
       : null
 
-  // Rebook reminder only valid for single date mode
   useEffect(() => {
-    if (rebookMode !== 'BOOKED_NEXT_APPOINTMENT' && createRebookReminder) setCreateRebookReminder(false)
+    if (
+      rebookMode !== 'BOOKED_NEXT_APPOINTMENT' &&
+      createRebookReminder
+    ) {
+      setCreateRebookReminder(false)
+    }
   }, [rebookMode, createRebookReminder])
 
   useEffect(() => {
-    if (rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !hasBookedDate && createRebookReminder) setCreateRebookReminder(false)
+    if (
+      rebookMode === 'BOOKED_NEXT_APPOINTMENT' &&
+      !hasBookedDate &&
+      createRebookReminder
+    ) {
+      setCreateRebookReminder(false)
+    }
   }, [rebookMode, hasBookedDate, createRebookReminder])
 
   function onChangeMode(next: RebookMode) {
@@ -361,7 +412,6 @@ export default function AftercareForm({
     if (next === 'RECOMMENDED_WINDOW') {
       setRebookAt('')
       setCreateRebookReminder(false)
-      return
     }
   }
 
@@ -390,14 +440,19 @@ export default function AftercareForm({
       const url = p.url.trim()
       const note = pickString(p.note).trim()
 
-      // Empty row is allowed
       if (!name && !url && !note) continue
 
       if (!name) return 'Each product needs a name.'
-      if (name.length > PRODUCT_NAME_MAX) return `Product name is too long (max ${PRODUCT_NAME_MAX}).`
+      if (name.length > PRODUCT_NAME_MAX) {
+        return `Product name is too long (max ${PRODUCT_NAME_MAX}).`
+      }
       if (!url) return 'Each product needs a link.'
-      if (!isValidHttpUrl(url)) return 'Product links must be valid http/https URLs.'
-      if (note.length > PRODUCT_NOTE_MAX) return `Product note is too long (max ${PRODUCT_NOTE_MAX}).`
+      if (!isValidHttpUrl(url)) {
+        return 'Product links must be valid http/https URLs.'
+      }
+      if (note.length > PRODUCT_NOTE_MAX) {
+        return `Product note is too long (max ${PRODUCT_NOTE_MAX}).`
+      }
     }
     return null
   }
@@ -422,18 +477,19 @@ export default function AftercareForm({
     return {
       notes: notes.trim().slice(0, NOTES_MAX) || '',
       recommendedProducts: sanitizedProducts,
-
       rebookMode,
       rebookedFor: rebookMode === 'BOOKED_NEXT_APPOINTMENT' ? rebookISO : null,
-      rebookWindowStart: rebookMode === 'RECOMMENDED_WINDOW' ? windowStartISO : null,
-      rebookWindowEnd: rebookMode === 'RECOMMENDED_WINDOW' ? windowEndISO : null,
-
-      createRebookReminder: rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !!rebookISO ? createRebookReminder : false,
+      rebookWindowStart:
+        rebookMode === 'RECOMMENDED_WINDOW' ? windowStartISO : null,
+      rebookWindowEnd:
+        rebookMode === 'RECOMMENDED_WINDOW' ? windowEndISO : null,
+      createRebookReminder:
+        rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !!rebookISO
+          ? createRebookReminder
+          : false,
       rebookReminderDaysBefore: clampInt(daysBeforeRaw, 1, 30, 2),
-
       createProductReminder,
       productReminderDaysAfter: clampInt(daysAfterRaw, 1, 180, 7),
-
       sendToClient,
       timeZone: tz,
     }
@@ -451,8 +507,12 @@ export default function AftercareForm({
     }
 
     if (rebookMode === 'RECOMMENDED_WINDOW') {
-      if (!windowStartISO || !windowEndISO) return 'Pick both a start and end for the recommended booking window.'
-      if (new Date(windowEndISO) <= new Date(windowStartISO)) return 'Window end must be after window start.'
+      if (!windowStartISO || !windowEndISO) {
+        return 'Pick both a start and end for the recommended booking window.'
+      }
+      if (new Date(windowEndISO) <= new Date(windowStartISO)) {
+        return 'Window end must be after window start.'
+      }
     }
 
     const prodErr = validateProducts(products)
@@ -464,7 +524,9 @@ export default function AftercareForm({
     if (sendToClient) {
       const hasNotes = Boolean(notes.trim())
       const hasAfter = afterMedia.length > 0
-      const hasAnyProduct = products.some((p) => p.name.trim() || p.url.trim() || pickString(p.note).trim())
+      const hasAnyProduct = products.some(
+        (p) => p.name.trim() || p.url.trim() || pickString(p.note).trim(),
+      )
 
       if (!hasNotes && !hasAfter && !hasAnyProduct) {
         return 'Add notes, after photos, or at least one product before sending to the client.'
@@ -500,12 +562,15 @@ export default function AftercareForm({
     try {
       const payload = buildPayload(sendToClient)
 
-      const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      })
+      const res = await fetch(
+        `/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        },
+      )
 
       if (res.status === 401) {
         redirectToLogin(router, 'aftercare')
@@ -524,7 +589,10 @@ export default function AftercareForm({
       const bookingFinished = r?.bookingFinished === true
 
       const redirectTo =
-        typeof r?.redirectTo === 'string' && r.redirectTo.trim() && r.redirectTo.startsWith('/') && !r.redirectTo.startsWith('//')
+        typeof r?.redirectTo === 'string' &&
+        r.redirectTo.trim() &&
+        r.redirectTo.startsWith('/') &&
+        !r.redirectTo.startsWith('//')
           ? r.redirectTo
           : null
 
@@ -543,22 +611,14 @@ export default function AftercareForm({
         router.replace(redirectTo)
         return
       }
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       console.error(err)
       setError('Network error posting aftercare.')
     } finally {
       if (abortRef.current === controller) abortRef.current = null
       setLoading(false)
     }
-  }
-
-  function goCalendar() {
-    router.push('/pro/calendar')
-  }
-
-  function goDashboard() {
-    router.push('/pro')
   }
 
   const showBooked = rebookMode === 'BOOKED_NEXT_APPOINTMENT'
@@ -570,77 +630,74 @@ export default function AftercareForm({
       <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="text-xs font-black text-accentPrimary">Client-facing</div>
         <div className="mt-1 text-sm font-semibold text-textSecondary">
-          This is the client’s official appointment summary. You can save drafts and only send when it’s ready.
+          This is the client’s official appointment summary. You can save drafts
+          and only send when it’s ready.
         </div>
       </div>
 
-      {sent ? (
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="text-sm font-black text-textPrimary">Sent to client ✅</div>
-          <div className="mt-1 text-sm font-semibold text-textSecondary">They can view it now and rebook immediately.</div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" onClick={goCalendar} className={primaryBtn(false)}>
-              Back to calendar
-            </button>
-            <button type="button" onClick={goDashboard} className={secondaryBtn(false)}>
-              Dashboard overview
-            </button>
-          </div>
-        </div>
-      ) : saved ? (
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="text-sm font-black text-textPrimary">Draft saved ✅</div>
-          <div className="mt-1 text-sm font-semibold text-textSecondary">
-            Not sent to the client yet. Hit “Send to client” when you’re ready.
-          </div>
-        </div>
-      ) : null}
-
-      {/* Photos */}
       <div className={cardClass()}>
         <div className={sectionTitleClass()}>Photos</div>
-        <div className={subtleTextClass()}>Visible to you + the client (PRO_CLIENT). Not public.</div>
+        <div className={subtleTextClass()}>
+          Visible to you + the client (PRO_CLIENT). Not public.
+        </div>
 
         <div className="mt-3 grid gap-4">
           <div>
             <div className="text-sm font-black text-textPrimary">Before</div>
-            <div className={subtleTextClass()}>Before photos/videos from this appointment.</div>
+            <div className={subtleTextClass()}>
+              Before photos/videos from this appointment.
+            </div>
             <MediaGrid items={beforeMedia} />
           </div>
 
           <div>
             <div className="text-sm font-black text-textPrimary">After</div>
-            <div className={subtleTextClass()}>After photos/videos from this appointment.</div>
+            <div className={subtleTextClass()}>
+              After photos/videos from this appointment.
+            </div>
             <MediaGrid items={afterMedia} />
           </div>
 
           {otherMedia.length ? (
             <div>
               <div className="text-sm font-black text-textPrimary">Other</div>
-              <div className={subtleTextClass()}>Extra photos/videos attached to this appointment.</div>
+              <div className={subtleTextClass()}>
+                Extra photos/videos attached to this appointment.
+              </div>
               <MediaGrid items={otherMedia} />
             </div>
           ) : null}
         </div>
       </div>
 
-      {/* Products */}
       <div className={cardClass()}>
         <div className={sectionTitleClass()}>Recommended products</div>
         <div className={subtleTextClass()}>
-          Add products with links (Amazon storefront, pro shop, etc.). Links must be http/https.
+          Add products with links (Amazon storefront, pro shop, etc.). Links must
+          be http/https.
         </div>
 
         <div className="mt-3 grid gap-3">
           {products.length === 0 ? (
-            <div className="text-sm font-semibold text-textSecondary">No products added yet.</div>
+            <div className="text-sm font-semibold text-textSecondary">
+              No products added yet.
+            </div>
           ) : (
             products.map((p, idx) => (
-              <div key={p.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+              <div
+                key={p.id}
+                className="rounded-card border border-white/10 bg-bgPrimary p-3"
+              >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-black text-textPrimary">Product {idx + 1}</div>
-                  <button type="button" onClick={() => removeProduct(p.id)} disabled={disabled} className={secondaryBtn(Boolean(disabled))}>
+                  <div className="text-sm font-black text-textPrimary">
+                    Product {idx + 1}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeProduct(p.id)}
+                    disabled={disabled}
+                    className={secondaryBtn(Boolean(disabled))}
+                  >
                     Remove
                   </button>
                 </div>
@@ -652,7 +709,9 @@ export default function AftercareForm({
                       value={p.name}
                       disabled={disabled}
                       maxLength={PRODUCT_NAME_MAX}
-                      onChange={(e) => updateProduct(p.id, { name: e.target.value })}
+                      onChange={(e) =>
+                        updateProduct(p.id, { name: e.target.value })
+                      }
                       placeholder="e.g. Sulfate-free shampoo"
                       className={inputClass(Boolean(disabled))}
                     />
@@ -663,12 +722,16 @@ export default function AftercareForm({
                     <input
                       value={p.url}
                       disabled={disabled}
-                      onChange={(e) => updateProduct(p.id, { url: e.target.value })}
+                      onChange={(e) =>
+                        updateProduct(p.id, { url: e.target.value })
+                      }
                       placeholder="https://amazon.com/…"
                       className={inputClass(Boolean(disabled))}
                     />
                     {p.url.trim() && !isValidHttpUrl(p.url) ? (
-                      <div className="mt-1 text-xs font-semibold text-microAccent">Link must be a valid http/https URL.</div>
+                      <div className="mt-1 text-xs font-semibold text-microAccent">
+                        Link must be a valid http/https URL.
+                      </div>
                     ) : null}
                   </div>
 
@@ -678,7 +741,9 @@ export default function AftercareForm({
                       value={pickString(p.note)}
                       disabled={disabled}
                       maxLength={PRODUCT_NOTE_MAX}
-                      onChange={(e) => updateProduct(p.id, { note: e.target.value })}
+                      onChange={(e) =>
+                        updateProduct(p.id, { note: e.target.value })
+                      }
                       placeholder="e.g. Use 2–3x/week to maintain shine"
                       className={inputClass(Boolean(disabled))}
                     />
@@ -697,14 +762,19 @@ export default function AftercareForm({
             + Add product
           </button>
 
-          {productsError ? <div className="text-sm font-semibold text-microAccent">{productsError}</div> : null}
+          {productsError ? (
+            <div className="text-sm font-semibold text-microAccent">
+              {productsError}
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Instructions + controls */}
       <div className={cardClass()}>
         <div className={sectionTitleClass()}>Aftercare instructions</div>
-        <div className={subtleTextClass()}>Write this like doctor instructions: clear, specific, and actionable.</div>
+        <div className={subtleTextClass()}>
+          Write this like doctor instructions: clear, specific, and actionable.
+        </div>
 
         <div className="mt-3">
           <label className={labelClass()} htmlFor="notes">
@@ -730,12 +800,16 @@ export default function AftercareForm({
           </div>
         </div>
 
-        {/* Rebook */}
         <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
           <div className="text-sm font-black text-textPrimary">Rebook guidance</div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={() => onChangeMode('NONE')} disabled={disabled} className={pillClass(rebookMode === 'NONE')}>
+            <button
+              type="button"
+              onClick={() => onChangeMode('NONE')}
+              disabled={disabled}
+              className={pillClass(rebookMode === 'NONE')}
+            >
               None
             </button>
 
@@ -776,7 +850,9 @@ export default function AftercareForm({
                 }}
                 className={inputClass(Boolean(disabled))}
               />
-              <div className="mt-1 text-xs font-semibold text-textSecondary">This shows on the client’s summary and can power a reminder.</div>
+              <div className="mt-1 text-xs font-semibold text-textSecondary">
+                This shows on the client’s summary and can power a reminder.
+              </div>
               <div className="mt-1 text-[11px] font-semibold text-textSecondary">
                 Timezone: <span className="text-textPrimary">{tz}</span>
               </div>
@@ -816,24 +892,28 @@ export default function AftercareForm({
               </div>
 
               {windowError ? (
-                <div className="text-sm font-semibold text-microAccent">{windowError}</div>
+                <div className="text-sm font-semibold text-microAccent">
+                  {windowError}
+                </div>
               ) : (
                 <div className="text-xs font-semibold text-textSecondary">
-                  Client will be prompted to book within this range. Timezone: <span className="text-textPrimary">{tz}</span>
+                  Client will be prompted to book within this range. Timezone:{' '}
+                  <span className="text-textPrimary">{tz}</span>
                 </div>
               )}
             </div>
           ) : null}
         </div>
 
-        {/* Smart reminders */}
         <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
           <div className="text-sm font-black text-textPrimary">Smart reminders</div>
 
           <label
             className={[
               'mt-3 flex items-center gap-2 text-sm font-semibold',
-              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate ? 'text-textPrimary' : 'text-textSecondary opacity-60',
+              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
+                ? 'text-textPrimary'
+                : 'text-textSecondary opacity-60',
             ].join(' ')}
             title={
               rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
@@ -844,7 +924,10 @@ export default function AftercareForm({
             <input
               type="checkbox"
               checked={createRebookReminder}
-              disabled={!(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || disabled}
+              disabled={
+                !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
+                disabled
+              }
               onChange={(e) => {
                 setCreateRebookReminder(e.target.checked)
                 markDirty()
@@ -854,14 +937,20 @@ export default function AftercareForm({
               Create a rebook reminder{' '}
               <select
                 value={rebookDaysBefore}
-                disabled={!(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || disabled}
+                disabled={
+                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
+                  disabled
+                }
                 onChange={(e) => {
                   setRebookDaysBefore(e.target.value)
                   markDirty()
                 }}
                 className={[
                   'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
-                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) || disabled ? 'opacity-60 cursor-not-allowed' : '',
+                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
+                  disabled
+                    ? 'opacity-60 cursor-not-allowed'
+                    : '',
                 ].join(' ')}
               >
                 <option value="1">1 day</option>
@@ -906,17 +995,31 @@ export default function AftercareForm({
             </span>
           </label>
 
-          <div className="mt-2 text-xs font-semibold text-textSecondary">These go into your Reminders tab so Future You remembers to check in.</div>
+          <div className="mt-2 text-xs font-semibold text-textSecondary">
+            These go into your Reminders tab so Future You remembers to check in.
+          </div>
         </div>
 
-        {error ? <div className="mt-3 text-sm font-semibold text-microAccent">{error}</div> : null}
+        {error ? (
+          <div className="mt-3 text-sm font-semibold text-microAccent">{error}</div>
+        ) : null}
 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-          <button type="button" disabled={disabled || !!windowError} onClick={() => postAftercare(false)} className={secondaryBtn(Boolean(disabled || !!windowError))}>
+          <button
+            type="button"
+            disabled={disabled || !!windowError}
+            onClick={() => postAftercare(false)}
+            className={secondaryBtn(Boolean(disabled || !!windowError))}
+          >
             {loading ? 'Saving…' : 'Save draft'}
           </button>
 
-          <button type="button" disabled={disabled || !!windowError} onClick={() => postAftercare(true)} className={primaryBtn(Boolean(disabled || !!windowError))}>
+          <button
+            type="button"
+            disabled={disabled || !!windowError}
+            onClick={() => postAftercare(true)}
+            className={primaryBtn(Boolean(disabled || !!windowError))}
+          >
             {loading ? 'Sending…' : 'Send to client'}
           </button>
         </div>
@@ -927,7 +1030,11 @@ export default function AftercareForm({
 
 function MediaGrid({ items }: { items: MediaItem[] }) {
   if (!items || items.length === 0) {
-    return <div className="mt-2 text-sm font-semibold text-textSecondary">None yet.</div>
+    return (
+      <div className="mt-2 text-sm font-semibold text-textSecondary">
+        None yet.
+      </div>
+    )
   }
 
   return (
@@ -951,14 +1058,25 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
           >
             {thumb ? (
               href ? (
-                <a href={href} target="_blank" rel="noreferrer" className="block h-full w-full">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={thumb} alt="Booking media" className="h-full w-full object-cover" />
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block h-full w-full"
+                >
+                  <img
+                    src={thumb}
+                    alt="Booking media"
+                    className="h-full w-full object-cover"
+                  />
                 </a>
               ) : (
                 <div className="h-full w-full">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={thumb} alt="Booking media" className="h-full w-full object-cover" />
+                  <img
+                    src={thumb}
+                    alt="Booking media"
+                    className="h-full w-full object-cover"
+                  />
                 </div>
               )
             ) : (

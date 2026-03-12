@@ -5,8 +5,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
 import MediaFill from '@/app/_components/media/MediaFill'
-import { cn } from '@/lib/utils' 
+import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
+
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
 type UploadState = 'IDLE' | 'UPLOADING' | 'SAVING'
@@ -27,10 +30,15 @@ type SignedUploadResponse = {
   cacheBuster?: number
 }
 
+function errorFrom(res: Response, data: unknown) {
+  if (isRecord(data)) {
+    const message = pickString(data.message)
+    if (message) return message
 
-function errorFrom(res: Response, data: any) {
-  if (typeof data?.message === 'string' && data.message.trim()) return data.message
-  if (typeof data?.error === 'string' && data.error.trim()) return data.error
+    const error = pickString(data.error)
+    if (error) return error
+  }
+
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -41,20 +49,30 @@ function guessMediaType(file: File): MediaType {
   return t.startsWith('video/') ? 'VIDEO' : 'IMAGE'
 }
 
+function parseMediaType(value: string): MediaType {
+  return value === 'VIDEO' ? 'VIDEO' : 'IMAGE'
+}
+
 function bytesFromMb(mb: number) {
   return mb * 1024 * 1024
 }
-
 
 /**
  * Optional: create an image thumbnail client-side.
  * Disabled by default to avoid fragility.
  */
-async function maybeCreateImageThumb(_file: File): Promise<Blob | null> {
+async function maybeCreateImageThumb(file: File): Promise<Blob | null> {
+  void file
   return null
 }
 
-export default function MediaUploader({ bookingId, phase }: { bookingId: string; phase: Phase }) {
+export default function MediaUploader({
+  bookingId,
+  phase,
+}: {
+  bookingId: string
+  phase: Phase
+}) {
   const router = useRouter()
 
   const [file, setFile] = useState<File | null>(null)
@@ -70,19 +88,22 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
 
   const disabled = status !== 'IDLE'
 
-  // Clean up preview URL on unmount or when it changes
   useEffect(() => {
     return () => {
       if (previewUrl) {
         try {
           URL.revokeObjectURL(previewUrl)
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
     }
   }, [previewUrl])
 
   const maxBytes = useMemo(() => {
-    return mediaType === 'VIDEO' ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
+    return mediaType === 'VIDEO'
+      ? bytesFromMb(MAX_VIDEO_MB)
+      : bytesFromMb(MAX_IMAGE_MB)
   }, [mediaType])
 
   const canSubmit = useMemo(() => {
@@ -101,11 +122,12 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
   async function onPickFile(next: File | null) {
     resetMessages()
 
-    // cleanup previous preview
     if (previewUrl) {
       try {
         URL.revokeObjectURL(previewUrl)
-      } catch {}
+      } catch {
+        // ignore
+      }
       setPreviewUrl(null)
     }
 
@@ -116,7 +138,6 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
       return
     }
 
-    // ✅ lock mediaType to what the file actually is
     const inferred = guessMediaType(next)
     setMediaType(inferred)
 
@@ -142,7 +163,6 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
     try {
       setStatus('UPLOADING')
 
-      // 1) Ask server for a signed upload token (booking-scoped, private)
       const signRes = await fetch('/api/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,15 +170,19 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
         body: JSON.stringify({
           kind: 'CONSULT_PRIVATE',
           bookingId,
-          phase, // BEFORE/AFTER/OTHER
+          phase,
           contentType: file.type || 'application/octet-stream',
           size: file.size,
         }),
       })
 
-      const signData = (await safeJson(signRes)) as Partial<SignedUploadResponse>
+      const signDataUnknown: unknown = await safeJson(signRes)
+      const signData = isRecord(signDataUnknown)
+        ? (signDataUnknown as Partial<SignedUploadResponse>)
+        : {}
+
       if (!signRes.ok) {
-        setError(errorFrom(signRes, signData))
+        setError(errorFrom(signRes, signDataUnknown))
         setStatus('IDLE')
         return
       }
@@ -173,11 +197,12 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
         return
       }
 
-      // 2) Upload to Supabase using the signed token (avoids Storage RLS issues)
-      const uploadRes = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
-        upsert: false,
-        contentType: file.type || undefined,
-      })
+      const uploadRes = await supabaseBrowser.storage
+        .from(bucket)
+        .uploadToSignedUrl(path, token, file, {
+          upsert: false,
+          contentType: file.type || undefined,
+        })
 
       if (uploadRes.error) {
         setError(uploadRes.error.message || 'Upload failed.')
@@ -185,15 +210,12 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
         return
       }
 
-      // Optional thumb for images (still disabled)
       let thumbBucket: string | null = null
       let thumbPath: string | null = null
 
       if (mt === 'IMAGE') {
         const thumbBlob = await maybeCreateImageThumb(file)
         if (thumbBlob) {
-          // If you enable thumbs later, you should request a second signed token
-          // for the thumb path instead of uploading directly.
           thumbBucket = null
           thumbPath = null
         }
@@ -201,23 +223,25 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
 
       setStatus('SAVING')
 
-      // 3) Save DB record (server route verifies ownership + flow rules)
-      const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/media`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          storageBucket: bucket,
-          storagePath: path,
-          thumbBucket,
-          thumbPath,
-          caption: cap,
-          mediaType: mt, // ✅ already correct union
-          phase, // ✅ already correct union
-        }),
-      })
+      const res = await fetch(
+        `/api/pro/bookings/${encodeURIComponent(bookingId)}/media`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            storageBucket: bucket,
+            storagePath: path,
+            thumbBucket,
+            thumbPath,
+            caption: cap,
+            mediaType: mt,
+            phase,
+          }),
+        },
+      )
 
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
       if (!res.ok) {
         setError(errorFrom(res, data))
         setStatus('IDLE')
@@ -229,8 +253,8 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
       await onPickFile(null)
 
       router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
+    } catch (e: unknown) {
+      if (isRecord(e) && e.name === 'AbortError') return
       console.error(e)
       setError('Network error. Try again.')
     } finally {
@@ -239,7 +263,8 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
     }
   }
 
-  const shell = 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
+  const shell =
+    'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
   const input =
     'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-white/20'
   const select =
@@ -259,18 +284,21 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
       const limit = mediaType === 'VIDEO' ? MAX_VIDEO_MB : MAX_IMAGE_MB
       return `That file is ${mb}MB — over the ${limit}MB limit.`
     }
-    return `Ready to upload to private storage.`
+    return 'Ready to upload to private storage.'
   })()
 
   return (
     <div className={shell}>
       <div className="text-xs font-semibold text-textSecondary">
-        Upload {phase.toLowerCase()} media (stored privately). The client can only “release” media by attaching it to a review.
+        Upload {phase.toLowerCase()} media (stored privately). The client can
+        only “release” media by attaching it to a review.
       </div>
 
       <div className="mt-3 grid gap-3">
         <div>
-          <label className="mb-1 block text-xs font-black text-textSecondary">File</label>
+          <label className="mb-1 block text-xs font-black text-textSecondary">
+            File
+          </label>
           <input
             type="file"
             disabled={disabled}
@@ -278,13 +306,14 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
             onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
             className="block w-full text-sm text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-4 file:py-2 file:text-xs file:font-black file:text-textPrimary hover:file:bg-surfaceGlass"
           />
-          <div className="mt-2 text-[11px] font-semibold text-textSecondary">{hint}</div>
+          <div className="mt-2 text-[11px] font-semibold text-textSecondary">
+            {hint}
+          </div>
         </div>
 
         {previewUrl ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary p-2">
-            {/* ✅ Consistent sizing everywhere: 9:16 frame + MediaFill */}
-            <div className="relative w-full overflow-hidden rounded-card border border-white/10 bg-black aspect-[9/16]">
+            <div className="relative aspect-[9/16] w-full overflow-hidden rounded-card border border-white/10 bg-black">
               <MediaFill
                 src={previewUrl}
                 mediaType={mediaType}
@@ -309,11 +338,13 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
 
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="mb-1 block text-xs font-black text-textSecondary">Type</label>
+            <label className="mb-1 block text-xs font-black text-textSecondary">
+              Type
+            </label>
             <select
               value={mediaType}
-              onChange={(e) => setMediaType(e.target.value as MediaType)}
-              disabled={disabled || Boolean(file)} // ✅ lock once chosen
+              onChange={(e) => setMediaType(parseMediaType(e.target.value))}
+              disabled={disabled || Boolean(file)}
               className={cn(select, Boolean(file) ? 'opacity-70' : '')}
               title={file ? 'Type is inferred from the selected file.' : undefined}
             >
@@ -323,12 +354,17 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
           </div>
 
           <div className="text-[11px] font-semibold text-textSecondary">
-            Limits: {mediaType === 'VIDEO' ? `${MAX_VIDEO_MB}MB video` : `${MAX_IMAGE_MB}MB image`}
+            Limits:{' '}
+            {mediaType === 'VIDEO'
+              ? `${MAX_VIDEO_MB}MB video`
+              : `${MAX_IMAGE_MB}MB image`}
           </div>
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-black text-textSecondary">Caption (optional)</label>
+          <label className="mb-1 block text-xs font-black text-textSecondary">
+            Caption (optional)
+          </label>
           <input
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
@@ -343,12 +379,27 @@ export default function MediaUploader({ bookingId, phase }: { bookingId: string;
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={submit} disabled={!canSubmit || disabled} className={btn}>
-            {status === 'UPLOADING' ? 'Uploading…' : status === 'SAVING' ? 'Saving…' : 'Upload'}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit || disabled}
+            className={btn}
+          >
+            {status === 'UPLOADING'
+              ? 'Uploading…'
+              : status === 'SAVING'
+                ? 'Saving…'
+                : 'Upload'}
           </button>
 
-          {message ? <span className="text-xs font-black text-textPrimary">{message}</span> : null}
-          {error ? <span className="text-xs font-black text-microAccent">{error}</span> : null}
+          {message ? (
+            <span className="text-xs font-black text-textPrimary">
+              {message}
+            </span>
+          ) : null}
+          {error ? (
+            <span className="text-xs font-black text-microAccent">{error}</span>
+          ) : null}
         </div>
       </div>
     </div>

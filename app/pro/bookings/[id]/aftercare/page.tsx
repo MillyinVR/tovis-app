@@ -1,12 +1,14 @@
 // app/pro/bookings/[id]/aftercare/page.tsx
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
+import { BookingStatus, SessionStep } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import AftercareForm from './AftercareForm'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
-import { BookingStatus, SessionStep } from '@prisma/client'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,8 +16,13 @@ type RebookMode = 'NONE' | 'BOOKED_NEXT_APPOINTMENT' | 'RECOMMENDED_WINDOW'
 type MediaPhase = 'BEFORE' | 'AFTER' | 'OTHER'
 
 function isRebookMode(x: unknown): x is RebookMode {
-  return x === 'NONE' || x === 'BOOKED_NEXT_APPOINTMENT' || x === 'RECOMMENDED_WINDOW'
+  return (
+    x === 'NONE' ||
+    x === 'BOOKED_NEXT_APPOINTMENT' ||
+    x === 'RECOMMENDED_WINDOW'
+  )
 }
+
 function isMediaPhase(x: unknown): x is MediaPhase {
   return x === 'BEFORE' || x === 'AFTER' || x === 'OTHER'
 }
@@ -23,17 +30,24 @@ function isMediaPhase(x: unknown): x is MediaPhase {
 function bookingHubHref(bookingId: string) {
   return `/pro/bookings/${encodeURIComponent(bookingId)}/session`
 }
+
 function aftercareHref(bookingId: string) {
   return `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`
 }
+
 function isTerminal(status: BookingStatus, finishedAt: Date | null) {
-  return status === BookingStatus.CANCELLED || status === BookingStatus.COMPLETED || Boolean(finishedAt)
+  return (
+    status === BookingStatus.CANCELLED ||
+    status === BookingStatus.COMPLETED ||
+    Boolean(finishedAt)
+  )
 }
 
 function isHttpUrl(v: unknown): v is string {
   if (typeof v !== 'string') return false
   const s = v.trim()
   if (!s) return false
+
   try {
     const u = new URL(s)
     return u.protocol === 'http:' || u.protocol === 'https:'
@@ -42,24 +56,46 @@ function isHttpUrl(v: unknown): v is string {
   }
 }
 
+function pickDateOrNull(value: unknown): Date | null {
+  return value instanceof Date ? value : null
+}
+
+function pickRebookModeOrNull(value: unknown): RebookMode | null {
+  return isRebookMode(value) ? value : null
+}
+
+function pickMediaPhaseOrOther(value: unknown): MediaPhase {
+  return isMediaPhase(value) ? value : 'OTHER'
+}
+
 const SIGNED_URL_TTL_SECONDS = 60 * 10
 
-async function signObjectUrl(bucket: string | null, path: string | null): Promise<string | null> {
+async function signObjectUrl(
+  bucket: string | null,
+  path: string | null,
+): Promise<string | null> {
   if (!bucket || !path) return null
-  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+
+  const { data, error } = await supabaseAdmin.storage
+    .from(bucket)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+
   if (error) return null
   return data?.signedUrl ?? null
 }
 
-export default async function ProAftercarePage(props: { params: Promise<{ id: string }> }) {
+export default async function ProAftercarePage(props: {
+  params: Promise<{ id: string }>
+}) {
   const { id } = await props.params
   const bookingId = String(id || '').trim()
   if (!bookingId) notFound()
 
-  // Auth
   const user = await getCurrentUser().catch(() => null)
   const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-  if (!proId) redirect(`/login?from=${encodeURIComponent(aftercareHref(bookingId))}`)
+  if (!proId) {
+    redirect(`/login?from=${encodeURIComponent(aftercareHref(bookingId))}`)
+  }
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -87,35 +123,34 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
           id: true,
           notes: true,
           rebookedFor: true,
-          rebookMode: true as any,
-          rebookWindowStart: true as any,
-          rebookWindowEnd: true as any,
+          rebookMode: true,
+          rebookWindowStart: true,
+          rebookWindowEnd: true,
           recommendations: {
             orderBy: { id: 'asc' },
             select: {
               id: true,
               note: true,
               product: { select: { name: true } },
-              externalName: true as any,
-              externalUrl: true as any,
+              externalName: true,
+              externalUrl: true,
             },
           },
         },
       },
 
-      // ✅ Include storage info so we can sign URLs for private media
       mediaAssets: {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
-          url: true, // now String? in Prisma (ok)
+          url: true,
           thumbUrl: true,
           mediaType: true,
           visibility: true,
           uploadedByRole: true,
           reviewId: true,
           createdAt: true,
-          phase: true as any,
+          phase: true,
 
           storageBucket: true,
           storagePath: true,
@@ -129,20 +164,18 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   if (!booking) notFound()
   if (booking.professionalId !== proId) redirect('/pro')
 
-  // Terminal/started guards
   if (!booking.startedAt || isTerminal(booking.status, booking.finishedAt)) {
     redirect(bookingHubHref(bookingId))
   }
 
-  const step = (booking.sessionStep ?? SessionStep.NONE) as SessionStep
+  const step = booking.sessionStep ?? SessionStep.NONE
+  const allowedHere =
+    step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
 
-  // Allow only in wrap-up
-  const allowedHere = step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
   if (!allowedHere) {
     redirect(bookingHubHref(bookingId))
   }
 
-  // Timezone truth (booking.locationTimeZone > proProfile.timeZone > UTC)
   const proProfile = await prisma.professionalProfile.findUnique({
     where: { id: proId },
     select: { timeZone: true },
@@ -159,27 +192,24 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
 
   const aftercare = booking.aftercareSummary
 
-  const existingRebookModeRaw = (aftercare as any)?.rebookMode
-  const existingRebookMode = isRebookMode(existingRebookModeRaw) ? existingRebookModeRaw : null
-
-  const existingRebookedFor = aftercare?.rebookedFor instanceof Date ? aftercare.rebookedFor.toISOString() : null
+  const existingRebookMode = pickRebookModeOrNull(aftercare?.rebookMode)
+  const existingRebookedFor = pickDateOrNull(aftercare?.rebookedFor)?.toISOString() ?? null
   const existingRebookWindowStart =
-    (aftercare as any)?.rebookWindowStart instanceof Date ? (aftercare as any).rebookWindowStart.toISOString() : null
+    pickDateOrNull(aftercare?.rebookWindowStart)?.toISOString() ?? null
   const existingRebookWindowEnd =
-    (aftercare as any)?.rebookWindowEnd instanceof Date ? (aftercare as any).rebookWindowEnd.toISOString() : null
+    pickDateOrNull(aftercare?.rebookWindowEnd)?.toISOString() ?? null
 
-  // ✅ Build renderUrl/renderThumbUrl safely
   const existingMedia =
     (await Promise.all(
-      (booking.mediaAssets || []).map(async (m) => {
-        // Prefer real HTTP urls if present+usable (public or already signed somewhere else)
+      (booking.mediaAssets ?? []).map(async (m) => {
         const httpUrl = isHttpUrl(m.url) ? m.url : null
         const httpThumbUrl = isHttpUrl(m.thumbUrl) ? m.thumbUrl : null
 
-        // Otherwise sign from storage fields
-        const signedUrl = httpUrl ?? (await signObjectUrl(m.storageBucket, m.storagePath))
+        const signedUrl =
+          httpUrl ?? (await signObjectUrl(m.storageBucket, m.storagePath))
         const signedThumbUrl =
-          httpThumbUrl ?? (await signObjectUrl(m.thumbBucket ?? null, m.thumbPath ?? null))
+          httpThumbUrl ??
+          (await signObjectUrl(m.thumbBucket ?? null, m.thumbPath ?? null))
 
         return {
           id: m.id,
@@ -194,7 +224,7 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
           uploadedByRole: m.uploadedByRole ?? null,
           reviewId: m.reviewId ?? null,
           createdAt: m.createdAt.toISOString(),
-          phase: isMediaPhase(m.phase) ? (m.phase as MediaPhase) : ('OTHER' as MediaPhase),
+          phase: pickMediaPhaseOrOther(m.phase),
         }
       }),
     )) ?? []
@@ -202,8 +232,11 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
   const existingRecommendedProducts =
     aftercare?.recommendations?.map((r) => ({
       id: r.id,
-      name: r.product?.name ?? (r as any).externalName ?? '',
-      url: (r as any).externalUrl ?? '',
+      name:
+        r.product?.name ??
+        pickString(isRecord(r) ? r.externalName : null) ??
+        '',
+      url: pickString(isRecord(r) ? r.externalUrl : null) ?? '',
       note: r.note ?? '',
     })) ?? []
 
@@ -224,11 +257,14 @@ export default async function ProAftercarePage(props: { params: Promise<{ id: st
       </Link>
 
       <h1 className="mt-4 text-xl font-black">Aftercare: {serviceName}</h1>
-      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
+      <div className="mt-1 text-sm font-semibold text-textSecondary">
+        Client: {clientName}
+      </div>
 
       <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="text-sm font-semibold text-textSecondary">
-          Aftercare and after-photos are a wrap-up pair. Do either first — then complete the session from the session hub.
+          Aftercare and after-photos are a wrap-up pair. Do either first — then
+          complete the session from the session hub.
         </div>
       </div>
 

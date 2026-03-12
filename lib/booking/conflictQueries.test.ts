@@ -1,4 +1,3 @@
-// lib/booking/conflictQueries.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const prismaMockFns = vi.hoisted(() => ({
@@ -337,6 +336,9 @@ describe('conflictQueries', () => {
         },
         take: 2000,
       })
+
+      const callArg = prismaMockFns.bookingHoldFindMany.mock.calls[0]?.[0]
+      expect(callArg.where.scheduledFor.gte).toBeInstanceOf(Date)
     })
 
     it('returns false when no hold overlaps', async () => {
@@ -396,6 +398,9 @@ describe('conflictQueries', () => {
         },
         select: { id: true },
       })
+
+      expect(prismaMockFns.bookingFindMany).toHaveBeenCalled()
+      expect(prismaMockFns.bookingHoldFindMany).toHaveBeenCalled()
     })
 
     it('returns BOOKING when no block exists and a booking overlaps', async () => {

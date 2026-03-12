@@ -14,7 +14,7 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 import { isRecord } from '@/lib/guards'
-import { pickBool, pickNumber, pickString } from '@/lib/pick'
+import { pickNumber, pickString } from '@/lib/pick'
 import { readErrorMessage } from '@/lib/http'
 import { sanitizeTimeZone, DEFAULT_TIME_ZONE } from '@/lib/timeZone'
 
@@ -51,8 +51,13 @@ export function apiMessage(data: unknown, fallback: string) {
   )
 }
 
-export function upper(v: unknown) {
+export function upper(v: unknown): string {
   return (pickString(v) ?? '').toUpperCase()
+}
+
+function normalizeKnownBookingLocationType(value: unknown): 'SALON' | 'MOBILE' {
+  const raw = upper(value)
+  return raw === 'MOBILE' || raw === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
 }
 
 // ── Location-type normalisers ──────────────────────────────────────
@@ -64,7 +69,8 @@ export function normalizeProLocationType(value: unknown): ProLocationType {
   if (raw === 'SUITE') return 'SUITE'
   if (raw === 'MOBILE_BASE') return 'MOBILE_BASE'
 
-  return 'SALON'
+  const fallback = pickString(value)
+  return (fallback ?? 'SALON') as ProLocationType
 }
 
 export function normalizeLocationType(value: unknown): LocationType {
@@ -80,7 +86,8 @@ export function pickLocationType(
 ): LocationType {
   if (
     preferred &&
-    ((preferred === 'SALON' && canSalon) || (preferred === 'MOBILE' && canMobile))
+    ((preferred === 'SALON' && canSalon) ||
+      (preferred === 'MOBILE' && canMobile))
   ) {
     return preferred
   }
@@ -129,7 +136,9 @@ export function parseWorkingHoursJson(v: unknown): WorkingHoursJson {
 
 // ── Location parsers ───────────────────────────────────────────────
 
-export function parseCalendarRouteLocation(v: unknown): CalendarRouteLocation | null {
+export function parseCalendarRouteLocation(
+  v: unknown,
+): CalendarRouteLocation | null {
   if (!isRecord(v)) return null
 
   const id = pickString(v.id)
@@ -148,9 +157,12 @@ export function parseProLocation(v: unknown): ProLocation | null {
   const id = pickString(v.id)
   if (!id) return null
 
-  const stepMinutesRaw = v.stepMinutes === null ? null : pickNumber(v.stepMinutes)
+  const stepMinutesRaw =
+    v.stepMinutes === null ? null : pickNumber(v.stepMinutes)
   const stepMinutes =
-    stepMinutesRaw != null && Number.isFinite(stepMinutesRaw) ? stepMinutesRaw : null
+    stepMinutesRaw != null && Number.isFinite(stepMinutesRaw)
+      ? stepMinutesRaw
+      : null
 
   return {
     id,
@@ -210,14 +222,10 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
   const durationMinutes = dur != null && dur > 0 ? dur : undefined
 
   if (kind === 'BOOKING') {
-    const locationId = pickString(v.locationId)
-    if (!locationId) return null
+    const locationId =
+      v.locationId === null ? null : (pickString(v.locationId) ?? null)
 
-    const locationTypeRaw = pickString(v.locationType)
-    const locationType =
-      locationTypeRaw === 'SALON' || locationTypeRaw === 'MOBILE'
-        ? locationTypeRaw
-        : ''
+    const locationType = normalizeKnownBookingLocationType(v.locationType)
 
     const detailsRecord = isRecord(v.details) ? v.details : null
     const rawServiceItems = detailsRecord?.serviceItems

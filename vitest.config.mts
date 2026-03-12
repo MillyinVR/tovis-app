@@ -10,6 +10,12 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['**/*.test.ts'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/.next/**',
+      '**/.claude/**',
+    ],
     clearMocks: true,
     restoreMocks: true,
     mockReset: true,

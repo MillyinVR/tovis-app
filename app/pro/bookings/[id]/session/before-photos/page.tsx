@@ -6,12 +6,18 @@ import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getServerOrigin } from '@/lib/serverOrigin'
+import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
 
 import MediaUploader from '../MediaUploader'
 import MediaPreviewGrid from '../_components/MediaPreviewGrid'
 import { cn } from '@/lib/utils'
 import { transitionSessionStep } from '@/lib/booking/transitions'
-import { BookingStatus, ConsultationApprovalStatus, SessionStep } from '@prisma/client'
+import {
+  BookingStatus,
+  ConsultationApprovalStatus,
+  SessionStep,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,10 +31,14 @@ type ApiMediaItem = {
   renderThumbUrl: string | null
 }
 
-
 function Card(props: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4', props.className)}>
+    <div
+      className={cn(
+        'tovis-glass mt-3 rounded-card border border-white/10 bg-bgSecondary p-4',
+        props.className,
+      )}
+    >
       {props.children}
     </div>
   )
@@ -37,8 +47,44 @@ function Card(props: { children: React.ReactNode; className?: string }) {
 function bookingHubHref(bookingId: string) {
   return `/pro/bookings/${encodeURIComponent(bookingId)}/session`
 }
+
 function beforePhotosHref(bookingId: string) {
   return `/pro/bookings/${encodeURIComponent(bookingId)}/session/before-photos`
+}
+
+function pickMediaType(value: unknown): 'IMAGE' | 'VIDEO' {
+  return value === 'VIDEO' ? 'VIDEO' : 'IMAGE'
+}
+
+function parseApiMediaItem(value: unknown): ApiMediaItem | null {
+  if (!isRecord(value)) return null
+
+  const row = value
+
+  const id = pickString(row.id) ?? ''
+  if (!id) return null
+
+  const renderUrl =
+    pickString(row.renderUrl) ??
+    pickString(row.url) ??
+    pickString(row.signedUrl) ??
+    null
+
+  const renderThumbUrl =
+    pickString(row.renderThumbUrl) ??
+    pickString(row.thumbUrl) ??
+    pickString(row.signedThumbUrl) ??
+    null
+
+  return {
+    id,
+    mediaType: pickMediaType(row.mediaType),
+    caption: pickString(row.caption) ?? null,
+    createdAt: pickString(row.createdAt) ?? new Date().toISOString(),
+    reviewId: pickString(row.reviewId) ?? null,
+    renderUrl,
+    renderThumbUrl,
+  }
 }
 
 async function fetchBeforeMedia(bookingId: string): Promise<ApiMediaItem[]> {
@@ -56,22 +102,13 @@ async function fetchBeforeMedia(bookingId: string): Promise<ApiMediaItem[]> {
   }).catch(() => null)
 
   if (!res?.ok) return []
-  const data = (await res.json().catch(() => ({}))) as any
-  const items = Array.isArray(data?.items) ? data.items : []
 
-  return items.map((m: any) => ({
-    id: String(m?.id || ''),
-    mediaType: m?.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE',
-    caption: typeof m?.caption === 'string' ? m.caption : null,
-    createdAt: m?.createdAt ?? new Date().toISOString(),
-    reviewId: typeof m?.reviewId === 'string' ? m.reviewId : null,
+  const data: unknown = await res.json().catch(() => ({}))
+  if (!isRecord(data) || !Array.isArray(data.items)) return []
 
-    // ✅ canonical render fields (Option A)
-    renderUrl: typeof m?.renderUrl === 'string' ? m.renderUrl : typeof m?.url === 'string' ? m.url : null,
-    renderThumbUrl:
-      typeof m?.renderThumbUrl === 'string' ? m.renderThumbUrl : typeof m?.thumbUrl === 'string' ? m.thumbUrl : null,
-  }))
-  .filter((m: ApiMediaItem) => Boolean(m.id))
+  return data.items
+    .map(parseApiMediaItem)
+    .filter((item): item is ApiMediaItem => Boolean(item))
 }
 
 type PageProps = { params: Promise<{ id: string }> }
@@ -82,8 +119,14 @@ export default async function ProBeforePhotosPage(props: PageProps) {
   if (!bookingId) notFound()
 
   const user = await getCurrentUser().catch(() => null)
-  const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
-  if (!proId) redirect(`/login?from=${encodeURIComponent(beforePhotosHref(bookingId))}`)
+  const maybeProId =
+    user?.role === 'PRO' ? user.professionalProfile?.id ?? null : null
+
+  if (!maybeProId) {
+    redirect(`/login?from=${encodeURIComponent(beforePhotosHref(bookingId))}`)
+  }
+
+  const proId = maybeProId
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -95,7 +138,13 @@ export default async function ProBeforePhotosPage(props: PageProps) {
       finishedAt: true,
       sessionStep: true,
       service: { select: { name: true } },
-      client: { select: { firstName: true, lastName: true, user: { select: { email: true } } } },
+      client: {
+        select: {
+          firstName: true,
+          lastName: true,
+          user: { select: { email: true } },
+        },
+      },
       consultationApproval: { select: { status: true } },
     },
   })
@@ -104,19 +153,27 @@ export default async function ProBeforePhotosPage(props: PageProps) {
   if (booking.professionalId !== proId) redirect('/pro')
 
   const isCancelled = booking.status === BookingStatus.CANCELLED
-  const isCompleted = booking.status === BookingStatus.COMPLETED || Boolean(booking.finishedAt)
-  if (!booking.startedAt || isCancelled || isCompleted) redirect(bookingHubHref(bookingId))
+  const isCompleted =
+    booking.status === BookingStatus.COMPLETED || Boolean(booking.finishedAt)
 
-  const step = (booking.sessionStep ?? SessionStep.NONE) as SessionStep
+  if (!booking.startedAt || isCancelled || isCompleted) {
+    redirect(bookingHubHref(bookingId))
+  }
+
+  const step = booking.sessionStep ?? SessionStep.NONE
   const alreadyPastBefore =
     step === SessionStep.SERVICE_IN_PROGRESS ||
     step === SessionStep.FINISH_REVIEW ||
     step === SessionStep.AFTER_PHOTOS ||
     step === SessionStep.DONE
-  if (alreadyPastBefore) redirect(bookingHubHref(bookingId))
+
+  if (alreadyPastBefore) {
+    redirect(bookingHubHref(bookingId))
+  }
 
   const approvalStatus = booking.consultationApproval?.status ?? null
-  const consultApproved = approvalStatus === ConsultationApprovalStatus.APPROVED
+  const consultApproved =
+    approvalStatus === ConsultationApprovalStatus.APPROVED
 
   const items = await fetchBeforeMedia(bookingId)
   const hasBefore = items.length > 0
@@ -126,12 +183,16 @@ export default async function ProBeforePhotosPage(props: PageProps) {
     'use server'
 
     const u = await getCurrentUser().catch(() => null)
-    const uProId = u?.role === 'PRO' ? u.professionalProfile?.id : null
-    if (!uProId) redirect(`/login?from=${encodeURIComponent(beforePhotosHref(bookingId))}`)
+    const maybeUserProId =
+      u?.role === 'PRO' ? u.professionalProfile?.id ?? null : null
+
+    if (!maybeUserProId) {
+      redirect(`/login?from=${encodeURIComponent(beforePhotosHref(bookingId))}`)
+    }
 
     const result = await transitionSessionStep({
       bookingId,
-      proId: uProId,
+      proId: maybeUserProId,
       nextStep: SessionStep.SERVICE_IN_PROGRESS,
     })
 
@@ -147,25 +208,38 @@ export default async function ProBeforePhotosPage(props: PageProps) {
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 text-textPrimary">
-      <Link href={bookingHubHref(bookingId)} className="text-xs font-black text-textSecondary hover:opacity-80">
+      <Link
+        href={bookingHubHref(bookingId)}
+        className="text-xs font-black text-textSecondary hover:opacity-80"
+      >
         ← Back to session
       </Link>
 
       <h1 className="mt-3 text-lg font-black">Before photos: {serviceName}</h1>
-      <div className="mt-1 text-sm font-semibold text-textSecondary">Client: {clientName}</div>
+      <div className="mt-1 text-sm font-semibold text-textSecondary">
+        Client: {clientName}
+      </div>
 
       <Card>
         {!hasBefore ? (
           <>
-            <div className="text-sm font-black text-textPrimary">Add at least one before photo</div>
+            <div className="text-sm font-black text-textPrimary">
+              Add at least one before photo
+            </div>
             <div className="mt-1 text-sm text-textSecondary">
-              These are saved <span className="font-black text-textPrimary">privately</span> for the client + you.
+              These are saved{' '}
+              <span className="font-black text-textPrimary">privately</span> for
+              the client + you.
             </div>
           </>
         ) : consultApproved ? (
           <>
-            <div className="text-sm font-black text-textPrimary">Before photos saved ✅</div>
-            <div className="mt-1 text-sm text-textSecondary">Consultation is approved — you can continue.</div>
+            <div className="text-sm font-black text-textPrimary">
+              Before photos saved ✅
+            </div>
+            <div className="mt-1 text-sm text-textSecondary">
+              Consultation is approved — you can continue.
+            </div>
 
             <form action={continueToService} className="mt-3">
               <button
@@ -182,13 +256,17 @@ export default async function ProBeforePhotosPage(props: PageProps) {
           </>
         ) : (
           <>
-            <div className="text-sm font-black text-textPrimary">Before photos saved (private) ✅</div>
+            <div className="text-sm font-black text-textPrimary">
+              Before photos saved (private) ✅
+            </div>
             <div className="mt-1 text-sm text-textSecondary">
-              Client still needs to approve the consultation. You can keep uploading before photos, but service stays locked.
+              Client still needs to approve the consultation. You can keep
+              uploading before photos, but service stays locked.
             </div>
 
             <div className="mt-3 inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textSecondary">
-              Waiting on approval: {approvalStatus ?? ConsultationApprovalStatus.PENDING}
+              Waiting on approval:{' '}
+              {approvalStatus ?? ConsultationApprovalStatus.PENDING}
             </div>
           </>
         )}
@@ -203,7 +281,10 @@ export default async function ProBeforePhotosPage(props: PageProps) {
       </section>
 
       <div className="mt-6 text-xs font-semibold text-textSecondary">
-        Continue locked: <span className="font-black text-textPrimary">{String(!canContinue)}</span>
+        Continue locked:{' '}
+        <span className="font-black text-textPrimary">
+          {String(!canContinue)}
+        </span>
       </div>
     </main>
   )

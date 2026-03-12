@@ -1,35 +1,33 @@
 // app/pro/calendar/_hooks/useCalendarLocations.ts
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CalendarEvent, WorkingHoursJson } from '../_types'
-import { normalizeStepMinutes, computeDurationMinutesFromIso } from '../_utils/calendarMath'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { normalizeStepMinutes } from '../_utils/calendarMath'
 import {
   upper,
   pickLocationType,
   locationTypeFromProfessionalType,
-  locationTypeFromBookingValue,
   parseProLocation,
   type LocationType,
   type ProLocation,
 } from '../_utils/parsers'
-import {
-  DEFAULT_TIME_ZONE,
-  isValidIanaTimeZone,
-  sanitizeTimeZone,
-} from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
 
 export function useCalendarLocations() {
   const [locations, setLocations] = useState<ProLocation[]>([])
   const [locationsLoaded, setLocationsLoaded] = useState(false)
-  const [activeLocationId, setActiveLocationId] = useState<string | null>(null)
 
+  // User-selected location id. The actual active location is derived from this
+  // plus the currently loaded set of bookable locations.
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null)
+
+  // These stay mutable because other calendar flows may override capability flags.
   const [canSalon, setCanSalon] = useState(true)
   const [canMobile, setCanMobile] = useState(false)
 
-  const [hoursEditorLocationType, setHoursEditorLocationType] =
+  // Manual fallback used only when there is no active location selected/resolved.
+  const [manualHoursEditorLocationType, setManualHoursEditorLocationType] =
     useState<LocationType>('SALON')
 
   const loadedRef = useRef(false)
@@ -38,6 +36,25 @@ export function useCalendarLocations() {
     () => locations.filter((location) => location.isBookable),
     [locations],
   )
+
+  const primaryBookableLocation = useMemo(() => {
+    return (
+      scopedLocations.find((location) => location.isPrimary) ??
+      scopedLocations[0] ??
+      null
+    )
+  }, [scopedLocations])
+
+  const activeLocationId = useMemo(() => {
+    if (
+      selectedLocationId &&
+      scopedLocations.some((location) => location.id === selectedLocationId)
+    ) {
+      return selectedLocationId
+    }
+
+    return primaryBookableLocation?.id ?? null
+  }, [selectedLocationId, scopedLocations, primaryBookableLocation])
 
   const activeLocation = useMemo(() => {
     if (!activeLocationId) return null
@@ -48,8 +65,17 @@ export function useCalendarLocations() {
     if (activeLocation) {
       return locationTypeFromProfessionalType(activeLocation.type)
     }
-    return pickLocationType(canSalon, canMobile, hoursEditorLocationType)
-  }, [activeLocation, canSalon, canMobile, hoursEditorLocationType])
+
+    return pickLocationType(canSalon, canMobile, manualHoursEditorLocationType)
+  }, [activeLocation, canSalon, canMobile, manualHoursEditorLocationType])
+
+  const hoursEditorLocationType = useMemo<LocationType>(() => {
+    if (activeLocation) {
+      return locationTypeFromProfessionalType(activeLocation.type)
+    }
+
+    return manualHoursEditorLocationType
+  }, [activeLocation, manualHoursEditorLocationType])
 
   const activeLocationLabel = useMemo(() => {
     if (!activeLocation) return null
@@ -74,29 +100,31 @@ export function useCalendarLocations() {
     [activeLocation?.stepMinutes],
   )
 
-  // ── Resolver helpers ──────────────────────────────────────────────
+  const resolveLocationById = useCallback(
+    (locationId: string | null) => {
+      if (!locationId) return null
+      return locations.find((entry) => entry.id === locationId) ?? null
+    },
+    [locations],
+  )
 
-  function resolveLocationById(locationId: string | null) {
-    if (!locationId) return null
-    return locations.find((entry) => entry.id === locationId) ?? null
-  }
+  const resolveLocationStepMinutes = useCallback(
+    (locationId: string | null, fallback?: number | null) => {
+      const location = resolveLocationById(locationId)
+      return normalizeStepMinutes(location?.stepMinutes ?? fallback ?? null)
+    },
+    [resolveLocationById],
+  )
 
-  function resolveLocationStepMinutes(locationId: string | null, fallback?: number | null) {
-    const location = resolveLocationById(locationId)
-    return normalizeStepMinutes(location?.stepMinutes ?? fallback ?? null)
-  }
+  const resolveLocationTypeFromId = useCallback(
+    (locationId: string | null, fallback: LocationType): LocationType => {
+      const location = resolveLocationById(locationId)
+      return location ? locationTypeFromProfessionalType(location.type) : fallback
+    },
+    [resolveLocationById],
+  )
 
-  function resolveLocationTypeFromId(
-    locationId: string | null,
-    fallback: LocationType,
-  ): LocationType {
-    const location = resolveLocationById(locationId)
-    return location ? locationTypeFromProfessionalType(location.type) : fallback
-  }
-
-  // ── Load locations once ───────────────────────────────────────────
-
-  async function loadLocationsOnce() {
+  const loadLocationsOnce = useCallback(async () => {
     if (loadedRef.current) return
     loadedRef.current = true
 
@@ -114,70 +142,55 @@ export function useCalendarLocations() {
         .map(parseProLocation)
         .filter((location): location is ProLocation => Boolean(location))
 
-      setLocations(parsed)
-      setLocationsLoaded(true)
-
       const bookable = parsed.filter((location) => location.isBookable)
 
       const nextCanSalon = bookable.some(
         (location) =>
           upper(location.type) === 'SALON' || upper(location.type) === 'SUITE',
       )
+
       const nextCanMobile = bookable.some(
         (location) => upper(location.type) === 'MOBILE_BASE',
       )
 
+      setLocations(parsed)
       setCanSalon(nextCanSalon)
       setCanMobile(nextCanMobile)
 
-      setActiveLocationId((current) => {
-        if (current && bookable.some((location) => location.id === current)) {
-          return current
-        }
-
-        const primaryBookable =
-          bookable.find((location) => location.isPrimary) ?? bookable[0] ?? null
-
-        if (primaryBookable) {
-          setHoursEditorLocationType(
-            locationTypeFromProfessionalType(primaryBookable.type),
-          )
-          return primaryBookable.id
-        }
-
-        setHoursEditorLocationType(
-          pickLocationType(nextCanSalon, nextCanMobile, hoursEditorLocationType),
+      if (!bookable.length) {
+        setSelectedLocationId(null)
+        setManualHoursEditorLocationType(
+          pickLocationType(nextCanSalon, nextCanMobile, manualHoursEditorLocationType),
         )
-        return null
-      })
+      }
+
+      setLocationsLoaded(true)
     } catch {
       setLocations([])
       setLocationsLoaded(true)
     }
-  }
+  }, [manualHoursEditorLocationType])
 
   useEffect(() => {
-    void loadLocationsOnce()
+    let cancelled = false
+
+    void Promise.resolve().then(async () => {
+      if (cancelled) return
+      await loadLocationsOnce()
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [loadLocationsOnce])
+
+  const setActiveLocationId = useCallback((locationId: string | null) => {
+    setSelectedLocationId(locationId)
   }, [])
 
-  // Auto-select primary bookable location when locations load
-  useEffect(() => {
-    if (!locationsLoaded) return
-    if (activeLocationId && scopedLocations.some((location) => location.id === activeLocationId)) {
-      return
-    }
-
-    const primaryBookable =
-      scopedLocations.find((location) => location.isPrimary) ?? scopedLocations[0] ?? null
-
-    setActiveLocationId(primaryBookable?.id ?? null)
-  }, [locationsLoaded, scopedLocations, activeLocationId])
-
-  // Sync hoursEditorLocationType when active location changes
-  useEffect(() => {
-    if (!activeLocation) return
-    setHoursEditorLocationType(locationTypeFromProfessionalType(activeLocation.type))
-  }, [activeLocation])
+  const setHoursEditorLocationType = useCallback((value: LocationType) => {
+    setManualHoursEditorLocationType(value)
+  }, [])
 
   return {
     locations,

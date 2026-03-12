@@ -1,6 +1,10 @@
 // app/pro/bookings/new/BookingCreateContent.tsx
 import { redirect } from 'next/navigation'
-import { ProfessionalLocationType, Role } from '@prisma/client'
+import {
+  ClientAddressKind,
+  ProfessionalLocationType,
+  Role,
+} from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -9,6 +13,7 @@ import {
   buildProBookingNewClientDTO,
   buildProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
+import { getProClientVisibility } from '@/lib/clientVisibility'
 
 export type BookingCreateSearchParams = {
   clientId?: string
@@ -54,7 +59,6 @@ function normalizeLocationTypeParam(
 function normalizeDatetimeLocalParam(value: unknown): string | undefined {
   const raw = normalizeSearchParam(value)
   if (!raw) return undefined
-
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? raw : undefined
 }
 
@@ -97,7 +101,9 @@ function buildClientAddressesByClientId(
     const clientId = typeof row.clientId === 'string' ? row.clientId.trim() : ''
     const id = typeof row.id === 'string' ? row.id.trim() : ''
     const formattedAddress =
-      typeof row.formattedAddress === 'string' ? row.formattedAddress.trim() : ''
+      typeof row.formattedAddress === 'string'
+        ? row.formattedAddress.trim()
+        : ''
 
     if (!clientId || !id || !formattedAddress) continue
 
@@ -126,16 +132,25 @@ function buildClientAddressesByClientId(
   return grouped
 }
 
+function locationTypeFromLocation(
+  location: Pick<BookableLocationOption, 'type'> | null | undefined,
+): ServiceLocationType | undefined {
+  if (!location) return undefined
+  return location.type === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
+}
+
 export default async function BookingCreateContent(props: {
   searchParams: BookingCreateSearchParams
   isModal?: boolean
 }) {
   const { searchParams } = props
 
-  const defaultClientId = normalizeSearchParam(searchParams.clientId)
-  const defaultOfferingId = normalizeSearchParam(searchParams.offeringId)
-  const defaultLocationId = normalizeSearchParam(searchParams.locationId)
-  const defaultLocationType = normalizeLocationTypeParam(searchParams.locationType)
+  const requestedClientId = normalizeSearchParam(searchParams.clientId)
+  const requestedOfferingId = normalizeSearchParam(searchParams.offeringId)
+  const requestedLocationId = normalizeSearchParam(searchParams.locationId)
+  const requestedLocationType = normalizeLocationTypeParam(
+    searchParams.locationType,
+  )
   const defaultScheduledAt = normalizeDatetimeLocalParam(searchParams.scheduledAt)
 
   const user = await getCurrentUser()
@@ -146,122 +161,80 @@ export default async function BookingCreateContent(props: {
 
   const professionalId = user.professionalProfile.id
 
-  const [clientsRaw, offeringsRaw, locationsRaw, clientAddressesRaw] =
-    await Promise.all([
-      prisma.clientProfile.findMany({
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          phone: true,
-          avatarUrl: true,
-          dateOfBirth: true,
-          user: {
-            select: {
-              id: true,
-              email: true,
-              role: true,
-              phone: true,
-              phoneVerifiedAt: true,
-            },
-          },
-        },
-        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
-      }),
-
-      prisma.professionalServiceOffering.findMany({
-        where: {
-          professionalId,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          salonPriceStartingAt: true,
-          salonDurationMinutes: true,
-          mobilePriceStartingAt: true,
-          mobileDurationMinutes: true,
-          offersInSalon: true,
-          offersMobile: true,
-          customImageUrl: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-          service: {
-            select: {
-              id: true,
-              name: true,
-              categoryId: true,
-              description: true,
-              defaultDurationMinutes: true,
-              minPrice: true,
-              defaultImageUrl: true,
-              allowMobile: true,
-              isActive: true,
-              isAddOnEligible: true,
-              addOnGroup: true,
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                },
+  const [offeringsRaw, locationsRaw] = await Promise.all([
+    prisma.professionalServiceOffering.findMany({
+      where: {
+        professionalId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        salonPriceStartingAt: true,
+        salonDurationMinutes: true,
+        mobilePriceStartingAt: true,
+        mobileDurationMinutes: true,
+        offersInSalon: true,
+        offersMobile: true,
+        customImageUrl: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        service: {
+          select: {
+            id: true,
+            name: true,
+            categoryId: true,
+            description: true,
+            defaultDurationMinutes: true,
+            minPrice: true,
+            defaultImageUrl: true,
+            allowMobile: true,
+            isActive: true,
+            isAddOnEligible: true,
+            addOnGroup: true,
+            category: {
+              select: {
+                id: true,
+                name: true,
               },
             },
           },
         },
-        orderBy: {
-          service: {
-            name: 'asc',
-          },
+      },
+      orderBy: {
+        service: {
+          name: 'asc',
         },
-      }),
+      },
+    }),
 
-      prisma.professionalLocation.findMany({
-        where: {
-          professionalId,
-          isBookable: true,
-          type: {
-            in: [
-              ProfessionalLocationType.SALON,
-              ProfessionalLocationType.SUITE,
-              ProfessionalLocationType.MOBILE_BASE,
-            ],
-          },
+    prisma.professionalLocation.findMany({
+      where: {
+        professionalId,
+        isBookable: true,
+        type: {
+          in: [
+            ProfessionalLocationType.SALON,
+            ProfessionalLocationType.SUITE,
+            ProfessionalLocationType.MOBILE_BASE,
+          ],
         },
-        select: {
-          id: true,
-          type: true,
-          isBookable: true,
-          isPrimary: true,
-          timeZone: true,
-          city: true,
-          formattedAddress: true,
-        },
-        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      }),
+      },
+      select: {
+        id: true,
+        type: true,
+        isBookable: true,
+        isPrimary: true,
+        timeZone: true,
+        city: true,
+        formattedAddress: true,
+      },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    }),
+  ])
 
-      prisma.clientAddress.findMany({
-        where: {
-          kind: 'SERVICE_ADDRESS',
-        },
-        select: {
-          id: true,
-          clientId: true,
-          label: true,
-          formattedAddress: true,
-          isDefault: true,
-        },
-        orderBy: [
-          { clientId: 'asc' },
-          { isDefault: 'desc' },
-          { updatedAt: 'desc' },
-          { createdAt: 'asc' },
-        ],
-      }),
-    ])
-
-  const clients = clientsRaw.map(buildProBookingNewClientDTO)
   const offerings = offeringsRaw.map(buildProBookingNewOfferingDTO)
 
   const locations: BookableLocationOption[] = locationsRaw.map((location) => ({
@@ -273,8 +246,91 @@ export default async function BookingCreateContent(props: {
     timeZone: location.timeZone,
   }))
 
+  /**
+   * Only load clients the pro is allowed to view.
+   * If you already have a stronger internal helper/query for this, use that instead.
+   */
+  const candidateClientsRaw = await prisma.clientProfile.findMany({
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      avatarUrl: true,
+      dateOfBirth: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          phone: true,
+          phoneVerifiedAt: true,
+        },
+      },
+    },
+    orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+  })
+
+  const visibleClientRows = await Promise.all(
+    candidateClientsRaw.map(async (client) => {
+      const visibility = await getProClientVisibility(professionalId, client.id)
+      return visibility.canViewClient ? client : null
+    }),
+  )
+
+  const clientsRaw = visibleClientRows.filter(
+    (client): client is NonNullable<(typeof visibleClientRows)[number]> =>
+      client !== null,
+  )
+
+  const visibleClientIds = clientsRaw.map((client) => client.id)
+
+  const clientAddressesRaw =
+    visibleClientIds.length > 0
+      ? await prisma.clientAddress.findMany({
+          where: {
+            clientId: { in: visibleClientIds },
+            kind: ClientAddressKind.SERVICE_ADDRESS,
+          },
+          select: {
+            id: true,
+            clientId: true,
+            label: true,
+            formattedAddress: true,
+            isDefault: true,
+          },
+          orderBy: [
+            { clientId: 'asc' },
+            { isDefault: 'desc' },
+            { updatedAt: 'desc' },
+            { createdAt: 'asc' },
+          ],
+        })
+      : []
+
+  const clients = clientsRaw.map(buildProBookingNewClientDTO)
+
   const clientAddressesByClientId =
     buildClientAddressesByClientId(clientAddressesRaw)
+
+  const validClientId = clients.some((c) => c.id === requestedClientId)
+    ? requestedClientId
+    : undefined
+
+  const validOfferingId = offerings.some((o) => o.id === requestedOfferingId)
+    ? requestedOfferingId
+    : undefined
+
+  const validLocation =
+    locations.find((location) => location.id === requestedLocationId) ?? null
+
+  const validLocationId = validLocation?.id
+  const derivedLocationType = locationTypeFromLocation(validLocation)
+
+  const validLocationType =
+    validLocationId != null
+      ? derivedLocationType
+      : requestedLocationType
 
   return (
     <NewBookingForm
@@ -282,10 +338,10 @@ export default async function BookingCreateContent(props: {
       offerings={offerings}
       locations={locations}
       clientAddressesByClientId={clientAddressesByClientId}
-      defaultClientId={defaultClientId}
-      defaultOfferingId={defaultOfferingId}
-      defaultLocationId={defaultLocationId}
-      defaultLocationType={defaultLocationType}
+      defaultClientId={validClientId}
+      defaultOfferingId={validOfferingId}
+      defaultLocationId={validLocationId}
+      defaultLocationType={validLocationType}
       defaultScheduledAt={defaultScheduledAt}
       cancelHref="/pro/bookings"
     />

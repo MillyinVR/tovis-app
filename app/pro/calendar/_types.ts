@@ -136,7 +136,7 @@ export type BookingCalendarEvent = {
   title: string
   clientName: string
   status: BookingCalendarStatus
-  locationId: string
+  locationId: string | null
   locationType: ServiceLocationType
   durationMinutes?: number
   details: BookingEventDetails

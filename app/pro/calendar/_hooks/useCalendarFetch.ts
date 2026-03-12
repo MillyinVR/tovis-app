@@ -30,7 +30,7 @@ import {
 import { toIso } from '../_utils/date'
 import { isRecord } from '@/lib/guards'
 import { pickBool, pickString } from '@/lib/pick'
-import { safeJson, errorMessageFromUnknown } from '@/lib/http'
+import { safeJson } from '@/lib/http'
 
 type CalendarFetchDeps = {
   view: ViewMode
@@ -46,6 +46,19 @@ type CalendarFetchDeps = {
 }
 
 export function useCalendarFetch(deps: CalendarFetchDeps) {
+  const {
+    view,
+    currentDate,
+    activeLocationId,
+    setActiveLocationId,
+    locationsLoaded,
+    activeLocation,
+    activeLocationType,
+    setCanSalon,
+    setCanMobile,
+    resolveActiveCalendarTimeZone,
+  } = deps
+
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const eventsRef = useRef<CalendarEvent[]>([])
   useEffect(() => {
@@ -67,8 +80,10 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
   const [autoAccept, setAutoAccept] = useState(false)
   const [savingAutoAccept, setSavingAutoAccept] = useState(false)
 
-  const [workingHoursSalon, setWorkingHoursSalon] = useState<WorkingHoursJson>(null)
-  const [workingHoursMobile, setWorkingHoursMobile] = useState<WorkingHoursJson>(null)
+  const [workingHoursSalon, setWorkingHoursSalon] =
+    useState<WorkingHoursJson>(null)
+  const [workingHoursMobile, setWorkingHoursMobile] =
+    useState<WorkingHoursJson>(null)
 
   const [management, setManagement] = useState<ManagementLists>({
     todaysBookings: [],
@@ -80,9 +95,16 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
   const loadSeqRef = useRef(0)
 
   const workingHoursActive = useMemo(() => {
-    if (deps.activeLocation?.workingHours) return deps.activeLocation.workingHours
-    return deps.activeLocationType === 'MOBILE' ? workingHoursMobile : workingHoursSalon
-  }, [deps.activeLocation, deps.activeLocationType, workingHoursSalon, workingHoursMobile])
+    if (activeLocation?.workingHours) return activeLocation.workingHours
+    return activeLocationType === 'MOBILE'
+      ? workingHoursMobile
+      : workingHoursSalon
+  }, [
+    activeLocation,
+    activeLocationType,
+    workingHoursSalon,
+    workingHoursMobile,
+  ])
 
   const blockedMinutesToday = useMemo(() => {
     const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
@@ -107,8 +129,6 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
     return sum
   }, [events, timeZone])
 
-  // ── Working hours loader ──────────────────────────────────────────
-
   async function loadWorkingHoursFor(locationType: LocationType) {
     const res = await fetch(
       `/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`,
@@ -126,8 +146,6 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
 
     return parseWorkingHoursJson(data.workingHours)
   }
-
-  // ── Auto-accept toggle ────────────────────────────────────────────
 
   async function toggleAutoAccept(next: boolean) {
     setAutoAccept(next)
@@ -157,8 +175,6 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
     }
   }
 
-  // ── Main calendar loader ──────────────────────────────────────────
-
   async function loadCalendar() {
     const seq = ++loadSeqRef.current
 
@@ -166,12 +182,16 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       setLoading(true)
       setError(null)
 
-      const requestedLocationId = deps.activeLocationId?.trim() || null
-      const tzGuess = deps.resolveActiveCalendarTimeZone()
+      const requestedLocationId = activeLocationId?.trim() || null
+      const tzGuess = resolveActiveCalendarTimeZone()
 
       async function fetchCalendarFor(tzForRange: string) {
         const safeTz = sanitizeTimeZone(tzForRange, DEFAULT_TIME_ZONE)
-        const { from, to } = rangeForViewUtcInTimeZone(deps.view, deps.currentDate, safeTz)
+        const { from, to } = rangeForViewUtcInTimeZone(
+          view,
+          currentDate,
+          safeTz,
+        )
 
         const qs = new URLSearchParams({
           from: toIso(from),
@@ -198,7 +218,9 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       }
 
       const firstRecord = isRecord(data) ? data : null
-      const firstApiTzRaw = firstRecord ? pickString(firstRecord.timeZone) ?? '' : ''
+      const firstApiTzRaw = firstRecord
+        ? pickString(firstRecord.timeZone) ?? ''
+        : ''
       const firstApiTz = isValidIanaTimeZone(firstApiTzRaw)
         ? sanitizeTimeZone(firstApiTzRaw, DEFAULT_TIME_ZONE)
         : DEFAULT_TIME_ZONE
@@ -218,10 +240,12 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       }
 
       const record = isRecord(data) ? data : null
-      const apiLocation = record ? parseCalendarRouteLocation(record.location) : null
+      const apiLocation = record
+        ? parseCalendarRouteLocation(record.location)
+        : null
 
-      if (apiLocation?.id && apiLocation.id !== deps.activeLocationId) {
-        deps.setActiveLocationId(apiLocation.id)
+      if (apiLocation?.id && apiLocation.id !== activeLocationId) {
+        setActiveLocationId(apiLocation.id)
       }
 
       const finalApiTzRaw = record ? pickString(record.timeZone) ?? '' : ''
@@ -235,8 +259,8 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       const nextCanSalon = record ? Boolean(record.canSalon ?? true) : true
       const nextCanMobile = record ? Boolean(record.canMobile ?? false) : false
 
-      deps.setCanSalon(nextCanSalon)
-      deps.setCanMobile(nextCanMobile)
+      setCanSalon(nextCanSalon)
+      setCanMobile(nextCanMobile)
 
       setStats(record ? parseCalendarStats(record.stats) : null)
       setAutoAccept(record ? Boolean(record.autoAcceptBookings) : false)
@@ -282,10 +306,10 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
   }
 
   useEffect(() => {
-    if (!deps.locationsLoaded && deps.activeLocationId == null) return
+    if (!locationsLoaded && activeLocationId == null) return
     void loadCalendar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deps.view, deps.currentDate, deps.activeLocationId, deps.locationsLoaded])
+  }, [view, currentDate, activeLocationId, locationsLoaded])
 
   function reload() {
     void loadCalendar()

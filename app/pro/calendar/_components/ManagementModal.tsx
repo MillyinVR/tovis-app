@@ -14,8 +14,12 @@ function titleFor(key: ManagementKey) {
 }
 
 function descFor(key: ManagementKey) {
-  if (key === 'todaysBookings') return 'Accepted + completed appointments happening today.'
-  if (key === 'pendingRequests') return 'Requests waiting on you to accept/reschedule/decline.'
+  if (key === 'todaysBookings') {
+    return 'Accepted + completed appointments happening today.'
+  }
+  if (key === 'pendingRequests') {
+    return 'Requests waiting on you to accept/reschedule/decline.'
+  }
   if (key === 'waitlistToday') return 'Clients trying to get in today.'
   return 'Time you blocked off for yourself.'
 }
@@ -31,7 +35,9 @@ function canShowMessage(key: ManagementKey, ev: CalendarEvent) {
 }
 
 function messageHrefForBooking(bookingId: string) {
-  return `/messages/start?contextType=BOOKING&contextId=${encodeURIComponent(bookingId)}`
+  return `/messages/start?contextType=BOOKING&contextId=${encodeURIComponent(
+    bookingId,
+  )}`
 }
 
 function initialsFrom(name?: string | null) {
@@ -58,13 +64,10 @@ function prettyServiceTitle(title?: string | null) {
   return t || 'Appointment'
 }
 
-/**
- * ✅ Booking events have clean id, blocks are discriminated by `kind`.
- * This guarantees approve/deny/message never accidentally uses a block id.
- */
 function bookingIdFor(ev: CalendarEvent): string | null {
   return ev.kind === 'BOOKING' ? ev.id : null
 }
+
 function buttonBase() {
   return 'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass focus:outline-none focus:ring-2 focus:ring-white/15'
 }
@@ -81,7 +84,7 @@ export function ManagementModal(props: {
 
   onApproveBookingId?: (bookingId: string) => void | Promise<void>
   onDenyBookingId?: (bookingId: string) => void | Promise<void>
-  actionBusyId?: string | null // expects bookingId for booking actions
+  actionBusyId?: string | null
   actionError?: string | null
 }) {
   const {
@@ -99,15 +102,17 @@ export function ManagementModal(props: {
     actionError,
   } = props
 
-  const [confirmDenyId, setConfirmDenyId] = useState<string | null>(null)
+  const [confirmDenyIdState, setConfirmDenyIdState] = useState<string | null>(
+    null,
+  )
 
-  // ✅ hooks must run every render (no conditional return before this)
-  const activeList = management?.[activeKey] || []
+  const confirmScopeKey = `${open ? 'open' : 'closed'}:${activeKey}`
+  const confirmDenyId = open ? confirmDenyIdState : null
 
   const sortedList = useMemo(() => {
+    const activeList = management?.[activeKey] ?? []
     const copy = [...activeList]
 
-    // Premium touch: in Pending, keep true pending at top if statuses vary
     if (activeKey === 'pendingRequests') {
       copy.sort((a, b) => {
         const as = String(a.status || '').toUpperCase()
@@ -122,40 +127,34 @@ export function ManagementModal(props: {
       return copy
     }
 
-    copy.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+    copy.sort(
+      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+    )
     return copy
-  }, [activeKey, activeList])
+  }, [management, activeKey])
 
-  // Close on Escape (only active when open)
   useEffect(() => {
     if (!open) return
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
+
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  // Lock body scroll behind modal (only when open)
   useEffect(() => {
     if (!open) return
+
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+
     return () => {
       document.body.style.overflow = prev
     }
   }, [open])
 
-  // Reset deny confirm when closing or switching lists
-  useEffect(() => {
-    if (!open) {
-      setConfirmDenyId(null)
-      return
-    }
-    setConfirmDenyId(null)
-  }, [open, activeKey])
-
-  // ✅ safe to return null AFTER hooks
   if (!open) return null
 
   const activeCount = sortedList.length
@@ -172,12 +171,15 @@ export function ManagementModal(props: {
         className="tovis-glass w-full max-w-200 overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="sticky top-0 z-10 border-b border-white/10 bg-bgSecondary/70 backdrop-blur-md">
           <div className="flex items-start justify-between gap-3 p-4">
             <div className="min-w-0">
-              <div className="truncate text-[15px] font-black text-textPrimary">{titleFor(activeKey)}</div>
-              <div className="mt-1 text-[12px] font-semibold text-textSecondary">{descFor(activeKey)}</div>
+              <div className="truncate text-[15px] font-black text-textPrimary">
+                {titleFor(activeKey)}
+              </div>
+              <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                {descFor(activeKey)}
+              </div>
 
               {actionError ? (
                 <div className="mt-3 rounded-card border border-toneDanger/30 bg-bgPrimary px-3 py-2 text-[12px] font-semibold text-toneDanger">
@@ -189,12 +191,22 @@ export function ManagementModal(props: {
             <div className="flex items-center gap-2">
               {activeKey === 'blockedToday' ? (
                 <>
-                  <button type="button" onClick={onCreateBlockNow} className={buttonBase()}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmDenyIdState(null)
+                      onCreateBlockNow()
+                    }}
+                    className={buttonBase()}
+                  >
                     + Block time
                   </button>
                   <button
                     type="button"
-                    onClick={onBlockFullDayToday}
+                    onClick={() => {
+                      setConfirmDenyIdState(null)
+                      onBlockFullDayToday()
+                    }}
                     className={[
                       'rounded-full border border-white/10 bg-transparent px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass',
                       'focus:outline-none focus:ring-2 focus:ring-white/15',
@@ -207,7 +219,10 @@ export function ManagementModal(props: {
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => {
+                  setConfirmDenyIdState(null)
+                  onClose()
+                }}
                 className={buttonBase()}
                 aria-label="Close management"
               >
@@ -216,16 +231,25 @@ export function ManagementModal(props: {
             </div>
           </div>
 
-          {/* Tabs */}
           <div className="px-4 pb-4">
             <div className="flex flex-wrap gap-2">
-              {(['todaysBookings', 'pendingRequests', 'waitlistToday', 'blockedToday'] as ManagementKey[]).map((k) => {
+              {(
+                [
+                  'todaysBookings',
+                  'pendingRequests',
+                  'waitlistToday',
+                  'blockedToday',
+                ] as ManagementKey[]
+              ).map((k) => {
                 const active = activeKey === k
                 return (
                   <button
                     key={k}
                     type="button"
-                    onClick={() => onSetKey(k)}
+                    onClick={() => {
+                      setConfirmDenyIdState(null)
+                      onSetKey(k)
+                    }}
                     className={[
                       'rounded-full border px-3 py-1.5 text-[12px] font-black transition focus:outline-none focus:ring-2 focus:ring-white/15',
                       active
@@ -234,7 +258,10 @@ export function ManagementModal(props: {
                     ].join(' ')}
                     aria-pressed={active}
                   >
-                    {titleFor(k)} <span className="text-textSecondary">({management[k]?.length ?? 0})</span>
+                    {titleFor(k)}{' '}
+                    <span className="text-textSecondary">
+                      ({management[k]?.length ?? 0})
+                    </span>
                   </button>
                 )
               })}
@@ -242,14 +269,15 @@ export function ManagementModal(props: {
           </div>
         </div>
 
-        {/* Body */}
         <div className="max-h-[72vh] overflow-auto p-4">
           {activeCount === 0 ? (
             <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
               Nothing here right now.
               <div className="mt-2 text-textSecondary/90">
-                If you haven’t implemented <span className="font-black text-textPrimary">WAITLIST</span> /{' '}
-                <span className="font-black text-textPrimary">BLOCKED</span> yet, this being empty is expected.
+                If you haven’t implemented{' '}
+                <span className="font-black text-textPrimary">WAITLIST</span> /{' '}
+                <span className="font-black text-textPrimary">BLOCKED</span> yet,
+                this being empty is expected.
               </div>
             </div>
           ) : (
@@ -260,8 +288,14 @@ export function ManagementModal(props: {
                 const timeLabel = formatStartsAt(ev.startsAt)
                 const bookingId = bookingIdFor(ev)
 
-                // ✅ Busy should match bookingId (not ev.id), since actions are booking-based
-                const busy = Boolean(actionBusyId && bookingId && actionBusyId === bookingId)
+                const busy = Boolean(
+                  actionBusyId && bookingId && actionBusyId === bookingId,
+                )
+
+                const scopedConfirmDenyId =
+                  confirmScopeKey === `${open ? 'open' : 'closed'}:${activeKey}`
+                    ? confirmDenyId
+                    : null
 
                 return (
                   <div
@@ -281,7 +315,9 @@ export function ManagementModal(props: {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <div className="truncate text-[13px] font-black text-textPrimary">
-                              {isBlock ? 'Blocked time' : prettyServiceTitle(ev.title)}
+                              {isBlock
+                                ? 'Blocked time'
+                                : prettyServiceTitle(ev.title)}
                             </div>
                             <span className="rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[11px] font-black text-textSecondary">
                               {statusLabel(ev.status)}
@@ -290,7 +326,11 @@ export function ManagementModal(props: {
 
                           <div className="mt-1 truncate text-[12px] font-semibold text-textSecondary">
                             {isBlock
-                              ? `${ev.kind === 'BLOCK' ? (ev.note?.trim() || 'Personal time') : 'Personal time'} • ${timeLabel}`
+                              ? `${
+                                  ev.kind === 'BLOCK'
+                                    ? (ev.note?.trim() || 'Personal time')
+                                    : 'Personal time'
+                                } • ${timeLabel}`
                               : `${clientName || 'Client'} • ${timeLabel}`}
                           </div>
                         </div>
@@ -305,11 +345,20 @@ export function ManagementModal(props: {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => onPickEvent(ev)}
+                          onClick={() => {
+                            setConfirmDenyIdState(null)
+                            onPickEvent(ev)
+                          }}
                           className={buttonBase()}
-                          aria-label={activeKey === 'pendingRequests' && !isBlock ? 'Review or reschedule' : 'Open'}
+                          aria-label={
+                            activeKey === 'pendingRequests' && !isBlock
+                              ? 'Review or reschedule'
+                              : 'Open'
+                          }
                         >
-                          {activeKey === 'pendingRequests' && !isBlock ? 'Review / Reschedule' : 'Open'}
+                          {activeKey === 'pendingRequests' && !isBlock
+                            ? 'Review / Reschedule'
+                            : 'Open'}
                         </button>
 
                         {canShowMessage(activeKey, ev) && bookingId ? (
@@ -325,12 +374,12 @@ export function ManagementModal(props: {
 
                       {canShowActions(activeKey, ev) ? (
                         <div className="flex flex-wrap items-center gap-2">
-                          {confirmDenyId === ev.id ? (
+                          {scopedConfirmDenyId === ev.id ? (
                             <>
                               <button
                                 type="button"
                                 disabled={busy}
-                                onClick={() => setConfirmDenyId(null)}
+                                onClick={() => setConfirmDenyIdState(null)}
                                 className={[
                                   'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textSecondary hover:bg-surfaceGlass disabled:opacity-50',
                                   'focus:outline-none focus:ring-2 focus:ring-white/15',
@@ -344,7 +393,7 @@ export function ManagementModal(props: {
                                 disabled={busy || !onDenyBookingId || !bookingId}
                                 onClick={() => {
                                   if (bookingId) void onDenyBookingId?.(bookingId)
-                                  setConfirmDenyId(null)
+                                  setConfirmDenyIdState(null)
                                 }}
                                 className={[
                                   'rounded-full border border-toneDanger/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-50',
@@ -358,7 +407,7 @@ export function ManagementModal(props: {
                             <button
                               type="button"
                               disabled={busy || !onDenyBookingId || !bookingId}
-                              onClick={() => setConfirmDenyId(ev.id)}
+                              onClick={() => setConfirmDenyIdState(ev.id)}
                               className={[
                                 'rounded-full border border-toneDanger/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-50',
                                 'focus:outline-none focus:ring-2 focus:ring-white/15',
@@ -372,6 +421,7 @@ export function ManagementModal(props: {
                             type="button"
                             disabled={busy || !onApproveBookingId || !bookingId}
                             onClick={() => {
+                              setConfirmDenyIdState(null)
                               if (bookingId) void onApproveBookingId?.(bookingId)
                             }}
                             className={[
@@ -392,7 +442,8 @@ export function ManagementModal(props: {
         </div>
 
         <div className="border-t border-white/10 bg-bgSecondary/60 px-4 py-3 text-[11px] font-semibold text-textSecondary backdrop-blur-md">
-          Tip: Press <span className="font-black text-textPrimary">Esc</span> to close.
+          Tip: Press <span className="font-black text-textPrimary">Esc</span> to
+          close.
         </div>
       </div>
     </div>

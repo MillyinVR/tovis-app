@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+// app/api/bookings/finalize
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingServiceItemType,
   BookingSource,
@@ -167,6 +168,9 @@ function makeRequest(body: unknown): Request {
 
 describe('POST /api/bookings/finalize', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
+
     vi.clearAllMocks()
 
     mocks.requireClient.mockResolvedValue({
@@ -275,8 +279,11 @@ describe('POST /api/bookings/finalize', () => {
     })
 
     mocks.getTimeRangeConflict.mockResolvedValue(null)
-
     mocks.createProNotification.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('returns 400 when locationType is missing', async () => {
@@ -343,34 +350,34 @@ describe('POST /api/bookings/finalize', () => {
 
   it('logs STEP_BOUNDARY and returns 400 when the held time is off step', async () => {
     mocks.bookingHoldFindUnique.mockResolvedValueOnce({
-        id: 'hold_1',
-        offeringId: 'offering_1',
-        professionalId: 'pro_123',
-        clientId: 'client_1',
-        scheduledFor: new Date('2026-03-11T19:37:00.000Z'),
-        expiresAt: new Date('2026-03-11T19:45:00.000Z'),
-        locationType: ServiceLocationType.SALON,
-        locationId: 'loc_1',
-        locationTimeZone: 'America/Los_Angeles',
-        locationAddressSnapshot: { formattedAddress: '123 Salon St' },
-        locationLatSnapshot: 34.05,
-        locationLngSnapshot: -118.25,
-        clientAddressId: null,
-        clientAddressSnapshot: null,
-        clientAddressLatSnapshot: null,
-        clientAddressLngSnapshot: null,
+      id: 'hold_1',
+      offeringId: 'offering_1',
+      professionalId: 'pro_123',
+      clientId: 'client_1',
+      scheduledFor: new Date('2026-03-11T19:37:00.000Z'),
+      expiresAt: new Date('2026-03-11T19:45:00.000Z'),
+      locationType: ServiceLocationType.SALON,
+      locationId: 'loc_1',
+      locationTimeZone: 'America/Los_Angeles',
+      locationAddressSnapshot: { formattedAddress: '123 Salon St' },
+      locationLatSnapshot: 34.05,
+      locationLngSnapshot: -118.25,
+      clientAddressId: null,
+      clientAddressSnapshot: null,
+      clientAddressLatSnapshot: null,
+      clientAddressLngSnapshot: null,
     })
 
     mocks.resolveValidatedBookingContext.mockResolvedValueOnce({
-        ok: true,
-        durationMinutes: 60,
-        priceStartingAt: new Prisma.Decimal('100'),
-        context: {
+      ok: true,
+      durationMinutes: 60,
+      priceStartingAt: new Prisma.Decimal('100'),
+      context: {
         locationId: 'loc_1',
         location: { id: 'loc_1' },
         timeZone: 'America/Los_Angeles',
         workingHours: {
-            wed: { enabled: true, start: '09:00', end: '18:00' },
+          wed: { enabled: true, start: '09:00', end: '18:00' },
         },
         stepMinutes: 30,
         advanceNoticeMinutes: 0,
@@ -379,45 +386,45 @@ describe('POST /api/bookings/finalize', () => {
         formattedAddress: '123 Salon St',
         lat: 34.05,
         lng: -118.25,
-        },
+      },
     })
 
     const result = await POST(
-        makeRequest({
+      makeRequest({
         offeringId: 'offering_1',
         holdId: 'hold_1',
         locationType: 'SALON',
-        }),
+      }),
     )
 
     expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-        action: 'BOOKING_FINALIZE',
-        professionalId: 'pro_123',
-        locationId: 'loc_1',
-        locationType: ServiceLocationType.SALON,
-        requestedStart: new Date('2026-03-11T19:37:00.000Z'),
-        requestedEnd: new Date('2026-03-11T19:38:00.000Z'),
-        conflictType: 'STEP_BOUNDARY',
-        holdId: 'hold_1',
-        meta: {
+      action: 'BOOKING_FINALIZE',
+      professionalId: 'pro_123',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      requestedStart: new Date('2026-03-11T19:37:00.000Z'),
+      requestedEnd: new Date('2026-03-11T19:38:00.000Z'),
+      conflictType: 'STEP_BOUNDARY',
+      holdId: 'hold_1',
+      meta: {
         route: 'app/api/bookings/finalize/route.ts',
         stepMinutes: 30,
-        },
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
-        400,
-        'Start time must be on a 30-minute boundary.',
-        { code: 'STEP' },
+      400,
+      'Start time must be on a 30-minute boundary.',
+      { code: 'STEP' },
     )
 
     expect(result).toEqual({
-        ok: false,
-        status: 400,
-        error: 'Start time must be on a 30-minute boundary.',
-        code: 'STEP',
+      ok: false,
+      status: 400,
+      error: 'Start time must be on a 30-minute boundary.',
+      code: 'STEP',
     })
-    })
+  })
 
   it('logs BLOCKED and returns 409 when blocked by calendar block', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')

@@ -22,6 +22,7 @@ export const dynamic = 'force-dynamic'
 
 type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
 type SearchParams = Record<string, string | string[] | undefined>
+
 const BOOKING_STATUS = {
   PENDING: 'PENDING',
   ACCEPTED: 'ACCEPTED',
@@ -76,7 +77,6 @@ const bookingSelect = {
 } satisfies Prisma.BookingSelect
 
 type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
-type ServiceItemRow = BookingRow['serviceItems'][number]
 
 function firstParam(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
@@ -84,7 +84,12 @@ function firstParam(v: string | string[] | undefined): string {
 
 function normalizeStatusFilter(raw: unknown): StatusFilter {
   const s = String(raw || '').toUpperCase().trim()
-  if (s === 'PENDING' || s === 'ACCEPTED' || s === 'COMPLETED' || s === 'CANCELLED') {
+  if (
+    s === 'PENDING' ||
+    s === 'ACCEPTED' ||
+    s === 'COMPLETED' ||
+    s === 'CANCELLED'
+  ) {
     return s
   }
   return 'ALL'
@@ -133,7 +138,12 @@ function StatusPill({ status }: { status: string }) {
             : 'border-white/10 bg-bgPrimary text-textSecondary'
 
   return (
-    <span className={['inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black', tone].join(' ')}>
+    <span
+      className={[
+        'inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black',
+        tone,
+      ].join(' ')}
+    >
       {formatStatus(s)}
     </span>
   )
@@ -152,7 +162,10 @@ function FilterPills({ active }: { active: StatusFilter }) {
     <div className="flex flex-wrap gap-2">
       {pills.map((pill) => {
         const isActive = active === pill.key
-        const href = pill.key === 'ALL' ? '/pro/bookings' : `/pro/bookings?status=${encodeURIComponent(pill.key)}`
+        const href =
+          pill.key === 'ALL'
+            ? '/pro/bookings'
+            : `/pro/bookings?status=${encodeURIComponent(pill.key)}`
 
         return (
           <Link
@@ -173,7 +186,10 @@ function FilterPills({ active }: { active: StatusFilter }) {
   )
 }
 
-async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown): Promise<string> {
+async function resolveProScheduleTimeZone(
+  proId: string,
+  proTimeZoneRaw: unknown,
+): Promise<string> {
   const locations = await prisma.professionalLocation.findMany({
     where: {
       professionalId: proId,
@@ -197,7 +213,10 @@ async function resolveProScheduleTimeZone(proId: string, proTimeZoneRaw: unknown
   return DEFAULT_TIME_ZONE
 }
 
-function bookingDisplayTimeZone(bookingLocationTimeZone: unknown, scheduleTz: string) {
+function bookingDisplayTimeZone(
+  bookingLocationTimeZone: unknown,
+  scheduleTz: string,
+) {
   const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
   if (bookingTz) return bookingTz
   return sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
@@ -243,7 +262,9 @@ function getBaseAndAddOnNames(booking: BookingRow) {
     items[0] ??
     null
 
-  const addOnItems = items.filter((item) => item.itemType === BookingServiceItemType.ADD_ON)
+  const addOnItems = items.filter(
+    (item) => item.itemType === BookingServiceItemType.ADD_ON,
+  )
 
   const baseName = baseItem?.service?.name ?? booking.service?.name ?? 'Service'
   const addOnNames = addOnItems
@@ -280,7 +301,10 @@ function PriceBlock({ booking }: { booking: BookingRow }) {
   const tax = booking.taxAmount ?? null
   const tip = booking.tipAmount ?? null
 
-  const computedTotal = subtotal.minus(discount ?? zero).plus(tax ?? zero).plus(tip ?? zero)
+  const computedTotal = subtotal
+    .minus(discount ?? zero)
+    .plus(tax ?? zero)
+    .plus(tip ?? zero)
 
   const subtotalStr = formatMoneyOrNull(subtotal) ?? '0.00'
   const totalStr = formatMoneyOrNull(computedTotal) ?? subtotalStr
@@ -319,7 +343,9 @@ function Section({
     <section className="grid gap-3">
       <div className="flex items-end justify-between gap-3">
         <h2 className="text-[15px] font-black text-textPrimary">{title}</h2>
-        <div className="text-[12px] text-textSecondary">{items.length ? `${items.length} total` : ''}</div>
+        <div className="text-[12px] text-textSecondary">
+          {items.length ? `${items.length} total` : ''}
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -331,16 +357,24 @@ function Section({
           {items.map((booking) => {
             const dur = durationLabel(booking.totalDurationMinutes)
             const canLinkClient = visibleClientIdSet.has(String(booking.client.id))
-            const rowTz = bookingDisplayTimeZone(booking.locationTimeZone, scheduleTz)
+            const rowTz = bookingDisplayTimeZone(
+              booking.locationTimeZone,
+              scheduleTz,
+            )
             const { baseName, addOnNames } = getBaseAndAddOnNames(booking)
 
             return (
-              <div key={booking.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+              <div
+                key={booking.id}
+                className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
+              >
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">{baseName}</div>
+                        <div className="truncate text-[13px] font-black text-textPrimary">
+                          {baseName}
+                        </div>
 
                         {addOnNames.length ? (
                           <div className="mt-1 truncate text-[12px] text-textSecondary">
@@ -353,10 +387,15 @@ function Section({
                     </div>
 
                     <div className="mt-1 text-[12px] text-textSecondary">
-                      <ClientNameLink canLink={canLinkClient} clientId={booking.client.id}>
+                      <ClientNameLink
+                        canLink={canLinkClient}
+                        clientId={booking.client.id}
+                      >
                         {booking.client.firstName} {booking.client.lastName}
                       </ClientNameLink>
-                      {booking.client.user?.email ? ` • ${booking.client.user.email}` : ''}
+                      {booking.client.user?.email
+                        ? ` • ${booking.client.user.email}`
+                        : ''}
                       {booking.client.phone ? ` • ${booking.client.phone}` : ''}
                     </div>
 
@@ -381,8 +420,12 @@ function Section({
                     <BookingActions
                       bookingId={booking.id}
                       currentStatus={booking.status}
-                      startedAt={booking.startedAt ? booking.startedAt.toISOString() : null}
-                      finishedAt={booking.finishedAt ? booking.finishedAt.toISOString() : null}
+                      startedAt={
+                        booking.startedAt ? booking.startedAt.toISOString() : null
+                      }
+                      finishedAt={
+                        booking.finishedAt ? booking.finishedAt.toISOString() : null
+                      }
                       timeZone={rowTz}
                     />
                   </div>
@@ -396,20 +439,30 @@ function Section({
   )
 }
 
-export default async function ProBookingsPage(props: { searchParams?: Promise<SearchParams> }) {
+export default async function ProBookingsPage(props: {
+  searchParams?: Promise<SearchParams>
+}) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/bookings')
   }
 
-  const sp = (await props.searchParams?.catch(() => ({} as SearchParams))) ?? ({} as SearchParams)
+  const sp =
+    (await props.searchParams?.catch(() => ({} as SearchParams))) ??
+    ({} as SearchParams)
   const statusFilter = normalizeStatusFilter(firstParam(sp.status))
 
   const proId = user.professionalProfile.id
-  const scheduleTz = await resolveProScheduleTimeZone(proId, user.professionalProfile.timeZone)
+  const scheduleTz = await resolveProScheduleTimeZone(
+    proId,
+    user.professionalProfile.timeZone,
+  )
 
   const nowUtc = new Date()
-  const { startOfTodayUtc, startOfTomorrowUtc } = computeTodayTomorrowBoundsUtc(nowUtc, scheduleTz)
+  const { startOfTodayUtc, startOfTomorrowUtc } = computeTodayTomorrowBoundsUtc(
+    nowUtc,
+    scheduleTz,
+  )
 
   const now = new Date()
   const visibleClientRows = await prisma.booking.findMany({
@@ -425,7 +478,9 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
     take: 2000,
   })
 
-  const visibleClientIdSet = new Set<string>(visibleClientRows.map((row) => String(row.clientId)))
+  const visibleClientIdSet = new Set<string>(
+    visibleClientRows.map((row) => String(row.clientId)),
+  )
 
   const nonCancelledStatusWhere:
     | { status: { not: BookingStatus } }
@@ -436,6 +491,7 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
       : statusFilter === 'CANCELLED'
         ? null
         : { status: statusFilter }
+
   const activeBucketsPromise: Promise<[BookingRow[], BookingRow[], BookingRow[]]> =
     nonCancelledStatusWhere == null
       ? Promise.resolve([[], [], []])
@@ -481,10 +537,8 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
         })
       : Promise.resolve([])
 
-  const [[todayBookings, upcomingBookings, pastBookings], cancelledBookings] = await Promise.all([
-    activeBucketsPromise,
-    cancelledBookingsPromise,
-  ])
+  const [[todayBookings, upcomingBookings, pastBookings], cancelledBookings] =
+    await Promise.all([activeBucketsPromise, cancelledBookingsPromise])
 
   const showTz = pickTimeZoneOrNull(scheduleTz)
 
@@ -496,7 +550,9 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
             <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
             <div className="mt-1 text-[12px] text-textSecondary">
               Today, upcoming, past, and cancelled.
-              {showTz ? <span className="text-textSecondary/70"> ({showTz})</span> : null}
+              {showTz ? (
+                <span className="text-textSecondary/70"> ({showTz})</span>
+              ) : null}
             </div>
           </div>
 
@@ -509,7 +565,9 @@ export default async function ProBookingsPage(props: { searchParams?: Promise<Se
         </div>
 
         <div className="mt-4">
-          <div className="mb-2 text-[12px] font-black text-textPrimary">Filter</div>
+          <div className="mb-2 text-[12px] font-black text-textPrimary">
+            Filter
+          </div>
           <FilterPills active={statusFilter} />
         </div>
       </header>

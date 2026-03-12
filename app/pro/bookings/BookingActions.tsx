@@ -7,11 +7,8 @@ import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { safeJson } from '@/lib/http'
 
-const BOOKING_STATUSES = ['PENDING', 'ACCEPTED', 'COMPLETED', 'CANCELLED'] as const
-type BookingStatus = (typeof BOOKING_STATUSES)[number]
-
-const LOADING_ACTIONS = ['ACCEPT', 'CANCEL', 'START', 'FINISH'] as const
-type LoadingAction = (typeof LOADING_ACTIONS)[number]
+type BookingStatus = 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+type LoadingAction = 'ACCEPT' | 'CANCEL' | 'START' | 'FINISH'
 
 type Props = {
   bookingId: string
@@ -33,7 +30,7 @@ function isRecord(v: unknown): v is JsonObject {
 }
 
 function readString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v : null
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
 function readNestedRecord(obj: unknown, key: string): JsonObject | null {
@@ -43,7 +40,14 @@ function readNestedRecord(obj: unknown, key: string): JsonObject | null {
 }
 
 function isBookingStatus(v: unknown): v is BookingStatus {
-  return typeof v === 'string' && (BOOKING_STATUSES as readonly string[]).includes(v.trim().toUpperCase())
+  if (typeof v !== 'string') return false
+  const s = v.trim().toUpperCase()
+  return (
+    s === 'PENDING' ||
+    s === 'ACCEPTED' ||
+    s === 'COMPLETED' ||
+    s === 'CANCELLED'
+  )
 }
 
 function normalizeBookingStatus(v: unknown): BookingStatus {
@@ -97,11 +101,15 @@ function extractNextHref(data: unknown): string | null {
 
   const booking = readNestedRecord(root, 'booking')
   const bookingHref = booking ? readString(booking.nextHref) : null
-  if (bookingHref && bookingHref.startsWith('/') && !bookingHref.startsWith('//')) return bookingHref
+  if (bookingHref && bookingHref.startsWith('/') && !bookingHref.startsWith('//')) {
+    return bookingHref
+  }
 
   const nestedData = readNestedRecord(root, 'data')
   const dataHref = nestedData ? readString(nestedData.nextHref) : null
-  if (dataHref && dataHref.startsWith('/') && !dataHref.startsWith('//')) return dataHref
+  if (dataHref && dataHref.startsWith('/') && !dataHref.startsWith('//')) {
+    return dataHref
+  }
 
   return null
 }
@@ -116,6 +124,7 @@ function extractNextHref(data: unknown): string | null {
  */
 function extractStatusStrict(data: unknown): BookingStatus {
   const root = isRecord(data) ? data : null
+
   const direct = root ? readString(root.status) : null
   if (direct) return normalizeBookingStatus(direct)
 
@@ -173,7 +182,9 @@ export default function BookingActions({
       setStatusError(null)
     } catch (err: unknown) {
       setStatus(null)
-      setStatusError(err instanceof Error ? err.message : 'Invalid booking status.')
+      setStatusError(
+        err instanceof Error ? err.message : 'Invalid booking status.',
+      )
     }
   }, [currentStatus])
 
@@ -198,7 +209,8 @@ export default function BookingActions({
   const startedLabel = formatWhen(localStartedAt, timeZone)
   const finishedLabel = formatWhen(localFinishedAt, timeZone)
 
-  const isTerminal = status === 'COMPLETED' || status === 'CANCELLED' || finished
+  const isTerminal =
+    status === 'COMPLETED' || status === 'CANCELLED' || finished
 
   const canAccept = status === 'PENDING'
   const canCancel = status === 'PENDING' || status === 'ACCEPTED'
@@ -220,7 +232,9 @@ export default function BookingActions({
     if (loading) return
 
     if (action === 'CANCEL') {
-      const ok = window.confirm('Cancel this booking? This will notify the client.')
+      const ok = window.confirm(
+        'Cancel this booking? This will notify the client.',
+      )
       if (!ok) return
     }
 
@@ -245,7 +259,10 @@ export default function BookingActions({
         res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/cancel`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: 'Cancelled by professional', promoteWaitlist: true }),
+          body: JSON.stringify({
+            reason: 'Cancelled by professional',
+            promoteWaitlist: true,
+          }),
           signal: controller.signal,
         })
       } else if (action === 'START') {
@@ -291,7 +308,11 @@ export default function BookingActions({
       if (err instanceof Error && err.name === 'AbortError') return
 
       console.error(err)
-      setError(err instanceof Error ? err.message : 'Network error while updating booking.')
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Network error while updating booking.',
+      )
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null
@@ -326,7 +347,9 @@ export default function BookingActions({
     return (
       <div className="text-[12px] text-textSecondary">
         Status: <span className="font-black text-textPrimary">{status}</span>
-        {finishedLabel ? <span className="ml-2 text-textSecondary">• {finishedLabel}</span> : null}
+        {finishedLabel ? (
+          <span className="ml-2 text-textSecondary">• {finishedLabel}</span>
+        ) : null}
       </div>
     )
   }
@@ -343,7 +366,10 @@ export default function BookingActions({
       </div>
 
       {error ? (
-        <div aria-live="polite" className="max-w-65 text-right text-[11px] font-black text-microAccent">
+        <div
+          aria-live="polite"
+          className="max-w-65 text-right text-[11px] font-black text-microAccent"
+        >
           {error}
         </div>
       ) : null}

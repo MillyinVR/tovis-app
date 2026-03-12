@@ -12,9 +12,7 @@ import {
   extractBlockId,
 } from '../_utils/calendarMath'
 import { clamp } from '../_utils/date'
-import {
-  utcFromDayAndMinutesInTimeZone,
-} from '@/lib/timeZone'
+import { utcFromDayAndMinutesInTimeZone } from '@/lib/timeZone'
 
 type DragDropDeps = {
   eventsRef: React.RefObject<CalendarEvent[]>
@@ -57,9 +55,23 @@ export function useDragDrop(deps: DragDropDeps) {
   const suppressClickRef = useRef(false)
   const suppressClickTimerRef = useRef<number | null>(null)
 
-  // Keep a stable ref to openConfirm so useCallback closures stay fresh
+  // Stable dependency refs for DOM listeners / async callbacks.
+  const setEventsRef = useRef(deps.setEvents)
+  const resolveEventSchedulingContextRef = useRef(deps.resolveEventSchedulingContext)
+  const activeStepMinutesRef = useRef(deps.activeStepMinutes)
   const openConfirmRef = useRef(deps.openConfirm)
-  openConfirmRef.current = deps.openConfirm
+
+  useEffect(() => {
+    setEventsRef.current = deps.setEvents
+    resolveEventSchedulingContextRef.current = deps.resolveEventSchedulingContext
+    activeStepMinutesRef.current = deps.activeStepMinutes
+    openConfirmRef.current = deps.openConfirm
+  }, [
+    deps.setEvents,
+    deps.resolveEventSchedulingContext,
+    deps.activeStepMinutes,
+    deps.openConfirm,
+  ])
 
   function suppressClickBriefly() {
     suppressClickRef.current = true
@@ -74,75 +86,101 @@ export function useDragDrop(deps: DragDropDeps) {
     }, 250)
   }
 
+  const onResizeMoveImplRef = useRef<(e: MouseEvent) => void>(() => {})
+  const onResizeEndImplRef = useRef<() => void>(() => {})
+
   const onResizeMove = useCallback((e: MouseEvent) => {
-    const s = resizingRef.current
-    if (!s) return
-
-    const y = e.clientY - s.columnTop
-    const endMinutes = snapMinutes(y / PX_PER_MINUTE, s.stepMinutes)
-    const rawDur = endMinutes - s.startMinutes
-    const dur = roundDurationMinutes(rawDur, s.stepMinutes)
-
-    const start = utcFromDayAndMinutesInTimeZone(s.day, s.startMinutes, s.timeZone)
-    const end = new Date(start.getTime() + dur * 60_000)
-
-    deps.setEvents((prev) =>
-      prev.map((ev) =>
-        ev.id === s.eventId
-          ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur }
-          : ev,
-      ),
-    )
+    onResizeMoveImplRef.current(e)
   }, [])
 
   const onResizeEnd = useCallback(() => {
-    const s = resizingRef.current
-    resizingRef.current = null
-    window.removeEventListener('mousemove', onResizeMove)
-    window.removeEventListener('mouseup', onResizeEnd)
-    if (!s) return
+    onResizeEndImplRef.current()
+  }, [])
 
-    suppressClickBriefly()
+  useEffect(() => {
+    onResizeMoveImplRef.current = (e: MouseEvent) => {
+      const s = resizingRef.current
+      if (!s) return
 
-    const ev = deps.eventsRef.current.find((x) => x.id === s.eventId)
-    if (!ev) return
+      const y = e.clientY - s.columnTop
+      const endMinutes = snapMinutes(y / PX_PER_MINUTE, s.stepMinutes)
+      const rawDur = endMinutes - s.startMinutes
+      const dur = roundDurationMinutes(rawDur, s.stepMinutes)
 
-    const start = new Date(ev.startsAt)
-    const end = new Date(ev.endsAt)
-    const raw = Math.round((end.getTime() - start.getTime()) / 60_000)
-    const dur = roundDurationMinutes(raw, s.stepMinutes)
+      const start = utcFromDayAndMinutesInTimeZone(
+        s.day,
+        s.startMinutes,
+        s.timeZone,
+      )
+      const end = new Date(start.getTime() + dur * 60_000)
 
-    if (dur === s.originalDuration) {
-      const rollbackEnd = new Date(start.getTime() + s.originalDuration * 60_000)
-      deps.setEvents((prev) =>
-        prev.map((x) =>
-          x.id === s.eventId
-            ? {
-                ...x,
-                endsAt: rollbackEnd.toISOString(),
-                durationMinutes: s.originalDuration,
-              }
-            : x,
+      setEventsRef.current((prev) =>
+        prev.map((ev) =>
+          ev.id === s.eventId
+            ? { ...ev, endsAt: end.toISOString(), durationMinutes: dur }
+            : ev,
         ),
       )
-      return
     }
+  }, [])
 
-    const originalForRollback: CalendarEvent = {
-      ...ev,
-      endsAt: new Date(start.getTime() + s.originalDuration * 60_000).toISOString(),
-      durationMinutes: s.originalDuration,
+  useEffect(() => {
+    onResizeEndImplRef.current = () => {
+      const s = resizingRef.current
+      resizingRef.current = null
+
+      window.removeEventListener('mousemove', onResizeMove)
+      window.removeEventListener('mouseup', onResizeEnd)
+
+      if (!s) return
+
+      suppressClickBriefly()
+
+      const ev = deps.eventsRef.current.find((x) => x.id === s.eventId)
+      if (!ev) return
+
+      const start = new Date(ev.startsAt)
+      const end = new Date(ev.endsAt)
+      const raw = Math.round((end.getTime() - start.getTime()) / 60_000)
+      const dur = roundDurationMinutes(raw, s.stepMinutes)
+
+      if (dur === s.originalDuration) {
+        const rollbackEnd = new Date(
+          start.getTime() + s.originalDuration * 60_000,
+        )
+
+        setEventsRef.current((prev) =>
+          prev.map((x) =>
+            x.id === s.eventId
+              ? {
+                  ...x,
+                  endsAt: rollbackEnd.toISOString(),
+                  durationMinutes: s.originalDuration,
+                }
+              : x,
+          ),
+        )
+        return
+      }
+
+      const originalForRollback: CalendarEvent = {
+        ...ev,
+        endsAt: new Date(
+          start.getTime() + s.originalDuration * 60_000,
+        ).toISOString(),
+        durationMinutes: s.originalDuration,
+      }
+
+      openConfirmRef.current({
+        kind: 'resize',
+        entityType: s.entityType,
+        eventId: s.eventId,
+        apiId: s.apiId,
+        nextTotalDurationMinutes: dur,
+        original: originalForRollback,
+      })
     }
-
-    openConfirmRef.current({
-      kind: 'resize',
-      entityType: s.entityType,
-      eventId: s.eventId,
-      apiId: s.apiId,
-      nextTotalDurationMinutes: dur,
-      original: originalForRollback,
-    })
-  }, [onResizeMove])
+  }, [deps.eventsRef, onResizeMove, onResizeEnd])
 
   useEffect(() => {
     return () => {
@@ -172,7 +210,7 @@ export function useDragDrop(deps: DragDropDeps) {
     const pxFromTop = e.clientY - rect.top
     const minutesFromTop = pxFromTop / PX_PER_MINUTE
     const dur = eventDurationMinutes(ev)
-    const stepMinutes = deps.resolveEventSchedulingContext(ev).stepMinutes
+    const stepMinutes = resolveEventSchedulingContextRef.current(ev).stepMinutes
 
     dragGrabOffsetMinutesRef.current = clamp(
       minutesFromTop,
@@ -189,7 +227,11 @@ export function useDragDrop(deps: DragDropDeps) {
     e.dataTransfer.effectAllowed = 'move'
   }
 
-  async function onDropOnDayColumn(day: Date, clientY: number, columnTop: number) {
+  async function onDropOnDayColumn(
+    day: Date,
+    clientY: number,
+    columnTop: number,
+  ) {
     const eventId = dragEventIdRef.current
     const apiId = dragApiIdRef.current
     const entityType = dragEntityTypeRef.current
@@ -205,20 +247,24 @@ export function useDragDrop(deps: DragDropDeps) {
 
     const y = clientY - columnTop
     const rawMinutes = y / PX_PER_MINUTE
-    const context = deps.resolveEventSchedulingContext(original)
+    const context = resolveEventSchedulingContextRef.current(original)
     const topMinutes = snapMinutes(
       rawMinutes - dragGrabOffsetMinutesRef.current,
       context.stepMinutes,
     )
 
-    const nextStart = utcFromDayAndMinutesInTimeZone(day, topMinutes, context.timeZone)
+    const nextStart = utcFromDayAndMinutesInTimeZone(
+      day,
+      topMinutes,
+      context.timeZone,
+    )
 
     if (nextStart.toISOString() === original.startsAt) return
 
     const dur = eventDurationMinutes(original)
     const nextEnd = new Date(nextStart.getTime() + dur * 60_000)
 
-    deps.setEvents((prev) =>
+    setEventsRef.current((prev) =>
       prev.map((event) =>
         event.id === eventId
           ? {
@@ -253,11 +299,11 @@ export function useDragDrop(deps: DragDropDeps) {
     suppressClickBriefly()
 
     const ev = deps.eventsRef.current.find((item) => item.id === args.eventId)
-    const context = ev ? deps.resolveEventSchedulingContext(ev) : null
+    const context = ev ? resolveEventSchedulingContextRef.current(ev) : null
 
     resizingRef.current = {
       ...args,
-      stepMinutes: context?.stepMinutes ?? deps.activeStepMinutes,
+      stepMinutes: context?.stepMinutes ?? activeStepMinutesRef.current,
       timeZone: context?.timeZone ?? 'UTC',
     }
 

@@ -3,11 +3,9 @@
 
 import { useState } from 'react'
 import type { CalendarEvent } from '../_types'
-import { isBlockedEvent, extractBlockId, snapMinutes } from '../_utils/calendarMath'
+import { extractBlockId, snapMinutes } from '../_utils/calendarMath'
 import { apiMessage } from '../_utils/parsers'
 import {
-  DEFAULT_TIME_ZONE,
-  sanitizeTimeZone,
   startOfDayUtcInTimeZone,
   utcFromDayAndMinutesInTimeZone,
   getZonedParts,
@@ -28,12 +26,18 @@ type BlockActionsDeps = {
 
 export function useBlockActions(deps: BlockActionsDeps) {
   const [blockCreateOpen, setBlockCreateOpen] = useState(false)
-  const [blockCreateInitialStart, setBlockCreateInitialStart] = useState<Date>(new Date())
+  const [blockCreateInitialStart, setBlockCreateInitialStart] = useState<Date>(
+    new Date(),
+  )
 
   const [editBlockOpen, setEditBlockOpen] = useState(false)
   const [editBlockId, setEditBlockId] = useState<string | null>(null)
 
-  async function createBlock(startsAtIso: string, endsAtIso: string, note?: string) {
+  async function createBlock(
+    startsAtIso: string,
+    endsAtIso: string,
+    note?: string,
+  ) {
     if (!deps.activeLocationId) throw new Error('Select a location first.')
 
     const res = await fetch('/api/pro/calendar/blocked', {
@@ -83,7 +87,11 @@ export function useBlockActions(deps: BlockActionsDeps) {
       const startUtc = startOfDayUtcInTimeZone(day, tz)
       const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
 
-      await createBlock(startUtc.toISOString(), endUtc.toISOString(), 'Full day off')
+      await createBlock(
+        startUtc.toISOString(),
+        endUtc.toISOString(),
+        'Full day off',
+      )
       await deps.reloadCalendar()
       deps.forceProFooterRefresh()
     } catch (e: unknown) {
@@ -106,7 +114,8 @@ export function useBlockActions(deps: BlockActionsDeps) {
     const nowUtc = new Date()
     const p = getZonedParts(nowUtc, tz)
     const minutesNow = p.hour * 60 + p.minute
-    const roundedUp = Math.ceil(minutesNow / deps.activeStepMinutes) * deps.activeStepMinutes
+    const roundedUp =
+      Math.ceil(minutesNow / deps.activeStepMinutes) * deps.activeStepMinutes
     const rounded = snapMinutes(roundedUp, deps.activeStepMinutes)
     const startUtc = utcFromDayAndMinutesInTimeZone(nowUtc, rounded, tz)
 
@@ -121,7 +130,6 @@ export function useBlockActions(deps: BlockActionsDeps) {
     setEditBlockId(bid)
     setEditBlockOpen(true)
 
-    // Return the locationId so the caller can update activeLocationId
     return ev.locationId ?? null
   }
 

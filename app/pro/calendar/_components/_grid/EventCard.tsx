@@ -29,7 +29,7 @@ type Props = {
   day: Date
   startMinutes: number
   originalDuration: number
-  columnTop: number
+  getColumnTop: () => number
 
   suppressClickRef: React.MutableRefObject<boolean>
   onClickEvent: (id: string) => void
@@ -71,7 +71,7 @@ export function EventCard(props: Props) {
     day,
     startMinutes,
     originalDuration,
-    columnTop,
+    getColumnTop,
     suppressClickRef,
     onClickEvent,
     onDragStart,
@@ -102,15 +102,22 @@ export function EventCard(props: Props) {
         card.ring || '',
       ].join(' ')}
       style={{ top: topPx, height: heightPx }}
-      title={isBlocked ? 'Drag to move, drag bottom to resize. Click to edit.' : 'Drag to move, drag bottom to resize.'}
+      title={
+        isBlocked
+          ? 'Drag to move, drag bottom to resize. Click to edit.'
+          : 'Drag to move, drag bottom to resize.'
+      }
     >
-      {/* Accent strip */}
       <div className={['absolute inset-y-0 left-0 w-1.5', accent].join(' ')} />
 
-      {/* Contrast layer */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/35 via-black/18 to-transparent" />
 
-      <div className={['relative h-full pl-3 pr-2', micro ? 'py-1.5' : compact ? 'py-2' : 'py-2.5'].join(' ')}>
+      <div
+        className={[
+          'relative h-full pl-3 pr-2',
+          micro ? 'py-1.5' : compact ? 'py-2' : 'py-2.5',
+        ].join(' ')}
+      >
         <div className="flex items-start justify-between gap-2">
           <div
             className={[
@@ -150,12 +157,17 @@ export function EventCard(props: Props) {
             {secondaryText(ev)}
           </div>
         ) : (
-          <div className="mt-0.5 truncate text-[11px] font-medium text-textPrimary/85">{secondaryText(ev)}</div>
+          <div className="mt-0.5 truncate text-[11px] font-medium text-textPrimary/85">
+            {secondaryText(ev)}
+          </div>
         )}
 
-        {micro && <div className="mt-0.5 truncate text-[10px] font-semibold text-white/80">{timeLabel}</div>}
+        {micro && (
+          <div className="mt-0.5 truncate text-[10px] font-semibold text-white/80">
+            {timeLabel}
+          </div>
+        )}
 
-        {/* Resize handle */}
         <div
           onMouseDown={(e) => {
             e.stopPropagation()
@@ -169,7 +181,7 @@ export function EventCard(props: Props) {
               day,
               startMinutes,
               originalDuration,
-              columnTop,
+              columnTop: getColumnTop(),
             })
           }}
           className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize bg-white/5"
