@@ -231,67 +231,65 @@ describe('useAvailability', () => {
   })
 
   it('returns stale cached data and refreshes in the background after TTL', async () => {
-  const realNow = Date.now
-  let nowMs = new Date('2026-03-10T12:00:00.000Z').getTime()
-  vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
+    const nowSpy = vi.spyOn(Date, 'now')
+    let nowMs = new Date('2026-03-10T12:00:00.000Z').getTime()
+    nowSpy.mockImplementation(() => nowMs)
 
-  const staleSummary = makeSummary({
-    serviceName: 'Haircut v1',
-  })
+    const staleSummary = makeSummary({
+      serviceName: 'Haircut v1',
+    })
 
-  const freshSummary = makeSummary({
-    serviceName: 'Haircut v2',
-  })
+    const freshSummary = makeSummary({
+      serviceName: 'Haircut v2',
+    })
 
-  mocks.fetch.mockResolvedValueOnce(makeResponse(staleSummary))
+    mocks.fetch.mockResolvedValueOnce(makeResponse(staleSummary))
 
-  const { useAvailability } = await import('./useAvailability')
+    const { useAvailability } = await import('./useAvailability')
 
-  const first = renderHook(() =>
-    useAvailability(true, makeContext(), 'SALON', null),
-  )
+    const first = renderHook(() =>
+      useAvailability(true, makeContext(), 'SALON', null),
+    )
 
-  await waitFor(() => {
-    expect(first.result.current.loading).toBe(false)
-  })
+    await waitFor(() => {
+      expect(first.result.current.loading).toBe(false)
+    })
 
-  expect(first.result.current.refreshing).toBe(false)
-  expect(first.result.current.data).toEqual(staleSummary)
-  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(first.result.current.refreshing).toBe(false)
+    expect(first.result.current.data).toEqual(staleSummary)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
 
-  first.unmount()
+    first.unmount()
 
-  nowMs += 45_001
+    nowMs += 45_001
 
-  const refreshGate = deferred<Response>()
-  mocks.fetch.mockReturnValueOnce(refreshGate.promise)
+    const refreshGate = deferred<Response>()
+    mocks.fetch.mockReturnValueOnce(refreshGate.promise)
 
-  const second = renderHook(() =>
-    useAvailability(true, makeContext(), 'SALON', null),
-  )
+    const second = renderHook(() =>
+      useAvailability(true, makeContext(), 'SALON', null),
+    )
 
-  await waitFor(() => {
+    await waitFor(() => {
+      expect(second.result.current.data).toEqual(staleSummary)
+      expect(second.result.current.loading).toBe(false)
+      expect(second.result.current.refreshing).toBe(true)
+    })
+
     expect(mocks.fetch).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      refreshGate.resolve(makeResponse(freshSummary))
+      await flushMicrotasks(5)
+    })
+
+    await waitFor(() => {
+      expect(second.result.current.refreshing).toBe(false)
+    })
+
+    expect(second.result.current.loading).toBe(false)
+    expect(second.result.current.data).toEqual(freshSummary)
   })
-
-  expect(second.result.current.data).toEqual(staleSummary)
-  expect(second.result.current.loading).toBe(false)
-  expect(second.result.current.refreshing).toBe(true)
-
-  await act(async () => {
-    refreshGate.resolve(makeResponse(freshSummary))
-    await flushMicrotasks(5)
-  })
-
-  await waitFor(() => {
-    expect(second.result.current.refreshing).toBe(false)
-  })
-
-  expect(second.result.current.loading).toBe(false)
-  expect(second.result.current.data).toEqual(freshSummary)
-
-  Date.now = realNow
-})
 
   it('dedupes concurrent in-flight requests for the same key', async () => {
     const summary = makeSummary()

@@ -11,12 +11,12 @@ import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { getRedis } from '@/lib/redis'
 import { createHash } from 'crypto'
+import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import {
-  sanitizeTimeZone,
-  getZonedParts,
-  zonedTimeToUtc,
-  isValidIanaTimeZone,
-} from '@/lib/timeZone'
+  dateTimeLocalToUtcDate,
+  getUtcBoundsForLocalDate,
+  utcDateToLocalParts,
+} from '@/lib/booking/dateTime'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import {
   addMinutes,
@@ -90,6 +90,7 @@ type OtherProRow = {
 
 type AvailabilityPlacementErrorCode =
   | SchedulingReadinessError
+  | 'LOCATION_NOT_FOUND'
   | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
   | 'SALON_LOCATION_ADDRESS_REQUIRED'
   | 'NO_SCHEDULING_READY_LOCATION'
@@ -101,6 +102,12 @@ type AvailabilityPlacementResult =
       locationId: string
       locationType: ServiceLocationType
       timeZone: string
+      timeZoneSource:
+        | 'BOOKING_SNAPSHOT'
+        | 'HOLD_SNAPSHOT'
+        | 'LOCATION'
+        | 'PROFESSIONAL'
+        | 'FALLBACK'
       workingHours: unknown
       stepMinutes: number
       leadTimeMinutes: number
@@ -122,6 +129,12 @@ type CachedPlacement = {
   locationId: string
   locationType: ServiceLocationType
   timeZone: string
+  timeZoneSource:
+    | 'BOOKING_SNAPSHOT'
+    | 'HOLD_SNAPSHOT'
+    | 'LOCATION'
+    | 'PROFESSIONAL'
+    | 'FALLBACK'
   workingHours: unknown
   stepMinutes: number
   leadTimeMinutes: number
@@ -217,30 +230,54 @@ function computeDayBoundsUtc(
   timeZoneRaw: string,
 ) {
   const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC')
+  const ymd = ymdToString(dateYMD)
+  const { startUtc, endUtc } = getUtcBoundsForLocalDate(ymd, timeZone)
 
-  const dayStartUtc = zonedTimeToUtc({
-    year: dateYMD.year,
-    month: dateYMD.month,
-    day: dateYMD.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
+  return {
     timeZone,
-  })
+    dayStartUtc: startUtc,
+    dayEndExclusiveUtc: endUtc,
+  }
+}
+function buildLocalDateTimeString(args: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+}) {
+  const mm = String(args.month).padStart(2, '0')
+  const dd = String(args.day).padStart(2, '0')
+  const hh = String(args.hour).padStart(2, '0')
+  const min = String(args.minute).padStart(2, '0')
+  return `${args.year}-${mm}-${dd}T${hh}:${min}:00`
+}
 
-  const next = addDaysToYMD(dateYMD.year, dateYMD.month, dateYMD.day, 1)
+function localSlotToUtcOrNull(args: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  timeZone: string
+}): Date | null {
+  const localValue = buildLocalDateTimeString(args)
 
-  const dayEndExclusiveUtc = zonedTimeToUtc({
-    year: next.year,
-    month: next.month,
-    day: next.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone,
-  })
+  try {
+    const utc = normalizeToMinute(dateTimeLocalToUtcDate(localValue, args.timeZone))
 
-  return { timeZone, dayStartUtc, dayEndExclusiveUtc }
+    const roundTrip = utcDateToLocalParts(utc, args.timeZone)
+    const matches =
+      roundTrip.year === args.year &&
+      roundTrip.month === args.month &&
+      roundTrip.day === args.day &&
+      roundTrip.hour === args.hour &&
+      roundTrip.minute === args.minute
+
+    return matches ? utc : null
+  } catch {
+    return null
+  }
 }
 
 function stableHash(input: unknown): string {
@@ -298,6 +335,7 @@ function parseCachedPlacement(raw: unknown): CachedPlacement | null {
   if (typeof raw.locationId !== 'string') return null
   if (typeof raw.locationType !== 'string') return null
   if (typeof raw.timeZone !== 'string') return null
+  if (typeof raw.timeZoneSource !== 'string') return null
   if (typeof raw.stepMinutes !== 'number') return null
   if (typeof raw.durationMinutes !== 'number') return null
   if (typeof raw.offeringId !== 'string') return null
@@ -412,22 +450,23 @@ async function validateAvailabilityPlacement(args: {
   }
 
   return {
-    ok: true,
-    location: context.location,
-    locationId: context.locationId,
-    locationType: args.locationType,
-    timeZone: context.timeZone,
-    workingHours: context.workingHours,
-    stepMinutes: context.stepMinutes,
-    leadTimeMinutes: context.advanceNoticeMinutes,
-    locationBufferMinutes: context.bufferMinutes,
-    maxAdvanceDays: context.maxDaysAhead,
-    durationMinutes: validated.durationMinutes,
-    priceStartingAt: validated.priceStartingAt,
-    formattedAddress,
-    lat: context.lat,
-    lng: context.lng,
-  }
+  ok: true,
+  location: context.location,
+  locationId: context.locationId,
+  locationType: args.locationType,
+  timeZone: context.timeZone,
+  timeZoneSource: 'LOCATION',
+  workingHours: context.workingHours,
+  stepMinutes: context.stepMinutes,
+  leadTimeMinutes: context.advanceNoticeMinutes,
+  locationBufferMinutes: context.bufferMinutes,
+  maxAdvanceDays: context.maxDaysAhead,
+  durationMinutes: validated.durationMinutes,
+  priceStartingAt: validated.priceStartingAt,
+  formattedAddress,
+  lat: context.lat,
+  lng: context.lng,
+}
 }
 
 async function resolveAvailabilityPlacement(args: {
@@ -696,22 +735,20 @@ async function computeDaySlotsFast(args: {
     debug,
   } = args
 
-  const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(
-    dateYMD,
-    tzIn,
-  )
-
+  const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(dateYMD, tzIn)
   const nowUtc = new Date()
 
-  const dayAnchorUtc = zonedTimeToUtc({
-    year: dateYMD.year,
-    month: dateYMD.month,
-    day: dateYMD.day,
-    hour: 12,
-    minute: 0,
-    second: 0,
-    timeZone,
-  })
+  // Midday local anchor for working-hours day lookup.
+  // This stays internal. Caller still passes authoritative timezone explicitly.
+  const dayAnchorUtc =
+    localSlotToUtcOrNull({
+      year: dateYMD.year,
+      month: dateYMD.month,
+      day: dateYMD.day,
+      hour: 12,
+      minute: 0,
+      timeZone,
+    }) ?? new Date(dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
 
   const window = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
 
@@ -746,16 +783,8 @@ async function computeDaySlotsFast(args: {
   }
 
   const step = normalizeStepMinutes(stepMinutes, 30)
-  const dur = clampInt(
-    Number(durationMinutes || DEFAULT_DURATION_MINUTES),
-    15,
-    MAX_SLOT_DURATION_MINUTES,
-  )
-  const buf = clampInt(
-    Number(locationBufferMinutes ?? 0) || 0,
-    0,
-    MAX_BUFFER_MINUTES,
-  )
+  const dur = clampInt(Number(durationMinutes || DEFAULT_DURATION_MINUTES), 15, MAX_SLOT_DURATION_MINUTES)
+  const buf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
 
   const cutoffUtc = addMinutes(
     nowUtc,
@@ -763,6 +792,7 @@ async function computeDaySlotsFast(args: {
   )
 
   const slots: string[] = []
+  const skippedDstWallTimes: string[] = []
 
   for (
     let minute = window.startMinutes;
@@ -772,17 +802,21 @@ async function computeDaySlotsFast(args: {
     const hh = Math.floor(minute / 60)
     const mm = minute % 60
 
-    const slotStartUtc = normalizeToMinute(
-      zonedTimeToUtc({
-        year: dateYMD.year,
-        month: dateYMD.month,
-        day: dateYMD.day,
-        hour: hh,
-        minute: mm,
-        second: 0,
-        timeZone,
-      }),
-    )
+    const slotStartUtc = localSlotToUtcOrNull({
+      year: dateYMD.year,
+      month: dateYMD.month,
+      day: dateYMD.day,
+      hour: hh,
+      minute: mm,
+      timeZone,
+    })
+
+    if (!slotStartUtc) {
+      if (debug) {
+        skippedDstWallTimes.push(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`)
+      }
+      continue
+    }
 
     if (slotStartUtc < dayStartUtc) continue
     if (slotStartUtc >= dayEndExclusiveUtc) continue
@@ -801,7 +835,13 @@ async function computeDaySlotsFast(args: {
     slots,
     dayStartUtc,
     dayEndExclusiveUtc,
-    debug: debug ? { timeZone, dayKey: window.key } : undefined,
+    debug: debug
+      ? {
+          timeZone,
+          dayKey: window.key,
+          skippedDstWallTimes,
+        }
+      : undefined,
   }
 }
 
@@ -1300,6 +1340,12 @@ export async function GET(req: Request) {
     let locationId: string
     let effectiveLocationType: ServiceLocationType
     let timeZone: string
+    let timeZoneSource:
+      | 'BOOKING_SNAPSHOT'
+      | 'HOLD_SNAPSHOT'
+      | 'LOCATION'
+      | 'PROFESSIONAL'
+      | 'FALLBACK'
     let workingHours: unknown
     let defaultStepMinutes: number
     let defaultLead: number
@@ -1329,6 +1375,7 @@ export async function GET(req: Request) {
       locationId = cachedPlacement.locationId
       effectiveLocationType = cachedPlacement.locationType
       timeZone = cachedPlacement.timeZone
+      timeZoneSource = cachedPlacement.timeZoneSource
       workingHours = cachedPlacement.workingHours
       defaultStepMinutes = cachedPlacement.stepMinutes
       defaultLead = cachedPlacement.leadTimeMinutes
@@ -1412,6 +1459,7 @@ export async function GET(req: Request) {
       locationId = placement.locationId
       effectiveLocationType = placement.locationType
       timeZone = placement.timeZone
+      timeZoneSource = placement.timeZoneSource
       workingHours = placement.workingHours
       defaultStepMinutes = placement.stepMinutes
       defaultLead = placement.leadTimeMinutes
@@ -1445,6 +1493,7 @@ export async function GET(req: Request) {
             locationId,
             locationType: effectiveLocationType,
             timeZone,
+            timeZoneSource,
             workingHours,
             stepMinutes: defaultStepMinutes,
             leadTimeMinutes: defaultLead,
@@ -1560,7 +1609,7 @@ export async function GET(req: Request) {
     }
 
     const nowUtc = new Date()
-    const nowParts = getZonedParts(nowUtc, timeZone)
+    const nowParts = utcDateToLocalParts(nowUtc, timeZone)
     const todayYMD = {
       year: nowParts.year,
       month: nowParts.month,
@@ -1735,6 +1784,7 @@ export async function GET(req: Request) {
         locationType: effectiveLocationType,
         locationId,
         timeZone,
+        timeZoneSource,
 
         stepMinutes,
         leadTimeMinutes,
@@ -1756,6 +1806,7 @@ export async function GET(req: Request) {
           offeringId: offeringDbId,
           isCreator: true as const,
           timeZone,
+          timeZoneSource,
           locationId,
         },
 
@@ -1881,6 +1932,7 @@ export async function GET(req: Request) {
       return jsonFail(400, result.error, {
         locationId,
         timeZone,
+        timeZoneSource,
         stepMinutes,
         leadTimeMinutes,
         locationBufferMinutes,
@@ -1899,6 +1951,7 @@ export async function GET(req: Request) {
 
       locationId,
       timeZone,
+      timeZoneSource,
       stepMinutes,
       leadTimeMinutes,
       locationBufferMinutes,

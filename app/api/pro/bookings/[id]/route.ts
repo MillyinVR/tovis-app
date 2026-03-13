@@ -22,7 +22,10 @@ import {
   sanitizeTimeZone,
   minutesSinceMidnightInTimeZone,
 } from '@/lib/timeZone'
-import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import {
+  resolveApptTimeZone,
+  type TimeZoneTruthSource,
+} from '@/lib/booking/timeZoneTruth'
 import { moneyToFixed2String } from '@/lib/money'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
@@ -59,6 +62,8 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
+
+type AppointmentTimeZoneSource = TimeZoneTruthSource
 
 function throwCode(code: string): never {
   throw new Error(code)
@@ -130,6 +135,7 @@ function buildBookingOutput(args: {
   status: BookingStatus
   subtotalSnapshot: Prisma.Decimal
   timeZone: string
+  timeZoneSource: AppointmentTimeZoneSource
   locationId?: string | null
   locationType?: ServiceLocationType
   locationAddressSnapshot?: string | null
@@ -144,6 +150,7 @@ function buildBookingOutput(args: {
     status,
     subtotalSnapshot,
     timeZone,
+    timeZoneSource,
     locationId,
     locationType,
     locationAddressSnapshot,
@@ -164,6 +171,7 @@ function buildBookingOutput(args: {
     status,
     subtotalSnapshot: moneyToFixed2String(subtotalSnapshot),
     timeZone,
+    timeZoneSource,
     locationId: locationId ?? null,
     locationType: locationType ?? null,
     locationAddressSnapshot: locationAddressSnapshot ?? null,
@@ -180,6 +188,8 @@ function logAndThrowTimeRangeConflict(args: {
   requestedStart: Date
   requestedEnd: Date
   bookingId: string
+  timeZone: string
+  timeZoneSource: AppointmentTimeZoneSource
 }): never {
   logBookingConflict({
     action: 'BOOKING_UPDATE',
@@ -192,6 +202,8 @@ function logAndThrowTimeRangeConflict(args: {
     bookingId: args.bookingId,
     meta: {
       route: 'app/api/pro/bookings/[id]/route.ts',
+      timeZone: args.timeZone,
+      timeZoneSource: args.timeZoneSource,
     },
   })
 
@@ -312,6 +324,9 @@ export async function GET(_req: Request, ctx: Ctx) {
         ? sanitizeTimeZone(tzResult.timeZone, 'UTC')
         : 'UTC'
 
+    const timeZoneSource: AppointmentTimeZoneSource =
+      tzResult.ok ? tzResult.source : 'FALLBACK'
+
     return jsonOk(
       {
         booking: {
@@ -345,6 +360,7 @@ export async function GET(_req: Request, ctx: Ctx) {
             phone: booking.client?.phone ?? null,
           },
           timeZone,
+          timeZoneSource,
           serviceItems: items.map((item) => ({
             id: item.id,
             serviceId: item.serviceId,
@@ -500,6 +516,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
           ? sanitizeTimeZone(outputTzResult.timeZone, 'UTC')
           : 'UTC'
 
+      const outputTimeZoneSource: AppointmentTimeZoneSource =
+        outputTzResult.ok ? outputTzResult.source : 'FALLBACK'
+
       const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
         existing.locationAddressSnapshot,
       )
@@ -546,6 +565,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
           status: updated.status,
           subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
           timeZone: outputTimeZone,
+          timeZoneSource: outputTimeZoneSource,
           locationId: existing.locationId ?? null,
           locationType: existing.locationType,
           locationAddressSnapshot: existingLocationAddressSnapshot,
@@ -602,10 +622,22 @@ export async function PATCH(req: Request, ctx: Ctx) {
       })
 
       if (!apptTzResult.ok || !isValidIanaTimeZone(apptTzResult.timeZone)) {
+        console.error('PATCH /api/pro/bookings/[id] invalid appointment timezone', {
+          route: 'app/api/pro/bookings/[id]/route.ts',
+          bookingId: existing.id,
+          professionalId: existing.professionalId,
+          bookingLocationTimeZone: existing.locationTimeZone,
+          locationId: location.id,
+          locationTimeZone: location.timeZone,
+          professionalTimeZone: existing.professional?.timeZone ?? null,
+          resolveResult: apptTzResult,
+        })
         throwCode('TIMEZONE_REQUIRED')
       }
 
       const appointmentTimeZone = sanitizeTimeZone(apptTzResult.timeZone, 'UTC')
+      const appointmentTimeZoneSource: AppointmentTimeZoneSource =
+        apptTzResult.source
       const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
 
       if (nextBuffer != null && (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)) {
@@ -645,6 +677,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
           meta: {
             route: 'app/api/pro/bookings/[id]/route.ts',
             stepMinutes,
+            timeZone: appointmentTimeZone,
+            timeZoneSource: appointmentTimeZoneSource,
           },
         })
         throw new Error(`STEP:${stepMinutes}`)
@@ -787,6 +821,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
             meta: {
               route: 'app/api/pro/bookings/[id]/route.ts',
               workingHoursError: workingHoursCheck.error,
+              timeZone: appointmentTimeZone,
+              timeZoneSource: appointmentTimeZoneSource,
             },
           })
           throw new Error(`WH:${workingHoursCheck.error}`)
@@ -813,6 +849,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
           requestedStart: finalStart,
           requestedEnd: finalEnd,
           bookingId: existing.id,
+          timeZone: appointmentTimeZone,
+          timeZoneSource: appointmentTimeZoneSource,
         })
       }
 
@@ -911,6 +949,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         status: updated.status,
         subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
         timeZone: appointmentTimeZone,
+        timeZoneSource: appointmentTimeZoneSource,
         locationId: existing.locationId ?? null,
         locationType: existing.locationType,
         locationAddressSnapshot: existingLocationAddressSnapshot,

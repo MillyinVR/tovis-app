@@ -27,16 +27,14 @@ import {
   normalizeDraftServiceItems,
   sameServiceItems,
 } from '../_utils/serviceItems'
+import { anchorDayLocalNoon } from '../_utils/calendarRange'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import {
-  anchorDayLocalNoon,
-  toDateInputValueInTimeZone,
-  toTimeInputValueInTimeZone,
-} from '../_utils/calendarRange'
-import {
-  DEFAULT_TIME_ZONE,
-  sanitizeTimeZone,
-  zonedTimeToUtc,
-} from '@/lib/timeZone'
+  utcIsoToDateInputValue,
+  utcIsoToTimeInputValue,
+  dateTimeLocalToUtcIso,
+  combineDateAndTimeInput,
+} from '@/lib/bookingDateTimeClient'
 import { isRecord } from '@/lib/guards'
 import { safeJson, errorMessageFromUnknown } from '@/lib/http'
 
@@ -65,14 +63,14 @@ type BookingModalDeps = {
 
 export function useBookingModal(deps: BookingModalDeps) {
   const {
-  eventsRef,
-  activeStepMinutes,
-  timeZone,
-  resolveLocationStepMinutes,
-  resolveBookingSchedulingContext,
-  reloadCalendar,
-  forceProFooterRefresh,
-} = deps
+    eventsRef,
+    activeStepMinutes,
+    timeZone,
+    resolveLocationStepMinutes,
+    resolveBookingSchedulingContext,
+    reloadCalendar,
+    forceProFooterRefresh,
+  } = deps
 
   const [openBookingId, setOpenBookingId] = useState<string | null>(null)
   const [bookingLoading, setBookingLoading] = useState(false)
@@ -92,6 +90,10 @@ export function useBookingModal(deps: BookingModalDeps) {
   const [allowOutsideHours, setAllowOutsideHours] = useState(false)
 
   const [services, setServices] = useState<ServiceOption[]>([])
+
+  const bookingAppointmentTimeZone = useMemo(() => {
+    return sanitizeTimeZone(booking?.timeZone ?? timeZone, DEFAULT_TIME_ZONE)
+  }, [booking?.timeZone, timeZone])
 
   const openBookingStepMinutes = useMemo(() => {
     return resolveLocationStepMinutes(openBookingLocationId, activeStepMinutes)
@@ -193,7 +195,7 @@ export function useBookingModal(deps: BookingModalDeps) {
     const context = resolveBookingSchedulingContext({
       locationId: openBookingLocationId,
       locationType: openBookingLocationType,
-      fallbackTimeZone: booking.timeZone || timeZone,
+      fallbackTimeZone: bookingAppointmentTimeZone,
     })
 
     const startMinutes = hh * 60 + mi
@@ -253,9 +255,8 @@ export function useBookingModal(deps: BookingModalDeps) {
       setManualDurationMinutes(Number(parsed.totalDurationMinutes || 60))
 
       const bookingTz = sanitizeTimeZone(parsed.timeZone, DEFAULT_TIME_ZONE)
-      const start = new Date(parsed.scheduledFor)
-      setReschedDate(toDateInputValueInTimeZone(start, bookingTz))
-      setReschedTime(toTimeInputValueInTimeZone(start, bookingTz))
+      setReschedDate(utcIsoToDateInputValue(parsed.scheduledFor, bookingTz))
+      setReschedTime(utcIsoToTimeInputValue(parsed.scheduledFor, bookingTz))
       setNotifyClient(true)
 
       const editLocationType: LocationType =
@@ -305,18 +306,12 @@ export function useBookingModal(deps: BookingModalDeps) {
       const context = resolveBookingSchedulingContext({
         locationId: openBookingLocationId,
         locationType: openBookingLocationType,
-        fallbackTimeZone: booking.timeZone || timeZone,
+        fallbackTimeZone: bookingAppointmentTimeZone,
       })
 
-      const nextStart = zonedTimeToUtc({
-        year: yyyy,
-        month: mm,
-        day: dd,
-        hour: hh,
-        minute: mi,
-        second: 0,
-        timeZone: context.timeZone,
-      })
+      const localDateTime = combineDateAndTimeInput(reschedDate, reschedTime)
+      const nextStartIso = dateTimeLocalToUtcIso(localDateTime, context.timeZone)
+      const nextStart = new Date(nextStartIso)
 
       const effectiveDuration =
         hasDraftServiceItemsChanges && serviceItemsDraft.length > 0

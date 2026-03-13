@@ -2,6 +2,7 @@
 //
 // Pure parser / normalizer functions extracted from useCalendarData.
 // Zero React dependency — safe to unit-test in isolation.
+//
 
 import type {
   BookingDetails,
@@ -12,6 +13,7 @@ import type {
   ServiceOption,
   WorkingHoursDay,
   WorkingHoursJson,
+  BookingCalendarStatus,
 } from '../_types'
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
@@ -41,6 +43,14 @@ export type CalendarRouteLocation = {
   timeZone: string | null
 }
 
+// Keep this aligned with the server event payload.
+type AppointmentTimeZoneSource =
+  | 'BOOKING_SNAPSHOT'
+  | 'HOLD_SNAPSHOT'
+  | 'LOCATION'
+  | 'PROFESSIONAL'
+  | 'FALLBACK'
+
 // ── Tiny helpers ────────────────────────────────────────────────────
 
 export function apiMessage(data: unknown, fallback: string) {
@@ -58,6 +68,38 @@ export function upper(v: unknown): string {
 function normalizeKnownBookingLocationType(value: unknown): 'SALON' | 'MOBILE' {
   const raw = upper(value)
   return raw === 'MOBILE' || raw === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
+}
+
+function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
+  const raw = upper(value)
+
+  if (
+    raw === 'PENDING' ||
+    raw === 'ACCEPTED' ||
+    raw === 'COMPLETED' ||
+    raw === 'CANCELLED' ||
+    raw === 'WAITLIST' ||
+    raw === 'UNKNOWN'
+  ) {
+    return raw
+  }
+
+  const fallback = pickString(value)
+  return (fallback ?? 'UNKNOWN') as BookingCalendarStatus
+}
+
+function normalizeAppointmentTimeZoneSource(
+  value: unknown,
+): AppointmentTimeZoneSource {
+  const raw = upper(value)
+
+  if (raw === 'BOOKING_SNAPSHOT') return 'BOOKING_SNAPSHOT'
+  if (raw === 'HOLD_SNAPSHOT') return 'HOLD_SNAPSHOT'
+  if (raw === 'LOCATION') return 'LOCATION'
+  if (raw === 'PROFESSIONAL') return 'PROFESSIONAL'
+  if (raw === 'FALLBACK') return 'FALLBACK'
+
+  return 'FALLBACK'
 }
 
 // ── Location-type normalisers ──────────────────────────────────────
@@ -213,10 +255,9 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
 
   if (!kind || !id || !startsAt || !endsAt) return null
 
-  const title = pickString(v.title) ?? (kind === 'BLOCK' ? 'Blocked' : 'Booking')
+  const title =
+    pickString(v.title) ?? (kind === 'BLOCK' ? 'Blocked' : 'Booking')
   const clientName = pickString(v.clientName) ?? ''
-  const rawStatus = pickString(v.status)
-  const status = rawStatus ?? (kind === 'BLOCK' ? 'BLOCKED' : '')
 
   const dur = pickNumber(v.durationMinutes)
   const durationMinutes = dur != null && dur > 0 ? dur : undefined
@@ -246,6 +287,11 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
         }, [])
       : []
 
+    const timeZone = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
+    const timeZoneSource = normalizeAppointmentTimeZoneSource(v.timeZoneSource)
+    const localDateKey =
+      pickString(v.localDateKey) ?? pickString(v.date) ?? startsAt.slice(0, 10)
+
     return {
       kind: 'BOOKING',
       id,
@@ -253,9 +299,12 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
       endsAt,
       title,
       clientName,
-      status,
+      status: normalizeBookingCalendarStatus(v.status),
       locationId,
       locationType,
+      timeZone,
+      timeZoneSource,
+      localDateKey,
       details: {
         serviceName: detailsRecord
           ? pickString(detailsRecord.serviceName) ?? title
@@ -363,11 +412,15 @@ export function parseServiceOptions(v: unknown): ServiceOption[] {
     if (!id || !name) continue
 
     const durationMinutes =
-      row.durationMinutes === null ? null : (pickNumber(row.durationMinutes) ?? null)
+      row.durationMinutes === null
+        ? null
+        : (pickNumber(row.durationMinutes) ?? null)
 
     const offeringId = pickString(row.offeringId) ?? undefined
     const priceStartingAt =
-      row.priceStartingAt === null ? null : (pickString(row.priceStartingAt) ?? null)
+      row.priceStartingAt === null
+        ? null
+        : (pickString(row.priceStartingAt) ?? null)
 
     out.push({
       id,

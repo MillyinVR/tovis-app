@@ -60,7 +60,7 @@ export function BookingModal(props: {
   error: string | null
   booking: BookingDetails | null
   services: ServiceOption[]
-  timeZone: string
+  appointmentTimeZone: string
 
   bookingServiceLabel?: string
   serviceItemsDraft?: BookingDetails['serviceItems']
@@ -91,7 +91,7 @@ export function BookingModal(props: {
     error,
     booking,
     services,
-    timeZone,
+    appointmentTimeZone,
 
     bookingServiceLabel,
     serviceItemsDraft,
@@ -118,10 +118,13 @@ export function BookingModal(props: {
   } = props
 
   const tz = useMemo(
-    () => sanitizeTimeZone(booking?.timeZone ?? timeZone, DEFAULT_TIME_ZONE),
-    [booking?.timeZone, timeZone],
-  )
-
+  () =>
+    sanitizeTimeZone(
+      booking?.timeZone ?? appointmentTimeZone,
+      DEFAULT_TIME_ZONE,
+    ),
+  [booking?.timeZone, appointmentTimeZone],
+)
   const isPending = String(booking?.status || '').toUpperCase() === 'PENDING'
   const noServicesSelected = selectedDraftServiceIds.length === 0
 

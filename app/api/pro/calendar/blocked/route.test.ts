@@ -1,4 +1,3 @@
-// app/api/pro/calendar/blocked/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -164,6 +163,9 @@ describe('POST /api/pro/calendar/blocked', () => {
       requestedEnd: new Date('2026-03-11T18:00:00.000Z'),
       conflictType: 'BLOCKED',
       blockId: 'block_existing',
+      meta: {
+        route: 'app/api/pro/calendar/blocked/route.ts',
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -195,6 +197,9 @@ describe('POST /api/pro/calendar/blocked', () => {
       requestedStart: new Date('2026-03-11T17:00:00.000Z'),
       requestedEnd: new Date('2026-03-11T18:00:00.000Z'),
       conflictType: 'BOOKING',
+      meta: {
+        route: 'app/api/pro/calendar/blocked/route.ts',
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -226,6 +231,9 @@ describe('POST /api/pro/calendar/blocked', () => {
       requestedStart: new Date('2026-03-11T17:00:00.000Z'),
       requestedEnd: new Date('2026-03-11T18:00:00.000Z'),
       conflictType: 'HOLD',
+      meta: {
+        route: 'app/api/pro/calendar/blocked/route.ts',
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(

@@ -1,3 +1,4 @@
+// app/api/pro/bookings/[id]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
@@ -7,6 +8,7 @@ const mocks = vi.hoisted(() => {
     professionalLocationFindMany: vi.fn(),
     bookingFindMany: vi.fn(),
     calendarBlockFindMany: vi.fn(),
+    resolveApptTimeZone: vi.fn(),
   }
 })
 
@@ -41,6 +43,10 @@ vi.mock('@/app/api/_utils', () => ({
     }),
 }))
 
+vi.mock('@/lib/booking/timeZoneTruth', () => ({
+  resolveApptTimeZone: mocks.resolveApptTimeZone,
+}))
+
 import { GET } from './route'
 
 function makeBooking(args: {
@@ -50,6 +56,8 @@ function makeBooking(args: {
   locationId: string
   serviceName: string
   clientFirstName: string
+  locationTimeZone?: string | null
+  location?: { id: string; timeZone: string | null } | null
 }) {
   return {
     id: args.id,
@@ -59,6 +67,8 @@ function makeBooking(args: {
     bufferMinutes: 0,
     locationType: args.locationType,
     locationId: args.locationId,
+    locationTimeZone: args.locationTimeZone ?? null,
+    location: args.location ?? null,
     client: {
       firstName: args.clientFirstName,
       lastName: 'Client',
@@ -78,6 +88,11 @@ const salonBooking = makeBooking({
   locationId: 'salon-1',
   serviceName: 'Salon Cut',
   clientFirstName: 'Salon',
+  locationTimeZone: 'America/New_York',
+  location: {
+    id: 'salon-1',
+    timeZone: 'America/Chicago',
+  },
 })
 
 const mobileBooking = makeBooking({
@@ -87,6 +102,25 @@ const mobileBooking = makeBooking({
   locationId: 'mobile-1',
   serviceName: 'Mobile Glam',
   clientFirstName: 'Mobile',
+  locationTimeZone: null,
+  location: {
+    id: 'mobile-1',
+    timeZone: 'America/Chicago',
+  },
+})
+
+const legacyBooking = makeBooking({
+  id: 'booking-legacy',
+  startsAt: '2030-01-15T23:30:00.000Z',
+  locationType: 'SALON',
+  locationId: 'legacy-1',
+  serviceName: 'Legacy Booking',
+  clientFirstName: 'Legacy',
+  locationTimeZone: null,
+  location: {
+    id: 'legacy-1',
+    timeZone: null,
+  },
 })
 
 const allBlocks = [
@@ -124,7 +158,7 @@ describe('GET /api/pro/calendar', () => {
 
     mocks.professionalProfileFindUnique.mockResolvedValue({
       id: 'pro-1',
-      timeZone: 'UTC',
+      timeZone: 'Europe/London',
       autoAcceptBookings: false,
     })
 
@@ -133,13 +167,19 @@ describe('GET /api/pro/calendar', () => {
         id: 'salon-1',
         type: 'SALON',
         isPrimary: true,
-        timeZone: 'UTC',
+        timeZone: 'America/Los_Angeles',
       },
       {
         id: 'mobile-1',
         type: 'MOBILE_BASE',
         isPrimary: false,
-        timeZone: 'UTC',
+        timeZone: 'America/Denver',
+      },
+      {
+        id: 'legacy-1',
+        type: 'SALON',
+        isPrimary: false,
+        timeZone: null,
       },
     ])
 
@@ -153,6 +193,56 @@ describe('GET /api/pro/calendar', () => {
         return allBlocks.filter((block) =>
           allowedLocationIds.includes(block.locationId ?? null),
         )
+      },
+    )
+
+    mocks.resolveApptTimeZone.mockImplementation(
+      async (args: {
+        bookingLocationTimeZone?: string | null
+        location?: { id?: string | null; timeZone?: string | null } | null
+        professionalTimeZone?: string | null
+      }) => {
+        const bookingTz =
+          typeof args.bookingLocationTimeZone === 'string'
+            ? args.bookingLocationTimeZone.trim()
+            : ''
+        if (bookingTz) {
+          return {
+            ok: true,
+            timeZone: bookingTz,
+            source: 'BOOKING_SNAPSHOT',
+          }
+        }
+
+        const locationTz =
+          typeof args.location?.timeZone === 'string'
+            ? args.location.timeZone.trim()
+            : ''
+        if (locationTz) {
+          return {
+            ok: true,
+            timeZone: locationTz,
+            source: 'LOCATION',
+          }
+        }
+
+        const proTz =
+          typeof args.professionalTimeZone === 'string'
+            ? args.professionalTimeZone.trim()
+            : ''
+        if (proTz) {
+          return {
+            ok: true,
+            timeZone: proTz,
+            source: 'PROFESSIONAL',
+          }
+        }
+
+        return {
+          ok: true,
+          timeZone: 'UTC',
+          source: 'FALLBACK',
+        }
       },
     )
   })
@@ -182,6 +272,71 @@ describe('GET /api/pro/calendar', () => {
       locationType: 'MOBILE',
       locationId: 'mobile-1',
     })
+  })
+
+  it('returns viewport timezone separately from per-booking event timezones', async () => {
+    const response = await GET(new Request('https://example.test/api/pro/calendar'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+
+    expect(body.timeZone).toBe('America/Los_Angeles')
+    expect(body.viewportTimeZone).toBe('America/Los_Angeles')
+
+    const bookingEvents = body.events.filter(
+      (event: { kind: string }) => event.kind === 'BOOKING',
+    )
+
+    const salonEvent = bookingEvents.find(
+      (event: { id: string }) => event.id === 'booking-salon',
+    )
+    const mobileEvent = bookingEvents.find(
+      (event: { id: string }) => event.id === 'booking-mobile',
+    )
+
+    expect(salonEvent).toMatchObject({
+      id: 'booking-salon',
+      startsAt: '2030-01-15T10:00:00.000Z',
+      endsAt: '2030-01-15T11:00:00.000Z',
+      timeZone: 'America/New_York',
+      timeZoneSource: 'BOOKING_SNAPSHOT',
+    })
+
+    expect(mobileEvent).toMatchObject({
+      id: 'booking-mobile',
+      startsAt: '2030-01-15T11:00:00.000Z',
+      endsAt: '2030-01-15T12:00:00.000Z',
+      timeZone: 'America/Chicago',
+      timeZoneSource: 'LOCATION',
+    })
+
+    expect(typeof salonEvent.localDateKey).toBe('string')
+    expect(typeof mobileEvent.localDateKey).toBe('string')
+  })
+
+  it('falls back deterministically for legacy rows with null locationTimeZone and returns timeZoneSource', async () => {
+    mocks.bookingFindMany.mockResolvedValue([legacyBooking])
+
+    const response = await GET(new Request('https://example.test/api/pro/calendar'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+
+    const bookingEvents = body.events.filter(
+      (event: { kind: string }) => event.kind === 'BOOKING',
+    )
+
+    expect(bookingEvents).toHaveLength(1)
+
+    expect(bookingEvents[0]).toMatchObject({
+      id: 'booking-legacy',
+      timeZone: 'Europe/London',
+      timeZoneSource: 'PROFESSIONAL',
+      startsAt: '2030-01-15T23:30:00.000Z',
+      endsAt: '2030-01-16T00:30:00.000Z',
+    })
+
+    expect(typeof bookingEvents[0].localDateKey).toBe('string')
   })
 
   it('returns all pro bookings, while blocks stay selected-location/global only', async () => {

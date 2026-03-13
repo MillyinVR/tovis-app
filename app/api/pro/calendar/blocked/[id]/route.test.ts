@@ -1,4 +1,3 @@
-// app/api/pro/calendar/blocked/[id]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -14,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   calendarBlockDelete: vi.fn(),
   professionalLocationFindFirst: vi.fn(),
 
+  assertNoCalendarBlockConflict: vi.fn(),
   hasBookingConflict: vi.fn(),
   hasHoldConflict: vi.fn(),
   logBookingConflict: vi.fn(),
@@ -40,6 +40,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/booking/conflictQueries', () => ({
+  assertNoCalendarBlockConflict: mocks.assertNoCalendarBlockConflict,
   hasBookingConflict: mocks.hasBookingConflict,
   hasHoldConflict: mocks.hasHoldConflict,
 }))
@@ -100,6 +101,7 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       bufferMinutes: 15,
     })
 
+    mocks.assertNoCalendarBlockConflict.mockResolvedValue(undefined)
     mocks.hasBookingConflict.mockResolvedValue(false)
     mocks.hasHoldConflict.mockResolvedValue(false)
 
@@ -238,9 +240,9 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
   })
 
   it('returns 409 and logs when the updated range overlaps another block', async () => {
-    mocks.calendarBlockFindFirst
-      .mockResolvedValueOnce(existingBlock)
-      .mockResolvedValueOnce({ id: 'block_conflict' })
+    mocks.assertNoCalendarBlockConflict.mockRejectedValueOnce(
+      new Error('BLOCK_CONFLICT:block_conflict'),
+    )
 
     const result = await PATCH(
       makePatchRequest({
@@ -260,6 +262,7 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       blockId: 'block_1',
       meta: {
         conflictingBlockId: 'block_conflict',
+        route: 'app/api/pro/calendar/blocked/[id]/route.ts',
       },
     })
 
@@ -275,10 +278,6 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
   })
 
   it('returns 409 and logs when the updated range overlaps a booking', async () => {
-    mocks.calendarBlockFindFirst
-      .mockResolvedValueOnce(existingBlock)
-      .mockResolvedValueOnce(null)
-
     mocks.hasBookingConflict.mockResolvedValueOnce(true)
 
     const result = await PATCH(
@@ -297,6 +296,9 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       requestedEnd: new Date('2026-03-11T20:00:00.000Z'),
       conflictType: 'BOOKING',
       blockId: 'block_1',
+      meta: {
+        route: 'app/api/pro/calendar/blocked/[id]/route.ts',
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -311,10 +313,6 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
   })
 
   it('returns 409 and logs when the updated range overlaps a hold', async () => {
-    mocks.calendarBlockFindFirst
-      .mockResolvedValueOnce(existingBlock)
-      .mockResolvedValueOnce(null)
-
     mocks.hasHoldConflict.mockResolvedValueOnce(true)
 
     const result = await PATCH(
@@ -333,6 +331,9 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       requestedEnd: new Date('2026-03-11T20:00:00.000Z'),
       conflictType: 'HOLD',
       blockId: 'block_1',
+      meta: {
+        route: 'app/api/pro/calendar/blocked/[id]/route.ts',
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -347,10 +348,6 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
   })
 
   it('updates the block and does not log a conflict when the range is valid', async () => {
-    mocks.calendarBlockFindFirst
-      .mockResolvedValueOnce(existingBlock)
-      .mockResolvedValueOnce(null)
-
     const result = await PATCH(
       makePatchRequest({
         startsAt: '2026-03-11T19:00:00.000Z',
@@ -372,6 +369,7 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       },
     })
 
+    expect(mocks.assertNoCalendarBlockConflict).toHaveBeenCalled()
     expect(mocks.hasBookingConflict).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       requestedStart: new Date('2026-03-11T19:00:00.000Z'),

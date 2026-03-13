@@ -1,6 +1,5 @@
-// lib/dto/clientBooking.ts
 import type { Prisma } from '@prisma/client'
-import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import { resolveApptTimeZone, type TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
 
@@ -28,6 +27,13 @@ export type ClientBookingConsultationDTO = {
   rejectedAt: string | null
 }
 
+export type ClientBookingTimeZoneSource =
+  | 'BOOKING'
+  | 'HOLD'
+  | 'LOCATION'
+  | 'PRO'
+  | 'FALLBACK'
+
 export type ClientBookingDTO = {
   id: string
   status: string | null
@@ -43,9 +49,8 @@ export type ClientBookingDTO = {
   locationType: string | null
   locationId: string | null
 
-  // ✅ appointment timezone as determined by TimeZoneTruth
   timeZone: string | null
-  timeZoneSource?: 'BOOKING' | 'HOLD' | 'LOCATION' | 'PRO' | 'FALLBACK'
+  timeZoneSource?: ClientBookingTimeZoneSource
 
   locationLabel: string | null
 
@@ -80,6 +85,22 @@ export type ClientBookingDTO = {
   consultation: ClientBookingConsultationDTO | null
 }
 
+function mapTimeZoneTruthSourceToClientDtoSource(
+  source: TimeZoneTruthSource,
+): ClientBookingTimeZoneSource {
+  switch (source) {
+    case 'BOOKING_SNAPSHOT':
+      return 'BOOKING'
+    case 'HOLD_SNAPSHOT':
+      return 'HOLD'
+    case 'LOCATION':
+      return 'LOCATION'
+    case 'PROFESSIONAL':
+      return 'PRO'
+    case 'FALLBACK':
+      return 'FALLBACK'
+  }
+}
 
 function pickFormattedAddress(snapshot: unknown): string | null {
   if (!isRecord(snapshot)) return null
@@ -91,7 +112,10 @@ function decimalToString(v: unknown): string | null {
   if (v == null) return null
   if (typeof v === 'string') return v
   if (typeof v === 'number' && Number.isFinite(v)) return String(v)
-  if (typeof v === 'object' && typeof (v as { toString?: unknown }).toString === 'function') {
+  if (
+    typeof v === 'object' &&
+    typeof (v as { toString?: unknown }).toString === 'function'
+  ) {
     return String((v as { toString: () => string }).toString())
   }
   return null
@@ -99,7 +123,12 @@ function decimalToString(v: unknown): string | null {
 
 function buildLocationLabel(args: {
   locationAddressSnapshot: unknown
-  location: { formattedAddress: string | null; name: string | null; city: string | null; state: string | null } | null
+  location: {
+    formattedAddress: string | null
+    name: string | null
+    city: string | null
+    state: string | null
+  } | null
   proLocation: string | null
 }): string | null {
   const snap = pickFormattedAddress(args.locationAddressSnapshot)
@@ -111,7 +140,10 @@ function buildLocationLabel(args: {
   const name = args.location?.name?.trim()
   if (name) return name
 
-  const cityState = [args.location?.city, args.location?.state].filter(Boolean).join(', ').trim()
+  const cityState = [args.location?.city, args.location?.state]
+    .filter(Boolean)
+    .join(', ')
+    .trim()
   if (cityState) return cityState
 
   const proLoc = args.proLocation?.trim()
@@ -144,7 +176,9 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
 
     service: { select: { id: true; name: true } }
 
-    professional: { select: { id: true; businessName: true; location: true; timeZone: true } }
+    professional: {
+      select: { id: true; businessName: true; location: true; timeZone: true }
+    }
 
     location: {
       select: {
@@ -195,7 +229,8 @@ export async function buildClientBookingDTO(input: {
   const { booking: b } = input
 
   const items: ClientBookingItemDTO[] = (b.serviceItems ?? []).map((it) => {
-    const rawType = typeof it.itemType === 'string' ? it.itemType : String(it.itemType ?? '')
+    const rawType =
+      typeof it.itemType === 'string' ? it.itemType : String(it.itemType ?? '')
     const type = rawType.toUpperCase() === 'ADD_ON' ? 'ADD_ON' : 'BASE'
 
     return {
@@ -228,10 +263,11 @@ export async function buildClientBookingDTO(input: {
     proLocation: b.professional?.location ?? null,
   })
 
-  // ✅ SINGLE SOURCE OF TRUTH for appointment timezone
   const tzRes = await resolveApptTimeZone({
     bookingLocationTimeZone: b.locationTimeZone ?? null,
-    location: b.location ? { id: b.location.id, timeZone: b.location.timeZone } : null,
+    location: b.location
+      ? { id: b.location.id, timeZone: b.location.timeZone }
+      : null,
     locationId: b.locationId ?? null,
     professionalId: b.professional?.id ?? null,
     professionalTimeZone: b.professional?.timeZone ?? null,
@@ -239,23 +275,40 @@ export async function buildClientBookingDTO(input: {
     requireValid: false,
   })
 
-  const timeZone = tzRes.ok ? sanitizeTimeZone(tzRes.timeZone, DEFAULT_TIME_ZONE) : DEFAULT_TIME_ZONE
-  const timeZoneSource = tzRes.ok ? tzRes.source : 'FALLBACK'
+  const timeZone = tzRes.ok
+    ? sanitizeTimeZone(tzRes.timeZone, DEFAULT_TIME_ZONE)
+    : DEFAULT_TIME_ZONE
 
-  const consultBlobNeeded = Boolean(b.consultationApproval) || Boolean(b.consultationNotes) || b.consultationPrice != null
+  const timeZoneSource: ClientBookingTimeZoneSource = tzRes.ok
+    ? mapTimeZoneTruthSourceToClientDtoSource(tzRes.source)
+    : 'FALLBACK'
+
+  const consultBlobNeeded =
+    Boolean(b.consultationApproval) ||
+    Boolean(b.consultationNotes) ||
+    b.consultationPrice != null
 
   const consultation: ClientBookingConsultationDTO | null = consultBlobNeeded
     ? {
         consultationNotes: b.consultationNotes ?? null,
         consultationPrice: decimalToString(b.consultationPrice),
-        consultationConfirmedAt: b.consultationConfirmedAt ? b.consultationConfirmedAt.toISOString() : null,
+        consultationConfirmedAt: b.consultationConfirmedAt
+          ? b.consultationConfirmedAt.toISOString()
+          : null,
 
-        approvalStatus: b.consultationApproval?.status ? String(b.consultationApproval.status) : null,
+        approvalStatus: b.consultationApproval?.status
+          ? String(b.consultationApproval.status)
+          : null,
         approvalNotes: b.consultationApproval?.notes ?? null,
         proposedTotal: decimalToString(b.consultationApproval?.proposedTotal),
-        proposedServicesJson: (b.consultationApproval?.proposedServicesJson ?? null) as Prisma.JsonValue | null,
-        approvedAt: b.consultationApproval?.approvedAt ? b.consultationApproval.approvedAt.toISOString() : null,
-        rejectedAt: b.consultationApproval?.rejectedAt ? b.consultationApproval.rejectedAt.toISOString() : null,
+        proposedServicesJson:
+          (b.consultationApproval?.proposedServicesJson ?? null) as Prisma.JsonValue | null,
+        approvedAt: b.consultationApproval?.approvedAt
+          ? b.consultationApproval.approvedAt.toISOString()
+          : null,
+        rejectedAt: b.consultationApproval?.rejectedAt
+          ? b.consultationApproval.rejectedAt.toISOString()
+          : null,
       }
     : null
 

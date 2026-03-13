@@ -189,6 +189,7 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
     mocks.resolveApptTimeZone.mockResolvedValue({
       ok: true,
       timeZone: 'America/Los_Angeles',
+      source: 'BOOKING_SNAPSHOT',
     })
 
     mocks.isValidIanaTimeZone.mockReturnValue(true)
@@ -207,38 +208,40 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       computedSubtotal: new Prisma.Decimal('50.00'),
     })
 
-    mocks.prismaTransaction.mockImplementation(async (callback: (tx: unknown) => unknown) => {
-      const tx = {
-        booking: {
-          findFirst: vi.fn().mockResolvedValue(existingBooking),
-          update: vi.fn().mockResolvedValue({
-            id: 'booking_1',
-            scheduledFor: new Date('2026-03-11T19:00:00.000Z'),
-            bufferMinutes: 15,
-            totalDurationMinutes: 60,
-            status: BookingStatus.ACCEPTED,
-            subtotalSnapshot: new Prisma.Decimal('50.00'),
-          }),
-        },
-        professionalLocation: {
-          findFirst: vi.fn().mockResolvedValue(location),
-        },
-        professionalServiceOffering: {
-          findMany: vi.fn().mockResolvedValue([]),
-        },
-        bookingServiceItem: {
-          findMany: vi.fn().mockResolvedValue(existingItems),
-          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-          create: vi.fn(),
-          createMany: vi.fn(),
-        },
-        clientNotification: {
-          create: vi.fn(),
-        },
-      }
+    mocks.prismaTransaction.mockImplementation(
+      async (callback: (tx: unknown) => unknown) => {
+        const tx = {
+          booking: {
+            findFirst: vi.fn().mockResolvedValue(existingBooking),
+            update: vi.fn().mockResolvedValue({
+              id: 'booking_1',
+              scheduledFor: new Date('2026-03-11T19:00:00.000Z'),
+              bufferMinutes: 15,
+              totalDurationMinutes: 60,
+              status: BookingStatus.ACCEPTED,
+              subtotalSnapshot: new Prisma.Decimal('50.00'),
+            }),
+          },
+          professionalLocation: {
+            findFirst: vi.fn().mockResolvedValue(location),
+          },
+          professionalServiceOffering: {
+            findMany: vi.fn().mockResolvedValue([]),
+          },
+          bookingServiceItem: {
+            findMany: vi.fn().mockResolvedValue(existingItems),
+            deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+            create: vi.fn(),
+            createMany: vi.fn(),
+          },
+          clientNotification: {
+            create: vi.fn(),
+          },
+        }
 
-      return callback(tx)
-    })
+        return callback(tx)
+      },
+    )
   })
 
   it('logs STEP_BOUNDARY and returns 400 when scheduled time is off step', async () => {
@@ -263,6 +266,8 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       meta: {
         route: 'app/api/pro/bookings/[id]/route.ts',
         stepMinutes: 15,
+        timeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
       },
     })
 
@@ -298,6 +303,8 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       meta: {
         route: 'app/api/pro/bookings/[id]/route.ts',
         workingHoursError: 'That time is outside your working hours.',
+        timeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
       },
     })
 
@@ -329,6 +336,8 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       bookingId: 'booking_1',
       meta: {
         route: 'app/api/pro/bookings/[id]/route.ts',
+        timeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
       },
     })
 
@@ -360,6 +369,8 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       bookingId: 'booking_1',
       meta: {
         route: 'app/api/pro/bookings/[id]/route.ts',
+        timeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
       },
     })
 
@@ -391,6 +402,8 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       bookingId: 'booking_1',
       meta: {
         route: 'app/api/pro/bookings/[id]/route.ts',
+        timeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
       },
     })
 

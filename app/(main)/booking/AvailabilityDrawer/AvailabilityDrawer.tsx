@@ -37,8 +37,8 @@ import { useDebugFlag } from './hooks/useDebugFlag'
 import { useDaySlots } from './hooks/useDaySlots'
 import { useMobileAddresses } from './hooks/useMobileAddresses'
 import { shouldPrefetchForSelectedIndex } from './utils/availabilityWindow'
-
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
+import { dateTimeLocalToUtcIso } from '@/lib/bookingDateTimeClient'
 
 const FALLBACK_TZ = 'UTC' as const
 const MOBILE_ADDRESS_REQUIRED_MESSAGE =
@@ -168,7 +168,6 @@ const FALLBACK_OFFERING: AvailabilityOffering = {
 function resolveAppointmentTimeZone(args: {
   summaryTimeZone?: unknown
   primaryProTimeZone?: unknown
-  viewerTimeZone?: string
 }) {
   const s =
     typeof args.summaryTimeZone === 'string'
@@ -182,12 +181,6 @@ function resolveAppointmentTimeZone(args: {
       : ''
   if (p && isValidIanaTimeZone(p)) return p
 
-  const v =
-    typeof args.viewerTimeZone === 'string'
-      ? args.viewerTimeZone.trim()
-      : ''
-  if (v && isValidIanaTimeZone(v)) return v
-
   return FALLBACK_TZ
 }
 
@@ -196,7 +189,15 @@ function buildDayScrollerModel(
   appointmentTz: string,
 ) {
   return days.map((d) => {
-    const anchor = new Date(`${d.date}T12:00:00.000Z`)
+    let anchor = new Date(`${d.date}T12:00:00.000Z`)
+
+    try {
+      anchor = new Date(
+        dateTimeLocalToUtcIso(`${d.date}T12:00:00`, appointmentTz),
+      )
+    } catch {
+      // fail-soft for display only
+    }
 
     const top = new Intl.DateTimeFormat(undefined, {
       timeZone: appointmentTz,
@@ -330,13 +331,12 @@ export default function AvailabilityDrawer(props: {
     useHoldTimer(holdUntil)
 
   const appointmentTz = useMemo(() => {
-    const resolved = resolveAppointmentTimeZone({
-      summaryTimeZone: summary?.timeZone,
-      primaryProTimeZone: primary?.timeZone,
-      viewerTimeZone: viewerTz,
-    })
-    return sanitizeTimeZone(resolved, FALLBACK_TZ)
-  }, [summary?.timeZone, primary?.timeZone, viewerTz])
+  const resolved = resolveAppointmentTimeZone({
+    summaryTimeZone: summary?.timeZone,
+    primaryProTimeZone: primary?.timeZone,
+  })
+  return sanitizeTimeZone(resolved, FALLBACK_TZ)
+}, [summary?.timeZone, primary?.timeZone])
 
   const showLocalHint = viewerTz !== appointmentTz
   const effectiveServiceId = summary?.serviceId ?? context.serviceId ?? null

@@ -49,9 +49,10 @@ function initialsFrom(name?: string | null) {
   return (a + b).toUpperCase()
 }
 
-function formatStartsAt(startsAt: string) {
+function formatStartsAt(startsAt: string, timeZone: string) {
   const d = new Date(startsAt)
   return d.toLocaleString(undefined, {
+    timeZone,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -76,6 +77,7 @@ export function ManagementModal(props: {
   open: boolean
   activeKey: ManagementKey
   management: ManagementLists
+  viewportTimeZone: string
   onClose: () => void
   onSetKey: (k: ManagementKey) => void
   onPickEvent: (ev: CalendarEvent) => void
@@ -88,19 +90,20 @@ export function ManagementModal(props: {
   actionError?: string | null
 }) {
   const {
-    open,
-    activeKey,
-    management,
-    onClose,
-    onSetKey,
-    onPickEvent,
-    onCreateBlockNow,
-    onBlockFullDayToday,
-    onApproveBookingId,
-    onDenyBookingId,
-    actionBusyId,
-    actionError,
-  } = props
+  open,
+  activeKey,
+  management,
+  viewportTimeZone,
+  onClose,
+  onSetKey,
+  onPickEvent,
+  onCreateBlockNow,
+  onBlockFullDayToday,
+  onApproveBookingId,
+  onDenyBookingId,
+  actionBusyId,
+  actionError,
+} = props
 
   const [confirmDenyIdState, setConfirmDenyIdState] = useState<string | null>(
     null,
@@ -285,7 +288,10 @@ export function ManagementModal(props: {
               {sortedList.map((ev) => {
                 const isBlock = isBlockedEvent(ev)
                 const clientName = (ev.clientName || '').trim()
-                const timeLabel = formatStartsAt(ev.startsAt)
+                const eventTimeZone =
+                  ev.kind === 'BOOKING' ? ev.timeZone : viewportTimeZone
+
+                const timeLabel = formatStartsAt(ev.startsAt, eventTimeZone)
                 const bookingId = bookingIdFor(ev)
 
                 const busy = Boolean(

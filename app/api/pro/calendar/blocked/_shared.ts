@@ -1,6 +1,4 @@
-// app/api/pro/calendar/blocked/_shared.ts 
-
-import { Prisma } from '@prisma/client'
+// app/api/pro/calendar/blocked/_shared.ts
 
 const MIN_BLOCK_MINUTES = 15
 const MAX_BLOCK_MINUTES = 24 * 60
@@ -15,10 +13,18 @@ export type BlockDto = {
   locationId: string | null
 }
 
+export type BuildBlockConflictWhereArgs = {
+  professionalId: string
+  startsAt: Date
+  endsAt: Date
+  locationId: string | null
+  excludeBlockId?: string | null
+}
+
 export function trimString(v: unknown): string | null {
   if (typeof v !== 'string') return null
   const trimmed = v.trim()
-  return trimmed ? trimmed : null
+  return trimmed || null
 }
 
 export function toDateOrNull(v: unknown): Date | null {
@@ -33,20 +39,29 @@ export function minutesBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 60_000)
 }
 
-export function validateBlockWindow(startsAt: Date, endsAt: Date): string | null {
+export function validateBlockWindow(
+  startsAt: Date,
+  endsAt: Date,
+): string | null {
   if (endsAt <= startsAt) {
     return 'End must be after start.'
   }
 
   const durationMinutes = minutesBetween(startsAt, endsAt)
-  if (durationMinutes < MIN_BLOCK_MINUTES || durationMinutes > MAX_BLOCK_MINUTES) {
+  if (
+    durationMinutes < MIN_BLOCK_MINUTES ||
+    durationMinutes > MAX_BLOCK_MINUTES
+  ) {
     return 'Block must be between 15 minutes and 24 hours.'
   }
 
   return null
 }
 
-export function clampRange(from: Date, to: Date): { from: Date; to: Date } {
+export function clampRange(
+  from: Date,
+  to: Date,
+): { from: Date; to: Date } {
   const maxMs = MAX_RANGE_DAYS * 24 * 60 * 60_000
   const currentMs = to.getTime() - from.getTime()
 
@@ -90,7 +105,9 @@ export function parseNoteInput(
   }
 }
 
-export function parseLocationIdInput(v: unknown): { ok: true; value: string | null } | { ok: false } {
+export function parseLocationIdInput(
+  v: unknown,
+): { ok: true; value: string | null } | { ok: false } {
   if (v === undefined || v === null) {
     return { ok: true, value: null }
   }
@@ -103,30 +120,39 @@ export function parseLocationIdInput(v: unknown): { ok: true; value: string | nu
   return { ok: true, value: trimmed || null }
 }
 
-export function buildBlockConflictWhere(args: {
+export function buildBlockConflictWhere(args: BuildBlockConflictWhereArgs): {
   professionalId: string
-  startsAt: Date
-  endsAt: Date
-  locationId: string | null
-  excludeBlockId?: string
-}): Prisma.CalendarBlockWhereInput {
-  const { professionalId, startsAt, endsAt, locationId, excludeBlockId } = args
-
-  const base: Prisma.CalendarBlockWhereInput = {
-    professionalId,
-    startsAt: { lt: endsAt },
-    endsAt: { gt: startsAt },
-    ...(excludeBlockId ? { id: { not: excludeBlockId } } : {}),
+  startsAt: { lt: Date }
+  endsAt: { gt: Date }
+  id?: { not: string }
+  OR?: Array<{ locationId: string | null }>
+} {
+  const where: {
+    professionalId: string
+    startsAt: { lt: Date }
+    endsAt: { gt: Date }
+    id?: { not: string }
+    OR?: Array<{ locationId: string | null }>
+  } = {
+    professionalId: args.professionalId,
+    startsAt: { lt: args.endsAt },
+    endsAt: { gt: args.startsAt },
   }
 
-  if (locationId) {
-    return {
-      ...base,
-      OR: [{ locationId }, { locationId: null }],
-    }
+  const excludeBlockId =
+    typeof args.excludeBlockId === 'string' && args.excludeBlockId.trim()
+      ? args.excludeBlockId.trim()
+      : null
+
+  if (excludeBlockId) {
+    where.id = { not: excludeBlockId }
   }
 
-  return base
+  if (args.locationId) {
+    where.OR = [{ locationId: args.locationId }, { locationId: null }]
+  }
+
+  return where
 }
 
 export function toBlockDto(block: {

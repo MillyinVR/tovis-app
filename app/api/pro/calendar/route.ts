@@ -8,6 +8,8 @@ import {
   startOfDayUtcInTimeZone,
 } from '@/lib/timeZone'
 import { addMinutes } from '@/lib/booking/conflicts'
+import { resolveApptTimeZone, type TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
+import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
@@ -48,6 +50,9 @@ type BookingEvent = {
   locationType: ServiceLocationType | string
   locationId: string
   durationMinutes: number
+  timeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  localDateKey: string
   details: {
     serviceName: string
     bufferMinutes: number
@@ -225,7 +230,8 @@ export async function GET(req: Request) {
     const selectedLocationTimeZoneValid = isValidIanaTimeZone(locationTimeZoneRaw)
     const profileTimeZoneValid = isValidIanaTimeZone(profileTimeZoneRaw)
 
-    const calendarTimeZone = sanitizeTimeZone(
+    // Viewport timezone: used for calendar grid, default range, and "today" stats.
+    const viewportTimeZone = sanitizeTimeZone(
       selectedLocationTimeZoneValid
         ? locationTimeZoneRaw
         : profileTimeZoneValid
@@ -238,7 +244,7 @@ export async function GET(req: Request) {
       !selectedLocationTimeZoneValid && !profileTimeZoneValid
 
     const now = new Date()
-    const defaultFrom = startOfDayUtcInTimeZone(now, calendarTimeZone)
+    const defaultFrom = startOfDayUtcInTimeZone(now, viewportTimeZone)
     const defaultToExclusive = addDaysUtc(defaultFrom, 90)
 
     const from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
@@ -259,8 +265,6 @@ export async function GET(req: Request) {
         ? maxToExclusive
         : requestedToExclusive
 
-    // All bookings for the pro stay visible in the pro calendar,
-    // regardless of location/mode, so cross-location occupancy is obvious.
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
@@ -275,6 +279,7 @@ export async function GET(req: Request) {
         bufferMinutes: true,
         locationType: true,
         locationId: true,
+        locationTimeZone: true,
         client: {
           select: {
             firstName: true,
@@ -284,6 +289,12 @@ export async function GET(req: Request) {
         },
         service: {
           select: { name: true },
+        },
+        location: {
+          select: {
+            id: true,
+            timeZone: true,
+          },
         },
         serviceItems: {
           select: {
@@ -300,7 +311,7 @@ export async function GET(req: Request) {
       take: 1200,
     })
 
-    // Blocks are scoped to the selected location or global blocks.
+    // Blocks remain viewport-scoped to selected location/global.
     const blocks = await prisma.calendarBlock.findMany({
       where: {
         professionalId,
@@ -319,66 +330,97 @@ export async function GET(req: Request) {
       take: 1200,
     })
 
-    const bookingEvents: BookingEvent[] = bookings.flatMap((booking) => {
-      if (!booking.locationId) return []
+    const bookingEventsNested = await Promise.all(
+      bookings.map(async (booking): Promise<BookingEvent[]> => {
+        if (!booking.locationId) return []
 
-      const start = new Date(booking.scheduledFor)
-      const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
-      const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
-      const end = addMinutes(start, durationMinutes + bufferMinutes)
+        const start = new Date(booking.scheduledFor)
+        const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
+        const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
+        const end = addMinutes(start, durationMinutes + bufferMinutes)
 
-      const firstItemName =
-        booking.serviceItems.length > 0
-          ? String(booking.serviceItems[0]?.service?.name || '').trim()
-          : ''
+        const firstItemName =
+          booking.serviceItems.length > 0
+            ? String(booking.serviceItems[0]?.service?.name || '').trim()
+            : ''
 
-      const serviceName =
-        firstItemName ||
-        String(booking.service?.name || '').trim() ||
-        'Appointment'
+        const serviceName =
+          firstItemName ||
+          String(booking.service?.name || '').trim() ||
+          'Appointment'
 
-      const firstName = String(booking.client?.firstName || '').trim()
-      const lastName = String(booking.client?.lastName || '').trim()
-      const email = String(booking.client?.user?.email || '').trim()
+        const firstName = String(booking.client?.firstName || '').trim()
+        const lastName = String(booking.client?.lastName || '').trim()
+        const email = String(booking.client?.user?.email || '').trim()
 
-      const clientName =
-        firstName || lastName
-          ? `${firstName} ${lastName}`.trim()
-          : email || 'Client'
+        const clientName =
+          firstName || lastName
+            ? `${firstName} ${lastName}`.trim()
+            : email || 'Client'
 
-      const serviceItems: CalendarServiceItem[] = booking.serviceItems.map((item) => ({
-        id: String(item.id),
-        name: String(item.service?.name || '').trim() || null,
-        durationMinutes: clampInt(
-          item.durationMinutesSnapshot,
-          0,
-          0,
-          MAX_SLOT_DURATION_MINUTES,
-        ),
-        price: item.priceSnapshot ?? null,
-        sortOrder: Number(item.sortOrder ?? 0),
-      }))
+        const serviceItems: CalendarServiceItem[] = booking.serviceItems.map((item) => ({
+          id: String(item.id),
+          name: String(item.service?.name || '').trim() || null,
+          durationMinutes: clampInt(
+            item.durationMinutesSnapshot,
+            0,
+            0,
+            MAX_SLOT_DURATION_MINUTES,
+          ),
+          price: item.priceSnapshot ?? null,
+          sortOrder: Number(item.sortOrder ?? 0),
+        }))
 
-      return [
-        {
-          id: String(booking.id),
-          kind: 'BOOKING' as const,
-          startsAt: start.toISOString(),
-          endsAt: end.toISOString(),
-          title: serviceName,
-          clientName,
-          status: normalizeBookingStatus(booking.status),
-          locationType: normalizeServiceLocationType(booking.locationType),
-          locationId: booking.locationId,
-          durationMinutes,
-          details: {
-            serviceName,
-            bufferMinutes,
-            serviceItems,
+        const eventTzResult = await resolveApptTimeZone({
+          bookingLocationTimeZone: booking.locationTimeZone,
+          location: booking.location
+            ? {
+                id: booking.location.id,
+                timeZone: booking.location.timeZone,
+              }
+            : null,
+          locationId: booking.locationId ?? null,
+          professionalId,
+          professionalTimeZone: proProfile.timeZone,
+          fallback: 'UTC',
+        })
+
+        const eventTimeZone =
+          eventTzResult.ok && isValidIanaTimeZone(eventTzResult.timeZone)
+            ? sanitizeTimeZone(eventTzResult.timeZone, 'UTC')
+            : 'UTC'
+
+        const eventTimeZoneSource: TimeZoneTruthSource =
+          eventTzResult.ok ? eventTzResult.source : 'FALLBACK'
+
+        const localDateKey = utcDateToLocalYmd(start, eventTimeZone)
+
+        return [
+          {
+            id: String(booking.id),
+            kind: 'BOOKING' as const,
+            startsAt: start.toISOString(),
+            endsAt: end.toISOString(),
+            title: serviceName,
+            clientName,
+            status: normalizeBookingStatus(booking.status),
+            locationType: normalizeServiceLocationType(booking.locationType),
+            locationId: booking.locationId,
+            durationMinutes,
+            timeZone: eventTimeZone,
+            timeZoneSource: eventTimeZoneSource,
+            localDateKey,
+            details: {
+              serviceName,
+              bufferMinutes,
+              serviceItems,
+            },
           },
-        },
-      ]
-    })
+        ]
+      }),
+    )
+
+    const bookingEvents: BookingEvent[] = bookingEventsNested.flat()
 
     const blockEvents: BlockEvent[] = blocks.map((block) => {
       const start = new Date(block.startsAt)
@@ -411,17 +453,18 @@ export async function GET(req: Request) {
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     )
 
-    const todayStart = startOfDayUtcInTimeZone(now, calendarTimeZone)
+    // "Today" stats are explicitly viewport-based.
+    const todayStart = startOfDayUtcInTimeZone(now, viewportTimeZone)
     const todayEndExclusive = addDaysUtc(todayStart, 1)
 
-    const isToday = (iso: string) => {
+    const isTodayInViewport = (iso: string) => {
       const time = new Date(iso).getTime()
       return time >= todayStart.getTime() && time < todayEndExclusive.getTime()
     }
 
     const todaysBookingsEvents = bookingEvents.filter(
       (event) =>
-        isToday(event.startsAt) &&
+        isTodayInViewport(event.startsAt) &&
         (event.status === 'ACCEPTED' || event.status === 'COMPLETED'),
     )
 
@@ -432,10 +475,12 @@ export async function GET(req: Request) {
     )
 
     const waitlistTodayEvents = bookingEvents.filter(
-      (event) => isToday(event.startsAt) && event.status === 'WAITLIST',
+      (event) => isTodayInViewport(event.startsAt) && event.status === 'WAITLIST',
     )
 
-    const blockedTodayEvents = blockEvents.filter((event) => isToday(event.startsAt))
+    const blockedTodayEvents = blockEvents.filter((event) =>
+      isTodayInViewport(event.startsAt),
+    )
     const blockedMinutesToday = blockedTodayEvents.reduce(
       (sum, event) => sum + event.durationMinutes,
       0,
@@ -456,7 +501,8 @@ export async function GET(req: Request) {
           timeZone: locationTimeZoneRaw || null,
           timeZoneValid: selectedLocationTimeZoneValid,
         },
-        timeZone: calendarTimeZone,
+        timeZone: viewportTimeZone,
+        viewportTimeZone,
         needsTimeZoneSetup,
         events,
         canSalon,

@@ -354,6 +354,7 @@ export default function ProCalendarPage() {
         open={cal.managementOpen}
         activeKey={cal.managementKey}
         management={cal.management}
+        viewportTimeZone={calendarTimeZone}
         onClose={cal.closeManagement}
         onSetKey={(k) => cal.setManagementKey(k)}
         onPickEvent={(ev) => {
@@ -386,33 +387,33 @@ export default function ProCalendarPage() {
         onConfirm={cal.applyConfirm}
       />
 
-      <BookingModal
-        open={Boolean(cal.openBookingId)}
-        loading={cal.bookingLoading}
-        error={cal.bookingError}
-        booking={cal.booking}
-        services={cal.services}
-        timeZone={bookingModalTimeZone}
-        bookingServiceLabel={cal.bookingServiceLabel}
-        serviceItemsDraft={cal.serviceItemsDraft}
-        reschedDate={cal.reschedDate}
-        reschedTime={cal.reschedTime}
-        durationMinutes={cal.durationMinutes}
-        notifyClient={cal.notifyClient}
-        allowOutsideHours={cal.allowOutsideHours}
-        editOutside={cal.editOutside}
-        saving={cal.savingReschedule}
-        onClose={cal.closeBooking}
-        onChangeReschedDate={cal.setReschedDate}
-        onChangeReschedTime={cal.setReschedTime}
-        selectedDraftServiceIds={cal.selectedDraftServiceIds}
-        hasDraftServiceItemsChanges={cal.hasDraftServiceItemsChanges}
-        onChangeSelectedDraftServiceIds={cal.setDraftServiceIds}
-        onToggleNotifyClient={cal.setNotifyClient}
-        onToggleAllowOutsideHours={cal.setAllowOutsideHours}
-        onSave={() => void cal.submitChanges()}
-        onApprove={() => void cal.approveBooking()}
-        onDeny={() => void cal.denyBooking()}
+      <ManagementModal
+        open={cal.managementOpen}
+        activeKey={cal.managementKey}
+        management={cal.management}
+        viewportTimeZone={calendarTimeZone}
+        onClose={cal.closeManagement}
+        onSetKey={(k) => cal.setManagementKey(k)}
+        onPickEvent={(ev) => {
+          cal.closeManagement()
+          cal.openBookingOrBlock(ev.id)
+        }}
+        onCreateBlockNow={() => {
+          cal.closeManagement()
+          cal.openCreateBlockNow()
+        }}
+        onBlockFullDayToday={() => {
+          cal.closeManagement()
+          void cal.oneClickBlockFullDay(new Date())
+        }}
+        onApproveBookingId={(bookingId: string) =>
+          void cal.approveBookingById(bookingId)
+        }
+        onDenyBookingId={(bookingId: string) =>
+          void cal.denyBookingById(bookingId)
+        }
+        actionBusyId={cal.managementActionBusyId}
+        actionError={cal.managementActionError}
       />
     </main>
   )

@@ -13,6 +13,13 @@ export type WeekdayKey =
   | 'fri'
   | 'sat'
 
+export type TimeZoneTruthSource =
+  | 'BOOKING_SNAPSHOT'
+  | 'HOLD_SNAPSHOT'
+  | 'LOCATION'
+  | 'PROFESSIONAL'
+  | 'FALLBACK'
+
 export type ServiceLocationType =
   | 'SALON'
   | 'MOBILE'
@@ -31,8 +38,8 @@ export type CalendarStatus = BookingCalendarStatus | 'BLOCKED'
 
 export type WorkingHoursDay = {
   enabled: boolean
-  start: string // "HH:MM" (24h)
-  end: string // "HH:MM" (24h)
+  start: string
+  end: string
 }
 
 export type WorkingHoursJson = Record<WeekdayKey, WorkingHoursDay> | null
@@ -46,14 +53,6 @@ export type CalendarStats =
     }
   | null
 
-/**
- * Service selector option used by calendar booking create/edit UI.
- *
- * Current API shape from /api/pro/services is:
- * - id = service id
- * - offeringId = optional active offering id
- * - durationMinutes = display/helper duration
- */
 export type ServiceOption = {
   id: string
   name: string
@@ -62,10 +61,6 @@ export type ServiceOption = {
   priceStartingAt?: string | null
 }
 
-/**
- * Booking service item returned by GET /api/pro/bookings/[id].
- * This is the source of truth for editable booking services.
- */
 export type BookingServiceItem = {
   id: string
   serviceId: string
@@ -77,20 +72,11 @@ export type BookingServiceItem = {
   sortOrder: number
 }
 
-/**
- * Booking details used by the edit modal.
- *
- * Notes:
- * - serviceItems is the actual editable unit
- * - totalDurationMinutes is still the persisted booking duration
- * - location snapshot fields are optional so the UI can progressively
- *   support mobile-address rendering without breaking older payloads
- */
 export type BookingDetails = {
   id: string
   status: string
-  scheduledFor: string // ISO string for a UTC instant
-  endsAt: string // ISO string for a UTC instant
+  scheduledFor: string
+  endsAt: string
 
   locationId?: string | null
   locationType?: ServiceLocationType
@@ -111,6 +97,7 @@ export type BookingDetails = {
   }
 
   timeZone: IanaTimeZone
+  timeZoneSource?: TimeZoneTruthSource
   serviceItems: BookingServiceItem[]
 }
 
@@ -139,6 +126,11 @@ export type BookingCalendarEvent = {
   locationId: string | null
   locationType: ServiceLocationType
   durationMinutes?: number
+
+  timeZone: IanaTimeZone | string
+  timeZoneSource: TimeZoneTruthSource
+  localDateKey: string
+
   details: BookingEventDetails
   note?: never
   blockId?: never
@@ -174,7 +166,7 @@ export type PendingChange =
       entityType: EntityType
       eventId: string
       apiId: string
-      nextStartIso: string // ISO string for a UTC instant
+      nextStartIso: string
       original: CalendarEvent
     }
 
@@ -196,4 +188,22 @@ export type BlockRow = {
   startsAt: string | Date
   endsAt: string | Date
   note?: string | null
+}
+
+export type CalendarResponse = {
+  location: {
+    id: string
+    type: string
+    timeZone: string | null
+    timeZoneValid: boolean
+  }
+  timeZone: string
+  viewportTimeZone: string
+  needsTimeZoneSetup: boolean
+  events: CalendarEvent[]
+  canSalon: boolean
+  canMobile: boolean
+  stats: CalendarStats
+  autoAcceptBookings: boolean
+  management: ManagementLists
 }
