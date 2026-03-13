@@ -10,130 +10,36 @@ import type {
   ServiceLocationType,
 } from '../types'
 
-import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
-import { parseAvailabilitySummaryResponse } from '../contract'
-
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
 import {
   INITIAL_WINDOW_DAYS,
   NEXT_WINDOW_DAYS,
 } from '../utils/availabilityWindow'
 import { mergeAvailableDays } from '../utils/mergeAvailableDays'
+import {
+  buildAvailabilityPrefetchArgsFromContext,
+  buildAvailabilitySummaryPrefetchKey,
+  fetchAvailabilitySummaryWindow,
+  getCachedAvailabilitySummaryWindow,
+} from '../utils/availabilityPrefetch'
 
 type SummaryOk = Extract<
   AvailabilitySummaryResponse,
   { ok: true; mode: 'SUMMARY' }
 >
 
-type CacheEntry = {
-  at: number
-  data: SummaryOk
-}
-
-const CACHE_TTL_MS = 45_000
-const MAX_CACHE_ENTRIES = 200
-
-const summaryWindowCache = new Map<string, CacheEntry>()
-const inFlightByKey = new Map<string, Promise<SummaryOk>>()
-
-function pickApiError(raw: unknown): string | null {
-  if (!isRecord(raw)) return null
-  return pickString(raw.error)
-}
-
-function buildBaseQueryKey(args: {
-  proId: string
-  serviceId: string
-  locationType: ServiceLocationType | null
-  mediaId?: string
-  clientAddressId?: string | null
-  viewer?: {
-    lat: number
-    lng: number
-    radiusMiles: number | null
-    placeId: string | null
-  } | null
-}) {
-  const viewerKey = args.viewer
-    ? `viewer=${args.viewer.lat.toFixed(3)},${args.viewer.lng.toFixed(3)},${
-        args.viewer.radiusMiles ?? ''
-      },${args.viewer.placeId ?? ''}`
-    : ''
-
-  return [
-    `pro=${args.proId}`,
-    `service=${args.serviceId}`,
-    `loc=${args.locationType ?? 'AUTO'}`,
-    `media=${args.mediaId ?? ''}`,
-    `clientAddress=${args.clientAddressId ?? ''}`,
-    viewerKey,
-  ]
-    .filter(Boolean)
-    .join('|')
-}
-
-function buildWindowQueryKey(args: {
-  baseKey: string
-  startDate: string
-  days: number
-  includeOtherPros: boolean
-}) {
-  return [
-    args.baseKey,
-    `start=${args.startDate}`,
-    `days=${args.days}`,
-    `otherPros=${args.includeOtherPros ? '1' : '0'}`,
-  ].join('|')
-}
-
-function isFresh(entry: CacheEntry): boolean {
-  return Date.now() - entry.at < CACHE_TTL_MS
-}
-
-function pruneCache() {
-  const now = Date.now()
-
-  for (const [key, entry] of summaryWindowCache.entries()) {
-    if (now - entry.at >= CACHE_TTL_MS) {
-      summaryWindowCache.delete(key)
-    }
-  }
-
-  if (summaryWindowCache.size <= MAX_CACHE_ENTRIES) return
-
-  const sorted = Array.from(summaryWindowCache.entries()).sort(
-    (a, b) => a[1].at - b[1].at,
-  )
-
-  const overflow = summaryWindowCache.size - MAX_CACHE_ENTRIES
-  for (let i = 0; i < overflow; i += 1) {
-    const row = sorted[i]
-    if (row) summaryWindowCache.delete(row[0])
-  }
-}
-
-function getFreshCache(key: string): SummaryOk | null {
-  const hit = summaryWindowCache.get(key)
-  if (!hit) return null
-  if (!isFresh(hit)) return null
-  return hit.data
-}
-
-function getAnyCache(key: string): SummaryOk | null {
-  const hit = summaryWindowCache.get(key)
-  return hit ? hit.data : null
-}
-
-
-function mergeSummaryData(current: SummaryOk | null, incoming: SummaryOk): SummaryOk {
+function mergeSummaryData(
+  current: SummaryOk | null,
+  incoming: SummaryOk,
+): SummaryOk {
   if (!current) return incoming
 
   return {
     ...current,
-    mediaId: incoming.mediaId ?? current.mediaId,
-    availableDays: mergeAvailableDays(current.availableDays, incoming.availableDays),
+    availableDays: mergeAvailableDays(
+      current.availableDays,
+      incoming.availableDays,
+    ),
     windowStartDate: current.windowStartDate,
     windowEndDate: incoming.windowEndDate,
     nextStartDate: incoming.nextStartDate,
@@ -143,7 +49,6 @@ function mergeSummaryData(current: SummaryOk | null, incoming: SummaryOk): Summa
     debug: incoming.debug ?? current.debug,
   }
 }
-
 
 export function useAvailability(
   open: boolean,
@@ -171,47 +76,10 @@ export function useAvailability(
     [context.serviceId],
   )
 
-  const mediaId = useMemo(
-    () => (context.mediaId ? String(context.mediaId).trim() : ''),
-    [context.mediaId],
-  )
-
   const normalizedClientAddressId = useMemo(
     () => (clientAddressId ? String(clientAddressId).trim() : ''),
     [clientAddressId],
   )
-
-  const viewer = useMemo(() => {
-    const lat =
-      typeof context.viewerLat === 'number' && Number.isFinite(context.viewerLat)
-        ? context.viewerLat
-        : null
-
-    const lng =
-      typeof context.viewerLng === 'number' && Number.isFinite(context.viewerLng)
-        ? context.viewerLng
-        : null
-
-    if (lat == null || lng == null) return null
-
-    const radiusMiles =
-      typeof context.viewerRadiusMiles === 'number' &&
-      Number.isFinite(context.viewerRadiusMiles)
-        ? context.viewerRadiusMiles
-        : null
-
-    const placeId =
-      typeof context.viewerPlaceId === 'string' && context.viewerPlaceId.trim()
-        ? context.viewerPlaceId.trim()
-        : null
-
-    return { lat, lng, radiusMiles, placeId }
-  }, [
-    context.viewerLat,
-    context.viewerLng,
-    context.viewerRadiusMiles,
-    context.viewerPlaceId,
-  ])
 
   const requiresClientAddress = locationType === 'MOBILE'
 
@@ -221,148 +89,40 @@ export function useAvailability(
     Boolean(serviceId) &&
     (!requiresClientAddress || Boolean(normalizedClientAddressId))
 
-  const baseQueryKey = useMemo(
+  const initialPrefetchArgs = useMemo(
     () =>
-      buildBaseQueryKey({
-        proId,
-        serviceId,
+      buildAvailabilityPrefetchArgsFromContext({
+        context,
         locationType,
-        mediaId,
         clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
-        viewer,
+        includeOtherPros,
+        days: INITIAL_WINDOW_DAYS,
+        startDate: null,
       }),
     [
-      proId,
-      serviceId,
+      context,
       locationType,
-      mediaId,
       normalizedClientAddressId,
       requiresClientAddress,
-      viewer,
+      includeOtherPros,
     ],
   )
 
-  const fetchSummaryWindow = useCallback(
-    async (args: {
-      startDate?: string | null
-      days: number
-      includeOtherProsForRequest: boolean
-    }): Promise<SummaryOk> => {
-      const windowKey = buildWindowQueryKey({
-        baseKey: baseQueryKey,
-        startDate: args.startDate ?? 'AUTO',
-        days: args.days,
-        includeOtherPros: args.includeOtherProsForRequest,
-      })
+  const initialWindowKey = useMemo(() => {
+    if (!initialPrefetchArgs) return null
 
-      const fresh = getFreshCache(windowKey)
-      if (fresh) return fresh
-
-      let promise = inFlightByKey.get(windowKey)
-      if (!promise) {
-        const qs = new URLSearchParams()
-        qs.set('professionalId', proId)
-        qs.set('serviceId', serviceId)
-        if (args.startDate) {
-          qs.set('startDate', args.startDate)
-        }
-        qs.set('days', String(args.days))
-        qs.set(
-          'includeOtherPros',
-          args.includeOtherProsForRequest ? '1' : '0',
-        )
-
-        if (locationType) {
-          qs.set('locationType', locationType)
-        }
-
-        if (mediaId) {
-          qs.set('mediaId', mediaId)
-        }
-
-        if (requiresClientAddress && normalizedClientAddressId) {
-          qs.set('clientAddressId', normalizedClientAddressId)
-        }
-
-        if (viewer) {
-          qs.set('viewerLat', String(viewer.lat))
-          qs.set('viewerLng', String(viewer.lng))
-
-          if (viewer.radiusMiles != null) {
-            qs.set('radiusMiles', String(viewer.radiusMiles))
-          }
-
-          if (viewer.placeId) {
-            qs.set('viewerPlaceId', viewer.placeId)
-          }
-        }
-
-        promise = (async (): Promise<SummaryOk> => {
-          const res = await fetch(`/api/availability/day?${qs.toString()}`, {
-            method: 'GET',
-            cache: 'no-store',
-            headers: { Accept: 'application/json' },
-          })
-
-          const raw = await safeJson(res)
-
-          if (res.status === 401) {
-            redirectToLogin(router, 'availability')
-            throw new Error('Please log in to view availability.')
-          }
-
-          if (!res.ok) {
-            throw new Error(
-              pickApiError(raw) ?? `Request failed (${res.status}).`,
-            )
-          }
-
-          const parsed = parseAvailabilitySummaryResponse(raw)
-          if (!parsed) {
-            throw new Error('Availability endpoint returned unexpected response.')
-          }
-
-          if (!parsed.ok) {
-            throw new Error(parsed.error)
-          }
-
-          if (parsed.mode !== 'SUMMARY') {
-            throw new Error('Availability endpoint returned unexpected response.')
-          }
-
-          pruneCache()
-          summaryWindowCache.set(windowKey, {
-            at: Date.now(),
-            data: parsed,
-          })
-
-          return parsed
-        })()
-
-        inFlightByKey.set(windowKey, promise)
-      }
-
-      try {
-        return await promise
-      } finally {
-        const currentPromise = inFlightByKey.get(windowKey)
-        if (currentPromise === promise) {
-          inFlightByKey.delete(windowKey)
-        }
-      }
-    },
-    [
-      baseQueryKey,
-      proId,
-      serviceId,
-      locationType,
-      mediaId,
-      viewer,
-      requiresClientAddress,
-      normalizedClientAddressId,
-      router,
-    ],
-  )
+    return buildAvailabilitySummaryPrefetchKey({
+      professionalId: initialPrefetchArgs.professionalId,
+      serviceId: initialPrefetchArgs.serviceId,
+      locationType: initialPrefetchArgs.locationType,
+      mediaId: initialPrefetchArgs.mediaId,
+      clientAddressId: initialPrefetchArgs.clientAddressId,
+      viewer: initialPrefetchArgs.viewer,
+      startDate: null,
+      days: INITIAL_WINDOW_DAYS,
+      includeOtherPros,
+    })
+  }, [initialPrefetchArgs, includeOtherPros])
 
   const loadInitial = useCallback(
     async (keepExistingData: boolean) => {
@@ -377,32 +137,39 @@ export function useAvailability(
       setError(null)
 
       try {
-        const freshKey = buildWindowQueryKey({
-          baseKey: baseQueryKey,
-          startDate: 'AUTO',
-          days: INITIAL_WINDOW_DAYS,
-          includeOtherPros,
-        })
-
-        const stale = getAnyCache(freshKey)
-        if (keepExistingData && stale) {
-          if (seq !== requestSeqRef.current) return
-          setData(stale)
+        if (!initialPrefetchArgs) {
+          throw new Error('Missing availability context.')
         }
 
-        const firstPage = await fetchSummaryWindow({
+        if (keepExistingData && initialWindowKey) {
+          const stale = getCachedAvailabilitySummaryWindow(initialWindowKey)
+          if (stale && seq === requestSeqRef.current) {
+            setData(stale)
+          }
+        }
+
+        const firstPage = await fetchAvailabilitySummaryWindow({
+          ...initialPrefetchArgs,
           startDate: null,
           days: INITIAL_WINDOW_DAYS,
-          includeOtherProsForRequest: includeOtherPros,
+          includeOtherPros,
         })
 
         if (seq !== requestSeqRef.current) return
         setData(firstPage)
       } catch (e: unknown) {
         if (seq !== requestSeqRef.current) return
-        setError(
-          e instanceof Error ? e.message : 'Failed to load availability.',
-        )
+
+        const message =
+          e instanceof Error ? e.message : 'Failed to load availability.'
+
+        if (message === 'Unauthorized.') {
+          redirectToLogin(router, 'availability')
+          setError('Please log in to view availability.')
+          return
+        }
+
+        setError(message)
       } finally {
         if (seq === requestSeqRef.current) {
           setLoading(false)
@@ -410,11 +177,7 @@ export function useAvailability(
         }
       }
     },
-    [
-      baseQueryKey,
-      fetchSummaryWindow,
-      includeOtherPros,
-    ],
+    [initialPrefetchArgs, initialWindowKey, includeOtherPros, router],
   )
 
   const loadMore = useCallback(async () => {
@@ -425,21 +188,52 @@ export function useAvailability(
     setError(null)
 
     try {
-      const nextPage = await fetchSummaryWindow({
+      const nextArgs = buildAvailabilityPrefetchArgsFromContext({
+        context,
+        locationType,
+        clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
+        includeOtherPros: false,
+        days: NEXT_WINDOW_DAYS,
+        startDate: data.nextStartDate,
+      })
+
+      if (!nextArgs) {
+        throw new Error('Missing availability context.')
+      }
+
+      const nextPage = await fetchAvailabilitySummaryWindow({
+        ...nextArgs,
         startDate: data.nextStartDate,
         days: NEXT_WINDOW_DAYS,
-        includeOtherProsForRequest: false,
+        includeOtherPros: false,
       })
 
       setData((current) => mergeSummaryData(current, nextPage))
     } catch (e: unknown) {
-      setError(
-        e instanceof Error ? e.message : 'Failed to load more availability.',
-      )
+      const message =
+        e instanceof Error ? e.message : 'Failed to load more availability.'
+
+      if (message === 'Unauthorized.') {
+        redirectToLogin(router, 'availability')
+        setError('Please log in to view availability.')
+        return
+      }
+
+      setError(message)
     } finally {
       setLoadingMore(false)
     }
-  }, [data, fetchSummaryWindow, loading, refreshing, loadingMore])
+  }, [
+    context,
+    data,
+    loading,
+    refreshing,
+    loadingMore,
+    locationType,
+    requiresClientAddress,
+    normalizedClientAddressId,
+    router,
+  ])
 
   useEffect(() => {
     return () => {
@@ -485,14 +279,16 @@ export function useAvailability(
       return
     }
 
-    const initialWindowKey = buildWindowQueryKey({
-      baseKey: baseQueryKey,
-      startDate: 'AUTO',
-      days: INITIAL_WINDOW_DAYS,
-      includeOtherPros,
-    })
+    if (!initialWindowKey) {
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+      setData(null)
+      setError('Missing availability context.')
+      return
+    }
 
-    const fresh = getFreshCache(initialWindowKey)
+    const fresh = getCachedAvailabilitySummaryWindow(initialWindowKey)
     if (fresh) {
       setData(fresh)
       setError(null)
@@ -502,9 +298,7 @@ export function useAvailability(
       return
     }
 
-    const stale = getAnyCache(initialWindowKey)
-    if (stale) {
-      setData(stale)
+    if (data) {
       setError(null)
       void loadInitial(true)
       return
@@ -517,9 +311,9 @@ export function useAvailability(
     proId,
     serviceId,
     canFetch,
-    baseQueryKey,
-    includeOtherPros,
+    initialWindowKey,
     loadInitial,
+    data,
   ])
 
   return {

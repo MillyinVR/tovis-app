@@ -19,6 +19,12 @@ import {
   viewerLocationToDrawerContextFields,
   type ViewerLocation,
 } from '@/lib/viewerLocation'
+import {
+  buildAvailabilityPrefetchArgsFromContext,
+  prefetchAvailabilitySummary,
+} from '../../booking/AvailabilityDrawer/utils/availabilityPrefetch'
+import { INITIAL_WINDOW_DAYS } from '../../booking/AvailabilityDrawer/utils/availabilityWindow'
+import { useDefaultMobileAddress } from '../../booking/AvailabilityDrawer/hooks/useDefaultMobileAddress'
 
 const ALL_TAB: UiCategory = { name: 'The Looks', slug: 'all' }
 const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
@@ -26,13 +32,14 @@ const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
 const FEED_LIMIT = 24
 const FEED_CACHE_TTL_MS = 15_000
 const UPDATING_DELAY_MS = 250
+const AVAILABILITY_PREFETCH_DELAY_MS = 200
 
 type FeedCacheEntry = { items: FeedItem[]; expiresAt: number }
 
 function withSpotlight(cats: UiCategory[]) {
   if (cats.some((c) => c.slug === SPOTLIGHT_TAB.slug)) return cats
   const next = [...cats]
-  next.splice(1, 0, SPOTLIGHT_TAB) // right after "The Looks"
+  next.splice(1, 0, SPOTLIGHT_TAB)
   return next
 }
 
@@ -74,7 +81,11 @@ function parseCategories(raw: unknown): UiCategory[] {
       slug: typeof c.slug === 'string' ? c.slug.trim() : '',
     }))
     .filter((c) => c.name.length > 0 && c.slug.length > 0)
-    .filter((c) => c.name.toLowerCase() !== 'for you' && c.slug.toLowerCase() !== 'for-you')
+    .filter(
+      (c) =>
+        c.name.toLowerCase() !== 'for you' &&
+        c.slug.toLowerCase() !== 'for-you',
+    )
 
   const map = new Map<string, UiCategory>()
   for (const c of normalized) map.set(c.slug, c)
@@ -101,7 +112,6 @@ function parseComments(raw: unknown): UiComment[] {
   return comments as unknown as UiComment[]
 }
 
-/** Small deterministic “random” so signals don’t flicker on re-render */
 function hashStringToIndex(id: string, mod: number) {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
@@ -117,7 +127,12 @@ const BOOKING_SIGNALS = [
   'Clients saved this',
 ] as const
 
-const FUTURE_SELF_LINES = ['Wake up ready.', 'Low-maintenance glow.', 'Future-you called. Do it.', 'Main-character upgrade.'] as const
+const FUTURE_SELF_LINES = [
+  'Wake up ready.',
+  'Low-maintenance glow.',
+  'Future-you called. Do it.',
+  'Main-character upgrade.',
+] as const
 
 const FOOTER_HEIGHT = UI_SIZES.footerHeight
 const RIGHT_RAIL_BOTTOM = UI_SIZES.footerHeight + UI_SIZES.rightRailBottomOffset
@@ -127,20 +142,38 @@ function getNavigatorShare() {
   const n: unknown = navigator
   if (!isRecord(n)) return null
   const share = n.share
-  return typeof share === 'function' ? (share as (data: ShareData) => Promise<void>) : null
+  return typeof share === 'function'
+    ? (share as (data: ShareData) => Promise<void>)
+    : null
+}
+
+function buildAvailabilityDrawerContext(
+  item: FeedItem,
+  viewerLoc: ViewerLocation | null,
+): AvailabilityDrawerContext | null {
+  if (!item.professional?.id) return null
+
+  return {
+    mediaId: item.id,
+    professionalId: item.professional.id,
+    serviceId: item.serviceId ?? null,
+    source: 'DISCOVERY',
+    ...viewerLocationToDrawerContextFields(viewerLoc),
+  }
 }
 
 export default function LooksFeed() {
   const router = useRouter()
 
-  // State
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState<string | null>(null)
 
   const [cats, setCats] = useState<UiCategory[]>(withSpotlight([ALL_TAB]))
-  const [activeCategorySlug, setActiveCategorySlug] = useState<string>(ALL_TAB.slug)
+  const [activeCategorySlug, setActiveCategorySlug] = useState<string>(
+    ALL_TAB.slug,
+  )
 
   const categoriesForTopBar = useMemo(() => cats.map((c) => c.name), [cats])
   const activeCategoryName = useMemo(
@@ -157,26 +190,32 @@ export default function LooksFeed() {
   const [commentError, setCommentError] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
 
-  // Refs
   const hasLoadedOnceRef = useRef(false)
   const feedCacheRef = useRef(new Map<string, FeedCacheEntry>())
   const abortRef = useRef<AbortController | null>(null)
   const updatingTimerRef = useRef<number | null>(null)
+  const availabilityPrefetchTimerRef = useRef<number | null>(null)
+  const availabilityPrefetchAbortRef = useRef<AbortController | null>(null)
 
   const likeInFlight = useRef<Record<string, boolean>>({})
   const lastTapRef = useRef<Record<string, number>>({})
   const feedScrollRef = useRef<HTMLDivElement | null>(null)
 
   const [availabilityOpen, setAvailabilityOpen] = useState(false)
-  const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(null)
+  const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(
+    null,
+  )
   const [activeIndex, setActiveIndex] = useState(0)
 
-  // ✅ viewer location (single source of truth)
   const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
   useEffect(() => {
     setViewerLoc(loadViewerLocation())
     return subscribeViewerLocation(setViewerLoc)
   }, [])
+
+  const {
+    defaultAddressId,
+  } = useDefaultMobileAddress(true)
 
   const redirectToLogin = useCallback(
     (reason: string) => {
@@ -200,27 +239,41 @@ export default function LooksFeed() {
 
   const loadCategories = useCallback(async () => {
     try {
-      const res = await fetch('/api/looks/categories', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const res = await fetch('/api/looks/categories', {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
       const raw = await safeJson(res)
       if (!res.ok) {
-        throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load categories' : 'Failed to load categories')
+        throw new Error(
+          isRecord(raw)
+            ? pickString(raw.error) ?? 'Failed to load categories'
+            : 'Failed to load categories',
+        )
       }
 
       const next = parseCategories(raw)
       setCats(next)
-      setActiveCategorySlug((cur) => (next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug))
+      setActiveCategorySlug((cur) =>
+        next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug,
+      )
     } catch {
       const next = withSpotlight([ALL_TAB])
       setCats(next)
-      setActiveCategorySlug((cur) => (next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug))
+      setActiveCategorySlug((cur) =>
+        next.some((x) => x.slug === cur) ? cur : ALL_TAB.slug,
+      )
     }
   }, [])
 
   const loadFeed = useCallback(async () => {
-    const key = makeFeedKey({ slug: activeCategorySlug, q: query, limit: FEED_LIMIT })
+    const key = makeFeedKey({
+      slug: activeCategorySlug,
+      q: query,
+      limit: FEED_LIMIT,
+    })
     const now = Date.now()
 
-    // 1) Instant render from cache (seamless tab switches)
     const cached = feedCacheRef.current.get(key)
     const cachedFresh = Boolean(cached && cached.expiresAt > now)
 
@@ -230,23 +283,22 @@ export default function LooksFeed() {
       setLoading(false)
       setRefreshing(false)
       hasLoadedOnceRef.current = true
-      // still refresh in background, but silently
     }
 
-    // 2) Cancel any in-flight request
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
 
-    // 3) Only show "refreshing" if it’s slow AND we didn’t have cached content
     if (updatingTimerRef.current) window.clearTimeout(updatingTimerRef.current)
     if (hasLoadedOnceRef.current && !cachedFresh) {
-      updatingTimerRef.current = window.setTimeout(() => setRefreshing(true), UPDATING_DELAY_MS)
+      updatingTimerRef.current = window.setTimeout(
+        () => setRefreshing(true),
+        UPDATING_DELAY_MS,
+      )
     } else {
       setRefreshing(false)
     }
 
-    // 4) Initial load spinner only when we truly have nothing
     if (!hasLoadedOnceRef.current && !cachedFresh) setLoading(true)
 
     setFeedError(null)
@@ -254,7 +306,9 @@ export default function LooksFeed() {
     try {
       const qs = new URLSearchParams()
       qs.set('limit', String(FEED_LIMIT))
-      if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) qs.set('category', activeCategorySlug)
+      if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) {
+        qs.set('category', activeCategorySlug)
+      }
       if (query.trim()) qs.set('q', query.trim())
 
       const res = await fetch(`/api/looks?${qs.toString()}`, {
@@ -267,21 +321,26 @@ export default function LooksFeed() {
       if (ac.signal.aborted) return
 
       if (!res.ok) {
-        throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load looks' : 'Failed to load looks')
+        throw new Error(
+          isRecord(raw)
+            ? pickString(raw.error) ?? 'Failed to load looks'
+            : 'Failed to load looks',
+        )
       }
 
       const nextItems = parseFeedItems(raw)
 
       setItems(nextItems)
-      feedCacheRef.current.set(key, { items: nextItems, expiresAt: Date.now() + FEED_CACHE_TTL_MS })
+      feedCacheRef.current.set(key, {
+        items: nextItems,
+        expiresAt: Date.now() + FEED_CACHE_TTL_MS,
+      })
       hasLoadedOnceRef.current = true
     } catch (e: unknown) {
-      // Ignore aborts (tab switching fast)
       if (e instanceof DOMException && e.name === 'AbortError') return
       if (ac.signal.aborted) return
 
       setFeedError(e instanceof Error ? e.message : 'Failed to load looks')
-      // keep old items so it doesn't feel like a wipe
     } finally {
       if (updatingTimerRef.current) window.clearTimeout(updatingTimerRef.current)
       setLoading(false)
@@ -306,7 +365,9 @@ export default function LooksFeed() {
   useEffect(() => {
     const el = feedScrollRef.current
     if (!el) return
-    const slides = Array.from(el.querySelectorAll('[data-look-slide="1"]')) as HTMLElement[]
+    const slides = Array.from(
+      el.querySelectorAll('[data-look-slide="1"]'),
+    ) as HTMLElement[]
     if (!slides.length) return
 
     const io = new IntersectionObserver(
@@ -326,6 +387,86 @@ export default function LooksFeed() {
     return () => io.disconnect()
   }, [items.length])
 
+  useEffect(() => {
+    if (availabilityPrefetchTimerRef.current) {
+      window.clearTimeout(availabilityPrefetchTimerRef.current)
+      availabilityPrefetchTimerRef.current = null
+    }
+
+    availabilityPrefetchAbortRef.current?.abort()
+    availabilityPrefetchAbortRef.current = null
+
+    const activeItem = items[activeIndex]
+    if (!activeItem) return
+
+    const activeContext = buildAvailabilityDrawerContext(activeItem, viewerLoc)
+    if (!activeContext) return
+
+    const controller = new AbortController()
+    availabilityPrefetchAbortRef.current = controller
+
+    availabilityPrefetchTimerRef.current = window.setTimeout(() => {
+      const prefetchForContext = (ctx: AvailabilityDrawerContext | null) => {
+        if (!ctx) return
+
+        const salonArgs = buildAvailabilityPrefetchArgsFromContext({
+          context: ctx,
+          locationType: 'SALON',
+          includeOtherPros: false,
+          days: INITIAL_WINDOW_DAYS,
+          startDate: null,
+        })
+
+        if (salonArgs) {
+          void prefetchAvailabilitySummary({
+            ...salonArgs,
+            signal: controller.signal,
+          })
+        }
+
+        if (defaultAddressId) {
+          const mobileArgs = buildAvailabilityPrefetchArgsFromContext({
+            context: ctx,
+            locationType: 'MOBILE',
+            clientAddressId: defaultAddressId,
+            includeOtherPros: false,
+            days: INITIAL_WINDOW_DAYS,
+            startDate: null,
+          })
+
+          if (mobileArgs) {
+            void prefetchAvailabilitySummary({
+              ...mobileArgs,
+              signal: controller.signal,
+            })
+          }
+        }
+      }
+
+      prefetchForContext(activeContext)
+
+      const nextItem = items[activeIndex + 1]
+      const nextContext = nextItem
+        ? buildAvailabilityDrawerContext(nextItem, viewerLoc)
+        : null
+
+      prefetchForContext(nextContext)
+    }, AVAILABILITY_PREFETCH_DELAY_MS)
+
+    return () => {
+      if (availabilityPrefetchTimerRef.current) {
+        window.clearTimeout(availabilityPrefetchTimerRef.current)
+        availabilityPrefetchTimerRef.current = null
+      }
+
+      controller.abort()
+
+      if (availabilityPrefetchAbortRef.current === controller) {
+        availabilityPrefetchAbortRef.current = null
+      }
+    }
+  }, [items, activeIndex, viewerLoc, defaultAddressId])
+
   const toggleLike = useCallback(
     async (mediaId: string) => {
       if (likeInFlight.current[mediaId]) return
@@ -343,18 +484,30 @@ export default function LooksFeed() {
           if (m.id !== mediaId) return m
           const nextLiked = !m.viewerLiked
           const nextCount = Math.max(0, m._count.likes + (nextLiked ? 1 : -1))
-          return { ...m, viewerLiked: nextLiked, _count: { ...m._count, likes: nextCount } }
+          return {
+            ...m,
+            viewerLiked: nextLiked,
+            _count: { ...m._count, likes: nextCount },
+          }
         })
       })
 
       try {
-        const res = await fetch(`/api/looks/${mediaId}/like`, { method: beforeLiked ? 'DELETE' : 'POST' })
+        const res = await fetch(`/api/looks/${mediaId}/like`, {
+          method: beforeLiked ? 'DELETE' : 'POST',
+        })
         const raw = await safeJson(res)
 
         if (isGuestBlocked(res.status)) {
           setItems((prev) =>
             prev.map((m) =>
-              m.id === mediaId ? { ...m, viewerLiked: beforeLiked, _count: { ...m._count, likes: beforeCount } } : m,
+              m.id === mediaId
+                ? {
+                    ...m,
+                    viewerLiked: beforeLiked,
+                    _count: { ...m._count, likes: beforeCount },
+                  }
+                : m,
             ),
           )
           redirectToLogin('like')
@@ -364,17 +517,28 @@ export default function LooksFeed() {
         if (!res.ok) {
           setItems((prev) =>
             prev.map((m) =>
-              m.id === mediaId ? { ...m, viewerLiked: beforeLiked, _count: { ...m._count, likes: beforeCount } } : m,
+              m.id === mediaId
+                ? {
+                    ...m,
+                    viewerLiked: beforeLiked,
+                    _count: { ...m._count, likes: beforeCount },
+                  }
+                : m,
             ),
           )
           return
         }
 
-        const serverLiked = isRecord(raw) && typeof raw.liked === 'boolean' ? raw.liked : !beforeLiked
+        const serverLiked =
+          isRecord(raw) && typeof raw.liked === 'boolean'
+            ? raw.liked
+            : !beforeLiked
         const serverCount =
           isRecord(raw) && typeof raw.likeCount === 'number'
             ? raw.likeCount
-            : isRecord(raw) && isRecord(raw._count) && typeof raw._count.likes === 'number'
+            : isRecord(raw) &&
+                isRecord(raw._count) &&
+                typeof raw._count.likes === 'number'
               ? raw._count.likes
               : undefined
 
@@ -384,7 +548,13 @@ export default function LooksFeed() {
               ? {
                   ...m,
                   viewerLiked: serverLiked,
-                  _count: { ...m._count, likes: typeof serverCount === 'number' ? serverCount : m._count.likes },
+                  _count: {
+                    ...m._count,
+                    likes:
+                      typeof serverCount === 'number'
+                        ? serverCount
+                        : m._count.likes,
+                  },
                 }
               : m,
           ),
@@ -405,7 +575,10 @@ export default function LooksFeed() {
     [items, toggleLike],
   )
 
-  const handleDoubleClickLikeOnly = useCallback((mediaId: string) => likeOnly(mediaId), [likeOnly])
+  const handleDoubleClickLikeOnly = useCallback(
+    (mediaId: string) => likeOnly(mediaId),
+    [likeOnly],
+  )
 
   const handleTouchEndLikeOnly = useCallback(
     (mediaId: string) => {
@@ -425,7 +598,10 @@ export default function LooksFeed() {
     setCommentsLoading(true)
 
     try {
-      const res = await fetch(`/api/looks/${mediaId}/comments`, { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const res = await fetch(`/api/looks/${mediaId}/comments`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
       const raw = await safeJson(res)
 
       if (isGuestBlocked(res.status)) {
@@ -434,7 +610,13 @@ export default function LooksFeed() {
         return
       }
 
-      if (!res.ok) throw new Error(isRecord(raw) ? pickString(raw.error) ?? 'Failed to load comments' : 'Failed to load comments')
+      if (!res.ok) {
+        throw new Error(
+          isRecord(raw)
+            ? pickString(raw.error) ?? 'Failed to load comments'
+            : 'Failed to load comments',
+        )
+      }
       setComments(parseComments(raw))
     } catch (e: unknown) {
       setCommentError(e instanceof Error ? e.message : 'Failed to load comments')
@@ -463,7 +645,16 @@ export default function LooksFeed() {
 
     setComments((prev) => [optimistic, ...prev])
     setCommentText('')
-    setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: m._count.comments + 1 } } : m)))
+    setItems((prev) =>
+      prev.map((m) =>
+        m.id === mediaId
+          ? {
+              ...m,
+              _count: { ...m._count, comments: m._count.comments + 1 },
+            }
+          : m,
+      ),
+    )
 
     try {
       const res = await fetch(`/api/looks/${mediaId}/comments`, {
@@ -477,7 +668,17 @@ export default function LooksFeed() {
       if (isGuestBlocked(res.status)) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
         setItems((prev) =>
-          prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+          prev.map((m) =>
+            m.id === mediaId
+              ? {
+                  ...m,
+                  _count: {
+                    ...m._count,
+                    comments: Math.max(0, m._count.comments - 1),
+                  },
+                }
+              : m,
+          ),
         )
         redirectToLogin('comment')
         return
@@ -486,7 +687,17 @@ export default function LooksFeed() {
       if (!res.ok) {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
         setItems((prev) =>
-          prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+          prev.map((m) =>
+            m.id === mediaId
+              ? {
+                  ...m,
+                  _count: {
+                    ...m._count,
+                    comments: Math.max(0, m._count.comments - 1),
+                  },
+                }
+              : m,
+          ),
         )
         const msg = isRecord(raw) ? pickString(raw.error) : null
         setCommentError(msg ?? 'Failed to post comment')
@@ -497,7 +708,17 @@ export default function LooksFeed() {
     } catch (e: unknown) {
       setComments((prev) => prev.filter((c) => c.id !== tempId))
       setItems((prev) =>
-        prev.map((m) => (m.id === mediaId ? { ...m, _count: { ...m._count, comments: Math.max(0, m._count.comments - 1) } } : m)),
+        prev.map((m) =>
+          m.id === mediaId
+            ? {
+                ...m,
+                _count: {
+                  ...m._count,
+                  comments: Math.max(0, m._count.comments - 1),
+                },
+              }
+            : m,
+        ),
       )
       setCommentError(e instanceof Error ? e.message : 'Failed to post comment')
     } finally {
@@ -512,15 +733,8 @@ export default function LooksFeed() {
 
   const openAvailabilityFor = useCallback(
     (item: FeedItem) => {
-      if (!item.professional?.id) return
-
-      const ctx: AvailabilityDrawerContext = {
-        mediaId: item.id,
-        professionalId: item.professional.id,
-        serviceId: item.serviceId ?? null,
-        source: 'DISCOVERY',
-        ...viewerLocationToDrawerContextFields(viewerLoc),
-      }
+      const ctx = buildAvailabilityDrawerContext(item, viewerLoc)
+      if (!ctx) return
 
       setDrawerCtx(ctx)
       setAvailabilityOpen(true)
@@ -535,7 +749,11 @@ export default function LooksFeed() {
     try {
       const share = getNavigatorShare()
       if (share) {
-        await share({ title: 'TOVIS Look', text: item.caption ? item.caption.slice(0, 120) : undefined, url })
+        await share({
+          title: 'TOVIS Look',
+          text: item.caption ? item.caption.slice(0, 120) : undefined,
+          url,
+        })
         return
       }
 
@@ -554,7 +772,15 @@ export default function LooksFeed() {
 
   return (
     <>
-      <div className="bg-bgPrimary" style={{ height: FEED_VIEWPORT_HEIGHT, width: '100%', overflow: 'hidden', position: 'relative' }}>
+      <div
+        className="bg-bgPrimary"
+        style={{
+          height: FEED_VIEWPORT_HEIGHT,
+          width: '100%',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
         <LooksTopBar
           categories={categoriesForTopBar}
           activeCategory={activeCategoryName}
@@ -577,16 +803,30 @@ export default function LooksFeed() {
             {loading && !items.length ? (
               <div className="p-3 text-textSecondary">Loading Looks…</div>
             ) : !items.length ? (
-              <div className="p-3 text-textSecondary">No Looks yet. This is where the glow-ups will live.</div>
+              <div className="p-3 text-textSecondary">
+                No Looks yet. This is where the glow-ups will live.
+              </div>
             ) : (
               items.map((m, idx) => {
-                const signal = BOOKING_SIGNALS[hashStringToIndex(m.id, BOOKING_SIGNALS.length)]
-                const futureSelf = FUTURE_SELF_LINES[hashStringToIndex(m.id + '_future', FUTURE_SELF_LINES.length)]
+                const signal =
+                  BOOKING_SIGNALS[hashStringToIndex(m.id, BOOKING_SIGNALS.length)]
+                const futureSelf =
+                  FUTURE_SELF_LINES[
+                    hashStringToIndex(m.id + '_future', FUTURE_SELF_LINES.length)
+                  ]
                 const isActive = idx === activeIndex
 
                 const rightRail = (
                   <RightActionRail
-                    pro={m.professional ? { id: m.professional.id, businessName: m.professional.businessName, avatarUrl: m.professional.avatarUrl ?? null } : null}
+                    pro={
+                      m.professional
+                        ? {
+                            id: m.professional.id,
+                            businessName: m.professional.businessName,
+                            avatarUrl: m.professional.avatarUrl ?? null,
+                          }
+                        : null
+                    }
                     viewerLiked={m.viewerLiked}
                     likeCount={m._count.likes}
                     commentCount={m._count.comments}
@@ -620,35 +860,49 @@ export default function LooksFeed() {
           </div>
 
           {feedError ? (
-            <div className="p-3 text-toneDanger" style={{ position: 'absolute', left: 0, right: 0, top: 70, pointerEvents: 'none' }}>
+            <div
+              className="p-3 text-toneDanger"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: 70,
+                pointerEvents: 'none',
+              }}
+            >
               {feedError}
             </div>
           ) : null}
 
-          {/* Only shows if the fetch is slow AND there was no cached content */}
           {refreshing ? (
-          <div
-            className="text-xs font-semibold text-textSecondary"
-            style={{
-              position: 'absolute',
-              right: 12,
-              top: 72,
-              background: 'rgba(0,0,0,0.28)',
-              border: '1px solid rgba(255,255,255,0.10)',
-              borderRadius: 999,
-              padding: '6px 10px',
-              backdropFilter: 'blur(14px)',
-              WebkitBackdropFilter: 'blur(14px)',
-              pointerEvents: 'none',
-            }}
-          >
-            Updating…
-          </div>
-        ) : null}
+            <div
+              className="text-xs font-semibold text-textSecondary"
+              style={{
+                position: 'absolute',
+                right: 12,
+                top: 72,
+                background: 'rgba(0,0,0,0.28)',
+                border: '1px solid rgba(255,255,255,0.10)',
+                borderRadius: 999,
+                padding: '6px 10px',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                pointerEvents: 'none',
+              }}
+            >
+              Updating…
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {drawerCtx ? <AvailabilityDrawer open={availabilityOpen} onClose={closeAvailability} context={drawerCtx} /> : null}
+      {drawerCtx ? (
+        <AvailabilityDrawer
+          open={availabilityOpen}
+          onClose={closeAvailability}
+          context={drawerCtx}
+        />
+      ) : null}
 
       <CommentsDrawer
         open={Boolean(openCommentsFor)}
