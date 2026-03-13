@@ -48,6 +48,15 @@ type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
 
+type ConfirmHoldSelection = {
+  holdId: string
+  offeringId: string
+  locationType: ServiceLocationType
+  slotISO: string
+  bookingSource: BookingSource
+  mediaId: string | null
+}
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
@@ -225,8 +234,10 @@ export default function AvailabilityDrawer(props: {
   open: boolean
   onClose: () => void
   context: DrawerContext
+  onConfirmHold?: (selection: ConfirmHoldSelection) => void | Promise<void>
 }) {
-  const { open, onClose, context } = props
+
+  const { open, onClose, context, onConfirmHold } = props
 
   const router = useRouter()
   const debug = useDebugFlag()
@@ -331,12 +342,12 @@ export default function AvailabilityDrawer(props: {
     useHoldTimer(holdUntil)
 
   const appointmentTz = useMemo(() => {
-  const resolved = resolveAppointmentTimeZone({
-    summaryTimeZone: summary?.timeZone,
-    primaryProTimeZone: primary?.timeZone,
-  })
-  return sanitizeTimeZone(resolved, FALLBACK_TZ)
-}, [summary?.timeZone, primary?.timeZone])
+    const resolved = resolveAppointmentTimeZone({
+      summaryTimeZone: summary?.timeZone,
+      primaryProTimeZone: primary?.timeZone,
+    })
+    return sanitizeTimeZone(resolved, FALLBACK_TZ)
+  }, [summary?.timeZone, primary?.timeZone])
 
   const showLocalHint = viewerTz !== appointmentTz
   const effectiveServiceId = summary?.serviceId ?? context.serviceId ?? null
@@ -756,23 +767,45 @@ export default function AvailabilityDrawer(props: {
     }
   }
 
-  function onContinue() {
-    if (!selected?.holdId || !selected?.offeringId || holding) return
+  async function onContinue() {
+  if (!selected?.holdId || !selected?.offeringId || holding) return
 
-    const qs = new URLSearchParams({
-      holdId: selected.holdId,
-      offeringId: selected.offeringId,
-      locationType: activeLocationType,
-      source: bookingSource,
-    })
-
-    if (context.mediaId) {
-      qs.set('mediaId', context.mediaId)
-    }
-
-    onClose()
-    router.push(`/booking/add-ons?${qs.toString()}`)
+  const payload: ConfirmHoldSelection = {
+    holdId: selected.holdId,
+    offeringId: selected.offeringId,
+    locationType: activeLocationType,
+    slotISO: selected.slotISO,
+    bookingSource,
+    mediaId: context.mediaId ?? null,
   }
+
+  if (onConfirmHold) {
+    try {
+      await onConfirmHold(payload)
+      // Do not delete the hold here; the caller/route consumes it on success.
+      onClose()
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Could not continue with that time.',
+      )
+    }
+    return
+  }
+
+  const qs = new URLSearchParams({
+    holdId: payload.holdId,
+    offeringId: payload.offeringId,
+    locationType: payload.locationType,
+    source: payload.bookingSource,
+  })
+
+  if (payload.mediaId) {
+    qs.set('mediaId', payload.mediaId)
+  }
+
+  onClose()
+  router.push(`/booking/add-ons?${qs.toString()}`)
+}
 
   const selectedLine = selected?.slotISO
     ? fmtSelectedLine(selected.slotISO, appointmentTz)

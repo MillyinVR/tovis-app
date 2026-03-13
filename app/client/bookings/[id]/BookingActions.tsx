@@ -3,15 +3,22 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { DEFAULT_TIME_ZONE, getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { safeJson } from '@/lib/http'
+
+type BookingLocationType = 'SALON' | 'MOBILE' | null
+
 type Props = {
   bookingId: string
-  status: any
+  status: unknown
   scheduledFor: string // ISO UTC
   durationMinutesSnapshot?: number | null
-  appointmentTz?: string | null // ✅ booking.locationTimeZone (DTO) or server-derived
+  appointmentTz?: string | null
+  rescheduleHoldId?: string | null
+  locationType?: BookingLocationType
+  onRequestReschedule?: () => void
+  onConfirmReschedule?: () => Promise<void> | void
 }
 
 function upper(v: unknown) {
@@ -24,46 +31,18 @@ function toDateIsoUtc(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-/**
- * ISO (UTC) -> datetime-local string shown in the given (already-sanitized) timeZone.
- * No browser implicit conversions.
- */
-function toDatetimeLocalValueInTimeZone(isoUtc: string, tz: string) {
-  const d = toDateIsoUtc(isoUtc)
-  if (!d) return ''
+function errorFromResponse(res: Response, data: unknown) {
+  const rec =
+    data && typeof data === 'object' ? (data as Record<string, unknown>) : null
 
-  const p = getZonedParts(d, tz)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
-}
-
-/**
- * datetime-local value -> UTC Date, interpreting the wall clock in (already-sanitized) timeZone.
- */
-function fromDatetimeLocalValueInTimeZone(v: string, tz: string): Date | null {
-  if (!v || typeof v !== 'string') return null
-  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
-  if (!m) return null
-
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  const hour = Number(m[4])
-  const minute = Number(m[5])
-
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
-
-  const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
-  return Number.isNaN(utc.getTime()) ? null : utc
-}
-
-
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+  if (typeof rec?.error === 'string') return rec.error
   if (res.status === 401) return 'Please log in again.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  if (res.status === 409) return data?.error || 'That time is no longer available.'
+  if (res.status === 403) return 'You do not have access to do that.'
+  if (res.status === 409) {
+    return typeof rec?.error === 'string'
+      ? rec.error
+      : 'That request could not be completed.'
+  }
   return `Request failed (${res.status}).`
 }
 
@@ -79,6 +58,10 @@ export default function BookingActions({
   scheduledFor,
   durationMinutesSnapshot,
   appointmentTz,
+  rescheduleHoldId,
+  locationType,
+  onRequestReschedule,
+  onConfirmReschedule,
 }: Props) {
   const router = useRouter()
 
@@ -89,10 +72,13 @@ export default function BookingActions({
   const isCompleted = statusUpper === 'COMPLETED'
 
   const canCancel = !isCancelled && !isCompleted
-  const canReschedule = (isPending || isAccepted) && !isCancelled && !isCompleted
+  const canReschedule =
+    (isPending || isAccepted) && !isCancelled && !isCompleted
 
-  // ✅ sanitize once, with policy-approved fallback
-  const tz = useMemo(() => sanitizeTimeZone(appointmentTz, DEFAULT_TIME_ZONE), [appointmentTz])
+  const tz = useMemo(
+    () => sanitizeTimeZone(appointmentTz, DEFAULT_TIME_ZONE),
+    [appointmentTz],
+  )
 
   const scheduledDate = useMemo(() => toDateIsoUtc(scheduledFor), [scheduledFor])
 
@@ -106,13 +92,8 @@ export default function BookingActions({
   const [success, setSuccess] = useState<string | null>(null)
   const [mode, setMode] = useState<'none' | 'reschedule'>('none')
 
-  const [localValue, setLocalValue] = useState<string>(() => toDatetimeLocalValueInTimeZone(scheduledFor, tz))
-
-  useEffect(() => {
-    setLocalValue(toDatetimeLocalValueInTimeZone(scheduledFor, tz))
-  }, [scheduledFor, tz])
-
   const abortRef = useRef<AbortController | null>(null)
+
   useEffect(() => {
     return () => {
       abortRef.current?.abort()
@@ -125,7 +106,7 @@ export default function BookingActions({
     setSuccess(null)
   }
 
-  async function post(url: string, body?: any) {
+  async function post(url: string, body?: Record<string, unknown>) {
     resetAlerts()
     setBusy(true)
 
@@ -147,9 +128,10 @@ export default function BookingActions({
       setSuccess('Saved.')
       setMode('none')
       router.refresh()
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
-      setError(e?.message || 'Something went wrong.')
+    } catch (e: unknown) {
+      const err = e as { name?: string; message?: string } | null
+      if (err?.name === 'AbortError') return
+      setError(err?.message || 'Something went wrong.')
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null
@@ -161,35 +143,54 @@ export default function BookingActions({
   async function cancelBooking() {
     if (!canCancel || busy) return
     resetAlerts()
+
     if (!window.confirm('Cancel this booking?')) return
+
     await post(`/api/bookings/${encodeURIComponent(bookingId)}/cancel`)
   }
 
-  async function rescheduleBooking() {
+  async function confirmReschedule() {
     if (!canReschedule || busy) return
     resetAlerts()
 
-    const nextUtc = fromDatetimeLocalValueInTimeZone(localValue, tz)
-    if (!nextUtc) return setError('Pick a valid date/time.')
-    if (nextUtc.getTime() < Date.now()) return setError('Pick a future time.')
-
-    if (scheduledDate) {
-      const sameMinute = Math.floor(nextUtc.getTime() / 60000) === Math.floor(scheduledDate.getTime() / 60000)
-      if (sameMinute) return setError('Choose a different time than the current one.')
+    if (!rescheduleHoldId) {
+      setError('Choose a new available time before rescheduling this booking.')
+      return
     }
 
-    const ok = window.confirm(`Reschedule to:\n\n${formatAppointmentWhen(nextUtc, tz)}\n\nProceed?`)
+    if (!locationType) {
+      setError('Missing booking location type for reschedule.')
+      return
+    }
+
+    if (!onConfirmReschedule) {
+      setError('Reschedule flow is not connected yet.')
+      return
+    }
+
+    const ok = window.confirm('Use the selected new time for this booking?')
     if (!ok) return
 
-    // ✅ API expects UTC ISO
-    await post(`/api/bookings/${encodeURIComponent(bookingId)}/reschedule`, {
-      scheduledFor: nextUtc.toISOString(),
-    })
+    try {
+      setBusy(true)
+      await onConfirmReschedule()
+      setSuccess('Saved.')
+      setMode('none')
+    } catch (e: unknown) {
+      const err = e as { message?: string } | null
+      setError(err?.message || 'Something went wrong.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const timeline = useMemo(() => {
     const base = [
-      { key: 'requested', label: 'Requested', on: isPending || isAccepted || isCompleted || isCancelled },
+      {
+        key: 'requested',
+        label: 'Requested',
+        on: isPending || isAccepted || isCompleted || isCancelled,
+      },
       { key: 'confirmed', label: 'Confirmed', on: isAccepted || isCompleted },
       { key: 'completed', label: 'Completed', on: isCompleted },
     ] as const
@@ -217,7 +218,10 @@ export default function BookingActions({
         {timeline.map((t) => (
           <span
             key={t.key}
-            className={['inline-flex items-center rounded-full px-3 py-1 text-xs font-black', pillClass(t.on)].join(' ')}
+            className={[
+              'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
+              pillClass(t.on),
+            ].join(' ')}
           >
             {t.label}
           </span>
@@ -268,18 +272,30 @@ export default function BookingActions({
       {mode === 'reschedule' && canReschedule ? (
         <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
           <div className="text-xs font-black">
-            Pick a new time <span className="font-semibold text-textSecondary">({tz})</span>
+            Choose a new time slot before confirming
           </div>
 
-          <input
-            type="datetime-local"
-            value={localValue}
-            onChange={(e) => setLocalValue(e.target.value)}
-            disabled={busy}
-            className="w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
-          />
+          <div className="text-xs font-semibold text-textSecondary">
+            This flow now uses a held slot. It does not directly submit a raw date/time anymore.
+          </div>
 
           <div className="flex flex-wrap justify-end gap-2">
+            {onRequestReschedule ? (
+              <button
+                type="button"
+                onClick={onRequestReschedule}
+                disabled={busy}
+                className={[
+                  'rounded-full px-4 py-2 text-sm font-black transition',
+                  busy
+                    ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
+                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                ].join(' ')}
+              >
+                Pick new time
+              </button>
+            ) : null}
+
             <button
               type="button"
               onClick={() => setMode('none')}
@@ -296,23 +312,33 @@ export default function BookingActions({
 
             <button
               type="button"
-              onClick={rescheduleBooking}
-              disabled={busy}
+              onClick={confirmReschedule}
+              disabled={busy || !rescheduleHoldId || !locationType}
               className={[
                 'rounded-full px-4 py-2 text-sm font-black transition',
-                busy
+                busy || !rescheduleHoldId || !locationType
                   ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
                   : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
               ].join(' ')}
             >
-              {busy ? 'Saving…' : 'Save new time'}
+              {busy ? 'Saving…' : 'Confirm new time'}
             </button>
           </div>
+
+          {!rescheduleHoldId ? (
+            <div className="text-xs font-semibold text-textSecondary">
+              No held replacement slot selected yet.
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      {error ? <div className="text-xs font-semibold text-microAccent">{error}</div> : null}
-      {success ? <div className="text-xs font-semibold text-textSecondary">{success}</div> : null}
+      {error ? (
+        <div className="text-xs font-semibold text-microAccent">{error}</div>
+      ) : null}
+      {success ? (
+        <div className="text-xs font-semibold text-textSecondary">{success}</div>
+      ) : null}
     </section>
   )
 }

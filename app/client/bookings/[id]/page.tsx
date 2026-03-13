@@ -6,7 +6,7 @@ import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 
 import ReviewSection from './ReviewSection'
-import BookingActions from './BookingActions'
+import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 export const dynamic = 'force-dynamic'
 
 type StepKey = 'overview' | 'consult' | 'aftercare'
-
 
 function normalizeStep(raw: unknown): StepKey {
   const s = String(raw || '').toLowerCase().trim()
@@ -86,7 +85,9 @@ function friendlySource(v: unknown) {
 
 type StatusVariant = 'danger' | 'success' | 'warn' | 'info' | 'neutral'
 
-function statusPillVariant(statusRaw: unknown): Exclude<StatusVariant, 'neutral'> {
+function statusPillVariant(
+  statusRaw: unknown,
+): Exclude<StatusVariant, 'neutral'> {
   const s = upper(statusRaw)
   if (s === 'CANCELLED') return 'danger'
   if (s === 'COMPLETED') return 'success'
@@ -94,14 +95,34 @@ function statusPillVariant(statusRaw: unknown): Exclude<StatusVariant, 'neutral'
   return 'info'
 }
 
-function statusMessage(statusRaw: unknown): { title: string; body: string; variant: StatusVariant } {
+function statusMessage(statusRaw: unknown): {
+  title: string
+  body: string
+  variant: StatusVariant
+} {
   const s = upper(statusRaw)
   const M = COPY.bookings.status.messages
 
-  if (s === 'PENDING') return { title: M.pending.title, body: M.pending.body, variant: 'warn' }
-  if (s === 'ACCEPTED') return { title: M.accepted.title, body: M.accepted.body, variant: 'info' }
-  if (s === 'COMPLETED') return { title: M.completed.title, body: M.completed.body, variant: 'success' }
-  if (s === 'CANCELLED') return { title: M.cancelled.title, body: M.cancelled.body, variant: 'danger' }
+  if (s === 'PENDING') {
+    return { title: M.pending.title, body: M.pending.body, variant: 'warn' }
+  }
+  if (s === 'ACCEPTED') {
+    return { title: M.accepted.title, body: M.accepted.body, variant: 'info' }
+  }
+  if (s === 'COMPLETED') {
+    return {
+      title: M.completed.title,
+      body: M.completed.body,
+      variant: 'success',
+    }
+  }
+  if (s === 'CANCELLED') {
+    return {
+      title: M.cancelled.title,
+      body: M.cancelled.body,
+      variant: 'danger',
+    }
+  }
 
   return { title: M.fallback.title, body: M.fallback.body, variant: 'neutral' }
 }
@@ -119,7 +140,9 @@ function tabClass(active: boolean) {
   return cn(
     'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
     'border border-white/10',
-    active ? 'bg-accentPrimary text-bgPrimary shadow-sm' : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+    active
+      ? 'bg-accentPrimary text-bgPrimary shadow-sm'
+      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
   )
 }
 
@@ -136,29 +159,49 @@ type AftercareRebookInfo =
   | { mode: 'RECOMMENDED_DATE'; label: string }
   | { mode: 'NONE'; label: null }
 
-function getAftercareRebookInfo(aftercare: any, timeZone: string): AftercareRebookInfo {
+function getAftercareRebookInfo(
+  aftercare: any,
+  timeZone: string,
+): AftercareRebookInfo {
   const modeRaw = upper(aftercare?.rebookMode || 'NONE')
 
   if (modeRaw === 'BOOKED_NEXT_APPOINTMENT') {
     const d = toDate(aftercare?.rebookedFor)
     return d
-      ? { mode: 'BOOKED_NEXT_APPOINTMENT', label: `Next appointment booked: ${formatWhenInTimeZone(d, timeZone)}` }
-      : { mode: 'BOOKED_NEXT_APPOINTMENT', label: 'Next appointment booked.' }
+      ? {
+          mode: 'BOOKED_NEXT_APPOINTMENT',
+          label: `Next appointment booked: ${formatWhenInTimeZone(d, timeZone)}`,
+        }
+      : {
+          mode: 'BOOKED_NEXT_APPOINTMENT',
+          label: 'Next appointment booked.',
+        }
   }
 
   if (modeRaw === 'RECOMMENDED_WINDOW') {
     const s = toDate(aftercare?.rebookWindowStart)
     const e = toDate(aftercare?.rebookWindowEnd)
     if (s && e) {
-      return { mode: 'RECOMMENDED_WINDOW', label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}` }
+      return {
+        mode: 'RECOMMENDED_WINDOW',
+        label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}`,
+      }
     }
-    return { mode: 'RECOMMENDED_WINDOW', label: 'Recommended rebook window.' }
+    return {
+      mode: 'RECOMMENDED_WINDOW',
+      label: 'Recommended rebook window.',
+    }
   }
 
   if (modeRaw === 'NONE') return { mode: 'NONE', label: null }
 
   const legacy = toDate(aftercare?.rebookedFor)
-  if (legacy) return { mode: 'RECOMMENDED_DATE', label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}` }
+  if (legacy) {
+    return {
+      mode: 'RECOMMENDED_DATE',
+      label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}`,
+    }
+  }
 
   return { mode: 'NONE', label: null }
 }
@@ -186,9 +229,13 @@ function SectionCard(props: {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[13px] font-black text-textPrimary">{props.title}</div>
+          <div className="text-[13px] font-black text-textPrimary">
+            {props.title}
+          </div>
           {props.subtitle ? (
-            <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">{props.subtitle}</div>
+            <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+              {props.subtitle}
+            </div>
           ) : null}
         </div>
         {props.right ? <div className="shrink-0">{props.right}</div> : null}
@@ -221,30 +268,48 @@ function computePendingConsultation(raw: {
   if (step === 'CONSULTATION_PENDING_CLIENT') return true
 
   const approval = upper(raw.consultationApproval?.status)
-  const PENDING_SET = new Set(['PENDING', 'PENDING_CLIENT', 'PENDING_CLIENT_APPROVAL', 'AWAITING_CLIENT', 'WAITING_CLIENT', 'SENT'])
+  const PENDING_SET = new Set([
+    'PENDING',
+    'PENDING_CLIENT',
+    'PENDING_CLIENT_APPROVAL',
+    'AWAITING_CLIENT',
+    'WAITING_CLIENT',
+    'SENT',
+  ])
   return PENDING_SET.has(approval)
 }
 
 export default async function ClientBookingPage(props: {
   params: Promise<{ id: string }> | { id: string }
-  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>
+  searchParams?:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>
 }) {
   const resolvedParams = await Promise.resolve(props.params as any)
   const bookingId = String(resolvedParams?.id || '').trim()
   if (!bookingId) notFound()
 
-  const sp = (await Promise.resolve(props.searchParams as any).catch(() => ({}))) ?? {}
+  const sp = (await Promise.resolve(props.searchParams as any).catch(
+    () => ({}),
+  )) ?? {}
   const step = normalizeStep((sp as any)?.step)
 
-  // ✅ single place: auth + prisma reads
-  const { user, raw, aftercare, existingReview, media } = await loadClientBookingPage(bookingId)
+  const { user, raw, aftercare, existingReview, media } =
+    await loadClientBookingPage(bookingId)
   const clientId = user.clientProfile?.id
-  if (!clientId) redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`)
+  if (!clientId) {
+    redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`)
+  }
 
-  // ✅ filter media so we never pass null into href/src
-  const validMedia = (media || []).filter((m) => typeof m?.url === 'string' && m.url.trim().length > 0)
-  const beforeMedia = validMedia.filter((m) => String(m.phase || '').toUpperCase() === 'BEFORE')
-  const afterMedia = validMedia.filter((m) => String(m.phase || '').toUpperCase() === 'AFTER')
+  const validMedia = (media || []).filter(
+    (m) => typeof m?.url === 'string' && m.url.trim().length > 0,
+  )
+  const beforeMedia = validMedia.filter(
+    (m) => String(m.phase || '').toUpperCase() === 'BEFORE',
+  )
+  const afterMedia = validMedia.filter(
+    (m) => String(m.phase || '').toUpperCase() === 'AFTER',
+  )
 
   const hasPendingConsultationApproval = computePendingConsultation(raw)
 
@@ -258,11 +323,13 @@ export default async function ClientBookingPage(props: {
 
   const baseHref = `/client/bookings/${encodeURIComponent(booking.id)}`
 
-  // tab gating
-  if (step === 'consult' && !vm.canShowConsultTab) redirect(`${baseHref}?step=overview`)
-  if (step === 'aftercare' && !vm.canShowAftercareTab) redirect(`${baseHref}?step=overview`)
+  if (step === 'consult' && !vm.canShowConsultTab) {
+    redirect(`${baseHref}?step=overview`)
+  }
+  if (step === 'aftercare' && !vm.canShowAftercareTab) {
+    redirect(`${baseHref}?step=overview`)
+  }
 
-  // unread aftercare badge handling
   let showUnreadAftercareBadge = false
   if (step === 'aftercare' && aftercare?.id) {
     const { prisma } = await import('@/lib/prisma')
@@ -295,20 +362,31 @@ export default async function ClientBookingPage(props: {
     }
   }
 
-  // derived labels
   const appointmentTz = sanitizeTimeZone(booking.timeZone, 'UTC')
   const scheduled = toDate(booking.scheduledFor)
-  const whenLabel = scheduled ? formatWhenInTimeZone(scheduled, appointmentTz) : COPY.common.unknownTime
+  const whenLabel = scheduled
+    ? formatWhenInTimeZone(scheduled, appointmentTz)
+    : COPY.common.unknownTime
 
   const pillVariant = statusPillVariant(booking.status)
   const msg = statusMessage(booking.status)
 
   const durationMinutes =
-    typeof booking.totalDurationMinutes === 'number' && booking.totalDurationMinutes > 0 ? booking.totalDurationMinutes : null
+    typeof booking.totalDurationMinutes === 'number' &&
+    booking.totalDurationMinutes > 0
+      ? booking.totalDurationMinutes
+      : null
 
-  const itemsSubtotal = booking.items.reduce((sum, it) => sum + (Number(it.price) || 0), 0)
-  const hasItemPrices = booking.items.some((it) => Number.isFinite(Number(it.price)))
-  const breakdownTotalLabel = hasItemPrices ? `$${itemsSubtotal.toFixed(2)}` : formatMoneyFromDecimalString(booking.subtotalSnapshot)
+  const itemsSubtotal = booking.items.reduce(
+    (sum, it) => sum + (Number(it.price) || 0),
+    0,
+  )
+  const hasItemPrices = booking.items.some((it) =>
+    Number.isFinite(Number(it.price)),
+  )
+  const breakdownTotalLabel = hasItemPrices
+    ? `$${itemsSubtotal.toFixed(2)}`
+    : formatMoneyFromDecimalString(booking.subtotalSnapshot)
 
   const modeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
@@ -316,29 +394,34 @@ export default async function ClientBookingPage(props: {
   const statusUpper = upper(booking.status)
   const showConsultationApproval = Boolean(vm.showConsultationApproval)
 
-  const rebookInfo = aftercare ? getAftercareRebookInfo(aftercare, appointmentTz) : ({ mode: 'NONE', label: null } as const)
+  const rebookInfo = aftercare
+    ? getAftercareRebookInfo(aftercare, appointmentTz)
+    : ({ mode: 'NONE', label: null } as const)
   const aftercareToken = aftercare ? pickToken(aftercare) : null
   const showRebookCTA = statusUpper === 'COMPLETED' && Boolean(aftercareToken)
 
-  const consultNotes = String(booking.consultation?.approvalNotes || booking.consultation?.consultationNotes || '')
+  const consultNotes = String(
+    booking.consultation?.approvalNotes ||
+      booking.consultation?.consultationNotes ||
+      '',
+  )
   const proposedTotalLabel =
     formatMoneyFromDecimalString(booking.consultation?.proposedTotal) ||
     formatMoneyFromDecimalString(booking.subtotalSnapshot) ||
     null
 
   const proLabel =
-    booking.professional?.businessName || (raw as any)?.professional?.user?.email || COPY.common.professionalFallback
+    booking.professional?.businessName ||
+    (raw as any)?.professional?.user?.email ||
+    COPY.common.professionalFallback
 
   const title = booking.display?.title || COPY.bookings.titleFallback
   const locLine = booking.locationLabel || ''
 
-  // ✅ NEW: “Consult approval mode” = simplify page hard
   const consultApprovalMode = step === 'consult' && showConsultationApproval
+  const shouldShowReview =
+    statusUpper === 'COMPLETED' && step === 'aftercare'
 
-  // ✅ only show review at the end (you said “very end”)
-  const shouldShowReview = statusUpper === 'COMPLETED' && step === 'aftercare'
-
-  // ✅ TS fix: ReviewSection expects url: string, so drop null urls
   const safeExistingReview =
     existingReview && existingReview.id
       ? {
@@ -347,7 +430,9 @@ export default async function ClientBookingPage(props: {
           headline: existingReview.headline,
           body: existingReview.body,
           mediaAssets: (existingReview.mediaAssets || [])
-            .filter((m) => typeof m.url === 'string' && m.url.trim().length > 0)
+            .filter(
+              (m) => typeof m.url === 'string' && m.url.trim().length > 0,
+            )
             .map((m) => ({
               id: m.id,
               url: m.url as string,
@@ -360,9 +445,25 @@ export default async function ClientBookingPage(props: {
         }
       : null
 
+  const drawerProfessionalId = booking.professional?.id
+  if (!drawerProfessionalId) notFound()
+
+  const drawerServiceId = booking.items[0]?.serviceId ?? raw.service?.id ?? null
+
+  const safeLocationType =
+    booking.locationType === 'SALON' || booking.locationType === 'MOBILE'
+      ? booking.locationType
+      : null
+
+  const safeSource =
+    booking.source === 'DISCOVERY' ||
+    booking.source === 'REQUESTED' ||
+    booking.source === 'AFTERCARE'
+      ? booking.source
+      : undefined
+
   return (
     <main className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">
-      {/* Top recap “hero” card */}
       <section
         className={cn(
           'rounded-card border border-white/10 p-5',
@@ -372,7 +473,9 @@ export default async function ClientBookingPage(props: {
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[18px] font-black leading-snug text-textPrimary">{title}</div>
+            <div className="text-[18px] font-black leading-snug text-textPrimary">
+              {title}
+            </div>
 
             <div className="mt-2 text-[13px] font-semibold text-textSecondary">
               {COPY.bookings.withLabel}{' '}
@@ -386,7 +489,9 @@ export default async function ClientBookingPage(props: {
             <div className="mt-2 text-[13px] text-textPrimary">
               <span className="font-black">{whenLabel}</span>
               <span className="text-textSecondary"> · {appointmentTz}</span>
-              {locLine ? <span className="text-textSecondary"> · {locLine}</span> : null}
+              {locLine ? (
+                <span className="text-textSecondary"> · {locLine}</span>
+              ) : null}
             </div>
           </div>
 
@@ -397,7 +502,9 @@ export default async function ClientBookingPage(props: {
                 pillClassByVariant(pillVariant),
               )}
             >
-              {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
+              {String(
+                booking.status || COPY.bookings.status.pillUnknown,
+              ).toUpperCase()}
             </span>
 
             <a
@@ -412,7 +519,9 @@ export default async function ClientBookingPage(props: {
         {(durationMinutes || breakdownTotalLabel || modeLabel || sourceLabel) && (
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {durationMinutes ? <TinyMetaPill>{durationMinutes} min</TinyMetaPill> : null}
-            {breakdownTotalLabel ? <TinyMetaPill>{breakdownTotalLabel}</TinyMetaPill> : null}
+            {breakdownTotalLabel ? (
+              <TinyMetaPill>{breakdownTotalLabel}</TinyMetaPill>
+            ) : null}
             {modeLabel ? <TinyMetaPill>{modeLabel}</TinyMetaPill> : null}
             {sourceLabel ? <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill> : null}
 
@@ -428,7 +537,6 @@ export default async function ClientBookingPage(props: {
         )}
       </section>
 
-      {/* ✅ CONSULT APPROVAL MODE (your requested “strip it down” UI) */}
       {consultApprovalMode ? (
         <div className="mt-4">
           <SectionCard
@@ -442,20 +550,28 @@ export default async function ClientBookingPage(props: {
           >
             <div className="grid gap-3">
               <div>
-                <div className="text-[11px] font-black text-textSecondary">{COPY.bookings.consultation.notesLabel}</div>
+                <div className="text-[11px] font-black text-textSecondary">
+                  {COPY.bookings.consultation.notesLabel}
+                </div>
                 <div className="mt-1 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
-                  {consultNotes.trim() ? consultNotes : COPY.bookings.consultation.noNotes}
+                  {consultNotes.trim()
+                    ? consultNotes
+                    : COPY.bookings.consultation.noNotes}
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <TinyMetaPill>
-                  <span className="text-textSecondary">{COPY.bookings.consultation.proposedTotalLabel} </span>
+                  <span className="text-textSecondary">
+                    {COPY.bookings.consultation.proposedTotalLabel}{' '}
+                  </span>
                   {proposedTotalLabel || COPY.common.notProvided}
                 </TinyMetaPill>
 
                 <TinyMetaPill>
-                  <span className="text-textSecondary">{COPY.bookings.consultation.timesShownIn} </span>
+                  <span className="text-textSecondary">
+                    {COPY.bookings.consultation.timesShownIn}{' '}
+                  </span>
                   {appointmentTz}
                 </TinyMetaPill>
               </div>
@@ -465,35 +581,44 @@ export default async function ClientBookingPage(props: {
                 appointmentTz={appointmentTz}
                 notes={consultNotes}
                 proposedTotalLabel={proposedTotalLabel}
-                proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
+                proposedServicesJson={
+                  booking.consultation?.proposedServicesJson ?? null
+                }
               />
             </div>
           </SectionCard>
         </div>
       ) : null}
 
-      {/* Everything else only when NOT in consult-approval mode */}
       {!consultApprovalMode ? (
         <>
-          {/* Included items */}
           {booking.items.length ? (
             <div className="mt-4">
               <SectionCard
                 title="What’s included"
-                subtitle={booking.display?.addOnCount ? 'Includes base service + add-ons' : 'Service breakdown'}
+                subtitle={
+                  booking.display?.addOnCount
+                    ? 'Includes base service + add-ons'
+                    : 'Service breakdown'
+                }
                 right={
                   booking.display?.addOnCount ? (
                     <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
-                      {booking.display.addOnCount} add-on{booking.display.addOnCount === 1 ? '' : 's'}
+                      {booking.display.addOnCount} add-on
+                      {booking.display.addOnCount === 1 ? '' : 's'}
                     </span>
                   ) : null
                 }
               >
                 <div className="grid gap-2">
                   {booking.items.map((it) => {
-                    const name = it.name || (it.type === 'ADD_ON' ? 'Add-on' : 'Service')
+                    const name =
+                      it.name || (it.type === 'ADD_ON' ? 'Add-on' : 'Service')
                     const price = formatMoneyFromDecimalString(it.price)
-                    const dur = it.durationMinutes && it.durationMinutes > 0 ? `${it.durationMinutes} min` : null
+                    const dur =
+                      it.durationMinutes && it.durationMinutes > 0
+                        ? `${it.durationMinutes} min`
+                        : null
 
                     return (
                       <div
@@ -506,15 +631,23 @@ export default async function ClientBookingPage(props: {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-[14px] font-black text-textPrimary">{name}</div>
+                              <div className="text-[14px] font-black text-textPrimary">
+                                {name}
+                              </div>
                               <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
                                 {it.type === 'ADD_ON' ? 'Add-on' : 'Base'}
                               </span>
-                              {dur ? <span className="text-[11px] font-semibold text-textSecondary">· {dur}</span> : null}
+                              {dur ? (
+                                <span className="text-[11px] font-semibold text-textSecondary">
+                                  · {dur}
+                                </span>
+                              ) : null}
                             </div>
                           </div>
 
-                          <div className="shrink-0 text-[13px] font-black text-textPrimary">{price || COPY.common.emDash}</div>
+                          <div className="shrink-0 text-[13px] font-black text-textPrimary">
+                            {price || COPY.common.emDash}
+                          </div>
                         </div>
                       </div>
                     )
@@ -524,7 +657,6 @@ export default async function ClientBookingPage(props: {
             </div>
           ) : null}
 
-          {/* Tabs */}
           <nav className="mt-4 flex flex-wrap items-center gap-2">
             <a href={`${baseHref}?step=overview`} className={tabClass(step === 'overview')}>
               {COPY.bookings.tabs.overview}
@@ -535,7 +667,10 @@ export default async function ClientBookingPage(props: {
                 {COPY.bookings.tabs.consultation}
               </a>
             ) : (
-              <span className={tabDisabledClass()} title="Consultation becomes available after your booking is confirmed and started by your pro.">
+              <span
+                className={tabDisabledClass()}
+                title="Consultation becomes available after your booking is confirmed and started by your pro."
+              >
                 {COPY.bookings.tabs.consultation}
               </span>
             )}
@@ -545,7 +680,10 @@ export default async function ClientBookingPage(props: {
                 {COPY.bookings.tabs.aftercare}
               </a>
             ) : (
-              <span className={tabDisabledClass()} title="Aftercare becomes available after your appointment is completed.">
+              <span
+                className={tabDisabledClass()}
+                title="Aftercare becomes available after your appointment is completed."
+              >
                 {COPY.bookings.tabs.aftercare}
               </span>
             )}
@@ -557,13 +695,13 @@ export default async function ClientBookingPage(props: {
             ) : null}
           </nav>
 
-          {/* Status message */}
           <section className={cn('mt-4 rounded-card p-4', alertClassByVariant(msg.variant))}>
             <div className="text-[13px] font-black text-textPrimary">{msg.title}</div>
-            <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">{msg.body}</div>
+            <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">
+              {msg.body}
+            </div>
           </section>
 
-          {/* CONSULT (non-approval / regular consult view) */}
           {step === 'consult' ? (
             <div className="mt-4">
               <SectionCard
@@ -579,20 +717,28 @@ export default async function ClientBookingPage(props: {
               >
                 <div className="grid gap-3">
                   <div>
-                    <div className="text-[11px] font-black text-textSecondary">{COPY.bookings.consultation.notesLabel}</div>
+                    <div className="text-[11px] font-black text-textSecondary">
+                      {COPY.bookings.consultation.notesLabel}
+                    </div>
                     <div className="mt-1 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
-                      {consultNotes.trim() ? consultNotes : COPY.bookings.consultation.noNotes}
+                      {consultNotes.trim()
+                        ? consultNotes
+                        : COPY.bookings.consultation.noNotes}
                     </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
                     <TinyMetaPill>
-                      <span className="text-textSecondary">{COPY.bookings.consultation.proposedTotalLabel} </span>
+                      <span className="text-textSecondary">
+                        {COPY.bookings.consultation.proposedTotalLabel}{' '}
+                      </span>
                       {proposedTotalLabel || COPY.common.notProvided}
                     </TinyMetaPill>
 
                     <TinyMetaPill>
-                      <span className="text-textSecondary">{COPY.bookings.consultation.timesShownIn} </span>
+                      <span className="text-textSecondary">
+                        {COPY.bookings.consultation.timesShownIn}{' '}
+                      </span>
                       {appointmentTz}
                     </TinyMetaPill>
                   </div>
@@ -603,17 +749,20 @@ export default async function ClientBookingPage(props: {
                       appointmentTz={appointmentTz}
                       notes={consultNotes}
                       proposedTotalLabel={proposedTotalLabel}
-                      proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
+                      proposedServicesJson={
+                        booking.consultation?.proposedServicesJson ?? null
+                      }
                     />
                   ) : (
-                    <div className="text-[12px] font-semibold text-textSecondary">{COPY.bookings.consultation.noApprovalNeeded}</div>
+                    <div className="text-[12px] font-semibold text-textSecondary">
+                      {COPY.bookings.consultation.noApprovalNeeded}
+                    </div>
                   )}
                 </div>
               </SectionCard>
             </div>
           ) : null}
 
-          {/* OVERVIEW */}
           {step === 'overview' ? (
             <div className="mt-4 grid gap-4">
               {showConsultationApproval ? (
@@ -629,7 +778,9 @@ export default async function ClientBookingPage(props: {
                     </a>
                   }
                 >
-                  <div className="text-[12px] font-semibold text-textSecondary">One quick decision and you’re done.</div>
+                  <div className="text-[12px] font-semibold text-textSecondary">
+                    One quick decision and you’re done.
+                  </div>
                 </SectionCard>
               ) : null}
 
@@ -642,31 +793,47 @@ export default async function ClientBookingPage(props: {
                 </a>
               </div>
 
-              <BookingActions
+              <ClientBookingActionsCard
                 bookingId={booking.id}
-                status={booking.status as any}
-                scheduledFor={scheduled ? scheduled.toISOString() : new Date().toISOString()}
-                durationMinutesSnapshot={(durationMinutes ?? null) as any}
+                status={booking.status}
+                scheduledFor={
+                  scheduled ? scheduled.toISOString() : new Date().toISOString()
+                }
+                durationMinutesSnapshot={durationMinutes ?? null}
                 appointmentTz={appointmentTz}
+                locationType={safeLocationType}
+                drawerContext={{
+                  professionalId: drawerProfessionalId,
+                  serviceId: drawerServiceId,
+                  offeringId: null,
+                  source: safeSource,
+                  mediaId: null,
+                }}
               />
             </div>
           ) : null}
 
-          {/* AFTERCARE */}
           {step === 'aftercare' ? (
             <section id="aftercare" className="mt-4 grid gap-4">
               <SectionCard
                 title={COPY.bookings.aftercare.header}
                 subtitle="Photos, care notes, products, and rebook options."
-                right={showUnreadAftercareBadge ? <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill> : null}
+                right={
+                  showUnreadAftercareBadge ? (
+                    <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill>
+                  ) : null
+                }
               >
                 <div className="grid gap-4">
-                  {/* Before & After */}
                   <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
                     <div className="flex items-baseline justify-between gap-3">
-                      <div className="text-[12px] font-black text-textPrimary">Before &amp; After</div>
+                      <div className="text-[12px] font-black text-textPrimary">
+                        Before &amp; After
+                      </div>
                       <div className="text-[11px] font-semibold text-textSecondary">
-                        {beforeMedia.length || afterMedia.length ? 'Swipe to view' : 'No photos attached'}
+                        {beforeMedia.length || afterMedia.length
+                          ? 'Swipe to view'
+                          : 'No photos attached'}
                       </div>
                     </div>
 
@@ -674,11 +841,16 @@ export default async function ClientBookingPage(props: {
                       <div className="mt-3 grid gap-3">
                         {beforeMedia.length ? (
                           <div>
-                            <div className="mb-2 text-[11px] font-black text-textSecondary">Before</div>
+                            <div className="mb-2 text-[11px] font-black text-textSecondary">
+                              Before
+                            </div>
                             <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
                               {beforeMedia.map((m) => {
                                 const src =
-                                  typeof m.thumbUrl === 'string' && m.thumbUrl.trim().length > 0 ? m.thumbUrl : (m.url as string)
+                                  typeof m.thumbUrl === 'string' &&
+                                  m.thumbUrl.trim().length > 0
+                                    ? m.thumbUrl
+                                    : (m.url as string)
 
                                 return (
                                   <a
@@ -687,8 +859,12 @@ export default async function ClientBookingPage(props: {
                                     className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
                                     style={{ width: 128, height: 128 }}
                                   >
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+                                    <img
+                                      src={src}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                      loading="lazy"
+                                    />
                                   </a>
                                 )
                               })}
@@ -698,11 +874,16 @@ export default async function ClientBookingPage(props: {
 
                         {afterMedia.length ? (
                           <div>
-                            <div className="mb-2 text-[11px] font-black text-textSecondary">After</div>
+                            <div className="mb-2 text-[11px] font-black text-textSecondary">
+                              After
+                            </div>
                             <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
                               {afterMedia.map((m) => {
                                 const src =
-                                  typeof m.thumbUrl === 'string' && m.thumbUrl.trim().length > 0 ? m.thumbUrl : (m.url as string)
+                                  typeof m.thumbUrl === 'string' &&
+                                  m.thumbUrl.trim().length > 0
+                                    ? m.thumbUrl
+                                    : (m.url as string)
 
                                 return (
                                   <a
@@ -711,8 +892,12 @@ export default async function ClientBookingPage(props: {
                                     className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
                                     style={{ width: 128, height: 128 }}
                                   >
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+                                    <img
+                                      src={src}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                      loading="lazy"
+                                    />
                                   </a>
                                 )
                               })}
@@ -727,12 +912,15 @@ export default async function ClientBookingPage(props: {
                     )}
                   </div>
 
-                  {/* Care notes */}
                   <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">Care notes</div>
+                    <div className="text-[12px] font-black text-textPrimary">
+                      Care notes
+                    </div>
 
                     {aftercare?.notes ? (
-                      <div className="mt-2 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">{aftercare.notes}</div>
+                      <div className="mt-2 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
+                        {aftercare.notes}
+                      </div>
                     ) : (
                       <div className="mt-2 text-[12px] font-semibold text-textSecondary">
                         {upper(booking.status) === 'COMPLETED'
@@ -742,15 +930,19 @@ export default async function ClientBookingPage(props: {
                     )}
                   </div>
 
-                  {/* Rebook */}
                   {aftercare && (rebookInfo.label || showRebookCTA) ? (
                     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                      <div className="text-[12px] font-black text-textPrimary">{COPY.bookings.aftercare.rebookHeader}</div>
+                      <div className="text-[12px] font-black text-textPrimary">
+                        {COPY.bookings.aftercare.rebookHeader}
+                      </div>
 
                       {rebookInfo.label ? (
                         <div className="mt-2 text-[13px] text-textPrimary">
                           {rebookInfo.label}
-                          <span className="text-textSecondary"> · {appointmentTz}</span>
+                          <span className="text-textSecondary">
+                            {' '}
+                            · {appointmentTz}
+                          </span>
                         </div>
                       ) : (
                         <div className="mt-2 text-[12px] font-semibold text-textSecondary">
@@ -760,7 +952,9 @@ export default async function ClientBookingPage(props: {
 
                       {showRebookCTA ? (
                         <a
-                          href={`/client/rebook/${encodeURIComponent(aftercareToken as string)}`}
+                          href={`/client/rebook/${encodeURIComponent(
+                            aftercareToken as string,
+                          )}`}
                           className="mt-3 inline-flex items-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
                         >
                           {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
@@ -775,10 +969,12 @@ export default async function ClientBookingPage(props: {
             </section>
           ) : null}
 
-          {/* ✅ Review only at the end */}
           {shouldShowReview ? (
             <div id="review" className="mt-6">
-              <ReviewSection bookingId={booking.id} existingReview={safeExistingReview} />
+              <ReviewSection
+                bookingId={booking.id}
+                existingReview={safeExistingReview}
+              />
             </div>
           ) : null}
         </>
