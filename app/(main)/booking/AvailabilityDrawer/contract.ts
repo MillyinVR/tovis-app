@@ -33,7 +33,6 @@ function pickServiceLocationType(x: unknown): ServiceLocationType | null {
 }
 
 function pickMoneyString(x: unknown): MoneyString | null {
-  // Prisma Decimal JSON-serializes to string; accept string only.
   return typeof x === 'string' ? x : null
 }
 
@@ -46,11 +45,15 @@ function pickOffering(x: unknown): AvailabilityOffering | null {
 
   if (!id || offersInSalon == null || offersMobile == null) return null
 
-  const salonDurationMinutes = x.salonDurationMinutes == null ? null : pickNumber(x.salonDurationMinutes)
-  const mobileDurationMinutes = x.mobileDurationMinutes == null ? null : pickNumber(x.mobileDurationMinutes)
+  const salonDurationMinutes =
+    x.salonDurationMinutes == null ? null : pickNumber(x.salonDurationMinutes)
+  const mobileDurationMinutes =
+    x.mobileDurationMinutes == null ? null : pickNumber(x.mobileDurationMinutes)
 
-  const salonPriceStartingAt = x.salonPriceStartingAt == null ? null : pickMoneyString(x.salonPriceStartingAt)
-  const mobilePriceStartingAt = x.mobilePriceStartingAt == null ? null : pickMoneyString(x.mobilePriceStartingAt)
+  const salonPriceStartingAt =
+    x.salonPriceStartingAt == null ? null : pickMoneyString(x.salonPriceStartingAt)
+  const mobilePriceStartingAt =
+    x.mobilePriceStartingAt == null ? null : pickMoneyString(x.mobilePriceStartingAt)
 
   if (x.salonDurationMinutes != null && salonDurationMinutes == null) return null
   if (x.mobileDurationMinutes != null && mobileDurationMinutes == null) return null
@@ -70,6 +73,7 @@ function pickOffering(x: unknown): AvailabilityOffering | null {
 
 function pickProCardBase(x: unknown): ProCard | null {
   if (!isRecord(x)) return null
+
   const id = pickString(x.id)
   if (!id) return null
 
@@ -81,7 +85,8 @@ function pickProCardBase(x: unknown): ProCard | null {
   const locationId = x.locationId == null ? null : pickString(x.locationId)
   const distanceMiles = x.distanceMiles == null ? null : pickNumber(x.distanceMiles)
 
-  const isCreator = x.isCreator == null ? undefined : pickBoolean(x.isCreator) ?? undefined
+  const isCreator =
+    x.isCreator == null ? undefined : pickBoolean(x.isCreator) ?? undefined
 
   let slots: string[] | undefined
   if (Array.isArray(x.slots)) {
@@ -126,16 +131,102 @@ function pickAvailabilityOtherPro(x: unknown): AvailabilityOtherPro | null {
     distanceMiles: distanceMiles ?? null,
   }
 }
+function pickSummaryDebug(x: unknown):
+  | {
+      emptyReason?: string | null
+      otherProsCount?: number
+      includeOtherPros?: boolean
+      center?: {
+        lat: number
+        lng: number
+        radiusMiles: number
+      } | null
+      usedViewerCenter?: boolean
+      addOnIds?: string[]
+      clientAddressId?: string | null
+      requestedSummaryDays?: number
+    }
+  | undefined {
+  if (x == null) return undefined
+  if (!isRecord(x)) return undefined
 
-export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummaryResponse | null {
+  const emptyReason =
+    x.emptyReason == null ? undefined : pickString(x.emptyReason) ?? undefined
+
+  const otherProsCount =
+    x.otherProsCount == null ? undefined : pickNumber(x.otherProsCount) ?? undefined
+
+  const includeOtherPros =
+    x.includeOtherPros == null
+      ? undefined
+      : pickBoolean(x.includeOtherPros) ?? undefined
+
+  const usedViewerCenter =
+    x.usedViewerCenter == null
+      ? undefined
+      : pickBoolean(x.usedViewerCenter) ?? undefined
+
+  const requestedSummaryDays =
+    x.requestedSummaryDays == null
+      ? undefined
+      : pickNumber(x.requestedSummaryDays) ?? undefined
+
+  const addOnIds =
+    Array.isArray(x.addOnIds) && x.addOnIds.every((v) => typeof v === 'string')
+      ? x.addOnIds.slice()
+      : undefined
+
+  const clientAddressId =
+    x.clientAddressId == null ? undefined : pickString(x.clientAddressId) ?? undefined
+
+  let center:
+    | {
+        lat: number
+        lng: number
+        radiusMiles: number
+      }
+    | null
+    | undefined
+
+  if (x.center === null) {
+    center = null
+  } else if (isRecord(x.center)) {
+    const lat = pickNumber(x.center.lat)
+    const lng = pickNumber(x.center.lng)
+    const radiusMiles = pickNumber(x.center.radiusMiles)
+
+    if (lat != null && lng != null && radiusMiles != null) {
+      center = { lat, lng, radiusMiles }
+    }
+  }
+
+  return {
+    ...(emptyReason !== undefined ? { emptyReason } : {}),
+    ...(otherProsCount !== undefined ? { otherProsCount } : {}),
+    ...(includeOtherPros !== undefined ? { includeOtherPros } : {}),
+    ...(center !== undefined ? { center } : {}),
+    ...(usedViewerCenter !== undefined ? { usedViewerCenter } : {}),
+    ...(addOnIds !== undefined ? { addOnIds } : {}),
+    ...(clientAddressId !== undefined ? { clientAddressId } : {}),
+    ...(requestedSummaryDays !== undefined ? { requestedSummaryDays } : {}),
+  }
+}
+
+export function parseAvailabilitySummaryResponse(
+  x: unknown,
+): AvailabilitySummaryResponse | null {
   if (!isRecord(x)) return null
 
   const ok = x.ok
   if (ok === false) {
     const error = pickString(x.error)
     if (!error) return null
-    const timeZone = x.timeZone == null ? undefined : pickString(x.timeZone) ?? undefined
-    const locationId = x.locationId == null ? undefined : pickString(x.locationId) ?? undefined
+
+    const timeZone =
+      x.timeZone == null ? undefined : pickString(x.timeZone) ?? undefined
+    const locationId =
+      x.locationId == null ? undefined : pickString(x.locationId) ?? undefined
+
     return { ok: false, error, timeZone, locationId }
   }
 
@@ -147,10 +238,12 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
 
   const serviceId = pickString(x.serviceId)
   const professionalId = pickString(x.professionalId)
-  const serviceName = pickString(x.serviceName)
-  const serviceCategoryName = x.serviceCategoryName === null ? null : pickString(x.serviceCategoryName)
+  const serviceName = x.serviceName === null ? null : pickString(x.serviceName)
+  const serviceCategoryName =
+    x.serviceCategoryName === null ? null : pickString(x.serviceCategoryName)
 
-  if (!serviceId || !professionalId || !serviceName) return null
+  if (!serviceId || !professionalId) return null
+  if (x.serviceName !== null && serviceName == null) return null
   if (x.serviceCategoryName !== null && serviceCategoryName == null) return null
 
   const locationType = pickServiceLocationType(x.locationType)
@@ -161,7 +254,8 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
   const stepMinutes = pickNumber(x.stepMinutes)
   const leadTimeMinutes = pickNumber(x.leadTimeMinutes)
   const locationBufferMinutes = pickNumber(x.locationBufferMinutes)
-  const adjacencyBufferMinutes = pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
+  const adjacencyBufferMinutes =
+    pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
   const maxDaysAhead = pickNumber(x.maxDaysAhead)
   const durationMinutes = pickNumber(x.durationMinutes)
 
@@ -176,19 +270,31 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
     return null
   }
 
+  const windowStartDate = pickString(x.windowStartDate)
+  const windowEndDate = pickString(x.windowEndDate)
+  const nextStartDate =
+    x.nextStartDate === null ? null : pickString(x.nextStartDate)
+  const hasMoreDays = pickBoolean(x.hasMoreDays)
+
+  if (!windowStartDate || !windowEndDate || hasMoreDays == null) return null
+  if (x.nextStartDate !== null && nextStartDate == null) return null
+
   const primaryProBase = pickProCardBase(x.primaryPro)
   if (!primaryProBase) return null
   if (!primaryProBase.offeringId) return null
+  if (!primaryProBase.locationId) return null
 
   const availableDaysRaw = x.availableDays
   if (!Array.isArray(availableDaysRaw)) return null
-  const availableDays: Array<{ date: string; slotCount: number }> = []
 
+  const availableDays: Array<{ date: string; slotCount: number }> = []
   for (const row of availableDaysRaw) {
     if (!isRecord(row)) return null
+
     const date = pickString(row.date)
     const slotCount = pickNumber(row.slotCount)
     if (!date || slotCount == null) return null
+
     availableDays.push({ date, slotCount })
   }
 
@@ -208,13 +314,15 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
   const offering = pickOffering(x.offering)
   if (!offering) return null
 
+  const debug = pickSummaryDebug(x.debug)
+
   return {
     ok: true,
     mode: 'SUMMARY',
     mediaId: mediaId ?? null,
     serviceId,
     professionalId,
-    serviceName,
+    serviceName: serviceName ?? null,
     serviceCategoryName: serviceCategoryName ?? null,
     locationType,
     locationId,
@@ -225,28 +333,40 @@ export function parseAvailabilitySummaryResponse(x: unknown): AvailabilitySummar
     adjacencyBufferMinutes,
     maxDaysAhead,
     durationMinutes,
+    windowStartDate,
+    windowEndDate,
+    nextStartDate: nextStartDate ?? null,
+    hasMoreDays,
     primaryPro: {
       ...primaryProBase,
       offeringId: primaryProBase.offeringId,
       isCreator: true as const,
       timeZone,
+      locationId: primaryProBase.locationId,
     },
     availableDays,
     otherPros,
     waitlistSupported,
     offering,
+    ...(debug !== undefined ? { debug } : {}),
   }
 }
 
-export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayResponse | null {
+export function parseAvailabilityDayResponse(
+  x: unknown,
+): AvailabilityDayResponse | null {
   if (!isRecord(x)) return null
 
   const ok = x.ok
   if (ok === false) {
     const error = pickString(x.error)
     if (!error) return null
-    const timeZone = x.timeZone == null ? undefined : pickString(x.timeZone) ?? undefined
-    const locationId = x.locationId == null ? undefined : pickString(x.locationId) ?? undefined
+
+    const timeZone =
+      x.timeZone == null ? undefined : pickString(x.timeZone) ?? undefined
+    const locationId =
+      x.locationId == null ? undefined : pickString(x.locationId) ?? undefined
+
     return { ok: false, error, timeZone, locationId }
   }
 
@@ -267,7 +387,8 @@ export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayRespons
   const stepMinutes = pickNumber(x.stepMinutes)
   const leadTimeMinutes = pickNumber(x.leadTimeMinutes)
   const locationBufferMinutes = pickNumber(x.locationBufferMinutes)
-  const adjacencyBufferMinutes = pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
+  const adjacencyBufferMinutes =
+    pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
   const maxDaysAhead = pickNumber(x.maxDaysAhead)
 
   const durationMinutes = pickNumber(x.durationMinutes)
@@ -293,8 +414,19 @@ export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayRespons
     return null
   }
 
-  const offering = x.offering == null ? undefined : pickOffering(x.offering) ?? undefined
+  const offering =
+    x.offering == null ? undefined : pickOffering(x.offering) ?? undefined
   if (x.offering != null && !offering) return null
+
+  const debug = x.debug
+  const addOnIds =
+    Array.isArray(x.addOnIds) && x.addOnIds.every((v) => typeof v === 'string')
+      ? x.addOnIds.slice()
+      : undefined
+  const clientAddressId =
+    x.clientAddressId == null ? null : pickString(x.clientAddressId)
+
+  if (x.clientAddressId != null && clientAddressId == null) return null
 
   return {
     ok: true,
@@ -315,6 +447,9 @@ export function parseAvailabilityDayResponse(x: unknown): AvailabilityDayRespons
     dayEndExclusiveUtc,
     slots: slotsRaw.slice(),
     offering,
+    ...(debug !== undefined ? { debug } : {}),
+    ...(addOnIds ? { addOnIds } : {}),
+    ...(clientAddressId !== null ? { clientAddressId } : {}),
   }
 }
 

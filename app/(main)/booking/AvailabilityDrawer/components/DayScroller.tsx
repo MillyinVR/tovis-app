@@ -1,20 +1,57 @@
 // app/(main)/booking/AvailabilityDrawer/components/DayScroller.tsx
 'use client'
 
+import { useCallback, useRef } from 'react'
+
+import { shouldPrefetchForScrollPosition } from '../utils/availabilityWindow'
+
+type DayScrollerProps = {
+  days: Array<{ ymd: string; labelTop: string; labelBottom: string }>
+  selectedYMD: string | null
+  onSelect: (ymd: string) => void
+  onNearEnd?: () => void
+}
+
 export default function DayScroller({
   days,
   selectedYMD,
   onSelect,
-}: {
-  days: Array<{ ymd: string; labelTop: string; labelBottom: string }>
-  selectedYMD: string | null
-  onSelect: (ymd: string) => void
-}) {
+  onNearEnd,
+}: DayScrollerProps) {
+  const nearEndTriggeredRef = useRef(false)
+
+  const handleScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!onNearEnd) return
+
+      const el = event.currentTarget
+      const isNearEnd = shouldPrefetchForScrollPosition({
+        scrollLeft: el.scrollLeft,
+        clientWidth: el.clientWidth,
+        scrollWidth: el.scrollWidth,
+      })
+
+      if (isNearEnd) {
+        if (!nearEndTriggeredRef.current) {
+          nearEndTriggeredRef.current = true
+          onNearEnd()
+        }
+        return
+      }
+
+      nearEndTriggeredRef.current = false
+    },
+    [onNearEnd],
+  )
+
   return (
     <section className="tovis-glass-soft mb-3 rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="text-[13px] font-black text-textPrimary">Choose a day</div>
 
-      <div className="looksNoScrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+      <div
+        className="looksNoScrollbar mt-3 flex gap-2 overflow-x-auto pb-1"
+        onScroll={handleScroll}
+      >
         {days.map((d) => {
           const active = d.ymd === selectedYMD
 
@@ -31,8 +68,12 @@ export default function DayScroller({
               ].join(' ')}
               aria-pressed={active}
             >
-              <div className="text-[11px] font-black uppercase tracking-wide opacity-90">{d.labelTop}</div>
-              <div className="mt-1 text-[16px] font-black leading-none">{d.labelBottom}</div>
+              <div className="text-[11px] font-black uppercase tracking-wide opacity-90">
+                {d.labelTop}
+              </div>
+              <div className="mt-1 text-[16px] font-black leading-none">
+                {d.labelBottom}
+              </div>
             </button>
           )
         })}

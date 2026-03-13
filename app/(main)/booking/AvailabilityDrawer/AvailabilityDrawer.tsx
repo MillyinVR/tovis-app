@@ -1,4 +1,5 @@
-// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
+// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx 
+
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -35,6 +36,7 @@ import { useHoldTimer } from './hooks/useHoldTimer'
 import { useDebugFlag } from './hooks/useDebugFlag'
 import { useDaySlots } from './hooks/useDaySlots'
 import { useMobileAddresses } from './hooks/useMobileAddresses'
+import { shouldPrefetchForSelectedIndex } from './utils/availabilityWindow'
 
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
@@ -270,11 +272,20 @@ export default function AvailabilityDrawer(props: {
 
   const {
     loading,
+    loadingMore,
     refreshing,
     error: availabilityError,
     data,
+    hasMoreDays,
+    loadMore,
     setError,
-  } = useAvailability(open, context, locationType, selectedClientAddressId)
+  } = useAvailability(
+    open,
+    context,
+    locationType,
+    selectedClientAddressId,
+    true,
+  )
 
   const summary = isSummary(data) ? data : null
   const primary = summary?.primaryPro ?? null
@@ -354,12 +365,12 @@ export default function AvailabilityDrawer(props: {
     if (!summary) return map
 
     map[summary.primaryPro.id] = summary.locationId
-    for (const p of summary.otherPros) {
+    for (const p of others) {
       map[p.id] = p.locationId
     }
 
     return map
-  }, [summary])
+  }, [summary, others])
 
   const daysKey = useMemo(() => {
     if (!days.length) return ''
@@ -440,7 +451,6 @@ export default function AvailabilityDrawer(props: {
       if (!hasOtherPros) return
 
       setOtherProsRequested(true)
-
       void loadOtherSlots({ forceRefresh: options?.forceRefresh })
 
       if (options?.scroll) {
@@ -454,6 +464,52 @@ export default function AvailabilityDrawer(props: {
     },
     [open, summary, selectedDayYMD, hasOtherPros, loadOtherSlots],
   )
+
+    const maybeLoadMoreDays = useCallback(() => {
+    if (!hasMoreDays) return
+    if (loading || loadingMore || refreshing) return
+    void loadMore()
+  }, [hasMoreDays, loadMore, loading, loadingMore, refreshing])
+
+  useEffect(() => {
+    if (!open) return
+    if (!summary) return
+    if (!selectedDayYMD) return
+    if (!hasMoreDays) return
+
+    const selectedIndex = days.findIndex((d) => d.date === selectedDayYMD)
+    if (
+      shouldPrefetchForSelectedIndex({
+        selectedIndex,
+        loadedCount: days.length,
+      })
+    ) {
+      maybeLoadMoreDays()
+    }
+  }, [open, summary, selectedDayYMD, hasMoreDays, days, maybeLoadMoreDays])
+
+  useEffect(() => {
+    if (!open) return
+    if (!hasOtherPros) {
+      setOtherProsRequested(false)
+    }
+  }, [open, hasOtherPros])
+
+  useEffect(() => {
+    if (!open) return
+    if (!otherProsRequested) return
+    if (!hasOtherPros) return
+    if (activeLocationType === 'MOBILE' && !selectedClientAddressId) return
+
+    void loadOtherSlots()
+  }, [
+    open,
+    otherProsRequested,
+    hasOtherPros,
+    loadOtherSlots,
+    activeLocationType,
+    selectedClientAddressId,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -483,26 +539,30 @@ export default function AvailabilityDrawer(props: {
     setError,
   ])
 
-useEffect(() => {
-  if (!open) return
+  useEffect(() => {
+    if (!open) return
 
-  setSelectedDayYMD(null)
-  setPeriod('AFTERNOON')
-  setOtherProsRequested(false)
-  clearDaySlots()
-  clearDaySlotCache()
-  resetMobileAddressState()
+    setSelectedDayYMD(null)
+    setPeriod('AFTERNOON')
+    setOtherProsRequested(false)
+    clearDaySlots()
+    clearDaySlotCache()
+    resetMobileAddressState()
 
-  void hardResetUi({ deleteHold: true })
-}, [
-  open,
-  context.mediaId,
-  context.professionalId,
-  context.serviceId,
-  context.offeringId,
-  context.source,
-])
-  
+    void hardResetUi({ deleteHold: true })
+  }, [
+    open,
+    context.mediaId,
+    context.professionalId,
+    context.serviceId,
+    context.offeringId,
+    context.source,
+    clearDaySlots,
+    clearDaySlotCache,
+    resetMobileAddressState,
+    hardResetUi,
+  ])
+
   useEffect(() => {
     if (!open) return
     if (!summary) return
@@ -897,7 +957,16 @@ useEffect(() => {
                     void hardResetUi({ deleteHold: true })
                     setSelectedDayYMD(ymd)
                   }}
+                  onNearEnd={() => {
+                    maybeLoadMoreDays()
+                  }}
                 />
+              ) : null}
+
+              {loadingMore ? (
+                <div className="mb-3 text-xs font-semibold text-textSecondary">
+                  Loading more days…
+                </div>
               ) : null}
 
               {loadingPrimarySlots ? (
@@ -1002,6 +1071,10 @@ useEffect(() => {
                     primarySlotsCount: primarySlots.length,
                     otherProsRequested,
                     otherProsCount: others.length,
+                    hasMoreDays,
+                    windowStartDate: summary.windowStartDate,
+                    windowEndDate: summary.windowEndDate,
+                    nextStartDate: summary.nextStartDate,
                     offering,
                     allowed,
                     selectedClientAddressId,

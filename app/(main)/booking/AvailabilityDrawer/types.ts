@@ -79,6 +79,11 @@ export type AvailabilityReason =
 
 export type MoneyString = string
 
+export type AvailabilityDaySummary = {
+  date: string
+  slotCount: number
+}
+
 export type ProCard = {
   id: string
   businessName: string | null
@@ -124,7 +129,7 @@ export type AvailabilitySummaryOk = ApiOk<{
   serviceId: string
   professionalId: string
 
-  serviceName: string
+  serviceName: string | null
   serviceCategoryName: string | null
 
   locationType: ServiceLocationType
@@ -138,17 +143,39 @@ export type AvailabilitySummaryOk = ApiOk<{
   maxDaysAhead: number
   durationMinutes: number
 
+  // paged summary window metadata
+  windowStartDate: string
+  windowEndDate: string
+  nextStartDate: string | null
+  hasMoreDays: boolean
+
   primaryPro: ProCard & {
     offeringId: string
     isCreator: true
     timeZone: string
+    locationId: string
   }
 
-  availableDays: Array<{ date: string; slotCount: number }>
+  availableDays: AvailabilityDaySummary[]
   otherPros: AvailabilityOtherPro[]
   waitlistSupported: boolean
 
   offering: AvailabilityOffering
+
+  debug?: {
+    emptyReason?: string | null
+    otherProsCount?: number
+    includeOtherPros?: boolean
+    center?: {
+      lat: number
+      lng: number
+      radiusMiles: number
+    } | null
+    usedViewerCenter?: boolean
+    addOnIds?: string[]
+    clientAddressId?: string | null
+    requestedSummaryDays?: number
+  }
 }>
 
 export type AvailabilitySummaryFail = ApiFail<{
@@ -185,6 +212,10 @@ export type AvailabilityDayOk = ApiOk<{
   slots: string[]
 
   offering?: AvailabilityOffering
+
+  debug?: unknown
+  addOnIds?: string[]
+  clientAddressId?: string | null
 }>
 
 export type AvailabilityDayFail = ApiFail<{

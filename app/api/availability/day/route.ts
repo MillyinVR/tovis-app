@@ -37,7 +37,6 @@ import { decimalToNumber } from '@/lib/booking/snapshots'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
-  MAX_DAYS_AHEAD as MAX_BOOKING_DAYS_AHEAD,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 
@@ -45,13 +44,14 @@ export const dynamic = 'force-dynamic'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
 
-// Short-lived browsing cache.
-// Final booking correctness is still enforced by holds/conflict checks.
 const TTL_DAY_SECONDS = 90
 const TTL_SUMMARY_SECONDS = 60
 const TTL_BUSY_SECONDS = 60
-const TTL_OTHER_PROS_SECONDS = 600 // nearby pros rarely change — 10 min
-const TTL_PLACEMENT_SECONDS = 600  // placement/location context rarely changes — 10 min
+const TTL_OTHER_PROS_SECONDS = 600
+const TTL_PLACEMENT_SECONDS = 600
+
+const DEFAULT_SUMMARY_WINDOW_DAYS = 7
+const MAX_SUMMARY_WINDOW_DAYS = 21
 
 const LOCATION_SELECT = {
   id: true,
@@ -116,6 +116,35 @@ type AvailabilityPlacementResult =
       error: string
     }
 
+type CachedPlacement = {
+  locationId: string
+  locationType: ServiceLocationType
+  timeZone: string
+  workingHours: unknown
+  stepMinutes: number
+  leadTimeMinutes: number
+  locationBufferMinutes: number
+  maxAdvanceDays: number
+  durationMinutes: number
+  priceStartingAt: number
+  formattedAddress: string | null
+  lat: number | undefined
+  lng: number | undefined
+  proBusinessName: string | null
+  proAvatarUrl: string | null
+  proLocation: string | null
+  serviceName: string | null
+  serviceCategory: string | null
+  offeringId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonDurationMinutes: number | null
+  mobileDurationMinutes: number | null
+  salonPriceStartingAt: string | null
+  mobilePriceStartingAt: string | null
+  locationCity: string | null
+}
+
 const redis = getRedis()
 
 function toInt(value: string | null, fallback: number): number {
@@ -130,6 +159,11 @@ function clampFloat(value: number, min: number, max: number): number {
 
 function normalizeAddress(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function roundCoordForCache(value: number | null): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.round(value * 1000) / 1000
 }
 
 function parseYYYYMMDD(value: unknown) {
@@ -240,36 +274,6 @@ async function cacheSetJson(
   }
 }
 
-type CachedPlacement = {
-  locationId: string
-  locationType: ServiceLocationType
-  timeZone: string
-  workingHours: unknown
-  stepMinutes: number
-  leadTimeMinutes: number
-  locationBufferMinutes: number
-  maxAdvanceDays: number
-  durationMinutes: number
-  priceStartingAt: number
-  formattedAddress: string | null
-  lat: number | undefined
-  lng: number | undefined
-  // Fields needed for the response payload:
-  proBusinessName: string | null
-  proAvatarUrl: string | null
-  proLocation: string | null
-  serviceName: string | null
-  serviceCategory: string | null
-  offeringId: string
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonDurationMinutes: number | null
-  mobileDurationMinutes: number | null
-  salonPriceStartingAt: string | null
-  mobilePriceStartingAt: string | null
-  locationCity: string | null
-}
-
 function buildPlacementCacheKey(args: {
   professionalId: string
   serviceId: string
@@ -295,7 +299,7 @@ function parseCachedPlacement(raw: unknown): CachedPlacement | null {
   if (typeof raw.stepMinutes !== 'number') return null
   if (typeof raw.durationMinutes !== 'number') return null
   if (typeof raw.offeringId !== 'string') return null
-  return raw as unknown as CachedPlacement
+  return raw as CachedPlacement
 }
 
 function allowedProfessionalTypes(
@@ -389,10 +393,7 @@ async function validateAvailabilityPlacement(args: {
   const context = validated.context
   const formattedAddress = normalizeAddress(context.formattedAddress)
 
-  if (
-    args.locationType === ServiceLocationType.MOBILE &&
-    !args.clientAddressId
-  ) {
+  if (args.locationType === ServiceLocationType.MOBILE && !args.clientAddressId) {
     return {
       ok: false,
       code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
@@ -400,10 +401,7 @@ async function validateAvailabilityPlacement(args: {
     }
   }
 
-  if (
-    args.locationType === ServiceLocationType.SALON &&
-    !formattedAddress
-  ) {
+  if (args.locationType === ServiceLocationType.SALON && !formattedAddress) {
     return {
       ok: false,
       code: 'SALON_LOCATION_ADDRESS_REQUIRED',
@@ -536,7 +534,6 @@ async function resolveAvailabilityPlacement(args: {
     take: 50,
   })
 
-  // Validate all candidate locations in parallel instead of sequentially
   const attempts = await Promise.all(
     candidates.map(async (candidate) => {
       const locationType = locationTypeForLocation(candidate)
@@ -551,7 +548,6 @@ async function resolveAvailabilityPlacement(args: {
     }),
   )
 
-  // Return the first success (preserves original ordering preference: isPrimary desc, createdAt asc)
   for (const attempt of attempts) {
     if (attempt.ok) return attempt
   }
@@ -569,9 +565,7 @@ async function resolveAvailabilityPlacement(args: {
   )
 }
 
-function parseCachedBusyIntervals(
-  value: unknown,
-): BusyInterval[] | null {
+function parseCachedBusyIntervals(value: unknown): BusyInterval[] | null {
   if (!isRecord(value) || !Array.isArray(value.busy)) return null
 
   const intervals: BusyInterval[] = []
@@ -863,6 +857,82 @@ function parseCommaIds(v: string | null): string[] {
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 25)
+}
+
+function parseSummaryWindowDays(
+  value: string | null,
+  maxAdvanceDays: number,
+): number {
+  const fallback = Math.min(DEFAULT_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays))
+  const parsed = toInt(value, fallback)
+  return clampInt(parsed, 1, Math.min(MAX_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays)))
+}
+
+function resolveSummaryWindowStart(args: {
+  startDateStr: string | null
+  todayYMD: { year: number; month: number; day: number }
+  maxAdvanceDays: number
+}) {
+  const parsedStart = args.startDateStr ? parseYYYYMMDD(args.startDateStr) : null
+  if (!parsedStart) {
+    return {
+      ok: true as const,
+      startYMD: args.todayYMD,
+      startDateStr: ymdToString(args.todayYMD),
+      startDayOffset: 0,
+    }
+  }
+
+  const offset = ymdSerial(parsedStart) - ymdSerial(args.todayYMD)
+  if (offset < 0) {
+    return {
+      ok: false as const,
+      error: 'startDate cannot be in the past.',
+    }
+  }
+
+  if (offset > args.maxAdvanceDays) {
+    return {
+      ok: false as const,
+      error: `You can book up to ${args.maxAdvanceDays} days in advance.`,
+    }
+  }
+
+  return {
+    ok: true as const,
+    startYMD: parsedStart,
+    startDateStr: ymdToString(parsedStart),
+    startDayOffset: offset,
+  }
+}
+
+function buildSummaryYMDs(args: {
+  startYMD: { year: number; month: number; day: number }
+  startDayOffset: number
+  requestedDays: number
+  maxAdvanceDays: number
+}) {
+  const remainingDays = args.maxAdvanceDays - args.startDayOffset + 1
+  const windowDays = clampInt(args.requestedDays, 1, Math.max(1, remainingDays))
+
+  const ymds = Array.from({ length: windowDays }, (_, i) =>
+    addDaysToYMD(args.startYMD.year, args.startYMD.month, args.startYMD.day, i),
+  )
+
+  const endYMD = ymds[ymds.length - 1] ?? args.startYMD
+  const nextOffset = args.startDayOffset + windowDays
+  const hasMoreDays = nextOffset <= args.maxAdvanceDays
+  const nextStartYMD = hasMoreDays
+    ? addDaysToYMD(args.startYMD.year, args.startYMD.month, args.startYMD.day, windowDays)
+    : null
+
+  return {
+    ymds,
+    windowDays,
+    endYMD,
+    hasMoreDays,
+    nextStartYMD,
+  }
 }
 
 async function loadOtherProsNearby(args: {
@@ -1180,8 +1250,14 @@ export async function GET(req: Request) {
     const requestedLocationId = pickString(searchParams.get('locationId'))
     const dateStr = pickString(searchParams.get('date'))
 
+    const startDateStr = pickString(searchParams.get('startDate'))
+    const requestedSummaryDaysRaw = pickString(searchParams.get('days'))
+
     const addOnIds = parseCommaIds(searchParams.get('addOnIds')).sort()
     const debug = pickString(searchParams.get('debug')) === '1'
+
+    const includeOtherPros =
+      pickString(searchParams.get('includeOtherPros')) !== '0'
 
     const stepRaw =
       pickString(searchParams.get('stepMinutes')) ||
@@ -1195,6 +1271,9 @@ export async function GET(req: Request) {
 
     const viewerLat = parseFloatParam(searchParams.get('viewerLat'))
     const viewerLng = parseFloatParam(searchParams.get('viewerLng'))
+    const roundedViewerLat = roundCoordForCache(viewerLat)
+    const roundedViewerLng = roundCoordForCache(viewerLng)
+
     const radiusMilesRaw = parseFloatParam(searchParams.get('radiusMiles'))
     const radiusMiles = clampFloat(radiusMilesRaw ?? 15, 5, 50)
 
@@ -1202,7 +1281,6 @@ export async function GET(req: Request) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
     }
 
-    // Check placement cache first to skip expensive DB queries on repeat visits
     const placementCacheKey = debug
       ? null
       : buildPlacementCacheKey({
@@ -1246,9 +1324,8 @@ export async function GET(req: Request) {
     }
 
     if (cachedPlacement) {
-      // Fast path: reconstruct everything from cache, zero DB queries
       locationId = cachedPlacement.locationId
-      effectiveLocationType = cachedPlacement.locationType as ServiceLocationType
+      effectiveLocationType = cachedPlacement.locationType
       timeZone = cachedPlacement.timeZone
       workingHours = cachedPlacement.workingHours
       defaultStepMinutes = cachedPlacement.stepMinutes
@@ -1276,7 +1353,6 @@ export async function GET(req: Request) {
         mobilePriceStartingAt: cachedPlacement.mobilePriceStartingAt,
       }
     } else {
-      // Slow path: full DB resolution
       const [pro, service, offering] = await Promise.all([
         prisma.professionalProfile.findUnique({
           where: { id: professionalId },
@@ -1356,13 +1432,10 @@ export async function GET(req: Request) {
         offersMobile: Boolean(offering.offersMobile),
         salonDurationMinutes: offering.salonDurationMinutes ?? null,
         mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
-        // Keep as Prisma Decimal — it serializes to string via toJSON(),
-        // which the client parser (pickMoneyString) expects.
         salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
         mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
       }
 
-      // Cache the placement for subsequent requests
       if (placementCacheKey) {
         void cacheSetJson(
           placementCacheKey,
@@ -1390,14 +1463,16 @@ export async function GET(req: Request) {
             offersMobile: offeringPayload.offersMobile,
             salonDurationMinutes: offeringPayload.salonDurationMinutes,
             mobileDurationMinutes: offeringPayload.mobileDurationMinutes,
-            salonPriceStartingAt: offeringPayload.salonPriceStartingAt != null
-              ? String(offeringPayload.salonPriceStartingAt)
-              : null,
-            mobilePriceStartingAt: offeringPayload.mobilePriceStartingAt != null
-              ? String(offeringPayload.mobilePriceStartingAt)
-              : null,
+            salonPriceStartingAt:
+              offeringPayload.salonPriceStartingAt != null
+                ? String(offeringPayload.salonPriceStartingAt)
+                : null,
+            mobilePriceStartingAt:
+              offeringPayload.mobilePriceStartingAt != null
+                ? String(offeringPayload.mobilePriceStartingAt)
+                : null,
             locationCity: placement.location.city ?? null,
-          } as CachedPlacement,
+          } satisfies CachedPlacement,
           TTL_PLACEMENT_SECONDS,
         )
       }
@@ -1491,27 +1566,60 @@ export async function GET(req: Request) {
     }
 
     if (!dateStr) {
+      const startResult = resolveSummaryWindowStart({
+        startDateStr,
+        todayYMD,
+        maxAdvanceDays,
+      })
+
+      if (!startResult.ok) {
+        return jsonFail(400, startResult.error)
+      }
+
+      const requestedSummaryDays = parseSummaryWindowDays(
+        requestedSummaryDaysRaw,
+        maxAdvanceDays,
+      )
+
+      const summaryWindow = buildSummaryYMDs({
+        startYMD: startResult.startYMD,
+        startDayOffset: startResult.startDayOffset,
+        requestedDays: requestedSummaryDays,
+        maxAdvanceDays,
+      })
+
+      const windowStartDate = startResult.startDateStr
+      const windowEndDate = ymdToString(summaryWindow.endYMD)
+      const nextStartDate = summaryWindow.nextStartYMD
+        ? ymdToString(summaryWindow.nextStartYMD)
+        : null
+
       const cacheKey = debug
         ? null
         : [
-            'avail:summary:v5',
+            'avail:summary:v7',
             professionalId,
             serviceId,
             locationId,
             effectiveLocationType,
             timeZone,
+            windowStartDate,
+            windowEndDate,
+            String(summaryWindow.windowDays),
             String(stepMinutes),
             String(leadTimeMinutes),
             String(locationBufferMinutes),
             String(maxAdvanceDays),
+            String(includeOtherPros ? 1 : 0),
             stableHash({
               addOnIds,
-              viewerLat,
-              viewerLng,
+              viewerLat: roundedViewerLat,
+              viewerLng: roundedViewerLng,
               radiusMiles,
-              clientAddressId: effectiveLocationType === ServiceLocationType.MOBILE
-                ? clientAddressId
-                : null,
+              clientAddressId:
+                effectiveLocationType === ServiceLocationType.MOBILE
+                  ? clientAddressId
+                  : null,
             }),
           ].join(':')
 
@@ -1525,13 +1633,12 @@ export async function GET(req: Request) {
         }
       }
 
-      const daysAhead = Math.min(14, maxAdvanceDays)
-      const ymds = Array.from({ length: daysAhead }, (_, i) =>
-        addDaysToYMD(todayYMD.year, todayYMD.month, todayYMD.day, i),
+      const ymds = summaryWindow.ymds
+      const firstBounds = computeDayBoundsUtc(ymds[0] ?? todayYMD, timeZone)
+      const lastBounds = computeDayBoundsUtc(
+        ymds[ymds.length - 1] ?? todayYMD,
+        timeZone,
       )
-
-      const firstBounds = computeDayBoundsUtc(ymds[0], timeZone)
-      const lastBounds = computeDayBoundsUtc(ymds[ymds.length - 1], timeZone)
 
       const windowStartUtc = addMinutes(
         firstBounds.dayStartUtc,
@@ -1550,7 +1657,6 @@ export async function GET(req: Request) {
       const centerLat = hasViewer ? viewerLat : fallbackLat
       const centerLng = hasViewer ? viewerLng : fallbackLng
 
-      // Load busy intervals and other pros concurrently — they are independent
       const [busy, otherPros] = await Promise.all([
         loadBusyIntervals({
           professionalId,
@@ -1562,7 +1668,7 @@ export async function GET(req: Request) {
           locationBufferMinutes,
           cache: { enabled: !debug },
         }),
-        centerLat != null && centerLng != null
+        includeOtherPros && centerLat != null && centerLng != null
           ? loadOtherProsNearbyCached({
               centerLat,
               centerLng,
@@ -1635,6 +1741,11 @@ export async function GET(req: Request) {
         maxDaysAhead: maxAdvanceDays,
         durationMinutes,
 
+        windowStartDate,
+        windowEndDate,
+        nextStartDate,
+        hasMoreDays: summaryWindow.hasMoreDays,
+
         primaryPro: {
           id: professionalId,
           businessName: proBusinessName,
@@ -1656,6 +1767,7 @@ export async function GET(req: Request) {
               debug: {
                 emptyReason: !availableDays.length ? firstError ?? 'none' : null,
                 otherProsCount: otherPros.length,
+                includeOtherPros,
                 center:
                   centerLat != null && centerLng != null
                     ? { lat: centerLat, lng: centerLng, radiusMiles }
@@ -1666,6 +1778,7 @@ export async function GET(req: Request) {
                   effectiveLocationType === ServiceLocationType.MOBILE
                     ? clientAddressId || null
                     : null,
+                requestedSummaryDays,
               },
             }
           : {}),

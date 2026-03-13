@@ -16,24 +16,34 @@ import { parseAvailabilitySummaryResponse } from '../contract'
 
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
+import {
+  INITIAL_WINDOW_DAYS,
+  NEXT_WINDOW_DAYS,
+} from '../utils/availabilityWindow'
+import { mergeAvailableDays } from '../utils/mergeAvailableDays'
+
+type SummaryOk = Extract<
+  AvailabilitySummaryResponse,
+  { ok: true; mode: 'SUMMARY' }
+>
 
 type CacheEntry = {
   at: number
-  data: AvailabilitySummaryResponse
+  data: SummaryOk
 }
 
 const CACHE_TTL_MS = 45_000
-const MAX_CACHE_ENTRIES = 100
+const MAX_CACHE_ENTRIES = 200
 
-const summaryCache = new Map<string, CacheEntry>()
-const inFlightByKey = new Map<string, Promise<AvailabilitySummaryResponse>>()
+const summaryWindowCache = new Map<string, CacheEntry>()
+const inFlightByKey = new Map<string, Promise<SummaryOk>>()
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
   return pickString(raw.error)
 }
 
-function buildQueryKey(args: {
+function buildBaseQueryKey(args: {
   proId: string
   serviceId: string
   locationType: ServiceLocationType | null
@@ -64,6 +74,20 @@ function buildQueryKey(args: {
     .join('|')
 }
 
+function buildWindowQueryKey(args: {
+  baseKey: string
+  startDate: string
+  days: number
+  includeOtherPros: boolean
+}) {
+  return [
+    args.baseKey,
+    `start=${args.startDate}`,
+    `days=${args.days}`,
+    `otherPros=${args.includeOtherPros ? '1' : '0'}`,
+  ].join('|')
+}
+
 function isFresh(entry: CacheEntry): boolean {
   return Date.now() - entry.at < CACHE_TTL_MS
 }
@@ -71,50 +95,71 @@ function isFresh(entry: CacheEntry): boolean {
 function pruneCache() {
   const now = Date.now()
 
-  for (const [key, entry] of summaryCache.entries()) {
+  for (const [key, entry] of summaryWindowCache.entries()) {
     if (now - entry.at >= CACHE_TTL_MS) {
-      summaryCache.delete(key)
+      summaryWindowCache.delete(key)
     }
   }
 
-  if (summaryCache.size <= MAX_CACHE_ENTRIES) return
+  if (summaryWindowCache.size <= MAX_CACHE_ENTRIES) return
 
-  const sorted = Array.from(summaryCache.entries()).sort(
+  const sorted = Array.from(summaryWindowCache.entries()).sort(
     (a, b) => a[1].at - b[1].at,
   )
 
-  const overflow = summaryCache.size - MAX_CACHE_ENTRIES
+  const overflow = summaryWindowCache.size - MAX_CACHE_ENTRIES
   for (let i = 0; i < overflow; i += 1) {
     const row = sorted[i]
-    if (row) summaryCache.delete(row[0])
+    if (row) summaryWindowCache.delete(row[0])
   }
 }
 
-function getFreshCache(key: string): AvailabilitySummaryResponse | null {
-  const hit = summaryCache.get(key)
+function getFreshCache(key: string): SummaryOk | null {
+  const hit = summaryWindowCache.get(key)
   if (!hit) return null
   if (!isFresh(hit)) return null
   return hit.data
 }
 
-function getAnyCache(key: string): AvailabilitySummaryResponse | null {
-  const hit = summaryCache.get(key)
+function getAnyCache(key: string): SummaryOk | null {
+  const hit = summaryWindowCache.get(key)
   return hit ? hit.data : null
 }
+
+
+function mergeSummaryData(current: SummaryOk | null, incoming: SummaryOk): SummaryOk {
+  if (!current) return incoming
+
+  return {
+    ...current,
+    mediaId: incoming.mediaId ?? current.mediaId,
+    availableDays: mergeAvailableDays(current.availableDays, incoming.availableDays),
+    windowStartDate: current.windowStartDate,
+    windowEndDate: incoming.windowEndDate,
+    nextStartDate: incoming.nextStartDate,
+    hasMoreDays: incoming.hasMoreDays,
+    otherPros:
+      current.otherPros.length > 0 ? current.otherPros : incoming.otherPros,
+    debug: incoming.debug ?? current.debug,
+  }
+}
+
 
 export function useAvailability(
   open: boolean,
   context: DrawerContext,
   locationType: ServiceLocationType | null,
   clientAddressId?: string | null,
+  includeOtherPros = true,
 ) {
   const router = useRouter()
   const requestSeqRef = useRef(0)
 
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [data, setData] = useState<AvailabilitySummaryResponse | null>(null)
+  const [data, setData] = useState<SummaryOk | null>(null)
 
   const proId = useMemo(
     () => String(context.professionalId || '').trim(),
@@ -176,9 +221,9 @@ export function useAvailability(
     Boolean(serviceId) &&
     (!requiresClientAddress || Boolean(normalizedClientAddressId))
 
-  const queryKey = useMemo(
+  const baseQueryKey = useMemo(
     () =>
-      buildQueryKey({
+      buildBaseQueryKey({
         proId,
         serviceId,
         locationType,
@@ -197,24 +242,35 @@ export function useAvailability(
     ],
   )
 
-  const fetchAvailability = useCallback(
-    async (key: string, keepExistingData: boolean) => {
-      const seq = ++requestSeqRef.current
+  const fetchSummaryWindow = useCallback(
+    async (args: {
+      startDate?: string | null
+      days: number
+      includeOtherProsForRequest: boolean
+    }): Promise<SummaryOk> => {
+      const windowKey = buildWindowQueryKey({
+        baseKey: baseQueryKey,
+        startDate: args.startDate ?? 'AUTO',
+        days: args.days,
+        includeOtherPros: args.includeOtherProsForRequest,
+      })
 
-      if (keepExistingData) {
-        setRefreshing(true)
-      } else {
-        setLoading(true)
-      }
+      const fresh = getFreshCache(windowKey)
+      if (fresh) return fresh
 
-      setError(null)
-
-      let promise = inFlightByKey.get(key)
-
+      let promise = inFlightByKey.get(windowKey)
       if (!promise) {
         const qs = new URLSearchParams()
         qs.set('professionalId', proId)
         qs.set('serviceId', serviceId)
+        if (args.startDate) {
+          qs.set('startDate', args.startDate)
+        }
+        qs.set('days', String(args.days))
+        qs.set(
+          'includeOtherPros',
+          args.includeOtherProsForRequest ? '1' : '0',
+        )
 
         if (locationType) {
           qs.set('locationType', locationType)
@@ -241,7 +297,7 @@ export function useAvailability(
           }
         }
 
-        promise = (async (): Promise<AvailabilitySummaryResponse> => {
+        promise = (async (): Promise<SummaryOk> => {
           const res = await fetch(`/api/availability/day?${qs.toString()}`, {
             method: 'GET',
             cache: 'no-store',
@@ -275,7 +331,7 @@ export function useAvailability(
           }
 
           pruneCache()
-          summaryCache.set(key, {
+          summaryWindowCache.set(windowKey, {
             at: Date.now(),
             data: parsed,
           })
@@ -283,32 +339,20 @@ export function useAvailability(
           return parsed
         })()
 
-        inFlightByKey.set(key, promise)
+        inFlightByKey.set(windowKey, promise)
       }
 
       try {
-        const parsed = await promise
-        if (seq !== requestSeqRef.current) return
-        setData(parsed)
-      } catch (e: unknown) {
-        if (seq !== requestSeqRef.current) return
-        setError(
-          e instanceof Error ? e.message : 'Failed to load availability.',
-        )
+        return await promise
       } finally {
-        const currentPromise = inFlightByKey.get(key)
+        const currentPromise = inFlightByKey.get(windowKey)
         if (currentPromise === promise) {
-          inFlightByKey.delete(key)
-        }
-
-        if (seq === requestSeqRef.current) {
-          setLoading(false)
-          setRefreshing(false)
+          inFlightByKey.delete(windowKey)
         }
       }
     },
     [
-      router,
+      baseQueryKey,
       proId,
       serviceId,
       locationType,
@@ -316,8 +360,86 @@ export function useAvailability(
       viewer,
       requiresClientAddress,
       normalizedClientAddressId,
+      router,
     ],
   )
+
+  const loadInitial = useCallback(
+    async (keepExistingData: boolean) => {
+      const seq = ++requestSeqRef.current
+
+      if (keepExistingData) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+
+      setError(null)
+
+      try {
+        const freshKey = buildWindowQueryKey({
+          baseKey: baseQueryKey,
+          startDate: 'AUTO',
+          days: INITIAL_WINDOW_DAYS,
+          includeOtherPros,
+        })
+
+        const stale = getAnyCache(freshKey)
+        if (keepExistingData && stale) {
+          if (seq !== requestSeqRef.current) return
+          setData(stale)
+        }
+
+        const firstPage = await fetchSummaryWindow({
+          startDate: null,
+          days: INITIAL_WINDOW_DAYS,
+          includeOtherProsForRequest: includeOtherPros,
+        })
+
+        if (seq !== requestSeqRef.current) return
+        setData(firstPage)
+      } catch (e: unknown) {
+        if (seq !== requestSeqRef.current) return
+        setError(
+          e instanceof Error ? e.message : 'Failed to load availability.',
+        )
+      } finally {
+        if (seq === requestSeqRef.current) {
+          setLoading(false)
+          setRefreshing(false)
+        }
+      }
+    },
+    [
+      baseQueryKey,
+      fetchSummaryWindow,
+      includeOtherPros,
+    ],
+  )
+
+  const loadMore = useCallback(async () => {
+    if (!data?.hasMoreDays || !data.nextStartDate) return
+    if (loading || refreshing || loadingMore) return
+
+    setLoadingMore(true)
+    setError(null)
+
+    try {
+      const nextPage = await fetchSummaryWindow({
+        startDate: data.nextStartDate,
+        days: NEXT_WINDOW_DAYS,
+        includeOtherProsForRequest: false,
+      })
+
+      setData((current) => mergeSummaryData(current, nextPage))
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error ? e.message : 'Failed to load more availability.',
+      )
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [data, fetchSummaryWindow, loading, refreshing, loadingMore])
 
   useEffect(() => {
     return () => {
@@ -326,79 +448,88 @@ export function useAvailability(
   }, [])
 
   useEffect(() => {
-  if (!open) {
-    setLoading(false)
-    setRefreshing(false)
-    setError(null)
-    return
-  }
+    if (!open) {
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+      setError(null)
+      return
+    }
 
-  if (!proId) {
-    setLoading(false)
-    setRefreshing(false)
+    if (!proId) {
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+      setData(null)
+      setError('Missing professional. Please try again.')
+      return
+    }
+
+    if (!serviceId) {
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+      setData(null)
+      setError(
+        'No service is linked yet. Ask the pro to attach a service to this look.',
+      )
+      return
+    }
+
+    if (!canFetch) {
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+      setData(null)
+      setError(null)
+      return
+    }
+
+    const initialWindowKey = buildWindowQueryKey({
+      baseKey: baseQueryKey,
+      startDate: 'AUTO',
+      days: INITIAL_WINDOW_DAYS,
+      includeOtherPros,
+    })
+
+    const fresh = getFreshCache(initialWindowKey)
+    if (fresh) {
+      setData(fresh)
+      setError(null)
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+      return
+    }
+
+    const stale = getAnyCache(initialWindowKey)
+    if (stale) {
+      setData(stale)
+      setError(null)
+      void loadInitial(true)
+      return
+    }
+
     setData(null)
-    setError('Missing professional. Please try again.')
-    return
-  }
-
-  if (!serviceId) {
-    setLoading(false)
-    setRefreshing(false)
-    setData(null)
-    setError(
-      'No service is linked yet. Ask the pro to attach a service to this look.',
-    )
-    return
-  }
-
-  if (!canFetch) {
-    setLoading(false)
-    setRefreshing(false)
-    setData(null)
-    setError(null)
-    return
-  }
-
-  const fresh = getFreshCache(queryKey)
-  if (fresh) {
-    setData(fresh)
-    setError(null)
-    setLoading(false)
-    setRefreshing(false)
-    return
-  }
-
-  const stale = getAnyCache(queryKey)
-  if (stale) {
-    setData(stale)
-    setError(null)
-    void fetchAvailability(queryKey, true)
-    return
-  }
-
-  if (data) {
-    setError(null)
-    void fetchAvailability(queryKey, true)
-    return
-  }
-
-  setData(null)
-  void fetchAvailability(queryKey, false)
-}, [
-  open,
-  proId,
-  serviceId,
-  canFetch,
-  queryKey,
-  fetchAvailability,
-  data,
-])
+    void loadInitial(false)
+  }, [
+    open,
+    proId,
+    serviceId,
+    canFetch,
+    baseQueryKey,
+    includeOtherPros,
+    loadInitial,
+  ])
 
   return {
     loading,
+    loadingMore,
     refreshing,
     error,
     data,
+    hasMoreDays: Boolean(data?.hasMoreDays),
+    loadMore,
     setError,
     setData,
   }

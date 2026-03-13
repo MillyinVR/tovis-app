@@ -22,6 +22,11 @@ type DaySlotsSummary = Extract<
   { ok: true; mode: 'SUMMARY' }
 >
 
+type OtherProRef = {
+  id: string
+  locationId: string
+}
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
@@ -95,6 +100,15 @@ function pruneExpiredDaySlotCache(cache: Record<string, DaySlotCacheEntry>) {
   }
 }
 
+function getOtherProsFromSummary(summary: DaySlotsSummary | null): OtherProRef[] {
+  if (!summary) return []
+
+  return summary.otherPros.map((pro) => ({
+    id: pro.id,
+    locationId: pro.locationId,
+  }))
+}
+
 export function useDaySlots(args: {
   open: boolean
   summary: DaySlotsSummary | null
@@ -129,8 +143,8 @@ export function useDaySlots(args: {
   const primaryId = summary?.primaryPro.id ?? null
   const primaryLocationId = summary?.locationId ?? null
 
-  const othersRef = useRef(summary?.otherPros ?? [])
-  othersRef.current = summary?.otherPros ?? []
+  const othersRef = useRef<OtherProRef[]>([])
+  othersRef.current = getOtherProsFromSummary(summary)
 
   const clearDaySlots = useCallback(() => {
     setPrimarySlots([])
@@ -294,7 +308,14 @@ export function useDaySlots(args: {
     otherSlotsRequestIdRef.current += 1
     setOtherSlots({})
     setLoadingOtherSlots(false)
-  }, [open, selectedDayYMD, activeLocationType, selectedClientAddressId, primaryId])
+  }, [
+    open,
+    selectedDayYMD,
+    activeLocationType,
+    selectedClientAddressId,
+    primaryId,
+    summary?.windowEndDate,
+  ])
 
   useEffect(() => {
     if (!open || !primaryId || !primaryLocationId || !selectedDayYMD) {
