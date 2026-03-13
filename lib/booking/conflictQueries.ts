@@ -13,9 +13,14 @@
  *   A held time blocks that professional regardless of the client-facing mode/location view.
  *
  * - Calendar blocks are LOCATION-AWARE or GLOBAL.
- *   A block only applies when:
- *   - it matches the selected locationId, or
- *   - it is global (locationId === null).
+ *   A block applies when:
+ *   - it is global (locationId === null), or
+ *   - it matches the selected/requested locationId.
+ *
+ *   Important nuance:
+ *   - A REQUESTED global block conflicts with ANY overlapping block for that pro.
+ *   - A REQUESTED location-scoped block conflicts with overlapping global blocks
+ *     and overlapping blocks for that same location.
  *
  * - Client-facing availability is LOCATION/MODE-SCOPED for visibility,
  *   but must still consume PRO-WIDE booking and hold occupancy when determining
@@ -23,6 +28,7 @@
  *
  * If you change these rules, update the tests first.
  */
+
 import { prisma } from '@/lib/prisma'
 import { BookingStatus, Prisma } from '@prisma/client'
 import {
@@ -41,9 +47,10 @@ type DbClient = Prisma.TransactionClient | typeof prisma
 type CalendarBlockConflictArgs = {
   tx?: DbClient
   professionalId: string
-  locationId: string
+  locationId: string | null
   requestedStart: Date
   requestedEnd: Date
+  excludeBlockId?: string | null
 }
 
 type BookingConflictCheckArgs = {
@@ -70,7 +77,7 @@ type HoldConflictCheckArgs = {
 type TimeRangeAvailabilityArgs = {
   tx?: DbClient
   professionalId: string
-  locationId: string
+  locationId: string | null
   requestedStart: Date
   requestedEnd: Date
   defaultBufferMinutes: number
@@ -84,7 +91,7 @@ type TimeRangeAvailabilityArgs = {
 type BusyIntervalWindowArgs = {
   tx?: DbClient
   professionalId: string
-  locationId: string
+  locationId: string | null
   windowStartUtc: Date
   windowEndUtc: Date
   nowUtc?: Date
@@ -109,20 +116,116 @@ function normalizeTake(value: unknown, fallback: number): number {
   return Math.min(whole, 10_000)
 }
 
+function assertValidRange(start: Date, end: Date): void {
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
+    throw new Error('INVALID_START')
+  }
+  if (!(end instanceof Date) || Number.isNaN(end.getTime())) {
+    throw new Error('INVALID_END')
+  }
+  if (end <= start) {
+    throw new Error('INVALID_RANGE')
+  }
+}
+
+/**
+ * Existing block applicability when evaluating a requested block/time range:
+ *
+ * - requested locationId === null (global request):
+ *   any overlapping block for this pro conflicts
+ *
+ * - requested locationId !== null (location-scoped request):
+ *   overlapping global blocks conflict
+ *   overlapping blocks at the same location conflict
+ */
+function buildCalendarBlockConflictWhere(args: {
+  professionalId: string
+  locationId: string | null
+  requestedStart: Date
+  requestedEnd: Date
+  excludeBlockId?: string | null
+}): Prisma.CalendarBlockWhereInput {
+  const {
+    professionalId,
+    locationId,
+    requestedStart,
+    requestedEnd,
+    excludeBlockId = null,
+  } = args
+
+  return {
+    professionalId,
+    ...(excludeBlockId ? { id: { not: excludeBlockId } } : {}),
+    startsAt: { lt: requestedEnd },
+    endsAt: { gt: requestedStart },
+    ...(locationId === null
+      ? {}
+      : {
+          OR: [{ locationId: null }, { locationId }],
+        }),
+  }
+}
+
+/**
+ * Existing block applicability when loading busy intervals for a selected location:
+ *
+ * - selected locationId === null:
+ *   include all overlapping blocks for this pro
+ *
+ * - selected locationId !== null:
+ *   include overlapping global blocks and blocks for that location
+ */
+function buildCalendarBlockWindowWhere(args: {
+  professionalId: string
+  locationId: string | null
+  windowStartUtc: Date
+  windowEndUtc: Date
+}): Prisma.CalendarBlockWhereInput {
+  const { professionalId, locationId, windowStartUtc, windowEndUtc } = args
+
+  return {
+    professionalId,
+    startsAt: { lt: windowEndUtc },
+    endsAt: { gt: windowStartUtc },
+    ...(locationId === null
+      ? {}
+      : {
+          OR: [{ locationId: null }, { locationId }],
+        }),
+  }
+}
+
 export async function findCalendarBlockConflict(
   args: CalendarBlockConflictArgs,
 ) {
-  const { tx, professionalId, locationId, requestedStart, requestedEnd } = args
+  const {
+    tx,
+    professionalId,
+    locationId,
+    requestedStart,
+    requestedEnd,
+    excludeBlockId = null,
+  } = args
+
+  assertValidRange(requestedStart, requestedEnd)
 
   return db(tx).calendarBlock.findFirst({
-    where: {
+    where: buildCalendarBlockConflictWhere({
       professionalId,
-      startsAt: { lt: requestedEnd },
-      endsAt: { gt: requestedStart },
-      OR: [{ locationId }, { locationId: null }],
-    },
+      locationId,
+      requestedStart,
+      requestedEnd,
+      excludeBlockId,
+    }),
     select: { id: true },
   })
+}
+
+export async function hasCalendarBlockConflict(
+  args: CalendarBlockConflictArgs,
+): Promise<boolean> {
+  const conflict = await findCalendarBlockConflict(args)
+  return Boolean(conflict)
 }
 
 export async function hasBookingConflict(
@@ -136,6 +239,8 @@ export async function hasBookingConflict(
     excludeBookingId = null,
     take = 2000,
   } = args
+
+  assertValidRange(requestedStart, requestedEnd)
 
   const rows = await db(tx).booking.findMany({
     where: {
@@ -175,6 +280,8 @@ export async function hasHoldConflict(
     nowUtc = new Date(),
     take = 2000,
   } = args
+
+  assertValidRange(requestedStart, requestedEnd)
 
   const holds = await db(tx).bookingHold.findMany({
     where: {
@@ -284,6 +391,8 @@ export async function loadBusyIntervalsForWindow(
     take = 5000,
   } = args
 
+  assertValidRange(windowStartUtc, windowEndUtc)
+
   const database = db(tx)
   const normalizedTake = normalizeTake(take, 5000)
   const queryStartUtc = getConflictWindowStart(windowStartUtc)
@@ -331,12 +440,12 @@ export async function loadBusyIntervalsForWindow(
       take: normalizedTake,
     }),
     database.calendarBlock.findMany({
-      where: {
+      where: buildCalendarBlockWindowWhere({
         professionalId,
-        startsAt: { lt: windowEndUtc },
-        endsAt: { gt: windowStartUtc },
-        OR: [{ locationId: null }, { locationId }],
-      },
+        locationId,
+        windowStartUtc,
+        windowEndUtc,
+      }),
       select: {
         startsAt: true,
         endsAt: true,
@@ -370,6 +479,7 @@ export async function loadBusyIntervalsForWindow(
 
   return mergeBusyIntervals(intervals)
 }
+
 export async function getTimeRangeConflict(
   args: TimeRangeAvailabilityArgs,
 ): Promise<TimeRangeConflictCode | null> {
@@ -387,9 +497,10 @@ export async function getTimeRangeConflict(
     take,
   } = args
 
-  // Run all three conflict checks concurrently
+  assertValidRange(requestedStart, requestedEnd)
+
   const [blockConflict, bookingConflict, holdConflict] = await Promise.all([
-    findCalendarBlockConflict({
+    hasCalendarBlockConflict({
       tx,
       professionalId,
       locationId,

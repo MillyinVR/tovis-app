@@ -34,6 +34,7 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
+
 export const dynamic = 'force-dynamic'
 
 type TxnErrorCode =
@@ -184,6 +185,36 @@ function mapSchedulingReadinessErrorToTxnCode(
   }
 }
 
+function logAndThrowTimeRangeConflict(args: {
+  conflict: 'BLOCKED' | 'BOOKING' | 'HOLD'
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  holdId: string
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_FINALIZE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: args.conflict,
+    holdId: args.holdId,
+    meta: {
+      route: 'app/api/bookings/finalize/route.ts',
+    },
+  })
+
+  if (args.conflict === 'BLOCKED') {
+    throwCode('BLOCKED')
+  }
+
+  throwCode('TIME_NOT_AVAILABLE')
+}
+
 export async function POST(request: Request) {
   try {
     const auth = await requireClient()
@@ -266,7 +297,7 @@ export async function POST(request: Request) {
 
     const now = new Date()
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
-const initialStatus = getClientSubmittedBookingStatus(autoAccept)
+    const initialStatus = getClientSubmittedBookingStatus(autoAccept)
 
     let rebookOfBookingIdForCreate: string | null = null
 
@@ -673,55 +704,16 @@ const initialStatus = getClientSubmittedBookingStatus(autoAccept)
         excludeHoldId: hold.id,
       })
 
-      if (timeRangeConflict === 'BLOCKED') {
-        logBookingConflict({
-          action: 'BOOKING_FINALIZE',
+      if (timeRangeConflict) {
+        logAndThrowTimeRangeConflict({
+          conflict: timeRangeConflict,
           professionalId: offering.professionalId,
           locationId: locationContext.locationId,
           locationType: hold.locationType,
           requestedStart,
           requestedEnd,
-          conflictType: 'BLOCKED',
           holdId: hold.id,
-          meta: {
-            route: 'app/api/bookings/finalize/route.ts',
-          },
         })
-        throwCode('BLOCKED')
-      }
-
-      if (timeRangeConflict === 'BOOKING') {
-        logBookingConflict({
-          action: 'BOOKING_FINALIZE',
-          professionalId: offering.professionalId,
-          locationId: locationContext.locationId,
-          locationType: hold.locationType,
-          requestedStart,
-          requestedEnd,
-          conflictType: 'BOOKING',
-          holdId: hold.id,
-          meta: {
-            route: 'app/api/bookings/finalize/route.ts',
-          },
-        })
-        throwCode('TIME_NOT_AVAILABLE')
-      }
-
-      if (timeRangeConflict === 'HOLD') {
-        logBookingConflict({
-          action: 'BOOKING_FINALIZE',
-          professionalId: offering.professionalId,
-          locationId: locationContext.locationId,
-          locationType: hold.locationType,
-          requestedStart,
-          requestedEnd,
-          conflictType: 'HOLD',
-          holdId: hold.id,
-          meta: {
-            route: 'app/api/bookings/finalize/route.ts',
-          },
-        })
-        throwCode('TIME_NOT_AVAILABLE')
       }
 
       const salonLocationAddressSnapshotInput:
@@ -756,8 +748,6 @@ const initialStatus = getClientSubmittedBookingStatus(autoAccept)
             locationId: locationContext.locationId,
             locationTimeZone: locationContext.timeZone,
 
-            // SALON destination = pro salon/suite address.
-            // MOBILE destination = clientAddressSnapshot, so locationAddressSnapshot stays null.
             locationAddressSnapshot: salonLocationAddressSnapshotInput,
             locationLatSnapshot:
               decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,

@@ -43,6 +43,8 @@ import {
 export const dynamic = 'force-dynamic'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
+const OCCUPANCY_WINDOW_PADDING_MINUTES =
+  MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 
 const TTL_DAY_SECONDS = 90
 const TTL_SUMMARY_SECONDS = 60
@@ -594,7 +596,7 @@ function parseCachedBusyIntervals(value: unknown): BusyInterval[] | null {
 
 async function loadBusyIntervals(args: {
   professionalId: string
-  locationId: string
+  locationId: string | null
   windowStartUtc: Date
   windowEndUtc: Date
   nowUtc: Date
@@ -617,9 +619,9 @@ async function loadBusyIntervals(args: {
   }
 
   const key = [
-    'avail:busy:v5',
+    'avail:busy:v6',
     args.professionalId,
-    args.locationId,
+    args.locationId ?? 'GLOBAL',
     args.windowStartUtc.toISOString(),
     args.windowEndUtc.toISOString(),
     String(args.locationBufferMinutes ?? ''),
@@ -1597,7 +1599,7 @@ export async function GET(req: Request) {
       const cacheKey = debug
         ? null
         : [
-            'avail:summary:v7',
+            'avail:summary:v8',
             professionalId,
             serviceId,
             locationId,
@@ -1642,11 +1644,11 @@ export async function GET(req: Request) {
 
       const windowStartUtc = addMinutes(
         firstBounds.dayStartUtc,
-        -(MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES),
+        -OCCUPANCY_WINDOW_PADDING_MINUTES,
       )
       const windowEndUtc = addMinutes(
         lastBounds.dayEndExclusiveUtc,
-        MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES,
+        OCCUPANCY_WINDOW_PADDING_MINUTES,
       )
 
       const fallbackLat = placementLat
@@ -1815,7 +1817,7 @@ export async function GET(req: Request) {
     const dayCacheKey = debug
       ? null
       : [
-          'avail:day:v5',
+          'avail:day:v6',
           professionalId,
           serviceId,
           locationId,
@@ -1845,11 +1847,11 @@ export async function GET(req: Request) {
     const bounds = computeDayBoundsUtc(ymd, timeZone)
     const windowStartUtc = addMinutes(
       bounds.dayStartUtc,
-      -(MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES),
+      -OCCUPANCY_WINDOW_PADDING_MINUTES,
     )
     const windowEndUtc = addMinutes(
       bounds.dayEndExclusiveUtc,
-      MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES,
+      OCCUPANCY_WINDOW_PADDING_MINUTES,
     )
 
     const busy = await loadBusyIntervals({

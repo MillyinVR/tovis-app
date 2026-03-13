@@ -172,6 +172,36 @@ function buildBookingOutput(args: {
   }
 }
 
+function logAndThrowTimeRangeConflict(args: {
+  conflict: 'BLOCKED' | 'BOOKING' | 'HOLD'
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  bookingId: string
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: args.conflict,
+    bookingId: args.bookingId,
+    meta: {
+      route: 'app/api/pro/bookings/[id]/route.ts',
+    },
+  })
+
+  if (args.conflict === 'BLOCKED') {
+    throw new Error('BLOCKED')
+  }
+
+  throw new Error('TIME_NOT_AVAILABLE')
+}
+
 /* ---------------------------------------------
    GET
 --------------------------------------------- */
@@ -763,67 +793,28 @@ export async function PATCH(req: Request, ctx: Ctx) {
         }
       }
 
-            const timeRangeConflict = await getTimeRangeConflict({
-              tx,
-              professionalId: existing.professionalId,
-              locationId: location.id,
-              requestedStart: finalStart,
-              requestedEnd: finalEnd,
-              defaultBufferMinutes: finalBuffer,
-              fallbackDurationMinutes: finalDuration,
-              excludeBookingId: existing.id,
-            })
+      const timeRangeConflict = await getTimeRangeConflict({
+        tx,
+        professionalId: existing.professionalId,
+        locationId: location.id,
+        requestedStart: finalStart,
+        requestedEnd: finalEnd,
+        defaultBufferMinutes: finalBuffer,
+        fallbackDurationMinutes: finalDuration,
+        excludeBookingId: existing.id,
+      })
 
-            if (timeRangeConflict === 'BLOCKED') {
-              logBookingConflict({
-                action: 'BOOKING_UPDATE',
-                professionalId: existing.professionalId,
-                locationId: location.id,
-                locationType: existing.locationType,
-                requestedStart: finalStart,
-                requestedEnd: finalEnd,
-                conflictType: 'BLOCKED',
-                bookingId: existing.id,
-                meta: {
-                  route: 'app/api/pro/bookings/[id]/route.ts',
-                },
-              })
-              throw new Error('BLOCKED')
-            }
-
-            if (timeRangeConflict === 'BOOKING') {
-              logBookingConflict({
-                action: 'BOOKING_UPDATE',
-                professionalId: existing.professionalId,
-                locationId: location.id,
-                locationType: existing.locationType,
-                requestedStart: finalStart,
-                requestedEnd: finalEnd,
-                conflictType: 'BOOKING',
-                bookingId: existing.id,
-                meta: {
-                  route: 'app/api/pro/bookings/[id]/route.ts',
-                },
-              })
-              throw new Error('TIME_NOT_AVAILABLE')
-            }
-
-            if (timeRangeConflict === 'HOLD') {
-              logBookingConflict({
-                action: 'BOOKING_UPDATE',
-                professionalId: existing.professionalId,
-                locationId: location.id,
-                locationType: existing.locationType,
-                requestedStart: finalStart,
-                requestedEnd: finalEnd,
-                conflictType: 'HOLD',
-                bookingId: existing.id,
-                meta: {
-                  route: 'app/api/pro/bookings/[id]/route.ts',
-                },
-              })
-              throw new Error('TIME_NOT_AVAILABLE')
-            }
+      if (timeRangeConflict) {
+        logAndThrowTimeRangeConflict({
+          conflict: timeRangeConflict,
+          professionalId: existing.professionalId,
+          locationId: location.id,
+          locationType: existing.locationType,
+          requestedStart: finalStart,
+          requestedEnd: finalEnd,
+          bookingId: existing.id,
+        })
+      }
 
       if (normalizedServiceItems) {
         await tx.bookingServiceItem.deleteMany({

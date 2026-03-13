@@ -7,7 +7,6 @@ import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import {
-  buildBlockConflictWhere,
   clampRange,
   parseLocationIdInput,
   parseNoteInput,
@@ -19,7 +18,7 @@ import {
 export const dynamic = 'force-dynamic'
 
 function normalizeLocationBufferMinutes(value: unknown): number {
-  return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
+  return clampInt(value, 0, MAX_BUFFER_MINUTES)
 }
 
 export async function GET(req: Request) {
@@ -125,30 +124,6 @@ export async function POST(req: Request) {
       return jsonFail(404, 'Location not found.')
     }
 
-    const blockConflict = await prisma.calendarBlock.findFirst({
-      where: buildBlockConflictWhere({
-        professionalId,
-        startsAt,
-        endsAt,
-        locationId,
-      }),
-      select: { id: true },
-    })
-
-    if (blockConflict) {
-      logBookingConflict({
-        action: 'BLOCK_CREATE',
-        professionalId,
-        locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'BLOCKED',
-        blockId: blockConflict.id,
-      })
-
-      return jsonFail(409, 'That time overlaps an existing block.')
-    }
-
     const timeRangeConflict = await getTimeRangeConflict({
       professionalId,
       locationId,
@@ -156,6 +131,22 @@ export async function POST(req: Request) {
       requestedEnd: endsAt,
       defaultBufferMinutes: normalizeLocationBufferMinutes(location.bufferMinutes),
     })
+
+    if (timeRangeConflict === 'BLOCKED') {
+      logBookingConflict({
+        action: 'BLOCK_CREATE',
+        professionalId,
+        locationId,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        conflictType: 'BLOCKED',
+        meta: {
+          route: 'app/api/pro/calendar/blocked/route.ts',
+        },
+      })
+
+      return jsonFail(409, 'That time overlaps an existing block.')
+    }
 
     if (timeRangeConflict === 'BOOKING') {
       logBookingConflict({
@@ -165,6 +156,9 @@ export async function POST(req: Request) {
         requestedStart: startsAt,
         requestedEnd: endsAt,
         conflictType: 'BOOKING',
+        meta: {
+          route: 'app/api/pro/calendar/blocked/route.ts',
+        },
       })
 
       return jsonFail(409, 'That time overlaps an existing booking.')
@@ -178,22 +172,12 @@ export async function POST(req: Request) {
         requestedStart: startsAt,
         requestedEnd: endsAt,
         conflictType: 'HOLD',
+        meta: {
+          route: 'app/api/pro/calendar/blocked/route.ts',
+        },
       })
 
       return jsonFail(409, 'That time is temporarily held for booking.')
-    }
-
-    if (timeRangeConflict === 'BLOCKED') {
-      logBookingConflict({
-        action: 'BLOCK_CREATE',
-        professionalId,
-        locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'BLOCKED',
-      })
-
-      return jsonFail(409, 'That time overlaps an existing block.')
     }
 
     const created = await prisma.calendarBlock.create({

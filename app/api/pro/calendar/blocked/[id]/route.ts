@@ -3,11 +3,14 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
-import { hasBookingConflict, hasHoldConflict } from '@/lib/booking/conflictQueries'
+import {
+  assertNoCalendarBlockConflict,
+  hasBookingConflict,
+  hasHoldConflict,
+} from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import {
-  buildBlockConflictWhere,
   parseNoteInput,
   toBlockDto,
   toDateOrNull,
@@ -19,7 +22,7 @@ export const dynamic = 'force-dynamic'
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 function normalizeLocationBufferMinutes(value: unknown): number {
-  return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
+  return clampInt(value, 0, MAX_BUFFER_MINUTES)
 }
 
 async function getBlockId(ctx: Ctx): Promise<string | null> {
@@ -89,10 +92,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(404, 'Not found.')
     }
 
-    if (!existing.locationId) {
-      return jsonFail(400, 'This block is missing a location and cannot be edited.')
-    }
-
     const hasStartsAt = Object.prototype.hasOwnProperty.call(body, 'startsAt')
     const hasEndsAt = Object.prototype.hasOwnProperty.call(body, 'endsAt')
 
@@ -124,51 +123,56 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, windowError)
     }
 
-    const location = await prisma.professionalLocation.findFirst({
-      where: {
-        id: existing.locationId,
-        professionalId,
-        isBookable: true,
-      },
-      select: {
-        id: true,
-        bufferMinutes: true,
-      },
-    })
+    const location = existing.locationId
+      ? await prisma.professionalLocation.findFirst({
+          where: {
+            id: existing.locationId,
+            professionalId,
+            isBookable: true,
+          },
+          select: {
+            id: true,
+            bufferMinutes: true,
+          },
+        })
+      : null
 
-    if (!location) {
+    if (existing.locationId && !location) {
       return jsonFail(404, 'Location not found.')
     }
 
-    const blockConflict = await prisma.calendarBlock.findFirst({
-      where: buildBlockConflictWhere({
+    try {
+      await assertNoCalendarBlockConflict({
         professionalId,
-        startsAt,
-        endsAt,
-        locationId: existing.locationId,
-        excludeBlockId: existing.id,
-      }),
-      select: { id: true },
-    })
-
-    if (blockConflict) {
-      logBookingConflict({
-        action: 'BLOCK_UPDATE',
-        professionalId,
-        locationId: existing.locationId,
+        locationId: existing.locationId ?? null,
         requestedStart: startsAt,
         requestedEnd: endsAt,
-        conflictType: 'BLOCKED',
-        blockId: existing.id,
-        meta: {
-          conflictingBlockId: blockConflict.id,
-        },
+        excludeBlockId: existing.id,
       })
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'BLOCKED') {
+        logBookingConflict({
+          action: 'BLOCK_UPDATE',
+          professionalId,
+          locationId: existing.locationId ?? null,
+          requestedStart: startsAt,
+          requestedEnd: endsAt,
+          conflictType: 'BLOCKED',
+          blockId: existing.id,
+          meta: {
+            route: 'app/api/pro/calendar/blocked/[id]/route.ts',
+          },
+        })
 
-      return jsonFail(409, 'That time overlaps an existing block.')
+        return jsonFail(409, 'That time overlaps an existing block.')
+      }
+
+      throw error
     }
 
-    const defaultBufferMinutes = normalizeLocationBufferMinutes(location.bufferMinutes)
+    const defaultBufferMinutes = normalizeLocationBufferMinutes(
+      location?.bufferMinutes ?? 0,
+    )
 
     const bookingConflict = await hasBookingConflict({
       professionalId,
@@ -180,11 +184,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
       logBookingConflict({
         action: 'BLOCK_UPDATE',
         professionalId,
-        locationId: existing.locationId,
+        locationId: existing.locationId ?? null,
         requestedStart: startsAt,
         requestedEnd: endsAt,
         conflictType: 'BOOKING',
         blockId: existing.id,
+        meta: {
+          route: 'app/api/pro/calendar/blocked/[id]/route.ts',
+        },
       })
 
       return jsonFail(409, 'That time overlaps an existing booking.')
@@ -201,11 +208,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
       logBookingConflict({
         action: 'BLOCK_UPDATE',
         professionalId,
-        locationId: existing.locationId,
+        locationId: existing.locationId ?? null,
         requestedStart: startsAt,
         requestedEnd: endsAt,
         conflictType: 'HOLD',
         blockId: existing.id,
+        meta: {
+          route: 'app/api/pro/calendar/blocked/[id]/route.ts',
+        },
       })
 
       return jsonFail(409, 'That time is temporarily held for booking.')
