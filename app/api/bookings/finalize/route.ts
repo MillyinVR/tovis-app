@@ -33,7 +33,7 @@ import {
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-
+import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 export const dynamic = 'force-dynamic'
 
 type TxnErrorCode =
@@ -266,7 +266,7 @@ export async function POST(request: Request) {
 
     const now = new Date()
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
-    const initialStatus = autoAccept ? BookingStatus.ACCEPTED : BookingStatus.PENDING
+const initialStatus = getClientSubmittedBookingStatus(autoAccept)
 
     let rebookOfBookingIdForCreate: string | null = null
 

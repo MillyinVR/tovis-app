@@ -31,7 +31,7 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { snapToStepMinutes } from '@/lib/booking/serviceItems'
-
+import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 export const dynamic = 'force-dynamic'
 
 type CreateBookingErrorCode =
@@ -455,7 +455,7 @@ export async function POST(req: Request) {
             serviceId: offering.serviceId,
             offeringId: offering.id,
             scheduledFor: requestedStart,
-            status: BookingStatus.ACCEPTED,
+            status: getProCreatedBookingStatus(),
 
             locationType,
             locationId: locationContext.locationId,
