@@ -1,3 +1,4 @@
+// lib/dto/clientBooking.ts
 import type { Prisma } from '@prisma/client'
 import { resolveApptTimeZone, type TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'

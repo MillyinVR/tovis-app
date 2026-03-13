@@ -61,6 +61,20 @@ type BookingModalDeps = {
   locations: { id: string; stepMinutes: number | null }[]
 }
 
+type BookingPatchServiceItem = {
+  serviceId: string
+  offeringId: string
+  sortOrder: number
+}
+
+type BookingPatchPayload = {
+  scheduledFor?: string
+  notifyClient?: boolean
+  allowOutsideWorkingHours?: boolean
+  status?: 'ACCEPTED' | 'CANCELLED'
+  serviceItems?: BookingPatchServiceItem[]
+}
+
 function normalizeUiTimeZone(value: string | null | undefined): string {
   return sanitizeTimeZone(value ?? DEFAULT_TIME_ZONE, DEFAULT_TIME_ZONE)
 }
@@ -70,7 +84,7 @@ function parseDateParts(value: string): {
   mm: number
   dd: number
 } | null {
-  const [yyyy, mm, dd] = value.split('-').map((x) => Number(x))
+  const [yyyy, mm, dd] = value.split('-').map(Number)
   if (!yyyy || !mm || !dd) return null
   return { yyyy, mm, dd }
 }
@@ -79,9 +93,19 @@ function parseTimeParts(value: string): {
   hh: number
   mi: number
 } | null {
-  const [hh, mi] = value.split(':').map((x) => Number(x))
+  const [hh, mi] = value.split(':').map(Number)
   if (!Number.isFinite(hh) || !Number.isFinite(mi)) return null
   return { hh, mi }
+}
+
+function toPatchServiceItems(
+  items: BookingServiceItem[],
+): BookingPatchServiceItem[] {
+  return normalizeDraftServiceItems(items).map((item) => ({
+    serviceId: item.serviceId,
+    offeringId: item.offeringId ?? '',
+    sortOrder: Number(item.sortOrder),
+  }))
 }
 
 export function useBookingModal(deps: BookingModalDeps) {
@@ -99,11 +123,15 @@ export function useBookingModal(deps: BookingModalDeps) {
   const [bookingLoading, setBookingLoading] = useState(false)
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [booking, setBooking] = useState<BookingDetails | null>(null)
-  const [openBookingLocationId, setOpenBookingLocationId] = useState<string | null>(null)
+  const [openBookingLocationId, setOpenBookingLocationId] = useState<
+    string | null
+  >(null)
   const [openBookingLocationType, setOpenBookingLocationType] =
     useState<LocationType>('SALON')
 
-  const [serviceItemsDraft, setServiceItemsDraft] = useState<BookingServiceItem[]>([])
+  const [serviceItemsDraft, setServiceItemsDraft] = useState<
+    BookingServiceItem[]
+  >([])
   const [manualDurationMinutes, setManualDurationMinutes] = useState<number>(60)
 
   const [reschedDate, setReschedDate] = useState<string>('')
@@ -176,6 +204,21 @@ export function useBookingModal(deps: BookingModalDeps) {
     [serviceItemsDraft],
   )
 
+  function resetBookingState() {
+    setOpenBookingId(null)
+    setBooking(null)
+    setOpenBookingLocationId(null)
+    setOpenBookingLocationType('SALON')
+    setServiceItemsDraft([])
+    setBookingError(null)
+    setSavingReschedule(false)
+    setAllowOutsideHours(false)
+    setManualDurationMinutes(60)
+    setReschedDate('')
+    setReschedTime('')
+    setNotifyClient(true)
+  }
+
   function setDraftServiceIds(nextServiceIds: string[]) {
     const uniqueIds = Array.from(
       new Set(nextServiceIds.map((id) => id.trim()).filter(Boolean)),
@@ -241,6 +284,23 @@ export function useBookingModal(deps: BookingModalDeps) {
     })
   }
 
+  async function patchBooking(
+    bookingId: string,
+    payload: BookingPatchPayload,
+    fallbackError: string,
+  ) {
+    const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const data: unknown = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(apiMessage(data, fallbackError))
+    }
+  }
+
   const editOutside = booking ? editWouldBeOutsideHours() : false
 
   async function openBooking(id: string) {
@@ -254,11 +314,11 @@ export function useBookingModal(deps: BookingModalDeps) {
     setAllowOutsideHours(false)
 
     try {
-      const maybeEv = eventsRef.current.find((x) => x.id === id)
-      if (maybeEv && maybeEv.kind === 'BOOKING') {
-        setOpenBookingLocationId(maybeEv.locationId ?? null)
+      const maybeEvent = eventsRef.current.find((event) => event.id === id)
+      if (maybeEvent && maybeEvent.kind === 'BOOKING') {
+        setOpenBookingLocationId(maybeEvent.locationId ?? null)
         setOpenBookingLocationType(
-          locationTypeFromBookingValue(maybeEv.locationType),
+          locationTypeFromBookingValue(maybeEvent.locationType),
         )
       }
 
@@ -288,7 +348,7 @@ export function useBookingModal(deps: BookingModalDeps) {
       setManualDurationMinutes(Number(parsed.totalDurationMinutes || 60))
       setNotifyClient(true)
 
-      setOpenBookingLocationId(parsed.locationId ?? maybeEv?.locationId ?? null)
+      setOpenBookingLocationId(parsed.locationId ?? maybeEvent?.locationId ?? null)
       setOpenBookingLocationType(parsedLocationType)
 
       const appointmentTimeZone = normalizeUiTimeZone(parsed.timeZone)
@@ -300,27 +360,16 @@ export function useBookingModal(deps: BookingModalDeps) {
       )
 
       await loadServicesForLocation(parsedLocationType)
-    } catch (e: unknown) {
-      console.error(e)
-      setBookingError(errorMessageFromUnknown(e))
+    } catch (error: unknown) {
+      console.error(error)
+      setBookingError(errorMessageFromUnknown(error))
     } finally {
       setBookingLoading(false)
     }
   }
 
   function closeBooking() {
-    setOpenBookingId(null)
-    setBooking(null)
-    setOpenBookingLocationId(null)
-    setOpenBookingLocationType('SALON')
-    setServiceItemsDraft([])
-    setBookingError(null)
-    setSavingReschedule(false)
-    setAllowOutsideHours(false)
-    setManualDurationMinutes(60)
-    setReschedDate('')
-    setReschedTime('')
-    setNotifyClient(true)
+    resetBookingState()
   }
 
   async function submitChanges() {
@@ -347,7 +396,7 @@ export function useBookingModal(deps: BookingModalDeps) {
           ? serviceItemsTotalDuration(serviceItemsDraft)
           : Number(booking.totalDurationMinutes || durationMinutes || 60)
 
-      const snappedDur = roundDurationMinutes(
+      const snappedDuration = roundDurationMinutes(
         effectiveDuration,
         activeSchedulingContext.stepMinutes,
       )
@@ -361,60 +410,29 @@ export function useBookingModal(deps: BookingModalDeps) {
       const outside = isOutsideWorkingHours({
         day: dayAnchor,
         startMinutes: timeParts.hh * 60 + timeParts.mi,
-        endMinutes: timeParts.hh * 60 + timeParts.mi + snappedDur,
+        endMinutes: timeParts.hh * 60 + timeParts.mi + snappedDuration,
         workingHours: activeSchedulingContext.workingHours,
         timeZone: activeSchedulingContext.timeZone,
       })
 
-      const payload: {
-        scheduledFor: string
-        notifyClient: boolean
-        allowOutsideWorkingHours: boolean
-        serviceItems?: {
-          serviceId: string
-          offeringId: string
-          durationMinutesSnapshot: number
-          priceSnapshot: string
-          sortOrder: number
-        }[]
-      } = {
+      const payload: BookingPatchPayload = {
         scheduledFor: nextStartIso,
         notifyClient,
         allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
       }
 
       if (hasDraftServiceItemsChanges) {
-        payload.serviceItems = normalizeDraftServiceItems(serviceItemsDraft).map(
-          (item) => ({
-            serviceId: item.serviceId,
-            offeringId: item.offeringId ?? '',
-            durationMinutesSnapshot: Number(item.durationMinutesSnapshot),
-            priceSnapshot: item.priceSnapshot,
-            sortOrder: Number(item.sortOrder),
-          }),
-        )
+        payload.serviceItems = toPatchServiceItems(serviceItemsDraft)
       }
 
-      const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(booking.id)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        },
-      )
-
-      const data: unknown = await safeJson(res)
-      if (!res.ok) {
-        throw new Error(apiMessage(data, 'Failed to save changes.'))
-      }
+      await patchBooking(booking.id, payload, 'Failed to save changes.')
 
       closeBooking()
       await reloadCalendar()
       forceProFooterRefresh()
-    } catch (e: unknown) {
-      console.error(e)
-      setBookingError(errorMessageFromUnknown(e))
+    } catch (error: unknown) {
+      console.error(error)
+      setBookingError(errorMessageFromUnknown(error))
     } finally {
       setSavingReschedule(false)
     }
@@ -427,25 +445,17 @@ export function useBookingModal(deps: BookingModalDeps) {
     setBookingError(null)
 
     try {
-      const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(booking.id)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'ACCEPTED', notifyClient: true }),
-        },
+      await patchBooking(
+        booking.id,
+        { status: 'ACCEPTED', notifyClient: true },
+        'Failed to approve booking.',
       )
-
-      const data: unknown = await safeJson(res)
-      if (!res.ok) {
-        throw new Error(apiMessage(data, 'Failed to approve booking.'))
-      }
 
       closeBooking()
       await reloadCalendar()
       forceProFooterRefresh()
-    } catch (e: unknown) {
-      setBookingError(errorMessageFromUnknown(e))
+    } catch (error: unknown) {
+      setBookingError(errorMessageFromUnknown(error))
     } finally {
       setSavingReschedule(false)
     }
@@ -458,25 +468,17 @@ export function useBookingModal(deps: BookingModalDeps) {
     setBookingError(null)
 
     try {
-      const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(booking.id)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'CANCELLED', notifyClient: true }),
-        },
+      await patchBooking(
+        booking.id,
+        { status: 'CANCELLED', notifyClient: true },
+        'Failed to deny booking.',
       )
-
-      const data: unknown = await safeJson(res)
-      if (!res.ok) {
-        throw new Error(apiMessage(data, 'Failed to deny booking.'))
-      }
 
       closeBooking()
       await reloadCalendar()
       forceProFooterRefresh()
-    } catch (e: unknown) {
-      setBookingError(errorMessageFromUnknown(e))
+    } catch (error: unknown) {
+      setBookingError(errorMessageFromUnknown(error))
     } finally {
       setSavingReschedule(false)
     }

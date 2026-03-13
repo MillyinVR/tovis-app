@@ -1,9 +1,11 @@
 // app/client/bookings/[id]/page.tsx
+import type { ReactNode } from 'react'
 import { redirect, notFound } from 'next/navigation'
 
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { cn } from '@/lib/utils'
 
 import ReviewSection from './ReviewSection'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
@@ -12,10 +14,26 @@ import ProProfileLink from '@/app/client/components/ProProfileLink'
 
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
-import { cn } from '@/lib/utils'
+
 export const dynamic = 'force-dynamic'
 
 type StepKey = 'overview' | 'consult' | 'aftercare'
+type StatusVariant = 'danger' | 'success' | 'warn' | 'info' | 'neutral'
+type PageParams = { id: string }
+type PageSearchParams = Record<string, string | string[] | undefined>
+
+type LoadedClientBookingPage = Awaited<ReturnType<typeof loadClientBookingPage>>
+type LoadedAftercare = LoadedClientBookingPage['aftercare']
+type LoadedExistingReview = LoadedClientBookingPage['existingReview']
+type LoadedMedia = LoadedClientBookingPage['media'][number]
+
+type AftercareRebookInfo =
+  | { mode: 'BOOKED_NEXT_APPOINTMENT'; label: string }
+  | { mode: 'RECOMMENDED_WINDOW'; label: string }
+  | { mode: 'RECOMMENDED_DATE'; label: string }
+  | { mode: 'NONE'; label: null }
+
+const NO_REBOOK_INFO: AftercareRebookInfo = { mode: 'NONE', label: null }
 
 function normalizeStep(raw: unknown): StepKey {
   const s = String(raw || '').toLowerCase().trim()
@@ -82,8 +100,6 @@ function friendlySource(v: unknown) {
   if (s === 'AFTERCARE') return 'Aftercare rebook'
   return null
 }
-
-type StatusVariant = 'danger' | 'success' | 'warn' | 'info' | 'neutral'
 
 function statusPillVariant(
   statusRaw: unknown,
@@ -153,20 +169,35 @@ function tabDisabledClass() {
   )
 }
 
-type AftercareRebookInfo =
-  | { mode: 'BOOKED_NEXT_APPOINTMENT'; label: string }
-  | { mode: 'RECOMMENDED_WINDOW'; label: string }
-  | { mode: 'RECOMMENDED_DATE'; label: string }
-  | { mode: 'NONE'; label: null }
+async function resolvePageValue<T>(
+  value: T | Promise<T> | undefined,
+  fallback: T,
+): Promise<T> {
+  try {
+    return value == null ? fallback : await Promise.resolve(value)
+  } catch {
+    return fallback
+  }
+}
+
+function firstSearchParam(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value[0]
+  return undefined
+}
 
 function getAftercareRebookInfo(
-  aftercare: any,
+  aftercare: LoadedAftercare,
   timeZone: string,
 ): AftercareRebookInfo {
-  const modeRaw = upper(aftercare?.rebookMode || 'NONE')
+  if (!aftercare) return NO_REBOOK_INFO
+
+  const modeRaw = upper(aftercare.rebookMode || 'NONE')
 
   if (modeRaw === 'BOOKED_NEXT_APPOINTMENT') {
-    const d = toDate(aftercare?.rebookedFor)
+    const d = toDate(aftercare.rebookedFor)
     return d
       ? {
           mode: 'BOOKED_NEXT_APPOINTMENT',
@@ -179,23 +210,25 @@ function getAftercareRebookInfo(
   }
 
   if (modeRaw === 'RECOMMENDED_WINDOW') {
-    const s = toDate(aftercare?.rebookWindowStart)
-    const e = toDate(aftercare?.rebookWindowEnd)
+    const s = toDate(aftercare.rebookWindowStart)
+    const e = toDate(aftercare.rebookWindowEnd)
+
     if (s && e) {
       return {
         mode: 'RECOMMENDED_WINDOW',
         label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}`,
       }
     }
+
     return {
       mode: 'RECOMMENDED_WINDOW',
       label: 'Recommended rebook window.',
     }
   }
 
-  if (modeRaw === 'NONE') return { mode: 'NONE', label: null }
+  if (modeRaw === 'NONE') return NO_REBOOK_INFO
 
-  const legacy = toDate(aftercare?.rebookedFor)
+  const legacy = toDate(aftercare.rebookedFor)
   if (legacy) {
     return {
       mode: 'RECOMMENDED_DATE',
@@ -203,19 +236,59 @@ function getAftercareRebookInfo(
     }
   }
 
-  return { mode: 'NONE', label: null }
+  return NO_REBOOK_INFO
 }
 
-function pickToken(aftercare: any): string | null {
-  const t = aftercare?.publicToken
+function pickToken(aftercare: LoadedAftercare): string | null {
+  if (!aftercare) return null
+  const t = aftercare.publicToken
   return typeof t === 'string' && t.trim() ? t.trim() : null
+}
+
+function hasUsableMediaUrl(
+  media: LoadedMedia | null | undefined,
+): media is LoadedMedia & { url: string } {
+  return typeof media?.url === 'string' && media.url.trim().length > 0
+}
+
+function hasUsableReviewMediaUrl(
+  media:
+    | NonNullable<LoadedExistingReview>['mediaAssets'][number]
+    | null
+    | undefined,
+): media is NonNullable<LoadedExistingReview>['mediaAssets'][number] & {
+  url: string
+} {
+  return typeof media?.url === 'string' && media.url.trim().length > 0
+}
+
+function toSafeExistingReview(existingReview: LoadedExistingReview) {
+  if (!existingReview?.id) return null
+
+  return {
+    id: existingReview.id,
+    rating: existingReview.rating,
+    headline: existingReview.headline,
+    body: existingReview.body,
+    mediaAssets: (existingReview.mediaAssets || [])
+      .filter(hasUsableReviewMediaUrl)
+      .map((m) => ({
+        id: m.id,
+        url: m.url,
+        thumbUrl: m.thumbUrl,
+        mediaType: m.mediaType,
+        createdAt: m.createdAt.toISOString(),
+        isFeaturedInPortfolio: m.isFeaturedInPortfolio,
+        isEligibleForLooks: m.isEligibleForLooks,
+      })),
+  }
 }
 
 function SectionCard(props: {
   title: string
   subtitle?: string | null
-  right?: React.ReactNode
-  children: React.ReactNode
+  right?: ReactNode
+  children: ReactNode
   className?: string
 }) {
   return (
@@ -246,7 +319,7 @@ function SectionCard(props: {
   )
 }
 
-function TinyMetaPill({ children }: { children: React.ReactNode }) {
+function TinyMetaPill({ children }: { children: ReactNode }) {
   return (
     <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-2.5 py-1 text-[11px] font-black text-textPrimary">
       {children}
@@ -280,30 +353,29 @@ function computePendingConsultation(raw: {
 }
 
 export default async function ClientBookingPage(props: {
-  params: Promise<{ id: string }> | { id: string }
-  searchParams?:
-    | Promise<Record<string, string | string[] | undefined>>
-    | Record<string, string | string[] | undefined>
+  params: Promise<PageParams> | PageParams
+  searchParams?: Promise<PageSearchParams> | PageSearchParams
 }) {
-  const resolvedParams = await Promise.resolve(props.params as any)
-  const bookingId = String(resolvedParams?.id || '').trim()
+  const resolvedParams = await resolvePageValue<PageParams>(props.params, {
+    id: '',
+  })
+  const bookingId = resolvedParams.id.trim()
   if (!bookingId) notFound()
 
-  const sp = (await Promise.resolve(props.searchParams as any).catch(
-    () => ({}),
-  )) ?? {}
-  const step = normalizeStep((sp as any)?.step)
+  const sp = await resolvePageValue<PageSearchParams>(props.searchParams, {})
+  const step = normalizeStep(firstSearchParam(sp.step))
 
   const { user, raw, aftercare, existingReview, media } =
     await loadClientBookingPage(bookingId)
+
   const clientId = user.clientProfile?.id
   if (!clientId) {
-    redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`)
+    redirect(
+      `/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`,
+    )
   }
 
-  const validMedia = (media || []).filter(
-    (m) => typeof m?.url === 'string' && m.url.trim().length > 0,
-  )
+  const validMedia = (media || []).filter(hasUsableMediaUrl)
   const beforeMedia = validMedia.filter(
     (m) => String(m.phase || '').toUpperCase() === 'BEFORE',
   )
@@ -314,7 +386,7 @@ export default async function ClientBookingPage(props: {
   const hasPendingConsultationApproval = computePendingConsultation(raw)
 
   const booking = await buildClientBookingDTO({
-    booking: raw as any,
+    booking: raw,
     unreadAftercare: false,
     hasPendingConsultationApproval,
   })
@@ -341,7 +413,7 @@ export default async function ClientBookingPage(props: {
         bookingId: raw.id,
         aftercareId: aftercare.id,
         readAt: null,
-      } as any,
+      },
       select: { id: true },
     })
 
@@ -355,8 +427,8 @@ export default async function ClientBookingPage(props: {
           bookingId: raw.id,
           aftercareId: aftercare.id,
           readAt: null,
-        } as any,
-        data: { readAt: new Date() } as any,
+        },
+        data: { readAt: new Date() },
       })
       showUnreadAftercareBadge = false
     }
@@ -394,10 +466,8 @@ export default async function ClientBookingPage(props: {
   const statusUpper = upper(booking.status)
   const showConsultationApproval = Boolean(vm.showConsultationApproval)
 
-  const rebookInfo = aftercare
-    ? getAftercareRebookInfo(aftercare, appointmentTz)
-    : ({ mode: 'NONE', label: null } as const)
-  const aftercareToken = aftercare ? pickToken(aftercare) : null
+  const rebookInfo = getAftercareRebookInfo(aftercare, appointmentTz)
+  const aftercareToken = pickToken(aftercare)
   const showRebookCTA = statusUpper === 'COMPLETED' && Boolean(aftercareToken)
 
   const consultNotes = String(
@@ -410,9 +480,14 @@ export default async function ClientBookingPage(props: {
     formatMoneyFromDecimalString(booking.subtotalSnapshot) ||
     null
 
+  const proEmail =
+    raw.professional?.user?.email && raw.professional.user.email.trim()
+      ? raw.professional.user.email
+      : null
+
   const proLabel =
     booking.professional?.businessName ||
-    (raw as any)?.professional?.user?.email ||
+    proEmail ||
     COPY.common.professionalFallback
 
   const title = booking.display?.title || COPY.bookings.titleFallback
@@ -422,28 +497,7 @@ export default async function ClientBookingPage(props: {
   const shouldShowReview =
     statusUpper === 'COMPLETED' && step === 'aftercare'
 
-  const safeExistingReview =
-    existingReview && existingReview.id
-      ? {
-          id: existingReview.id,
-          rating: existingReview.rating,
-          headline: existingReview.headline,
-          body: existingReview.body,
-          mediaAssets: (existingReview.mediaAssets || [])
-            .filter(
-              (m) => typeof m.url === 'string' && m.url.trim().length > 0,
-            )
-            .map((m) => ({
-              id: m.id,
-              url: m.url as string,
-              thumbUrl: m.thumbUrl,
-              mediaType: m.mediaType,
-              createdAt: m.createdAt.toISOString(),
-              isFeaturedInPortfolio: m.isFeaturedInPortfolio,
-              isEligibleForLooks: m.isEligibleForLooks,
-            })),
-        }
-      : null
+  const safeExistingReview = toSafeExistingReview(existingReview)
 
   const drawerProfessionalId = booking.professional?.id
   if (!drawerProfessionalId) notFound()
@@ -518,12 +572,16 @@ export default async function ClientBookingPage(props: {
 
         {(durationMinutes || breakdownTotalLabel || modeLabel || sourceLabel) && (
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {durationMinutes ? <TinyMetaPill>{durationMinutes} min</TinyMetaPill> : null}
+            {durationMinutes ? (
+              <TinyMetaPill>{durationMinutes} min</TinyMetaPill>
+            ) : null}
             {breakdownTotalLabel ? (
               <TinyMetaPill>{breakdownTotalLabel}</TinyMetaPill>
             ) : null}
             {modeLabel ? <TinyMetaPill>{modeLabel}</TinyMetaPill> : null}
-            {sourceLabel ? <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill> : null}
+            {sourceLabel ? (
+              <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill>
+            ) : null}
 
             {showConsultationApproval ? (
               <span
@@ -658,12 +716,18 @@ export default async function ClientBookingPage(props: {
           ) : null}
 
           <nav className="mt-4 flex flex-wrap items-center gap-2">
-            <a href={`${baseHref}?step=overview`} className={tabClass(step === 'overview')}>
+            <a
+              href={`${baseHref}?step=overview`}
+              className={tabClass(step === 'overview')}
+            >
               {COPY.bookings.tabs.overview}
             </a>
 
             {vm.canShowConsultTab ? (
-              <a href={`${baseHref}?step=consult`} className={tabClass(step === 'consult')}>
+              <a
+                href={`${baseHref}?step=consult`}
+                className={tabClass(step === 'consult')}
+              >
                 {COPY.bookings.tabs.consultation}
               </a>
             ) : (
@@ -676,7 +740,10 @@ export default async function ClientBookingPage(props: {
             )}
 
             {vm.canShowAftercareTab ? (
-              <a href={`${baseHref}?step=aftercare`} className={tabClass(step === 'aftercare')}>
+              <a
+                href={`${baseHref}?step=aftercare`}
+                className={tabClass(step === 'aftercare')}
+              >
                 {COPY.bookings.tabs.aftercare}
               </a>
             ) : (
@@ -695,8 +762,15 @@ export default async function ClientBookingPage(props: {
             ) : null}
           </nav>
 
-          <section className={cn('mt-4 rounded-card p-4', alertClassByVariant(msg.variant))}>
-            <div className="text-[13px] font-black text-textPrimary">{msg.title}</div>
+          <section
+            className={cn(
+              'mt-4 rounded-card p-4',
+              alertClassByVariant(msg.variant),
+            )}
+          >
+            <div className="text-[13px] font-black text-textPrimary">
+              {msg.title}
+            </div>
             <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">
               {msg.body}
             </div>
@@ -850,12 +924,12 @@ export default async function ClientBookingPage(props: {
                                   typeof m.thumbUrl === 'string' &&
                                   m.thumbUrl.trim().length > 0
                                     ? m.thumbUrl
-                                    : (m.url as string)
+                                    : m.url
 
                                 return (
                                   <a
                                     key={m.id}
-                                    href={m.url as string}
+                                    href={m.url}
                                     className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
                                     style={{ width: 128, height: 128 }}
                                   >
@@ -883,12 +957,12 @@ export default async function ClientBookingPage(props: {
                                   typeof m.thumbUrl === 'string' &&
                                   m.thumbUrl.trim().length > 0
                                     ? m.thumbUrl
-                                    : (m.url as string)
+                                    : m.url
 
                                 return (
                                   <a
                                     key={m.id}
-                                    href={m.url as string}
+                                    href={m.url}
                                     className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
                                     style={{ width: 128, height: 128 }}
                                   >
@@ -950,11 +1024,9 @@ export default async function ClientBookingPage(props: {
                         </div>
                       )}
 
-                      {showRebookCTA ? (
+                      {showRebookCTA && aftercareToken ? (
                         <a
-                          href={`/client/rebook/${encodeURIComponent(
-                            aftercareToken as string,
-                          )}`}
+                          href={`/client/rebook/${encodeURIComponent(aftercareToken)}`}
                           className="mt-3 inline-flex items-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
                         >
                           {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
