@@ -127,9 +127,15 @@ export type BookingCalendarEvent = {
   locationType: ServiceLocationType
   durationMinutes?: number
 
+  // Authoritative appointment-local timezone for this booking.
   timeZone: IanaTimeZone | string
   timeZoneSource: TimeZoneTruthSource
+
+  // Day key in the booking's appointment timezone.
   localDateKey: string
+
+  // Day key in the selected calendar viewport timezone.
+  viewLocalDateKey?: string
 
   details: BookingEventDetails
   note?: never
@@ -148,6 +154,9 @@ export type BlockCalendarEvent = {
   durationMinutes?: number
   note: string | null
   locationId: string | null
+
+  // Block rows are viewport-scoped in the current calendar payload.
+  localDateKey?: string
 }
 
 export type CalendarEvent = BookingCalendarEvent | BlockCalendarEvent

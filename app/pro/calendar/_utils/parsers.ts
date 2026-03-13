@@ -1,7 +1,7 @@
 // app/pro/calendar/_utils/parsers.ts
 //
 // Pure parser / normalizer functions extracted from useCalendarData.
-// Zero React dependency — safe to unit-test in isolation.
+// Zero React dependency - safe to unit-test in isolation.
 //
 
 import type {
@@ -14,6 +14,7 @@ import type {
   WorkingHoursDay,
   WorkingHoursJson,
   BookingCalendarStatus,
+  TimeZoneTruthSource,
 } from '../_types'
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
@@ -42,14 +43,6 @@ export type CalendarRouteLocation = {
   type: ProLocationType
   timeZone: string | null
 }
-
-// Keep this aligned with the server event payload.
-type AppointmentTimeZoneSource =
-  | 'BOOKING_SNAPSHOT'
-  | 'HOLD_SNAPSHOT'
-  | 'LOCATION'
-  | 'PROFESSIONAL'
-  | 'FALLBACK'
 
 // ── Tiny helpers ────────────────────────────────────────────────────
 
@@ -88,9 +81,7 @@ function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
   return (fallback ?? 'UNKNOWN') as BookingCalendarStatus
 }
 
-function normalizeAppointmentTimeZoneSource(
-  value: unknown,
-): AppointmentTimeZoneSource {
+function normalizeTimeZoneTruthSource(value: unknown): TimeZoneTruthSource {
   const raw = upper(value)
 
   if (raw === 'BOOKING_SNAPSHOT') return 'BOOKING_SNAPSHOT'
@@ -288,9 +279,10 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
       : []
 
     const timeZone = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
-    const timeZoneSource = normalizeAppointmentTimeZoneSource(v.timeZoneSource)
+    const timeZoneSource = normalizeTimeZoneTruthSource(v.timeZoneSource)
     const localDateKey =
       pickString(v.localDateKey) ?? pickString(v.date) ?? startsAt.slice(0, 10)
+    const viewLocalDateKey = pickString(v.viewLocalDateKey) ?? undefined
 
     return {
       kind: 'BOOKING',
@@ -305,6 +297,7 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
       timeZone,
       timeZoneSource,
       localDateKey,
+      ...(viewLocalDateKey ? { viewLocalDateKey } : {}),
       details: {
         serviceName: detailsRecord
           ? pickString(detailsRecord.serviceName) ?? title
@@ -325,6 +318,7 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
 
     const note = v.note === null ? null : pickString(v.note)
     const locationId = v.locationId === null ? null : pickString(v.locationId)
+    const localDateKey = pickString(v.localDateKey) ?? undefined
 
     return {
       kind: 'BLOCK',
@@ -337,6 +331,7 @@ export function parseCalendarEvent(v: unknown): CalendarEvent | null {
       status: 'BLOCKED',
       note: note ?? null,
       locationId: locationId ?? null,
+      ...(localDateKey ? { localDateKey } : {}),
       ...(durationMinutes != null ? { durationMinutes } : {}),
     }
   }
@@ -525,7 +520,8 @@ export function parseBookingDetails(v: unknown): BookingDetails | null {
   const email = client.email === null ? null : pickString(client.email)
   const phone = client.phone === null ? null : pickString(client.phone)
 
-  const tz = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
+  const timeZone = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
+  const timeZoneSource = normalizeTimeZoneTruthSource(v.timeZoneSource)
   const serviceItems = parseBookingServiceItems(v.serviceItems)
 
   if (
@@ -558,7 +554,8 @@ export function parseBookingDetails(v: unknown): BookingDetails | null {
       email: email ?? null,
       phone: phone ?? null,
     },
-    timeZone: tz,
+    timeZone,
+    timeZoneSource,
     serviceItems,
   }
 }

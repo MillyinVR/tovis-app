@@ -5,7 +5,10 @@ import {
   type BookableLocation,
   type BookingDbClient,
 } from '@/lib/booking/pickLocation'
-import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import {
+  resolveApptTimeZone,
+  type TimeZoneTruthSource,
+} from '@/lib/booking/timeZoneTruth'
 import {
   ALLOWED_STEP_MINUTES,
   MAX_ADVANCE_NOTICE_MINUTES,
@@ -23,6 +26,7 @@ export type BookingLocationContext = {
   locationId: string
   locationType: ServiceLocationType
   timeZone: string
+  timeZoneSource: TimeZoneTruthSource
   stepMinutes: number
   bufferMinutes: number
   advanceNoticeMinutes: number
@@ -50,6 +54,7 @@ type ResolveBookingLocationContextArgs = {
   locationType: ServiceLocationType
   bookingLocationTimeZone?: string | null
   holdLocationTimeZone?: string | null
+  professionalTimeZone?: string | null
   fallbackTimeZone?: string
   requireValidTimeZone?: boolean
   allowFallback?: boolean
@@ -341,6 +346,7 @@ export async function resolveBookingLocationContext(
     locationType,
     bookingLocationTimeZone = null,
     holdLocationTimeZone = null,
+    professionalTimeZone = null,
     fallbackTimeZone = 'UTC',
     requireValidTimeZone = true,
     allowFallback = true,
@@ -363,12 +369,18 @@ export async function resolveBookingLocationContext(
     return { ok: false, error: 'LOCATION_NOT_FOUND' }
   }
 
+  const effectiveFallbackTimeZone =
+    typeof professionalTimeZone === 'string' && professionalTimeZone.trim()
+      ? professionalTimeZone.trim()
+      : fallbackTimeZone
+
   const tzResult = await resolveApptTimeZone({
     bookingLocationTimeZone,
     holdLocationTimeZone,
     location: { id: location.id, timeZone: location.timeZone },
     professionalId,
-    fallback: fallbackTimeZone,
+    professionalTimeZone,
+    fallback: effectiveFallbackTimeZone,
     requireValid: requireValidTimeZone,
   })
 
@@ -384,8 +396,8 @@ export async function resolveBookingLocationContext(
   }
 
   const timeZone = sanitizeTimeZone(
-    rawResolvedTimeZone || fallbackTimeZone,
-    fallbackTimeZone,
+    rawResolvedTimeZone || effectiveFallbackTimeZone,
+    effectiveFallbackTimeZone,
   )
 
   if (!isValidIanaTimeZone(timeZone)) {
@@ -399,6 +411,7 @@ export async function resolveBookingLocationContext(
       locationId: location.id,
       locationType,
       timeZone,
+      timeZoneSource: tzResult.source,
       stepMinutes: normalizeStepMinutes(location.stepMinutes, 15),
       bufferMinutes: clampInt(
         Number(location.bufferMinutes ?? 0),

@@ -77,6 +77,13 @@ type AvailabilityLocation = Prisma.ProfessionalLocationGetPayload<{
   select: typeof LOCATION_SELECT
 }>
 
+type AvailabilityTimeZoneSource =
+  | 'BOOKING_SNAPSHOT'
+  | 'HOLD_SNAPSHOT'
+  | 'LOCATION'
+  | 'PROFESSIONAL'
+  | 'FALLBACK'
+
 type OtherProRow = {
   id: string
   businessName: string | null
@@ -102,12 +109,7 @@ type AvailabilityPlacementResult =
       locationId: string
       locationType: ServiceLocationType
       timeZone: string
-      timeZoneSource:
-        | 'BOOKING_SNAPSHOT'
-        | 'HOLD_SNAPSHOT'
-        | 'LOCATION'
-        | 'PROFESSIONAL'
-        | 'FALLBACK'
+      timeZoneSource: AvailabilityTimeZoneSource
       workingHours: unknown
       stepMinutes: number
       leadTimeMinutes: number
@@ -129,12 +131,7 @@ type CachedPlacement = {
   locationId: string
   locationType: ServiceLocationType
   timeZone: string
-  timeZoneSource:
-    | 'BOOKING_SNAPSHOT'
-    | 'HOLD_SNAPSHOT'
-    | 'LOCATION'
-    | 'PROFESSIONAL'
-    | 'FALLBACK'
+  timeZoneSource: AvailabilityTimeZoneSource
   workingHours: unknown
   stepMinutes: number
   leadTimeMinutes: number
@@ -239,6 +236,7 @@ function computeDayBoundsUtc(
     dayEndExclusiveUtc: endUtc,
   }
 }
+
 function buildLocalDateTimeString(args: {
   year: number
   month: number
@@ -403,6 +401,55 @@ function mapPlacementError(code: AvailabilityPlacementErrorCode): string {
   }
 }
 
+function normalizeAvailabilityTimeZoneSource(
+  value: unknown,
+): AvailabilityTimeZoneSource | null {
+  return value === 'BOOKING_SNAPSHOT' ||
+    value === 'HOLD_SNAPSHOT' ||
+    value === 'LOCATION' ||
+    value === 'PROFESSIONAL' ||
+    value === 'FALLBACK'
+    ? value
+    : null
+}
+
+function resolvePlacementTimeZoneSource(args: {
+  contextTimeZone: string
+  contextTimeZoneSource?: unknown
+  locationTimeZone?: unknown
+  professionalTimeZone?: unknown
+  fallbackTimeZone?: string
+}): AvailabilityTimeZoneSource {
+  const explicit = normalizeAvailabilityTimeZoneSource(args.contextTimeZoneSource)
+  if (explicit) return explicit
+
+  const contextTimeZone = sanitizeTimeZone(args.contextTimeZone, 'UTC')
+
+  const locationTimeZone =
+    typeof args.locationTimeZone === 'string' && isValidIanaTimeZone(args.locationTimeZone)
+      ? sanitizeTimeZone(args.locationTimeZone, 'UTC')
+      : null
+  if (locationTimeZone && locationTimeZone === contextTimeZone) {
+    return 'LOCATION'
+  }
+
+  const professionalTimeZone =
+    typeof args.professionalTimeZone === 'string' &&
+    isValidIanaTimeZone(args.professionalTimeZone)
+      ? sanitizeTimeZone(args.professionalTimeZone, 'UTC')
+      : null
+  if (professionalTimeZone && professionalTimeZone === contextTimeZone) {
+    return 'PROFESSIONAL'
+  }
+
+  const fallbackTimeZone = sanitizeTimeZone(args.fallbackTimeZone ?? 'UTC', 'UTC')
+  if (fallbackTimeZone === contextTimeZone) {
+    return 'FALLBACK'
+  }
+
+  return 'FALLBACK'
+}
+
 async function validateAvailabilityPlacement(args: {
   professionalId: string
   requestedLocationId: string | null
@@ -410,12 +457,18 @@ async function validateAvailabilityPlacement(args: {
   offering: OfferingSchedulingSnapshot
   clientAddressId: string | null
   allowFallback: boolean
+  professionalTimeZone: string | null
 }): Promise<AvailabilityPlacementResult> {
   const validated = await resolveValidatedBookingContext({
     professionalId: args.professionalId,
     requestedLocationId: args.requestedLocationId,
     locationType: args.locationType,
-    fallbackTimeZone: 'UTC',
+    professionalTimeZone: args.professionalTimeZone,
+    fallbackTimeZone:
+      typeof args.professionalTimeZone === 'string' &&
+      isValidIanaTimeZone(args.professionalTimeZone)
+        ? sanitizeTimeZone(args.professionalTimeZone, 'UTC')
+        : 'UTC',
     requireValidTimeZone: true,
     allowFallback: args.allowFallback,
     requireCoordinates: false,
@@ -449,24 +502,36 @@ async function validateAvailabilityPlacement(args: {
     }
   }
 
+  const timeZoneSource = resolvePlacementTimeZoneSource({
+    contextTimeZone: context.timeZone,
+    contextTimeZoneSource: (context as Record<string, unknown>).timeZoneSource,
+    locationTimeZone: context.location?.timeZone,
+    professionalTimeZone: args.professionalTimeZone,
+    fallbackTimeZone:
+      typeof args.professionalTimeZone === 'string' &&
+      isValidIanaTimeZone(args.professionalTimeZone)
+        ? sanitizeTimeZone(args.professionalTimeZone, 'UTC')
+        : 'UTC',
+  })
+
   return {
-  ok: true,
-  location: context.location,
-  locationId: context.locationId,
-  locationType: args.locationType,
-  timeZone: context.timeZone,
-  timeZoneSource: 'LOCATION',
-  workingHours: context.workingHours,
-  stepMinutes: context.stepMinutes,
-  leadTimeMinutes: context.advanceNoticeMinutes,
-  locationBufferMinutes: context.bufferMinutes,
-  maxAdvanceDays: context.maxDaysAhead,
-  durationMinutes: validated.durationMinutes,
-  priceStartingAt: validated.priceStartingAt,
-  formattedAddress,
-  lat: context.lat,
-  lng: context.lng,
-}
+    ok: true,
+    location: context.location,
+    locationId: context.locationId,
+    locationType: args.locationType,
+    timeZone: context.timeZone,
+    timeZoneSource,
+    workingHours: context.workingHours,
+    stepMinutes: context.stepMinutes,
+    leadTimeMinutes: context.advanceNoticeMinutes,
+    locationBufferMinutes: context.bufferMinutes,
+    maxAdvanceDays: context.maxDaysAhead,
+    durationMinutes: validated.durationMinutes,
+    priceStartingAt: validated.priceStartingAt,
+    formattedAddress,
+    lat: context.lat,
+    lng: context.lng,
+  }
 }
 
 async function resolveAvailabilityPlacement(args: {
@@ -475,6 +540,7 @@ async function resolveAvailabilityPlacement(args: {
   requestedLocationType: ServiceLocationType | null
   requestedLocationId: string | null
   clientAddressId: string | null
+  professionalTimeZone: string | null
 }): Promise<AvailabilityPlacementResult> {
   const professionalId = args.professionalId.trim()
   const requestedLocationId = args.requestedLocationId?.trim() || null
@@ -510,6 +576,7 @@ async function resolveAvailabilityPlacement(args: {
       offering: args.offering,
       clientAddressId: args.clientAddressId,
       allowFallback: !requestedLocationId,
+      professionalTimeZone: args.professionalTimeZone,
     })
   }
 
@@ -540,6 +607,7 @@ async function resolveAvailabilityPlacement(args: {
       offering: args.offering,
       clientAddressId: args.clientAddressId,
       allowFallback: false,
+      professionalTimeZone: args.professionalTimeZone,
     })
   }
 
@@ -585,6 +653,7 @@ async function resolveAvailabilityPlacement(args: {
         offering: args.offering,
         clientAddressId: args.clientAddressId,
         allowFallback: false,
+        professionalTimeZone: args.professionalTimeZone,
       })
     }),
   )
@@ -697,6 +766,34 @@ async function loadBusyIntervals(args: {
   return busy
 }
 
+function utcMinuteOfDayInLocalTimeZone(date: Date, timeZone: string): number {
+  const parts = utcDateToLocalParts(date, timeZone)
+  return parts.hour * 60 + parts.minute
+}
+
+function isSameLocalDay(
+  date: Date,
+  timeZone: string,
+  ymd: { year: number; month: number; day: number },
+): boolean {
+  const parts = utcDateToLocalParts(date, timeZone)
+  return (
+    parts.year === ymd.year &&
+    parts.month === ymd.month &&
+    parts.day === ymd.day
+  )
+}
+
+function localStepOffsetMinutes(
+  localMinutes: number,
+  startMinutes: number,
+  stepMinutes: number,
+): number {
+  const diff = localMinutes - startMinutes
+  const mod = diff % stepMinutes
+  return mod >= 0 ? mod : mod + stepMinutes
+}
+
 async function computeDaySlotsFast(args: {
   dateYMD: { year: number; month: number; day: number }
   durationMinutes: number
@@ -738,8 +835,6 @@ async function computeDaySlotsFast(args: {
   const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(dateYMD, tzIn)
   const nowUtc = new Date()
 
-  // Midday local anchor for working-hours day lookup.
-  // This stays internal. Caller still passes authoritative timezone explicitly.
   const dayAnchorUtc =
     localSlotToUtcOrNull({
       year: dateYMD.year,
@@ -783,8 +878,16 @@ async function computeDaySlotsFast(args: {
   }
 
   const step = normalizeStepMinutes(stepMinutes, 30)
-  const dur = clampInt(Number(durationMinutes || DEFAULT_DURATION_MINUTES), 15, MAX_SLOT_DURATION_MINUTES)
-  const buf = clampInt(Number(locationBufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
+  const dur = clampInt(
+    Number(durationMinutes || DEFAULT_DURATION_MINUTES),
+    15,
+    MAX_SLOT_DURATION_MINUTES,
+  )
+  const buf = clampInt(
+    Number(locationBufferMinutes ?? 0) || 0,
+    0,
+    MAX_BUFFER_MINUTES,
+  )
 
   const cutoffUtc = addMinutes(
     nowUtc,
@@ -795,39 +898,66 @@ async function computeDaySlotsFast(args: {
   const skippedDstWallTimes: string[] = []
 
   for (
-    let minute = window.startMinutes;
-    minute + dur + buf <= window.endMinutes;
-    minute += step
+    let cursor = new Date(dayStartUtc.getTime());
+    cursor.getTime() < dayEndExclusiveUtc.getTime();
+    cursor = addMinutes(cursor, step)
   ) {
-    const hh = Math.floor(minute / 60)
-    const mm = minute % 60
+    const slotStartUtc = normalizeToMinute(cursor)
 
-    const slotStartUtc = localSlotToUtcOrNull({
-      year: dateYMD.year,
-      month: dateYMD.month,
-      day: dateYMD.day,
-      hour: hh,
-      minute: mm,
-      timeZone,
-    })
+    if (!isSameLocalDay(slotStartUtc, timeZone, dateYMD)) continue
+    if (slotStartUtc.getTime() < cutoffUtc.getTime()) continue
 
-    if (!slotStartUtc) {
-      if (debug) {
-        skippedDstWallTimes.push(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`)
-      }
+    const localStartMinutes = utcMinuteOfDayInLocalTimeZone(slotStartUtc, timeZone)
+
+    if (localStartMinutes < window.startMinutes) continue
+    if (localStepOffsetMinutes(localStartMinutes, window.startMinutes, step) !== 0) {
       continue
     }
 
-    if (slotStartUtc < dayStartUtc) continue
-    if (slotStartUtc >= dayEndExclusiveUtc) continue
-    if (slotStartUtc.getTime() < cutoffUtc.getTime()) continue
-
     const slotEndWithBufferUtc = addMinutes(slotStartUtc, dur + buf)
+
+    const localEndMinutes = utcMinuteOfDayInLocalTimeZone(
+      slotEndWithBufferUtc,
+      timeZone,
+    )
+
+    if (!isSameLocalDay(slotStartUtc, timeZone, dateYMD)) continue
+    if (!isSameLocalDay(slotEndWithBufferUtc, timeZone, dateYMD)) continue
+    if (localEndMinutes > window.endMinutes) continue
     if (slotEndWithBufferUtc > dayEndExclusiveUtc) continue
 
     if (!isSlotFree(busy, slotStartUtc, slotEndWithBufferUtc)) continue
 
     slots.push(slotStartUtc.toISOString())
+  }
+
+  if (debug) {
+    for (
+      let minute = window.startMinutes;
+      minute + dur + buf <= window.endMinutes;
+      minute += step
+    ) {
+      const hh = Math.floor(minute / 60)
+      const mm = minute % 60
+      const localValue = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+      const matched = slots.some((iso) => {
+        const p = utcDateToLocalParts(new Date(iso), timeZone)
+        return p.hour === hh && p.minute === mm
+      })
+      if (!matched) {
+        const maybeUtc = localSlotToUtcOrNull({
+          year: dateYMD.year,
+          month: dateYMD.month,
+          day: dateYMD.day,
+          hour: hh,
+          minute: mm,
+          timeZone,
+        })
+        if (!maybeUtc) {
+          skippedDstWallTimes.push(localValue)
+        }
+      }
+    }
   }
 
   return {
@@ -907,7 +1037,11 @@ function parseSummaryWindowDays(
 ): number {
   const fallback = Math.min(DEFAULT_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays))
   const parsed = toInt(value, fallback)
-  return clampInt(parsed, 1, Math.min(MAX_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays)))
+  return clampInt(
+    parsed,
+    1,
+    Math.min(MAX_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays)),
+  )
 }
 
 function resolveSummaryWindowStart(args: {
@@ -965,7 +1099,12 @@ function buildSummaryYMDs(args: {
   const nextOffset = args.startDayOffset + windowDays
   const hasMoreDays = nextOffset <= args.maxAdvanceDays
   const nextStartYMD = hasMoreDays
-    ? addDaysToYMD(args.startYMD.year, args.startYMD.month, args.startYMD.day, windowDays)
+    ? addDaysToYMD(
+        args.startYMD.year,
+        args.startYMD.month,
+        args.startYMD.day,
+        windowDays,
+      )
     : null
 
   return {
@@ -1340,12 +1479,7 @@ export async function GET(req: Request) {
     let locationId: string
     let effectiveLocationType: ServiceLocationType
     let timeZone: string
-    let timeZoneSource:
-      | 'BOOKING_SNAPSHOT'
-      | 'HOLD_SNAPSHOT'
-      | 'LOCATION'
-      | 'PROFESSIONAL'
-      | 'FALLBACK'
+    let timeZoneSource: AvailabilityTimeZoneSource
     let workingHours: unknown
     let defaultStepMinutes: number
     let defaultLead: number
@@ -1410,6 +1544,7 @@ export async function GET(req: Request) {
             businessName: true,
             avatarUrl: true,
             location: true,
+            timeZone: true,
           },
         }),
         prisma.service.findUnique({
@@ -1450,6 +1585,7 @@ export async function GET(req: Request) {
         requestedLocationType,
         requestedLocationId,
         clientAddressId,
+        professionalTimeZone: pro.timeZone ?? null,
       })
 
       if (!placement.ok) {

@@ -61,6 +61,29 @@ type BookingModalDeps = {
   locations: { id: string; stepMinutes: number | null }[]
 }
 
+function normalizeUiTimeZone(value: string | null | undefined): string {
+  return sanitizeTimeZone(value ?? DEFAULT_TIME_ZONE, DEFAULT_TIME_ZONE)
+}
+
+function parseDateParts(value: string): {
+  yyyy: number
+  mm: number
+  dd: number
+} | null {
+  const [yyyy, mm, dd] = value.split('-').map((x) => Number(x))
+  if (!yyyy || !mm || !dd) return null
+  return { yyyy, mm, dd }
+}
+
+function parseTimeParts(value: string): {
+  hh: number
+  mi: number
+} | null {
+  const [hh, mi] = value.split(':').map((x) => Number(x))
+  if (!Number.isFinite(hh) || !Number.isFinite(mi)) return null
+  return { hh, mi }
+}
+
 export function useBookingModal(deps: BookingModalDeps) {
   const {
     eventsRef,
@@ -92,12 +115,25 @@ export function useBookingModal(deps: BookingModalDeps) {
   const [services, setServices] = useState<ServiceOption[]>([])
 
   const bookingAppointmentTimeZone = useMemo(() => {
-    return sanitizeTimeZone(booking?.timeZone ?? timeZone, DEFAULT_TIME_ZONE)
+    return normalizeUiTimeZone(booking?.timeZone ?? timeZone)
   }, [booking?.timeZone, timeZone])
 
   const openBookingStepMinutes = useMemo(() => {
     return resolveLocationStepMinutes(openBookingLocationId, activeStepMinutes)
   }, [resolveLocationStepMinutes, openBookingLocationId, activeStepMinutes])
+
+  const activeSchedulingContext = useMemo(() => {
+    return resolveBookingSchedulingContext({
+      locationId: openBookingLocationId,
+      locationType: openBookingLocationType,
+      fallbackTimeZone: bookingAppointmentTimeZone,
+    })
+  }, [
+    resolveBookingSchedulingContext,
+    openBookingLocationId,
+    openBookingLocationType,
+    bookingAppointmentTimeZone,
+  ])
 
   const hasDraftServiceItemsChanges = useMemo(() => {
     if (!booking) return false
@@ -110,7 +146,7 @@ export function useBookingModal(deps: BookingModalDeps) {
 
   const bookingServiceLabel = useMemo(() => {
     const source =
-      serviceItemsDraft.length ? serviceItemsDraft : booking?.serviceItems ?? []
+      serviceItemsDraft.length > 0 ? serviceItemsDraft : booking?.serviceItems ?? []
     return serviceItemsLabel(source)
   }, [serviceItemsDraft, booking])
 
@@ -186,28 +222,22 @@ export function useBookingModal(deps: BookingModalDeps) {
   function editWouldBeOutsideHours() {
     if (!booking) return false
 
-    const [yyyy, mm, dd] = (reschedDate || '').split('-').map((x) => Number(x))
-    if (!yyyy || !mm || !dd) return false
+    const dateParts = parseDateParts(reschedDate || '')
+    if (!dateParts) return false
 
-    const [hh, mi] = (reschedTime || '').split(':').map((x) => Number(x))
-    if (!Number.isFinite(hh) || !Number.isFinite(mi)) return false
+    const timeParts = parseTimeParts(reschedTime || '')
+    if (!timeParts) return false
 
-    const context = resolveBookingSchedulingContext({
-      locationId: openBookingLocationId,
-      locationType: openBookingLocationType,
-      fallbackTimeZone: bookingAppointmentTimeZone,
-    })
-
-    const startMinutes = hh * 60 + mi
+    const startMinutes = timeParts.hh * 60 + timeParts.mi
     const endMinutes = startMinutes + durationMinutes
-    const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
+    const dayAnchor = anchorDayLocalNoon(dateParts.yyyy, dateParts.mm, dateParts.dd)
 
     return isOutsideWorkingHours({
       day: dayAnchor,
       startMinutes,
       endMinutes,
-      workingHours: context.workingHours,
-      timeZone: context.timeZone,
+      workingHours: activeSchedulingContext.workingHours,
+      timeZone: activeSchedulingContext.timeZone,
     })
   }
 
@@ -250,24 +280,26 @@ export function useBookingModal(deps: BookingModalDeps) {
         throw new Error('Malformed booking response.')
       }
 
+      const parsedLocationType: LocationType =
+        parsed.locationType === 'MOBILE' ? 'MOBILE' : 'SALON'
+
       setBooking(parsed)
       setServiceItemsDraft(parsed.serviceItems)
       setManualDurationMinutes(Number(parsed.totalDurationMinutes || 60))
-
-      const bookingTz = sanitizeTimeZone(parsed.timeZone, DEFAULT_TIME_ZONE)
-      setReschedDate(utcIsoToDateInputValue(parsed.scheduledFor, bookingTz))
-      setReschedTime(utcIsoToTimeInputValue(parsed.scheduledFor, bookingTz))
       setNotifyClient(true)
 
-      const editLocationType: LocationType =
-        parsed.locationType === 'MOBILE' ? 'MOBILE' : 'SALON'
+      setOpenBookingLocationId(parsed.locationId ?? maybeEv?.locationId ?? null)
+      setOpenBookingLocationType(parsedLocationType)
 
-      if (!maybeEv || maybeEv.kind !== 'BOOKING') {
-        setOpenBookingLocationType(editLocationType)
-      }
+      const appointmentTimeZone = normalizeUiTimeZone(parsed.timeZone)
+      setReschedDate(
+        utcIsoToDateInputValue(parsed.scheduledFor, appointmentTimeZone),
+      )
+      setReschedTime(
+        utcIsoToTimeInputValue(parsed.scheduledFor, appointmentTimeZone),
+      )
 
-      setOpenBookingLocationId(parsed.locationId ?? null)
-      await loadServicesForLocation(editLocationType)
+      await loadServicesForLocation(parsedLocationType)
     } catch (e: unknown) {
       console.error(e)
       setBookingError(errorMessageFromUnknown(e))
@@ -286,6 +318,9 @@ export function useBookingModal(deps: BookingModalDeps) {
     setSavingReschedule(false)
     setAllowOutsideHours(false)
     setManualDurationMinutes(60)
+    setReschedDate('')
+    setReschedTime('')
+    setNotifyClient(true)
   }
 
   async function submitChanges() {
@@ -295,23 +330,17 @@ export function useBookingModal(deps: BookingModalDeps) {
     setBookingError(null)
 
     try {
-      const [yyyy, mm, dd] = (reschedDate || '').split('-').map((x) => Number(x))
-      if (!yyyy || !mm || !dd) throw new Error('Pick a valid date.')
+      const dateParts = parseDateParts(reschedDate || '')
+      if (!dateParts) throw new Error('Pick a valid date.')
 
-      const [hh, mi] = (reschedTime || '').split(':').map((x) => Number(x))
-      if (!Number.isFinite(hh) || !Number.isFinite(mi)) {
-        throw new Error('Pick a valid time.')
-      }
-
-      const context = resolveBookingSchedulingContext({
-        locationId: openBookingLocationId,
-        locationType: openBookingLocationType,
-        fallbackTimeZone: bookingAppointmentTimeZone,
-      })
+      const timeParts = parseTimeParts(reschedTime || '')
+      if (!timeParts) throw new Error('Pick a valid time.')
 
       const localDateTime = combineDateAndTimeInput(reschedDate, reschedTime)
-      const nextStartIso = dateTimeLocalToUtcIso(localDateTime, context.timeZone)
-      const nextStart = new Date(nextStartIso)
+      const nextStartIso = dateTimeLocalToUtcIso(
+        localDateTime,
+        activeSchedulingContext.timeZone,
+      )
 
       const effectiveDuration =
         hasDraftServiceItemsChanges && serviceItemsDraft.length > 0
@@ -320,16 +349,21 @@ export function useBookingModal(deps: BookingModalDeps) {
 
       const snappedDur = roundDurationMinutes(
         effectiveDuration,
-        context.stepMinutes,
+        activeSchedulingContext.stepMinutes,
       )
-      const dayAnchor = anchorDayLocalNoon(yyyy, mm, dd)
+
+      const dayAnchor = anchorDayLocalNoon(
+        dateParts.yyyy,
+        dateParts.mm,
+        dateParts.dd,
+      )
 
       const outside = isOutsideWorkingHours({
         day: dayAnchor,
-        startMinutes: hh * 60 + mi,
-        endMinutes: hh * 60 + mi + snappedDur,
-        workingHours: context.workingHours,
-        timeZone: context.timeZone,
+        startMinutes: timeParts.hh * 60 + timeParts.mi,
+        endMinutes: timeParts.hh * 60 + timeParts.mi + snappedDur,
+        workingHours: activeSchedulingContext.workingHours,
+        timeZone: activeSchedulingContext.timeZone,
       })
 
       const payload: {
@@ -344,7 +378,7 @@ export function useBookingModal(deps: BookingModalDeps) {
           sortOrder: number
         }[]
       } = {
-        scheduledFor: nextStart.toISOString(),
+        scheduledFor: nextStartIso,
         notifyClient,
         allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
       }

@@ -51,6 +51,27 @@ vi.mock('@/lib/http', () => ({
 describe('useBookingModal', () => {
   const fetchMock = vi.fn()
 
+  function makeBooking(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'booking_1',
+      status: 'ACCEPTED',
+      scheduledFor: '2026-01-15T17:30:00.000Z',
+      endsAt: '2026-01-15T18:30:00.000Z',
+      locationId: 'loc_1',
+      locationType: 'SALON',
+      totalDurationMinutes: 60,
+      client: {
+        fullName: 'Test Client',
+        email: 'test@example.com',
+        phone: null,
+      },
+      timeZone: 'America/New_York',
+      timeZoneSource: 'BOOKING_SNAPSHOT',
+      serviceItems: [],
+      ...overrides,
+    }
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('fetch', fetchMock)
@@ -72,23 +93,12 @@ describe('useBookingModal', () => {
   })
 
   it('initializes reschedule form values from booking timezone, not viewer timezone', async () => {
-    mocks.parseBookingDetails.mockReturnValue({
-      id: 'booking_1',
-      status: 'ACCEPTED',
+    const booking = makeBooking({
       scheduledFor: '2026-01-15T17:30:00.000Z',
-      endsAt: '2026-01-15T18:30:00.000Z',
-      locationId: 'loc_1',
-      locationType: 'SALON',
-      totalDurationMinutes: 60,
-      client: {
-        fullName: 'Test Client',
-        email: 'test@example.com',
-        phone: null,
-      },
       timeZone: 'America/New_York',
-      serviceItems: [],
     })
 
+    mocks.parseBookingDetails.mockReturnValue(booking)
     mocks.safeJson
       .mockResolvedValueOnce({ booking: { id: 'booking_1' } })
       .mockResolvedValueOnce({ services: [] })
@@ -128,27 +138,16 @@ describe('useBookingModal', () => {
     })
 
     expect(result.current.booking?.timeZone).toBe('America/New_York')
+    expect(result.current.booking?.timeZoneSource).toBe('BOOKING_SNAPSHOT')
     expect(result.current.reschedDate).toBe('2026-01-15')
     expect(result.current.reschedTime).toBe('12:30')
   })
 
   it('submits scheduledFor using resolved booking scheduling timezone', async () => {
-    const booking = {
-      id: 'booking_1',
-      status: 'ACCEPTED',
+    const booking = makeBooking({
       scheduledFor: '2026-01-15T17:30:00.000Z',
-      endsAt: '2026-01-15T18:30:00.000Z',
-      locationId: 'loc_1',
-      locationType: 'SALON',
-      totalDurationMinutes: 60,
-      client: {
-        fullName: 'Test Client',
-        email: 'test@example.com',
-        phone: null,
-      },
       timeZone: 'America/New_York',
-      serviceItems: [],
-    }
+    })
 
     mocks.parseBookingDetails.mockReturnValue(booking)
     mocks.safeJson
@@ -218,8 +217,84 @@ describe('useBookingModal', () => {
 
     const body = JSON.parse(String(patchCall?.[1]?.body))
     expect(body.scheduledFor).toBe('2026-01-15T18:15:00.000Z')
+    expect(body.notifyClient).toBe(true)
+    expect(body.allowOutsideWorkingHours).toBe(false)
 
     expect(reloadCalendar).toHaveBeenCalled()
     expect(forceProFooterRefresh).toHaveBeenCalled()
+  })
+
+  it('uses resolved scheduling timezone for submit even when viewer timezone differs', async () => {
+    const booking = makeBooking({
+      scheduledFor: '2026-06-01T03:30:00.000Z',
+      timeZone: 'America/Chicago',
+      timeZoneSource: 'LOCATION',
+    })
+
+    mocks.parseBookingDetails.mockReturnValue(booking)
+    mocks.safeJson
+      .mockResolvedValueOnce({ booking })
+      .mockResolvedValueOnce({ services: [] })
+      .mockResolvedValueOnce({ ok: true })
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ booking }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ services: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      })
+
+    const { result } = renderHook(() =>
+      useBookingModal({
+        eventsRef: { current: [] },
+        activeStepMinutes: 15,
+        activeLocationType: 'SALON',
+        timeZone: 'America/Los_Angeles',
+        resolveLocationStepMinutes: () => 15,
+        resolveBookingSchedulingContext: () => ({
+          timeZone: 'America/Chicago',
+          workingHours: null,
+          stepMinutes: 15,
+        }),
+        reloadCalendar: async () => {},
+        forceProFooterRefresh: () => {},
+        locations: [],
+      }),
+    )
+
+    await act(async () => {
+      await result.current.openBooking('booking_1')
+    })
+
+    await act(async () => {
+      result.current.setReschedDate('2026-05-31')
+      result.current.setReschedTime('23:15')
+    })
+
+    await act(async () => {
+      await result.current.submitChanges()
+    })
+
+    const patchCall = fetchMock.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[1]?.method === 'PATCH',
+    )
+
+    expect(patchCall).toBeTruthy()
+
+    const body = JSON.parse(String(patchCall?.[1]?.body))
+    expect(body.scheduledFor).toBe('2026-06-01T04:15:00.000Z')
   })
 })

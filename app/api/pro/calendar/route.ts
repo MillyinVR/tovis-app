@@ -8,7 +8,10 @@ import {
   startOfDayUtcInTimeZone,
 } from '@/lib/timeZone'
 import { addMinutes } from '@/lib/booking/conflicts'
-import { resolveApptTimeZone, type TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
+import {
+  resolveAppointmentSchedulingContext,
+  type TimeZoneTruthSource,
+} from '@/lib/booking/timeZoneTruth'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
   DEFAULT_DURATION_MINUTES,
@@ -53,6 +56,7 @@ type BookingEvent = {
   timeZone: string
   timeZoneSource: TimeZoneTruthSource
   localDateKey: string
+  viewLocalDateKey: string
   details: {
     serviceName: string
     bufferMinutes: number
@@ -73,6 +77,7 @@ type BlockEvent = {
   locationType: null
   locationId: string | null
   durationMinutes: number
+  localDateKey: string
   details: { note: string | null }
 }
 
@@ -155,6 +160,10 @@ function safeBufferMinutes(value: unknown): number {
   return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
 }
 
+function safeEventTimeZone(value: string): string {
+  return isValidIanaTimeZone(value) ? sanitizeTimeZone(value, 'UTC') : 'UTC'
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
@@ -230,7 +239,7 @@ export async function GET(req: Request) {
     const selectedLocationTimeZoneValid = isValidIanaTimeZone(locationTimeZoneRaw)
     const profileTimeZoneValid = isValidIanaTimeZone(profileTimeZoneRaw)
 
-    // Viewport timezone: used for calendar grid, default range, and "today" stats.
+    // Viewport timezone is for the grid, date range defaults, and selected-location view.
     const viewportTimeZone = sanitizeTimeZone(
       selectedLocationTimeZoneValid
         ? locationTimeZoneRaw
@@ -335,6 +344,8 @@ export async function GET(req: Request) {
         if (!booking.locationId) return []
 
         const start = new Date(booking.scheduledFor)
+        if (!Number.isFinite(start.getTime())) return []
+
         const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
         const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
         const end = addMinutes(start, durationMinutes + bufferMinutes)
@@ -371,7 +382,7 @@ export async function GET(req: Request) {
           sortOrder: Number(item.sortOrder ?? 0),
         }))
 
-        const eventTzResult = await resolveApptTimeZone({
+        const schedulingContextResult = await resolveAppointmentSchedulingContext({
           bookingLocationTimeZone: booking.locationTimeZone,
           location: booking.location
             ? {
@@ -383,17 +394,20 @@ export async function GET(req: Request) {
           professionalId,
           professionalTimeZone: proProfile.timeZone,
           fallback: 'UTC',
+          requireValid: false,
         })
 
-        const eventTimeZone =
-          eventTzResult.ok && isValidIanaTimeZone(eventTzResult.timeZone)
-            ? sanitizeTimeZone(eventTzResult.timeZone, 'UTC')
-            : 'UTC'
+        const appointmentTimeZone = schedulingContextResult.ok
+          ? safeEventTimeZone(schedulingContextResult.context.appointmentTimeZone)
+          : 'UTC'
 
-        const eventTimeZoneSource: TimeZoneTruthSource =
-          eventTzResult.ok ? eventTzResult.source : 'FALLBACK'
+        const appointmentTimeZoneSource: TimeZoneTruthSource =
+          schedulingContextResult.ok
+            ? schedulingContextResult.context.timeZoneSource
+            : 'FALLBACK'
 
-        const localDateKey = utcDateToLocalYmd(start, eventTimeZone)
+        const localDateKey = utcDateToLocalYmd(start, appointmentTimeZone)
+        const viewLocalDateKey = utcDateToLocalYmd(start, viewportTimeZone)
 
         return [
           {
@@ -407,9 +421,10 @@ export async function GET(req: Request) {
             locationType: normalizeServiceLocationType(booking.locationType),
             locationId: booking.locationId,
             durationMinutes,
-            timeZone: eventTimeZone,
-            timeZoneSource: eventTimeZoneSource,
+            timeZone: appointmentTimeZone,
+            timeZoneSource: appointmentTimeZoneSource,
             localDateKey,
+            viewLocalDateKey,
             details: {
               serviceName,
               bufferMinutes,
@@ -443,6 +458,7 @@ export async function GET(req: Request) {
           0,
           Math.round((end.getTime() - start.getTime()) / 60_000),
         ),
+        localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
         details: {
           note: block.note ?? null,
         },
@@ -453,18 +469,12 @@ export async function GET(req: Request) {
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     )
 
-    // "Today" stats are explicitly viewport-based.
-    const todayStart = startOfDayUtcInTimeZone(now, viewportTimeZone)
-    const todayEndExclusive = addDaysUtc(todayStart, 1)
-
-    const isTodayInViewport = (iso: string) => {
-      const time = new Date(iso).getTime()
-      return time >= todayStart.getTime() && time < todayEndExclusive.getTime()
-    }
+    // Viewport-today: explicit selected-location/view based stats.
+    const viewportTodayKey = utcDateToLocalYmd(now, viewportTimeZone)
 
     const todaysBookingsEvents = bookingEvents.filter(
       (event) =>
-        isTodayInViewport(event.startsAt) &&
+        event.viewLocalDateKey === viewportTodayKey &&
         (event.status === 'ACCEPTED' || event.status === 'COMPLETED'),
     )
 
@@ -475,12 +485,14 @@ export async function GET(req: Request) {
     )
 
     const waitlistTodayEvents = bookingEvents.filter(
-      (event) => isTodayInViewport(event.startsAt) && event.status === 'WAITLIST',
+      (event) =>
+        event.viewLocalDateKey === viewportTodayKey && event.status === 'WAITLIST',
     )
 
-    const blockedTodayEvents = blockEvents.filter((event) =>
-      isTodayInViewport(event.startsAt),
+    const blockedTodayEvents = blockEvents.filter(
+      (event) => event.localDateKey === viewportTodayKey,
     )
+
     const blockedMinutesToday = blockedTodayEvents.reduce(
       (sum, event) => sum + event.durationMinutes,
       0,

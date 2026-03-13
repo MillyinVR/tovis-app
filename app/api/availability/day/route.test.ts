@@ -74,7 +74,7 @@ function makeLocation(args: {
     type: args.type,
     isPrimary: args.isPrimary ?? false,
     isBookable: true,
-    timeZone: args.timeZone ?? 'UTC',
+    timeZone: args.timeZone === undefined ? 'UTC' : args.timeZone,
     workingHours: WORKING_HOURS,
     bufferMinutes: 0,
     stepMinutes: 60,
@@ -85,6 +85,45 @@ function makeLocation(args: {
     city: null,
     formattedAddress:
       args.type === 'MOBILE_BASE' ? null : '123 Main St, Test City, CA 90001',
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  }
+}
+
+function makeDstLocation(args?: {
+  workingHours?: {
+    sun: { enabled: boolean; start: string; end: string }
+    mon: { enabled: boolean; start: string; end: string }
+    tue: { enabled: boolean; start: string; end: string }
+    wed: { enabled: boolean; start: string; end: string }
+    thu: { enabled: boolean; start: string; end: string }
+    fri: { enabled: boolean; start: string; end: string }
+    sat: { enabled: boolean; start: string; end: string }
+  }
+}) {
+  return {
+    id: 'dst-salon-1',
+    type: 'SALON',
+    isPrimary: true,
+    isBookable: true,
+    timeZone: 'America/New_York',
+    workingHours:
+      args?.workingHours ?? {
+        sun: { enabled: true, start: '01:00', end: '04:00' },
+        mon: { enabled: true, start: '01:00', end: '04:00' },
+        tue: { enabled: true, start: '01:00', end: '04:00' },
+        wed: { enabled: true, start: '01:00', end: '04:00' },
+        thu: { enabled: true, start: '01:00', end: '04:00' },
+        fri: { enabled: true, start: '01:00', end: '04:00' },
+        sat: { enabled: true, start: '01:00', end: '04:00' },
+      },
+    bufferMinutes: 0,
+    stepMinutes: 30,
+    advanceNoticeMinutes: 0,
+    maxDaysAhead: 730,
+    lat: null,
+    lng: null,
+    city: null,
+    formattedAddress: '123 DST St, Test City, NY 10001',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
   }
 }
@@ -126,6 +165,10 @@ const SLOT_09 = slotIso(testDayDate, 9)
 const SLOT_10 = slotIso(testDayDate, 10)
 const SLOT_11 = slotIso(testDayDate, 11)
 
+const DST_SPRING_FORWARD_DAY = '2027-03-14'
+const DST_FALL_BACK_DAY = '2027-11-07'
+const NEAR_MIDNIGHT_DAY = '2027-01-15'
+
 const salonLocation = makeLocation({
   id: 'salon-1',
   type: 'SALON',
@@ -143,6 +186,37 @@ async function getAvailability(params: Record<string, string>) {
     `https://example.test/api/availability/day?${search.toString()}`,
   )
   return GET(req)
+}
+
+function localHmInTz(isoUtc: string, timeZone: string): string {
+  const d = new Date(isoUtc)
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+
+  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00'
+  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00'
+  return `${hh}:${mm}`
+}
+
+function localYmdInTz(isoUtc: string, timeZone: string): string {
+  const d = new Date(isoUtc)
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d)
+
+  const yyyy = parts.find((p) => p.type === 'year')?.value ?? '0000'
+  const mm = parts.find((p) => p.type === 'month')?.value ?? '00'
+  const dd = parts.find((p) => p.type === 'day')?.value ?? '00'
+  return `${yyyy}-${mm}-${dd}`
 }
 
 describe('GET /api/availability/day', () => {
@@ -329,36 +403,6 @@ describe('GET /api/availability/day', () => {
     expect(Array.isArray(body.slots)).toBe(true)
   })
 })
-function localHmInTz(isoUtc: string, timeZone: string): string {
-  const d = new Date(isoUtc)
-
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-
-  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00'
-  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00'
-  return `${hh}:${mm}`
-}
-
-function localYmdInTz(isoUtc: string, timeZone: string): string {
-  const d = new Date(isoUtc)
-
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(d)
-
-  const yyyy = parts.find((p) => p.type === 'year')?.value ?? '0000'
-  const mm = parts.find((p) => p.type === 'month')?.value ?? '00'
-  const dd = parts.find((p) => p.type === 'day')?.value ?? '00'
-  return `${yyyy}-${mm}-${dd}`
-}
 
 describe('GET /api/availability/day DST behavior', () => {
   beforeEach(() => {
@@ -398,32 +442,7 @@ describe('GET /api/availability/day DST behavior', () => {
     mocks.professionalLocationFindFirst.mockImplementation(
       async (args: { where?: { id?: string } }) => {
         if (args.where?.id !== 'dst-salon-1') return null
-
-        return {
-          id: 'dst-salon-1',
-          type: 'SALON',
-          isPrimary: true,
-          isBookable: true,
-          timeZone: 'America/New_York',
-          workingHours: {
-            sun: { enabled: true, start: '01:00', end: '04:00' },
-            mon: { enabled: true, start: '01:00', end: '04:00' },
-            tue: { enabled: true, start: '01:00', end: '04:00' },
-            wed: { enabled: true, start: '01:00', end: '04:00' },
-            thu: { enabled: true, start: '01:00', end: '04:00' },
-            fri: { enabled: true, start: '01:00', end: '04:00' },
-            sat: { enabled: true, start: '01:00', end: '04:00' },
-          },
-          bufferMinutes: 0,
-          stepMinutes: 30,
-          advanceNoticeMinutes: 0,
-          maxDaysAhead: 365,
-          lat: null,
-          lng: null,
-          city: null,
-          formattedAddress: '123 DST St, Test City, NY 10001',
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        }
+        return makeDstLocation()
       },
     )
   })
@@ -434,7 +453,7 @@ describe('GET /api/availability/day DST behavior', () => {
       serviceId: 'service-1',
       locationType: 'SALON',
       locationId: 'dst-salon-1',
-      date: '2026-03-08',
+      date: DST_SPRING_FORWARD_DAY,
     })
 
     const body = await response.json()
@@ -454,7 +473,7 @@ describe('GET /api/availability/day DST behavior', () => {
     expect(localTimes).not.toContain('02:30')
 
     expect(localTimes).toContain('03:00')
-    expect(localTimes).toContain('03:30')
+    expect(localTimes).not.toContain('03:30')
   })
 
   it('fall back: can return distinct UTC instants for repeated 01:00 local hour', async () => {
@@ -463,7 +482,7 @@ describe('GET /api/availability/day DST behavior', () => {
       serviceId: 'service-1',
       locationType: 'SALON',
       locationId: 'dst-salon-1',
-      date: '2026-11-01',
+      date: DST_FALL_BACK_DAY,
     })
 
     const body = await response.json()
@@ -494,16 +513,21 @@ describe('GET /api/availability/day DST behavior', () => {
   })
 
   it('near midnight: returned slots stay on the requested local date', async () => {
+    mocks.professionalServiceOfferingFindFirst.mockResolvedValueOnce({
+      id: 'offering-1',
+      offersInSalon: true,
+      offersMobile: false,
+      salonDurationMinutes: 30,
+      mobileDurationMinutes: null,
+      salonPriceStartingAt: '50.00',
+      mobilePriceStartingAt: null,
+    })
+
     mocks.professionalLocationFindFirst.mockImplementationOnce(
       async (args: { where?: { id?: string } }) => {
         if (args.where?.id !== 'dst-salon-1') return null
 
-        return {
-          id: 'dst-salon-1',
-          type: 'SALON',
-          isPrimary: true,
-          isBookable: true,
-          timeZone: 'America/New_York',
+        return makeDstLocation({
           workingHours: {
             sun: { enabled: true, start: '23:00', end: '23:59' },
             mon: { enabled: true, start: '23:00', end: '23:59' },
@@ -513,16 +537,7 @@ describe('GET /api/availability/day DST behavior', () => {
             fri: { enabled: true, start: '23:00', end: '23:59' },
             sat: { enabled: true, start: '23:00', end: '23:59' },
           },
-          bufferMinutes: 0,
-          stepMinutes: 30,
-          advanceNoticeMinutes: 0,
-          maxDaysAhead: 365,
-          lat: null,
-          lng: null,
-          city: null,
-          formattedAddress: '123 DST St, Test City, NY 10001',
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        }
+        })
       },
     )
 
@@ -531,7 +546,7 @@ describe('GET /api/availability/day DST behavior', () => {
       serviceId: 'service-1',
       locationType: 'SALON',
       locationId: 'dst-salon-1',
-      date: '2026-01-15',
+      date: NEAR_MIDNIGHT_DAY,
     })
 
     const body = await response.json()
@@ -544,6 +559,7 @@ describe('GET /api/availability/day DST behavior', () => {
       localYmdInTz(iso, 'America/New_York'),
     )
 
-    expect(localDates.every((d) => d === '2026-01-15')).toBe(true)
+    expect(localDates.length).toBeGreaterThan(0)
+    expect(localDates.every((d) => d === NEAR_MIDNIGHT_DAY)).toBe(true)
   })
 })

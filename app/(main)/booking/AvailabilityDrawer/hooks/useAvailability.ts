@@ -1,4 +1,3 @@
-// app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.ts
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -20,6 +19,7 @@ import {
   buildAvailabilityPrefetchArgsFromContext,
   buildAvailabilitySummaryPrefetchKey,
   fetchAvailabilitySummaryWindow,
+  getAnyCachedAvailabilitySummaryWindow,
   getCachedAvailabilitySummaryWindow,
 } from '../utils/availabilityPrefetch'
 
@@ -130,8 +130,10 @@ export function useAvailability(
 
       if (keepExistingData) {
         setRefreshing(true)
+        setLoading(false)
       } else {
         setLoading(true)
+        setRefreshing(false)
       }
 
       setError(null)
@@ -142,7 +144,7 @@ export function useAvailability(
         }
 
         if (keepExistingData && initialWindowKey) {
-          const stale = getCachedAvailabilitySummaryWindow(initialWindowKey)
+          const stale = getAnyCachedAvailabilitySummaryWindow(initialWindowKey)
           if (stale && seq === requestSeqRef.current) {
             setData(stale)
           }
@@ -156,7 +158,9 @@ export function useAvailability(
         })
 
         if (seq !== requestSeqRef.current) return
+
         setData(firstPage)
+        setError(null)
       } catch (e: unknown) {
         if (seq !== requestSeqRef.current) return
 
@@ -166,6 +170,7 @@ export function useAvailability(
         if (message === 'Unauthorized.') {
           redirectToLogin(router, 'availability')
           setError('Please log in to view availability.')
+          setData(null)
           return
         }
 
@@ -216,6 +221,7 @@ export function useAvailability(
       if (message === 'Unauthorized.') {
         redirectToLogin(router, 'availability')
         setError('Please log in to view availability.')
+        setData(null)
         return
       }
 
@@ -298,13 +304,20 @@ export function useAvailability(
       return
     }
 
-    if (data) {
+    const stale = getAnyCachedAvailabilitySummaryWindow(initialWindowKey)
+    if (stale) {
+      setData(stale)
       setError(null)
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(true)
       void loadInitial(true)
       return
     }
 
     setData(null)
+    setError(null)
+    setLoadingMore(false)
     void loadInitial(false)
   }, [
     open,
@@ -313,7 +326,6 @@ export function useAvailability(
     canFetch,
     initialWindowKey,
     loadInitial,
-    data,
   ])
 
   return {

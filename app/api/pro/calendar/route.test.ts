@@ -1,4 +1,4 @@
-// app/api/pro/bookings/[id]/route.test.ts
+// app/api/pro/calendar/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => {
     professionalLocationFindMany: vi.fn(),
     bookingFindMany: vi.fn(),
     calendarBlockFindMany: vi.fn(),
-    resolveApptTimeZone: vi.fn(),
+    resolveAppointmentSchedulingContext: vi.fn(),
   }
 })
 
@@ -44,7 +44,7 @@ vi.mock('@/app/api/_utils', () => ({
 }))
 
 vi.mock('@/lib/booking/timeZoneTruth', () => ({
-  resolveApptTimeZone: mocks.resolveApptTimeZone,
+  resolveAppointmentSchedulingContext: mocks.resolveAppointmentSchedulingContext,
 }))
 
 import { GET } from './route'
@@ -196,10 +196,11 @@ describe('GET /api/pro/calendar', () => {
       },
     )
 
-    mocks.resolveApptTimeZone.mockImplementation(
+    mocks.resolveAppointmentSchedulingContext.mockImplementation(
       async (args: {
         bookingLocationTimeZone?: string | null
         location?: { id?: string | null; timeZone?: string | null } | null
+        locationId?: string | null
         professionalTimeZone?: string | null
       }) => {
         const bookingTz =
@@ -209,8 +210,19 @@ describe('GET /api/pro/calendar', () => {
         if (bookingTz) {
           return {
             ok: true,
-            timeZone: bookingTz,
-            source: 'BOOKING_SNAPSHOT',
+            context: {
+              appointmentTimeZone: bookingTz,
+              timeZoneSource: 'BOOKING_SNAPSHOT',
+              locationId: args.locationId ?? args.location?.id ?? null,
+              locationTimeZone:
+                typeof args.location?.timeZone === 'string'
+                  ? args.location.timeZone
+                  : null,
+              businessTimeZone:
+                typeof args.professionalTimeZone === 'string'
+                  ? args.professionalTimeZone
+                  : null,
+            },
           }
         }
 
@@ -221,8 +233,16 @@ describe('GET /api/pro/calendar', () => {
         if (locationTz) {
           return {
             ok: true,
-            timeZone: locationTz,
-            source: 'LOCATION',
+            context: {
+              appointmentTimeZone: locationTz,
+              timeZoneSource: 'LOCATION',
+              locationId: args.location?.id ?? args.locationId ?? null,
+              locationTimeZone: locationTz,
+              businessTimeZone:
+                typeof args.professionalTimeZone === 'string'
+                  ? args.professionalTimeZone
+                  : null,
+            },
           }
         }
 
@@ -233,15 +253,25 @@ describe('GET /api/pro/calendar', () => {
         if (proTz) {
           return {
             ok: true,
-            timeZone: proTz,
-            source: 'PROFESSIONAL',
+            context: {
+              appointmentTimeZone: proTz,
+              timeZoneSource: 'PROFESSIONAL',
+              locationId: args.location?.id ?? args.locationId ?? null,
+              locationTimeZone: null,
+              businessTimeZone: proTz,
+            },
           }
         }
 
         return {
           ok: true,
-          timeZone: 'UTC',
-          source: 'FALLBACK',
+          context: {
+            appointmentTimeZone: 'UTC',
+            timeZoneSource: 'FALLBACK',
+            locationId: args.location?.id ?? args.locationId ?? null,
+            locationTimeZone: null,
+            businessTimeZone: null,
+          },
         }
       },
     )
@@ -312,6 +342,8 @@ describe('GET /api/pro/calendar', () => {
 
     expect(typeof salonEvent.localDateKey).toBe('string')
     expect(typeof mobileEvent.localDateKey).toBe('string')
+    expect(typeof salonEvent.viewLocalDateKey).toBe('string')
+    expect(typeof mobileEvent.viewLocalDateKey).toBe('string')
   })
 
   it('falls back deterministically for legacy rows with null locationTimeZone and returns timeZoneSource', async () => {
@@ -337,6 +369,7 @@ describe('GET /api/pro/calendar', () => {
     })
 
     expect(typeof bookingEvents[0].localDateKey).toBe('string')
+    expect(typeof bookingEvents[0].viewLocalDateKey).toBe('string')
   })
 
   it('returns all pro bookings, while blocks stay selected-location/global only', async () => {
@@ -363,5 +396,18 @@ describe('GET /api/pro/calendar', () => {
     expect(
       blockEvents.map((event: { blockId: string }) => event.blockId).sort(),
     ).toEqual(['block-global', 'block-mobile'])
+  })
+
+  it('computes todays management buckets using viewport-local day keys', async () => {
+    const response = await GET(new Request('https://example.test/api/pro/calendar'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+
+    expect(body.management).toBeTruthy()
+    expect(Array.isArray(body.management.todaysBookings)).toBe(true)
+    expect(Array.isArray(body.management.pendingRequests)).toBe(true)
+    expect(Array.isArray(body.management.waitlistToday)).toBe(true)
+    expect(Array.isArray(body.management.blockedToday)).toBe(true)
   })
 })

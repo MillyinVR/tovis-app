@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 
   prismaTransaction: vi.fn(),
 
-  resolveApptTimeZone: vi.fn(),
+  resolveAppointmentSchedulingContext: vi.fn(),
   isValidIanaTimeZone: vi.fn(),
   sanitizeTimeZone: vi.fn(),
   minutesSinceMidnightInTimeZone: vi.fn(),
@@ -46,7 +46,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/booking/timeZoneTruth', () => ({
-  resolveApptTimeZone: mocks.resolveApptTimeZone,
+  resolveAppointmentSchedulingContext: mocks.resolveAppointmentSchedulingContext,
 }))
 
 vi.mock('@/lib/timeZone', () => ({
@@ -186,10 +186,15 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       return Number.isFinite(d.getTime()) ? d : null
     })
 
-    mocks.resolveApptTimeZone.mockResolvedValue({
+    mocks.resolveAppointmentSchedulingContext.mockResolvedValue({
       ok: true,
-      timeZone: 'America/Los_Angeles',
-      source: 'BOOKING_SNAPSHOT',
+      context: {
+        appointmentTimeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
+        locationId: 'loc_1',
+        locationTimeZone: 'America/Los_Angeles',
+        businessTimeZone: 'America/Los_Angeles',
+      },
     })
 
     mocks.isValidIanaTimeZone.mockReturnValue(true)

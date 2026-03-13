@@ -19,11 +19,12 @@ import {
 } from '@prisma/client'
 import {
   isValidIanaTimeZone,
-  sanitizeTimeZone,
   minutesSinceMidnightInTimeZone,
+  sanitizeTimeZone,
 } from '@/lib/timeZone'
 import {
-  resolveApptTimeZone,
+  resolveAppointmentSchedulingContext,
+  type AppointmentSchedulingContext,
   type TimeZoneTruthSource,
 } from '@/lib/booking/timeZoneTruth'
 import { moneyToFixed2String } from '@/lib/money'
@@ -43,7 +44,7 @@ import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import {
-  RequestedServiceItemInput,
+  type RequestedServiceItemInput,
   buildNormalizedBookingItemsFromRequestedOfferings,
   computeBookingItemLikeTotals,
   snapToStepMinutes,
@@ -62,8 +63,6 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
-
-type AppointmentTimeZoneSource = TimeZoneTruthSource
 
 function throwCode(code: string): never {
   throw new Error(code)
@@ -127,6 +126,10 @@ function parseRequestedServiceItems(
   return [...parsed].sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
+function normalizeOutputTimeZone(value: string): string {
+  return isValidIanaTimeZone(value) ? sanitizeTimeZone(value, 'UTC') : 'UTC'
+}
+
 function buildBookingOutput(args: {
   id: string
   scheduledFor: Date
@@ -134,8 +137,8 @@ function buildBookingOutput(args: {
   bufferMinutes: number
   status: BookingStatus
   subtotalSnapshot: Prisma.Decimal
-  timeZone: string
-  timeZoneSource: AppointmentTimeZoneSource
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
   locationId?: string | null
   locationType?: ServiceLocationType
   locationAddressSnapshot?: string | null
@@ -149,7 +152,7 @@ function buildBookingOutput(args: {
     bufferMinutes,
     status,
     subtotalSnapshot,
-    timeZone,
+    appointmentTimeZone,
     timeZoneSource,
     locationId,
     locationType,
@@ -170,7 +173,7 @@ function buildBookingOutput(args: {
     totalDurationMinutes,
     status,
     subtotalSnapshot: moneyToFixed2String(subtotalSnapshot),
-    timeZone,
+    timeZone: appointmentTimeZone,
     timeZoneSource,
     locationId: locationId ?? null,
     locationType: locationType ?? null,
@@ -188,8 +191,8 @@ function logAndThrowTimeRangeConflict(args: {
   requestedStart: Date
   requestedEnd: Date
   bookingId: string
-  timeZone: string
-  timeZoneSource: AppointmentTimeZoneSource
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
 }): never {
   logBookingConflict({
     action: 'BOOKING_UPDATE',
@@ -202,7 +205,7 @@ function logAndThrowTimeRangeConflict(args: {
     bookingId: args.bookingId,
     meta: {
       route: 'app/api/pro/bookings/[id]/route.ts',
-      timeZone: args.timeZone,
+      timeZone: args.appointmentTimeZone,
       timeZoneSource: args.timeZoneSource,
     },
   })
@@ -212,6 +215,35 @@ function logAndThrowTimeRangeConflict(args: {
   }
 
   throw new Error('TIME_NOT_AVAILABLE')
+}
+
+async function resolveBookingSchedulingContext(args: {
+  bookingLocationTimeZone?: unknown
+  locationId?: string | null
+  professionalId: string
+  professionalTimeZone?: unknown
+  fallback?: string
+  requireValid?: boolean
+}): Promise<AppointmentSchedulingContext> {
+  const result = await resolveAppointmentSchedulingContext({
+    bookingLocationTimeZone: args.bookingLocationTimeZone,
+    locationId: args.locationId ?? null,
+    professionalId: args.professionalId,
+    professionalTimeZone: args.professionalTimeZone,
+    fallback: args.fallback ?? 'UTC',
+    requireValid: args.requireValid,
+  })
+
+  if (!result.ok) {
+    throwCode(args.requireValid ? 'TIMEZONE_REQUIRED' : 'TIMEZONE_FALLBACK')
+  }
+
+  return {
+    ...result.context,
+    appointmentTimeZone: normalizeOutputTimeZone(
+      result.context.appointmentTimeZone,
+    ),
+  }
 }
 
 /* ---------------------------------------------
@@ -311,21 +343,14 @@ export async function GET(_req: Request, ctx: Ctx) {
         ? `${firstName} ${lastName}`.trim()
         : booking.client?.user?.email || 'Client'
 
-    const tzResult = await resolveApptTimeZone({
+    const schedulingContext = await resolveBookingSchedulingContext({
       bookingLocationTimeZone: booking.locationTimeZone,
       locationId: booking.locationId ?? null,
       professionalId,
       professionalTimeZone: booking.professional?.timeZone,
       fallback: 'UTC',
+      requireValid: false,
     })
-
-    const timeZone =
-      tzResult.ok && isValidIanaTimeZone(tzResult.timeZone)
-        ? sanitizeTimeZone(tzResult.timeZone, 'UTC')
-        : 'UTC'
-
-    const timeZoneSource: AppointmentTimeZoneSource =
-      tzResult.ok ? tzResult.source : 'FALLBACK'
 
     return jsonOk(
       {
@@ -359,8 +384,8 @@ export async function GET(_req: Request, ctx: Ctx) {
             email: booking.client?.user?.email ?? null,
             phone: booking.client?.phone ?? null,
           },
-          timeZone,
-          timeZoneSource,
+          timeZone: schedulingContext.appointmentTimeZone,
+          timeZoneSource: schedulingContext.timeZoneSource,
           serviceItems: items.map((item) => ({
             id: item.id,
             serviceId: item.serviceId,
@@ -402,17 +427,26 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const rec = isRecord(rawBody) ? rawBody : {}
 
     const hasStatus = Object.prototype.hasOwnProperty.call(rec, 'status')
-    const hasNotifyClient = Object.prototype.hasOwnProperty.call(rec, 'notifyClient')
+    const hasNotifyClient = Object.prototype.hasOwnProperty.call(
+      rec,
+      'notifyClient',
+    )
     const hasAllowOutside = Object.prototype.hasOwnProperty.call(
       rec,
       'allowOutsideWorkingHours',
     )
-    const hasScheduledFor = Object.prototype.hasOwnProperty.call(rec, 'scheduledFor')
+    const hasScheduledFor = Object.prototype.hasOwnProperty.call(
+      rec,
+      'scheduledFor',
+    )
     const hasBuffer = Object.prototype.hasOwnProperty.call(rec, 'bufferMinutes')
     const hasDuration =
       Object.prototype.hasOwnProperty.call(rec, 'durationMinutes') ||
       Object.prototype.hasOwnProperty.call(rec, 'totalDurationMinutes')
-    const hasServiceItems = Object.prototype.hasOwnProperty.call(rec, 'serviceItems')
+    const hasServiceItems = Object.prototype.hasOwnProperty.call(
+      rec,
+      'serviceItems',
+    )
 
     const nextStatus = normalizeRequestedStatus(rec.status)
     if (hasStatus && nextStatus == null) {
@@ -434,13 +468,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Invalid scheduledFor.')
     }
 
-    const nextBuffer = rec.bufferMinutes != null ? pickInt(rec.bufferMinutes) : null
+    const nextBuffer =
+      rec.bufferMinutes != null ? pickInt(rec.bufferMinutes) : null
     if (hasBuffer && nextBuffer == null) {
       return jsonFail(400, 'Invalid bufferMinutes.')
     }
 
     const rawDurationValue = rec.durationMinutes ?? rec.totalDurationMinutes
-    const nextDuration = rawDurationValue != null ? pickInt(rawDurationValue) : null
+    const nextDuration =
+      rawDurationValue != null ? pickInt(rawDurationValue) : null
     if (hasDuration && nextDuration == null) {
       return jsonFail(400, 'Invalid durationMinutes.')
     }
@@ -503,21 +539,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
         throwCode('CANNOT_EDIT_COMPLETED')
       }
 
-      const outputTzResult = await resolveApptTimeZone({
+      const outputSchedulingContext = await resolveBookingSchedulingContext({
         bookingLocationTimeZone: existing.locationTimeZone,
         locationId: existing.locationId ?? null,
         professionalId: existing.professionalId,
         professionalTimeZone: existing.professional?.timeZone,
         fallback: 'UTC',
+        requireValid: false,
       })
-
-      const outputTimeZone =
-        outputTzResult.ok && isValidIanaTimeZone(outputTzResult.timeZone)
-          ? sanitizeTimeZone(outputTzResult.timeZone, 'UTC')
-          : 'UTC'
-
-      const outputTimeZoneSource: AppointmentTimeZoneSource =
-        outputTzResult.ok ? outputTzResult.source : 'FALLBACK'
 
       const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
         existing.locationAddressSnapshot,
@@ -564,8 +593,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
           bufferMinutes: Math.max(0, Number(updated.bufferMinutes ?? 0)),
           status: updated.status,
           subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
-          timeZone: outputTimeZone,
-          timeZoneSource: outputTimeZoneSource,
+          appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
+          timeZoneSource: outputSchedulingContext.timeZoneSource,
           locationId: existing.locationId ?? null,
           locationType: existing.locationType,
           locationAddressSnapshot: existingLocationAddressSnapshot,
@@ -612,7 +641,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         throwCode('BAD_LOCATION_MODE')
       }
 
-      const apptTzResult = await resolveApptTimeZone({
+      const schedulingContextResult = await resolveAppointmentSchedulingContext({
         bookingLocationTimeZone: existing.locationTimeZone,
         location: { id: location.id, timeZone: location.timeZone },
         professionalId: existing.professionalId,
@@ -621,23 +650,33 @@ export async function PATCH(req: Request, ctx: Ctx) {
         requireValid: true,
       })
 
-      if (!apptTzResult.ok || !isValidIanaTimeZone(apptTzResult.timeZone)) {
-        console.error('PATCH /api/pro/bookings/[id] invalid appointment timezone', {
-          route: 'app/api/pro/bookings/[id]/route.ts',
-          bookingId: existing.id,
-          professionalId: existing.professionalId,
-          bookingLocationTimeZone: existing.locationTimeZone,
-          locationId: location.id,
-          locationTimeZone: location.timeZone,
-          professionalTimeZone: existing.professional?.timeZone ?? null,
-          resolveResult: apptTzResult,
-        })
+      if (!schedulingContextResult.ok) {
+        console.error(
+          'PATCH /api/pro/bookings/[id] invalid appointment timezone',
+          {
+            route: 'app/api/pro/bookings/[id]/route.ts',
+            bookingId: existing.id,
+            professionalId: existing.professionalId,
+            bookingLocationTimeZone: existing.locationTimeZone,
+            locationId: location.id,
+            locationTimeZone: location.timeZone,
+            professionalTimeZone: existing.professional?.timeZone ?? null,
+            resolveResult: schedulingContextResult,
+          },
+        )
         throwCode('TIMEZONE_REQUIRED')
       }
 
-      const appointmentTimeZone = sanitizeTimeZone(apptTzResult.timeZone, 'UTC')
-      const appointmentTimeZoneSource: AppointmentTimeZoneSource =
-        apptTzResult.source
+      const schedulingContext = {
+        ...schedulingContextResult.context,
+        appointmentTimeZone: normalizeOutputTimeZone(
+          schedulingContextResult.context.appointmentTimeZone,
+        ),
+      }
+
+      const appointmentTimeZone = schedulingContext.appointmentTimeZone
+      const appointmentTimeZoneSource = schedulingContext.timeZoneSource
+
       const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
 
       if (nextBuffer != null && (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)) {
@@ -849,7 +888,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
           requestedStart: finalStart,
           requestedEnd: finalEnd,
           bookingId: existing.id,
-          timeZone: appointmentTimeZone,
+          appointmentTimeZone,
           timeZoneSource: appointmentTimeZoneSource,
         })
       }
@@ -948,7 +987,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         bufferMinutes: Math.max(0, Number(updated.bufferMinutes)),
         status: updated.status,
         subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
-        timeZone: appointmentTimeZone,
+        appointmentTimeZone,
         timeZoneSource: appointmentTimeZoneSource,
         locationId: existing.locationId ?? null,
         locationType: existing.locationType,
@@ -979,7 +1018,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (message === 'BAD_BUFFER') return jsonFail(400, 'Invalid bufferMinutes.')
     if (message === 'BAD_DURATION') return jsonFail(400, 'Invalid durationMinutes.')
     if (message.startsWith('WH:')) {
-      return jsonFail(400, message.slice(3) || 'That time is outside working hours.')
+      return jsonFail(
+        400,
+        message.slice(3) || 'That time is outside working hours.',
+      )
     }
     if (message === 'TIMEZONE_REQUIRED') {
       return jsonFail(400, 'Please set a valid timezone before editing bookings.')

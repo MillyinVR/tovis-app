@@ -144,7 +144,7 @@ describe('POST /api/pro/calendar/blocked', () => {
   })
 
   it('returns 409 and logs when the block overlaps an existing block', async () => {
-    mocks.calendarBlockFindFirst.mockResolvedValueOnce({ id: 'block_existing' })
+    mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
 
     const result = await POST(
       makeRequest({
@@ -162,7 +162,6 @@ describe('POST /api/pro/calendar/blocked', () => {
       requestedStart: new Date('2026-03-11T17:00:00.000Z'),
       requestedEnd: new Date('2026-03-11T18:00:00.000Z'),
       conflictType: 'BLOCKED',
-      blockId: 'block_existing',
       meta: {
         route: 'app/api/pro/calendar/blocked/route.ts',
       },
