@@ -156,6 +156,34 @@ function extractIso(data: unknown, key: 'startedAt' | 'finishedAt') {
   return null
 }
 
+type MutationPayload =
+  | {
+      status: 'ACCEPTED'
+      notifyClient: boolean
+    }
+  | {
+      status: 'CANCELLED'
+      notifyClient: boolean
+    }
+
+function getPatchPayload(action: LoadingAction): MutationPayload | null {
+  if (action === 'ACCEPT') {
+    return {
+      status: 'ACCEPTED',
+      notifyClient: true,
+    }
+  }
+
+  if (action === 'CANCEL') {
+    return {
+      status: 'CANCELLED',
+      notifyClient: true,
+    }
+  }
+
+  return null
+}
+
 export default function BookingActions({
   bookingId,
   currentStatus,
@@ -248,21 +276,16 @@ export default function BookingActions({
     try {
       let res: Response
 
-      if (action === 'ACCEPT') {
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/status`, {
+      if (action === 'ACCEPT' || action === 'CANCEL') {
+        const body = getPatchPayload(action)
+        if (!body) {
+          throw new Error('Unsupported booking action.')
+        }
+
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'ACCEPTED' }),
-          signal: controller.signal,
-        })
-      } else if (action === 'CANCEL') {
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/cancel`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            reason: 'Cancelled by professional',
-            promoteWaitlist: true,
-          }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         })
       } else if (action === 'START') {
