@@ -1,3 +1,4 @@
+// app/api/holds/route.ts 
 import { NextRequest } from 'next/server'
 import {
   ClientAddressKind,
@@ -22,7 +23,8 @@ import {
 } from '@/lib/booking/snapshots'
 import { minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-
+import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 export const dynamic = 'force-dynamic'
 
 type HoldRouteErrorCode =
@@ -237,42 +239,44 @@ export async function POST(req: NextRequest) {
       return jsonFail(400, 'Invalid scheduledFor.')
     }
 
-    const now = new Date()
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
-    if (requestedStart.getTime() < now.getTime() + 60_000) {
-      return jsonFail(400, 'Please select a future time.')
-    }
+if (requestedStart.getTime() < Date.now() + 60_000) {
+  return jsonFail(400, 'Please select a future time.')
+}
 
-    const offering = await prisma.professionalServiceOffering.findUnique({
-      where: { id: offeringId },
-      select: {
-        id: true,
-        isActive: true,
-        professionalId: true,
-        offersInSalon: true,
-        offersMobile: true,
-        salonDurationMinutes: true,
-        mobileDurationMinutes: true,
-        salonPriceStartingAt: true,
-        mobilePriceStartingAt: true,
-      },
-    })
+const offering = await prisma.professionalServiceOffering.findUnique({
+  where: { id: offeringId },
+  select: {
+    id: true,
+    isActive: true,
+    professionalId: true,
+    offersInSalon: true,
+    offersMobile: true,
+    salonDurationMinutes: true,
+    mobileDurationMinutes: true,
+    salonPriceStartingAt: true,
+    mobilePriceStartingAt: true,
+  },
+})
 
-    if (!offering || !offering.isActive) {
-      return jsonFail(404, 'Offering not found.')
-    }
+if (!offering || !offering.isActive) {
+  return jsonFail(404, 'Offering not found.')
+}
 
-    const result = await prisma.$transaction(
-      async (tx): Promise<HoldCreateResult> => {
-        const selectedClientAddress =
-          locationType === ServiceLocationType.MOBILE && clientAddressId
-            ? await loadClientServiceAddress({
-                tx,
-                clientId,
-                clientAddressId,
-              })
-            : null
+const result = await withLockedProfessionalTransaction(
+  offering.professionalId,
+  async ({ tx, now }): Promise<HoldCreateResult> => {
+    await lockProfessionalSchedule(tx, offering.professionalId)
+
+    const selectedClientAddress =
+      locationType === ServiceLocationType.MOBILE && clientAddressId
+        ? await loadClientServiceAddress({
+            tx,
+            clientId,
+            clientAddressId,
+          })
+        : null
 
         const clientServiceAddress =
           locationType === ServiceLocationType.MOBILE

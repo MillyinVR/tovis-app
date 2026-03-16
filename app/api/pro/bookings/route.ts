@@ -32,6 +32,7 @@ import {
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { snapToStepMinutes } from '@/lib/booking/serviceItems'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
+import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 
 export const dynamic = 'force-dynamic'
 
@@ -179,6 +180,8 @@ export async function POST(req: Request) {
     const requestedStart = normalizeToMinute(scheduledFor)
 
     const result = await prisma.$transaction(async (tx) => {
+      await lockProfessionalSchedule(tx, professionalId)
+
       const [client, clientAddress, offering] = await Promise.all([
         tx.clientProfile.findUnique({
           where: { id: clientId },

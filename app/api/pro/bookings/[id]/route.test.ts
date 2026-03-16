@@ -1,6 +1,5 @@
-// app/api/pro/bookings/[id]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Prisma, BookingStatus, ServiceLocationType } from '@prisma/client'
+import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -18,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   sanitizeTimeZone: vi.fn(),
   minutesSinceMidnightInTimeZone: vi.fn(),
 
+  moneyToFixed2String: vi.fn(),
+  clampInt: vi.fn(),
+
   normalizeStepMinutes: vi.fn(),
   ensureWithinWorkingHours: vi.fn(),
   getTimeRangeConflict: vi.fn(),
@@ -27,6 +29,21 @@ const mocks = vi.hoisted(() => ({
   computeBookingItemLikeTotals: vi.fn(),
   snapToStepMinutes: vi.fn(),
   sumDecimal: vi.fn(),
+
+  decimalToNullableNumber: vi.fn(),
+  pickFormattedAddressFromSnapshot: vi.fn(),
+
+  lockProfessionalSchedule: vi.fn(),
+
+  txBookingFindFirst: vi.fn(),
+  txBookingUpdate: vi.fn(),
+  txProfessionalLocationFindFirst: vi.fn(),
+  txProfessionalServiceOfferingFindMany: vi.fn(),
+  txBookingServiceItemFindMany: vi.fn(),
+  txBookingServiceItemDeleteMany: vi.fn(),
+  txBookingServiceItemCreate: vi.fn(),
+  txBookingServiceItemCreateMany: vi.fn(),
+  txClientNotificationCreate: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -55,6 +72,14 @@ vi.mock('@/lib/timeZone', () => ({
   minutesSinceMidnightInTimeZone: mocks.minutesSinceMidnightInTimeZone,
 }))
 
+vi.mock('@/lib/money', () => ({
+  moneyToFixed2String: mocks.moneyToFixed2String,
+}))
+
+vi.mock('@/lib/pick', () => ({
+  clampInt: mocks.clampInt,
+}))
+
 vi.mock('@/lib/booking/locationContext', () => ({
   normalizeStepMinutes: mocks.normalizeStepMinutes,
 }))
@@ -79,7 +104,38 @@ vi.mock('@/lib/booking/serviceItems', () => ({
   sumDecimal: mocks.sumDecimal,
 }))
 
+vi.mock('@/lib/booking/snapshots', () => ({
+  decimalToNullableNumber: mocks.decimalToNullableNumber,
+  pickFormattedAddressFromSnapshot: mocks.pickFormattedAddressFromSnapshot,
+}))
+
+vi.mock('@/lib/booking/scheduleLock', () => ({
+  lockProfessionalSchedule: mocks.lockProfessionalSchedule,
+}))
+
 import { PATCH } from './route'
+
+const tx = {
+  booking: {
+    findFirst: mocks.txBookingFindFirst,
+    update: mocks.txBookingUpdate,
+  },
+  professionalLocation: {
+    findFirst: mocks.txProfessionalLocationFindFirst,
+  },
+  professionalServiceOffering: {
+    findMany: mocks.txProfessionalServiceOfferingFindMany,
+  },
+  bookingServiceItem: {
+    findMany: mocks.txBookingServiceItemFindMany,
+    deleteMany: mocks.txBookingServiceItemDeleteMany,
+    create: mocks.txBookingServiceItemCreate,
+    createMany: mocks.txBookingServiceItemCreateMany,
+  },
+  clientNotification: {
+    create: mocks.txClientNotificationCreate,
+  },
+}
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/pro/bookings/booking_1', {
@@ -142,7 +198,7 @@ const existingItems = [
   },
 ]
 
-describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
+describe('PATCH /api/pro/bookings/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -186,6 +242,8 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       return Number.isFinite(d.getTime()) ? d : null
     })
 
+    mocks.lockProfessionalSchedule.mockResolvedValue(undefined)
+
     mocks.resolveAppointmentSchedulingContext.mockResolvedValue({
       ok: true,
       context: {
@@ -199,6 +257,16 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
 
     mocks.isValidIanaTimeZone.mockReturnValue(true)
     mocks.sanitizeTimeZone.mockImplementation((tz: string) => tz)
+    mocks.moneyToFixed2String.mockImplementation((value: Prisma.Decimal) =>
+      value.toFixed(2),
+    )
+
+    mocks.clampInt.mockImplementation((value: unknown, min: number, max: number) => {
+      const parsed = Number(value)
+      const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
+      return Math.max(min, Math.min(max, n))
+    })
+
     mocks.normalizeStepMinutes.mockReturnValue(15)
     mocks.snapToStepMinutes.mockImplementation((value: number) => value)
     mocks.minutesSinceMidnightInTimeZone.mockReturnValue(30)
@@ -213,40 +281,89 @@ describe('PATCH /api/pro/bookings/[id] conflict logging', () => {
       computedSubtotal: new Prisma.Decimal('50.00'),
     })
 
-    mocks.prismaTransaction.mockImplementation(
-      async (callback: (tx: unknown) => unknown) => {
-        const tx = {
-          booking: {
-            findFirst: vi.fn().mockResolvedValue(existingBooking),
-            update: vi.fn().mockResolvedValue({
-              id: 'booking_1',
-              scheduledFor: new Date('2026-03-11T19:00:00.000Z'),
-              bufferMinutes: 15,
-              totalDurationMinutes: 60,
-              status: BookingStatus.ACCEPTED,
-              subtotalSnapshot: new Prisma.Decimal('50.00'),
-            }),
-          },
-          professionalLocation: {
-            findFirst: vi.fn().mockResolvedValue(location),
-          },
-          professionalServiceOffering: {
-            findMany: vi.fn().mockResolvedValue([]),
-          },
-          bookingServiceItem: {
-            findMany: vi.fn().mockResolvedValue(existingItems),
-            deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-            create: vi.fn(),
-            createMany: vi.fn(),
-          },
-          clientNotification: {
-            create: vi.fn(),
-          },
-        }
+    mocks.buildNormalizedBookingItemsFromRequestedOfferings.mockReturnValue(null)
+    mocks.sumDecimal.mockReturnValue(new Prisma.Decimal('50.00'))
 
-        return callback(tx)
-      },
+    mocks.decimalToNullableNumber.mockReturnValue(null)
+    mocks.pickFormattedAddressFromSnapshot.mockReturnValue(null)
+
+    mocks.txBookingFindFirst.mockResolvedValue(existingBooking)
+
+    mocks.txBookingUpdate.mockImplementation(
+      async ({
+        data,
+      }: {
+        data: {
+          scheduledFor?: Date
+          bufferMinutes?: number
+          totalDurationMinutes?: number
+          status?: BookingStatus
+          subtotalSnapshot?: Prisma.Decimal
+        }
+      }) => ({
+        id: 'booking_1',
+        scheduledFor: data.scheduledFor ?? existingBooking.scheduledFor,
+        bufferMinutes: data.bufferMinutes ?? 15,
+        totalDurationMinutes: data.totalDurationMinutes ?? 60,
+        status: data.status ?? BookingStatus.ACCEPTED,
+        subtotalSnapshot: data.subtotalSnapshot ?? new Prisma.Decimal('50.00'),
+      }),
     )
+
+    mocks.txProfessionalLocationFindFirst.mockResolvedValue(location)
+    mocks.txProfessionalServiceOfferingFindMany.mockResolvedValue([])
+    mocks.txBookingServiceItemFindMany.mockResolvedValue(existingItems)
+    mocks.txBookingServiceItemDeleteMany.mockResolvedValue({ count: 0 })
+    mocks.txBookingServiceItemCreate.mockResolvedValue({ id: 'item_1' })
+    mocks.txBookingServiceItemCreateMany.mockResolvedValue({ count: 0 })
+    mocks.txClientNotificationCreate.mockResolvedValue({ id: 'notif_1' })
+
+    mocks.prismaTransaction.mockImplementation(
+      async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    )
+  })
+
+  it('acquires the professional schedule lock before conflict check and booking update', async () => {
+    const result = await PATCH(
+      makeRequest({
+        scheduledFor: '2026-03-11T19:30:00.000Z',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.lockProfessionalSchedule).toHaveBeenCalledWith(tx, 'pro_123')
+
+    expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.getTimeRangeConflict.mock.invocationCallOrder[0],
+    )
+
+    expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.txBookingUpdate.mock.invocationCallOrder[0],
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        booking: {
+          id: 'booking_1',
+          scheduledFor: '2026-03-11T19:30:00.000Z',
+          endsAt: '2026-03-11T20:45:00.000Z',
+          bufferMinutes: 15,
+          durationMinutes: 60,
+          totalDurationMinutes: 60,
+          status: BookingStatus.ACCEPTED,
+          subtotalSnapshot: '50.00',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+          locationId: 'loc_1',
+          locationType: ServiceLocationType.SALON,
+          locationAddressSnapshot: null,
+          locationLatSnapshot: null,
+          locationLngSnapshot: null,
+        },
+      },
+    })
   })
 
   it('logs STEP_BOUNDARY and returns 400 when scheduled time is off step', async () => {

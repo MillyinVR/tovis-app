@@ -11,8 +11,14 @@
     "typecheck": "tsc --noEmit",
     "seed": "node prisma/seed.cjs",
     "test": "vitest run",
-    "test:watch": "vitest"
-  },
+    "test:watch": "vitest",
+  "db:test:up": "docker run --name tovis-test-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=tovis_test -p 5433:5432 -d postgres:16",
+  "db:test:start": "docker start tovis-test-postgres",
+  "db:test:stop": "docker stop tovis-test-postgres",
+  "db:test:down": "docker rm -f tovis-test-postgres",
+  "db:test:push": "node scripts/with-test-db.mjs npx prisma db push --skip-generate",
+  "test:integration": "node scripts/with-test-db.mjs npx vitest run tests/integration"
+},
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-select": "^2.2.6",

@@ -34,6 +34,7 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
+import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 
 export const dynamic = 'force-dynamic'
 
@@ -290,99 +291,102 @@ export async function POST(request: Request) {
     })
 
     if (!offering || !offering.isActive) {
-      return jsonFail(400, 'Invalid or inactive offering.', {
-        code: 'MISSING_OFFERING' satisfies FinalizeRouteErrorCode,
-      })
-    }
+  return jsonFail(400, 'Invalid or inactive offering.', {
+    code: 'MISSING_OFFERING' satisfies FinalizeRouteErrorCode,
+  })
+}
 
-    const now = new Date()
-    const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
-    const initialStatus = getClientSubmittedBookingStatus(autoAccept)
+const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
+const initialStatus = getClientSubmittedBookingStatus(autoAccept)
 
-    let rebookOfBookingIdForCreate: string | null = null
+let rebookOfBookingIdForCreate: string | null = null
 
-    if (source === BookingSource.AFTERCARE) {
-      if (!aftercareToken) {
-        return jsonFail(400, 'Missing aftercare token.', {
-          code: 'AFTERCARE_TOKEN_MISSING' satisfies FinalizeRouteErrorCode,
-        })
-      }
+if (source === BookingSource.AFTERCARE) {
+  if (!aftercareToken) {
+    return jsonFail(400, 'Missing aftercare token.', {
+      code: 'AFTERCARE_TOKEN_MISSING' satisfies FinalizeRouteErrorCode,
+    })
+  }
 
-      const aftercare = await prisma.aftercareSummary.findUnique({
-        where: { publicToken: aftercareToken },
-        select: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              clientId: true,
-              professionalId: true,
-              serviceId: true,
-              offeringId: true,
-            },
-          },
-        },
-      })
-
-      if (!aftercare?.booking) {
-        return jsonFail(400, 'Invalid aftercare token.', {
-          code: 'AFTERCARE_TOKEN_INVALID' satisfies FinalizeRouteErrorCode,
-        })
-      }
-
-      const original = aftercare.booking
-
-      if (original.status !== BookingStatus.COMPLETED) {
-        return jsonFail(409, 'Only COMPLETED bookings can be rebooked.', {
-          code: 'AFTERCARE_NOT_COMPLETED' satisfies FinalizeRouteErrorCode,
-        })
-      }
-
-      if (original.clientId !== clientId) {
-        return jsonFail(403, 'Aftercare link does not match this client.', {
-          code: 'AFTERCARE_CLIENT_MISMATCH' satisfies FinalizeRouteErrorCode,
-        })
-      }
-
-      const matchesOffering =
-        (original.offeringId && original.offeringId === offering.id) ||
-        (original.professionalId === offering.professionalId &&
-          original.serviceId === offering.serviceId)
-
-      if (!matchesOffering) {
-        return jsonFail(403, 'Aftercare link does not match this offering.', {
-          code: 'AFTERCARE_OFFERING_MISMATCH' satisfies FinalizeRouteErrorCode,
-        })
-      }
-
-      rebookOfBookingIdForCreate =
-        requestedRebookOfBookingId && requestedRebookOfBookingId === original.id
-          ? requestedRebookOfBookingId
-          : original.id
-    }
-
-    const booking = await prisma.$transaction(async (tx) => {
-      const hold = await tx.bookingHold.findUnique({
-        where: { id: holdId },
+  const aftercare = await prisma.aftercareSummary.findUnique({
+    where: { publicToken: aftercareToken },
+    select: {
+      booking: {
         select: {
           id: true,
-          offeringId: true,
-          professionalId: true,
+          status: true,
           clientId: true,
-          scheduledFor: true,
-          expiresAt: true,
-          locationType: true,
-          locationId: true,
-          locationTimeZone: true,
-          locationAddressSnapshot: true,
-          locationLatSnapshot: true,
-          locationLngSnapshot: true,
-          clientAddressId: true,
-          clientAddressSnapshot: true,
-          clientAddressLatSnapshot: true,
-          clientAddressLngSnapshot: true,
+          professionalId: true,
+          serviceId: true,
+          offeringId: true,
         },
-      })
+      },
+    },
+  })
+
+  if (!aftercare?.booking) {
+    return jsonFail(400, 'Invalid aftercare token.', {
+      code: 'AFTERCARE_TOKEN_INVALID' satisfies FinalizeRouteErrorCode,
+    })
+  }
+
+  const original = aftercare.booking
+
+  if (original.status !== BookingStatus.COMPLETED) {
+    return jsonFail(409, 'Only COMPLETED bookings can be rebooked.', {
+      code: 'AFTERCARE_NOT_COMPLETED' satisfies FinalizeRouteErrorCode,
+    })
+  }
+
+  if (original.clientId !== clientId) {
+    return jsonFail(403, 'Aftercare link does not match this client.', {
+      code: 'AFTERCARE_CLIENT_MISMATCH' satisfies FinalizeRouteErrorCode,
+    })
+  }
+
+  const matchesOffering =
+    (original.offeringId && original.offeringId === offering.id) ||
+    (original.professionalId === offering.professionalId &&
+      original.serviceId === offering.serviceId)
+
+  if (!matchesOffering) {
+    return jsonFail(403, 'Aftercare link does not match this offering.', {
+      code: 'AFTERCARE_OFFERING_MISMATCH' satisfies FinalizeRouteErrorCode,
+    })
+  }
+
+  rebookOfBookingIdForCreate =
+    requestedRebookOfBookingId && requestedRebookOfBookingId === original.id
+      ? requestedRebookOfBookingId
+      : original.id
+}
+
+const booking = await prisma.$transaction(async (tx) => {
+  await lockProfessionalSchedule(tx, offering.professionalId)
+
+  const now = new Date()
+
+  const hold = await tx.bookingHold.findUnique({
+    where: { id: holdId },
+    select: {
+      id: true,
+      offeringId: true,
+      professionalId: true,
+      clientId: true,
+      scheduledFor: true,
+      expiresAt: true,
+      locationType: true,
+      locationId: true,
+      locationTimeZone: true,
+      locationAddressSnapshot: true,
+      locationLatSnapshot: true,
+      locationLngSnapshot: true,
+      clientAddressId: true,
+      clientAddressSnapshot: true,
+      clientAddressLatSnapshot: true,
+      clientAddressLngSnapshot: true,
+    },
+  })
 
       if (!hold) throwCode('HOLD_NOT_FOUND')
       if (hold.clientId !== clientId) throwCode('HOLD_NOT_FOUND')

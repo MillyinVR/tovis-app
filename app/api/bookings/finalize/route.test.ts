@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   logBookingConflict: vi.fn(),
   resolveValidatedBookingContext: vi.fn(),
   ensureWithinWorkingHours: vi.fn(),
+  lockProfessionalSchedule: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -91,6 +92,10 @@ vi.mock('@/lib/booking/locationContext', () => ({
 
 vi.mock('@/lib/booking/workingHoursGuard', () => ({
   ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
+}))
+
+vi.mock('@/lib/booking/scheduleLock', () => ({
+  lockProfessionalSchedule: mocks.lockProfessionalSchedule,
 }))
 
 vi.mock('@/lib/booking/snapshots', () => ({
@@ -172,6 +177,8 @@ describe('POST /api/bookings/finalize', () => {
     vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
 
     vi.clearAllMocks()
+
+    mocks.lockProfessionalSchedule.mockResolvedValue(undefined)
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -505,78 +512,88 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('creates the booking, deletes the hold, and notifies the pro when valid', async () => {
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-        source: 'REQUESTED',
-      }),
-    )
+  const result = await POST(
+    makeRequest({
+      offeringId: 'offering_1',
+      holdId: 'hold_1',
+      locationType: 'SALON',
+      source: 'REQUESTED',
+    }),
+  )
 
-    expect(mocks.bookingCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        clientId: 'client_1',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offeringId: 'offering_1',
-        locationType: ServiceLocationType.SALON,
-        locationId: 'loc_1',
-        locationTimeZone: 'America/Los_Angeles',
-        totalDurationMinutes: 60,
-        bufferMinutes: 15,
-        status: BookingStatus.PENDING,
-        source: BookingSource.REQUESTED,
-      }),
-      select: {
-        id: true,
-        status: true,
-        scheduledFor: true,
-        professionalId: true,
-      },
-    })
+  expect(mocks.lockProfessionalSchedule).toHaveBeenCalledWith(tx, 'pro_123')
 
-    expect(mocks.bookingServiceItemCreate).toHaveBeenCalledWith({
-      data: {
-        bookingId: 'booking_1',
-        serviceId: 'service_1',
-        offeringId: 'offering_1',
-        itemType: BookingServiceItemType.BASE,
-        priceSnapshot: new Prisma.Decimal('100'),
-        durationMinutesSnapshot: 60,
-        sortOrder: 0,
-      },
-      select: { id: true },
-    })
+  expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.getTimeRangeConflict.mock.invocationCallOrder[0],
+  )
 
-    expect(mocks.bookingHoldDelete).toHaveBeenCalledWith({
-      where: { id: 'hold_1' },
-    })
+  expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.bookingCreate.mock.invocationCallOrder[0],
+  )
 
-    expect(mocks.createProNotification).toHaveBeenCalledWith({
+  expect(mocks.bookingCreate).toHaveBeenCalledWith({
+    data: expect.objectContaining({
+      clientId: 'client_1',
       professionalId: 'pro_123',
-      type: NotificationType.BOOKING_REQUEST,
-      title: 'New booking request',
-      body: '',
-      href: '/pro/bookings/booking_1',
-      actorUserId: 'user_1',
-      bookingId: 'booking_1',
-      dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST:booking_1',
-    })
-
-    expect(mocks.logBookingConflict).not.toHaveBeenCalled()
-
-    expect(result).toEqual({
-      ok: true,
-      status: 201,
-      data: {
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.PENDING,
-          scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-          professionalId: 'pro_123',
-        },
-      },
-    })
+      serviceId: 'service_1',
+      offeringId: 'offering_1',
+      locationType: ServiceLocationType.SALON,
+      locationId: 'loc_1',
+      locationTimeZone: 'America/Los_Angeles',
+      totalDurationMinutes: 60,
+      bufferMinutes: 15,
+      status: BookingStatus.PENDING,
+      source: BookingSource.REQUESTED,
+    }),
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+      professionalId: true,
+    },
   })
+
+  expect(mocks.bookingServiceItemCreate).toHaveBeenCalledWith({
+    data: {
+      bookingId: 'booking_1',
+      serviceId: 'service_1',
+      offeringId: 'offering_1',
+      itemType: BookingServiceItemType.BASE,
+      priceSnapshot: new Prisma.Decimal('100'),
+      durationMinutesSnapshot: 60,
+      sortOrder: 0,
+    },
+    select: { id: true },
+  })
+
+  expect(mocks.bookingHoldDelete).toHaveBeenCalledWith({
+    where: { id: 'hold_1' },
+  })
+
+  expect(mocks.createProNotification).toHaveBeenCalledWith({
+    professionalId: 'pro_123',
+    type: NotificationType.BOOKING_REQUEST,
+    title: 'New booking request',
+    body: '',
+    href: '/pro/bookings/booking_1',
+    actorUserId: 'user_1',
+    bookingId: 'booking_1',
+    dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST:booking_1',
+  })
+
+  expect(mocks.logBookingConflict).not.toHaveBeenCalled()
+
+  expect(result).toEqual({
+    ok: true,
+    status: 201,
+    data: {
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.PENDING,
+        scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+        professionalId: 'pro_123',
+      },
+    },
+  })
+})
 })

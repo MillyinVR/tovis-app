@@ -4,14 +4,16 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 /**
- * Vercel does NOT provide a .env file in the build container.
- * It injects environment variables via the platform.
+ * Prefer an already-provided DATABASE_URL from the parent process.
+ * This is how test commands can safely inject a separate database.
  *
- * So: only load a local env file if it actually exists.
+ * Only fall back to loading local .env when DATABASE_URL is not already set.
  */
-const envPath = path.join(process.cwd(), '.env')
-if (fs.existsSync(envPath)) {
-  process.loadEnvFile(envPath)
+if (!process.env.DATABASE_URL) {
+  const envPath = path.join(process.cwd(), '.env')
+  if (fs.existsSync(envPath)) {
+    process.loadEnvFile(envPath)
+  }
 }
 
 export default defineConfig({

@@ -55,6 +55,8 @@ import {
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
+import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -503,7 +505,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonOk({ booking: null, noOp: true }, 200)
     }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await withLockedProfessionalTransaction(
+      professionalId,
+      async ({ tx }) => {
       const existing = await tx.booking.findFirst({
         where: { id: bookingId, professionalId },
         select: {
