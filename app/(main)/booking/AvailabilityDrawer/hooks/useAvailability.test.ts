@@ -1,3 +1,4 @@
+// app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.test.ts
 // @vitest-environment jsdom
 
 import { act, renderHook, waitFor } from '@testing-library/react'
@@ -374,26 +375,30 @@ describe('useAvailability', () => {
   })
 
   it('redirects on 401 and surfaces the login message', async () => {
-    mocks.fetch.mockResolvedValueOnce(
-      makeResponse({ error: 'Unauthorized' }, 401),
-    )
+  mocks.fetch.mockResolvedValueOnce(
+    makeResponse({ error: 'Unauthorized' }, 401),
+  )
 
-    const { useAvailability } = await import('./useAvailability')
-
-    const { result } = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
-    )
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false)
-    })
-
-    expect(mocks.redirectToLogin).toHaveBeenCalledTimes(1)
-    expect(mocks.redirectToLogin).toHaveBeenCalledWith(
-      expect.anything(),
-      'availability',
-    )
-    expect(result.current.error).toBe('Please log in to view availability.')
-    expect(result.current.data).toBeNull()
+  mocks.safeJson.mockResolvedValueOnce({
+    error: 'Please log in to view availability.',
   })
+
+  const { useAvailability } = await import('./useAvailability')
+
+  const { result } = renderHook(() =>
+    useAvailability(true, makeContext(), 'SALON', null),
+  )
+
+  await waitFor(() => {
+    expect(result.current.loading).toBe(false)
+  })
+
+  expect(mocks.redirectToLogin).toHaveBeenCalledTimes(1)
+  expect(mocks.redirectToLogin).toHaveBeenCalledWith(
+    expect.anything(),
+    'availability',
+  )
+  expect(result.current.error).toBe('Please log in to view availability.')
+  expect(result.current.data).toBeNull()
+})
 })

@@ -55,7 +55,6 @@ import {
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 
 export const dynamic = 'force-dynamic'
@@ -212,11 +211,11 @@ function logAndThrowTimeRangeConflict(args: {
     },
   })
 
-  if (args.conflict === 'BLOCKED') {
-    throw new Error('BLOCKED')
-  }
+if (args.conflict === 'BLOCKED') {
+  throwCode('BLOCKED')
+}
 
-  throw new Error('TIME_NOT_AVAILABLE')
+throwCode('TIME_NOT_AVAILABLE')
 }
 
 async function resolveBookingSchedulingContext(args: {

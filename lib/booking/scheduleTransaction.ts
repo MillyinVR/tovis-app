@@ -1,3 +1,4 @@
+// lib/booking/scheduleTransaction.ts
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
@@ -52,4 +53,28 @@ export async function lockClientOwnedBookingSchedule(args: {
     professionalId: bookingRef.professionalId,
     now: new Date(),
   }
+}
+
+export async function withLockedClientOwnedBookingTransaction<T>(args: {
+  bookingId: string
+  clientId: string
+  run: (ctx: {
+    tx: Prisma.TransactionClient
+    now: Date
+    professionalId: string
+  }) => Promise<T>
+}): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    const { professionalId, now } = await lockClientOwnedBookingSchedule({
+      tx,
+      bookingId: args.bookingId,
+      clientId: args.clientId,
+    })
+
+    return args.run({
+      tx,
+      now,
+      professionalId,
+    })
+  })
 }

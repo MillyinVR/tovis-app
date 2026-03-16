@@ -67,11 +67,13 @@ function workingHoursJson(): Prisma.InputJsonValue {
 }
 
 async function cleanupAll(): Promise<void> {
+  await db.aftercareSummary.deleteMany({})
   await db.bookingHold.deleteMany({})
   await db.bookingServiceItem.deleteMany({})
   await db.booking.deleteMany({})
   await db.professionalServiceOffering.deleteMany({})
   await db.clientAddress.deleteMany({})
+  await db.mediaServiceTag.deleteMany({})
   await db.service.deleteMany({})
   await db.serviceCategory.deleteMany({})
   await db.professionalLocation.deleteMany({})

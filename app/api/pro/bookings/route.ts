@@ -1,5 +1,4 @@
 // app/api/pro/bookings/route.ts
-import { prisma } from '@/lib/prisma'
 import {
   BookingServiceItemType,
   BookingStatus,
@@ -32,7 +31,7 @@ import {
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { snapToStepMinutes } from '@/lib/booking/serviceItems'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
-import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -179,10 +178,10 @@ export async function POST(req: Request) {
 
     const requestedStart = normalizeToMinute(scheduledFor)
 
-    const result = await prisma.$transaction(async (tx) => {
-      await lockProfessionalSchedule(tx, professionalId)
-
-      const [client, clientAddress, offering] = await Promise.all([
+    const result = await withLockedProfessionalTransaction(
+      professionalId,
+      async ({ tx }) => {
+        const [client, clientAddress, offering] = await Promise.all([
         tx.clientProfile.findUnique({
           where: { id: clientId },
           select: { id: true },
@@ -505,7 +504,7 @@ export async function POST(req: Request) {
         },
       })
 
-      return {
+            return {
         booking,
         subtotalSnapshot: basePrice,
         stepMinutes,
@@ -518,7 +517,8 @@ export async function POST(req: Request) {
             : null,
         serviceName: offering.service.name || 'Appointment',
       }
-    })
+    },
+  )
 
     const endsAt = addMinutes(
       new Date(result.booking.scheduledFor),

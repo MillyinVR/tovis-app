@@ -34,7 +34,7 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
-import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -361,12 +361,10 @@ if (source === BookingSource.AFTERCARE) {
       : original.id
 }
 
-const booking = await prisma.$transaction(async (tx) => {
-  await lockProfessionalSchedule(tx, offering.professionalId)
-
-  const now = new Date()
-
-  const hold = await tx.bookingHold.findUnique({
+const booking = await withLockedProfessionalTransaction(
+  offering.professionalId,
+  async ({ tx, now }) => {
+    const hold = await tx.bookingHold.findUnique({
     where: { id: holdId },
     select: {
       id: true,
@@ -838,8 +836,9 @@ const booking = await prisma.$transaction(async (tx) => {
         where: { id: hold.id },
       })
 
-      return created
-    })
+            return created
+    },
+)
 
     const notificationType =
       booking.status === BookingStatus.PENDING

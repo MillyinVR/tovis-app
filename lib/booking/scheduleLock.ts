@@ -1,3 +1,4 @@
+// lib/booking/scheduleLock.ts
 import { Prisma } from '@prisma/client'
 
 const BOOKING_SCHEDULE_LOCK_NAMESPACE = 41021

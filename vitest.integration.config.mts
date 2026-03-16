@@ -8,13 +8,12 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['**/*.test.ts'],
+    include: ['tests/integration/**/*.test.ts'],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
       '**/.next/**',
       '**/.claude/**',
-      '**/tests/integration/**',
     ],
     clearMocks: true,
     restoreMocks: true,

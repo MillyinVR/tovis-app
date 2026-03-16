@@ -1,6 +1,5 @@
 // app/api/bookings/[id]/reschedule/route.ts
 
-import { prisma } from '@/lib/prisma'
 import {
   BookingStatus,
   ClientAddressKind,
@@ -27,7 +26,7 @@ import {
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-import { lockClientOwnedBookingSchedule } from '@/lib/booking/scheduleTransaction'
+import { withLockedClientOwnedBookingTransaction } from '@/lib/booking/scheduleTransaction'
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -72,12 +71,40 @@ function normalizeAddress(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return {}
+  }
+
+  const out: Record<string, Prisma.InputJsonValue | null> = {}
+
+  for (const key of Object.keys(value)) {
+    const child = value[key]
+    if (child === undefined) continue
+    out[key] = child === null ? null : toInputJsonValue(child)
+  }
+
+  return out
+}
+
 function toNullableJsonCreateInput(
   value: Prisma.JsonValue | null | undefined,
 ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
   if (value === undefined) return undefined
   if (value === null) return Prisma.JsonNull
-  return value as Prisma.InputJsonValue
+  return toInputJsonValue(value)
 }
 
 function mapSchedulingReadinessErrorToRescheduleCode(
@@ -132,295 +159,294 @@ export async function POST(req: Request, { params }: Ctx) {
     if (hasLocationType && requestedLocationType == null) {
       return jsonFail(400, 'Missing or invalid locationType.')
     }
-
-  const result = await prisma.$transaction(async (tx) => {
-  const { now } = await lockClientOwnedBookingSchedule({
-    tx,
-    bookingId,
-    clientId,
-  })
-
-  const booking = await tx.booking.findUnique({
-    where: { id: bookingId },
-    select: {
-      id: true,
-      status: true,
-      clientId: true,
-      professionalId: true,
-      offeringId: true,
-      startedAt: true,
-      finishedAt: true,
-      totalDurationMinutes: true,
-      bufferMinutes: true,
-    },
-  })
-
-  if (!booking) throwCode('BOOKING_NOT_FOUND')
-  if (booking.clientId !== clientId) throwCode('FORBIDDEN')
-
-  if (
-    booking.status === BookingStatus.COMPLETED ||
-    booking.status === BookingStatus.CANCELLED
-  ) {
-    throwCode('BOOKING_NOT_RESCHEDULABLE')
-  }
-
-  if (booking.startedAt || booking.finishedAt) {
-    throwCode('BOOKING_ALREADY_STARTED')
-  }
-
-  if (!booking.offeringId) {
-    throwCode('BOOKING_MISSING_OFFERING')
-  }
-
-  const bookingOffering = await tx.professionalServiceOffering.findUnique({
-    where: { id: booking.offeringId },
-    select: {
-      id: true,
-      offersInSalon: true,
-      offersMobile: true,
-      salonPriceStartingAt: true,
-      salonDurationMinutes: true,
-      mobilePriceStartingAt: true,
-      mobileDurationMinutes: true,
-    },
-  })
-
-  if (!bookingOffering) {
-    throwCode('OFFERING_NOT_FOUND')
-  }
-
-  const rawDuration = Number(booking.totalDurationMinutes ?? 0)
-  if (
-    !Number.isFinite(rawDuration) ||
-    rawDuration < 15 ||
-    rawDuration > MAX_SLOT_DURATION_MINUTES
-  ) {
-    throwCode('INVALID_DURATION')
-  }
-
-  const totalDurationMinutes = clampInt(
-    Math.trunc(rawDuration),
-    15,
-    MAX_SLOT_DURATION_MINUTES,
-  )
-
-  const hold = await tx.bookingHold.findUnique({
-    where: { id: holdId },
-    select: {
-      id: true,
-      clientId: true,
-      professionalId: true,
-      offeringId: true,
-      scheduledFor: true,
-      expiresAt: true,
-      locationType: true,
-      locationId: true,
-      locationTimeZone: true,
-      locationAddressSnapshot: true,
-      locationLatSnapshot: true,
-      locationLngSnapshot: true,
-      clientAddressId: true,
-      clientAddressSnapshot: true,
-      clientAddressLatSnapshot: true,
-      clientAddressLngSnapshot: true,
-    },
-  })
-
-  if (!hold) throwCode('HOLD_NOT_FOUND')
-  if (hold.clientId !== clientId) throwCode('HOLD_FORBIDDEN')
-  if (hold.expiresAt.getTime() <= now.getTime()) throwCode('HOLD_EXPIRED')
-  if (hold.professionalId !== booking.professionalId) throwCode('HOLD_PRO_MISMATCH')
-  if (hold.offeringId !== booking.offeringId) throwCode('HOLD_OFFERING_MISMATCH')
-
-  if (requestedLocationType && hold.locationType !== requestedLocationType) {
-    throwCode('HOLD_LOCATIONTYPE_MISMATCH')
-  }
-
-  if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
-
-  if (hold.locationType === ServiceLocationType.MOBILE) {
-    const clientServiceAddressFromHold = pickFormattedAddressFromSnapshot(
-      hold.clientAddressSnapshot,
-    )
-
-    if (!hold.clientAddressId || !clientServiceAddressFromHold) {
-      throwCode('HOLD_MISSING_CLIENT_ADDRESS')
-    }
-
-    const ownedClientAddress = await tx.clientAddress.findFirst({
-      where: {
-        id: hold.clientAddressId,
-        clientId,
-        kind: ClientAddressKind.SERVICE_ADDRESS,
+const result = await withLockedClientOwnedBookingTransaction({
+  bookingId,
+  clientId,
+  run: async ({ tx, now }) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        status: true,
+        clientId: true,
+        professionalId: true,
+        offeringId: true,
+        startedAt: true,
+        finishedAt: true,
+        totalDurationMinutes: true,
+        bufferMinutes: true,
       },
-      select: { id: true },
     })
 
-    if (!ownedClientAddress) {
-      throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+    if (!booking) throwCode('BOOKING_NOT_FOUND')
+
+    if (
+      booking.status === BookingStatus.COMPLETED ||
+      booking.status === BookingStatus.CANCELLED
+    ) {
+      throwCode('BOOKING_NOT_RESCHEDULABLE')
     }
-  }
 
-  const validatedContextResult = await resolveValidatedBookingContext({
-    tx,
-    professionalId: booking.professionalId,
-    requestedLocationId: hold.locationId,
-    locationType: hold.locationType,
-    holdLocationTimeZone: hold.locationTimeZone,
-    fallbackTimeZone: DEFAULT_TIME_ZONE,
-    requireValidTimeZone: true,
-    allowFallback: false,
-    requireCoordinates: false,
-    offering: {
-      offersInSalon: bookingOffering.offersInSalon,
-      offersMobile: bookingOffering.offersMobile,
-      salonDurationMinutes: bookingOffering.salonDurationMinutes,
-      mobileDurationMinutes: bookingOffering.mobileDurationMinutes,
-      salonPriceStartingAt: bookingOffering.salonPriceStartingAt,
-      mobilePriceStartingAt: bookingOffering.mobilePriceStartingAt,
-    },
-  })
+    if (booking.startedAt || booking.finishedAt) {
+      throwCode('BOOKING_ALREADY_STARTED')
+    }
 
-  if (!validatedContextResult.ok) {
-    throwCode(
-      mapSchedulingReadinessErrorToRescheduleCode(
-        validatedContextResult.error,
-      ),
+    if (!booking.offeringId) {
+      throwCode('BOOKING_MISSING_OFFERING')
+    }
+
+    const bookingOffering = await tx.professionalServiceOffering.findUnique({
+      where: { id: booking.offeringId },
+      select: {
+        id: true,
+        offersInSalon: true,
+        offersMobile: true,
+        salonPriceStartingAt: true,
+        salonDurationMinutes: true,
+        mobilePriceStartingAt: true,
+        mobileDurationMinutes: true,
+      },
+    })
+
+    if (!bookingOffering) {
+      throwCode('OFFERING_NOT_FOUND')
+    }
+
+    const rawDuration = Number(booking.totalDurationMinutes ?? 0)
+    if (
+      !Number.isFinite(rawDuration) ||
+      rawDuration < 15 ||
+      rawDuration > MAX_SLOT_DURATION_MINUTES
+    ) {
+      throwCode('INVALID_DURATION')
+    }
+
+    const totalDurationMinutes = clampInt(
+      Math.trunc(rawDuration),
+      15,
+      MAX_SLOT_DURATION_MINUTES,
     )
-  }
 
-  const locationContext = validatedContextResult.context
+    const hold = await tx.bookingHold.findUnique({
+      where: { id: holdId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        offeringId: true,
+        scheduledFor: true,
+        expiresAt: true,
+        locationType: true,
+        locationId: true,
+        locationTimeZone: true,
+        locationAddressSnapshot: true,
+        locationLatSnapshot: true,
+        locationLngSnapshot: true,
+        clientAddressId: true,
+        clientAddressSnapshot: true,
+        clientAddressLatSnapshot: true,
+        clientAddressLngSnapshot: true,
+      },
+    })
 
-  const salonAddressText =
-    hold.locationType === ServiceLocationType.SALON
-      ? pickFormattedAddressFromSnapshot(hold.locationAddressSnapshot) ??
-        normalizeAddress(locationContext.formattedAddress)
-      : null
+    if (!hold) throwCode('HOLD_NOT_FOUND')
+    if (hold.clientId !== clientId) throwCode('HOLD_FORBIDDEN')
+    if (hold.expiresAt.getTime() <= now.getTime()) throwCode('HOLD_EXPIRED')
+    if (hold.professionalId !== booking.professionalId) {
+      throwCode('HOLD_PRO_MISMATCH')
+    }
+    if (hold.offeringId !== booking.offeringId) {
+      throwCode('HOLD_OFFERING_MISMATCH')
+    }
 
-  if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
-    throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
-  }
+    if (requestedLocationType && hold.locationType !== requestedLocationType) {
+      throwCode('HOLD_LOCATIONTYPE_MISMATCH')
+    }
 
-  const newStart = normalizeToMinute(new Date(hold.scheduledFor))
-  if (!Number.isFinite(newStart.getTime())) {
-    throwCode('HOLD_TIME_INVALID')
-  }
+    if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
 
-  if (
-    newStart.getTime() <
-    now.getTime() + locationContext.advanceNoticeMinutes * 60_000
-  ) {
-    throwCode('TIME_IN_PAST')
-  }
+    if (hold.locationType === ServiceLocationType.MOBILE) {
+      const clientServiceAddressFromHold = pickFormattedAddressFromSnapshot(
+        hold.clientAddressSnapshot,
+      )
 
-  if (
-    newStart.getTime() >
-    now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
-  ) {
-    throwCode('TOO_FAR')
-  }
+      if (!hold.clientAddressId || !clientServiceAddressFromHold) {
+        throwCode('HOLD_MISSING_CLIENT_ADDRESS')
+      }
 
-  const startMinuteOfDay = minutesSinceMidnightInTimeZone(
-    newStart,
-    locationContext.timeZone,
-  )
+      const ownedClientAddress = await tx.clientAddress.findFirst({
+        where: {
+          id: hold.clientAddressId,
+          clientId,
+          kind: ClientAddressKind.SERVICE_ADDRESS,
+        },
+        select: { id: true },
+      })
 
-  if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
-    throw new Error(`STEP:${locationContext.stepMinutes}`)
-  }
+      if (!ownedClientAddress) {
+        throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+      }
+    }
 
-  const newEnd = addMinutes(
-    newStart,
-    totalDurationMinutes + locationContext.bufferMinutes,
-  )
-
-  const workingHoursCheck = ensureWithinWorkingHours({
-    scheduledStartUtc: newStart,
-    scheduledEndUtc: newEnd,
-    workingHours: locationContext.workingHours,
-    timeZone: locationContext.timeZone,
-    fallbackTimeZone: DEFAULT_TIME_ZONE,
-    messages: {
-      missing: 'This professional has not set working hours yet.',
-      outside: 'That time is outside this professional’s working hours.',
-      misconfigured: 'This professional’s working hours are misconfigured.',
-    },
-  })
-
-  if (!workingHoursCheck.ok) {
-    throw new Error(`WH:${workingHoursCheck.error}`)
-  }
-
-  await assertTimeRangeAvailable({
-    tx,
-    professionalId: booking.professionalId,
-    locationId: locationContext.locationId,
-    requestedStart: newStart,
-    requestedEnd: newEnd,
-    defaultBufferMinutes: locationContext.bufferMinutes,
-    fallbackDurationMinutes: totalDurationMinutes,
-    excludeBookingId: booking.id,
-    excludeHoldId: hold.id,
-  })
-
-  const salonLocationAddressSnapshotInput:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    hold.locationType === ServiceLocationType.SALON && salonAddressText
-      ? buildAddressSnapshot(salonAddressText) ?? Prisma.JsonNull
-      : Prisma.JsonNull
-
-  const updated = await tx.booking.update({
-    where: { id: booking.id },
-    data: {
-      scheduledFor: newStart,
+    const validatedContextResult = await resolveValidatedBookingContext({
+      tx,
+      professionalId: booking.professionalId,
+      requestedLocationId: hold.locationId,
       locationType: hold.locationType,
-      bufferMinutes: locationContext.bufferMinutes,
+      holdLocationTimeZone: hold.locationTimeZone,
+      fallbackTimeZone: DEFAULT_TIME_ZONE,
+      requireValidTimeZone: true,
+      allowFallback: false,
+      requireCoordinates: false,
+      offering: {
+        offersInSalon: bookingOffering.offersInSalon,
+        offersMobile: bookingOffering.offersMobile,
+        salonDurationMinutes: bookingOffering.salonDurationMinutes,
+        mobileDurationMinutes: bookingOffering.mobileDurationMinutes,
+        salonPriceStartingAt: bookingOffering.salonPriceStartingAt,
+        mobilePriceStartingAt: bookingOffering.mobilePriceStartingAt,
+      },
+    })
+
+    if (!validatedContextResult.ok) {
+      throwCode(
+        mapSchedulingReadinessErrorToRescheduleCode(
+          validatedContextResult.error,
+        ),
+      )
+    }
+
+    const locationContext = validatedContextResult.context
+
+    const salonAddressText =
+      hold.locationType === ServiceLocationType.SALON
+        ? pickFormattedAddressFromSnapshot(hold.locationAddressSnapshot) ??
+          normalizeAddress(locationContext.formattedAddress)
+        : null
+
+    if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
+      throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
+    }
+
+    const newStart = normalizeToMinute(new Date(hold.scheduledFor))
+    if (!Number.isFinite(newStart.getTime())) {
+      throwCode('HOLD_TIME_INVALID')
+    }
+
+    if (
+      newStart.getTime() <
+      now.getTime() + locationContext.advanceNoticeMinutes * 60_000
+    ) {
+      throwCode('TIME_IN_PAST')
+    }
+
+    if (
+      newStart.getTime() >
+      now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
+    ) {
+      throwCode('TOO_FAR')
+    }
+
+    const startMinuteOfDay = minutesSinceMidnightInTimeZone(
+      newStart,
+      locationContext.timeZone,
+    )
+
+    if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
+      throw new Error(`STEP:${locationContext.stepMinutes}`)
+    }
+
+    const newEnd = addMinutes(
+      newStart,
+      totalDurationMinutes + locationContext.bufferMinutes,
+    )
+
+    const workingHoursCheck = ensureWithinWorkingHours({
+      scheduledStartUtc: newStart,
+      scheduledEndUtc: newEnd,
+      workingHours: locationContext.workingHours,
+      timeZone: locationContext.timeZone,
+      fallbackTimeZone: DEFAULT_TIME_ZONE,
+      messages: {
+        missing: 'This professional has not set working hours yet.',
+        outside: 'That time is outside this professional’s working hours.',
+        misconfigured: 'This professional’s working hours are misconfigured.',
+      },
+    })
+
+    if (!workingHoursCheck.ok) {
+      throw new Error(`WH:${workingHoursCheck.error}`)
+    }
+
+    await assertTimeRangeAvailable({
+      tx,
+      professionalId: booking.professionalId,
       locationId: locationContext.locationId,
-      locationTimeZone: locationContext.timeZone,
+      requestedStart: newStart,
+      requestedEnd: newEnd,
+      defaultBufferMinutes: locationContext.bufferMinutes,
+      fallbackDurationMinutes: totalDurationMinutes,
+      excludeBookingId: booking.id,
+      excludeHoldId: hold.id,
+    })
 
-      locationAddressSnapshot: salonLocationAddressSnapshotInput,
-      locationLatSnapshot:
-        decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
-      locationLngSnapshot:
-        decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+    const salonLocationAddressSnapshotInput:
+      | Prisma.InputJsonValue
+      | Prisma.NullableJsonNullValueInput =
+      hold.locationType === ServiceLocationType.SALON && salonAddressText
+        ? buildAddressSnapshot(salonAddressText) ?? Prisma.JsonNull
+        : Prisma.JsonNull
 
-      clientAddressId:
-        hold.locationType === ServiceLocationType.MOBILE
-          ? hold.clientAddressId
-          : null,
-      clientAddressSnapshot:
-        hold.locationType === ServiceLocationType.MOBILE
-          ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
-          : Prisma.JsonNull,
-      clientAddressLatSnapshot:
-        hold.locationType === ServiceLocationType.MOBILE
-          ? decimalToNumber(hold.clientAddressLatSnapshot)
-          : null,
-      clientAddressLngSnapshot:
-        hold.locationType === ServiceLocationType.MOBILE
-          ? decimalToNumber(hold.clientAddressLngSnapshot)
-          : null,
-    },
-    select: {
-      id: true,
-      status: true,
-      scheduledFor: true,
-      locationType: true,
-      bufferMinutes: true,
-      totalDurationMinutes: true,
-      locationTimeZone: true,
-    },
-  })
+    const updated = await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        scheduledFor: newStart,
+        locationType: hold.locationType,
+        bufferMinutes: locationContext.bufferMinutes,
+        locationId: locationContext.locationId,
+        locationTimeZone: locationContext.timeZone,
 
-  await tx.bookingHold.delete({
-    where: { id: hold.id },
-  })
+        locationAddressSnapshot: salonLocationAddressSnapshotInput,
+        locationLatSnapshot:
+          decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
+        locationLngSnapshot:
+          decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
 
-  return updated
+        clientAddressId:
+          hold.locationType === ServiceLocationType.MOBILE
+            ? hold.clientAddressId
+            : null,
+        clientAddressSnapshot:
+          hold.locationType === ServiceLocationType.MOBILE
+            ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
+            : Prisma.JsonNull,
+        clientAddressLatSnapshot:
+          hold.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(hold.clientAddressLatSnapshot)
+            : null,
+        clientAddressLngSnapshot:
+          hold.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(hold.clientAddressLngSnapshot)
+            : null,
+      },
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+        locationType: true,
+        bufferMinutes: true,
+        totalDurationMinutes: true,
+        locationTimeZone: true,
+      },
+    })
+
+    await tx.bookingHold.delete({
+      where: { id: hold.id },
+    })
+
+    return updated
+  },
 })
-
     return jsonOk(
       {
         booking: {

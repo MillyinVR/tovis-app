@@ -23,7 +23,6 @@ import {
 } from '@/lib/booking/snapshots'
 import { minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 export const dynamic = 'force-dynamic'
 
@@ -267,7 +266,7 @@ if (!offering || !offering.isActive) {
 const result = await withLockedProfessionalTransaction(
   offering.professionalId,
   async ({ tx, now }): Promise<HoldCreateResult> => {
-    await lockProfessionalSchedule(tx, offering.professionalId)
+    
 
     const selectedClientAddress =
       locationType === ServiceLocationType.MOBILE && clientAddressId
