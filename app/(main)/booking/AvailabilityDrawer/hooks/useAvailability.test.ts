@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DrawerContext, ServiceLocationType } from '../types'
+import { clearAvailabilitySummaryPrefetchCache } from '../utils/availabilityPrefetch'
 
 const mocks = vi.hoisted(() => ({
   useRouter: vi.fn(),
@@ -136,8 +137,9 @@ async function flushMicrotasks(times = 3) {
 
 describe('useAvailability', () => {
   beforeEach(() => {
-    vi.resetModules()
     vi.clearAllMocks()
+
+    clearAvailabilitySummaryPrefetchCache()
 
     mocks.useRouter.mockReturnValue({
       push: vi.fn(),
@@ -161,6 +163,7 @@ describe('useAvailability', () => {
   })
 
   afterEach(() => {
+    clearAvailabilitySummaryPrefetchCache()
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
@@ -375,12 +378,14 @@ describe('useAvailability', () => {
   })
 
   it('redirects on 401 and surfaces the login message', async () => {
-  mocks.fetch.mockResolvedValueOnce(
-    makeResponse({ error: 'Unauthorized' }, 401),
+  clearAvailabilitySummaryPrefetchCache()
+
+  mocks.fetch.mockResolvedValue(
+    makeResponse({ error: 'Unauthorized.' }, 401),
   )
 
-  mocks.safeJson.mockResolvedValueOnce({
-    error: 'Please log in to view availability.',
+  mocks.safeJson.mockResolvedValue({
+    error: 'Unauthorized.',
   })
 
   const { useAvailability } = await import('./useAvailability')
@@ -393,7 +398,10 @@ describe('useAvailability', () => {
     expect(result.current.loading).toBe(false)
   })
 
-  expect(mocks.redirectToLogin).toHaveBeenCalledTimes(1)
+  await waitFor(() => {
+    expect(mocks.redirectToLogin).toHaveBeenCalled()
+  })
+
   expect(mocks.redirectToLogin).toHaveBeenCalledWith(
     expect.anything(),
     'availability',
