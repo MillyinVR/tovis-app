@@ -20,7 +20,7 @@ import { decimalToNumber } from '@/lib/booking/snapshots'
 import { clampInt } from '@/lib/pick'
 import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
-
+import { normalizeWorkingHours } from '@/lib/scheduling/workingHoursValidation'
 export type BookingLocationContext = {
   location: BookableLocation
   locationId: string
@@ -179,7 +179,7 @@ function normalizePriceNumberOrNull(value: unknown): number | null {
 }
 
 function hasSchedulingWorkingHours(value: unknown): boolean {
-  return isRecord(value)
+  return normalizeWorkingHours(value) !== null
 }
 
 function shouldAllowLocationFallback(args: {
@@ -369,10 +369,11 @@ export async function resolveBookingLocationContext(
     return { ok: false, error: 'LOCATION_NOT_FOUND' }
   }
 
-  const effectiveFallbackTimeZone =
-    typeof professionalTimeZone === 'string' && professionalTimeZone.trim()
-      ? professionalTimeZone.trim()
-      : fallbackTimeZone
+const effectiveFallbackTimeZone =
+  typeof professionalTimeZone === 'string' &&
+  isValidIanaTimeZone(professionalTimeZone)
+    ? sanitizeTimeZone(professionalTimeZone, fallbackTimeZone)
+    : sanitizeTimeZone(fallbackTimeZone, 'UTC')
 
   const tzResult = await resolveApptTimeZone({
     bookingLocationTimeZone,
