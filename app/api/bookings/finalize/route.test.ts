@@ -1,10 +1,11 @@
-// app/api/bookings/finalize
+// app/api/bookings/finalize/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
   NotificationType,
+  OpeningStatus,
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
@@ -19,7 +20,6 @@ const mocks = vi.hoisted(() => ({
 
   professionalServiceOfferingFindUnique: vi.fn(),
   aftercareSummaryFindUnique: vi.fn(),
-  prismaTransaction: vi.fn(),
 
   bookingHoldFindUnique: vi.fn(),
   clientAddressFindFirst: vi.fn(),
@@ -38,7 +38,7 @@ const mocks = vi.hoisted(() => ({
   logBookingConflict: vi.fn(),
   resolveValidatedBookingContext: vi.fn(),
   ensureWithinWorkingHours: vi.fn(),
-  lockProfessionalSchedule: vi.fn(),
+  withLockedProfessionalTransaction: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -63,7 +63,6 @@ vi.mock('@/lib/prisma', () => ({
     aftercareSummary: {
       findUnique: mocks.aftercareSummaryFindUnique,
     },
-    $transaction: mocks.prismaTransaction,
   },
 }))
 
@@ -94,8 +93,8 @@ vi.mock('@/lib/booking/workingHoursGuard', () => ({
   ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
 }))
 
-vi.mock('@/lib/booking/scheduleLock', () => ({
-  lockProfessionalSchedule: mocks.lockProfessionalSchedule,
+vi.mock('@/lib/booking/scheduleTransaction', () => ({
+  withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
 }))
 
 vi.mock('@/lib/booking/snapshots', () => ({
@@ -178,8 +177,6 @@ describe('POST /api/bookings/finalize', () => {
 
     vi.clearAllMocks()
 
-    mocks.lockProfessionalSchedule.mockResolvedValue(undefined)
-
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -219,8 +216,11 @@ describe('POST /api/bookings/finalize', () => {
 
     mocks.aftercareSummaryFindUnique.mockResolvedValue(null)
 
-    mocks.prismaTransaction.mockImplementation(
-      async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    mocks.withLockedProfessionalTransaction.mockImplementation(
+      async (
+        _professionalId: string,
+        callback: (args: { tx: typeof tx; now: Date }) => Promise<unknown>,
+      ) => callback({ tx, now: new Date('2026-03-11T19:00:00.000Z') }),
     )
 
     mocks.bookingHoldFindUnique.mockResolvedValue({
@@ -293,7 +293,7 @@ describe('POST /api/bookings/finalize', () => {
     vi.useRealTimers()
   })
 
-  it('returns 400 when locationType is missing', async () => {
+  it('returns LOCATION_TYPE_REQUIRED when locationType is missing', async () => {
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -301,19 +301,25 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing locationType.', {
-      code: 'MISSING_LOCATION_TYPE',
+    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing location type.', {
+      code: 'LOCATION_TYPE_REQUIRED',
+      retryable: false,
+      uiAction: 'NONE',
+      message: 'Location type is required.',
     })
 
     expect(result).toEqual({
       ok: false,
       status: 400,
-      error: 'Missing locationType.',
-      code: 'MISSING_LOCATION_TYPE',
+      error: 'Missing location type.',
+      code: 'LOCATION_TYPE_REQUIRED',
+      retryable: false,
+      uiAction: 'NONE',
+      message: 'Location type is required.',
     })
   })
 
-  it('returns 409 when the hold is expired', async () => {
+  it('returns HOLD_EXPIRED when the hold is expired', async () => {
     mocks.bookingHoldFindUnique.mockResolvedValueOnce({
       id: 'hold_1',
       offeringId: 'offering_1',
@@ -343,19 +349,27 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
-      'Hold expired. Please pick a slot again.',
-      { code: 'HOLD_EXPIRED' },
+      'That hold expired. Please pick a new slot.',
+      {
+        code: 'HOLD_EXPIRED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Hold expired.',
+      },
     )
 
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'Hold expired. Please pick a slot again.',
+      error: 'That hold expired. Please pick a new slot.',
       code: 'HOLD_EXPIRED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Hold expired.',
     })
   })
 
-  it('logs STEP_BOUNDARY and returns 400 when the held time is off step', async () => {
+  it('logs STEP_BOUNDARY and returns STEP_MISMATCH when the held time is off step', async () => {
     mocks.bookingHoldFindUnique.mockResolvedValueOnce({
       id: 'hold_1',
       offeringId: 'offering_1',
@@ -422,18 +436,26 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
       'Start time must be on a 30-minute boundary.',
-      { code: 'STEP' },
+      {
+        code: 'STEP_MISMATCH',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Start time must be on a 30-minute boundary.',
+      },
     )
 
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Start time must be on a 30-minute boundary.',
-      code: 'STEP',
+      code: 'STEP_MISMATCH',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Start time must be on a 30-minute boundary.',
     })
   })
 
-  it('logs BLOCKED and returns 409 when blocked by calendar block', async () => {
+  it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
 
     const result = await POST(
@@ -460,19 +482,27 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
-      'That time is blocked. Please select a different slot.',
-      { code: 'BLOCKED' },
+      'That time is blocked. Please choose another slot.',
+      {
+        code: 'TIME_BLOCKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is blocked.',
+      },
     )
 
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is blocked. Please select a different slot.',
-      code: 'BLOCKED',
+      error: 'That time is blocked. Please choose another slot.',
+      code: 'TIME_BLOCKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is blocked.',
     })
   })
 
-  it('logs BOOKING and returns 409 when blocked by existing booking', async () => {
+  it('logs BOOKING and returns TIME_BOOKED when blocked by existing booking', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
 
     const result = await POST(
@@ -499,101 +529,151 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
-      'That time is no longer available. Please select a different slot.',
-      { code: 'TIME_NOT_AVAILABLE' },
+      'That time was just taken. Please choose another slot.',
+      {
+        code: 'TIME_BOOKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time already has a booking.',
+      },
     )
 
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is no longer available. Please select a different slot.',
-      code: 'TIME_NOT_AVAILABLE',
+      error: 'That time was just taken. Please choose another slot.',
+      code: 'TIME_BOOKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time already has a booking.',
+    })
+  })
+
+  it('logs HOLD and returns TIME_HELD when blocked by existing hold', async () => {
+    mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
+      action: 'BOOKING_FINALIZE',
+      professionalId: 'pro_123',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      conflictType: 'HOLD',
+      holdId: 'hold_1',
+      meta: {
+        route: 'app/api/bookings/finalize/route.ts',
+      },
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'Someone is already holding that time. Please try another slot.',
+      {
+        code: 'TIME_HELD',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is currently held.',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Someone is already holding that time. Please try another slot.',
+      code: 'TIME_HELD',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is currently held.',
     })
   })
 
   it('creates the booking, deletes the hold, and notifies the pro when valid', async () => {
-  const result = await POST(
-    makeRequest({
-      offeringId: 'offering_1',
-      holdId: 'hold_1',
-      locationType: 'SALON',
-      source: 'REQUESTED',
-    }),
-  )
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+      }),
+    )
 
-  expect(mocks.lockProfessionalSchedule).toHaveBeenCalledWith(tx, 'pro_123')
+    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
+      'pro_123',
+      expect.any(Function),
+    )
 
-  expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
-    mocks.getTimeRangeConflict.mock.invocationCallOrder[0],
-  )
-
-  expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
-    mocks.bookingCreate.mock.invocationCallOrder[0],
-  )
-
-  expect(mocks.bookingCreate).toHaveBeenCalledWith({
-    data: expect.objectContaining({
-      clientId: 'client_1',
-      professionalId: 'pro_123',
-      serviceId: 'service_1',
-      offeringId: 'offering_1',
-      locationType: ServiceLocationType.SALON,
-      locationId: 'loc_1',
-      locationTimeZone: 'America/Los_Angeles',
-      totalDurationMinutes: 60,
-      bufferMinutes: 15,
-      status: BookingStatus.PENDING,
-      source: BookingSource.REQUESTED,
-    }),
-    select: {
-      id: true,
-      status: true,
-      scheduledFor: true,
-      professionalId: true,
-    },
-  })
-
-  expect(mocks.bookingServiceItemCreate).toHaveBeenCalledWith({
-    data: {
-      bookingId: 'booking_1',
-      serviceId: 'service_1',
-      offeringId: 'offering_1',
-      itemType: BookingServiceItemType.BASE,
-      priceSnapshot: new Prisma.Decimal('100'),
-      durationMinutesSnapshot: 60,
-      sortOrder: 0,
-    },
-    select: { id: true },
-  })
-
-  expect(mocks.bookingHoldDelete).toHaveBeenCalledWith({
-    where: { id: 'hold_1' },
-  })
-
-  expect(mocks.createProNotification).toHaveBeenCalledWith({
-    professionalId: 'pro_123',
-    type: NotificationType.BOOKING_REQUEST,
-    title: 'New booking request',
-    body: '',
-    href: '/pro/bookings/booking_1',
-    actorUserId: 'user_1',
-    bookingId: 'booking_1',
-    dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST:booking_1',
-  })
-
-  expect(mocks.logBookingConflict).not.toHaveBeenCalled()
-
-  expect(result).toEqual({
-    ok: true,
-    status: 201,
-    data: {
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.PENDING,
-        scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+    expect(mocks.bookingCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        clientId: 'client_1',
         professionalId: 'pro_123',
+        serviceId: 'service_1',
+        offeringId: 'offering_1',
+        locationType: ServiceLocationType.SALON,
+        locationId: 'loc_1',
+        locationTimeZone: 'America/Los_Angeles',
+        totalDurationMinutes: 60,
+        bufferMinutes: 15,
+        status: BookingStatus.PENDING,
+        source: BookingSource.REQUESTED,
+      }),
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+        professionalId: true,
       },
-    },
+    })
+
+    expect(mocks.bookingServiceItemCreate).toHaveBeenCalledWith({
+      data: {
+        bookingId: 'booking_1',
+        serviceId: 'service_1',
+        offeringId: 'offering_1',
+        itemType: BookingServiceItemType.BASE,
+        priceSnapshot: new Prisma.Decimal('100'),
+        durationMinutesSnapshot: 60,
+        sortOrder: 0,
+      },
+      select: { id: true },
+    })
+
+    expect(mocks.bookingHoldDelete).toHaveBeenCalledWith({
+      where: { id: 'hold_1' },
+    })
+
+    expect(mocks.createProNotification).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      type: NotificationType.BOOKING_REQUEST,
+      title: 'New booking request',
+      body: '',
+      href: '/pro/bookings/booking_1',
+      actorUserId: 'user_1',
+      bookingId: 'booking_1',
+      dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST:booking_1',
+    })
+
+    expect(mocks.logBookingConflict).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: {
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.PENDING,
+          scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+          professionalId: 'pro_123',
+        },
+      },
+    })
   })
-})
 })

@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
+
+const TEST_NOW = new Date('2026-03-17T12:55:00.000Z')
+const PATCH_START = new Date('2026-03-17T13:30:00.000Z')
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -9,8 +12,6 @@ const mocks = vi.hoisted(() => ({
   pickInt: vi.fn(),
   pickIsoDate: vi.fn(),
   pickString: vi.fn(),
-
-  prismaTransaction: vi.fn(),
 
   resolveAppointmentSchedulingContext: vi.fn(),
   isValidIanaTimeZone: vi.fn(),
@@ -33,7 +34,7 @@ const mocks = vi.hoisted(() => ({
   decimalToNullableNumber: vi.fn(),
   pickFormattedAddressFromSnapshot: vi.fn(),
 
-  lockProfessionalSchedule: vi.fn(),
+  withLockedProfessionalTransaction: vi.fn(),
 
   txBookingFindFirst: vi.fn(),
   txBookingUpdate: vi.fn(),
@@ -54,12 +55,6 @@ vi.mock('@/app/api/_utils', () => ({
   pickInt: mocks.pickInt,
   pickIsoDate: mocks.pickIsoDate,
   pickString: mocks.pickString,
-}))
-
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    $transaction: mocks.prismaTransaction,
-  },
 }))
 
 vi.mock('@/lib/booking/timeZoneTruth', () => ({
@@ -109,8 +104,8 @@ vi.mock('@/lib/booking/snapshots', () => ({
   pickFormattedAddressFromSnapshot: mocks.pickFormattedAddressFromSnapshot,
 }))
 
-vi.mock('@/lib/booking/scheduleLock', () => ({
-  lockProfessionalSchedule: mocks.lockProfessionalSchedule,
+vi.mock('@/lib/booking/scheduleTransaction', () => ({
+  withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
 }))
 
 import { PATCH } from './route'
@@ -154,7 +149,7 @@ function makeCtx(id = 'booking_1') {
 const existingBooking = {
   id: 'booking_1',
   status: BookingStatus.ACCEPTED,
-  scheduledFor: new Date('2026-03-11T19:00:00.000Z'),
+  scheduledFor: new Date('2026-03-17T13:00:00.000Z'),
   locationType: ServiceLocationType.SALON,
   bufferMinutes: 15,
   totalDurationMinutes: 60,
@@ -186,6 +181,8 @@ const location = {
   },
   stepMinutes: 15,
   bufferMinutes: 15,
+  advanceNoticeMinutes: 0,
+  maxDaysAhead: 30,
 }
 
 const existingItems = [
@@ -200,6 +197,8 @@ const existingItems = [
 
 describe('PATCH /api/pro/bookings/[id]', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(TEST_NOW)
     vi.clearAllMocks()
 
     mocks.requirePro.mockResolvedValue({
@@ -207,11 +206,14 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       professionalId: 'pro_123',
     })
 
-    mocks.jsonFail.mockImplementation((status: number, error: string) => ({
-      ok: false,
-      status,
-      error,
-    }))
+    mocks.jsonFail.mockImplementation(
+      (status: number, error: string, extra?: unknown) => ({
+        ok: false,
+        status,
+        error,
+        ...(extra && typeof extra === 'object' ? extra : {}),
+      }),
+    )
 
     mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
       ok: true,
@@ -241,8 +243,6 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       const d = new Date(value)
       return Number.isFinite(d.getTime()) ? d : null
     })
-
-    mocks.lockProfessionalSchedule.mockResolvedValue(undefined)
 
     mocks.resolveAppointmentSchedulingContext.mockResolvedValue({
       ok: true,
@@ -318,28 +318,33 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     mocks.txBookingServiceItemCreateMany.mockResolvedValue({ count: 0 })
     mocks.txClientNotificationCreate.mockResolvedValue({ id: 'notif_1' })
 
-    mocks.prismaTransaction.mockImplementation(
-      async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    mocks.withLockedProfessionalTransaction.mockImplementation(
+      async (
+        professionalId: string,
+        run: (args: { tx: typeof tx; now: Date }) => Promise<unknown>,
+      ) => run({ tx, now: TEST_NOW }),
     )
   })
 
-  it('acquires the professional schedule lock before conflict check and booking update', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('uses the locked professional transaction before conflict check and booking update', async () => {
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: PATCH_START.toISOString(),
       }),
       makeCtx(),
     )
 
-    expect(mocks.lockProfessionalSchedule).toHaveBeenCalledWith(tx, 'pro_123')
-
-    expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.getTimeRangeConflict.mock.invocationCallOrder[0],
+    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
+      'pro_123',
+      expect.any(Function),
     )
 
-    expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.txBookingUpdate.mock.invocationCallOrder[0],
-    )
+    expect(mocks.getTimeRangeConflict).toHaveBeenCalled()
+    expect(mocks.txBookingUpdate).toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: true,
@@ -347,8 +352,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       data: {
         booking: {
           id: 'booking_1',
-          scheduledFor: '2026-03-11T19:30:00.000Z',
-          endsAt: '2026-03-11T20:45:00.000Z',
+          scheduledFor: '2026-03-17T13:30:00.000Z',
+          endsAt: '2026-03-17T14:45:00.000Z',
           bufferMinutes: 15,
           durationMinutes: 60,
           totalDurationMinutes: 60,
@@ -366,12 +371,12 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     })
   })
 
-  it('logs STEP_BOUNDARY and returns 400 when scheduled time is off step', async () => {
+  it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
     mocks.minutesSinceMidnightInTimeZone.mockReturnValueOnce(17)
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-11T19:17:00.000Z',
+        scheduledFor: '2026-03-17T13:17:00.000Z',
       }),
       makeCtx(),
     )
@@ -381,8 +386,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       professionalId: 'pro_123',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:17:00.000Z'),
-      requestedEnd: new Date('2026-03-11T19:18:00.000Z'),
+      requestedStart: new Date('2026-03-17T13:17:00.000Z'),
+      requestedEnd: new Date('2026-03-17T13:18:00.000Z'),
       conflictType: 'STEP_BOUNDARY',
       bookingId: 'booking_1',
       meta: {
@@ -397,18 +402,22 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       ok: false,
       status: 400,
       error: 'Start time must be on a 15-minute boundary.',
+      code: 'STEP_MISMATCH',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Start time must be on a 15-minute boundary.',
     })
   })
 
-  it('logs WORKING_HOURS and returns 400 when outside working hours', async () => {
+  it('logs WORKING_HOURS and returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
     mocks.ensureWithinWorkingHours.mockReturnValueOnce({
       ok: false,
-      error: 'That time is outside your working hours.',
+      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
     })
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: PATCH_START.toISOString(),
       }),
       makeCtx(),
     )
@@ -418,13 +427,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       professionalId: 'pro_123',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      requestedStart: PATCH_START,
+      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
       conflictType: 'WORKING_HOURS',
       bookingId: 'booking_1',
       meta: {
         route: 'app/api/pro/bookings/[id]/route.ts',
-        workingHoursError: 'That time is outside your working hours.',
+        workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
         timeZone: 'America/Los_Angeles',
         timeZoneSource: 'BOOKING_SNAPSHOT',
       },
@@ -434,15 +443,19 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       ok: false,
       status: 400,
       error: 'That time is outside your working hours.',
+      code: 'OUTSIDE_WORKING_HOURS',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is outside working hours.',
     })
   })
 
-  it('logs BLOCKED and returns 409 when blocked by calendar block', async () => {
+  it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: PATCH_START.toISOString(),
       }),
       makeCtx(),
     )
@@ -452,8 +465,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       professionalId: 'pro_123',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      requestedStart: PATCH_START,
+      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
       conflictType: 'BLOCKED',
       bookingId: 'booking_1',
       meta: {
@@ -467,15 +480,19 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       ok: false,
       status: 409,
       error: 'That time is blocked on your calendar.',
+      code: 'TIME_BLOCKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is blocked.',
     })
   })
 
-  it('logs BOOKING and returns 409 when blocked by another booking', async () => {
+  it('logs BOOKING and returns TIME_BOOKED when blocked by another booking', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: PATCH_START.toISOString(),
       }),
       makeCtx(),
     )
@@ -485,8 +502,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       professionalId: 'pro_123',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      requestedStart: PATCH_START,
+      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
       conflictType: 'BOOKING',
       bookingId: 'booking_1',
       meta: {
@@ -500,15 +517,19 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       ok: false,
       status: 409,
       error: 'That time is not available.',
+      code: 'TIME_BOOKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time already has a booking.',
     })
   })
 
-  it('logs HOLD and returns 409 when blocked by an active hold', async () => {
+  it('logs HOLD and returns TIME_HELD when blocked by an active hold', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: PATCH_START.toISOString(),
       }),
       makeCtx(),
     )
@@ -518,8 +539,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       professionalId: 'pro_123',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      requestedStart: PATCH_START,
+      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
       conflictType: 'HOLD',
       bookingId: 'booking_1',
       meta: {
@@ -533,6 +554,10 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       ok: false,
       status: 409,
       error: 'That time is not available.',
+      code: 'TIME_HELD',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is currently held.',
     })
   })
 })

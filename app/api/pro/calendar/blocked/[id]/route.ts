@@ -12,6 +12,12 @@ import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
+  bookingError,
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import {
   parseNoteInput,
   toBlockDto,
   toDateOrNull,
@@ -22,6 +28,17 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
+type BlockRouteLocalErrorCode =
+  | 'BLOCK_ID_REQUIRED'
+  | 'BLOCK_NOT_FOUND'
+  | 'BLOCK_LOCATION_MISSING'
+  | 'BLOCK_LOCATION_NOT_FOUND'
+  | 'INVALID_STARTS_AT'
+  | 'INVALID_ENDS_AT'
+  | 'INVALID_NOTE'
+  | 'INVALID_BLOCK_WINDOW'
+  | 'INTERNAL_ERROR'
+
 function normalizeLocationBufferMinutes(value: unknown): number {
   return clampInt(value, 0, MAX_BUFFER_MINUTES)
 }
@@ -29,6 +46,25 @@ function normalizeLocationBufferMinutes(value: unknown): number {
 async function getBlockId(ctx: Ctx): Promise<string | null> {
   const params = await Promise.resolve(ctx.params)
   return pickString(params?.id)
+}
+
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function localJsonFail(
+  status: number,
+  code: BlockRouteLocalErrorCode,
+  error: string,
+) {
+  return jsonFail(status, error, { code })
 }
 
 function logBlockUpdateConflict(args: {
@@ -66,7 +102,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     const blockId = await getBlockId(ctx)
 
     if (!blockId) {
-      return jsonFail(400, 'Missing block id.')
+      return localJsonFail(400, 'BLOCK_ID_REQUIRED', 'Missing block id.')
     }
 
     const block = await prisma.calendarBlock.findFirst({
@@ -81,13 +117,13 @@ export async function GET(_req: Request, ctx: Ctx) {
     })
 
     if (!block) {
-      return jsonFail(404, 'Block not found.')
+      return localJsonFail(404, 'BLOCK_NOT_FOUND', 'Block not found.')
     }
 
     return jsonOk({ block: toBlockDto(block) }, 200)
   } catch (error) {
     console.error('GET /api/pro/calendar/blocked/[id] error:', error)
-    return jsonFail(500, 'Failed to load block.')
+    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to load block.')
   }
 }
 
@@ -100,7 +136,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const blockId = await getBlockId(ctx)
 
     if (!blockId) {
-      return jsonFail(400, 'Missing block id.')
+      return localJsonFail(400, 'BLOCK_ID_REQUIRED', 'Missing block id.')
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
@@ -113,16 +149,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const endsAtInput = hasEndsAt ? toDateOrNull(body.endsAt) : null
 
     if (hasStartsAt && !startsAtInput) {
-      return jsonFail(400, 'Invalid startsAt.')
+      return localJsonFail(400, 'INVALID_STARTS_AT', 'Invalid startsAt.')
     }
 
     if (hasEndsAt && !endsAtInput) {
-      return jsonFail(400, 'Invalid endsAt.')
+      return localJsonFail(400, 'INVALID_ENDS_AT', 'Invalid endsAt.')
     }
 
     const noteInput = parseNoteInput(body.note, 'patch')
     if (!noteInput.ok) {
-      return jsonFail(400, 'Invalid note.')
+      return localJsonFail(400, 'INVALID_NOTE', 'Invalid note.')
     }
 
     const result = await withLockedProfessionalTransaction(
@@ -142,7 +178,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
         if (!existing) {
           return {
             ok: false as const,
+            type: 'local' as const,
             status: 404,
+            code: 'BLOCK_NOT_FOUND' as const,
             error: 'Not found.',
           }
         }
@@ -150,7 +188,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
         if (!existing.locationId) {
           return {
             ok: false as const,
+            type: 'local' as const,
             status: 400,
+            code: 'BLOCK_LOCATION_MISSING' as const,
             error: 'This block is missing a location and cannot be edited.',
           }
         }
@@ -170,7 +210,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
         if (windowError) {
           return {
             ok: false as const,
+            type: 'local' as const,
             status: 400,
+            code: 'INVALID_BLOCK_WINDOW' as const,
             error: windowError,
           }
         }
@@ -190,7 +232,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
         if (!location) {
           return {
             ok: false as const,
+            type: 'local' as const,
             status: 404,
+            code: 'BLOCK_LOCATION_NOT_FOUND' as const,
             error: 'Location not found.',
           }
         }
@@ -206,7 +250,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
           })
         } catch (error: unknown) {
           if (error instanceof Error) {
-            if (error.message === 'BLOCKED') {
+            if (error.message === 'TIME_BLOCKED' || error.message === 'BLOCKED') {
               logBlockUpdateConflict({
                 professionalId,
                 locationId: existing.locationId,
@@ -216,11 +260,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
                 blockId: existing.id,
               })
 
-              return {
-                ok: false as const,
-                status: 409,
-                error: 'That time overlaps an existing block.',
-              }
+              throw bookingError('TIME_BLOCKED', {
+                userMessage: 'That time overlaps an existing block.',
+              })
             }
 
             if (error.message.startsWith('BLOCK_CONFLICT:')) {
@@ -237,11 +279,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
                 conflictingBlockId,
               })
 
-              return {
-                ok: false as const,
-                status: 409,
-                error: 'That time overlaps an existing block.',
-              }
+              throw bookingError('TIME_BLOCKED', {
+                userMessage: 'That time overlaps an existing block.',
+              })
             }
           }
 
@@ -269,11 +309,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
             blockId: existing.id,
           })
 
-          return {
-            ok: false as const,
-            status: 409,
-            error: 'That time overlaps an existing booking.',
-          }
+          throw bookingError('TIME_BOOKED', {
+            userMessage: 'That time overlaps an existing booking.',
+          })
         }
 
         const holdConflict = await hasHoldConflict({
@@ -294,11 +332,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
             blockId: existing.id,
           })
 
-          return {
-            ok: false as const,
-            status: 409,
-            error: 'That time is temporarily held for booking.',
-          }
+          throw bookingError('TIME_HELD', {
+            userMessage: 'That time is temporarily held for booking.',
+          })
         }
 
         const updated = await tx.calendarBlock.update({
@@ -326,13 +362,20 @@ export async function PATCH(req: Request, ctx: Ctx) {
     )
 
     if (!result.ok) {
-      return jsonFail(result.status, result.error)
+      return localJsonFail(result.status, result.code, result.error)
     }
 
     return jsonOk({ block: toBlockDto(result.block) }, result.status)
   } catch (error) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
+
     console.error('PATCH /api/pro/calendar/blocked/[id] error:', error)
-    return jsonFail(500, 'Failed to update block.')
+    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to update block.')
   }
 }
 
@@ -345,7 +388,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     const blockId = await getBlockId(ctx)
 
     if (!blockId) {
-      return jsonFail(400, 'Missing block id.')
+      return localJsonFail(400, 'BLOCK_ID_REQUIRED', 'Missing block id.')
     }
 
     const result = await withLockedProfessionalTransaction(
@@ -360,6 +403,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
           return {
             ok: false as const,
             status: 404,
+            code: 'BLOCK_NOT_FOUND' as const,
             error: 'Not found.',
           }
         }
@@ -377,12 +421,12 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     )
 
     if (!result.ok) {
-      return jsonFail(result.status, result.error)
+      return localJsonFail(result.status, result.code, result.error)
     }
 
     return jsonOk({ ok: true, id: result.id }, result.status)
   } catch (error) {
     console.error('DELETE /api/pro/calendar/blocked/[id] error:', error)
-    return jsonFail(500, 'Failed to delete block.')
+    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to delete block.')
   }
 }

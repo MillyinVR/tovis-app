@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   hasBookingConflict: vi.fn(),
   hasHoldConflict: vi.fn(),
   logBookingConflict: vi.fn(),
+
+  withLockedProfessionalTransaction: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -49,6 +51,10 @@ vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
 }))
 
+vi.mock('@/lib/booking/scheduleTransaction', () => ({
+  withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
+}))
+
 import { PATCH } from './route'
 
 function makePatchRequest(body: unknown): Request {
@@ -73,6 +79,17 @@ const existingBlock = {
   locationId: 'loc_1',
 }
 
+const tx = {
+  calendarBlock: {
+    findFirst: mocks.calendarBlockFindFirst,
+    update: mocks.calendarBlockUpdate,
+    delete: mocks.calendarBlockDelete,
+  },
+  professionalLocation: {
+    findFirst: mocks.professionalLocationFindFirst,
+  },
+}
+
 describe('PATCH /api/pro/calendar/blocked/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -82,17 +99,27 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       professionalId: 'pro_123',
     })
 
-    mocks.jsonFail.mockImplementation((status: number, error: string) => ({
-      ok: false,
-      status,
-      error,
-    }))
+    mocks.jsonFail.mockImplementation(
+      (status: number, error: string, extra?: unknown) => ({
+        ok: false,
+        status,
+        error,
+        ...(extra && typeof extra === 'object' ? extra : {}),
+      }),
+    )
 
     mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
       ok: true,
       status,
       data,
     }))
+
+    mocks.withLockedProfessionalTransaction.mockImplementation(
+      async (
+        professionalId: string,
+        run: (args: { tx: typeof tx }) => Promise<unknown>,
+      ) => run({ tx }),
+    )
 
     mocks.calendarBlockFindFirst.mockResolvedValue(existingBlock)
 
@@ -117,11 +144,14 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
   it('returns 400 when block id is missing', async () => {
     const result = await PATCH(makePatchRequest({}), makeCtx(''))
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing block id.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing block id.', {
+      code: 'BLOCK_ID_REQUIRED',
+    })
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Missing block id.',
+      code: 'BLOCK_ID_REQUIRED',
     })
   })
 
@@ -136,11 +166,14 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Not found.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Not found.', {
+      code: 'BLOCK_NOT_FOUND',
+    })
     expect(result).toEqual({
       ok: false,
       status: 404,
       error: 'Not found.',
+      code: 'BLOCK_NOT_FOUND',
     })
   })
 
@@ -152,11 +185,14 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Invalid startsAt.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Invalid startsAt.', {
+      code: 'INVALID_STARTS_AT',
+    })
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Invalid startsAt.',
+      code: 'INVALID_STARTS_AT',
     })
   })
 
@@ -168,11 +204,14 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Invalid endsAt.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Invalid endsAt.', {
+      code: 'INVALID_ENDS_AT',
+    })
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Invalid endsAt.',
+      code: 'INVALID_ENDS_AT',
     })
   })
 
@@ -193,11 +232,15 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
       'This block is missing a location and cannot be edited.',
+      {
+        code: 'BLOCK_LOCATION_MISSING',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'This block is missing a location and cannot be edited.',
+      code: 'BLOCK_LOCATION_MISSING',
     })
   })
 
@@ -212,11 +255,14 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Location not found.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Location not found.', {
+      code: 'BLOCK_LOCATION_NOT_FOUND',
+    })
     expect(result).toEqual({
       ok: false,
       status: 404,
       error: 'Location not found.',
+      code: 'BLOCK_LOCATION_NOT_FOUND',
     })
   })
 
@@ -239,7 +285,7 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
     })
   })
 
-  it('returns 409 and logs when the updated range overlaps another block', async () => {
+  it('returns TIME_BLOCKED and logs when the updated range overlaps another block', async () => {
     mocks.assertNoCalendarBlockConflict.mockRejectedValueOnce(
       new Error('BLOCK_CONFLICT:block_conflict'),
     )
@@ -269,15 +315,25 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time overlaps an existing block.',
+      {
+        code: 'TIME_BLOCKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is blocked.',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 409,
       error: 'That time overlaps an existing block.',
+      code: 'TIME_BLOCKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is blocked.',
     })
   })
 
-  it('returns 409 and logs when the updated range overlaps a booking', async () => {
+  it('returns TIME_BOOKED and logs when the updated range overlaps a booking', async () => {
     mocks.hasBookingConflict.mockResolvedValueOnce(true)
 
     const result = await PATCH(
@@ -304,15 +360,25 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time overlaps an existing booking.',
+      {
+        code: 'TIME_BOOKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time already has a booking.',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 409,
       error: 'That time overlaps an existing booking.',
+      code: 'TIME_BOOKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time already has a booking.',
     })
   })
 
-  it('returns 409 and logs when the updated range overlaps a hold', async () => {
+  it('returns TIME_HELD and logs when the updated range overlaps a hold', async () => {
     mocks.hasHoldConflict.mockResolvedValueOnce(true)
 
     const result = await PATCH(
@@ -339,11 +405,21 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time is temporarily held for booking.',
+      {
+        code: 'TIME_HELD',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is currently held.',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 409,
       error: 'That time is temporarily held for booking.',
+      code: 'TIME_HELD',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is currently held.',
     })
   })
 
@@ -355,6 +431,11 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
         note: 'Updated note',
       }),
       makeCtx(),
+    )
+
+    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
+      'pro_123',
+      expect.any(Function),
     )
 
     expect(mocks.professionalLocationFindFirst).toHaveBeenCalledWith({
@@ -371,12 +452,14 @@ describe('PATCH /api/pro/calendar/blocked/[id]', () => {
 
     expect(mocks.assertNoCalendarBlockConflict).toHaveBeenCalled()
     expect(mocks.hasBookingConflict).toHaveBeenCalledWith({
+      tx,
       professionalId: 'pro_123',
       requestedStart: new Date('2026-03-11T19:00:00.000Z'),
       requestedEnd: new Date('2026-03-11T20:00:00.000Z'),
     })
 
     expect(mocks.hasHoldConflict).toHaveBeenCalledWith({
+      tx,
       professionalId: 'pro_123',
       requestedStart: new Date('2026-03-11T19:00:00.000Z'),
       requestedEnd: new Date('2026-03-11T20:00:00.000Z'),

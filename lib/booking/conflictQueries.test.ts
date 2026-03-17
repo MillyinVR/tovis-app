@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { BookingStatus } from '@prisma/client'
 
 const prismaMockFns = vi.hoisted(() => ({
   bookingFindMany: vi.fn(),
@@ -234,7 +235,13 @@ describe('conflictQueries', () => {
             gte: expect.any(Date),
             lt: requestedEnd,
           },
-          status: { not: 'CANCELLED' },
+          status: {
+            in: [
+              BookingStatus.PENDING,
+              BookingStatus.ACCEPTED,
+              BookingStatus.COMPLETED,
+            ],
+          },
         },
         select: {
           scheduledFor: true,

@@ -12,8 +12,6 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
 
-  prismaTransaction: vi.fn(),
-
   minutesSinceMidnightInTimeZone: vi.fn(),
 
   clampInt: vi.fn(),
@@ -29,7 +27,7 @@ const mocks = vi.hoisted(() => ({
 
   ensureWithinWorkingHours: vi.fn(),
 
-  lockProfessionalSchedule: vi.fn(),
+  withLockedClientOwnedBookingTransaction: vi.fn(),
 
   txBookingFindUnique: vi.fn(),
   txProfessionalServiceOfferingFindUnique: vi.fn(),
@@ -50,12 +48,6 @@ vi.mock('@/app/api/_utils/pick', () => ({
 vi.mock('@/app/api/_utils/responses', () => ({
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
-}))
-
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    $transaction: mocks.prismaTransaction,
-  },
 }))
 
 vi.mock('@/lib/timeZone', () => ({
@@ -86,8 +78,9 @@ vi.mock('@/lib/booking/workingHoursGuard', () => ({
   ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
 }))
 
-vi.mock('@/lib/booking/scheduleLock', () => ({
-  lockProfessionalSchedule: mocks.lockProfessionalSchedule,
+vi.mock('@/lib/booking/scheduleTransaction', () => ({
+  withLockedClientOwnedBookingTransaction:
+    mocks.withLockedClientOwnedBookingTransaction,
 }))
 
 import { POST } from './route'
@@ -180,11 +173,14 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
 
-    mocks.jsonFail.mockImplementation((status: number, error: string) => ({
-      ok: false,
-      status,
-      error,
-    }))
+    mocks.jsonFail.mockImplementation(
+      (status: number, error: string, extra?: unknown) => ({
+        ok: false,
+        status,
+        error,
+        ...(extra && typeof extra === 'object' ? extra : {}),
+      }),
+    )
 
     mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
       ok: true,
@@ -253,8 +249,6 @@ describe('POST /api/bookings/[id]/reschedule', () => {
 
     mocks.assertTimeRangeAvailable.mockResolvedValue(undefined)
 
-    mocks.lockProfessionalSchedule.mockResolvedValue(undefined)
-
     mocks.txBookingFindUnique.mockResolvedValue(existingBooking)
     mocks.txProfessionalServiceOfferingFindUnique.mockResolvedValue(bookingOffering)
     mocks.txBookingHoldFindUnique.mockResolvedValue(hold)
@@ -275,8 +269,20 @@ describe('POST /api/bookings/[id]/reschedule', () => {
 
     mocks.txBookingHoldDelete.mockResolvedValue({ id: 'hold_1' })
 
-    mocks.prismaTransaction.mockImplementation(
-      async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    mocks.withLockedClientOwnedBookingTransaction.mockImplementation(
+      async ({
+        bookingId,
+        clientId,
+        run,
+      }: {
+        bookingId: string
+        clientId: string
+        run: (args: { tx: typeof tx; now: Date }) => Promise<unknown>
+      }) =>
+        run({
+          tx,
+          now: new Date('2026-03-11T19:00:00.000Z'),
+        }),
     )
   })
 
@@ -284,7 +290,7 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     vi.useRealTimers()
   })
 
-  it('acquires the professional schedule lock before availability check and booking update', async () => {
+  it('uses the locked client-owned booking transaction before availability check and booking update', async () => {
     const result = await POST(
       makeRequest({
         holdId: 'hold_1',
@@ -293,16 +299,13 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       makeCtx(),
     )
 
-    expect(mocks.lockProfessionalSchedule).toHaveBeenCalledWith(tx, 'pro_123')
+    expect(mocks.withLockedClientOwnedBookingTransaction).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      run: expect.any(Function),
+    })
 
-    expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.assertTimeRangeAvailable.mock.invocationCallOrder[0],
-    )
-
-    expect(mocks.lockProfessionalSchedule.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.txBookingUpdate.mock.invocationCallOrder[0],
-    )
-
+    expect(mocks.assertTimeRangeAvailable).toHaveBeenCalled()
     expect(mocks.txBookingUpdate).toHaveBeenCalledWith({
       where: { id: 'booking_1' },
       data: expect.objectContaining({
@@ -344,7 +347,7 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     })
   })
 
-  it('returns 409 when the hold is expired', async () => {
+  it('returns HOLD_EXPIRED when the hold is expired', async () => {
     mocks.txBookingHoldFindUnique.mockResolvedValueOnce({
       ...hold,
       expiresAt: new Date('2000-01-01T00:00:00.000Z'),
@@ -360,11 +363,15 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'Hold expired. Please pick a new time.',
+      error: 'That hold expired. Please pick a new slot.',
+      code: 'HOLD_EXPIRED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Hold expired.',
     })
   })
 
-  it('returns 400 when the held time is off step', async () => {
+  it('returns STEP_MISMATCH when the held time is off step', async () => {
     mocks.minutesSinceMidnightInTimeZone.mockReturnValueOnce(17)
 
     const result = await POST(
@@ -378,13 +385,17 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       ok: false,
       status: 400,
       error: 'Start time must be on a 15-minute boundary.',
+      code: 'STEP_MISMATCH',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Start time must be on a 15-minute boundary.',
     })
   })
 
-  it('returns 400 when outside working hours', async () => {
+  it('returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
     mocks.ensureWithinWorkingHours.mockReturnValueOnce({
       ok: false,
-      error: 'That time is outside this professional’s working hours.',
+      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
     })
 
     const result = await POST(
@@ -397,12 +408,16 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     expect(result).toEqual({
       ok: false,
       status: 400,
-      error: 'That time is outside this professional’s working hours.',
+      error: 'That time is outside working hours.',
+      code: 'OUTSIDE_WORKING_HOURS',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is outside working hours.',
     })
   })
 
-  it('returns 409 when the time is blocked', async () => {
-    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('BLOCKED'))
+  it('returns TIME_BLOCKED when the time is blocked', async () => {
+    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('TIME_BLOCKED'))
 
     const result = await POST(
       makeRequest({
@@ -414,14 +429,16 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is blocked. Please choose a new slot.',
+      error: 'That time is blocked. Please choose another slot.',
+      code: 'TIME_BLOCKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is blocked.',
     })
   })
 
-  it('returns 409 when the time is no longer available', async () => {
-    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(
-      new Error('TIME_NOT_AVAILABLE'),
-    )
+  it('returns TIME_BOOKED when the time is no longer available because another booking exists', async () => {
+    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('TIME_BOOKED'))
 
     const result = await POST(
       makeRequest({
@@ -433,7 +450,32 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is no longer available. Please choose a new slot.',
+      error: 'That time was just taken. Please choose another slot.',
+      code: 'TIME_BOOKED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time already has a booking.',
+    })
+  })
+
+  it('returns TIME_HELD when the time is currently held', async () => {
+    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('TIME_HELD'))
+
+    const result = await POST(
+      makeRequest({
+        holdId: 'hold_1',
+      }),
+      makeCtx(),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Someone is already holding that time. Please try another slot.',
+      code: 'TIME_HELD',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+      message: 'Requested time is currently held.',
     })
   })
 })

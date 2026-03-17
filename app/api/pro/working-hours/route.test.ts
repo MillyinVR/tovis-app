@@ -231,7 +231,7 @@ describe('app/api/pro/working-hours/route.ts', () => {
 
       const body = await readJson<{ ok: false; error: string }>(res)
       expect(body.error).toBe(
-        'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
+        'workingHours must contain mon..sun with { enabled, start, end } and valid HH:MM times. Overnight ranges are allowed.',
       )
       expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
