@@ -1,3 +1,4 @@
+// app/api/pro/calendar/blocked/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -6,12 +7,12 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
 
   calendarBlockFindMany: vi.fn(),
-  calendarBlockFindFirst: vi.fn(),
   calendarBlockCreate: vi.fn(),
   professionalLocationFindFirst: vi.fn(),
 
   getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
+  withLockedProfessionalTransaction: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -24,11 +25,6 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     calendarBlock: {
       findMany: mocks.calendarBlockFindMany,
-      findFirst: mocks.calendarBlockFindFirst,
-      create: mocks.calendarBlockCreate,
-    },
-    professionalLocation: {
-      findFirst: mocks.professionalLocationFindFirst,
     },
   },
 }))
@@ -39,6 +35,10 @@ vi.mock('@/lib/booking/conflictQueries', () => ({
 
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
+}))
+
+vi.mock('@/lib/booking/scheduleTransaction', () => ({
+  withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
 }))
 
 import { POST } from './route'
@@ -72,7 +72,11 @@ describe('POST /api/pro/calendar/blocked', () => {
       data,
     }))
 
-    mocks.calendarBlockFindFirst.mockResolvedValue(null)
+    mocks.professionalLocationFindFirst.mockResolvedValue({
+      id: 'loc_1',
+      bufferMinutes: 15,
+    })
+
     mocks.calendarBlockCreate.mockResolvedValue({
       id: 'block_1',
       startsAt: new Date('2026-03-11T17:00:00.000Z'),
@@ -81,12 +85,34 @@ describe('POST /api/pro/calendar/blocked', () => {
       locationId: 'loc_1',
     })
 
-    mocks.professionalLocationFindFirst.mockResolvedValue({
-      id: 'loc_1',
-      bufferMinutes: 15,
-    })
-
     mocks.getTimeRangeConflict.mockResolvedValue(null)
+
+    mocks.withLockedProfessionalTransaction.mockImplementation(
+      async (
+        professionalId: string,
+        callback: (args: {
+          tx: {
+            professionalLocation: {
+              findFirst: typeof mocks.professionalLocationFindFirst
+            }
+            calendarBlock: {
+              create: typeof mocks.calendarBlockCreate
+            }
+          }
+        }) => Promise<unknown>,
+      ) => {
+        const tx = {
+          professionalLocation: {
+            findFirst: mocks.professionalLocationFindFirst,
+          },
+          calendarBlock: {
+            create: mocks.calendarBlockCreate,
+          },
+        }
+
+        return callback({ tx })
+      },
+    )
   })
 
   it('returns 400 when startsAt or endsAt is missing', async () => {
@@ -97,6 +123,7 @@ describe('POST /api/pro/calendar/blocked', () => {
       }),
     )
 
+    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
     expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing startsAt/endsAt.')
     expect(result).toEqual({
       ok: false,
@@ -113,6 +140,7 @@ describe('POST /api/pro/calendar/blocked', () => {
       }),
     )
 
+    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
       'Blocked time requires a locationId.',
@@ -122,6 +150,22 @@ describe('POST /api/pro/calendar/blocked', () => {
       status: 400,
       error: 'Blocked time requires a locationId.',
     })
+  })
+
+  it('runs creation inside the professional schedule lock', async () => {
+    await POST(
+      makeRequest({
+        locationId: 'loc_1',
+        startsAt: '2026-03-11T17:00:00.000Z',
+        endsAt: '2026-03-11T18:00:00.000Z',
+      }),
+    )
+
+    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledTimes(1)
+    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
+      'pro_123',
+      expect.any(Function),
+    )
   })
 
   it('returns 404 when location is not found', async () => {
@@ -134,6 +178,21 @@ describe('POST /api/pro/calendar/blocked', () => {
         endsAt: '2026-03-11T18:00:00.000Z',
       }),
     )
+
+    expect(mocks.professionalLocationFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'loc_missing',
+        professionalId: 'pro_123',
+        isBookable: true,
+      },
+      select: {
+        id: true,
+        bufferMinutes: true,
+      },
+    })
+
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+    expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Location not found.')
     expect(result).toEqual({
@@ -166,6 +225,8 @@ describe('POST /api/pro/calendar/blocked', () => {
         route: 'app/api/pro/calendar/blocked/route.ts',
       },
     })
+
+    expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -201,6 +262,8 @@ describe('POST /api/pro/calendar/blocked', () => {
       },
     })
 
+    expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time overlaps an existing booking.',
@@ -235,6 +298,8 @@ describe('POST /api/pro/calendar/blocked', () => {
       },
     })
 
+    expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time is temporarily held for booking.',
@@ -246,7 +311,7 @@ describe('POST /api/pro/calendar/blocked', () => {
     })
   })
 
-  it('creates the block and does not log a conflict when the range is valid', async () => {
+  it('passes tx into getTimeRangeConflict and creates the block when the range is valid', async () => {
     const result = await POST(
       makeRequest({
         locationId: 'loc_1',
@@ -268,7 +333,16 @@ describe('POST /api/pro/calendar/blocked', () => {
       },
     })
 
+    expect(mocks.getTimeRangeConflict).toHaveBeenCalledTimes(1)
     expect(mocks.getTimeRangeConflict).toHaveBeenCalledWith({
+      tx: expect.objectContaining({
+        professionalLocation: expect.objectContaining({
+          findFirst: mocks.professionalLocationFindFirst,
+        }),
+        calendarBlock: expect.objectContaining({
+          create: mocks.calendarBlockCreate,
+        }),
+      }),
       professionalId: 'pro_123',
       locationId: 'loc_1',
       requestedStart: new Date('2026-03-11T17:00:00.000Z'),

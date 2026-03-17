@@ -1,3 +1,4 @@
+// app/api/pro/calendar/blocked/[id]/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
@@ -9,6 +10,7 @@ import {
 } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   parseNoteInput,
   toBlockDto,
@@ -29,13 +31,40 @@ async function getBlockId(ctx: Ctx): Promise<string | null> {
   return pickString(params?.id)
 }
 
+function logBlockUpdateConflict(args: {
+  professionalId: string
+  locationId: string
+  requestedStart: Date
+  requestedEnd: Date
+  conflictType: 'BLOCKED' | 'BOOKING' | 'HOLD'
+  blockId: string
+  conflictingBlockId?: string | null
+}) {
+  logBookingConflict({
+    action: 'BLOCK_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: args.conflictType,
+    blockId: args.blockId,
+    meta: {
+      ...(args.conflictingBlockId
+        ? { conflictingBlockId: args.conflictingBlockId }
+        : {}),
+      route: 'app/api/pro/calendar/blocked/[id]/route.ts',
+    },
+  })
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const blockId = await getBlockId(ctx)
+
     if (!blockId) {
       return jsonFail(400, 'Missing block id.')
     }
@@ -56,8 +85,8 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     return jsonOk({ block: toBlockDto(block) }, 200)
-  } catch (e) {
-    console.error('GET /api/pro/calendar/blocked/[id] error:', e)
+  } catch (error) {
+    console.error('GET /api/pro/calendar/blocked/[id] error:', error)
     return jsonFail(500, 'Failed to load block.')
   }
 }
@@ -66,34 +95,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const blockId = await getBlockId(ctx)
+
     if (!blockId) {
       return jsonFail(400, 'Missing block id.')
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
-
-    const existing = await prisma.calendarBlock.findFirst({
-      where: { id: blockId, professionalId },
-      select: {
-        id: true,
-        startsAt: true,
-        endsAt: true,
-        note: true,
-        locationId: true,
-      },
-    })
-
-    if (!existing) {
-      return jsonFail(404, 'Not found.')
-    }
-
-    if (!existing.locationId) {
-      return jsonFail(400, 'This block is missing a location and cannot be edited.')
-    }
 
     const hasStartsAt = Object.prototype.hasOwnProperty.call(body, 'startsAt')
     const hasEndsAt = Object.prototype.hasOwnProperty.call(body, 'endsAt')
@@ -114,156 +125,213 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Invalid note.')
     }
 
-    if (!hasStartsAt && !hasEndsAt && !noteInput.isSet) {
-      return jsonOk({ block: toBlockDto(existing) }, 200)
-    }
+    const result = await withLockedProfessionalTransaction(
+      professionalId,
+      async ({ tx }) => {
+        const existing = await tx.calendarBlock.findFirst({
+          where: { id: blockId, professionalId },
+          select: {
+            id: true,
+            startsAt: true,
+            endsAt: true,
+            note: true,
+            locationId: true,
+          },
+        })
 
-    const startsAt = startsAtInput ?? existing.startsAt
-    const endsAt = endsAtInput ?? existing.endsAt
+        if (!existing) {
+          return {
+            ok: false as const,
+            status: 404,
+            error: 'Not found.',
+          }
+        }
 
-    const windowError = validateBlockWindow(startsAt, endsAt)
-    if (windowError) {
-      return jsonFail(400, windowError)
-    }
+        if (!existing.locationId) {
+          return {
+            ok: false as const,
+            status: 400,
+            error: 'This block is missing a location and cannot be edited.',
+          }
+        }
 
-    const location = await prisma.professionalLocation.findFirst({
-      where: {
-        id: existing.locationId,
-        professionalId,
-        isBookable: true,
-      },
-      select: {
-        id: true,
-        bufferMinutes: true,
-      },
-    })
+        if (!hasStartsAt && !hasEndsAt && !noteInput.isSet) {
+          return {
+            ok: true as const,
+            status: 200,
+            block: existing,
+          }
+        }
 
-    if (!location) {
-      return jsonFail(404, 'Location not found.')
-    }
+        const startsAt = startsAtInput ?? existing.startsAt
+        const endsAt = endsAtInput ?? existing.endsAt
 
-    try {
-      await assertNoCalendarBlockConflict({
-        professionalId,
-        locationId: existing.locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        excludeBlockId: existing.id,
-      })
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        if (error.message === 'BLOCKED') {
-          logBookingConflict({
-            action: 'BLOCK_UPDATE',
+        const windowError = validateBlockWindow(startsAt, endsAt)
+        if (windowError) {
+          return {
+            ok: false as const,
+            status: 400,
+            error: windowError,
+          }
+        }
+
+        const location = await tx.professionalLocation.findFirst({
+          where: {
+            id: existing.locationId,
+            professionalId,
+            isBookable: true,
+          },
+          select: {
+            id: true,
+            bufferMinutes: true,
+          },
+        })
+
+        if (!location) {
+          return {
+            ok: false as const,
+            status: 404,
+            error: 'Location not found.',
+          }
+        }
+
+        try {
+          await assertNoCalendarBlockConflict({
+            tx,
             professionalId,
             locationId: existing.locationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
-            conflictType: 'BLOCKED',
-            blockId: existing.id,
-            meta: {
-              route: 'app/api/pro/calendar/blocked/[id]/route.ts',
-            },
+            excludeBlockId: existing.id,
           })
+        } catch (error: unknown) {
+          if (error instanceof Error) {
+            if (error.message === 'BLOCKED') {
+              logBlockUpdateConflict({
+                professionalId,
+                locationId: existing.locationId,
+                requestedStart: startsAt,
+                requestedEnd: endsAt,
+                conflictType: 'BLOCKED',
+                blockId: existing.id,
+              })
 
-          return jsonFail(409, 'That time overlaps an existing block.')
+              return {
+                ok: false as const,
+                status: 409,
+                error: 'That time overlaps an existing block.',
+              }
+            }
+
+            if (error.message.startsWith('BLOCK_CONFLICT:')) {
+              const conflictingBlockId =
+                error.message.slice('BLOCK_CONFLICT:'.length).trim() || null
+
+              logBlockUpdateConflict({
+                professionalId,
+                locationId: existing.locationId,
+                requestedStart: startsAt,
+                requestedEnd: endsAt,
+                conflictType: 'BLOCKED',
+                blockId: existing.id,
+                conflictingBlockId,
+              })
+
+              return {
+                ok: false as const,
+                status: 409,
+                error: 'That time overlaps an existing block.',
+              }
+            }
+          }
+
+          throw error
         }
 
-        if (error.message.startsWith('BLOCK_CONFLICT:')) {
-          const conflictingBlockId =
-            error.message.slice('BLOCK_CONFLICT:'.length).trim() || null
+        const defaultBufferMinutes = normalizeLocationBufferMinutes(
+          location.bufferMinutes ?? 0,
+        )
 
-          logBookingConflict({
-            action: 'BLOCK_UPDATE',
+        const bookingConflict = await hasBookingConflict({
+          tx,
+          professionalId,
+          requestedStart: startsAt,
+          requestedEnd: endsAt,
+        })
+
+        if (bookingConflict) {
+          logBlockUpdateConflict({
             professionalId,
             locationId: existing.locationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
-            conflictType: 'BLOCKED',
+            conflictType: 'BOOKING',
             blockId: existing.id,
-            meta: {
-              conflictingBlockId,
-              route: 'app/api/pro/calendar/blocked/[id]/route.ts',
-            },
           })
 
-          return jsonFail(409, 'That time overlaps an existing block.')
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'That time overlaps an existing booking.',
+          }
         }
-      }
 
-      throw error
-    }
+        const holdConflict = await hasHoldConflict({
+          tx,
+          professionalId,
+          requestedStart: startsAt,
+          requestedEnd: endsAt,
+          defaultBufferMinutes,
+        })
 
-    const defaultBufferMinutes = normalizeLocationBufferMinutes(
-      location.bufferMinutes ?? 0,
+        if (holdConflict) {
+          logBlockUpdateConflict({
+            professionalId,
+            locationId: existing.locationId,
+            requestedStart: startsAt,
+            requestedEnd: endsAt,
+            conflictType: 'HOLD',
+            blockId: existing.id,
+          })
+
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'That time is temporarily held for booking.',
+          }
+        }
+
+        const updated = await tx.calendarBlock.update({
+          where: { id: existing.id },
+          data: {
+            ...(hasStartsAt ? { startsAt } : {}),
+            ...(hasEndsAt ? { endsAt } : {}),
+            ...(noteInput.isSet ? { note: noteInput.value } : {}),
+          },
+          select: {
+            id: true,
+            startsAt: true,
+            endsAt: true,
+            note: true,
+            locationId: true,
+          },
+        })
+
+        return {
+          ok: true as const,
+          status: 200,
+          block: updated,
+        }
+      },
     )
 
-    const bookingConflict = await hasBookingConflict({
-      professionalId,
-      requestedStart: startsAt,
-      requestedEnd: endsAt,
-    })
-
-    if (bookingConflict) {
-      logBookingConflict({
-        action: 'BLOCK_UPDATE',
-        professionalId,
-        locationId: existing.locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'BOOKING',
-        blockId: existing.id,
-        meta: {
-          route: 'app/api/pro/calendar/blocked/[id]/route.ts',
-        },
-      })
-
-      return jsonFail(409, 'That time overlaps an existing booking.')
+    if (!result.ok) {
+      return jsonFail(result.status, result.error)
     }
 
-    const holdConflict = await hasHoldConflict({
-      professionalId,
-      requestedStart: startsAt,
-      requestedEnd: endsAt,
-      defaultBufferMinutes,
-    })
-
-    if (holdConflict) {
-      logBookingConflict({
-        action: 'BLOCK_UPDATE',
-        professionalId,
-        locationId: existing.locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'HOLD',
-        blockId: existing.id,
-        meta: {
-          route: 'app/api/pro/calendar/blocked/[id]/route.ts',
-        },
-      })
-
-      return jsonFail(409, 'That time is temporarily held for booking.')
-    }
-
-    const updated = await prisma.calendarBlock.update({
-      where: { id: existing.id },
-      data: {
-        ...(hasStartsAt ? { startsAt } : {}),
-        ...(hasEndsAt ? { endsAt } : {}),
-        ...(noteInput.isSet ? { note: noteInput.value } : {}),
-      },
-      select: {
-        id: true,
-        startsAt: true,
-        endsAt: true,
-        note: true,
-        locationId: true,
-      },
-    })
-
-    return jsonOk({ block: toBlockDto(updated) }, 200)
-  } catch (e) {
-    console.error('PATCH /api/pro/calendar/blocked/[id] error:', e)
+    return jsonOk({ block: toBlockDto(result.block) }, result.status)
+  } catch (error) {
+    console.error('PATCH /api/pro/calendar/blocked/[id] error:', error)
     return jsonFail(500, 'Failed to update block.')
   }
 }
@@ -272,29 +340,49 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const blockId = await getBlockId(ctx)
+
     if (!blockId) {
       return jsonFail(400, 'Missing block id.')
     }
 
-    const existing = await prisma.calendarBlock.findFirst({
-      where: { id: blockId, professionalId },
-      select: { id: true },
-    })
+    const result = await withLockedProfessionalTransaction(
+      professionalId,
+      async ({ tx }) => {
+        const existing = await tx.calendarBlock.findFirst({
+          where: { id: blockId, professionalId },
+          select: { id: true },
+        })
 
-    if (!existing) {
-      return jsonFail(404, 'Not found.')
+        if (!existing) {
+          return {
+            ok: false as const,
+            status: 404,
+            error: 'Not found.',
+          }
+        }
+
+        await tx.calendarBlock.delete({
+          where: { id: existing.id },
+        })
+
+        return {
+          ok: true as const,
+          status: 200,
+          id: existing.id,
+        }
+      },
+    )
+
+    if (!result.ok) {
+      return jsonFail(result.status, result.error)
     }
 
-    await prisma.calendarBlock.delete({
-      where: { id: existing.id },
-    })
-
-    return jsonOk({ ok: true, id: existing.id }, 200)
-  } catch (e) {
-    console.error('DELETE /api/pro/calendar/blocked/[id] error:', e)
+    return jsonOk({ ok: true, id: result.id }, result.status)
+  } catch (error) {
+    console.error('DELETE /api/pro/calendar/blocked/[id] error:', error)
     return jsonFail(500, 'Failed to delete block.')
   }
 }

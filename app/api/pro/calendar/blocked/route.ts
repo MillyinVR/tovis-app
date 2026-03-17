@@ -6,6 +6,7 @@ import { clampInt } from '@/lib/pick'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   clampRange,
   parseLocationIdInput,
@@ -21,12 +22,32 @@ function normalizeLocationBufferMinutes(value: unknown): number {
   return clampInt(value, 0, MAX_BUFFER_MINUTES)
 }
 
+function logBlockConflict(args: {
+  professionalId: string
+  locationId: string
+  requestedStart: Date
+  requestedEnd: Date
+  conflictType: 'BLOCKED' | 'BOOKING' | 'HOLD'
+}) {
+  logBookingConflict({
+    action: 'BLOCK_CREATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: args.conflictType,
+    meta: {
+      route: 'app/api/pro/calendar/blocked/route.ts',
+    },
+  })
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const url = new URL(req.url)
 
     const defaultFrom = new Date(Date.now() - 7 * 24 * 60 * 60_000)
@@ -66,8 +87,8 @@ export async function GET(req: Request) {
       },
       200,
     )
-  } catch (e) {
-    console.error('GET /api/pro/calendar/blocked error:', e)
+  } catch (error) {
+    console.error('GET /api/pro/calendar/blocked error:', error)
     return jsonFail(500, 'Failed to load blocked time.')
   }
 }
@@ -76,8 +97,8 @@ export async function POST(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
@@ -108,98 +129,120 @@ export async function POST(req: Request) {
       return jsonFail(400, 'Blocked time requires a locationId.')
     }
 
-    const location = await prisma.professionalLocation.findFirst({
-      where: {
-        id: locationId,
-        professionalId,
-        isBookable: true,
-      },
-      select: {
-        id: true,
-        bufferMinutes: true,
-      },
-    })
-
-    if (!location) {
-      return jsonFail(404, 'Location not found.')
-    }
-
-    const timeRangeConflict = await getTimeRangeConflict({
+    const result = await withLockedProfessionalTransaction(
       professionalId,
-      locationId,
-      requestedStart: startsAt,
-      requestedEnd: endsAt,
-      defaultBufferMinutes: normalizeLocationBufferMinutes(location.bufferMinutes),
-    })
+      async ({ tx }) => {
+        const location = await tx.professionalLocation.findFirst({
+          where: {
+            id: locationId,
+            professionalId,
+            isBookable: true,
+          },
+          select: {
+            id: true,
+            bufferMinutes: true,
+          },
+        })
 
-    if (timeRangeConflict === 'BLOCKED') {
-      logBookingConflict({
-        action: 'BLOCK_CREATE',
-        professionalId,
-        locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'BLOCKED',
-        meta: {
-          route: 'app/api/pro/calendar/blocked/route.ts',
-        },
-      })
+        if (!location) {
+          return {
+            ok: false as const,
+            status: 404,
+            error: 'Location not found.',
+          }
+        }
 
-      return jsonFail(409, 'That time overlaps an existing block.')
-    }
+        const timeRangeConflict = await getTimeRangeConflict({
+          tx,
+          professionalId,
+          locationId,
+          requestedStart: startsAt,
+          requestedEnd: endsAt,
+          defaultBufferMinutes: normalizeLocationBufferMinutes(
+            location.bufferMinutes,
+          ),
+        })
 
-    if (timeRangeConflict === 'BOOKING') {
-      logBookingConflict({
-        action: 'BLOCK_CREATE',
-        professionalId,
-        locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'BOOKING',
-        meta: {
-          route: 'app/api/pro/calendar/blocked/route.ts',
-        },
-      })
+        if (timeRangeConflict === 'BLOCKED') {
+          logBlockConflict({
+            professionalId,
+            locationId,
+            requestedStart: startsAt,
+            requestedEnd: endsAt,
+            conflictType: 'BLOCKED',
+          })
 
-      return jsonFail(409, 'That time overlaps an existing booking.')
-    }
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'That time overlaps an existing block.',
+          }
+        }
 
-    if (timeRangeConflict === 'HOLD') {
-      logBookingConflict({
-        action: 'BLOCK_CREATE',
-        professionalId,
-        locationId,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        conflictType: 'HOLD',
-        meta: {
-          route: 'app/api/pro/calendar/blocked/route.ts',
-        },
-      })
+        if (timeRangeConflict === 'BOOKING') {
+          logBlockConflict({
+            professionalId,
+            locationId,
+            requestedStart: startsAt,
+            requestedEnd: endsAt,
+            conflictType: 'BOOKING',
+          })
 
-      return jsonFail(409, 'That time is temporarily held for booking.')
-    }
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'That time overlaps an existing booking.',
+          }
+        }
 
-    const created = await prisma.calendarBlock.create({
-      data: {
-        professionalId,
-        startsAt,
-        endsAt,
-        note: noteInput.value,
-        locationId,
+        if (timeRangeConflict === 'HOLD') {
+          logBlockConflict({
+            professionalId,
+            locationId,
+            requestedStart: startsAt,
+            requestedEnd: endsAt,
+            conflictType: 'HOLD',
+          })
+
+          return {
+            ok: false as const,
+            status: 409,
+            error: 'That time is temporarily held for booking.',
+          }
+        }
+
+        const created = await tx.calendarBlock.create({
+          data: {
+            professionalId,
+            startsAt,
+            endsAt,
+            note: noteInput.value,
+            locationId,
+          },
+          select: {
+            id: true,
+            startsAt: true,
+            endsAt: true,
+            note: true,
+            locationId: true,
+          },
+        })
+
+        return {
+          ok: true as const,
+          status: 201,
+          block: created,
+        }
       },
-      select: {
-        id: true,
-        startsAt: true,
-        endsAt: true,
-        note: true,
-        locationId: true,
-      },
-    })
+    )
 
-    return jsonOk({ block: toBlockDto(created) }, 201)
-  } catch (e) {
-    console.error('POST /api/pro/calendar/blocked error:', e)
+    if (!result.ok) {
+      return jsonFail(result.status, result.error)
+    }
+
+    return jsonOk({ block: toBlockDto(result.block) }, result.status)
+  } catch (error) {
+    console.error('POST /api/pro/calendar/blocked error:', error)
     return jsonFail(500, 'Failed to create blocked time.')
   }
 }
