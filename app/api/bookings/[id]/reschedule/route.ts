@@ -30,45 +30,51 @@ import {
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { withLockedClientOwnedBookingTransaction } from '@/lib/booking/scheduleTransaction'
+import {
+  bookingError,
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-type RescheduleErrorCode =
-  | 'ADVANCE_NOTICE_REQUIRED'
-  | 'BOOKING_NOT_FOUND'
-  | 'FORBIDDEN'
+type RescheduleLocalErrorCode =
   | 'BOOKING_NOT_RESCHEDULABLE'
   | 'BOOKING_ALREADY_STARTED'
   | 'BOOKING_MISSING_OFFERING'
-  | 'OFFERING_NOT_FOUND'
-  | 'MODE_NOT_SUPPORTED'
-  | 'HOLD_NOT_FOUND'
-  | 'HOLD_FORBIDDEN'
-  | 'HOLD_EXPIRED'
-  | 'HOLD_PRO_MISMATCH'
-  | 'HOLD_OFFERING_MISMATCH'
-  | 'HOLD_LOCATIONTYPE_MISMATCH'
-  | 'HOLD_MISSING_LOCATION'
-  | 'HOLD_MISSING_CLIENT_ADDRESS'
-  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
-  | 'SALON_LOCATION_ADDRESS_REQUIRED'
-  | 'LOCATION_NOT_FOUND'
-  | 'TIMEZONE_REQUIRED'
+  | 'HOLD_TIME_INVALID'
+  | 'INTERNAL_ERROR'
+
+const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
+
+type WorkingHoursGuardCode =
   | 'WORKING_HOURS_REQUIRED'
   | 'WORKING_HOURS_INVALID'
-  | 'DURATION_REQUIRED'
-  | 'PRICE_REQUIRED'
-  | 'COORDINATES_REQUIRED'
-  | 'HOLD_TIME_INVALID'
-  | 'TIME_IN_PAST'
-  | 'TOO_FAR'
-  | 'BLOCKED'
-  | 'TIME_NOT_AVAILABLE'
-  | 'INVALID_DURATION'
+  | 'OUTSIDE_WORKING_HOURS'
 
-function throwCode(code: RescheduleErrorCode): never {
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function rescheduleLocalFail(
+  status: number,
+  code: RescheduleLocalErrorCode,
+  message: string,
+) {
+  return jsonFail(status, message, { code })
+}
+
+function throwLocalCode(code: RescheduleLocalErrorCode): never {
   throw new Error(code)
 }
 
@@ -112,9 +118,9 @@ function toNullableJsonCreateInput(
   return toInputJsonValue(value)
 }
 
-function mapSchedulingReadinessErrorToRescheduleCode(
+function mapSchedulingReadinessErrorToBookingCode(
   error: SchedulingReadinessError,
-): RescheduleErrorCode {
+): BookingErrorCode {
   switch (error) {
     case 'LOCATION_NOT_FOUND':
       return 'LOCATION_NOT_FOUND'
@@ -135,6 +141,29 @@ function mapSchedulingReadinessErrorToRescheduleCode(
   }
 }
 
+function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
+  return `${WORKING_HOURS_ERROR_PREFIX}${code}`
+}
+
+function parseWorkingHoursGuardMessage(
+  value: string,
+): WorkingHoursGuardCode | null {
+  if (!value.startsWith(WORKING_HOURS_ERROR_PREFIX)) return null
+
+  const code = value.slice(WORKING_HOURS_ERROR_PREFIX.length)
+
+  switch (code) {
+    case 'WORKING_HOURS_REQUIRED':
+      return 'WORKING_HOURS_REQUIRED'
+    case 'WORKING_HOURS_INVALID':
+      return 'WORKING_HOURS_INVALID'
+    case 'OUTSIDE_WORKING_HOURS':
+      return 'OUTSIDE_WORKING_HOURS'
+    default:
+      return null
+  }
+}
+
 export async function POST(req: Request, { params }: Ctx) {
   try {
     const auth = await requireClient()
@@ -145,7 +174,7 @@ export async function POST(req: Request, { params }: Ctx) {
     const resolvedParams = await Promise.resolve(params)
     const bookingId = pickString(resolvedParams.id)
     if (!bookingId) {
-      return jsonFail(400, 'Missing booking id.')
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
@@ -153,7 +182,7 @@ export async function POST(req: Request, { params }: Ctx) {
 
     const holdId = pickString(body.holdId)
     if (!holdId) {
-      return jsonFail(400, 'Missing holdId.')
+      return bookingJsonFail('HOLD_ID_REQUIRED')
     }
 
     const hasLocationType = Object.prototype.hasOwnProperty.call(
@@ -165,7 +194,7 @@ export async function POST(req: Request, { params }: Ctx) {
       : null
 
     if (hasLocationType && requestedLocationType == null) {
-      return jsonFail(400, 'Missing or invalid locationType.')
+      return bookingJsonFail('INVALID_LOCATION_TYPE')
     }
 
     const result = await withLockedClientOwnedBookingTransaction({
@@ -187,21 +216,21 @@ export async function POST(req: Request, { params }: Ctx) {
           },
         })
 
-        if (!booking) throwCode('BOOKING_NOT_FOUND')
+        if (!booking) throw bookingError('BOOKING_NOT_FOUND')
 
         if (
           booking.status === BookingStatus.COMPLETED ||
           booking.status === BookingStatus.CANCELLED
         ) {
-          throwCode('BOOKING_NOT_RESCHEDULABLE')
+          throwLocalCode('BOOKING_NOT_RESCHEDULABLE')
         }
 
         if (booking.startedAt || booking.finishedAt) {
-          throwCode('BOOKING_ALREADY_STARTED')
+          throwLocalCode('BOOKING_ALREADY_STARTED')
         }
 
         if (!booking.offeringId) {
-          throwCode('BOOKING_MISSING_OFFERING')
+          throwLocalCode('BOOKING_MISSING_OFFERING')
         }
 
         const bookingOffering = await tx.professionalServiceOffering.findUnique({
@@ -218,7 +247,7 @@ export async function POST(req: Request, { params }: Ctx) {
         })
 
         if (!bookingOffering) {
-          throwCode('OFFERING_NOT_FOUND')
+          throw bookingError('OFFERING_NOT_FOUND')
         }
 
         const rawDuration = Number(booking.totalDurationMinutes ?? 0)
@@ -227,7 +256,7 @@ export async function POST(req: Request, { params }: Ctx) {
           rawDuration < 15 ||
           rawDuration > MAX_SLOT_DURATION_MINUTES
         ) {
-          throwCode('INVALID_DURATION')
+          throw bookingError('INVALID_DURATION')
         }
 
         const totalDurationMinutes = clampInt(
@@ -258,21 +287,37 @@ export async function POST(req: Request, { params }: Ctx) {
           },
         })
 
-        if (!hold) throwCode('HOLD_NOT_FOUND')
-        if (hold.clientId !== clientId) throwCode('HOLD_FORBIDDEN')
-        if (hold.expiresAt.getTime() <= now.getTime()) throwCode('HOLD_EXPIRED')
+        if (!hold) throw bookingError('HOLD_NOT_FOUND')
+        if (hold.clientId !== clientId) throw bookingError('HOLD_FORBIDDEN')
+        if (hold.expiresAt.getTime() <= now.getTime()) {
+          throw bookingError('HOLD_EXPIRED')
+        }
         if (hold.professionalId !== booking.professionalId) {
-          throwCode('HOLD_PRO_MISMATCH')
+          throw bookingError('HOLD_MISMATCH', {
+            message: 'Hold is for a different professional.',
+            userMessage: 'That hold no longer matches this booking. Please pick a new slot.',
+          })
         }
         if (hold.offeringId !== booking.offeringId) {
-          throwCode('HOLD_OFFERING_MISMATCH')
+          throw bookingError('HOLD_MISMATCH', {
+            message: 'Hold is for a different service.',
+            userMessage: 'That hold no longer matches this booking. Please pick a new slot.',
+          })
         }
 
         if (requestedLocationType && hold.locationType !== requestedLocationType) {
-          throwCode('HOLD_LOCATIONTYPE_MISMATCH')
+          throw bookingError('HOLD_MISMATCH', {
+            message: 'Hold location type does not match the requested location type.',
+            userMessage: 'That hold no longer matches this booking. Please pick a new slot.',
+          })
         }
 
-        if (!hold.locationId) throwCode('HOLD_MISSING_LOCATION')
+        if (!hold.locationId) {
+          throw bookingError('HOLD_MISMATCH', {
+            message: 'Hold is missing location info.',
+            userMessage: 'That hold is missing location info. Please pick a new slot.',
+          })
+        }
 
         if (hold.locationType === ServiceLocationType.MOBILE) {
           const clientServiceAddressFromHold = pickFormattedAddressFromSnapshot(
@@ -280,7 +325,7 @@ export async function POST(req: Request, { params }: Ctx) {
           )
 
           if (!hold.clientAddressId || !clientServiceAddressFromHold) {
-            throwCode('HOLD_MISSING_CLIENT_ADDRESS')
+            throw bookingError('HOLD_MISSING_CLIENT_ADDRESS')
           }
 
           const ownedClientAddress = await tx.clientAddress.findFirst({
@@ -293,7 +338,7 @@ export async function POST(req: Request, { params }: Ctx) {
           })
 
           if (!ownedClientAddress) {
-            throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+            throw bookingError('CLIENT_SERVICE_ADDRESS_REQUIRED')
           }
         }
 
@@ -318,8 +363,8 @@ export async function POST(req: Request, { params }: Ctx) {
         })
 
         if (!validatedContextResult.ok) {
-          throwCode(
-            mapSchedulingReadinessErrorToRescheduleCode(
+          throw bookingError(
+            mapSchedulingReadinessErrorToBookingCode(
               validatedContextResult.error,
             ),
           )
@@ -334,30 +379,30 @@ export async function POST(req: Request, { params }: Ctx) {
             : null
 
         if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
-          throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
+          throw bookingError('SALON_LOCATION_ADDRESS_REQUIRED')
         }
 
         const newStart = normalizeToMinute(new Date(hold.scheduledFor))
         if (!Number.isFinite(newStart.getTime())) {
-          throwCode('HOLD_TIME_INVALID')
+          throwLocalCode('HOLD_TIME_INVALID')
         }
 
         if (newStart.getTime() < now.getTime()) {
-          throwCode('TIME_IN_PAST')
+          throw bookingError('TIME_IN_PAST')
         }
 
         if (
           newStart.getTime() <
           now.getTime() + locationContext.advanceNoticeMinutes * 60_000
         ) {
-          throwCode('ADVANCE_NOTICE_REQUIRED')
+          throw bookingError('ADVANCE_NOTICE_REQUIRED')
         }
 
         if (
           newStart.getTime() >
           now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
         ) {
-          throwCode('TOO_FAR')
+          throw bookingError('MAX_DAYS_AHEAD_EXCEEDED')
         }
 
         const startMinuteOfDay = minutesSinceMidnightInTimeZone(
@@ -366,7 +411,10 @@ export async function POST(req: Request, { params }: Ctx) {
         )
 
         if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
-          throw new Error(`STEP:${locationContext.stepMinutes}`)
+          throw bookingError('STEP_MISMATCH', {
+            message: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
+            userMessage: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
+          })
         }
 
         const newEnd = addMinutes(
@@ -381,27 +429,64 @@ export async function POST(req: Request, { params }: Ctx) {
           timeZone: locationContext.timeZone,
           fallbackTimeZone: DEFAULT_TIME_ZONE,
           messages: {
-            missing: 'This professional has not set working hours yet.',
-            outside: 'That time is outside this professional’s working hours.',
-            misconfigured: 'This professional’s working hours are misconfigured.',
+            missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
+            outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
+            misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
           },
         })
 
         if (!workingHoursCheck.ok) {
-          throw new Error(`WH:${workingHoursCheck.error}`)
+          const workingHoursCode = parseWorkingHoursGuardMessage(
+            workingHoursCheck.error,
+          )
+
+          if (workingHoursCode === 'WORKING_HOURS_REQUIRED') {
+            throw bookingError('WORKING_HOURS_REQUIRED')
+          }
+
+          if (workingHoursCode === 'WORKING_HOURS_INVALID') {
+            throw bookingError('WORKING_HOURS_INVALID')
+          }
+
+          if (workingHoursCode === 'OUTSIDE_WORKING_HOURS') {
+            throw bookingError('OUTSIDE_WORKING_HOURS')
+          }
+
+          throw bookingError('OUTSIDE_WORKING_HOURS', {
+            message: workingHoursCheck.error,
+            userMessage: workingHoursCheck.error || 'That time is outside working hours.',
+          })
         }
 
-        await assertTimeRangeAvailable({
-          tx,
-          professionalId: booking.professionalId,
-          locationId: locationContext.locationId,
-          requestedStart: newStart,
-          requestedEnd: newEnd,
-          defaultBufferMinutes: locationContext.bufferMinutes,
-          fallbackDurationMinutes: totalDurationMinutes,
-          excludeBookingId: booking.id,
-          excludeHoldId: hold.id,
-        })
+        try {
+          await assertTimeRangeAvailable({
+            tx,
+            professionalId: booking.professionalId,
+            locationId: locationContext.locationId,
+            requestedStart: newStart,
+            requestedEnd: newEnd,
+            defaultBufferMinutes: locationContext.bufferMinutes,
+            fallbackDurationMinutes: totalDurationMinutes,
+            excludeBookingId: booking.id,
+            excludeHoldId: hold.id,
+          })
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : ''
+
+          if (message === 'TIME_BLOCKED') {
+            throw bookingError('TIME_BLOCKED')
+          }
+
+          if (message === 'TIME_BOOKED') {
+            throw bookingError('TIME_BOOKED')
+          }
+
+          if (message === 'TIME_HELD') {
+            throw bookingError('TIME_HELD')
+          }
+
+          throw error
+        }
 
         const salonLocationAddressSnapshotInput:
           | Prisma.InputJsonValue
@@ -476,136 +561,52 @@ export async function POST(req: Request, { params }: Ctx) {
       200,
     )
   } catch (e: unknown) {
+    if (isBookingError(e)) {
+      return bookingJsonFail(e.code, {
+        message: e.message,
+        userMessage: e.userMessage,
+      })
+    }
+
     const msg = e instanceof Error ? e.message : ''
 
-    if (msg === 'BOOKING_NOT_FOUND') {
-      return jsonFail(404, 'Booking not found.')
-    }
-    if (msg === 'FORBIDDEN') {
-      return jsonFail(403, 'Forbidden.')
-    }
     if (msg === 'BOOKING_NOT_RESCHEDULABLE') {
-      return jsonFail(409, 'This booking cannot be rescheduled.')
-    }
-    if (msg === 'BOOKING_ALREADY_STARTED') {
-      return jsonFail(409, 'This booking has started and cannot be rescheduled.')
-    }
-    if (msg === 'BOOKING_MISSING_OFFERING' || msg === 'OFFERING_NOT_FOUND') {
-      return jsonFail(
+      return rescheduleLocalFail(
         409,
+        'BOOKING_NOT_RESCHEDULABLE',
+        'This booking cannot be rescheduled.',
+      )
+    }
+
+    if (msg === 'BOOKING_ALREADY_STARTED') {
+      return rescheduleLocalFail(
+        409,
+        'BOOKING_ALREADY_STARTED',
+        'This booking has started and cannot be rescheduled.',
+      )
+    }
+
+    if (msg === 'BOOKING_MISSING_OFFERING') {
+      return rescheduleLocalFail(
+        409,
+        'BOOKING_MISSING_OFFERING',
         'This booking is missing offering info and cannot be rescheduled.',
       )
     }
-    if (msg === 'MODE_NOT_SUPPORTED') {
-      return jsonFail(409, 'This booking does not support that location type.')
-    }
-    if (msg === 'HOLD_NOT_FOUND') {
-      return jsonFail(404, 'Hold not found. Please pick a new time.')
-    }
-    if (msg === 'HOLD_FORBIDDEN') {
-      return jsonFail(403, 'Hold does not belong to you.')
-    }
-    if (msg === 'HOLD_EXPIRED') {
-      return jsonFail(409, 'Hold expired. Please pick a new time.')
-    }
-    if (msg === 'HOLD_PRO_MISMATCH') {
-      return jsonFail(409, 'Hold is for a different professional.')
-    }
-    if (msg === 'HOLD_OFFERING_MISMATCH') {
-      return jsonFail(409, 'Hold is for a different service.')
-    }
-    if (msg === 'HOLD_LOCATIONTYPE_MISMATCH') {
-      return jsonFail(409, 'Hold locationType does not match.')
-    }
-    if (msg === 'HOLD_MISSING_LOCATION') {
-      return jsonFail(409, 'Hold is missing location info. Please pick a new slot.')
-    }
-    if (msg === 'HOLD_MISSING_CLIENT_ADDRESS') {
-      return jsonFail(
-        409,
-        'This mobile hold is missing the service address. Please pick a new slot.',
-      )
-    }
-    if (msg === 'CLIENT_SERVICE_ADDRESS_REQUIRED') {
-      return jsonFail(
-        400,
-        'Add a mobile service address in your client settings before rescheduling an in-home appointment.',
-      )
-    }
-    if (msg === 'SALON_LOCATION_ADDRESS_REQUIRED') {
-      return jsonFail(
-        400,
-        'This salon location is missing an address. Please update the professional location before rescheduling.',
-      )
-    }
-    if (msg === 'LOCATION_NOT_FOUND') {
-      return jsonFail(409, 'This location is no longer available.')
-    }
-    if (msg === 'TIMEZONE_REQUIRED') {
-      return jsonFail(409, 'This location is missing a valid timezone.')
-    }
-    if (msg === 'WORKING_HOURS_REQUIRED') {
-      return jsonFail(400, 'This professional has not set working hours yet.')
-    }
-    if (msg === 'WORKING_HOURS_INVALID') {
-      return jsonFail(400, 'This professional’s working hours are misconfigured.')
-    }
-    if (msg === 'DURATION_REQUIRED') {
-      return jsonFail(
-        409,
-        'This service is missing duration settings and cannot be rescheduled.',
-      )
-    }
-    if (msg === 'PRICE_REQUIRED') {
-      return jsonFail(
-        409,
-        'This service is missing pricing settings and cannot be rescheduled.',
-      )
-    }
-    if (msg === 'COORDINATES_REQUIRED') {
-      return jsonFail(
-        409,
-        'This location is missing coordinates required for this booking flow.',
-      )
-    }
+
     if (msg === 'HOLD_TIME_INVALID') {
-      return jsonFail(400, 'Hold time is invalid. Please pick a new slot.')
-    }
-    if (msg === 'TIME_IN_PAST') {
-      return jsonFail(400, 'Please select a future time.')
-    }
-    if (msg === 'ADVANCE_NOTICE_REQUIRED') {
-      return jsonFail(400, 'That slot is too soon. Please choose a later time.')
-    }
-    if (msg === 'TOO_FAR') {
-      return jsonFail(400, 'That date is too far in the future.')
-    }
-    if (msg === 'BLOCKED') {
-      return jsonFail(409, 'That time is blocked. Please choose a new slot.')
-    }
-    if (msg === 'TIME_NOT_AVAILABLE') {
-      return jsonFail(
-        409,
-        'That time is no longer available. Please choose a new slot.',
-      )
-    }
-    if (msg === 'INVALID_DURATION') {
-      return jsonFail(
-        409,
-        'This booking has an invalid duration and cannot be rescheduled.',
-      )
-    }
-    if (msg.startsWith('STEP:')) {
-      return jsonFail(
+      return rescheduleLocalFail(
         400,
-        `Start time must be on a ${msg.slice(5)}-minute boundary.`,
+        'HOLD_TIME_INVALID',
+        'Hold time is invalid. Please pick a new slot.',
       )
-    }
-    if (msg.startsWith('WH:')) {
-      return jsonFail(400, msg.slice(3) || 'That time is outside working hours.')
     }
 
     console.error('POST /api/bookings/[id]/reschedule error', e)
-    return jsonFail(500, 'Failed to reschedule booking.')
+    return rescheduleLocalFail(
+      500,
+      'INTERNAL_ERROR',
+      'Failed to reschedule booking.',
+    )
   }
 }

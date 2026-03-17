@@ -207,6 +207,17 @@ function buildCalendarBlockWindowWhere(args: {
   }
 }
 
+function toConflictErrorCode(conflict: TimeRangeConflictCode): 'TIME_BLOCKED' | 'TIME_BOOKED' | 'TIME_HELD' {
+  switch (conflict) {
+    case 'BLOCKED':
+      return 'TIME_BLOCKED'
+    case 'BOOKING':
+      return 'TIME_BOOKED'
+    case 'HOLD':
+      return 'TIME_HELD'
+  }
+}
+
 export async function findCalendarBlockConflict(
   args: CalendarBlockConflictArgs,
 ) {
@@ -352,7 +363,7 @@ export async function assertNoCalendarBlockConflict(
 ): Promise<void> {
   const conflict = await findCalendarBlockConflict(args)
   if (conflict) {
-    throw new Error('BLOCKED')
+    throw new Error('TIME_BLOCKED')
   }
 }
 
@@ -361,7 +372,7 @@ export async function assertNoBookingConflict(
 ): Promise<void> {
   const conflict = await hasBookingConflict(args)
   if (conflict) {
-    throw new Error('TIME_NOT_AVAILABLE')
+    throw new Error('TIME_BOOKED')
   }
 }
 
@@ -370,7 +381,7 @@ export async function assertNoHoldConflict(
 ): Promise<void> {
   const conflict = await hasHoldConflict(args)
   if (conflict) {
-    throw new Error('TIME_NOT_AVAILABLE')
+    throw new Error('TIME_HELD')
   }
 }
 
@@ -379,13 +390,9 @@ export async function assertTimeRangeAvailable(
 ): Promise<void> {
   const conflict = await getTimeRangeConflict(args)
 
-  if (conflict === 'BLOCKED') {
-    throw new Error('BLOCKED')
-  }
+  if (!conflict) return
 
-  if (conflict === 'BOOKING' || conflict === 'HOLD') {
-    throw new Error('TIME_NOT_AVAILABLE')
-  }
+  throw new Error(toConflictErrorCode(conflict))
 }
 
 export async function loadBusyIntervalsForWindow(

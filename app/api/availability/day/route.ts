@@ -39,6 +39,10 @@ import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import {
+  getBookingFailPayload,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -96,10 +100,16 @@ type OtherProRow = {
 }
 
 type AvailabilityPlacementErrorCode =
-  | SchedulingReadinessError
   | 'LOCATION_NOT_FOUND'
   | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
   | 'SALON_LOCATION_ADDRESS_REQUIRED'
+  | 'TIMEZONE_REQUIRED'
+  | 'WORKING_HOURS_REQUIRED'
+  | 'WORKING_HOURS_INVALID'
+  | 'MODE_NOT_SUPPORTED'
+  | 'DURATION_REQUIRED'
+  | 'PRICE_REQUIRED'
+  | 'COORDINATES_REQUIRED'
   | 'NO_SCHEDULING_READY_LOCATION'
 
 type AvailabilityPlacementResult =
@@ -124,7 +134,6 @@ type AvailabilityPlacementResult =
   | {
       ok: false
       code: AvailabilityPlacementErrorCode
-      error: string
     }
 
 type CachedPlacement = {
@@ -157,7 +166,38 @@ type CachedPlacement = {
   locationCity: string | null
 }
 
+type DayComputationResult =
+  | {
+      ok: true
+      slots: string[]
+      dayStartUtc: Date
+      dayEndExclusiveUtc: Date
+      debug?: unknown
+    }
+  | {
+      ok: false
+      code: 'WORKING_HOURS_REQUIRED' | 'WORKING_HOURS_INVALID'
+      dayStartUtc: Date
+      dayEndExclusiveUtc: Date
+      debug?: unknown
+    }
+
 const redis = getRedis()
+
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+  extra?: Record<string, unknown>,
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, {
+    ...fail.extra,
+    ...(extra ?? {}),
+  })
+}
 
 function toInt(value: string | null, fallback: number): number {
   const n = Number(value)
@@ -330,14 +370,79 @@ function buildPlacementCacheKey(args: {
 
 function parseCachedPlacement(raw: unknown): CachedPlacement | null {
   if (!isRecord(raw)) return null
-  if (typeof raw.locationId !== 'string') return null
-  if (typeof raw.locationType !== 'string') return null
-  if (typeof raw.timeZone !== 'string') return null
-  if (typeof raw.timeZoneSource !== 'string') return null
+
+  const locationId = pickString(raw.locationId)
+  const locationTypeRaw = pickString(raw.locationType)
+  const timeZone = pickString(raw.timeZone)
+  const offeringId = pickString(raw.offeringId)
+
+  if (!locationId || !locationTypeRaw || !timeZone || !offeringId) {
+    return null
+  }
+
+  const locationType = normalizeLocationType(locationTypeRaw)
+  if (!locationType) return null
+
+  const timeZoneSource = normalizeAvailabilityTimeZoneSource(raw.timeZoneSource)
+  if (!timeZoneSource) return null
+
   if (typeof raw.stepMinutes !== 'number') return null
   if (typeof raw.durationMinutes !== 'number') return null
-  if (typeof raw.offeringId !== 'string') return null
-  return raw as CachedPlacement
+  if (typeof raw.leadTimeMinutes !== 'number') return null
+  if (typeof raw.locationBufferMinutes !== 'number') return null
+  if (typeof raw.maxAdvanceDays !== 'number') return null
+  if (typeof raw.priceStartingAt !== 'number') return null
+  if (typeof raw.offersInSalon !== 'boolean') return null
+  if (typeof raw.offersMobile !== 'boolean') return null
+
+  const lat =
+    typeof raw.lat === 'number' && Number.isFinite(raw.lat) ? raw.lat : undefined
+  const lng =
+    typeof raw.lng === 'number' && Number.isFinite(raw.lng) ? raw.lng : undefined
+
+  const salonDurationMinutes =
+    typeof raw.salonDurationMinutes === 'number'
+      ? raw.salonDurationMinutes
+      : raw.salonDurationMinutes == null
+        ? null
+        : null
+
+  const mobileDurationMinutes =
+    typeof raw.mobileDurationMinutes === 'number'
+      ? raw.mobileDurationMinutes
+      : raw.mobileDurationMinutes == null
+        ? null
+        : null
+
+  return {
+    locationId,
+    locationType,
+    timeZone,
+    timeZoneSource,
+    workingHours: raw.workingHours,
+    stepMinutes: raw.stepMinutes,
+    leadTimeMinutes: raw.leadTimeMinutes,
+    locationBufferMinutes: raw.locationBufferMinutes,
+    maxAdvanceDays: raw.maxAdvanceDays,
+    durationMinutes: raw.durationMinutes,
+    priceStartingAt: raw.priceStartingAt,
+    formattedAddress: normalizeAddress(raw.formattedAddress),
+    lat,
+    lng,
+    proBusinessName: pickString(raw.proBusinessName) ?? null,
+    proAvatarUrl: pickString(raw.proAvatarUrl) ?? null,
+    proLocation: pickString(raw.proLocation) ?? null,
+    serviceName: pickString(raw.serviceName) ?? null,
+    serviceCategory: pickString(raw.serviceCategory) ?? null,
+    offeringId,
+    offersInSalon: raw.offersInSalon,
+    offersMobile: raw.offersMobile,
+    salonDurationMinutes,
+    mobileDurationMinutes,
+    salonPriceStartingAt: pickString(raw.salonPriceStartingAt) ?? null,
+    mobilePriceStartingAt: pickString(raw.mobilePriceStartingAt) ?? null,
+    locationCity: pickString(raw.locationCity) ?? null,
+  }
 }
 
 function allowedProfessionalTypes(
@@ -371,33 +476,6 @@ function buildOfferingSnapshot(offering: {
     mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
     salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
     mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
-  }
-}
-
-function mapPlacementError(code: AvailabilityPlacementErrorCode): string {
-  switch (code) {
-    case 'CLIENT_SERVICE_ADDRESS_REQUIRED':
-      return 'Select a saved service address before viewing mobile availability.'
-    case 'SALON_LOCATION_ADDRESS_REQUIRED':
-      return 'This salon location is missing an address and cannot take bookings.'
-    case 'LOCATION_NOT_FOUND':
-      return 'Location not found or not bookable.'
-    case 'TIMEZONE_REQUIRED':
-      return 'This location must set a valid timezone before taking bookings.'
-    case 'WORKING_HOURS_REQUIRED':
-      return 'Working hours are not set for this location.'
-    case 'WORKING_HOURS_INVALID':
-      return 'Working hours are misconfigured for this location.'
-    case 'MODE_NOT_SUPPORTED':
-      return 'This service is not bookable for the selected appointment type.'
-    case 'DURATION_REQUIRED':
-      return 'Duration is not set for the selected offering.'
-    case 'PRICE_REQUIRED':
-      return 'Pricing is not set for the selected offering.'
-    case 'COORDINATES_REQUIRED':
-      return 'This location is missing coordinates required for this booking flow.'
-    case 'NO_SCHEDULING_READY_LOCATION':
-      return 'No scheduling-ready location found for this service.'
   }
 }
 
@@ -479,7 +557,6 @@ async function validateAvailabilityPlacement(args: {
     return {
       ok: false,
       code: validated.error,
-      error: mapPlacementError(validated.error),
     }
   }
 
@@ -490,7 +567,6 @@ async function validateAvailabilityPlacement(args: {
     return {
       ok: false,
       code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
-      error: mapPlacementError('CLIENT_SERVICE_ADDRESS_REQUIRED'),
     }
   }
 
@@ -498,7 +574,6 @@ async function validateAvailabilityPlacement(args: {
     return {
       ok: false,
       code: 'SALON_LOCATION_ADDRESS_REQUIRED',
-      error: mapPlacementError('SALON_LOCATION_ADDRESS_REQUIRED'),
     }
   }
 
@@ -549,7 +624,6 @@ async function resolveAvailabilityPlacement(args: {
     return {
       ok: false,
       code: 'NO_SCHEDULING_READY_LOCATION',
-      error: mapPlacementError('NO_SCHEDULING_READY_LOCATION'),
     }
   }
 
@@ -565,7 +639,6 @@ async function resolveAvailabilityPlacement(args: {
       return {
         ok: false,
         code: 'MODE_NOT_SUPPORTED',
-        error: mapPlacementError('MODE_NOT_SUPPORTED'),
       }
     }
 
@@ -594,7 +667,6 @@ async function resolveAvailabilityPlacement(args: {
       return {
         ok: false,
         code: 'LOCATION_NOT_FOUND',
-        error: mapPlacementError('LOCATION_NOT_FOUND'),
       }
     }
 
@@ -628,7 +700,6 @@ async function resolveAvailabilityPlacement(args: {
     return {
       ok: false,
       code: 'MODE_NOT_SUPPORTED',
-      error: mapPlacementError('MODE_NOT_SUPPORTED'),
     }
   }
 
@@ -670,7 +741,6 @@ async function resolveAvailabilityPlacement(args: {
     firstMeaningfulError ?? {
       ok: false,
       code: 'NO_SCHEDULING_READY_LOCATION',
-      error: mapPlacementError('NO_SCHEDULING_READY_LOCATION'),
     }
   )
 }
@@ -812,6 +882,7 @@ function localMinutesFromRequestedDayStart(args: {
 
   return dayOffset * 1440 + utcMinuteOfDayInLocalTimeZone(date, timeZone)
 }
+
 function localStepOffsetMinutes(
   localMinutes: number,
   startMinutes: number,
@@ -832,22 +903,7 @@ async function computeDaySlotsFast(args: {
   locationBufferMinutes: number
   busy: BusyInterval[]
   debug?: boolean
-}): Promise<
-  | {
-      ok: true
-      slots: string[]
-      dayStartUtc: Date
-      dayEndExclusiveUtc: Date
-      debug?: unknown
-    }
-  | {
-      ok: false
-      error: string
-      dayStartUtc: Date
-      dayEndExclusiveUtc: Date
-      debug?: unknown
-    }
-> {
+}): Promise<DayComputationResult> {
   const {
     dateYMD,
     durationMinutes,
@@ -882,7 +938,7 @@ async function computeDaySlotsFast(args: {
     if (window.reason === 'MISSING') {
       return {
         ok: false,
-        error: 'Working hours are not set for this location.',
+        code: 'WORKING_HOURS_REQUIRED',
         dayStartUtc,
         dayEndExclusiveUtc,
         debug: debug ? { timeZone, reason: 'no-workingHours' } : undefined,
@@ -901,7 +957,7 @@ async function computeDaySlotsFast(args: {
 
     return {
       ok: false,
-      error: 'Working hours are misconfigured. Please re-save your schedule.',
+      code: 'WORKING_HOURS_INVALID',
       dayStartUtc,
       dayEndExclusiveUtc,
       debug: debug ? { timeZone, reason: 'misconfigured-workingHours' } : undefined,
@@ -1636,7 +1692,7 @@ export async function GET(req: Request) {
 
       if (!pro) return jsonFail(404, 'Professional not found')
       if (!service) return jsonFail(404, 'Service not found')
-      if (!offering) return jsonFail(404, 'Offering not found')
+      if (!offering) return bookingJsonFail('OFFERING_NOT_FOUND')
 
       const offeringSnapshot = buildOfferingSnapshot(offering)
 
@@ -1650,7 +1706,7 @@ export async function GET(req: Request) {
       })
 
       if (!placement.ok) {
-        return jsonFail(400, placement.error)
+        return bookingJsonFail(placement.code)
       }
 
       locationId = placement.locationId
@@ -1760,7 +1816,9 @@ export async function GET(req: Request) {
       })
 
       if (addOnLinks.length !== addOnIds.length) {
-        return jsonFail(400, 'One or more add-ons are invalid for this offering.')
+        return bookingJsonFail('ADDONS_INVALID', {
+          userMessage: 'One or more add-ons are invalid for this offering.',
+        })
       }
 
       const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
@@ -1952,11 +2010,11 @@ export async function GET(req: Request) {
       )
 
       const availableDays: Array<{ date: string; slotCount: number }> = []
-      let firstError: string | null = null
+      let firstErrorCode: BookingErrorCode | null = null
 
       for (const row of dayResults) {
         if (!row.result.ok) {
-          firstError = firstError ?? row.result.error
+          firstErrorCode = firstErrorCode ?? row.result.code
           continue
         }
 
@@ -2015,7 +2073,7 @@ export async function GET(req: Request) {
         ...(debug
           ? {
               debug: {
-                emptyReason: !availableDays.length ? firstError ?? 'none' : null,
+                emptyReasonCode: !availableDays.length ? firstErrorCode : null,
                 otherProsCount: otherPros.length,
                 includeOtherPros,
                 center:
@@ -2092,30 +2150,30 @@ export async function GET(req: Request) {
       }
     }
 
-const bounds = computeDayBoundsUtc(ymd, timeZone)
+    const bounds = computeDayBoundsUtc(ymd, timeZone)
 
-const dayAnchorUtc =
-  localSlotToUtcOrNull({
-    year: ymd.year,
-    month: ymd.month,
-    day: ymd.day,
-    hour: 12,
-    minute: 0,
-    timeZone,
-  }) ?? new Date(bounds.dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
+    const dayAnchorUtc =
+      localSlotToUtcOrNull({
+        year: ymd.year,
+        month: ymd.month,
+        day: ymd.day,
+        hour: 12,
+        minute: 0,
+        timeZone,
+      }) ?? new Date(bounds.dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
 
-const windowForLoad = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
+    const windowForLoad = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
 
-const windowStartUtc = addMinutes(
-  bounds.dayStartUtc,
-  -OCCUPANCY_WINDOW_PADDING_MINUTES,
-)
+    const windowStartUtc = addMinutes(
+      bounds.dayStartUtc,
+      -OCCUPANCY_WINDOW_PADDING_MINUTES,
+    )
 
-const windowEndUtc = addMinutes(
-  bounds.dayStartUtc,
-  (windowForLoad.ok ? windowForLoad.endMinutes : 1440) +
-    OCCUPANCY_WINDOW_PADDING_MINUTES,
-)
+    const windowEndUtc = addMinutes(
+      bounds.dayStartUtc,
+      (windowForLoad.ok ? windowForLoad.endMinutes : 1440) +
+        OCCUPANCY_WINDOW_PADDING_MINUTES,
+    )
 
     const busy = await loadBusyIntervals({
       professionalId,
@@ -2141,16 +2199,20 @@ const windowEndUtc = addMinutes(
     })
 
     if (!result.ok) {
-      return jsonFail(400, result.error, {
-        locationId,
-        timeZone,
-        timeZoneSource,
-        stepMinutes,
-        leadTimeMinutes,
-        locationBufferMinutes,
-        maxDaysAhead: maxAdvanceDays,
-        ...(debug ? { debug: result.debug } : {}),
-      })
+      return bookingJsonFail(
+        result.code,
+        undefined,
+        {
+          locationId,
+          timeZone,
+          timeZoneSource,
+          stepMinutes,
+          leadTimeMinutes,
+          locationBufferMinutes,
+          maxDaysAhead: maxAdvanceDays,
+          ...(debug ? { debug: result.debug } : {}),
+        },
+      )
     }
 
     const payload = {
@@ -2195,6 +2257,8 @@ const windowEndUtc = addMinutes(
     return jsonOk(payload)
   } catch (err: unknown) {
     console.error('GET /api/availability/day error', err)
-    return jsonFail(500, 'Failed to load availability')
+    return bookingJsonFail('INTERNAL_ERROR', {
+      userMessage: 'Failed to load availability.',
+    })
   }
 }

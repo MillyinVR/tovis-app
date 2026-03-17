@@ -1,4 +1,4 @@
-// app/api/holds/route.ts 
+// app/api/holds/route.ts
 import { NextRequest } from 'next/server'
 import {
   ClientAddressKind,
@@ -24,26 +24,20 @@ import {
 import { minutesSinceMidnightInTimeZone } from '@/lib/timeZone'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
+import {
+  getBookingFailPayload,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+
 export const dynamic = 'force-dynamic'
 
-type HoldRouteErrorCode =
-  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
-  | 'CLIENT_SERVICE_ADDRESS_INVALID'
-  | 'SALON_LOCATION_ADDRESS_REQUIRED'
-  | 'LOCATION_NOT_FOUND'
-  | 'TIMEZONE_REQUIRED'
-  | 'WORKING_HOURS_REQUIRED'
-  | 'WORKING_HOURS_INVALID'
-  | 'MODE_NOT_SUPPORTED'
-  | 'DURATION_REQUIRED'
-  | 'PRICE_REQUIRED'
-  | 'COORDINATES_REQUIRED'
+const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 type HoldCreateFailure = {
   ok: false
-  status: number
-  error: string
-  code?: HoldRouteErrorCode
+  code: BookingErrorCode
+  message?: string
+  userMessage?: string
 }
 
 type HoldCreateSuccess = {
@@ -63,6 +57,11 @@ type HoldCreateSuccess = {
 
 type HoldCreateResult = HoldCreateFailure | HoldCreateSuccess
 
+type WorkingHoursGuardCode =
+  | 'WORKING_HOURS_REQUIRED'
+  | 'WORKING_HOURS_INVALID'
+  | 'OUTSIDE_WORKING_HOURS'
+
 function isValidDate(date: Date): boolean {
   return date instanceof Date && Number.isFinite(date.getTime())
 }
@@ -71,76 +70,82 @@ function normalizeAddress(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function holdFailure(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+): HoldCreateFailure {
+  return {
+    ok: false,
+    code,
+    message: overrides?.message,
+    userMessage: overrides?.userMessage,
+  }
+}
+
+function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
+  return `${WORKING_HOURS_ERROR_PREFIX}${code}`
+}
+
+function parseWorkingHoursGuardMessage(
+  value: string,
+): WorkingHoursGuardCode | null {
+  if (!value.startsWith(WORKING_HOURS_ERROR_PREFIX)) return null
+
+  const code = value.slice(WORKING_HOURS_ERROR_PREFIX.length)
+
+  switch (code) {
+    case 'WORKING_HOURS_REQUIRED':
+      return 'WORKING_HOURS_REQUIRED'
+    case 'WORKING_HOURS_INVALID':
+      return 'WORKING_HOURS_INVALID'
+    case 'OUTSIDE_WORKING_HOURS':
+      return 'OUTSIDE_WORKING_HOURS'
+    default:
+      return null
+  }
+}
+
 function mapSchedulingReadinessFailure(
   error: SchedulingReadinessError,
 ): HoldCreateFailure {
   switch (error) {
     case 'LOCATION_NOT_FOUND':
-      return {
-        ok: false,
-        status: 404,
-        error: 'Location not found or not bookable.',
-        code: 'LOCATION_NOT_FOUND',
-      }
+      return holdFailure('LOCATION_NOT_FOUND')
 
     case 'TIMEZONE_REQUIRED':
-      return {
-        ok: false,
-        status: 400,
-        error: 'This professional must set a valid timezone before taking bookings.',
-        code: 'TIMEZONE_REQUIRED',
-      }
+      return holdFailure('TIMEZONE_REQUIRED')
 
     case 'WORKING_HOURS_REQUIRED':
-      return {
-        ok: false,
-        status: 400,
-        error: 'This professional has not set working hours yet.',
-        code: 'WORKING_HOURS_REQUIRED',
-      }
+      return holdFailure('WORKING_HOURS_REQUIRED')
 
     case 'WORKING_HOURS_INVALID':
-      return {
-        ok: false,
-        status: 400,
-        error: 'This professional’s working hours are misconfigured.',
-        code: 'WORKING_HOURS_INVALID',
-      }
+      return holdFailure('WORKING_HOURS_INVALID')
 
     case 'MODE_NOT_SUPPORTED':
-      return {
-        ok: false,
-        status: 400,
-        error: 'This service is not available for the selected booking type.',
-        code: 'MODE_NOT_SUPPORTED',
-      }
+      return holdFailure('MODE_NOT_SUPPORTED')
 
     case 'DURATION_REQUIRED':
-      return {
-        ok: false,
-        status: 400,
-        error:
-          'This service is missing duration settings for the selected booking type.',
-        code: 'DURATION_REQUIRED',
-      }
+      return holdFailure('DURATION_REQUIRED')
 
     case 'PRICE_REQUIRED':
-      return {
-        ok: false,
-        status: 400,
-        error:
-          'This service is missing pricing for the selected booking type.',
-        code: 'PRICE_REQUIRED',
-      }
+      return holdFailure('PRICE_REQUIRED')
 
     case 'COORDINATES_REQUIRED':
-      return {
-        ok: false,
-        status: 400,
-        error:
-          'This location is missing coordinates required for this booking flow.',
-        code: 'COORDINATES_REQUIRED',
-      }
+      return holdFailure('COORDINATES_REQUIRED')
   }
 }
 
@@ -218,64 +223,69 @@ export async function POST(req: NextRequest) {
     const locationType = normalizeLocationType(body.locationType)
     const scheduledForRaw = pickString(body.scheduledFor)
 
-    if (!offeringId || !scheduledForRaw || !locationType) {
-      return jsonFail(400, 'Missing offeringId, scheduledFor, or locationType.')
+    if (!offeringId) {
+      return bookingJsonFail('OFFERING_ID_REQUIRED')
+    }
+
+    if (!scheduledForRaw) {
+      return bookingJsonFail('INVALID_SCHEDULED_FOR', {
+        message: 'Scheduled time is required.',
+        userMessage: 'Missing scheduled time.',
+      })
+    }
+
+    if (!locationType) {
+      return bookingJsonFail('LOCATION_TYPE_REQUIRED')
     }
 
     if (
       locationType === ServiceLocationType.MOBILE &&
       !clientAddressId
     ) {
-      return jsonFail(
-        400,
-        'Select a saved service address before booking a mobile appointment.',
-        { code: 'CLIENT_SERVICE_ADDRESS_REQUIRED' },
-      )
+      return bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED')
     }
 
     const scheduledForParsed = new Date(scheduledForRaw)
     if (!isValidDate(scheduledForParsed)) {
-      return jsonFail(400, 'Invalid scheduledFor.')
+      return bookingJsonFail('INVALID_SCHEDULED_FOR')
     }
 
     const requestedStart = normalizeToMinute(scheduledForParsed)
 
-if (requestedStart.getTime() < Date.now() + 60_000) {
-  return jsonFail(400, 'Please select a future time.')
-}
+    if (requestedStart.getTime() < Date.now() + 60_000) {
+      return bookingJsonFail('TIME_IN_PAST')
+    }
 
-const offering = await prisma.professionalServiceOffering.findUnique({
-  where: { id: offeringId },
-  select: {
-    id: true,
-    isActive: true,
-    professionalId: true,
-    offersInSalon: true,
-    offersMobile: true,
-    salonDurationMinutes: true,
-    mobileDurationMinutes: true,
-    salonPriceStartingAt: true,
-    mobilePriceStartingAt: true,
-  },
-})
+    const offering = await prisma.professionalServiceOffering.findUnique({
+      where: { id: offeringId },
+      select: {
+        id: true,
+        isActive: true,
+        professionalId: true,
+        offersInSalon: true,
+        offersMobile: true,
+        salonDurationMinutes: true,
+        mobileDurationMinutes: true,
+        salonPriceStartingAt: true,
+        mobilePriceStartingAt: true,
+      },
+    })
 
-if (!offering || !offering.isActive) {
-  return jsonFail(404, 'Offering not found.')
-}
+    if (!offering || !offering.isActive) {
+      return bookingJsonFail('OFFERING_NOT_FOUND')
+    }
 
-const result = await withLockedProfessionalTransaction(
-  offering.professionalId,
-  async ({ tx, now }): Promise<HoldCreateResult> => {
-    
-
-    const selectedClientAddress =
-      locationType === ServiceLocationType.MOBILE && clientAddressId
-        ? await loadClientServiceAddress({
-            tx,
-            clientId,
-            clientAddressId,
-          })
-        : null
+    const result = await withLockedProfessionalTransaction(
+      offering.professionalId,
+      async ({ tx, now }): Promise<HoldCreateResult> => {
+        const selectedClientAddress =
+          locationType === ServiceLocationType.MOBILE && clientAddressId
+            ? await loadClientServiceAddress({
+                tx,
+                clientId,
+                clientAddressId,
+              })
+            : null
 
         const clientServiceAddress =
           locationType === ServiceLocationType.MOBILE
@@ -284,23 +294,11 @@ const result = await withLockedProfessionalTransaction(
 
         if (locationType === ServiceLocationType.MOBILE) {
           if (!selectedClientAddress) {
-            return {
-              ok: false,
-              status: 400,
-              error:
-                'Add or select a valid mobile service address in your client settings before booking an in-home appointment.',
-              code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
-            }
+            return holdFailure('CLIENT_SERVICE_ADDRESS_REQUIRED')
           }
 
           if (!clientServiceAddress) {
-            return {
-              ok: false,
-              status: 400,
-              error:
-                'That service address is missing a formatted address. Please update it before booking mobile.',
-              code: 'CLIENT_SERVICE_ADDRESS_INVALID',
-            }
+            return holdFailure('CLIENT_SERVICE_ADDRESS_INVALID')
           }
         }
 
@@ -339,13 +337,7 @@ const result = await withLockedProfessionalTransaction(
           locationType === ServiceLocationType.SALON &&
           !salonLocationAddress
         ) {
-          return {
-            ok: false,
-            status: 400,
-            error:
-              'This salon location is missing an address. Please update the professional location before booking.',
-            code: 'SALON_LOCATION_ADDRESS_REQUIRED',
-          }
+          return holdFailure('SALON_LOCATION_ADDRESS_REQUIRED')
         }
 
         const requestedEnd = addMinutes(
@@ -357,22 +349,14 @@ const result = await withLockedProfessionalTransaction(
           requestedStart.getTime() <
           now.getTime() + locationContext.advanceNoticeMinutes * 60_000
         ) {
-          return {
-            ok: false,
-            status: 400,
-            error: 'Please pick a later time.',
-          }
+          return holdFailure('ADVANCE_NOTICE_REQUIRED')
         }
 
         if (
           requestedStart.getTime() >
           now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
         ) {
-          return {
-            ok: false,
-            status: 400,
-            error: 'That date is too far in the future.',
-          }
+          return holdFailure('MAX_DAYS_AHEAD_EXCEEDED')
         }
 
         const startMinuteOfDay = minutesSinceMidnightInTimeZone(
@@ -396,11 +380,10 @@ const result = await withLockedProfessionalTransaction(
             },
           })
 
-          return {
-            ok: false,
-            status: 400,
-            error: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
-          }
+          return holdFailure('STEP_MISMATCH', {
+            message: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
+            userMessage: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
+          })
         }
 
         const workingHoursCheck = ensureWithinWorkingHours({
@@ -410,9 +393,9 @@ const result = await withLockedProfessionalTransaction(
           timeZone: locationContext.timeZone,
           fallbackTimeZone: 'UTC',
           messages: {
-            missing: 'This professional has not set working hours yet.',
-            outside: 'That time is outside this professional’s working hours.',
-            misconfigured: 'This professional’s working hours are misconfigured.',
+            missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
+            outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
+            misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
           },
         })
 
@@ -432,11 +415,26 @@ const result = await withLockedProfessionalTransaction(
             },
           })
 
-          return {
-            ok: false,
-            status: 400,
-            error: workingHoursCheck.error,
+          const workingHoursCode = parseWorkingHoursGuardMessage(
+            workingHoursCheck.error,
+          )
+
+          if (workingHoursCode === 'WORKING_HOURS_REQUIRED') {
+            return holdFailure('WORKING_HOURS_REQUIRED')
           }
+
+          if (workingHoursCode === 'WORKING_HOURS_INVALID') {
+            return holdFailure('WORKING_HOURS_INVALID')
+          }
+
+          if (workingHoursCode === 'OUTSIDE_WORKING_HOURS') {
+            return holdFailure('OUTSIDE_WORKING_HOURS')
+          }
+
+          return holdFailure('OUTSIDE_WORKING_HOURS', {
+            message: workingHoursCheck.error,
+            userMessage: workingHoursCheck.error || 'That time is outside working hours.',
+          })
         }
 
         const conflict = await getTimeRangeConflict({
@@ -462,11 +460,7 @@ const result = await withLockedProfessionalTransaction(
             clientAddressId,
           })
 
-          return {
-            ok: false,
-            status: 409,
-            error: 'That time is blocked. Try another slot.',
-          }
+          return holdFailure('TIME_BLOCKED')
         }
 
         if (conflict === 'BOOKING') {
@@ -482,11 +476,7 @@ const result = await withLockedProfessionalTransaction(
             clientAddressId,
           })
 
-          return {
-            ok: false,
-            status: 409,
-            error: 'That time was just taken.',
-          }
+          return holdFailure('TIME_BOOKED')
         }
 
         if (conflict === 'HOLD') {
@@ -502,11 +492,7 @@ const result = await withLockedProfessionalTransaction(
             clientAddressId,
           })
 
-          return {
-            ok: false,
-            status: 409,
-            error: 'Someone is already holding that time. Try another slot.',
-          }
+          return holdFailure('TIME_HELD')
         }
 
         const expiresAt = addMinutes(now, HOLD_MINUTES)
@@ -595,11 +581,7 @@ const result = await withLockedProfessionalTransaction(
               },
             })
 
-            return {
-              ok: false,
-              status: 409,
-              error: 'Someone is already holding that time. Try another slot.',
-            }
+            return holdFailure('TIME_HELD')
           }
 
           throw error
@@ -608,16 +590,15 @@ const result = await withLockedProfessionalTransaction(
     )
 
     if (!result.ok) {
-      return jsonFail(
-        result.status,
-        result.error,
-        result.code ? { code: result.code } : undefined,
-      )
+      return bookingJsonFail(result.code, {
+        message: result.message,
+        userMessage: result.userMessage,
+      })
     }
 
     return jsonOk({ hold: result.hold }, result.status)
   } catch (error) {
     console.error('POST /api/holds error', error)
-    return jsonFail(500, 'Failed to create hold.')
+    return bookingJsonFail('INTERNAL_ERROR')
   }
 }
