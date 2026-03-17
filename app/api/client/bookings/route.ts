@@ -7,11 +7,11 @@ import { upper } from '@/app/api/_utils/strings'
 import { jsonFail } from '@/app/api/_utils/responses'
 
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
-import { ClientNotificationType, WaitlistStatus, type Prisma } from '@prisma/client'
+import { ClientNotificationType, WaitlistStatus, type Prisma, Prisma as PrismaNamespace } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function addDaysUtc(date: Date, days: number) {
+function addDaysUtc(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
 
@@ -20,7 +20,7 @@ function needsConsultationApproval(b: {
   sessionStep: unknown
   finishedAt: Date | null
   consultationApproval?: { status: unknown } | null
-}) {
+}): boolean {
   const status = upper(b.status)
   if (status === 'CANCELLED' || status === 'COMPLETED') return false
   if (b.finishedAt) return false
@@ -30,7 +30,7 @@ function needsConsultationApproval(b: {
 
   const approval = upper(b.consultationApproval?.status)
 
-  const PENDING_APPROVAL = new Set([
+  const pendingApproval = new Set([
     'PENDING',
     'PENDING_CLIENT',
     'PENDING_CLIENT_APPROVAL',
@@ -40,17 +40,24 @@ function needsConsultationApproval(b: {
     'SENT',
   ])
 
-  if (PENDING_APPROVAL.has(approval)) return true
+  if (pendingApproval.has(approval)) return true
 
   const decided = approval === 'APPROVED' || approval === 'REJECTED'
-  const consultPhase = step === 'CONSULTATION' || step === 'CONSULTATION_PENDING_CLIENT' || step === 'NONE' || !step
+  const consultPhase =
+    step === 'CONSULTATION' ||
+    step === 'CONSULTATION_PENDING_CLIENT' ||
+    step === 'NONE' ||
+    !step
 
   if (!decided && consultPhase && approval) return true
 
   return false
 }
 
-// ✅ EXACTLY matches buildClientBookingDTO's expected select
+const bookingServiceItemsOrderBy: PrismaNamespace.BookingServiceItemOrderByWithRelationInput = {
+  sortOrder: 'asc',
+}
+
 const bookingSelect = {
   id: true,
   status: true,
@@ -109,7 +116,7 @@ const bookingSelect = {
       serviceId: true,
       service: { select: { name: true } },
     },
-    orderBy: { sortOrder: 'asc' as const },
+    orderBy: bookingServiceItemsOrderBy,
   },
 } satisfies Prisma.BookingSelect
 
@@ -161,7 +168,6 @@ export async function GET() {
       }),
     )
 
-    // waitlist (typed)
     const waitlist = await prisma.waitlistEntry.findMany({
       where: { clientId, status: WaitlistStatus.ACTIVE },
       orderBy: { createdAt: 'desc' },
@@ -170,11 +176,13 @@ export async function GET() {
         id: true,
         createdAt: true,
         notes: true,
-        preferredStart: true,
-        preferredEnd: true,
-        preferredTimeBucket: true,
         mediaId: true,
         status: true,
+        preferenceType: true,
+        specificDate: true,
+        timeOfDay: true,
+        windowStartMin: true,
+        windowEndMin: true,
         service: { select: { id: true, name: true } },
         professional: {
           select: {
@@ -187,7 +195,6 @@ export async function GET() {
       },
     })
 
-    // buckets
     const upcoming: ClientBookingDTO[] = []
     const pending: ClientBookingDTO[] = []
     const prebooked: ClientBookingDTO[] = []

@@ -4,12 +4,7 @@
 import { useMemo, useState } from 'react'
 import type { WaitlistLike } from './_helpers'
 import { prettyWhen, waitlistLocationLabel } from './_helpers'
-import {
-  isValidIanaTimeZone,
-  sanitizeTimeZone,
-  getZonedParts,
-  zonedTimeToUtc,
-} from '@/lib/timeZone'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
 import ProProfileLink from './ProProfileLink'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
@@ -20,10 +15,10 @@ type Props = {
   onChanged?: () => void
 }
 
+type WaitlistPreferenceType = 'ANY_TIME' | 'TIME_OF_DAY' | 'SPECIFIC_DATE' | 'TIME_RANGE'
+type WaitlistTimeOfDay = 'MORNING' | 'AFTERNOON' | 'EVENING'
+
 const DEFAULT_BROWSER_TIME_ZONE = 'UTC'
-const DEFAULT_FLEX_MINUTES = 60
-const MIN_FLEX_MINUTES = 15
-const MAX_FLEX_MINUTES = 24 * 60
 
 function getBrowserTimeZone(): string {
   try {
@@ -35,62 +30,80 @@ function getBrowserTimeZone(): string {
   return DEFAULT_BROWSER_TIME_ZONE
 }
 
-function clampFlexMinutes(n: number) {
-  if (!Number.isFinite(n)) return DEFAULT_FLEX_MINUTES
-  return Math.min(MAX_FLEX_MINUTES, Math.max(MIN_FLEX_MINUTES, Math.floor(n)))
-}
-
-function toDate(v: unknown): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(String(v))
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-/**
- * ISO UTC -> datetime-local value in the given timeZone
- * (avoid browser implicit conversions)
- */
-function toDatetimeLocalValueInTimeZone(isoUtc: string, timeZone: string) {
-  const d = toDate(isoUtc)
-  if (!d) return ''
-  const tz = sanitizeTimeZone(timeZone, DEFAULT_BROWSER_TIME_ZONE)
-  const p = getZonedParts(d, tz)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
-}
-
-/**
- * datetime-local -> UTC ISO, interpreting wall-clock time in timeZone
- */
-function datetimeLocalToIsoInTimeZone(value: string, timeZone: string) {
-  if (!value || typeof value !== 'string') return null
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
-  if (!m) return null
-
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  const hour = Number(m[4])
-  const minute = Number(m[5])
-
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
-
-  const tz = sanitizeTimeZone(timeZone, DEFAULT_BROWSER_TIME_ZONE)
-  const utc = zonedTimeToUtc({
-    year,
-    month,
-    day,
-    hour,
-    minute,
-    second: 0,
-    timeZone: tz,
-  })
-  return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
-}
-
-function apiErrorMessage(data: unknown, fallback: string) {
+function apiErrorMessage(data: unknown, fallback: string): string {
   return readErrorMessage(data) ?? (isRecord(data) ? pickString(data.error) : null) ?? fallback
+}
+
+function parsePreferenceType(value: unknown): WaitlistPreferenceType | null {
+  if (
+    value === 'ANY_TIME' ||
+    value === 'TIME_OF_DAY' ||
+    value === 'SPECIFIC_DATE' ||
+    value === 'TIME_RANGE'
+  ) {
+    return value
+  }
+  return null
+}
+
+function parseTimeOfDay(value: unknown): WaitlistTimeOfDay | null {
+  if (value === 'MORNING' || value === 'AFTERNOON' || value === 'EVENING') return value
+  return null
+}
+
+function clampMinuteOfDay(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  if (value < 0) return 0
+  if (value > 1440) return 1440
+  return Math.floor(value)
+}
+
+function minutesToTimeInput(value: number | null): string {
+  if (value == null || value < 0 || value > 1440) return ''
+  const hours = Math.floor(value / 60)
+  const minutes = value % 60
+  const hh = String(hours).padStart(2, '0')
+  const mm = String(minutes).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+function timeInputToMinutes(value: string): number | null {
+  const match = value.match(/^(\d{2}):(\d{2})$/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return hours * 60 + minutes
+}
+
+function formatPreferenceSummary(w: WaitlistLike): string {
+  const preferenceType = parsePreferenceType(w.preferenceType)
+
+  if (preferenceType === 'TIME_OF_DAY') {
+    const timeOfDay = parseTimeOfDay(w.timeOfDay)
+    if (timeOfDay === 'MORNING') return 'Morning'
+    if (timeOfDay === 'AFTERNOON') return 'Afternoon'
+    if (timeOfDay === 'EVENING') return 'Evening'
+    return 'Time of day'
+  }
+
+  if (preferenceType === 'SPECIFIC_DATE') {
+    const dateValue = typeof w.specificDate === 'string' ? w.specificDate : null
+    return dateValue ? `Specific day: ${dateValue.slice(0, 10)}` : 'Specific day'
+  }
+
+  if (preferenceType === 'TIME_RANGE') {
+    const start = typeof w.windowStartMin === 'number' ? minutesToTimeInput(w.windowStartMin) : ''
+    const end = typeof w.windowEndMin === 'number' ? minutesToTimeInput(w.windowEndMin) : ''
+    if (start && end) return `Time range: ${start}–${end}`
+    return 'Time range'
+  }
+
+  return 'Any time'
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -103,17 +116,17 @@ function Pill({ children }: { children: React.ReactNode }) {
 
 export default function WaitlistBookings({ items, onChanged }: Props) {
   const list = items ?? []
-
-  // Client UX: treat datetime-local as browser timezone wall clock
   const tz = useMemo(() => getBrowserTimeZone(), [])
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const [desiredForLocal, setDesiredForLocal] = useState<string>('') // datetime-local (wall clock)
-  const [flexMinutes, setFlexMinutes] = useState<number>(DEFAULT_FLEX_MINUTES)
-  const [timeBucket, setTimeBucket] = useState<string>('')
+  const [preferenceType, setPreferenceType] = useState<WaitlistPreferenceType>('ANY_TIME')
+  const [specificDate, setSpecificDate] = useState<string>('')
+  const [timeOfDay, setTimeOfDay] = useState<WaitlistTimeOfDay | ''>('')
+  const [windowStart, setWindowStart] = useState<string>('')
+  const [windowEnd, setWindowEnd] = useState<string>('')
 
   const editingItem = useMemo(
     () => list.find((x) => x.id === editingId) ?? null,
@@ -124,35 +137,16 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
     setErr(null)
     setEditingId(w.id)
 
-    const startISO = w?.preferredStart ?? null
-    const endISO = w?.preferredEnd ?? null
+    const nextPreferenceType = parsePreferenceType(w.preferenceType) ?? 'ANY_TIME'
+    setPreferenceType(nextPreferenceType)
 
-    const seedIso = (() => {
-      const d = startISO ? toDate(startISO) : null
-      if (d) return d.toISOString()
-      return new Date(Date.now() + 2 * 60 * 60_000).toISOString()
-    })()
+    setSpecificDate(typeof w.specificDate === 'string' ? w.specificDate.slice(0, 10) : '')
 
-    setDesiredForLocal(toDatetimeLocalValueInTimeZone(seedIso, tz))
+    const nextTimeOfDay = parseTimeOfDay(w.timeOfDay)
+    setTimeOfDay(nextTimeOfDay ?? '')
 
-    if (startISO && endISO) {
-      const s = toDate(startISO)
-      const e = toDate(endISO)
-      if (s && e) {
-        const span = e.getTime() - s.getTime()
-        if (Number.isFinite(span) && span > 0) {
-          setFlexMinutes(clampFlexMinutes(Math.round(span / 2 / 60_000)))
-        } else {
-          setFlexMinutes(DEFAULT_FLEX_MINUTES)
-        }
-      } else {
-        setFlexMinutes(DEFAULT_FLEX_MINUTES)
-      }
-    } else {
-      setFlexMinutes(DEFAULT_FLEX_MINUTES)
-    }
-
-    setTimeBucket((w?.preferredTimeBucket ?? '').toString())
+    setWindowStart(typeof w.windowStartMin === 'number' ? minutesToTimeInput(w.windowStartMin) : '')
+    setWindowEnd(typeof w.windowEndMin === 'number' ? minutesToTimeInput(w.windowEndMin) : '')
   }
 
   function closeEdit() {
@@ -164,10 +158,47 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
     if (!editingId) return
     setErr(null)
 
-    const desiredForISO = datetimeLocalToIsoInTimeZone(desiredForLocal, tz)
-    if (!desiredForISO) {
-      setErr('Pick a valid date/time.')
-      return
+    let nextSpecificDate: string | null = null
+    let nextTimeOfDay: WaitlistTimeOfDay | null = null
+    let nextWindowStartMin: number | null = null
+    let nextWindowEndMin: number | null = null
+
+    if (preferenceType === 'SPECIFIC_DATE') {
+      if (!specificDate) {
+        setErr('Pick a valid date.')
+        return
+      }
+      nextSpecificDate = specificDate
+    }
+
+    if (preferenceType === 'TIME_OF_DAY') {
+      const parsed = parseTimeOfDay(timeOfDay)
+      if (!parsed) {
+        setErr('Pick a valid time of day.')
+        return
+      }
+      nextTimeOfDay = parsed
+    }
+
+    if (preferenceType === 'TIME_RANGE') {
+      const startMin = timeInputToMinutes(windowStart)
+      const endMin = timeInputToMinutes(windowEnd)
+
+      if (startMin == null || endMin == null) {
+        setErr('Pick a valid start and end time.')
+        return
+      }
+
+      const clampedStart = clampMinuteOfDay(startMin)
+      const clampedEnd = clampMinuteOfDay(endMin)
+
+      if (clampedEnd <= clampedStart) {
+        setErr('End time must be after start time.')
+        return
+      }
+
+      nextWindowStartMin = clampedStart
+      nextWindowEndMin = clampedEnd
     }
 
     setBusyId(editingId)
@@ -177,9 +208,11 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: editingId,
-          desiredFor: desiredForISO,
-          flexibilityMinutes: clampFlexMinutes(flexMinutes),
-          preferredTimeBucket: timeBucket.trim() ? timeBucket.trim() : null,
+          preferenceType,
+          specificDate: nextSpecificDate,
+          timeOfDay: nextTimeOfDay,
+          windowStartMin: nextWindowStartMin,
+          windowEndMin: nextWindowEndMin,
         }),
       })
 
@@ -237,6 +270,7 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
 
         const isEditing = editingId === w.id
         const isBusy = busyId === w.id
+        const preferenceSummary = formatPreferenceSummary(w)
 
         return (
           <div key={w.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
@@ -259,6 +293,8 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
 
               {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
             </div>
+
+            <div className="mt-2 text-xs font-semibold text-textSecondary">{preferenceSummary}</div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Pill>Waitlisted</Pill>
@@ -299,52 +335,94 @@ export default function WaitlistBookings({ items, onChanged }: Props) {
             {isEditing ? (
               <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
                 <div className="text-xs font-medium text-textSecondary">
-                  Set a preferred time and flexibility. We’ll store a window around it.{` `}
-                  <span className="opacity-75">({sanitizeTimeZone(tz, DEFAULT_BROWSER_TIME_ZONE)})</span>
+                  Update your waitlist preference.
                 </div>
 
                 <label className="text-sm font-semibold text-textPrimary">
-                  Desired time
-                  <input
-                    type="datetime-local"
-                    value={desiredForLocal}
-                    onChange={(e) => setDesiredForLocal(e.target.value)}
-                    disabled={isBusy}
-                    className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
-                  />
-                </label>
-
-                <label className="text-sm font-semibold text-textPrimary">
-                  Flexibility (minutes)
-                  <input
-                    type="number"
-                    value={flexMinutes}
-                    onChange={(e) =>
-                      setFlexMinutes(
-                        clampFlexMinutes(Number(e.target.value) || DEFAULT_FLEX_MINUTES),
-                      )
-                    }
-                    disabled={isBusy}
-                    min={MIN_FLEX_MINUTES}
-                    max={MAX_FLEX_MINUTES}
-                    className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
-                  />
-                </label>
-
-                <label className="text-sm font-semibold text-textPrimary">
-                  Preferred time bucket (optional)
+                  Preference type
                   <select
-                    value={timeBucket}
-                    onChange={(e) => setTimeBucket(e.target.value)}
+                    value={preferenceType}
+                    onChange={(e) => {
+                      const next = parsePreferenceType(e.target.value)
+                      if (!next) return
+
+                      setPreferenceType(next)
+
+                      if (next !== 'SPECIFIC_DATE') setSpecificDate('')
+                      if (next !== 'TIME_OF_DAY') setTimeOfDay('')
+                      if (next !== 'TIME_RANGE') {
+                        setWindowStart('')
+                        setWindowEnd('')
+                      }
+                    }}
                     disabled={isBusy}
                     className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
                   >
-                    <option value="">No preference</option>
-                    <option value="MORNING">Morning</option>
-                    <option value="AFTERNOON">Afternoon</option>
-                    <option value="EVENING">Evening</option>
+                    <option value="ANY_TIME">Any time</option>
+                    <option value="TIME_OF_DAY">Time of day</option>
+                    <option value="SPECIFIC_DATE">Specific day</option>
+                    <option value="TIME_RANGE">Time range</option>
                   </select>
                 </label>
+
+                {preferenceType === 'TIME_OF_DAY' ? (
+                  <label className="text-sm font-semibold text-textPrimary">
+                    Time of day
+                    <select
+                      value={timeOfDay}
+                      onChange={(e) => {
+                        const next = parseTimeOfDay(e.target.value)
+                        setTimeOfDay(next ?? '')
+                      }}
+                      disabled={isBusy}
+                      className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
+                    >
+                      <option value="">Choose one</option>
+                      <option value="MORNING">Morning</option>
+                      <option value="AFTERNOON">Afternoon</option>
+                      <option value="EVENING">Evening</option>
+                    </select>
+                  </label>
+                ) : null}
+
+                {preferenceType === 'SPECIFIC_DATE' ? (
+                  <label className="text-sm font-semibold text-textPrimary">
+                    Preferred day
+                    <input
+                      type="date"
+                      value={specificDate}
+                      onChange={(e) => setSpecificDate(e.target.value)}
+                      disabled={isBusy}
+                      className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
+                    />
+                  </label>
+                ) : null}
+
+                {preferenceType === 'TIME_RANGE' ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm font-semibold text-textPrimary">
+                      Start time
+                      <input
+                        type="time"
+                        value={windowStart}
+                        onChange={(e) => setWindowStart(e.target.value)}
+                        disabled={isBusy}
+                        className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm font-semibold text-textPrimary">
+                      End time
+                      <input
+                        type="time"
+                        value={windowEnd}
+                        onChange={(e) => setWindowEnd(e.target.value)}
+                        disabled={isBusy}
+                        className="mt-1 w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none"
+                      />
+                    </label>
+                  </div>
+                ) : null}
 
                 <div className="flex justify-end gap-2">
                   <button

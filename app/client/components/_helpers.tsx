@@ -11,16 +11,20 @@ export type BookingLike = ClientBookingDTO
 
 /**
  * Waitlist shape returned by GET /api/client/bookings (buckets.waitlist)
- * Keep it minimal and schema-correct (ProfessionalProfile has no city/state).
+ * Keep it minimal and aligned with the Prisma/API contract.
  */
 export type WaitlistLike = {
   id: string
   createdAt?: string | Date | null
   notes?: string | null
+  mediaId?: string | null
+  status?: string | null
 
-  preferredStart?: string | null
-  preferredEnd?: string | null
-  preferredTimeBucket?: string | null
+  preferenceType?: 'ANY_TIME' | 'TIME_OF_DAY' | 'SPECIFIC_DATE' | 'TIME_RANGE' | null
+  specificDate?: string | Date | null
+  timeOfDay?: 'MORNING' | 'AFTERNOON' | 'EVENING' | null
+  windowStartMin?: number | null
+  windowEndMin?: number | null
 
   service?: { id?: string; name?: string | null } | null
   professional?: {
@@ -51,9 +55,9 @@ export function sourceUpper(v: unknown): string {
 /**
  * Format a timestamp in a specific timezone (IANA).
  * Always pass booking.timeZone from the API so UI is timezone-stable.
- * Fallback tz is UTC (matches booking page behavior).
+ * Fallback tz is UTC.
  */
-export function prettyWhen(v: unknown, timeZone?: string | null) {
+export function prettyWhen(v: unknown, timeZone?: string | null): string {
   const d = toDate(v)
   if (!d) return 'Unknown time'
 
@@ -69,16 +73,18 @@ export function prettyWhen(v: unknown, timeZone?: string | null) {
   }).format(d)
 }
 
-export function bookingLocationLabel(b: BookingLike | null | undefined) {
+export function bookingLocationLabel(b: BookingLike | null | undefined): string {
   if (!b) return ''
-  if (typeof b.locationLabel === 'string' && b.locationLabel.trim()) return b.locationLabel.trim()
+
+  if (typeof b.locationLabel === 'string' && b.locationLabel.trim()) {
+    return b.locationLabel.trim()
+  }
 
   const proLoc = b.professional?.location
   return typeof proLoc === 'string' && proLoc.trim() ? proLoc.trim() : ''
 }
 
-
-export function waitlistLocationLabel(p: WaitlistLike['professional'] | null | undefined) {
+export function waitlistLocationLabel(p: WaitlistLike['professional'] | null | undefined): string {
   const loc = p?.location
   return typeof loc === 'string' && loc.trim() ? loc.trim() : ''
 }

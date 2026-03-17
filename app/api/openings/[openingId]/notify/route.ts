@@ -1,12 +1,19 @@
 // app/api/openings/[openingId]/notify/route.ts
 import { prisma } from '@/lib/prisma'
-import { isValidIanaTimeZone, startOfDayUtcInTimeZone } from '@/lib/timeZone'
+import { isValidIanaTimeZone, startOfDayUtcInTimeZone, getZonedParts } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { BookingStatus, OpeningStatus, WaitlistStatus, OpeningTier } from '@prisma/client'
+import {
+  BookingStatus,
+  OpeningStatus,
+  WaitlistStatus,
+  OpeningTier,
+  WaitlistPreferenceType,
+  WaitlistTimeOfDay,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function daysAgo(n: number) {
+function daysAgo(n: number): Date {
   return new Date(Date.now() - n * 24 * 60 * 60_000)
 }
 
@@ -14,10 +21,6 @@ function isNonEmptyString(x: unknown): x is string {
   return typeof x === 'string' && x.trim().length > 0
 }
 
-/**
- * ✅ STRICT: opening tz must be present AND valid IANA
- * No fallback. No guessing.
- */
 function requireOpeningTimeZone(raw: unknown): string | null {
   const s = typeof raw === 'string' ? raw.trim() : ''
   if (!s) return null
@@ -25,17 +28,77 @@ function requireOpeningTimeZone(raw: unknown): string | null {
   return s
 }
 
-// Keep this aligned with your schema enums
 type Tier = 'TIER1_WAITLIST_LAPSED' | 'TIER2_FAVORITE_VIEWER'
-
 type Ctx = { params: Promise<{ openingId: string }> | { openingId: string } }
-
 type Candidate = { clientId: string; tier: Tier }
 
 function toOpeningTier(tier: Tier): OpeningTier {
-  // This mapping keeps prisma enum usage (no free-form strings written to DB)
   if (tier === 'TIER1_WAITLIST_LAPSED') return OpeningTier.TIER1_WAITLIST_LAPSED
   return OpeningTier.TIER2_FAVORITE_VIEWER
+}
+
+function timeOfDayForHour(hour: number): WaitlistTimeOfDay {
+  if (hour < 12) return WaitlistTimeOfDay.MORNING
+  if (hour < 17) return WaitlistTimeOfDay.AFTERNOON
+  return WaitlistTimeOfDay.EVENING
+}
+
+function sameZonedDate(a: Date, b: Date, timeZone: string): boolean {
+  const aParts = getZonedParts(a, timeZone)
+  const bParts = getZonedParts(b, timeZone)
+
+  return (
+    aParts.year === bParts.year &&
+    aParts.month === bParts.month &&
+    aParts.day === bParts.day
+  )
+}
+
+function minuteOfDayInTimeZone(d: Date, timeZone: string): number {
+  const parts = getZonedParts(d, timeZone)
+  return parts.hour * 60 + parts.minute
+}
+
+function waitlistEntryMatchesOpening(args: {
+  openingStartAt: Date
+  openingTimeZone: string
+  preferenceType: WaitlistPreferenceType
+  specificDate: Date | null
+  timeOfDay: WaitlistTimeOfDay | null
+  windowStartMin: number | null
+  windowEndMin: number | null
+}): boolean {
+  const {
+    openingStartAt,
+    openingTimeZone,
+    preferenceType,
+    specificDate,
+    timeOfDay,
+    windowStartMin,
+    windowEndMin,
+  } = args
+
+  if (preferenceType === WaitlistPreferenceType.ANY_TIME) {
+    return true
+  }
+
+  if (preferenceType === WaitlistPreferenceType.TIME_OF_DAY) {
+    if (!timeOfDay) return false
+    const openingHour = getZonedParts(openingStartAt, openingTimeZone).hour
+    return timeOfDayForHour(openingHour) === timeOfDay
+  }
+
+  if (preferenceType === WaitlistPreferenceType.SPECIFIC_DATE) {
+    if (!specificDate) return false
+    return sameZonedDate(openingStartAt, specificDate, openingTimeZone)
+  }
+
+  if (windowStartMin == null || windowEndMin == null) {
+    return false
+  }
+
+  const openingMinute = minuteOfDayInTimeZone(openingStartAt, openingTimeZone)
+  return openingMinute >= windowStartMin && openingMinute < windowEndMin
 }
 
 export async function POST(_req: Request, ctx: Ctx) {
@@ -68,7 +131,9 @@ export async function POST(_req: Request, ctx: Ctx) {
       where: { professionalId: proId },
       select: { enabled: true },
     })
-    if (!lm?.enabled) return jsonFail(409, 'Last-minute openings are disabled for this professional.')
+    if (!lm?.enabled) {
+      return jsonFail(409, 'Last-minute openings are disabled for this professional.')
+    }
 
     const openingTz = requireOpeningTimeZone(opening.timeZone)
     if (!openingTz) {
@@ -81,18 +146,41 @@ export async function POST(_req: Request, ctx: Ctx) {
     const now = new Date()
     const eightWeeksAgo = daysAgo(56)
 
-    // ---- Tier 1: waitlist + lapsed + no future bookings ----
-    const waitlist = await prisma.waitlistEntry.findMany({
+    const waitlistEntries = await prisma.waitlistEntry.findMany({
       where: {
         professionalId: proId,
         status: WaitlistStatus.ACTIVE,
         ...(opening.serviceId ? { serviceId: opening.serviceId } : {}),
       },
-      select: { clientId: true },
-      distinct: ['clientId'],
+      select: {
+        clientId: true,
+        preferenceType: true,
+        specificDate: true,
+        timeOfDay: true,
+        windowStartMin: true,
+        windowEndMin: true,
+      },
       take: 1000,
     })
-    const waitlistClientIds = waitlist.map((w) => w.clientId).filter(isNonEmptyString)
+
+    const matchedWaitlistClientIds = Array.from(
+      new Set(
+        waitlistEntries
+          .filter((entry) =>
+            waitlistEntryMatchesOpening({
+              openingStartAt: opening.startAt,
+              openingTimeZone: openingTz,
+              preferenceType: entry.preferenceType,
+              specificDate: entry.specificDate,
+              timeOfDay: entry.timeOfDay,
+              windowStartMin: entry.windowStartMin,
+              windowEndMin: entry.windowEndMin,
+            }),
+          )
+          .map((entry) => entry.clientId)
+          .filter(isNonEmptyString),
+      ),
+    )
 
     const upcoming = await prisma.booking.findMany({
       where: {
@@ -120,16 +208,15 @@ export async function POST(_req: Request, ctx: Ctx) {
 
     const lastByClient = new Map<string, Date>()
     for (const b of lastBookings) {
-      if (isNonEmptyString(b.clientId)) lastByClient.set(b.clientId, b.scheduledFor)
+      if (isNonEmptyString(b.clientId)) {
+        lastByClient.set(b.clientId, b.scheduledFor)
+      }
     }
 
-    const tier1ClientIds = waitlistClientIds.filter((clientId) => {
-      if (hasUpcoming.has(clientId)) return false
-      const last = lastByClient.get(clientId)
-      return Boolean(last && last.getTime() <= eightWeeksAgo.getTime())
+    const tier1ClientIds = matchedWaitlistClientIds.filter((clientId) => {
+      return !hasUpcoming.has(clientId)
     })
 
-    // ---- Tier 2: favorited pro + never booked pro ----
     const favorites = await prisma.professionalFavorite.findMany({
       where: { professionalId: proId },
       select: { userId: true },
@@ -144,10 +231,14 @@ export async function POST(_req: Request, ctx: Ctx) {
           take: 5000,
         })
       : []
+
     const favoriteClientIds = favoriteClients.map((c) => c.id).filter(isNonEmptyString)
 
     const everBooked = await prisma.booking.findMany({
-      where: { professionalId: proId, NOT: { status: BookingStatus.CANCELLED } },
+      where: {
+        professionalId: proId,
+        NOT: { status: BookingStatus.CANCELLED },
+      },
       select: { clientId: true },
       distinct: ['clientId'],
       take: 10000,
@@ -155,9 +246,10 @@ export async function POST(_req: Request, ctx: Ctx) {
     const everBookedSet = new Set(everBooked.map((b) => b.clientId).filter(isNonEmptyString))
 
     const tier1Set = new Set(tier1ClientIds)
-    const tier2ClientIds = favoriteClientIds.filter((cid) => !tier1Set.has(cid) && !everBookedSet.has(cid))
+    const tier2ClientIds = favoriteClientIds.filter(
+      (clientId) => !tier1Set.has(clientId) && !everBookedSet.has(clientId),
+    )
 
-    // ✅ IMPORTANT: keep tier literals narrowed to Tier by typing these arrays explicitly
     const tier1Candidates: Candidate[] = tier1ClientIds.map((clientId) => ({
       clientId,
       tier: 'TIER1_WAITLIST_LAPSED',
@@ -182,30 +274,35 @@ export async function POST(_req: Request, ctx: Ctx) {
     })
 
     const settingsByClient = new Map(
-      notifSettings.map((s) => [s.clientId, { enabled: s.lastMinuteEnabled, max: s.maxLastMinutePerDay }]),
+      notifSettings.map((s) => [
+        s.clientId,
+        { enabled: s.lastMinuteEnabled, max: s.maxLastMinutePerDay },
+      ]),
     )
 
-    // “Today” in opening timezone
     const todayStartUtc = startOfDayUtcInTimeZone(now, openingTz)
 
     const counts = await prisma.openingNotification.groupBy({
       by: ['clientId'],
-      where: { clientId: { in: candidateIds }, sentAt: { gte: todayStartUtc } },
+      where: {
+        clientId: { in: candidateIds },
+        sentAt: { gte: todayStartUtc },
+      },
       _count: { _all: true },
     })
     const sentTodayByClient = new Map(counts.map((c) => [c.clientId, c._count._all]))
 
-    // Enforce max-per-day within this batch too (tier order preserved by iteration order)
     const remainingByClient = new Map<string, number>()
-    for (const cid of candidateIds) {
-      const s = settingsByClient.get(cid)
-      if (s?.enabled === false) {
-        remainingByClient.set(cid, 0)
+    for (const clientId of candidateIds) {
+      const settings = settingsByClient.get(clientId)
+      if (settings?.enabled === false) {
+        remainingByClient.set(clientId, 0)
         continue
       }
-      const max = typeof s?.max === 'number' ? s.max : 2
-      const sent = sentTodayByClient.get(cid) ?? 0
-      remainingByClient.set(cid, Math.max(0, max - sent))
+
+      const max = typeof settings?.max === 'number' ? settings.max : 2
+      const sent = sentTodayByClient.get(clientId) ?? 0
+      remainingByClient.set(clientId, Math.max(0, max - sent))
     }
 
     const toCreate: Array<{
@@ -215,25 +312,28 @@ export async function POST(_req: Request, ctx: Ctx) {
       dedupeKey: string
     }> = []
 
-    for (const c of candidates) {
-      const remaining = remainingByClient.get(c.clientId) ?? 0
+    for (const candidate of candidates) {
+      const remaining = remainingByClient.get(candidate.clientId) ?? 0
       if (remaining <= 0) continue
 
       toCreate.push({
         openingId,
-        clientId: c.clientId,
-        tier: toOpeningTier(c.tier),
-        dedupeKey: `${openingId}:${c.clientId}:${c.tier}`,
+        clientId: candidate.clientId,
+        tier: toOpeningTier(candidate.tier),
+        dedupeKey: `${openingId}:${candidate.clientId}:${candidate.tier}`,
       })
 
-      remainingByClient.set(c.clientId, remaining - 1)
+      remainingByClient.set(candidate.clientId, remaining - 1)
     }
 
     if (!toCreate.length) {
       return jsonOk({ openingId, created: 0, reason: 'All candidates blocked by settings/daily limits' })
     }
 
-    const created = await prisma.openingNotification.createMany({ data: toCreate, skipDuplicates: true })
+    const created = await prisma.openingNotification.createMany({
+      data: toCreate,
+      skipDuplicates: true,
+    })
 
     return jsonOk(
       {

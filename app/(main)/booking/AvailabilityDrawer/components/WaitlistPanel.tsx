@@ -5,12 +5,12 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 
 import type { DrawerContext } from '../types'
-import { toISOFromDatetimeLocalInTimeZone } from '@/lib/bookingTime'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 import { isRecord, asTrimmedString, getRecordProp } from '@/lib/guards'
 
-type TimeBucket = 'MORNING' | 'AFTERNOON' | 'EVENING' | null
+type WaitlistPreferenceType = 'ANY_TIME' | 'TIME_OF_DAY' | 'SPECIFIC_DATE'
+type WaitlistTimeOfDay = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 type WaitlistEntryDTO = {
   id: string
@@ -18,14 +18,50 @@ type WaitlistEntryDTO = {
   professionalId: string
   serviceId: string
   mediaId: string | null
-  preferredStart: string
-  preferredEnd: string
-  preferredTimeBucket: string | null
+  notes: string | null
+  preferenceType: WaitlistPreferenceType
+  specificDate: string | null
+  timeOfDay: WaitlistTimeOfDay | null
+  windowStartMin: number | null
+  windowEndMin: number | null
 }
+
+type SavedPrefs = {
+  preferenceType: WaitlistPreferenceType
+  specificDate: string
+  timeOfDay: WaitlistTimeOfDay | null
+  notes: string
+}
+
+const PREFS_KEY = 'tovis:waitlist:prefs:v2'
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
   return asTrimmedString(getRecordProp(raw, 'error'))
+}
+
+function parseNullableStringProp(obj: Record<string, unknown>, key: string): string | null | undefined {
+  const raw = getRecordProp(obj, key)
+  if (raw === null) return null
+  if (raw === undefined) return undefined
+  return asTrimmedString(raw)
+}
+
+function parseNullableNumberProp(obj: Record<string, unknown>, key: string): number | null | undefined {
+  const raw = getRecordProp(obj, key)
+  if (raw === null) return null
+  if (raw === undefined) return undefined
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+}
+
+function parsePreferenceType(value: string | null): WaitlistPreferenceType | null {
+  if (value === 'ANY_TIME' || value === 'TIME_OF_DAY' || value === 'SPECIFIC_DATE') return value
+  return null
+}
+
+function parseTimeOfDay(value: string | null): WaitlistTimeOfDay | null {
+  if (value === 'MORNING' || value === 'AFTERNOON' || value === 'EVENING') return value
+  return null
 }
 
 function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | null {
@@ -38,36 +74,38 @@ function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | 
   const status = asTrimmedString(getRecordProp(entry, 'status'))
   const professionalId = asTrimmedString(getRecordProp(entry, 'professionalId'))
   const serviceId = asTrimmedString(getRecordProp(entry, 'serviceId'))
-  const preferredStart = asTrimmedString(getRecordProp(entry, 'preferredStart'))
-  const preferredEnd = asTrimmedString(getRecordProp(entry, 'preferredEnd'))
 
-  const mediaIdRaw = getRecordProp(entry, 'mediaId')
-  const mediaId = mediaIdRaw === null ? null : asTrimmedString(mediaIdRaw)
-  if (mediaIdRaw !== null && mediaId == null) return null
+  const mediaId = parseNullableStringProp(entry, 'mediaId')
+  const notes = parseNullableStringProp(entry, 'notes')
+  const preferenceType = parsePreferenceType(asTrimmedString(getRecordProp(entry, 'preferenceType')))
+  const specificDate = parseNullableStringProp(entry, 'specificDate')
+  const timeOfDay = parseTimeOfDay(parseNullableStringProp(entry, 'timeOfDay') ?? null)
+  const windowStartMin = parseNullableNumberProp(entry, 'windowStartMin')
+  const windowEndMin = parseNullableNumberProp(entry, 'windowEndMin')
 
-  const bucketRaw = getRecordProp(entry, 'preferredTimeBucket')
-  const preferredTimeBucket = bucketRaw === null ? null : asTrimmedString(bucketRaw)
-  if (bucketRaw !== null && preferredTimeBucket == null) return null
-
-  if (!id || !status || !professionalId || !serviceId || !preferredStart || !preferredEnd) return null
+  if (!id || !status || !professionalId || !serviceId || !preferenceType) return null
+  if (mediaId === undefined || notes === undefined || windowStartMin === undefined || windowEndMin === undefined) {
+    return null
+  }
 
   return {
     ok: true,
-    entry: { id, status, professionalId, serviceId, mediaId, preferredStart, preferredEnd, preferredTimeBucket },
+    entry: {
+      id,
+      status,
+      professionalId,
+      serviceId,
+      mediaId,
+      notes,
+      preferenceType,
+      specificDate: specificDate ?? null,
+      timeOfDay,
+      windowStartMin,
+      windowEndMin,
+    },
   }
 }
 
-function toFlexMinutes(v: unknown, fallback: number) {
-  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN
-  const x = Number.isFinite(n) ? Math.trunc(n) : fallback
-  const allowed = new Set([30, 60, 120, 240])
-  return allowed.has(x) ? x : fallback
-}
-
-/**
- * Convert "now" to YYYY-MM-DD + weekday in a given timeZone.
- * We intentionally avoid Date math in local tz.
- */
 function nowPartsInTz(timeZone: string) {
   const d = new Date()
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -77,40 +115,42 @@ function nowPartsInTz(timeZone: string) {
     day: '2-digit',
   }).formatToParts(d)
 
-  const y = parts.find((p) => p.type === 'year')?.value
-  const m = parts.find((p) => p.type === 'month')?.value
+  const year = parts.find((p) => p.type === 'year')?.value
+  const month = parts.find((p) => p.type === 'month')?.value
   const day = parts.find((p) => p.type === 'day')?.value
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+    .format(d)
+    .toLowerCase()
 
-  const w = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d).toLowerCase()
+  if (!year || !month || !day) return null
 
-  if (!y || !m || !day) return null
-  return { year: Number(y), month: Number(m), day: Number(day), weekday: w }
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    weekday,
+  }
 }
 
-function ymdToString(ymd: { year: number; month: number; day: number }) {
-  const mm = String(ymd.month).padStart(2, '0')
-  const dd = String(ymd.day).padStart(2, '0')
-  return `${ymd.year}-${mm}-${dd}`
+function ymdToString(ymd: { year: number; month: number; day: number }): string {
+  const month = String(ymd.month).padStart(2, '0')
+  const day = String(ymd.day).padStart(2, '0')
+  return `${ymd.year}-${month}-${day}`
 }
 
-function addDaysYmd(ymd: { year: number; month: number; day: number }, daysToAdd: number) {
-  // anchor at noon UTC so DST boundaries don’t bite the date math
+function addDaysYmd(
+  ymd: { year: number; month: number; day: number },
+  daysToAdd: number,
+): { year: number; month: number; day: number } {
   const d = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + daysToAdd, 12, 0, 0, 0))
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  }
 }
 
-/**
- * Build datetime-local string "YYYY-MM-DDTHH:MM" (interpreted later in appointmentTz).
- */
-function buildDatetimeLocal(ymd: { year: number; month: number; day: number }, hh: number, mm: number) {
-  const date = ymdToString(ymd)
-  const H = String(Math.min(23, Math.max(0, Math.trunc(hh)))).padStart(2, '0')
-  const M = String(Math.min(59, Math.max(0, Math.trunc(mm)))).padStart(2, '0')
-  return `${date}T${H}:${M}`
-}
-
-function weekdayIndex(shortLower: string) {
-  // sun..sat
+function weekdayIndex(shortLower: string): number {
   if (shortLower.startsWith('sun')) return 0
   if (shortLower.startsWith('mon')) return 1
   if (shortLower.startsWith('tue')) return 2
@@ -120,69 +160,69 @@ function weekdayIndex(shortLower: string) {
   return 6
 }
 
-function computeQuickPick(kind: 'TONIGHT' | 'TOMORROW' | 'WEEKEND', appointmentTz: string): string | null {
+function computeQuickPick(
+  kind: 'TONIGHT' | 'TOMORROW' | 'WEEKEND',
+  appointmentTz: string,
+): { preferenceType: WaitlistPreferenceType; specificDate: string; timeOfDay: WaitlistTimeOfDay | null } | null {
   const now = nowPartsInTz(appointmentTz)
   if (!now) return null
 
-  // choose sane defaults
-  // tonight: 6:00pm local to appointmentTz
-  // tomorrow: 10:00am
-  // weekend: next Saturday 10:00am
+  if (kind === 'TONIGHT') {
+    return {
+      preferenceType: 'TIME_OF_DAY',
+      specificDate: '',
+      timeOfDay: 'EVENING',
+    }
+  }
+
   if (kind === 'TOMORROW') {
-    const d = addDaysYmd(now, 1)
-    return buildDatetimeLocal(d, 10, 0)
+    const date = addDaysYmd(now, 1)
+    return {
+      preferenceType: 'SPECIFIC_DATE',
+      specificDate: ymdToString(date),
+      timeOfDay: null,
+    }
   }
 
-  if (kind === 'WEEKEND') {
-    const todayIdx = weekdayIndex(now.weekday)
-    const satIdx = 6
-    const delta = ((satIdx - todayIdx) + 7) % 7 || 7 // if today is sat, go to next sat
-    const d = addDaysYmd(now, delta)
-    return buildDatetimeLocal(d, 10, 0)
+  const todayIdx = weekdayIndex(now.weekday)
+  const saturdayIdx = 6
+  const delta = ((saturdayIdx - todayIdx) + 7) % 7 || 7
+  const date = addDaysYmd(now, delta)
+
+  return {
+    preferenceType: 'SPECIFIC_DATE',
+    specificDate: ymdToString(date),
+    timeOfDay: null,
   }
-
-  // TONIGHT
-  // if it’s already “late” in the appointment tz, bump to tomorrow night.
-  // We approximate “late” by checking current hour in appointment tz.
-  const hourParts = new Intl.DateTimeFormat('en-US', {
-    timeZone: appointmentTz,
-    hour: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date())
-  const hh = Number(hourParts.find((p) => p.type === 'hour')?.value ?? '0')
-  const isLate = Number.isFinite(hh) ? hh >= 18 : false
-
-  const base = isLate ? addDaysYmd(now, 1) : { year: now.year, month: now.month, day: now.day }
-  return buildDatetimeLocal(base, 18, 0)
-}
-
-const PREFS_KEY = 'tovis:waitlist:prefs:v1'
-
-type SavedPrefs = {
-  flexMinutes: number
-  notes: string
-  preferredTimeBucket: TimeBucket
 }
 
 function loadPrefs(): SavedPrefs | null {
   try {
     const raw = window.localStorage.getItem(PREFS_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<SavedPrefs>
-    const flex = toFlexMinutes(parsed.flexMinutes, 60)
-    const notes = typeof parsed.notes === 'string' ? parsed.notes : ''
-    const b = parsed.preferredTimeBucket
-    const preferredTimeBucket: TimeBucket =
-      b === 'MORNING' || b === 'AFTERNOON' || b === 'EVENING' ? b : null
-    return { flexMinutes: flex, notes, preferredTimeBucket }
+
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return null
+
+    const preferenceType = parsePreferenceType(asTrimmedString(getRecordProp(parsed, 'preferenceType'))) ?? 'ANY_TIME'
+    const specificDate = asTrimmedString(getRecordProp(parsed, 'specificDate')) ?? ''
+    const timeOfDay = parseTimeOfDay(asTrimmedString(getRecordProp(parsed, 'timeOfDay')))
+    const notes = asTrimmedString(getRecordProp(parsed, 'notes')) ?? ''
+
+    return {
+      preferenceType,
+      specificDate,
+      timeOfDay,
+      notes,
+    }
   } catch {
     return null
   }
 }
 
-function savePrefs(p: SavedPrefs) {
+function savePrefs(prefs: SavedPrefs) {
   try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
   } catch {
     // ignore
   }
@@ -204,33 +244,39 @@ export default function WaitlistPanel({
   const router = useRouter()
 
   const [open, setOpen] = React.useState(false)
-  const [desired, setDesired] = React.useState('') // datetime-local string
-  const [flexMinutes, setFlexMinutes] = React.useState(60)
+  const [preferenceType, setPreferenceType] = React.useState<WaitlistPreferenceType>('ANY_TIME')
+  const [specificDate, setSpecificDate] = React.useState('')
+  const [timeOfDay, setTimeOfDay] = React.useState<WaitlistTimeOfDay | null>(null)
   const [notes, setNotes] = React.useState('')
-  const [preferredTimeBucket, setPreferredTimeBucket] = React.useState<TimeBucket>(null)
 
   const [posting, setPosting] = React.useState(false)
   const [msg, setMsg] = React.useState<string | null>(null)
   const [ok, setOk] = React.useState(false)
 
+  React.useEffect(() => {
+    if (!canWaitlist) return
+    const prefs = loadPrefs()
+    if (!prefs) return
+    setPreferenceType(prefs.preferenceType)
+    setSpecificDate(prefs.specificDate)
+    setTimeOfDay(prefs.timeOfDay)
+    setNotes(prefs.notes)
+  }, [canWaitlist])
+
+  React.useEffect(() => {
+    if (!canWaitlist) return
+    savePrefs({
+      preferenceType,
+      specificDate,
+      timeOfDay,
+      notes,
+    })
+  }, [canWaitlist, preferenceType, specificDate, timeOfDay, notes])
+
   if (!canWaitlist) return null
 
   const professionalId = (context.professionalId || '').trim() || null
   const serviceId = (effectiveServiceId || '').trim() || null
-
-  // Load saved prefs once
-  React.useEffect(() => {
-    const p = loadPrefs()
-    if (!p) return
-    setFlexMinutes(p.flexMinutes)
-    setNotes(p.notes)
-    setPreferredTimeBucket(p.preferredTimeBucket)
-  }, [])
-
-  // Persist prefs whenever they change (cheap + reliable)
-  React.useEffect(() => {
-    savePrefs({ flexMinutes, notes, preferredTimeBucket })
-  }, [flexMinutes, notes, preferredTimeBucket])
 
   function openForm() {
     setMsg(null)
@@ -246,17 +292,19 @@ export default function WaitlistPanel({
   }
 
   function resetFieldsButKeepPrefs() {
-    setDesired('')
-    // keep flexMinutes/notes/bucket (these are “remember my prefs”)
+    setMsg(null)
+    setOk(false)
   }
 
   function applyQuickPick(kind: 'TONIGHT' | 'TOMORROW' | 'WEEKEND') {
-    const v = computeQuickPick(kind, appointmentTz)
-    if (v) {
-      setDesired(v)
-      setMsg(null)
-      setOk(false)
-    }
+    const next = computeQuickPick(kind, appointmentTz)
+    if (!next) return
+
+    setPreferenceType(next.preferenceType)
+    setSpecificDate(next.specificDate)
+    setTimeOfDay(next.timeOfDay)
+    setMsg(null)
+    setOk(false)
   }
 
   async function submit() {
@@ -265,20 +313,32 @@ export default function WaitlistPanel({
       setMsg('Missing professional. Please close and try again.')
       return
     }
+
     if (!serviceId) {
       setOk(false)
       setMsg('This look is missing a service link, so a waitlist request can’t be created yet.')
       return
     }
+
     if (posting) return
+
+    if (preferenceType === 'SPECIFIC_DATE' && !specificDate) {
+      setOk(false)
+      setMsg('Please choose a date.')
+      return
+    }
+
+    if (preferenceType === 'TIME_OF_DAY' && !timeOfDay) {
+      setOk(false)
+      setMsg('Please choose a time of day.')
+      return
+    }
 
     setPosting(true)
     setMsg(null)
     setOk(false)
 
     try {
-      const desiredISO = desired ? toISOFromDatetimeLocalInTimeZone(desired, appointmentTz) : null
-
       const res = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -286,11 +346,12 @@ export default function WaitlistPanel({
           professionalId,
           serviceId,
           mediaId: context.mediaId ?? null,
-
-          desiredFor: desiredISO,
-          preferredTimeBucket: preferredTimeBucket, // ✅ new (server can ignore safely)
-          flexibilityMinutes: flexMinutes,
           notes: notes.trim() || null,
+          preferenceType,
+          specificDate: preferenceType === 'SPECIFIC_DATE' ? specificDate : null,
+          timeOfDay: preferenceType === 'TIME_OF_DAY' ? timeOfDay : null,
+          windowStartMin: null,
+          windowEndMin: null,
         }),
       })
 
@@ -323,12 +384,12 @@ export default function WaitlistPanel({
     }
   }
 
-  const bucketLabel =
-    preferredTimeBucket === 'MORNING'
+  const timeOfDayLabel =
+    timeOfDay === 'MORNING'
       ? 'Morning'
-      : preferredTimeBucket === 'AFTERNOON'
+      : timeOfDay === 'AFTERNOON'
         ? 'Afternoon'
-        : preferredTimeBucket === 'EVENING'
+        : timeOfDay === 'EVENING'
           ? 'Evening'
           : 'Any time'
 
@@ -359,7 +420,6 @@ export default function WaitlistPanel({
         </button>
       ) : (
         <div className="mt-3 grid gap-3">
-          {/* Quick picks */}
           <div className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Quick picks</div>
             <div className="grid grid-cols-3 gap-2">
@@ -389,77 +449,81 @@ export default function WaitlistPanel({
               </button>
             </div>
             <div className="text-[11px] font-semibold text-textSecondary">
-              These set a suggested time in <span className="font-black text-textPrimary">{appointmentTz}</span>.
+              Quick picks use <span className="font-black text-textPrimary">{appointmentTz}</span>.
             </div>
           </div>
 
-          {/* Desired datetime */}
           <label className="text-[12px] font-black text-textPrimary">
-            Preferred date/time (optional)
-            <input
-              type="datetime-local"
-              value={desired}
-              onChange={(e) => setDesired(e.target.value)}
-              disabled={posting}
-              className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
-            />
-          </label>
-
-          {/* Time bucket */}
-          <label className="text-[12px] font-black text-textPrimary">
-            Time window
+            Preference type
             <select
-              value={preferredTimeBucket ?? ''}
+              value={preferenceType}
               onChange={(e) => {
-                const v = e.target.value
-                const next: TimeBucket = v === 'MORNING' || v === 'AFTERNOON' || v === 'EVENING' ? v : null
-                setPreferredTimeBucket(next)
+                const value = parsePreferenceType(e.target.value)
+                if (!value) return
+                setPreferenceType(value)
+
+                if (value !== 'SPECIFIC_DATE') setSpecificDate('')
+                if (value !== 'TIME_OF_DAY') setTimeOfDay(null)
               }}
               disabled={posting}
               className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
             >
-              <option value="">Any time</option>
-              <option value="MORNING">Morning</option>
-              <option value="AFTERNOON">Afternoon</option>
-              <option value="EVENING">Evening</option>
-            </select>
-            <div className="mt-1 text-[11px] font-semibold text-textSecondary">
-              Current preference: <span className="font-black text-textPrimary">{bucketLabel}</span> (saved on this device)
-            </div>
-          </label>
-
-          {/* Flex */}
-          <label className="text-[12px] font-black text-textPrimary">
-            Flexibility
-            <select
-              value={flexMinutes}
-              onChange={(e) => setFlexMinutes(toFlexMinutes(e.target.value, 60))}
-              disabled={posting}
-              className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
-            >
-              <option value={30}>± 30 minutes</option>
-              <option value={60}>± 1 hour</option>
-              <option value={120}>± 2 hours</option>
-              <option value={240}>± 4 hours</option>
+              <option value="ANY_TIME">Any time</option>
+              <option value="TIME_OF_DAY">Time of day</option>
+              <option value="SPECIFIC_DATE">Specific day</option>
             </select>
           </label>
 
-          {/* Notes */}
+          {preferenceType === 'TIME_OF_DAY' ? (
+            <label className="text-[12px] font-black text-textPrimary">
+              Time of day
+              <select
+                value={timeOfDay ?? ''}
+                onChange={(e) => {
+                  const value = parseTimeOfDay(e.target.value)
+                  setTimeOfDay(value)
+                }}
+                disabled={posting}
+                className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+              >
+                <option value="">Choose one</option>
+                <option value="MORNING">Morning</option>
+                <option value="AFTERNOON">Afternoon</option>
+                <option value="EVENING">Evening</option>
+              </select>
+              <div className="mt-1 text-[11px] font-semibold text-textSecondary">
+                Current preference: <span className="font-black text-textPrimary">{timeOfDayLabel}</span>
+              </div>
+            </label>
+          ) : null}
+
+          {preferenceType === 'SPECIFIC_DATE' ? (
+            <label className="text-[12px] font-black text-textPrimary">
+              Preferred day
+              <input
+                type="date"
+                value={specificDate}
+                onChange={(e) => setSpecificDate(e.target.value)}
+                disabled={posting}
+                className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+              />
+            </label>
+          ) : null}
+
           <label className="text-[12px] font-black text-textPrimary">
             Notes (optional)
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               disabled={posting}
-              placeholder="Ex: after 5pm, weekends, prefer shorter appointment"
+              placeholder="Ex: after work, weekends, short appointments preferred"
               className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
             />
             <div className="mt-1 text-[11px] font-semibold text-textSecondary">
-              Notes + flexibility + time window are remembered automatically.
+              We’ll remember your waitlist preference on this device.
             </div>
           </label>
 
-          {/* Actions */}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"

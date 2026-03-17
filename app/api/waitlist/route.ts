@@ -1,7 +1,11 @@
 // app/api/waitlist/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString, requireClient } from '@/app/api/_utils'
-import { WaitlistStatus } from '@prisma/client'
+import {
+  WaitlistPreferenceType,
+  WaitlistStatus,
+  WaitlistTimeOfDay,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,63 +13,145 @@ function isObject(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
 
-function toISODateOrNull(v: unknown): Date | null {
+function parseSpecificDate(v: unknown): Date | null {
   const s = pickString(v)
   if (!s) return null
-  const d = new Date(s)
+  const d = new Date(`${s}T00:00:00.000Z`)
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-function clampInt(v: unknown, min: number, max: number, fallback: number) {
-  const n = typeof v === 'number' ? v : pickInt(v)
-  if (!Number.isFinite(Number(n))) return fallback
-  return Math.max(min, Math.min(max, Math.floor(Number(n))))
+function parsePreferenceType(v: unknown): WaitlistPreferenceType | null {
+  if (v === WaitlistPreferenceType.ANY_TIME) return WaitlistPreferenceType.ANY_TIME
+  if (v === WaitlistPreferenceType.TIME_OF_DAY) return WaitlistPreferenceType.TIME_OF_DAY
+  if (v === WaitlistPreferenceType.SPECIFIC_DATE) return WaitlistPreferenceType.SPECIFIC_DATE
+  if (v === WaitlistPreferenceType.TIME_RANGE) return WaitlistPreferenceType.TIME_RANGE
+  return null
 }
 
-type PreferredWindow =
-  | { ok: true; start: Date; end: Date }
+function parseTimeOfDay(v: unknown): WaitlistTimeOfDay | null {
+  if (v === WaitlistTimeOfDay.MORNING) return WaitlistTimeOfDay.MORNING
+  if (v === WaitlistTimeOfDay.AFTERNOON) return WaitlistTimeOfDay.AFTERNOON
+  if (v === WaitlistTimeOfDay.EVENING) return WaitlistTimeOfDay.EVENING
+  return null
+}
+
+function parseMinuteOfDay(v: unknown): number | null {
+  const n = pickInt(v)
+  if (n == null) return null
+  if (!Number.isInteger(n)) return null
+  if (n < 0 || n > 1440) return null
+  return n
+}
+
+type ParsedPreference =
+  | {
+      ok: true
+      preferenceType: WaitlistPreferenceType
+      specificDate: Date | null
+      timeOfDay: WaitlistTimeOfDay | null
+      windowStartMin: number | null
+      windowEndMin: number | null
+    }
   | { ok: false; error: string }
 
-/**
- * Accept either:
- * A) preferredStart + preferredEnd
- * B) desiredFor + flexibilityMinutes -> window derived
- */
-function parsePreferredWindow(body: unknown): PreferredWindow {
+function parsePreference(body: unknown): ParsedPreference {
   if (!isObject(body)) return { ok: false, error: 'Invalid body.' }
 
-  const preferredStart = toISODateOrNull(body.preferredStart)
-  const preferredEnd = toISODateOrNull(body.preferredEnd)
-
-  const desiredFor = toISODateOrNull(body.desiredFor)
-  const flexibilityMinutes = clampInt(body.flexibilityMinutes, 15, 24 * 60, 60)
-
-  let start: Date | null = preferredStart
-  let end: Date | null = preferredEnd
-
-  if (!start || !end) {
-    if (!desiredFor) {
-      return { ok: false, error: 'Provide preferredStart/preferredEnd OR desiredFor + flexibilityMinutes.' }
-    }
-    start = new Date(desiredFor.getTime() - flexibilityMinutes * 60_000)
-    end = new Date(desiredFor.getTime() + flexibilityMinutes * 60_000)
+  const preferenceType = parsePreferenceType(body.preferenceType)
+  if (!preferenceType) {
+    return { ok: false, error: 'Invalid preferenceType.' }
   }
 
-  if (end <= start) return { ok: false, error: 'preferredEnd must be after preferredStart.' }
-  return { ok: true, start, end }
-}
+  if (preferenceType === WaitlistPreferenceType.ANY_TIME) {
+    return {
+      ok: true,
+      preferenceType,
+      specificDate: null,
+      timeOfDay: null,
+      windowStartMin: null,
+      windowEndMin: null,
+    }
+  }
 
-async function validateMediaBelongsToPro(args: { mediaId: string; professionalId: string }) {
+  if (preferenceType === WaitlistPreferenceType.TIME_OF_DAY) {
+    const timeOfDay = parseTimeOfDay(body.timeOfDay)
+    if (!timeOfDay) {
+      return { ok: false, error: 'timeOfDay is required for TIME_OF_DAY.' }
+    }
+
+    return {
+      ok: true,
+      preferenceType,
+      specificDate: null,
+      timeOfDay,
+      windowStartMin: null,
+      windowEndMin: null,
+    }
+  }
+
+  if (preferenceType === WaitlistPreferenceType.SPECIFIC_DATE) {
+    const specificDate = parseSpecificDate(body.specificDate)
+    if (!specificDate) {
+      return { ok: false, error: 'specificDate is required for SPECIFIC_DATE.' }
+    }
+
+    return {
+      ok: true,
+      preferenceType,
+      specificDate,
+      timeOfDay: null,
+      windowStartMin: null,
+      windowEndMin: null,
+    }
+  }
+
+  const windowStartMin = parseMinuteOfDay(body.windowStartMin)
+  const windowEndMin = parseMinuteOfDay(body.windowEndMin)
+
+  if (windowStartMin == null || windowEndMin == null) {
+    return {
+      ok: false,
+      error: 'windowStartMin and windowEndMin are required for TIME_RANGE.',
+    }
+  }
+
+  if (windowStartMin >= windowEndMin) {
+    return {
+      ok: false,
+      error: 'windowEndMin must be greater than windowStartMin.',
+    }
+  }
+
+  return {
+    ok: true,
+    preferenceType,
+    specificDate: null,
+    timeOfDay: null,
+    windowStartMin,
+    windowEndMin,
+  }
+}
+type MediaOwnershipCheck =
+  | { ok: true }
+  | { ok: false; error: string }
+
+async function validateMediaBelongsToPro(args: {
+  mediaId: string
+  professionalId: string
+}): Promise<MediaOwnershipCheck> {
   const { mediaId, professionalId } = args
-  const m = await prisma.mediaAsset.findUnique({
+
+  const media = await prisma.mediaAsset.findUnique({
     where: { id: mediaId },
     select: { id: true, professionalId: true },
   })
-  if (!m) return { ok: false as const, error: 'mediaId not found.' }
-  if (m.professionalId !== professionalId) {
-    return { ok: false as const, error: 'mediaId does not belong to this professional.' }
+
+  if (!media) return { ok: false, error: 'mediaId not found.' }
+  if (media.professionalId !== professionalId) {
+    return { ok: false, error: 'mediaId does not belong to this professional.' }
   }
-  return { ok: true as const }
+
+  return { ok: true }
 }
 
 export async function POST(req: Request) {
@@ -73,26 +159,25 @@ export async function POST(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const body = await req.json().catch(() => ({}))
+    const body: unknown = await req.json().catch(() => ({}))
+    if (!isObject(body)) return jsonFail(400, 'Invalid body.')
 
-    const professionalId = pickString(isObject(body) ? body.professionalId : null)
-    const serviceId = pickString(isObject(body) ? body.serviceId : null)
-    const mediaId = pickString(isObject(body) ? body.mediaId : null)
-    const preferredTimeBucket = pickString(isObject(body) ? body.preferredTimeBucket : null)
-    const notes = pickString(isObject(body) ? body.notes : null)
+    const professionalId = pickString(body.professionalId)
+    const serviceId = pickString(body.serviceId)
+    const mediaId = pickString(body.mediaId)
+    const notes = pickString(body.notes)
 
     if (!professionalId) return jsonFail(400, 'Missing professionalId.')
     if (!serviceId) return jsonFail(400, 'Missing serviceId.')
 
-    const window = parsePreferredWindow(body)
-    if (!window.ok) return jsonFail(400, window.error)
+    const parsedPreference = parsePreference(body)
+    if (!parsedPreference.ok) return jsonFail(400, parsedPreference.error)
 
     if (mediaId) {
       const mediaCheck = await validateMediaBelongsToPro({ mediaId, professionalId })
       if (!mediaCheck.ok) return jsonFail(400, mediaCheck.error)
     }
 
-    // Treat NOTIFIED as still “active-ish” so they can’t spam duplicates
     const existing = await prisma.waitlistEntry.findFirst({
       where: {
         clientId: auth.clientId,
@@ -102,7 +187,10 @@ export async function POST(req: Request) {
       },
       select: { id: true },
     })
-    if (existing) return jsonFail(409, 'You already have an active waitlist request for this pro/service.')
+
+    if (existing) {
+      return jsonFail(409, 'You already have an active waitlist request for this pro/service.')
+    }
 
     const entry = await prisma.waitlistEntry.create({
       data: {
@@ -111,9 +199,11 @@ export async function POST(req: Request) {
         serviceId,
         mediaId: mediaId ?? null,
         notes: notes ?? null,
-        preferredStart: window.start,
-        preferredEnd: window.end,
-        preferredTimeBucket: preferredTimeBucket ?? null,
+        preferenceType: parsedPreference.preferenceType,
+        specificDate: parsedPreference.specificDate,
+        timeOfDay: parsedPreference.timeOfDay,
+        windowStartMin: parsedPreference.windowStartMin,
+        windowEndMin: parsedPreference.windowEndMin,
         status: WaitlistStatus.ACTIVE,
       },
       select: {
@@ -122,9 +212,12 @@ export async function POST(req: Request) {
         professionalId: true,
         serviceId: true,
         mediaId: true,
-        preferredStart: true,
-        preferredEnd: true,
-        preferredTimeBucket: true,
+        notes: true,
+        preferenceType: true,
+        specificDate: true,
+        timeOfDay: true,
+        windowStartMin: true,
+        windowEndMin: true,
       },
     })
 
@@ -140,42 +233,57 @@ export async function PATCH(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const body = await req.json().catch(() => ({}))
-    const id = pickString(isObject(body) ? body.id : null)
+    const body: unknown = await req.json().catch(() => ({}))
+    if (!isObject(body)) return jsonFail(400, 'Invalid body.')
+
+    const id = pickString(body.id)
     if (!id) return jsonFail(400, 'Missing id.')
 
     const existing = await prisma.waitlistEntry.findUnique({
       where: { id },
-      select: { id: true, clientId: true, professionalId: true, status: true },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        serviceId: true,
+        status: true,
+      },
     })
+
     if (!existing) return jsonFail(404, 'Waitlist entry not found.')
     if (existing.clientId !== auth.clientId) return jsonFail(403, 'Forbidden.')
 
-    // No silent reactivation
-    if (existing.status === WaitlistStatus.CANCELLED) return jsonFail(409, 'This waitlist entry is cancelled.')
-    if (existing.status === WaitlistStatus.BOOKED) return jsonFail(409, 'This waitlist entry is already booked.')
+    if (existing.status === WaitlistStatus.CANCELLED) {
+      return jsonFail(409, 'This waitlist entry is cancelled.')
+    }
+    if (existing.status === WaitlistStatus.BOOKED) {
+      return jsonFail(409, 'This waitlist entry is already booked.')
+    }
 
-    const window = parsePreferredWindow(body)
-    if (!window.ok) return jsonFail(400, window.error)
+    const parsedPreference = parsePreference(body)
+    if (!parsedPreference.ok) return jsonFail(400, parsedPreference.error)
 
-    const preferredTimeBucket = pickString(isObject(body) ? body.preferredTimeBucket : null)
-    const notes = pickString(isObject(body) ? body.notes : null)
-    const mediaId = pickString(isObject(body) ? body.mediaId : null)
+    const notes = pickString(body.notes)
+    const mediaId = pickString(body.mediaId)
 
     if (mediaId) {
-      const mediaCheck = await validateMediaBelongsToPro({ mediaId, professionalId: existing.professionalId })
+      const mediaCheck = await validateMediaBelongsToPro({
+        mediaId,
+        professionalId: existing.professionalId,
+      })
       if (!mediaCheck.ok) return jsonFail(400, mediaCheck.error)
     }
 
     const updated = await prisma.waitlistEntry.update({
       where: { id },
       data: {
-        preferredStart: window.start,
-        preferredEnd: window.end,
-        preferredTimeBucket: preferredTimeBucket ?? null,
         notes: notes ?? null,
         mediaId: mediaId ?? null,
-        // status intentionally unchanged on PATCH
+        preferenceType: parsedPreference.preferenceType,
+        specificDate: parsedPreference.specificDate,
+        timeOfDay: parsedPreference.timeOfDay,
+        windowStartMin: parsedPreference.windowStartMin,
+        windowEndMin: parsedPreference.windowEndMin,
       },
       select: {
         id: true,
@@ -183,9 +291,12 @@ export async function PATCH(req: Request) {
         professionalId: true,
         serviceId: true,
         mediaId: true,
-        preferredStart: true,
-        preferredEnd: true,
-        preferredTimeBucket: true,
+        notes: true,
+        preferenceType: true,
+        specificDate: true,
+        timeOfDay: true,
+        windowStartMin: true,
+        windowEndMin: true,
       },
     })
 
@@ -210,13 +321,13 @@ export async function DELETE(req: Request) {
       select: { id: true, clientId: true, status: true },
     })
 
-    // Idempotent delete
     if (!existing) return jsonOk({}, 200)
     if (existing.clientId !== auth.clientId) return jsonFail(403, 'Forbidden.')
 
-    // If already cancelled, keep it idempotent
     if (existing.status === WaitlistStatus.CANCELLED) return jsonOk({}, 200)
-    if (existing.status === WaitlistStatus.BOOKED) return jsonFail(409, 'This waitlist entry is already booked.')
+    if (existing.status === WaitlistStatus.BOOKED) {
+      return jsonFail(409, 'This waitlist entry is already booked.')
+    }
 
     await prisma.waitlistEntry.update({
       where: { id },
