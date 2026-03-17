@@ -3,6 +3,8 @@
 export type BookingErrorCode =
   | "BOOKING_ID_REQUIRED"
   | "HOLD_ID_REQUIRED"
+  | "CLIENT_ID_REQUIRED"
+  | "LOCATION_ID_REQUIRED"
   | "LOCATION_TYPE_REQUIRED"
   | "INVALID_LOCATION_TYPE"
   | "OFFERING_ID_REQUIRED"
@@ -43,6 +45,23 @@ export type BookingErrorCode =
   | "TIME_HELD"
   | "TIME_NOT_AVAILABLE"
   | "ADDONS_INVALID"
+  | "CLIENT_NOT_FOUND"
+  | "MISSING_MEDIA_ID"
+  | "OPENING_NOT_AVAILABLE"
+  | "BOOKING_NOT_RESCHEDULABLE"
+  | "BOOKING_ALREADY_STARTED"
+  | "BOOKING_MISSING_OFFERING"
+  | "HOLD_TIME_INVALID"
+  | "BOOKING_CANNOT_EDIT_CANCELLED"
+  | "BOOKING_CANNOT_EDIT_COMPLETED"
+  | "BAD_LOCATION"
+  | "BAD_LOCATION_MODE"
+  | "DURATION_MISMATCH"
+  | "AFTERCARE_TOKEN_MISSING"
+  | "AFTERCARE_TOKEN_INVALID"
+  | "AFTERCARE_NOT_COMPLETED"
+  | "AFTERCARE_CLIENT_MISMATCH"
+  | "AFTERCARE_OFFERING_MISMATCH"
   | "INTERNAL_ERROR";
 
 export type BookingErrorUiAction =
@@ -94,6 +113,20 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "PICK_NEW_SLOT",
     message: "Hold id is required.",
     userMessage: "Missing hold. Please pick a slot again.",
+  },
+  CLIENT_ID_REQUIRED: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Client id is required.",
+    userMessage: "Missing client id.",
+  },
+  LOCATION_ID_REQUIRED: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Location id is required.",
+    userMessage: "Missing location id.",
   },
   LOCATION_TYPE_REQUIRED: {
     httpStatus: 400,
@@ -184,7 +217,7 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     httpStatus: 409,
     retryable: false,
     uiAction: "PICK_NEW_SLOT",
-    message: "Location not found or not bookable.",
+    message: "Requested location was not found or is not bookable.",
     userMessage: "This location is no longer available.",
   },
   FORBIDDEN: {
@@ -390,6 +423,128 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "One or more add-ons are invalid.",
     userMessage: "One or more add-ons are invalid for this booking.",
+  },
+
+  CLIENT_NOT_FOUND: {
+    httpStatus: 404,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Client not found.",
+    userMessage: "Client not found.",
+  },
+  MISSING_MEDIA_ID: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Discovery bookings require a media id.",
+    userMessage: "This booking is missing required media.",
+  },
+  OPENING_NOT_AVAILABLE: {
+    httpStatus: 409,
+    retryable: true,
+    uiAction: "PICK_NEW_SLOT",
+    message: "Requested opening is no longer available.",
+    userMessage: "That opening was just taken. Please pick another slot.",
+  },
+  BOOKING_NOT_RESCHEDULABLE: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Booking cannot be rescheduled.",
+    userMessage: "This booking cannot be rescheduled.",
+  },
+  BOOKING_ALREADY_STARTED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Booking has already started.",
+    userMessage: "This booking has started and cannot be rescheduled.",
+  },
+  BOOKING_MISSING_OFFERING: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "CONTACT_SUPPORT",
+    message: "Booking is missing offering information.",
+    userMessage:
+      "This booking is missing service information and cannot be processed.",
+  },
+  HOLD_TIME_INVALID: {
+    httpStatus: 400,
+    retryable: true,
+    uiAction: "PICK_NEW_SLOT",
+    message: "Hold time is invalid.",
+    userMessage: "Hold time is invalid. Please pick a new slot.",
+  },
+  BOOKING_CANNOT_EDIT_CANCELLED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Cancelled bookings cannot be edited.",
+    userMessage: "Cancelled bookings cannot be edited.",
+  },
+  BOOKING_CANNOT_EDIT_COMPLETED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Completed bookings cannot be edited.",
+    userMessage: "Completed bookings cannot be edited.",
+  },
+  BAD_LOCATION: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "FIX_LOCATION_CONFIG",
+    message: "Booking location is invalid or not bookable.",
+    userMessage: "This booking location is invalid or no longer bookable.",
+  },
+  BAD_LOCATION_MODE: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "FIX_LOCATION_CONFIG",
+    message: "Booking location does not support the requested mode.",
+    userMessage:
+      "This booking location no longer supports the selected booking type.",
+  },
+  DURATION_MISMATCH: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Booking duration does not match the selected services.",
+    userMessage: "Duration does not match the selected services.",
+  },
+  AFTERCARE_TOKEN_MISSING: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Aftercare token is missing.",
+    userMessage: "Missing aftercare token.",
+  },
+  AFTERCARE_TOKEN_INVALID: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Aftercare token is invalid.",
+    userMessage: "Invalid aftercare token.",
+  },
+  AFTERCARE_NOT_COMPLETED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Only completed bookings can be rebooked from aftercare.",
+    userMessage: "Only completed bookings can be rebooked.",
+  },
+  AFTERCARE_CLIENT_MISMATCH: {
+    httpStatus: 403,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Aftercare token does not match the current client.",
+    userMessage: "That aftercare link does not belong to you.",
+  },
+  AFTERCARE_OFFERING_MISMATCH: {
+    httpStatus: 403,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Aftercare token does not match the requested offering.",
+    userMessage: "That aftercare link does not match this service.",
   },
 
   INTERNAL_ERROR: {

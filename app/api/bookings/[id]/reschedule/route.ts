@@ -41,13 +41,6 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-type RescheduleLocalErrorCode =
-  | 'BOOKING_NOT_RESCHEDULABLE'
-  | 'BOOKING_ALREADY_STARTED'
-  | 'BOOKING_MISSING_OFFERING'
-  | 'HOLD_TIME_INVALID'
-  | 'INTERNAL_ERROR'
-
 const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 type WorkingHoursGuardCode =
@@ -64,18 +57,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function rescheduleLocalFail(
-  status: number,
-  code: RescheduleLocalErrorCode,
-  message: string,
-) {
-  return jsonFail(status, message, { code })
-}
-
-function throwLocalCode(code: RescheduleLocalErrorCode): never {
-  throw new Error(code)
 }
 
 function normalizeAddress(value: unknown): string | null {
@@ -216,21 +197,23 @@ export async function POST(req: Request, { params }: Ctx) {
           },
         })
 
-        if (!booking) throw bookingError('BOOKING_NOT_FOUND')
+        if (!booking) {
+          throw bookingError('BOOKING_NOT_FOUND')
+        }
 
         if (
           booking.status === BookingStatus.COMPLETED ||
           booking.status === BookingStatus.CANCELLED
         ) {
-          throwLocalCode('BOOKING_NOT_RESCHEDULABLE')
+          throw bookingError('BOOKING_NOT_RESCHEDULABLE')
         }
 
         if (booking.startedAt || booking.finishedAt) {
-          throwLocalCode('BOOKING_ALREADY_STARTED')
+          throw bookingError('BOOKING_ALREADY_STARTED')
         }
 
         if (!booking.offeringId) {
-          throwLocalCode('BOOKING_MISSING_OFFERING')
+          throw bookingError('BOOKING_MISSING_OFFERING')
         }
 
         const bookingOffering = await tx.professionalServiceOffering.findUnique({
@@ -287,35 +270,50 @@ export async function POST(req: Request, { params }: Ctx) {
           },
         })
 
-        if (!hold) throw bookingError('HOLD_NOT_FOUND')
-        if (hold.clientId !== clientId) throw bookingError('HOLD_FORBIDDEN')
+        if (!hold) {
+          throw bookingError('HOLD_NOT_FOUND')
+        }
+
+        if (hold.clientId !== clientId) {
+          throw bookingError('HOLD_FORBIDDEN')
+        }
+
         if (hold.expiresAt.getTime() <= now.getTime()) {
           throw bookingError('HOLD_EXPIRED')
         }
+
         if (hold.professionalId !== booking.professionalId) {
           throw bookingError('HOLD_MISMATCH', {
             message: 'Hold is for a different professional.',
-            userMessage: 'That hold no longer matches this booking. Please pick a new slot.',
-          })
-        }
-        if (hold.offeringId !== booking.offeringId) {
-          throw bookingError('HOLD_MISMATCH', {
-            message: 'Hold is for a different service.',
-            userMessage: 'That hold no longer matches this booking. Please pick a new slot.',
+            userMessage:
+              'That hold no longer matches this booking. Please pick a new slot.',
           })
         }
 
-        if (requestedLocationType && hold.locationType !== requestedLocationType) {
+        if (hold.offeringId !== booking.offeringId) {
+          throw bookingError('HOLD_MISMATCH', {
+            message: 'Hold is for a different service.',
+            userMessage:
+              'That hold no longer matches this booking. Please pick a new slot.',
+          })
+        }
+
+        if (
+          requestedLocationType &&
+          hold.locationType !== requestedLocationType
+        ) {
           throw bookingError('HOLD_MISMATCH', {
             message: 'Hold location type does not match the requested location type.',
-            userMessage: 'That hold no longer matches this booking. Please pick a new slot.',
+            userMessage:
+              'That hold no longer matches this booking. Please pick a new slot.',
           })
         }
 
         if (!hold.locationId) {
           throw bookingError('HOLD_MISMATCH', {
             message: 'Hold is missing location info.',
-            userMessage: 'That hold is missing location info. Please pick a new slot.',
+            userMessage:
+              'That hold is missing location info. Please pick a new slot.',
           })
         }
 
@@ -378,13 +376,16 @@ export async function POST(req: Request, { params }: Ctx) {
               normalizeAddress(locationContext.formattedAddress)
             : null
 
-        if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
+        if (
+          hold.locationType === ServiceLocationType.SALON &&
+          !salonAddressText
+        ) {
           throw bookingError('SALON_LOCATION_ADDRESS_REQUIRED')
         }
 
         const newStart = normalizeToMinute(new Date(hold.scheduledFor))
         if (!Number.isFinite(newStart.getTime())) {
-          throwLocalCode('HOLD_TIME_INVALID')
+          throw bookingError('HOLD_TIME_INVALID')
         }
 
         if (newStart.getTime() < now.getTime()) {
@@ -454,7 +455,8 @@ export async function POST(req: Request, { params }: Ctx) {
 
           throw bookingError('OUTSIDE_WORKING_HOURS', {
             message: workingHoursCheck.error,
-            userMessage: workingHoursCheck.error || 'That time is outside working hours.',
+            userMessage:
+              workingHoursCheck.error || 'That time is outside working hours.',
           })
         }
 
@@ -568,45 +570,10 @@ export async function POST(req: Request, { params }: Ctx) {
       })
     }
 
-    const msg = e instanceof Error ? e.message : ''
-
-    if (msg === 'BOOKING_NOT_RESCHEDULABLE') {
-      return rescheduleLocalFail(
-        409,
-        'BOOKING_NOT_RESCHEDULABLE',
-        'This booking cannot be rescheduled.',
-      )
-    }
-
-    if (msg === 'BOOKING_ALREADY_STARTED') {
-      return rescheduleLocalFail(
-        409,
-        'BOOKING_ALREADY_STARTED',
-        'This booking has started and cannot be rescheduled.',
-      )
-    }
-
-    if (msg === 'BOOKING_MISSING_OFFERING') {
-      return rescheduleLocalFail(
-        409,
-        'BOOKING_MISSING_OFFERING',
-        'This booking is missing offering info and cannot be rescheduled.',
-      )
-    }
-
-    if (msg === 'HOLD_TIME_INVALID') {
-      return rescheduleLocalFail(
-        400,
-        'HOLD_TIME_INVALID',
-        'Hold time is invalid. Please pick a new slot.',
-      )
-    }
-
     console.error('POST /api/bookings/[id]/reschedule error', e)
-    return rescheduleLocalFail(
-      500,
-      'INTERNAL_ERROR',
-      'Failed to reschedule booking.',
-    )
+    return bookingJsonFail('INTERNAL_ERROR', {
+      message: e instanceof Error ? e.message : 'Failed to reschedule booking.',
+      userMessage: 'Failed to reschedule booking.',
+    })
   }
 }

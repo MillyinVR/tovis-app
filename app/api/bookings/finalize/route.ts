@@ -44,16 +44,6 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type FinalizeLocalErrorCode =
-  | 'MISSING_MEDIA_ID'
-  | 'AFTERCARE_TOKEN_MISSING'
-  | 'AFTERCARE_TOKEN_INVALID'
-  | 'AFTERCARE_NOT_COMPLETED'
-  | 'AFTERCARE_CLIENT_MISMATCH'
-  | 'AFTERCARE_OFFERING_MISMATCH'
-  | 'OPENING_NOT_AVAILABLE'
-  | 'INTERNAL'
-
 const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 type WorkingHoursGuardCode =
@@ -70,18 +60,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function finalizeLocalFail(
-  status: number,
-  code: FinalizeLocalErrorCode,
-  message: string,
-) {
-  return jsonFail(status, message, { code })
-}
-
-function throwLocalCode(code: FinalizeLocalErrorCode): never {
-  throw new Error(code)
 }
 
 function normalizeAddress(value: unknown): string | null {
@@ -288,11 +266,7 @@ export async function POST(request: Request) {
     })
 
     if (source === BookingSource.DISCOVERY && !mediaId) {
-      return finalizeLocalFail(
-        400,
-        'MISSING_MEDIA_ID',
-        'Discovery bookings require a mediaId.',
-      )
+      return bookingJsonFail('MISSING_MEDIA_ID')
     }
 
     const offering = await prisma.professionalServiceOffering.findUnique({
@@ -325,11 +299,7 @@ export async function POST(request: Request) {
 
     if (source === BookingSource.AFTERCARE) {
       if (!aftercareToken) {
-        return finalizeLocalFail(
-          400,
-          'AFTERCARE_TOKEN_MISSING',
-          'Missing aftercare token.',
-        )
+        return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
       }
 
       const aftercare = await prisma.aftercareSummary.findUnique({
@@ -349,29 +319,17 @@ export async function POST(request: Request) {
       })
 
       if (!aftercare?.booking) {
-        return finalizeLocalFail(
-          400,
-          'AFTERCARE_TOKEN_INVALID',
-          'Invalid aftercare token.',
-        )
+        return bookingJsonFail('AFTERCARE_TOKEN_INVALID')
       }
 
       const original = aftercare.booking
 
       if (original.status !== BookingStatus.COMPLETED) {
-        return finalizeLocalFail(
-          409,
-          'AFTERCARE_NOT_COMPLETED',
-          'Only COMPLETED bookings can be rebooked.',
-        )
+        return bookingJsonFail('AFTERCARE_NOT_COMPLETED')
       }
 
       if (original.clientId !== clientId) {
-        return finalizeLocalFail(
-          403,
-          'AFTERCARE_CLIENT_MISMATCH',
-          'Aftercare link does not match this client.',
-        )
+        return bookingJsonFail('AFTERCARE_CLIENT_MISMATCH')
       }
 
       const matchesOffering =
@@ -380,11 +338,7 @@ export async function POST(request: Request) {
           original.serviceId === offering.serviceId)
 
       if (!matchesOffering) {
-        return finalizeLocalFail(
-          403,
-          'AFTERCARE_OFFERING_MISMATCH',
-          'Aftercare link does not match this offering.',
-        )
+        return bookingJsonFail('AFTERCARE_OFFERING_MISMATCH')
       }
 
       rebookOfBookingIdForCreate =
@@ -559,24 +513,24 @@ export async function POST(request: Request) {
             },
           })
 
-          if (!activeOpening) throwLocalCode('OPENING_NOT_AVAILABLE')
+          if (!activeOpening) throw bookingError('OPENING_NOT_AVAILABLE')
           if (activeOpening.professionalId !== offering.professionalId) {
-            throwLocalCode('OPENING_NOT_AVAILABLE')
+            throw bookingError('OPENING_NOT_AVAILABLE')
           }
           if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) {
-            throwLocalCode('OPENING_NOT_AVAILABLE')
+            throw bookingError('OPENING_NOT_AVAILABLE')
           }
           if (
             activeOpening.serviceId &&
             activeOpening.serviceId !== offering.serviceId
           ) {
-            throwLocalCode('OPENING_NOT_AVAILABLE')
+            throw bookingError('OPENING_NOT_AVAILABLE')
           }
           if (
             normalizeToMinute(new Date(activeOpening.startAt)).getTime() !==
             requestedStart.getTime()
           ) {
-            throwLocalCode('OPENING_NOT_AVAILABLE')
+            throw bookingError('OPENING_NOT_AVAILABLE')
           }
 
           const updated = await tx.lastMinuteOpening.updateMany({
@@ -589,7 +543,7 @@ export async function POST(request: Request) {
             },
           })
 
-          if (updated.count !== 1) throwLocalCode('OPENING_NOT_AVAILABLE')
+          if (updated.count !== 1) throw bookingError('OPENING_NOT_AVAILABLE')
         }
 
         const addOnLinks = addOnIds.length
@@ -934,17 +888,10 @@ export async function POST(request: Request) {
       })
     }
 
-    const message = error instanceof Error ? error.message : ''
-
-    if (message === 'OPENING_NOT_AVAILABLE') {
-      return finalizeLocalFail(
-        409,
-        'OPENING_NOT_AVAILABLE',
-        'That opening was just taken. Please pick another slot.',
-      )
-    }
-
     console.error('POST /api/bookings/finalize error:', error)
-    return finalizeLocalFail(500, 'INTERNAL', 'Internal server error')
+    return bookingJsonFail('INTERNAL_ERROR', {
+      message: error instanceof Error ? error.message : 'Internal server error',
+      userMessage: 'Internal server error',
+    })
   }
 }

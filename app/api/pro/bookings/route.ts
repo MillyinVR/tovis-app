@@ -41,21 +41,12 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type ProCreateBookingLocalErrorCode =
-  | 'CLIENT_NOT_FOUND'
-  | 'MISSING_SERVICE'
-  | 'INTERNAL_ERROR'
-
 const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 type WorkingHoursGuardCode =
   | 'WORKING_HOURS_REQUIRED'
   | 'WORKING_HOURS_INVALID'
   | 'OUTSIDE_WORKING_HOURS'
-
-function throwLocalCode(code: ProCreateBookingLocalErrorCode): never {
-  throw new Error(code)
-}
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -66,14 +57,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function localJsonFail(
-  status: number,
-  code: ProCreateBookingLocalErrorCode,
-  message: string,
-) {
-  return jsonFail(status, message, { code })
 }
 
 function toDateOrNull(value: unknown): Date | null {
@@ -178,13 +161,9 @@ function logAndThrowTimeRangeConflict(args: {
         userMessage: 'That time is blocked on your calendar.',
       })
     case 'BOOKING':
-      throw bookingError('TIME_BOOKED', {
-        userMessage: 'That time is not available.',
-      })
+      throw bookingError('TIME_BOOKED')
     case 'HOLD':
-      throw bookingError('TIME_HELD', {
-        userMessage: 'That time is not available.',
-      })
+      throw bookingError('TIME_HELD')
   }
 }
 
@@ -215,7 +194,7 @@ export async function POST(req: Request) {
     const allowFarFuture = pickBool(body.allowFarFuture) ?? false
 
     if (!clientId) {
-      return jsonFail(400, 'Missing clientId.', { code: 'CLIENT_ID_REQUIRED' })
+      return bookingJsonFail('CLIENT_ID_REQUIRED')
     }
 
     if (!scheduledFor) {
@@ -223,9 +202,8 @@ export async function POST(req: Request) {
     }
 
     if (!locationId) {
-      return jsonFail(400, 'Missing locationId.', { code: 'LOCATION_ID_REQUIRED' })
+      return bookingJsonFail('LOCATION_ID_REQUIRED')
     }
-
     if (!locationType) {
       return bookingJsonFail('LOCATION_TYPE_REQUIRED')
     }
@@ -233,6 +211,7 @@ export async function POST(req: Request) {
     if (!offeringId) {
       return bookingJsonFail('OFFERING_ID_REQUIRED')
     }
+
     if (locationType === ServiceLocationType.MOBILE && !clientAddressId) {
       return bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED', {
         userMessage: 'Mobile bookings require a saved client service address.',
@@ -289,9 +268,21 @@ export async function POST(req: Request) {
           }),
         ])
 
-        if (!client) throwLocalCode('CLIENT_NOT_FOUND')
-        if (!offering) throw bookingError('OFFERING_NOT_FOUND')
-        if (!offering.service) throwLocalCode('MISSING_SERVICE')
+        if (!client) {
+          throw bookingError('CLIENT_NOT_FOUND')
+        }
+
+        if (!offering) {
+          throw bookingError('OFFERING_NOT_FOUND')
+        }
+
+        if (!offering.service) {
+          throw bookingError('BOOKING_MISSING_OFFERING', {
+            message: 'Offering is missing its service relation.',
+            userMessage:
+              'This booking is missing service information and cannot be processed.',
+          })
+        }
 
         const clientServiceAddress =
           locationType === ServiceLocationType.MOBILE
@@ -340,7 +331,9 @@ export async function POST(req: Request) {
 
         const locationContext = validatedContextResult.context
         const baseDurationMinutes = validatedContextResult.durationMinutes
-        const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
+        const basePrice = decimalFromUnknown(
+          validatedContextResult.priceStartingAt,
+        )
 
         const salonLocationAddress =
           locationType === ServiceLocationType.SALON
@@ -638,9 +631,7 @@ export async function POST(req: Request) {
             error instanceof Prisma.PrismaClientKnownRequestError &&
             error.code === 'P2002'
           ) {
-            throw bookingError('TIME_BOOKED', {
-              userMessage: 'That time is not available.',
-            })
+            throw bookingError('TIME_BOOKED')
           }
           throw error
         }
@@ -710,21 +701,11 @@ export async function POST(req: Request) {
       })
     }
 
-    const message = error instanceof Error ? error.message : ''
-
-    if (message === 'CLIENT_NOT_FOUND') {
-      return localJsonFail(404, 'CLIENT_NOT_FOUND', 'Client not found.')
-    }
-
-    if (message === 'MISSING_SERVICE') {
-      return localJsonFail(
-        400,
-        'MISSING_SERVICE',
-        'The selected service could not be found.',
-      )
-    }
-
     console.error('POST /api/pro/bookings error', error)
-    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to create booking.')
+    return bookingJsonFail('INTERNAL_ERROR', {
+      message:
+        error instanceof Error ? error.message : 'Failed to create booking.',
+      userMessage: 'Failed to create booking.',
+    })
   }
 }

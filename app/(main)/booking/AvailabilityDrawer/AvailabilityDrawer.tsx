@@ -56,15 +56,101 @@ type ConfirmHoldSelection = {
   bookingSource: BookingSource
   mediaId: string | null
 }
+type BookingErrorUiAction =
+  | 'REFRESH_AVAILABILITY'
+  | 'PICK_NEW_SLOT'
+  | 'ADD_SERVICE_ADDRESS'
+  | 'FIX_LOCATION_CONFIG'
+  | 'FIX_OFFERING_CONFIG'
+  | 'FIX_WORKING_HOURS'
+  | 'CONTACT_SUPPORT'
+  | 'NONE'
+
+type ParsedBookingApiError = {
+  status: number
+  code: string | null
+  message: string | null
+  retryable: boolean | null
+  uiAction: BookingErrorUiAction | null
+  developerMessage: string | null
+}
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
 
-function pickErrorMessage(raw: unknown): string | null {
+function parseBookingApiError(
+  raw: unknown,
+  status: number,
+): ParsedBookingApiError | null {
   if (!isRecord(raw)) return null
-  const value = raw.error
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+
+  const topLevelError =
+    typeof raw.error === 'string' && raw.error.trim() ? raw.error.trim() : null
+
+  const code =
+    typeof raw.code === 'string' && raw.code.trim() ? raw.code.trim() : null
+
+  const retryable =
+    typeof raw.retryable === 'boolean' ? raw.retryable : null
+
+  const uiAction =
+    raw.uiAction === 'REFRESH_AVAILABILITY' ||
+    raw.uiAction === 'PICK_NEW_SLOT' ||
+    raw.uiAction === 'ADD_SERVICE_ADDRESS' ||
+    raw.uiAction === 'FIX_LOCATION_CONFIG' ||
+    raw.uiAction === 'FIX_OFFERING_CONFIG' ||
+    raw.uiAction === 'FIX_WORKING_HOURS' ||
+    raw.uiAction === 'CONTACT_SUPPORT' ||
+    raw.uiAction === 'NONE'
+      ? raw.uiAction
+      : null
+
+  const developerMessage =
+    typeof raw.message === 'string' && raw.message.trim()
+      ? raw.message.trim()
+      : null
+
+  return {
+    status,
+    code,
+    message: topLevelError,
+    retryable,
+    uiAction,
+    developerMessage,
+  }
+}
+
+function getBookingUiMessage(
+  parsed: ParsedBookingApiError | null,
+  fallback: string,
+): string {
+  if (!parsed) return fallback
+
+  switch (parsed.code) {
+    case 'CLIENT_SERVICE_ADDRESS_REQUIRED':
+    case 'CLIENT_SERVICE_ADDRESS_INVALID':
+    case 'HOLD_MISSING_CLIENT_ADDRESS':
+      return parsed.message ?? 'Choose a mobile service address before continuing.'
+
+    case 'HOLD_EXPIRED':
+      return parsed.message ?? 'That hold expired. Please pick a new slot.'
+
+    case 'HOLD_NOT_FOUND':
+    case 'HOLD_MISMATCH':
+    case 'TIME_BLOCKED':
+    case 'TIME_BOOKED':
+    case 'TIME_HELD':
+    case 'TIME_NOT_AVAILABLE':
+    case 'STEP_MISMATCH':
+    case 'OUTSIDE_WORKING_HOURS':
+    case 'ADVANCE_NOTICE_REQUIRED':
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return parsed.message ?? fallback
+
+    default:
+      return parsed.message ?? fallback
+  }
 }
 
 function periodOfHour(h: number): Period {
@@ -645,7 +731,7 @@ export default function AvailabilityDrawer(props: {
     if (!holdExpired) return
     setHoldUntil(null)
     setSelected(null)
-    setError('That hold expired. Pick another time.')
+    setError('That hold expired. Please pick a new slot.')
   }, [holdExpired, setError])
 
   useEffect(() => {
@@ -737,7 +823,13 @@ export default function AvailabilityDrawer(props: {
       }
 
       if (!res.ok) {
-        throw new Error(pickErrorMessage(raw) ?? `Hold failed (${res.status}).`)
+        const parsedError = parseBookingApiError(raw, res.status)
+        throw new Error(
+          getBookingUiMessage(
+            parsedError,
+            `Hold failed (${res.status}).`,
+          ),
+        )
       }
 
       const parsed = parseHoldResponse(raw)

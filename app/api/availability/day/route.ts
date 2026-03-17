@@ -2199,20 +2199,16 @@ export async function GET(req: Request) {
     })
 
     if (!result.ok) {
-      return bookingJsonFail(
-        result.code,
-        undefined,
-        {
-          locationId,
-          timeZone,
-          timeZoneSource,
-          stepMinutes,
-          leadTimeMinutes,
-          locationBufferMinutes,
-          maxDaysAhead: maxAdvanceDays,
-          ...(debug ? { debug: result.debug } : {}),
-        },
-      )
+      return bookingJsonFail(result.code, undefined, {
+        locationId,
+        timeZone,
+        timeZoneSource,
+        stepMinutes,
+        leadTimeMinutes,
+        locationBufferMinutes,
+        maxDaysAhead: maxAdvanceDays,
+        ...(debug ? { debug: result.debug } : {}),
+      })
     }
 
     const payload = {
@@ -2258,6 +2254,8 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     console.error('GET /api/availability/day error', err)
     return bookingJsonFail('INTERNAL_ERROR', {
+      message:
+        err instanceof Error ? err.message : 'Failed to load availability.',
       userMessage: 'Failed to load availability.',
     })
   }

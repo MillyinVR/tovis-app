@@ -71,24 +71,12 @@ type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
 
-type ProBookingLocalErrorCode =
-  | 'CANNOT_EDIT_CANCELLED'
-  | 'CANNOT_EDIT_COMPLETED'
-  | 'BAD_LOCATION'
-  | 'BAD_LOCATION_MODE'
-  | 'DURATION_MISMATCH'
-  | 'INTERNAL_ERROR'
-
 const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 type WorkingHoursGuardCode =
   | 'WORKING_HOURS_REQUIRED'
   | 'WORKING_HOURS_INVALID'
   | 'OUTSIDE_WORKING_HOURS'
-
-function throwLocalCode(code: ProBookingLocalErrorCode): never {
-  throw new Error(code)
-}
 
 function normalizeRequestedStatus(value: unknown): RequestedStatus | null {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
@@ -108,14 +96,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function localJsonFail(
-  status: number,
-  code: ProBookingLocalErrorCode,
-  message: string,
-) {
-  return jsonFail(status, message, { code })
 }
 
 async function createClientNotification(args: {
@@ -282,13 +262,9 @@ function logAndThrowTimeRangeConflict(args: {
         userMessage: 'That time is blocked on your calendar.',
       })
     case 'BOOKING':
-      throw bookingError('TIME_BOOKED', {
-        userMessage: 'That time is not available.',
-      })
+      throw bookingError('TIME_BOOKED')
     case 'HOLD':
-      throw bookingError('TIME_HELD', {
-        userMessage: 'That time is not available.',
-      })
+      throw bookingError('TIME_HELD')
   }
 }
 
@@ -392,7 +368,10 @@ export async function GET(_req: Request, ctx: Ctx) {
 
     const start = normalizeToMinute(new Date(booking.scheduledFor))
     if (!Number.isFinite(start.getTime())) {
-      return localJsonFail(500, 'INTERNAL_ERROR', 'Booking has an invalid scheduled time.')
+      return bookingJsonFail('INTERNAL_ERROR', {
+        message: 'Booking has an invalid scheduled time.',
+        userMessage: 'Failed to load booking.',
+      })
     }
 
     const items = booking.serviceItems ?? []
@@ -475,7 +454,7 @@ export async function GET(_req: Request, ctx: Ctx) {
       },
       200,
     )
-  } catch (error) {
+  } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -484,7 +463,10 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     console.error('GET /api/pro/bookings/[id] error:', error)
-    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to load booking.')
+    return bookingJsonFail('INTERNAL_ERROR', {
+      message: error instanceof Error ? error.message : 'Failed to load booking.',
+      userMessage: 'Failed to load booking.',
+    })
   }
 }
 
@@ -650,11 +632,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
         }
 
         if (existing.status === BookingStatus.CANCELLED) {
-          throwLocalCode('CANNOT_EDIT_CANCELLED')
+          throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
         }
 
         if (existing.status === BookingStatus.COMPLETED) {
-          throwLocalCode('CANNOT_EDIT_COMPLETED')
+          throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED')
         }
 
         const outputSchedulingContext = await resolveBookingSchedulingContext({
@@ -722,7 +704,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         }
 
         if (!existing.locationId) {
-          throwLocalCode('BAD_LOCATION')
+          throw bookingError('BAD_LOCATION')
         }
 
         const location = await tx.professionalLocation.findFirst({
@@ -744,21 +726,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
         })
 
         if (!location) {
-          throwLocalCode('BAD_LOCATION')
+          throw bookingError('BAD_LOCATION')
         }
 
         if (
           existing.locationType === ServiceLocationType.MOBILE &&
           location.type !== ProfessionalLocationType.MOBILE_BASE
         ) {
-          throwLocalCode('BAD_LOCATION_MODE')
+          throw bookingError('BAD_LOCATION_MODE')
         }
 
         if (
           existing.locationType === ServiceLocationType.SALON &&
           location.type === ProfessionalLocationType.MOBILE_BASE
         ) {
-          throwLocalCode('BAD_LOCATION_MODE')
+          throw bookingError('BAD_LOCATION_MODE')
         }
 
         const schedulingContextResult = await resolveAppointmentSchedulingContext({
@@ -799,7 +781,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
         const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
 
-        if (nextBuffer != null && (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)) {
+        if (
+          nextBuffer != null &&
+          (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)
+        ) {
           throw bookingError('INVALID_BUFFER_MINUTES')
         }
 
@@ -893,13 +878,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
             offerings.map((offering) => [offering.id, offering]),
           )
 
-          normalizedServiceItems = buildNormalizedBookingItemsFromRequestedOfferings({
-            requestedItems: parsedRequestedItems,
-            locationType: existing.locationType,
-            stepMinutes,
-            offeringById,
-            badItemsCode: 'INVALID_SERVICE_ITEMS',
-          })
+          normalizedServiceItems =
+            buildNormalizedBookingItemsFromRequestedOfferings({
+              requestedItems: parsedRequestedItems,
+              locationType: existing.locationType,
+              stepMinutes,
+              offeringById,
+              badItemsCode: 'INVALID_SERVICE_ITEMS',
+            })
         }
 
         const previewItems =
@@ -946,7 +932,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
           snappedNextDuration != null &&
           snappedNextDuration !== computedDurationMinutes
         ) {
-          throwLocalCode('DURATION_MISMATCH')
+          throw bookingError('DURATION_MISMATCH')
         }
 
         const finalDuration = normalizedServiceItems
@@ -1080,7 +1066,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
             throw bookingError('OUTSIDE_WORKING_HOURS', {
               message: workingHoursCheck.error,
-              userMessage: workingHoursCheck.error || 'That time is outside working hours.',
+              userMessage:
+                workingHoursCheck.error || 'That time is outside working hours.',
             })
           }
         }
@@ -1224,29 +1211,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
       })
     }
 
-    const message = error instanceof Error ? error.message : ''
-
-    if (message === 'CANNOT_EDIT_CANCELLED') {
-      return localJsonFail(409, 'CANNOT_EDIT_CANCELLED', 'Cancelled bookings cannot be edited.')
-    }
-
-    if (message === 'CANNOT_EDIT_COMPLETED') {
-      return localJsonFail(409, 'CANNOT_EDIT_COMPLETED', 'Completed bookings cannot be edited.')
-    }
-
-    if (message === 'BAD_LOCATION') {
-      return localJsonFail(400, 'BAD_LOCATION', 'Booking location is invalid.')
-    }
-
-    if (message === 'BAD_LOCATION_MODE') {
-      return localJsonFail(400, 'BAD_LOCATION_MODE', 'Booking mode does not match location type.')
-    }
-
-    if (message === 'DURATION_MISMATCH') {
-      return localJsonFail(400, 'DURATION_MISMATCH', 'Duration does not match selected services.')
-    }
-
     console.error('PATCH /api/pro/bookings/[id] error:', error)
-    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to update booking.')
+    return bookingJsonFail('INTERNAL_ERROR', {
+      message: error instanceof Error ? error.message : 'Failed to update booking.',
+      userMessage: 'Failed to update booking.',
+    })
   }
 }
