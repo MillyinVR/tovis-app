@@ -3,7 +3,6 @@
 import { isRecord } from '@/lib/guards'
 import {
   getZonedParts,
-  minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
 } from '@/lib/timeZone'
 
@@ -50,19 +49,26 @@ export type ParsedHHMM = {
 }
 
 export type WorkingWindowResult =
-  | { ok: true; key: WeekdayKey; startMinutes: number; endMinutes: number }
+  | {
+      ok: true
+      key: WeekdayKey
+      startMinutes: number
+      endMinutes: number
+      spansMidnight: boolean
+    }
   | { ok: false; reason: 'MISSING' | 'DISABLED' | 'MISCONFIGURED' }
 
 export type WorkingHoursRangeCheckResult =
-  | { ok: true; key: WeekdayKey; startMinutes: number; endMinutes: number }
+  | {
+      ok: true
+      key: WeekdayKey
+      startMinutes: number
+      endMinutes: number
+      spansMidnight: boolean
+    }
   | {
       ok: false
-      reason:
-        | 'MISSING'
-        | 'DISABLED'
-        | 'MISCONFIGURED'
-        | 'CROSS_DAY'
-        | 'OUTSIDE'
+      reason: 'MISSING' | 'DISABLED' | 'MISCONFIGURED' | 'OUTSIDE'
     }
 
 /**
@@ -129,8 +135,59 @@ function weekdayKeyForDate(day: Date, timeZone: string): WeekdayKey | null {
   return WEEKDAY_SHORT_TO_KEY[short] ?? null
 }
 
+function localMinutesSinceMidnight(date: Date, timeZone: string): number {
+  const parts = getZonedParts(date, timeZone)
+  return parts.hour * 60 + parts.minute
+}
+
+function localDaySerial(date: Date, timeZone: string): number {
+  const parts = getZonedParts(date, timeZone)
+  return Math.floor(
+    Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0) / 86_400_000,
+  )
+}
+
+function normalizeWindow(startMinutes: number, endMinutes: number): {
+  startMinutes: number
+  endMinutes: number
+  spansMidnight: boolean
+} | null {
+  if (startMinutes === endMinutes) return null
+
+  if (endMinutes > startMinutes) {
+    return {
+      startMinutes,
+      endMinutes,
+      spansMidnight: false,
+    }
+  }
+
+  return {
+    startMinutes,
+    endMinutes: endMinutes + 1440,
+    spansMidnight: true,
+  }
+}
+
+function offsetFromWindowStartDay(args: {
+  targetUtc: Date
+  windowDayUtc: Date
+  timeZone: string
+}): number {
+  const { targetUtc, windowDayUtc, timeZone } = args
+
+  const dayDelta = localDaySerial(targetUtc, timeZone) - localDaySerial(windowDayUtc, timeZone)
+  return dayDelta * 1440 + localMinutesSinceMidnight(targetUtc, timeZone)
+}
+
 /**
  * Shared source of truth for reading the working-hours window for a day.
+ *
+ * Supports both:
+ * - same-day windows, e.g. 09:00 -> 17:00
+ * - overnight windows, e.g. 22:00 -> 02:00
+ *
+ * Overnight windows are represented by endMinutes > 1440.
  */
 export function getWorkingWindowForDay(
   day: Date,
@@ -166,15 +223,17 @@ export function getWorkingWindowForDay(
     return { ok: false, reason: 'MISCONFIGURED' }
   }
 
-  if (endMinutes <= startMinutes) {
+  const normalized = normalizeWindow(startMinutes, endMinutes)
+  if (!normalized) {
     return { ok: false, reason: 'MISCONFIGURED' }
   }
 
   return {
     ok: true,
     key,
-    startMinutes,
-    endMinutes,
+    startMinutes: normalized.startMinutes,
+    endMinutes: normalized.endMinutes,
+    spansMidnight: normalized.spansMidnight,
   }
 }
 
@@ -202,10 +261,14 @@ export function isOutsideWorkingHours(args: {
 /**
  * Shared booking/span validation:
  * - workingHours must exist and be well-formed
- * - start/end must land on the same local day
  * - requested span must fit inside that day's working window
+ * - overnight windows are allowed
  *
- * Routes can map the result reason to user-facing copy.
+ * The "day" used for the window is the local day of scheduledStartUtc.
+ * Example:
+ * - Monday window 22:00 -> 02:00
+ * - booking Monday 23:30 -> Tuesday 01:00
+ *   => valid inside Monday's window
  */
 export function checkWorkingHoursRange(args: {
   scheduledStartUtc: Date
@@ -226,29 +289,27 @@ export function checkWorkingHoursRange(args: {
 
   const tz = sanitizeTimeZone(timeZone, 'UTC')
 
-  const startParts = getZonedParts(scheduledStartUtc, tz)
-  const endParts = getZonedParts(scheduledEndUtc, tz)
-
-  const sameLocalDay =
-    startParts.year === endParts.year &&
-    startParts.month === endParts.month &&
-    startParts.day === endParts.day
-
-  if (!sameLocalDay) {
-    return { ok: false, reason: 'CROSS_DAY' }
-  }
-
   const window = getWorkingWindowForDay(scheduledStartUtc, workingHours, tz)
   if (!window.ok) {
     return window
   }
 
-  const startMinutes = minutesSinceMidnightInTimeZone(scheduledStartUtc, tz)
-  const endMinutes = minutesSinceMidnightInTimeZone(scheduledEndUtc, tz)
+  const startOffset = offsetFromWindowStartDay({
+    targetUtc: scheduledStartUtc,
+    windowDayUtc: scheduledStartUtc,
+    timeZone: tz,
+  })
+
+  const endOffset = offsetFromWindowStartDay({
+    targetUtc: scheduledEndUtc,
+    windowDayUtc: scheduledStartUtc,
+    timeZone: tz,
+  })
 
   if (
-    startMinutes < window.startMinutes ||
-    endMinutes > window.endMinutes
+    endOffset <= startOffset ||
+    startOffset < window.startMinutes ||
+    endOffset > window.endMinutes
   ) {
     return { ok: false, reason: 'OUTSIDE' }
   }
@@ -258,5 +319,6 @@ export function checkWorkingHoursRange(args: {
     key: window.key,
     startMinutes: window.startMinutes,
     endMinutes: window.endMinutes,
+    spansMidnight: window.spansMidnight,
   }
 }

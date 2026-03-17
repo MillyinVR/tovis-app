@@ -98,8 +98,8 @@ export async function GET(req: Request) {
 
     const professionalId = auth.professionalId
     const { searchParams } = new URL(req.url)
-
     const mode = parseMode(searchParams.get('locationType')) ?? 'SALON'
+
     const loc = await pickRepresentativeLocation({ professionalId, mode })
 
     if (!loc) {
@@ -164,7 +164,7 @@ export async function POST(req: Request) {
     if (!normalized) {
       return jsonFail(
         400,
-        'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
+        'workingHours must contain mon..sun with { enabled, start, end } and valid HH:MM times. Overnight ranges are allowed.',
       )
     }
 
@@ -195,9 +195,7 @@ export async function POST(req: Request) {
       })
 
       if (updated.count === 0) {
-        return {
-          ok: false as const,
-        }
+        return { ok: false as const }
       }
 
       const updatedLocations = await tx.professionalLocation.findMany({

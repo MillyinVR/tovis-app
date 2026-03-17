@@ -36,12 +36,14 @@ import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransac
 export const dynamic = 'force-dynamic'
 
 type CreateBookingErrorCode =
+  | 'ADVANCE_NOTICE_REQUIRED'
   | 'BLOCKED'
   | 'CLIENT_NOT_FOUND'
   | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
   | 'CLIENT_SERVICE_ADDRESS_INVALID'
   | 'SALON_LOCATION_ADDRESS_REQUIRED'
   | 'LOCATION_NOT_FOUND'
+  | 'MAX_DAYS_AHEAD_EXCEEDED'
   | 'MISSING_OFFERING'
   | 'MISSING_SERVICE'
   | 'MODE_NOT_SUPPORTED'
@@ -157,8 +159,11 @@ export async function POST(req: Request) {
 
     const requestedBufferMinutes = pickInt(body.bufferMinutes)
     const requestedTotalDurationMinutes = pickInt(body.totalDurationMinutes)
+
     const allowOutsideWorkingHours =
       pickBool(body.allowOutsideWorkingHours) ?? false
+    const allowShortNotice = pickBool(body.allowShortNotice) ?? false
+    const allowFarFuture = pickBool(body.allowFarFuture) ?? false
 
     if (!clientId) return jsonFail(400, 'Missing clientId.')
     if (!scheduledFor) return jsonFail(400, 'Missing or invalid scheduledFor.')
@@ -180,190 +185,180 @@ export async function POST(req: Request) {
 
     const result = await withLockedProfessionalTransaction(
       professionalId,
-      async ({ tx }) => {
+      async ({ tx, now }) => {
         const [client, clientAddress, offering] = await Promise.all([
-        tx.clientProfile.findUnique({
-          where: { id: clientId },
-          select: { id: true },
-        }),
-        locationType === ServiceLocationType.MOBILE && clientAddressId
-          ? tx.clientAddress.findFirst({
-              where: {
-                id: clientAddressId,
-                clientId,
-                kind: ClientAddressKind.SERVICE_ADDRESS,
-              },
-              select: {
-                id: true,
-                formattedAddress: true,
-                lat: true,
-                lng: true,
-              },
-            })
-          : Promise.resolve(null),
-        tx.professionalServiceOffering.findFirst({
-          where: {
-            id: offeringId,
-            professionalId,
-            isActive: true,
-          },
-          select: {
-            id: true,
-            serviceId: true,
-            offersInSalon: true,
-            offersMobile: true,
-            salonPriceStartingAt: true,
-            mobilePriceStartingAt: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-            service: {
-              select: {
-                id: true,
-                name: true,
+          tx.clientProfile.findUnique({
+            where: { id: clientId },
+            select: { id: true },
+          }),
+          locationType === ServiceLocationType.MOBILE && clientAddressId
+            ? tx.clientAddress.findFirst({
+                where: {
+                  id: clientAddressId,
+                  clientId,
+                  kind: ClientAddressKind.SERVICE_ADDRESS,
+                },
+                select: {
+                  id: true,
+                  formattedAddress: true,
+                  lat: true,
+                  lng: true,
+                },
+              })
+            : Promise.resolve(null),
+          tx.professionalServiceOffering.findFirst({
+            where: {
+              id: offeringId,
+              professionalId,
+              isActive: true,
+            },
+            select: {
+              id: true,
+              serviceId: true,
+              offersInSalon: true,
+              offersMobile: true,
+              salonPriceStartingAt: true,
+              mobilePriceStartingAt: true,
+              salonDurationMinutes: true,
+              mobileDurationMinutes: true,
+              service: {
+                select: {
+                  id: true,
+                  name: true,
+                },
               },
             },
-          },
-        }),
-      ])
+          }),
+        ])
 
-      if (!client) throwCode('CLIENT_NOT_FOUND')
-      if (!offering) throwCode('MISSING_OFFERING')
-      if (!offering.service) throwCode('MISSING_SERVICE')
+        if (!client) throwCode('CLIENT_NOT_FOUND')
+        if (!offering) throwCode('MISSING_OFFERING')
+        if (!offering.service) throwCode('MISSING_SERVICE')
 
-      const clientServiceAddress =
-        locationType === ServiceLocationType.MOBILE
-          ? normalizeAddress(clientAddress?.formattedAddress)
-          : null
+        const clientServiceAddress =
+          locationType === ServiceLocationType.MOBILE
+            ? normalizeAddress(clientAddress?.formattedAddress)
+            : null
 
-      if (locationType === ServiceLocationType.MOBILE) {
-        if (!clientAddress) {
-          throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+        if (locationType === ServiceLocationType.MOBILE) {
+          if (!clientAddress) {
+            throwCode('CLIENT_SERVICE_ADDRESS_REQUIRED')
+          }
+
+          if (!clientServiceAddress) {
+            throwCode('CLIENT_SERVICE_ADDRESS_INVALID')
+          }
         }
 
-        if (!clientServiceAddress) {
-          throwCode('CLIENT_SERVICE_ADDRESS_INVALID')
-        }
-      }
-
-      const validatedContextResult = await resolveValidatedBookingContext({
-        tx,
-        professionalId,
-        requestedLocationId: locationId,
-        locationType,
-        fallbackTimeZone: 'UTC',
-        requireValidTimeZone: true,
-        allowFallback: false,
-        requireCoordinates: false,
-        offering: {
-          offersInSalon: offering.offersInSalon,
-          offersMobile: offering.offersMobile,
-          salonDurationMinutes: offering.salonDurationMinutes,
-          mobileDurationMinutes: offering.mobileDurationMinutes,
-          salonPriceStartingAt: offering.salonPriceStartingAt,
-          mobilePriceStartingAt: offering.mobilePriceStartingAt,
-        },
-      })
-
-      if (!validatedContextResult.ok) {
-        throwCode(mapSchedulingReadinessError(validatedContextResult.error))
-      }
-
-      const locationContext = validatedContextResult.context
-      const baseDurationMinutes = validatedContextResult.durationMinutes
-      const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
-
-      const salonLocationAddress =
-        locationType === ServiceLocationType.SALON
-          ? normalizeAddress(locationContext.formattedAddress)
-          : null
-
-      if (
-        locationType === ServiceLocationType.SALON &&
-        !salonLocationAddress
-      ) {
-        throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
-      }
-
-      const stepMinutes = locationContext.stepMinutes
-      const startMinuteOfDay = minutesSinceMidnightInTimeZone(
-        requestedStart,
-        locationContext.timeZone,
-      )
-
-      if (startMinuteOfDay % stepMinutes !== 0) {
-        logBookingConflict({
-          action: 'BOOKING_CREATE',
+        const validatedContextResult = await resolveValidatedBookingContext({
+          tx,
           professionalId,
-          locationId: locationContext.locationId,
+          requestedLocationId: locationId,
           locationType,
-          requestedStart,
-          requestedEnd: addMinutes(requestedStart, 1),
-          conflictType: 'STEP_BOUNDARY',
-          meta: {
-            route: 'app/api/pro/bookings/route.ts',
-            stepMinutes,
-            offeringId,
-            clientId,
-          },
-        })
-        throw new Error(`STEP:${stepMinutes}`)
-      }
-
-      const locationBufferMinutes = clampInt(
-        Number(locationContext.bufferMinutes ?? 0),
-        0,
-        MAX_BUFFER_MINUTES,
-      )
-
-      const bufferMinutes =
-        requestedBufferMinutes == null
-          ? locationBufferMinutes
-          : clampInt(
-              snapToStepMinutes(
-                clampInt(requestedBufferMinutes, 0, MAX_BUFFER_MINUTES),
-                stepMinutes,
-              ),
-              0,
-              MAX_BUFFER_MINUTES,
-            )
-
-      const computedDurationMinutes = clampInt(
-        snapToStepMinutes(baseDurationMinutes, stepMinutes),
-        stepMinutes,
-        MAX_SLOT_DURATION_MINUTES,
-      )
-
-      const totalDurationMinutes =
-        requestedTotalDurationMinutes != null &&
-        requestedTotalDurationMinutes >= computedDurationMinutes &&
-        requestedTotalDurationMinutes <= MAX_SLOT_DURATION_MINUTES
-          ? clampInt(
-              snapToStepMinutes(requestedTotalDurationMinutes, stepMinutes),
-              computedDurationMinutes,
-              MAX_SLOT_DURATION_MINUTES,
-            )
-          : computedDurationMinutes
-
-      const requestedEnd = addMinutes(
-        requestedStart,
-        totalDurationMinutes + bufferMinutes,
-      )
-
-      if (!allowOutsideWorkingHours) {
-        const workingHoursResult = ensureWithinWorkingHours({
-          scheduledStartUtc: requestedStart,
-          scheduledEndUtc: requestedEnd,
-          workingHours: locationContext.workingHours,
-          timeZone: locationContext.timeZone,
           fallbackTimeZone: 'UTC',
-          messages: {
-            missing: 'Working hours are not set yet.',
-            outside: 'That time is outside working hours.',
-            misconfigured: 'Working hours are misconfigured.',
+          requireValidTimeZone: true,
+          allowFallback: false,
+          requireCoordinates: false,
+          offering: {
+            offersInSalon: offering.offersInSalon,
+            offersMobile: offering.offersMobile,
+            salonDurationMinutes: offering.salonDurationMinutes,
+            mobileDurationMinutes: offering.mobileDurationMinutes,
+            salonPriceStartingAt: offering.salonPriceStartingAt,
+            mobilePriceStartingAt: offering.mobilePriceStartingAt,
           },
         })
 
-        if (!workingHoursResult.ok) {
+        if (!validatedContextResult.ok) {
+          throwCode(mapSchedulingReadinessError(validatedContextResult.error))
+        }
+
+        const locationContext = validatedContextResult.context
+        const baseDurationMinutes = validatedContextResult.durationMinutes
+        const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
+
+        const salonLocationAddress =
+          locationType === ServiceLocationType.SALON
+            ? normalizeAddress(locationContext.formattedAddress)
+            : null
+
+        if (
+          locationType === ServiceLocationType.SALON &&
+          !salonLocationAddress
+        ) {
+          throwCode('SALON_LOCATION_ADDRESS_REQUIRED')
+        }
+
+        const stepMinutes = locationContext.stepMinutes
+        const startMinuteOfDay = minutesSinceMidnightInTimeZone(
+          requestedStart,
+          locationContext.timeZone,
+        )
+
+        if (startMinuteOfDay % stepMinutes !== 0) {
+          logBookingConflict({
+            action: 'BOOKING_CREATE',
+            professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd: addMinutes(requestedStart, 1),
+            conflictType: 'STEP_BOUNDARY',
+            meta: {
+              route: 'app/api/pro/bookings/route.ts',
+              stepMinutes,
+              offeringId,
+              clientId,
+            },
+          })
+          throw new Error(`STEP:${stepMinutes}`)
+        }
+
+        const locationBufferMinutes = clampInt(
+          Number(locationContext.bufferMinutes ?? 0),
+          0,
+          MAX_BUFFER_MINUTES,
+        )
+
+        const bufferMinutes =
+          requestedBufferMinutes == null
+            ? locationBufferMinutes
+            : clampInt(
+                snapToStepMinutes(
+                  clampInt(requestedBufferMinutes, 0, MAX_BUFFER_MINUTES),
+                  stepMinutes,
+                ),
+                0,
+                MAX_BUFFER_MINUTES,
+              )
+
+        const computedDurationMinutes = clampInt(
+          snapToStepMinutes(baseDurationMinutes, stepMinutes),
+          stepMinutes,
+          MAX_SLOT_DURATION_MINUTES,
+        )
+
+        const totalDurationMinutes =
+          requestedTotalDurationMinutes != null &&
+          requestedTotalDurationMinutes >= computedDurationMinutes &&
+          requestedTotalDurationMinutes <= MAX_SLOT_DURATION_MINUTES
+            ? clampInt(
+                snapToStepMinutes(requestedTotalDurationMinutes, stepMinutes),
+                computedDurationMinutes,
+                MAX_SLOT_DURATION_MINUTES,
+              )
+            : computedDurationMinutes
+
+        const requestedEnd = addMinutes(
+          requestedStart,
+          totalDurationMinutes + bufferMinutes,
+        )
+
+        if (
+          !allowShortNotice &&
+          requestedStart.getTime() <
+            now.getTime() + locationContext.advanceNoticeMinutes * 60_000
+        ) {
           logBookingConflict({
             action: 'BOOKING_CREATE',
             professionalId,
@@ -371,154 +366,212 @@ export async function POST(req: Request) {
             locationType,
             requestedStart,
             requestedEnd,
-            conflictType: 'WORKING_HOURS',
+            conflictType: 'TIME_NOT_AVAILABLE',
             meta: {
               route: 'app/api/pro/bookings/route.ts',
               offeringId,
               clientId,
-              workingHoursError: workingHoursResult.error,
+              rule: 'ADVANCE_NOTICE',
+              advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+              allowShortNotice,
             },
           })
-          throw new Error(`WH:${workingHoursResult.error}`)
+          throwCode('ADVANCE_NOTICE_REQUIRED')
         }
-      }
 
-      const timeRangeConflict = await getTimeRangeConflict({
-        tx,
-        professionalId,
-        locationId: locationContext.locationId,
-        requestedStart,
-        requestedEnd,
-        defaultBufferMinutes: bufferMinutes,
-        fallbackDurationMinutes: totalDurationMinutes,
-      })
+        if (
+          !allowFarFuture &&
+          requestedStart.getTime() >
+            now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
+        ) {
+          logBookingConflict({
+            action: 'BOOKING_CREATE',
+            professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            conflictType: 'TIME_NOT_AVAILABLE',
+            meta: {
+              route: 'app/api/pro/bookings/route.ts',
+              offeringId,
+              clientId,
+              rule: 'MAX_DAYS_AHEAD',
+              maxDaysAhead: locationContext.maxDaysAhead,
+              allowFarFuture,
+            },
+          })
+          throwCode('MAX_DAYS_AHEAD_EXCEEDED')
+        }
 
-      if (timeRangeConflict) {
-        logAndThrowTimeRangeConflict({
-          conflict: timeRangeConflict,
+        if (!allowOutsideWorkingHours) {
+          const workingHoursResult = ensureWithinWorkingHours({
+            scheduledStartUtc: requestedStart,
+            scheduledEndUtc: requestedEnd,
+            workingHours: locationContext.workingHours,
+            timeZone: locationContext.timeZone,
+            fallbackTimeZone: 'UTC',
+            messages: {
+              missing: 'Working hours are not set yet.',
+              outside: 'That time is outside working hours.',
+              misconfigured: 'Working hours are misconfigured.',
+            },
+          })
+
+          if (!workingHoursResult.ok) {
+            logBookingConflict({
+              action: 'BOOKING_CREATE',
+              professionalId,
+              locationId: locationContext.locationId,
+              locationType,
+              requestedStart,
+              requestedEnd,
+              conflictType: 'WORKING_HOURS',
+              meta: {
+                route: 'app/api/pro/bookings/route.ts',
+                offeringId,
+                clientId,
+                workingHoursError: workingHoursResult.error,
+              },
+            })
+            throw new Error(`WH:${workingHoursResult.error}`)
+          }
+        }
+
+        const timeRangeConflict = await getTimeRangeConflict({
+          tx,
           professionalId,
           locationId: locationContext.locationId,
-          locationType,
           requestedStart,
           requestedEnd,
-          offeringId,
-          clientId,
+          defaultBufferMinutes: bufferMinutes,
+          fallbackDurationMinutes: totalDurationMinutes,
         })
-      }
 
-      const salonLocationAddressSnapshot:
-        | Prisma.InputJsonValue
-        | Prisma.NullableJsonNullValueInput =
-        locationType === ServiceLocationType.SALON && salonLocationAddress
-          ? buildAddressSnapshot(salonLocationAddress) ?? Prisma.JsonNull
-          : Prisma.JsonNull
-
-      const clientAddressSnapshot:
-        | Prisma.InputJsonValue
-        | Prisma.NullableJsonNullValueInput =
-        locationType === ServiceLocationType.MOBILE && clientServiceAddress
-          ? buildAddressSnapshot(clientServiceAddress) ?? Prisma.JsonNull
-          : Prisma.JsonNull
-
-      const locationLatSnapshot = locationContext.lat ?? null
-      const locationLngSnapshot = locationContext.lng ?? null
-
-      const clientAddressLatSnapshot =
-        locationType === ServiceLocationType.MOBILE && clientAddress
-          ? decimalToNumber(clientAddress.lat)
-          : null
-
-      const clientAddressLngSnapshot =
-        locationType === ServiceLocationType.MOBILE && clientAddress
-          ? decimalToNumber(clientAddress.lng)
-          : null
-
-      let booking: {
-        id: string
-        scheduledFor: Date
-        totalDurationMinutes: number
-        bufferMinutes: number
-        status: BookingStatus
-      }
-
-      try {
-        booking = await tx.booking.create({
-          data: {
+        if (timeRangeConflict) {
+          logAndThrowTimeRangeConflict({
+            conflict: timeRangeConflict,
             professionalId,
+            locationId: locationContext.locationId,
+            locationType,
+            requestedStart,
+            requestedEnd,
+            offeringId,
             clientId,
+          })
+        }
+
+        const salonLocationAddressSnapshot:
+          | Prisma.InputJsonValue
+          | Prisma.NullableJsonNullValueInput =
+          locationType === ServiceLocationType.SALON && salonLocationAddress
+            ? buildAddressSnapshot(salonLocationAddress) ?? Prisma.JsonNull
+            : Prisma.JsonNull
+
+        const clientAddressSnapshot:
+          | Prisma.InputJsonValue
+          | Prisma.NullableJsonNullValueInput =
+          locationType === ServiceLocationType.MOBILE && clientServiceAddress
+            ? buildAddressSnapshot(clientServiceAddress) ?? Prisma.JsonNull
+            : Prisma.JsonNull
+
+        const locationLatSnapshot = locationContext.lat ?? null
+        const locationLngSnapshot = locationContext.lng ?? null
+
+        const clientAddressLatSnapshot =
+          locationType === ServiceLocationType.MOBILE && clientAddress
+            ? decimalToNumber(clientAddress.lat)
+            : null
+
+        const clientAddressLngSnapshot =
+          locationType === ServiceLocationType.MOBILE && clientAddress
+            ? decimalToNumber(clientAddress.lng)
+            : null
+
+        let booking: {
+          id: string
+          scheduledFor: Date
+          totalDurationMinutes: number
+          bufferMinutes: number
+          status: BookingStatus
+        }
+
+        try {
+          booking = await tx.booking.create({
+            data: {
+              professionalId,
+              clientId,
+              serviceId: offering.serviceId,
+              offeringId: offering.id,
+              scheduledFor: requestedStart,
+              status: getProCreatedBookingStatus(),
+
+              locationType,
+              locationId: locationContext.locationId,
+              locationTimeZone: locationContext.timeZone,
+
+              locationAddressSnapshot: salonLocationAddressSnapshot,
+              locationLatSnapshot,
+              locationLngSnapshot,
+
+              clientAddressId:
+                locationType === ServiceLocationType.MOBILE && clientAddress
+                  ? clientAddress.id
+                  : null,
+              clientAddressSnapshot,
+              clientAddressLatSnapshot,
+              clientAddressLngSnapshot,
+
+              internalNotes: internalNotes ?? null,
+              bufferMinutes,
+              totalDurationMinutes,
+              subtotalSnapshot: basePrice,
+            },
+            select: {
+              id: true,
+              scheduledFor: true,
+              totalDurationMinutes: true,
+              bufferMinutes: true,
+              status: true,
+            },
+          })
+        } catch (error: unknown) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+          ) {
+            throwCode('TIME_NOT_AVAILABLE')
+          }
+          throw error
+        }
+
+        await tx.bookingServiceItem.create({
+          data: {
+            bookingId: booking.id,
             serviceId: offering.serviceId,
             offeringId: offering.id,
-            scheduledFor: requestedStart,
-            status: getProCreatedBookingStatus(),
-
-            locationType,
-            locationId: locationContext.locationId,
-            locationTimeZone: locationContext.timeZone,
-
-            // SALON destination = pro salon/suite address.
-            // MOBILE destination = clientAddressSnapshot.
-            locationAddressSnapshot: salonLocationAddressSnapshot,
-            locationLatSnapshot,
-            locationLngSnapshot,
-
-            clientAddressId:
-              locationType === ServiceLocationType.MOBILE && clientAddress
-                ? clientAddress.id
-                : null,
-            clientAddressSnapshot,
-            clientAddressLatSnapshot,
-            clientAddressLngSnapshot,
-
-            internalNotes: internalNotes ?? null,
-            bufferMinutes,
-            totalDurationMinutes,
-            subtotalSnapshot: basePrice,
-          },
-          select: {
-            id: true,
-            scheduledFor: true,
-            totalDurationMinutes: true,
-            bufferMinutes: true,
-            status: true,
+            itemType: BookingServiceItemType.BASE,
+            priceSnapshot: basePrice,
+            durationMinutesSnapshot: computedDurationMinutes,
+            sortOrder: 0,
           },
         })
-      } catch (error: unknown) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === 'P2002'
-        ) {
-          throwCode('TIME_NOT_AVAILABLE')
+
+        return {
+          booking,
+          subtotalSnapshot: basePrice,
+          stepMinutes,
+          appointmentTimeZone: locationContext.timeZone,
+          locationId: locationContext.locationId,
+          locationType,
+          clientAddressId:
+            locationType === ServiceLocationType.MOBILE && clientAddress
+              ? clientAddress.id
+              : null,
+          serviceName: offering.service.name || 'Appointment',
         }
-        throw error
-      }
-
-      await tx.bookingServiceItem.create({
-        data: {
-          bookingId: booking.id,
-          serviceId: offering.serviceId,
-          offeringId: offering.id,
-          itemType: BookingServiceItemType.BASE,
-          priceSnapshot: basePrice,
-          durationMinutesSnapshot: computedDurationMinutes,
-          sortOrder: 0,
-        },
-      })
-
-            return {
-        booking,
-        subtotalSnapshot: basePrice,
-        stepMinutes,
-        appointmentTimeZone: locationContext.timeZone,
-        locationId: locationContext.locationId,
-        locationType,
-        clientAddressId:
-          locationType === ServiceLocationType.MOBILE && clientAddress
-            ? clientAddress.id
-            : null,
-        serviceName: offering.service.name || 'Appointment',
-      }
-    },
-  )
+      },
+    )
 
     const endsAt = addMinutes(
       new Date(result.booking.scheduledFor),
@@ -623,6 +676,20 @@ export async function POST(req: Request) {
       return jsonFail(
         400,
         'This location is missing coordinates required for this booking flow.',
+      )
+    }
+
+    if (message === 'ADVANCE_NOTICE_REQUIRED') {
+      return jsonFail(
+        400,
+        'That booking is too soon unless you explicitly override advance notice.',
+      )
+    }
+
+    if (message === 'MAX_DAYS_AHEAD_EXCEEDED') {
+      return jsonFail(
+        400,
+        'That booking is too far in the future unless you explicitly override the booking window.',
       )
     }
 

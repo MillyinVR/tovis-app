@@ -771,19 +771,47 @@ function utcMinuteOfDayInLocalTimeZone(date: Date, timeZone: string): number {
   return parts.hour * 60 + parts.minute
 }
 
-function isSameLocalDay(
-  date: Date,
-  timeZone: string,
-  ymd: { year: number; month: number; day: number },
-): boolean {
+function localDaySerialFromUtc(date: Date, timeZone: string): number {
   const parts = utcDateToLocalParts(date, timeZone)
-  return (
-    parts.year === ymd.year &&
-    parts.month === ymd.month &&
-    parts.day === ymd.day
+  return Math.floor(
+    Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0) / 86_400_000,
   )
 }
 
+function requestedDaySerial(ymd: {
+  year: number
+  month: number
+  day: number
+}): number {
+  return Math.floor(
+    Date.UTC(ymd.year, ymd.month - 1, ymd.day, 12, 0, 0, 0) / 86_400_000,
+  )
+}
+
+/**
+ * Returns minutes from the requested local day start.
+ *
+ * Examples:
+ * - same day 01:30 => 90
+ * - same day 23:15 => 1395
+ * - next day 00:30 => 1470
+ *
+ * Returns null if the date is not on the requested day or the next local day.
+ */
+function localMinutesFromRequestedDayStart(args: {
+  date: Date
+  timeZone: string
+  dateYMD: { year: number; month: number; day: number }
+}): number | null {
+  const { date, timeZone, dateYMD } = args
+  const daySerial = localDaySerialFromUtc(date, timeZone)
+  const baseSerial = requestedDaySerial(dateYMD)
+  const dayOffset = daySerial - baseSerial
+
+  if (dayOffset !== 0 && dayOffset !== 1) return null
+
+  return dayOffset * 1440 + utcMinuteOfDayInLocalTimeZone(date, timeZone)
+}
 function localStepOffsetMinutes(
   localMinutes: number,
   startMinutes: number,
@@ -832,7 +860,10 @@ async function computeDaySlotsFast(args: {
     debug,
   } = args
 
-  const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(dateYMD, tzIn)
+  const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(
+    dateYMD,
+    tzIn,
+  )
   const nowUtc = new Date()
 
   const dayAnchorUtc =
@@ -897,34 +928,42 @@ async function computeDaySlotsFast(args: {
   const slots: string[] = []
   const skippedDstWallTimes: string[] = []
 
+  const scanEndUtc = addMinutes(dayStartUtc, window.endMinutes)
+
   for (
     let cursor = new Date(dayStartUtc.getTime());
-    cursor.getTime() < dayEndExclusiveUtc.getTime();
+    cursor.getTime() < scanEndUtc.getTime();
     cursor = addMinutes(cursor, step)
   ) {
     const slotStartUtc = normalizeToMinute(cursor)
 
-    if (!isSameLocalDay(slotStartUtc, timeZone, dateYMD)) continue
     if (slotStartUtc.getTime() < cutoffUtc.getTime()) continue
 
-    const localStartMinutes = utcMinuteOfDayInLocalTimeZone(slotStartUtc, timeZone)
+    const localStartOffset = localMinutesFromRequestedDayStart({
+      date: slotStartUtc,
+      timeZone,
+      dateYMD,
+    })
+    if (localStartOffset == null) continue
+    if (localStartOffset < window.startMinutes) continue
 
-    if (localStartMinutes < window.startMinutes) continue
-    if (localStepOffsetMinutes(localStartMinutes, window.startMinutes, step) !== 0) {
-      continue
-    }
+    const stepOffset = localStepOffsetMinutes(
+      localStartOffset,
+      window.startMinutes,
+      step,
+    )
+    if (stepOffset !== 0) continue
 
     const slotEndWithBufferUtc = addMinutes(slotStartUtc, dur + buf)
 
-    const localEndMinutes = utcMinuteOfDayInLocalTimeZone(
-      slotEndWithBufferUtc,
+    const localEndOffset = localMinutesFromRequestedDayStart({
+      date: slotEndWithBufferUtc,
       timeZone,
-    )
-
-    if (!isSameLocalDay(slotStartUtc, timeZone, dateYMD)) continue
-    if (!isSameLocalDay(slotEndWithBufferUtc, timeZone, dateYMD)) continue
-    if (localEndMinutes > window.endMinutes) continue
-    if (slotEndWithBufferUtc > dayEndExclusiveUtc) continue
+      dateYMD,
+    })
+    if (localEndOffset == null) continue
+    if (localEndOffset > window.endMinutes) continue
+    if (localEndOffset <= localStartOffset) continue
 
     if (!isSlotFree(busy, slotStartUtc, slotEndWithBufferUtc)) continue
 
@@ -937,18 +976,37 @@ async function computeDaySlotsFast(args: {
       minute + dur + buf <= window.endMinutes;
       minute += step
     ) {
-      const hh = Math.floor(minute / 60)
-      const mm = minute % 60
-      const localValue = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+      const normalizedMinute = minute % 1440
+      const dayOffset = Math.floor(minute / 1440)
+
+      const hh = Math.floor(normalizedMinute / 60)
+      const mm = normalizedMinute % 60
+      const localValue = `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+
       const matched = slots.some((iso) => {
-        const p = utcDateToLocalParts(new Date(iso), timeZone)
-        return p.hour === hh && p.minute === mm
+        const parts = utcDateToLocalParts(new Date(iso), timeZone)
+        const isoSerial = Math.floor(
+          Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0) / 86_400_000,
+        )
+        const baseSerial = requestedDaySerial(dateYMD)
+        return (
+          isoSerial - baseSerial === dayOffset &&
+          parts.hour === hh &&
+          parts.minute === mm
+        )
       })
+
       if (!matched) {
+        const shiftedYmd = addDaysToYMD(
+          dateYMD.year,
+          dateYMD.month,
+          dateYMD.day,
+          dayOffset,
+        )
         const maybeUtc = localSlotToUtcOrNull({
-          year: dateYMD.year,
-          month: dateYMD.month,
-          day: dateYMD.day,
+          year: shiftedYmd.year,
+          month: shiftedYmd.month,
+          day: shiftedYmd.day,
           hour: hh,
           minute: mm,
           timeZone,
@@ -969,6 +1027,9 @@ async function computeDaySlotsFast(args: {
       ? {
           timeZone,
           dayKey: window.key,
+          spansMidnight: window.spansMidnight,
+          windowStartMinutes: window.startMinutes,
+          windowEndMinutes: window.endMinutes,
           skippedDstWallTimes,
         }
       : undefined,
@@ -2031,15 +2092,30 @@ export async function GET(req: Request) {
       }
     }
 
-    const bounds = computeDayBoundsUtc(ymd, timeZone)
-    const windowStartUtc = addMinutes(
-      bounds.dayStartUtc,
-      -OCCUPANCY_WINDOW_PADDING_MINUTES,
-    )
-    const windowEndUtc = addMinutes(
-      bounds.dayEndExclusiveUtc,
-      OCCUPANCY_WINDOW_PADDING_MINUTES,
-    )
+const bounds = computeDayBoundsUtc(ymd, timeZone)
+
+const dayAnchorUtc =
+  localSlotToUtcOrNull({
+    year: ymd.year,
+    month: ymd.month,
+    day: ymd.day,
+    hour: 12,
+    minute: 0,
+    timeZone,
+  }) ?? new Date(bounds.dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
+
+const windowForLoad = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
+
+const windowStartUtc = addMinutes(
+  bounds.dayStartUtc,
+  -OCCUPANCY_WINDOW_PADDING_MINUTES,
+)
+
+const windowEndUtc = addMinutes(
+  bounds.dayStartUtc,
+  (windowForLoad.ok ? windowForLoad.endMinutes : 1440) +
+    OCCUPANCY_WINDOW_PADDING_MINUTES,
+)
 
     const busy = await loadBusyIntervals({
       professionalId,

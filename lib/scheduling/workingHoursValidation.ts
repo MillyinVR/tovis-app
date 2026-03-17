@@ -32,6 +32,15 @@ function formatHHMM(hh: number, mm: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
 
+/**
+ * Valid working-hours rules:
+ * - enabled must be boolean
+ * - start/end must be valid HH:MM
+ * - start and end cannot be identical
+ * - overnight ranges ARE allowed (e.g. 22:00 -> 02:00)
+ *
+ * Disabled days still need structurally valid times so the stored object remains predictable.
+ */
 function normalizeWorkingHoursDay(value: unknown): WorkingHoursDay | null {
   if (!isRecord(value)) return null
   if (typeof value.enabled !== 'boolean') return null
@@ -44,7 +53,9 @@ function normalizeWorkingHoursDay(value: unknown): WorkingHoursDay | null {
   const startMinutes = start.hh * 60 + start.mm
   const endMinutes = end.hh * 60 + end.mm
 
-  if (endMinutes <= startMinutes) return null
+  // Reject zero-length windows like 09:00 -> 09:00.
+  // Overnight windows such as 22:00 -> 02:00 are valid.
+  if (startMinutes === endMinutes) return null
 
   return {
     enabled: value.enabled,

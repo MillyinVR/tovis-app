@@ -3,30 +3,22 @@
 /**
  * Booking / availability conflict contract
  *
- * This file is the single source of truth for overlap behavior:
+ * Single source of truth for overlap behavior:
  *
- * - Bookings are PRO-WIDE occupancy.
- *   A professional cannot be double-booked across different locations
- *   or across different booking modes (SALON vs MOBILE) at the same time.
+ * 1) Bookings are PRO-WIDE occupancy.
+ *    A professional cannot be double-booked across locations or booking modes.
  *
- * - Holds are also PRO-WIDE occupancy.
- *   A held time blocks that professional regardless of the client-facing mode/location view.
+ * 2) Holds are PRO-WIDE occupancy.
+ *    An active hold blocks that professional regardless of client-facing view.
  *
- * - Calendar blocks are LOCATION-AWARE or GLOBAL.
- *   A block applies when:
- *   - it is global (locationId === null), or
- *   - it matches the selected/requested locationId.
+ * 3) Calendar blocks are LOCATION-AWARE or GLOBAL.
+ *    - global block => conflicts everywhere
+ *    - location block => conflicts only for that location
  *
- *   Important nuance:
- *   - A REQUESTED global block conflicts with ANY overlapping block for that pro.
- *   - A REQUESTED location-scoped block conflicts with overlapping global blocks
- *     and overlapping blocks for that same location.
+ * 4) WAITLIST DOES NOT BLOCK TIME.
+ *    Waitlist is non-occupancy metadata, not a reservation.
  *
- * - Client-facing availability is LOCATION/MODE-SCOPED for visibility,
- *   but must still consume PRO-WIDE booking and hold occupancy when determining
- *   whether a slot is actually free.
- *
- * If you change these rules, update the tests first.
+ * If these rules change, update tests first.
  */
 
 import { prisma } from '@/lib/prisma'
@@ -100,7 +92,19 @@ type BusyIntervalWindowArgs = {
   take?: number
 }
 
-type TimeRangeConflictCode = 'BLOCKED' | 'BOOKING' | 'HOLD'
+export type TimeRangeConflictCode = 'BLOCKED' | 'BOOKING' | 'HOLD'
+
+/**
+ * Only real scheduled appointment states should consume time.
+ * WAITLIST must NOT block.
+ *
+ * Adjust this list if your BookingStatus enum uses different active names.
+ */
+const BOOKING_BLOCKING_STATUSES: BookingStatus[] = [
+  BookingStatus.PENDING,
+  BookingStatus.ACCEPTED,
+  BookingStatus.COMPLETED,
+]
 
 function db(tx?: DbClient): DbClient {
   return tx ?? prisma
@@ -125,6 +129,14 @@ function assertValidRange(start: Date, end: Date): void {
   }
   if (end <= start) {
     throw new Error('INVALID_RANGE')
+  }
+}
+
+function buildBlockingBookingStatusWhere(): Prisma.BookingWhereInput {
+  return {
+    status: {
+      in: BOOKING_BLOCKING_STATUSES,
+    },
   }
 }
 
@@ -250,7 +262,7 @@ export async function hasBookingConflict(
         gte: getConflictWindowStart(requestedStart),
         lt: requestedEnd,
       },
-      status: { not: BookingStatus.CANCELLED },
+      ...buildBlockingBookingStatusWhere(),
     },
     select: {
       scheduledFor: true,
@@ -402,7 +414,7 @@ export async function loadBusyIntervalsForWindow(
       where: {
         professionalId,
         scheduledFor: { gte: queryStartUtc, lt: windowEndUtc },
-        status: { not: BookingStatus.CANCELLED },
+        ...buildBlockingBookingStatusWhere(),
       },
       select: {
         scheduledFor: true,

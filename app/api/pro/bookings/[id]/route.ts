@@ -211,11 +211,11 @@ function logAndThrowTimeRangeConflict(args: {
     },
   })
 
-if (args.conflict === 'BLOCKED') {
-  throwCode('BLOCKED')
-}
+  if (args.conflict === 'BLOCKED') {
+    throw new Error('BLOCKED')
+  }
 
-throwCode('TIME_NOT_AVAILABLE')
+  throw new Error('TIME_NOT_AVAILABLE')
 }
 
 async function resolveBookingSchedulingContext(args: {
@@ -436,6 +436,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
       rec,
       'allowOutsideWorkingHours',
     )
+    const hasAllowShortNotice = Object.prototype.hasOwnProperty.call(
+      rec,
+      'allowShortNotice',
+    )
+    const hasAllowFarFuture = Object.prototype.hasOwnProperty.call(
+      rec,
+      'allowFarFuture',
+    )
     const hasScheduledFor = Object.prototype.hasOwnProperty.call(
       rec,
       'scheduledFor',
@@ -462,6 +470,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const allowOutsideWorkingHours = pickBool(rec.allowOutsideWorkingHours)
     if (hasAllowOutside && allowOutsideWorkingHours == null) {
       return jsonFail(400, 'allowOutsideWorkingHours must be boolean.')
+    }
+
+    const allowShortNotice = pickBool(rec.allowShortNotice)
+    if (hasAllowShortNotice && allowShortNotice == null) {
+      return jsonFail(400, 'allowShortNotice must be boolean.')
+    }
+
+    const allowFarFuture = pickBool(rec.allowFarFuture)
+    if (hasAllowFarFuture && allowFarFuture == null) {
+      return jsonFail(400, 'allowFarFuture must be boolean.')
     }
 
     const nextStart = pickIsoDate(rec.scheduledFor)
@@ -506,351 +524,349 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     const result = await withLockedProfessionalTransaction(
       professionalId,
-      async ({ tx }) => {
-      const existing = await tx.booking.findFirst({
-        where: { id: bookingId, professionalId },
-        select: {
-          id: true,
-          status: true,
-          scheduledFor: true,
-          locationType: true,
-          bufferMinutes: true,
-          totalDurationMinutes: true,
-          subtotalSnapshot: true,
-          clientId: true,
-          locationId: true,
-          locationTimeZone: true,
-          locationAddressSnapshot: true,
-          locationLatSnapshot: true,
-          locationLngSnapshot: true,
-          professionalId: true,
-          professional: {
-            select: { timeZone: true },
-          },
-        },
-      })
-
-      if (!existing) {
-        throwCode('NOT_FOUND')
-      }
-
-      if (existing.status === BookingStatus.CANCELLED) {
-        throwCode('CANNOT_EDIT_CANCELLED')
-      }
-
-      if (existing.status === BookingStatus.COMPLETED) {
-        throwCode('CANNOT_EDIT_COMPLETED')
-      }
-
-      const outputSchedulingContext = await resolveBookingSchedulingContext({
-        bookingLocationTimeZone: existing.locationTimeZone,
-        locationId: existing.locationId ?? null,
-        professionalId: existing.professionalId,
-        professionalTimeZone: existing.professional?.timeZone,
-        fallback: 'UTC',
-        requireValid: false,
-      })
-
-      const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
-        existing.locationAddressSnapshot,
-      )
-      const existingLocationLatSnapshot = decimalToNullableNumber(
-        existing.locationLatSnapshot,
-      )
-      const existingLocationLngSnapshot = decimalToNullableNumber(
-        existing.locationLngSnapshot,
-      )
-
-      if (nextStatus === BookingStatus.CANCELLED) {
-        const updated = await tx.booking.update({
-          where: { id: existing.id },
-          data: { status: BookingStatus.CANCELLED },
+      async ({ tx, now }) => {
+        const existing = await tx.booking.findFirst({
+          where: { id: bookingId, professionalId },
           select: {
             id: true,
             status: true,
             scheduledFor: true,
+            locationType: true,
             bufferMinutes: true,
             totalDurationMinutes: true,
             subtotalSnapshot: true,
+            clientId: true,
+            locationId: true,
+            locationTimeZone: true,
+            locationAddressSnapshot: true,
+            locationLatSnapshot: true,
+            locationLngSnapshot: true,
+            professionalId: true,
+            professional: {
+              select: { timeZone: true },
+            },
           },
         })
 
-        if (notifyClient === true) {
-          await createClientNotification({
-            tx,
-            clientId: existing.clientId,
-            bookingId: updated.id,
-            type: ClientNotificationType.BOOKING_CANCELLED,
-            title: 'Appointment cancelled',
-            body: 'Your appointment was cancelled.',
-            dedupeKey: `BOOKING_CANCELLED:${updated.id}:${new Date(
-              updated.scheduledFor,
-            ).toISOString()}`,
+        if (!existing) {
+          throwCode('NOT_FOUND')
+        }
+
+        if (existing.status === BookingStatus.CANCELLED) {
+          throwCode('CANNOT_EDIT_CANCELLED')
+        }
+
+        if (existing.status === BookingStatus.COMPLETED) {
+          throwCode('CANNOT_EDIT_COMPLETED')
+        }
+
+        const outputSchedulingContext = await resolveBookingSchedulingContext({
+          bookingLocationTimeZone: existing.locationTimeZone,
+          locationId: existing.locationId ?? null,
+          professionalId: existing.professionalId,
+          professionalTimeZone: existing.professional?.timeZone,
+          fallback: 'UTC',
+          requireValid: false,
+        })
+
+        const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
+          existing.locationAddressSnapshot,
+        )
+        const existingLocationLatSnapshot = decimalToNullableNumber(
+          existing.locationLatSnapshot,
+        )
+        const existingLocationLngSnapshot = decimalToNullableNumber(
+          existing.locationLngSnapshot,
+        )
+
+        if (nextStatus === BookingStatus.CANCELLED) {
+          const updated = await tx.booking.update({
+            where: { id: existing.id },
+            data: { status: BookingStatus.CANCELLED },
+            select: {
+              id: true,
+              status: true,
+              scheduledFor: true,
+              bufferMinutes: true,
+              totalDurationMinutes: true,
+              subtotalSnapshot: true,
+            },
+          })
+
+          if (notifyClient === true) {
+            await createClientNotification({
+              tx,
+              clientId: existing.clientId,
+              bookingId: updated.id,
+              type: ClientNotificationType.BOOKING_CANCELLED,
+              title: 'Appointment cancelled',
+              body: 'Your appointment was cancelled.',
+              dedupeKey: `BOOKING_CANCELLED:${updated.id}:${new Date(
+                updated.scheduledFor,
+              ).toISOString()}`,
+            })
+          }
+
+          return buildBookingOutput({
+            id: updated.id,
+            scheduledFor: new Date(updated.scheduledFor),
+            totalDurationMinutes: durationOrFallback(updated.totalDurationMinutes),
+            bufferMinutes: Math.max(0, Number(updated.bufferMinutes ?? 0)),
+            status: updated.status,
+            subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
+            appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
+            timeZoneSource: outputSchedulingContext.timeZoneSource,
+            locationId: existing.locationId ?? null,
+            locationType: existing.locationType,
+            locationAddressSnapshot: existingLocationAddressSnapshot,
+            locationLatSnapshot: existingLocationLatSnapshot,
+            locationLngSnapshot: existingLocationLngSnapshot,
           })
         }
 
-        return buildBookingOutput({
-          id: updated.id,
-          scheduledFor: new Date(updated.scheduledFor),
-          totalDurationMinutes: durationOrFallback(updated.totalDurationMinutes),
-          bufferMinutes: Math.max(0, Number(updated.bufferMinutes ?? 0)),
-          status: updated.status,
-          subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
-          appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
-          timeZoneSource: outputSchedulingContext.timeZoneSource,
-          locationId: existing.locationId ?? null,
-          locationType: existing.locationType,
-          locationAddressSnapshot: existingLocationAddressSnapshot,
-          locationLatSnapshot: existingLocationLatSnapshot,
-          locationLngSnapshot: existingLocationLngSnapshot,
-        })
-      }
+        if (!existing.locationId) {
+          throwCode('BAD_LOCATION')
+        }
 
-      if (!existing.locationId) {
-        throwCode('BAD_LOCATION')
-      }
-
-      const location = await tx.professionalLocation.findFirst({
-        where: {
-          id: existing.locationId,
-          professionalId: existing.professionalId,
-          isBookable: true,
-        },
-        select: {
-          id: true,
-          type: true,
-          timeZone: true,
-          workingHours: true,
-          stepMinutes: true,
-          bufferMinutes: true,
-        },
-      })
-
-      if (!location) {
-        throwCode('BAD_LOCATION')
-      }
-
-      if (
-        existing.locationType === ServiceLocationType.MOBILE &&
-        location.type !== ProfessionalLocationType.MOBILE_BASE
-      ) {
-        throwCode('BAD_LOCATION_MODE')
-      }
-
-      if (
-        existing.locationType === ServiceLocationType.SALON &&
-        location.type === ProfessionalLocationType.MOBILE_BASE
-      ) {
-        throwCode('BAD_LOCATION_MODE')
-      }
-
-      const schedulingContextResult = await resolveAppointmentSchedulingContext({
-        bookingLocationTimeZone: existing.locationTimeZone,
-        location: { id: location.id, timeZone: location.timeZone },
-        professionalId: existing.professionalId,
-        professionalTimeZone: existing.professional?.timeZone,
-        fallback: 'UTC',
-        requireValid: true,
-      })
-
-      if (!schedulingContextResult.ok) {
-        console.error(
-          'PATCH /api/pro/bookings/[id] invalid appointment timezone',
-          {
-            route: 'app/api/pro/bookings/[id]/route.ts',
-            bookingId: existing.id,
-            professionalId: existing.professionalId,
-            bookingLocationTimeZone: existing.locationTimeZone,
-            locationId: location.id,
-            locationTimeZone: location.timeZone,
-            professionalTimeZone: existing.professional?.timeZone ?? null,
-            resolveResult: schedulingContextResult,
-          },
-        )
-        throwCode('TIMEZONE_REQUIRED')
-      }
-
-      const schedulingContext = {
-        ...schedulingContextResult.context,
-        appointmentTimeZone: normalizeOutputTimeZone(
-          schedulingContextResult.context.appointmentTimeZone,
-        ),
-      }
-
-      const appointmentTimeZone = schedulingContext.appointmentTimeZone
-      const appointmentTimeZoneSource = schedulingContext.timeZoneSource
-
-      const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
-
-      if (nextBuffer != null && (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)) {
-        throwCode('BAD_BUFFER')
-      }
-
-      if (
-        nextDuration != null &&
-        (nextDuration < 15 || nextDuration > MAX_SLOT_DURATION_MINUTES)
-      ) {
-        throwCode('BAD_DURATION')
-      }
-
-      const finalStart = nextStart
-        ? normalizeToMinute(nextStart)
-        : normalizeToMinute(new Date(existing.scheduledFor))
-
-      if (!Number.isFinite(finalStart.getTime())) {
-        throwCode('BAD_START')
-      }
-
-      const startMinutes = minutesSinceMidnightInTimeZone(
-        finalStart,
-        appointmentTimeZone,
-      )
-
-      if (startMinutes % stepMinutes !== 0) {
-        logBookingConflict({
-          action: 'BOOKING_UPDATE',
-          professionalId: existing.professionalId,
-          locationId: location.id,
-          locationType: existing.locationType,
-          requestedStart: finalStart,
-          requestedEnd: addMinutes(finalStart, 1),
-          conflictType: 'STEP_BOUNDARY',
-          bookingId: existing.id,
-          meta: {
-            route: 'app/api/pro/bookings/[id]/route.ts',
-            stepMinutes,
-            timeZone: appointmentTimeZone,
-            timeZoneSource: appointmentTimeZoneSource,
-          },
-        })
-        throw new Error(`STEP:${stepMinutes}`)
-      }
-
-      const finalBuffer =
-        nextBuffer != null
-          ? clampInt(
-              snapToStepMinutes(nextBuffer, stepMinutes),
-              0,
-              MAX_BUFFER_MINUTES,
-            )
-          : Math.max(0, Number(existing.bufferMinutes ?? 0))
-
-      let normalizedServiceItems:
-        | ReturnType<typeof buildNormalizedBookingItemsFromRequestedOfferings>
-        | null = null
-
-      if (parsedRequestedItems) {
-        const offeringIds = Array.from(
-          new Set(parsedRequestedItems.map((item) => item.offeringId)),
-        ).slice(0, 50)
-
-        const offerings = await tx.professionalServiceOffering.findMany({
+        const location = await tx.professionalLocation.findFirst({
           where: {
-            id: { in: offeringIds },
+            id: existing.locationId,
             professionalId: existing.professionalId,
-            isActive: true,
+            isBookable: true,
           },
           select: {
             id: true,
-            serviceId: true,
-            offersInSalon: true,
-            offersMobile: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-            salonPriceStartingAt: true,
-            mobilePriceStartingAt: true,
-            service: {
-              select: {
-                defaultDurationMinutes: true,
-              },
-            },
+            type: true,
+            timeZone: true,
+            workingHours: true,
+            stepMinutes: true,
+            bufferMinutes: true,
+            advanceNoticeMinutes: true,
+            maxDaysAhead: true,
           },
-          take: 100,
         })
 
-        const offeringById = new Map(
-          offerings.map((offering) => [offering.id, offering]),
+        if (!location) {
+          throwCode('BAD_LOCATION')
+        }
+
+        if (
+          existing.locationType === ServiceLocationType.MOBILE &&
+          location.type !== ProfessionalLocationType.MOBILE_BASE
+        ) {
+          throwCode('BAD_LOCATION_MODE')
+        }
+
+        if (
+          existing.locationType === ServiceLocationType.SALON &&
+          location.type === ProfessionalLocationType.MOBILE_BASE
+        ) {
+          throwCode('BAD_LOCATION_MODE')
+        }
+
+        const schedulingContextResult = await resolveAppointmentSchedulingContext({
+          bookingLocationTimeZone: existing.locationTimeZone,
+          location: { id: location.id, timeZone: location.timeZone },
+          professionalId: existing.professionalId,
+          professionalTimeZone: existing.professional?.timeZone,
+          fallback: 'UTC',
+          requireValid: true,
+        })
+
+        if (!schedulingContextResult.ok) {
+          console.error(
+            'PATCH /api/pro/bookings/[id] invalid appointment timezone',
+            {
+              route: 'app/api/pro/bookings/[id]/route.ts',
+              bookingId: existing.id,
+              professionalId: existing.professionalId,
+              bookingLocationTimeZone: existing.locationTimeZone,
+              locationId: location.id,
+              locationTimeZone: location.timeZone,
+              professionalTimeZone: existing.professional?.timeZone ?? null,
+              resolveResult: schedulingContextResult,
+            },
+          )
+          throwCode('TIMEZONE_REQUIRED')
+        }
+
+        const schedulingContext = {
+          ...schedulingContextResult.context,
+          appointmentTimeZone: normalizeOutputTimeZone(
+            schedulingContextResult.context.appointmentTimeZone,
+          ),
+        }
+
+        const appointmentTimeZone = schedulingContext.appointmentTimeZone
+        const appointmentTimeZoneSource = schedulingContext.timeZoneSource
+
+        const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
+
+        if (nextBuffer != null && (nextBuffer < 0 || nextBuffer > MAX_BUFFER_MINUTES)) {
+          throwCode('BAD_BUFFER')
+        }
+
+        if (
+          nextDuration != null &&
+          (nextDuration < 15 || nextDuration > MAX_SLOT_DURATION_MINUTES)
+        ) {
+          throwCode('BAD_DURATION')
+        }
+
+        const finalStart = nextStart
+          ? normalizeToMinute(nextStart)
+          : normalizeToMinute(new Date(existing.scheduledFor))
+
+        if (!Number.isFinite(finalStart.getTime())) {
+          throwCode('BAD_START')
+        }
+
+        const startMinutes = minutesSinceMidnightInTimeZone(
+          finalStart,
+          appointmentTimeZone,
         )
 
-        normalizedServiceItems = buildNormalizedBookingItemsFromRequestedOfferings({
-          requestedItems: parsedRequestedItems,
-          locationType: existing.locationType,
-          stepMinutes,
-          offeringById,
-          badItemsCode: 'BAD_ITEMS',
-        })
-      }
+        if (startMinutes % stepMinutes !== 0) {
+          logBookingConflict({
+            action: 'BOOKING_UPDATE',
+            professionalId: existing.professionalId,
+            locationId: location.id,
+            locationType: existing.locationType,
+            requestedStart: finalStart,
+            requestedEnd: addMinutes(finalStart, 1),
+            conflictType: 'STEP_BOUNDARY',
+            bookingId: existing.id,
+            meta: {
+              route: 'app/api/pro/bookings/[id]/route.ts',
+              stepMinutes,
+              timeZone: appointmentTimeZone,
+              timeZoneSource: appointmentTimeZoneSource,
+            },
+          })
+          throw new Error(`STEP:${stepMinutes}`)
+        }
 
-      const previewItems =
-        normalizedServiceItems?.map((item, index) => ({
-          serviceId: item.serviceId,
-          offeringId: item.offeringId,
-          durationMinutesSnapshot: item.durationMinutesSnapshot,
-          priceSnapshot: item.priceSnapshot,
-          itemType:
-            index === 0
-              ? BookingServiceItemType.BASE
-              : BookingServiceItemType.ADD_ON,
-        })) ??
-        (await tx.bookingServiceItem.findMany({
-          where: { bookingId: existing.id },
-          orderBy: { sortOrder: 'asc' },
-          select: {
-            serviceId: true,
-            offeringId: true,
-            priceSnapshot: true,
-            durationMinutesSnapshot: true,
-            itemType: true,
-          },
-        }))
+        const finalBuffer =
+          nextBuffer != null
+            ? clampInt(
+                snapToStepMinutes(nextBuffer, stepMinutes),
+                0,
+                MAX_BUFFER_MINUTES,
+              )
+            : Math.max(0, Number(existing.bufferMinutes ?? 0))
 
-      const {
-        primaryServiceId,
-        primaryOfferingId,
-        computedDurationMinutes,
-        computedSubtotal,
-      } = computeBookingItemLikeTotals(previewItems, 'BAD_ITEMS')
+        let normalizedServiceItems:
+          | ReturnType<typeof buildNormalizedBookingItemsFromRequestedOfferings>
+          | null = null
 
-      const snappedNextDuration =
-        nextDuration != null
-          ? clampInt(
-              snapToStepMinutes(nextDuration, stepMinutes),
-              15,
-              MAX_SLOT_DURATION_MINUTES,
-            )
-          : null
+        if (parsedRequestedItems) {
+          const offeringIds = Array.from(
+            new Set(parsedRequestedItems.map((item) => item.offeringId)),
+          ).slice(0, 50)
 
-      if (
-        normalizedServiceItems &&
-        snappedNextDuration != null &&
-        snappedNextDuration !== computedDurationMinutes
-      ) {
-        throwCode('DURATION_MISMATCH')
-      }
+          const offerings = await tx.professionalServiceOffering.findMany({
+            where: {
+              id: { in: offeringIds },
+              professionalId: existing.professionalId,
+              isActive: true,
+            },
+            select: {
+              id: true,
+              serviceId: true,
+              offersInSalon: true,
+              offersMobile: true,
+              salonDurationMinutes: true,
+              mobileDurationMinutes: true,
+              salonPriceStartingAt: true,
+              mobilePriceStartingAt: true,
+              service: {
+                select: {
+                  defaultDurationMinutes: true,
+                },
+              },
+            },
+            take: 100,
+          })
 
-      const finalDuration = normalizedServiceItems
-        ? computedDurationMinutes
-        : snappedNextDuration != null
-          ? snappedNextDuration
-          : durationOrFallback(existing.totalDurationMinutes)
+          const offeringById = new Map(
+            offerings.map((offering) => [offering.id, offering]),
+          )
 
-      const finalEnd = addMinutes(finalStart, finalDuration + finalBuffer)
+          normalizedServiceItems = buildNormalizedBookingItemsFromRequestedOfferings({
+            requestedItems: parsedRequestedItems,
+            locationType: existing.locationType,
+            stepMinutes,
+            offeringById,
+            badItemsCode: 'BAD_ITEMS',
+          })
+        }
 
-      if (allowOutsideWorkingHours !== true) {
-        const workingHoursCheck = ensureWithinWorkingHours({
-          scheduledStartUtc: finalStart,
-          scheduledEndUtc: finalEnd,
-          workingHours: location.workingHours,
-          timeZone: appointmentTimeZone,
-          fallbackTimeZone: 'UTC',
-          messages: {
-            missing: 'Working hours are not set yet.',
-            outside: 'That time is outside your working hours.',
-            misconfigured: 'Your working hours are misconfigured.',
-          },
-        })
+        const previewItems =
+          normalizedServiceItems?.map((item, index) => ({
+            serviceId: item.serviceId,
+            offeringId: item.offeringId,
+            durationMinutesSnapshot: item.durationMinutesSnapshot,
+            priceSnapshot: item.priceSnapshot,
+            itemType:
+              index === 0
+                ? BookingServiceItemType.BASE
+                : BookingServiceItemType.ADD_ON,
+          })) ??
+          (await tx.bookingServiceItem.findMany({
+            where: { bookingId: existing.id },
+            orderBy: { sortOrder: 'asc' },
+            select: {
+              serviceId: true,
+              offeringId: true,
+              priceSnapshot: true,
+              durationMinutesSnapshot: true,
+              itemType: true,
+            },
+          }))
 
-        if (!workingHoursCheck.ok) {
+        const {
+          primaryServiceId,
+          primaryOfferingId,
+          computedDurationMinutes,
+          computedSubtotal,
+        } = computeBookingItemLikeTotals(previewItems, 'BAD_ITEMS')
+
+        const snappedNextDuration =
+          nextDuration != null
+            ? clampInt(
+                snapToStepMinutes(nextDuration, stepMinutes),
+                15,
+                MAX_SLOT_DURATION_MINUTES,
+              )
+            : null
+
+        if (
+          normalizedServiceItems &&
+          snappedNextDuration != null &&
+          snappedNextDuration !== computedDurationMinutes
+        ) {
+          throwCode('DURATION_MISMATCH')
+        }
+
+        const finalDuration = normalizedServiceItems
+          ? computedDurationMinutes
+          : snappedNextDuration != null
+            ? snappedNextDuration
+            : durationOrFallback(existing.totalDurationMinutes)
+
+        const finalEnd = addMinutes(finalStart, finalDuration + finalBuffer)
+
+        const effectiveAllowShortNotice = allowShortNotice === true
+        const effectiveAllowFarFuture = allowFarFuture === true
+        const effectiveAllowOutsideWorkingHours =
+          allowOutsideWorkingHours === true
+
+        if (
+          !effectiveAllowShortNotice &&
+          finalStart.getTime() <
+            now.getTime() +
+              Math.max(0, Number(location.advanceNoticeMinutes ?? 0)) * 60_000
+        ) {
           logBookingConflict({
             action: 'BOOKING_UPDATE',
             professionalId: existing.professionalId,
@@ -858,147 +874,215 @@ export async function PATCH(req: Request, ctx: Ctx) {
             locationType: existing.locationType,
             requestedStart: finalStart,
             requestedEnd: finalEnd,
-            conflictType: 'WORKING_HOURS',
+            conflictType: 'TIME_NOT_AVAILABLE',
             bookingId: existing.id,
             meta: {
               route: 'app/api/pro/bookings/[id]/route.ts',
-              workingHoursError: workingHoursCheck.error,
+              rule: 'ADVANCE_NOTICE',
+              advanceNoticeMinutes: Number(location.advanceNoticeMinutes ?? 0),
+              allowShortNotice: effectiveAllowShortNotice,
               timeZone: appointmentTimeZone,
               timeZoneSource: appointmentTimeZoneSource,
             },
           })
-          throw new Error(`WH:${workingHoursCheck.error}`)
+          throwCode('ADVANCE_NOTICE_REQUIRED')
         }
-      }
 
-      const timeRangeConflict = await getTimeRangeConflict({
-        tx,
-        professionalId: existing.professionalId,
-        locationId: location.id,
-        requestedStart: finalStart,
-        requestedEnd: finalEnd,
-        defaultBufferMinutes: finalBuffer,
-        fallbackDurationMinutes: finalDuration,
-        excludeBookingId: existing.id,
-      })
+        if (
+          !effectiveAllowFarFuture &&
+          finalStart.getTime() >
+            now.getTime() +
+              Math.max(0, Number(location.maxDaysAhead ?? 0)) *
+                24 *
+                60 *
+                60 *
+                1000
+        ) {
+          logBookingConflict({
+            action: 'BOOKING_UPDATE',
+            professionalId: existing.professionalId,
+            locationId: location.id,
+            locationType: existing.locationType,
+            requestedStart: finalStart,
+            requestedEnd: finalEnd,
+            conflictType: 'TIME_NOT_AVAILABLE',
+            bookingId: existing.id,
+            meta: {
+              route: 'app/api/pro/bookings/[id]/route.ts',
+              rule: 'MAX_DAYS_AHEAD',
+              maxDaysAhead: Number(location.maxDaysAhead ?? 0),
+              allowFarFuture: effectiveAllowFarFuture,
+              timeZone: appointmentTimeZone,
+              timeZoneSource: appointmentTimeZoneSource,
+            },
+          })
+          throwCode('MAX_DAYS_AHEAD_EXCEEDED')
+        }
 
-      if (timeRangeConflict) {
-        logAndThrowTimeRangeConflict({
-          conflict: timeRangeConflict,
+        if (!effectiveAllowOutsideWorkingHours) {
+          const workingHoursCheck = ensureWithinWorkingHours({
+            scheduledStartUtc: finalStart,
+            scheduledEndUtc: finalEnd,
+            workingHours: location.workingHours,
+            timeZone: appointmentTimeZone,
+            fallbackTimeZone: 'UTC',
+            messages: {
+              missing: 'Working hours are not set yet.',
+              outside: 'That time is outside your working hours.',
+              misconfigured: 'Your working hours are misconfigured.',
+            },
+          })
+
+          if (!workingHoursCheck.ok) {
+            logBookingConflict({
+              action: 'BOOKING_UPDATE',
+              professionalId: existing.professionalId,
+              locationId: location.id,
+              locationType: existing.locationType,
+              requestedStart: finalStart,
+              requestedEnd: finalEnd,
+              conflictType: 'WORKING_HOURS',
+              bookingId: existing.id,
+              meta: {
+                route: 'app/api/pro/bookings/[id]/route.ts',
+                workingHoursError: workingHoursCheck.error,
+                timeZone: appointmentTimeZone,
+                timeZoneSource: appointmentTimeZoneSource,
+              },
+            })
+            throw new Error(`WH:${workingHoursCheck.error}`)
+          }
+        }
+
+        const timeRangeConflict = await getTimeRangeConflict({
+          tx,
           professionalId: existing.professionalId,
           locationId: location.id,
-          locationType: existing.locationType,
           requestedStart: finalStart,
           requestedEnd: finalEnd,
-          bookingId: existing.id,
-          appointmentTimeZone,
-          timeZoneSource: appointmentTimeZoneSource,
-        })
-      }
-
-      if (normalizedServiceItems) {
-        await tx.bookingServiceItem.deleteMany({
-          where: { bookingId: existing.id },
+          defaultBufferMinutes: finalBuffer,
+          fallbackDurationMinutes: finalDuration,
+          excludeBookingId: existing.id,
         })
 
-        const baseItem = normalizedServiceItems[0]
-        if (!baseItem) {
-          throwCode('BAD_ITEMS')
-        }
-
-        const createdBaseItem = await tx.bookingServiceItem.create({
-          data: {
+        if (timeRangeConflict) {
+          logAndThrowTimeRangeConflict({
+            conflict: timeRangeConflict,
+            professionalId: existing.professionalId,
+            locationId: location.id,
+            locationType: existing.locationType,
+            requestedStart: finalStart,
+            requestedEnd: finalEnd,
             bookingId: existing.id,
-            serviceId: baseItem.serviceId,
-            offeringId: baseItem.offeringId,
-            itemType: BookingServiceItemType.BASE,
-            parentItemId: null,
-            priceSnapshot: baseItem.priceSnapshot,
-            durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
-            sortOrder: 0,
-          },
-          select: { id: true },
-        })
-
-        const addOnItems = normalizedServiceItems.slice(1)
-
-        if (addOnItems.length) {
-          await tx.bookingServiceItem.createMany({
-            data: addOnItems.map((item, index) => ({
-              bookingId: existing.id,
-              serviceId: item.serviceId,
-              offeringId: item.offeringId,
-              itemType: BookingServiceItemType.ADD_ON,
-              parentItemId: createdBaseItem.id,
-              priceSnapshot: item.priceSnapshot,
-              durationMinutesSnapshot: item.durationMinutesSnapshot,
-              sortOrder: 100 + index,
-              notes: 'MANUAL_ADDON',
-            })),
+            appointmentTimeZone,
+            timeZoneSource: appointmentTimeZoneSource,
           })
         }
-      }
 
-      const updated = await tx.booking.update({
-        where: { id: existing.id },
-        data: {
-          ...(nextStatus === BookingStatus.ACCEPTED
-            ? { status: BookingStatus.ACCEPTED }
-            : {}),
-          scheduledFor: finalStart,
-          bufferMinutes: finalBuffer,
-          totalDurationMinutes: finalDuration,
-          subtotalSnapshot: computedSubtotal,
-          serviceId: primaryServiceId,
-          offeringId: primaryOfferingId,
-        },
-        select: {
-          id: true,
-          scheduledFor: true,
-          bufferMinutes: true,
-          totalDurationMinutes: true,
-          status: true,
-          subtotalSnapshot: true,
-        },
-      })
+        if (normalizedServiceItems) {
+          await tx.bookingServiceItem.deleteMany({
+            where: { bookingId: existing.id },
+          })
 
-      if (notifyClient === true) {
-        const isConfirm = nextStatus === BookingStatus.ACCEPTED
-        const title = isConfirm ? 'Appointment confirmed' : 'Appointment updated'
-        const bodyText = isConfirm
-          ? 'Your appointment has been confirmed.'
-          : 'Your appointment details were updated.'
-        const type = isConfirm
-          ? ClientNotificationType.BOOKING_CONFIRMED
-          : ClientNotificationType.BOOKING_RESCHEDULED
+          const baseItem = normalizedServiceItems[0]
+          if (!baseItem) {
+            throwCode('BAD_ITEMS')
+          }
 
-        await createClientNotification({
-          tx,
-          clientId: existing.clientId,
-          bookingId: updated.id,
-          type,
-          title,
-          body: bodyText,
-          dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
+          const createdBaseItem = await tx.bookingServiceItem.create({
+            data: {
+              bookingId: existing.id,
+              serviceId: baseItem.serviceId,
+              offeringId: baseItem.offeringId,
+              itemType: BookingServiceItemType.BASE,
+              parentItemId: null,
+              priceSnapshot: baseItem.priceSnapshot,
+              durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
+              sortOrder: 0,
+            },
+            select: { id: true },
+          })
+
+          const addOnItems = normalizedServiceItems.slice(1)
+
+          if (addOnItems.length) {
+            await tx.bookingServiceItem.createMany({
+              data: addOnItems.map((item, index) => ({
+                bookingId: existing.id,
+                serviceId: item.serviceId,
+                offeringId: item.offeringId,
+                itemType: BookingServiceItemType.ADD_ON,
+                parentItemId: createdBaseItem.id,
+                priceSnapshot: item.priceSnapshot,
+                durationMinutesSnapshot: item.durationMinutesSnapshot,
+                sortOrder: index + 1,
+                notes: 'MANUAL_ADDON',
+              })),
+            })
+          }
+        }
+
+        const updated = await tx.booking.update({
+          where: { id: existing.id },
+          data: {
+            ...(nextStatus === BookingStatus.ACCEPTED
+              ? { status: BookingStatus.ACCEPTED }
+              : {}),
+            scheduledFor: finalStart,
+            bufferMinutes: finalBuffer,
+            totalDurationMinutes: finalDuration,
+            subtotalSnapshot: computedSubtotal,
+            serviceId: primaryServiceId,
+            offeringId: primaryOfferingId,
+          },
+          select: {
+            id: true,
+            scheduledFor: true,
+            bufferMinutes: true,
+            totalDurationMinutes: true,
+            status: true,
+            subtotalSnapshot: true,
+          },
         })
-      }
 
-      return buildBookingOutput({
-        id: updated.id,
-        scheduledFor: new Date(updated.scheduledFor),
-        totalDurationMinutes: Number(updated.totalDurationMinutes),
-        bufferMinutes: Math.max(0, Number(updated.bufferMinutes)),
-        status: updated.status,
-        subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
-        appointmentTimeZone,
-        timeZoneSource: appointmentTimeZoneSource,
-        locationId: existing.locationId ?? null,
-        locationType: existing.locationType,
-        locationAddressSnapshot: existingLocationAddressSnapshot,
-        locationLatSnapshot: existingLocationLatSnapshot,
-        locationLngSnapshot: existingLocationLngSnapshot,
-      })
-    })
+        if (notifyClient === true) {
+          const isConfirm = nextStatus === BookingStatus.ACCEPTED
+          const title = isConfirm ? 'Appointment confirmed' : 'Appointment updated'
+          const bodyText = isConfirm
+            ? 'Your appointment has been confirmed.'
+            : 'Your appointment details were updated.'
+          const type = isConfirm
+            ? ClientNotificationType.BOOKING_CONFIRMED
+            : ClientNotificationType.BOOKING_RESCHEDULED
+
+          await createClientNotification({
+            tx,
+            clientId: existing.clientId,
+            bookingId: updated.id,
+            type,
+            title,
+            body: bodyText,
+            dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
+          })
+        }
+
+        return buildBookingOutput({
+          id: updated.id,
+          scheduledFor: new Date(updated.scheduledFor),
+          totalDurationMinutes: Number(updated.totalDurationMinutes),
+          bufferMinutes: Math.max(0, Number(updated.bufferMinutes)),
+          status: updated.status,
+          subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
+          appointmentTimeZone,
+          timeZoneSource: appointmentTimeZoneSource,
+          locationId: existing.locationId ?? null,
+          locationType: existing.locationType,
+          locationAddressSnapshot: existingLocationAddressSnapshot,
+          locationLatSnapshot: existingLocationLatSnapshot,
+          locationLngSnapshot: existingLocationLngSnapshot,
+        })
+      },
+    )
 
     return jsonOk({ booking: result }, 200)
   } catch (error: unknown) {
@@ -1020,6 +1104,18 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (message === 'BAD_ITEMS') return jsonFail(400, 'Invalid service items.')
     if (message === 'BAD_BUFFER') return jsonFail(400, 'Invalid bufferMinutes.')
     if (message === 'BAD_DURATION') return jsonFail(400, 'Invalid durationMinutes.')
+    if (message === 'ADVANCE_NOTICE_REQUIRED') {
+      return jsonFail(
+        400,
+        'That booking is too soon unless you explicitly override advance notice.',
+      )
+    }
+    if (message === 'MAX_DAYS_AHEAD_EXCEEDED') {
+      return jsonFail(
+        400,
+        'That booking is too far in the future unless you explicitly override the booking window.',
+      )
+    }
     if (message.startsWith('WH:')) {
       return jsonFail(
         400,
