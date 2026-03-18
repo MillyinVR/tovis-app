@@ -33,6 +33,8 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
+
 type HoldCreateFailure = {
   ok: false
   code: BookingErrorCode
@@ -56,6 +58,14 @@ type HoldCreateSuccess = {
 }
 
 type HoldCreateResult = HoldCreateFailure | HoldCreateSuccess
+
+type HoldConflictType =
+  | 'BLOCKED'
+  | 'BOOKING'
+  | 'HOLD'
+  | 'WORKING_HOURS'
+  | 'STEP_BOUNDARY'
+  | 'TIME_NOT_AVAILABLE'
 
 function isValidDate(date: Date): boolean {
   return date instanceof Date && Number.isFinite(date.getTime())
@@ -97,28 +107,77 @@ function mapSchedulingReadinessFailure(
   switch (error) {
     case 'LOCATION_NOT_FOUND':
       return holdFailure('LOCATION_NOT_FOUND')
-
     case 'TIMEZONE_REQUIRED':
       return holdFailure('TIMEZONE_REQUIRED')
-
     case 'WORKING_HOURS_REQUIRED':
       return holdFailure('WORKING_HOURS_REQUIRED')
-
     case 'WORKING_HOURS_INVALID':
       return holdFailure('WORKING_HOURS_INVALID')
-
     case 'MODE_NOT_SUPPORTED':
       return holdFailure('MODE_NOT_SUPPORTED')
-
     case 'DURATION_REQUIRED':
       return holdFailure('DURATION_REQUIRED')
-
     case 'PRICE_REQUIRED':
       return holdFailure('PRICE_REQUIRED')
-
     case 'COORDINATES_REQUIRED':
       return holdFailure('COORDINATES_REQUIRED')
   }
+}
+
+function mapSlotReadinessCodeToHoldFailure(
+  code: SlotReadinessCode,
+): HoldCreateFailure {
+  switch (code) {
+    case 'STEP_MISMATCH':
+      return holdFailure('STEP_MISMATCH')
+    case 'ADVANCE_NOTICE_REQUIRED':
+      return holdFailure('ADVANCE_NOTICE_REQUIRED')
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return holdFailure('MAX_DAYS_AHEAD_EXCEEDED')
+    case 'WORKING_HOURS_REQUIRED':
+      return holdFailure('WORKING_HOURS_REQUIRED')
+    case 'WORKING_HOURS_INVALID':
+      return holdFailure('WORKING_HOURS_INVALID')
+    case 'OUTSIDE_WORKING_HOURS':
+      return holdFailure('OUTSIDE_WORKING_HOURS')
+    case 'INVALID_START':
+      return holdFailure('INVALID_SCHEDULED_FOR')
+    case 'INVALID_DURATION':
+      return holdFailure('DURATION_REQUIRED')
+    case 'INVALID_BUFFER':
+      return holdFailure('INTERNAL_ERROR', {
+        message: 'Invalid buffer minutes.',
+        userMessage: 'That time is not available.',
+      })
+    case 'INVALID_RANGE':
+      return holdFailure('INVALID_SCHEDULED_FOR')
+  }
+}
+
+function getSlotReadinessConflictType(code: SlotReadinessCode): HoldConflictType {
+  if (code === 'STEP_MISMATCH') return 'STEP_BOUNDARY'
+
+  if (
+    code === 'WORKING_HOURS_REQUIRED' ||
+    code === 'WORKING_HOURS_INVALID' ||
+    code === 'OUTSIDE_WORKING_HOURS'
+  ) {
+    return 'WORKING_HOURS'
+  }
+
+  return 'TIME_NOT_AVAILABLE'
+}
+
+function getReadableWorkingHoursMessage(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return 'That time is outside working hours.'
+  }
+
+  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
+    return 'That time is outside working hours.'
+  }
+
+  return value
 }
 
 async function loadClientServiceAddress(args: {
@@ -141,58 +200,13 @@ async function loadClientServiceAddress(args: {
   })
 }
 
-function mapSlotReadinessFailure(
-  code: SlotReadinessCode,
-): HoldCreateFailure {
-  switch (code) {
-    case 'STEP_MISMATCH':
-      return holdFailure('STEP_MISMATCH')
-
-    case 'ADVANCE_NOTICE_REQUIRED':
-      return holdFailure('ADVANCE_NOTICE_REQUIRED')
-
-    case 'MAX_DAYS_AHEAD_EXCEEDED':
-      return holdFailure('MAX_DAYS_AHEAD_EXCEEDED')
-
-    case 'WORKING_HOURS_REQUIRED':
-      return holdFailure('WORKING_HOURS_REQUIRED')
-
-    case 'WORKING_HOURS_INVALID':
-      return holdFailure('WORKING_HOURS_INVALID')
-
-    case 'OUTSIDE_WORKING_HOURS':
-      return holdFailure('OUTSIDE_WORKING_HOURS')
-
-    case 'INVALID_START':
-      return holdFailure('INVALID_SCHEDULED_FOR')
-
-    case 'INVALID_DURATION':
-      return holdFailure('DURATION_REQUIRED')
-
-    case 'INVALID_BUFFER':
-      return holdFailure('INTERNAL_ERROR', {
-        message: 'Invalid buffer minutes.',
-        userMessage: 'That time is not available.',
-      })
-
-    case 'INVALID_RANGE':
-      return holdFailure('INVALID_SCHEDULED_FOR')
-  }
-}
-
 function logHoldConflict(args: {
   professionalId: string
   locationId: string | null
   locationType: ServiceLocationType
   requestedStart: Date
   requestedEnd: Date
-  conflictType:
-    | 'BLOCKED'
-    | 'BOOKING'
-    | 'HOLD'
-    | 'WORKING_HOURS'
-    | 'STEP_BOUNDARY'
-    | 'TIME_NOT_AVAILABLE'
+  conflictType: HoldConflictType
   offeringId: string
   clientId: string
   clientAddressId?: string | null
@@ -216,6 +230,30 @@ function logHoldConflict(args: {
       ...args.meta,
     },
   })
+}
+
+function buildSlotReadinessFailure(args: {
+  code: SlotReadinessCode
+  stepMinutes: number
+  workingHoursError?: unknown
+}): HoldCreateFailure {
+  if (args.code === 'STEP_MISMATCH') {
+    return holdFailure('STEP_MISMATCH', {
+      message: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
+      userMessage: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
+    })
+  }
+
+  if (args.code === 'OUTSIDE_WORKING_HOURS') {
+    const message = getReadableWorkingHoursMessage(args.workingHoursError)
+
+    return holdFailure('OUTSIDE_WORKING_HOURS', {
+      message,
+      userMessage: message,
+    })
+  }
+
+  return mapSlotReadinessCodeToHoldFailure(args.code)
 }
 
 export async function POST(req: NextRequest) {
@@ -357,6 +395,11 @@ export async function POST(req: NextRequest) {
           return holdFailure('SALON_LOCATION_ADDRESS_REQUIRED')
         }
 
+        const computedRequestedEnd = addMinutes(
+          requestedStart,
+          durationMinutes + locationContext.bufferMinutes,
+        )
+
         const slotReadiness = checkSlotReadiness({
           startUtc: requestedStart,
           nowUtc: now,
@@ -372,28 +415,16 @@ export async function POST(req: NextRequest) {
 
         const requestedEnd = slotReadiness.ok
           ? slotReadiness.endUtc
-          : addMinutes(
-              requestedStart,
-              durationMinutes + locationContext.bufferMinutes,
-            )
+          : computedRequestedEnd
 
         if (!slotReadiness.ok) {
-          const conflictType =
-            slotReadiness.code === 'STEP_MISMATCH'
-              ? 'STEP_BOUNDARY'
-              : slotReadiness.code === 'WORKING_HOURS_REQUIRED' ||
-                  slotReadiness.code === 'WORKING_HOURS_INVALID' ||
-                  slotReadiness.code === 'OUTSIDE_WORKING_HOURS'
-                ? 'WORKING_HOURS'
-                : 'TIME_NOT_AVAILABLE'
-
           logHoldConflict({
             professionalId: offering.professionalId,
             locationId: locationContext.locationId,
             locationType,
             requestedStart,
             requestedEnd,
-            conflictType,
+            conflictType: getSlotReadinessConflictType(slotReadiness.code),
             offeringId: offering.id,
             clientId,
             clientAddressId,
@@ -404,27 +435,11 @@ export async function POST(req: NextRequest) {
             },
           })
 
-          if (slotReadiness.code === 'STEP_MISMATCH') {
-            return holdFailure('STEP_MISMATCH', {
-              message: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
-              userMessage: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
-            })
-          }
-
-          if (slotReadiness.code === 'OUTSIDE_WORKING_HOURS') {
-            return holdFailure('OUTSIDE_WORKING_HOURS', {
-              message:
-                typeof slotReadiness.meta?.workingHoursError === 'string'
-                  ? slotReadiness.meta.workingHoursError
-                  : 'That time is outside working hours.',
-              userMessage:
-                typeof slotReadiness.meta?.workingHoursError === 'string'
-                  ? slotReadiness.meta.workingHoursError
-                  : 'That time is outside working hours.',
-            })
-          }
-
-          return mapSlotReadinessFailure(slotReadiness.code)
+          return buildSlotReadinessFailure({
+            code: slotReadiness.code,
+            stepMinutes: locationContext.stepMinutes,
+            workingHoursError: slotReadiness.meta?.workingHoursError,
+          })
         }
 
         const conflict = await getTimeRangeConflict({

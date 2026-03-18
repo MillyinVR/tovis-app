@@ -18,9 +18,9 @@ import {
 } from '@/lib/booking/constants'
 import { decimalToNumber } from '@/lib/booking/snapshots'
 import { clampInt } from '@/lib/pick'
-import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { normalizeWorkingHours } from '@/lib/scheduling/workingHoursValidation'
+
 export type BookingLocationContext = {
   location: BookableLocation
   locationId: string
@@ -99,7 +99,9 @@ export function normalizeLocationType(
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
 
   if (normalized === ServiceLocationType.SALON) return ServiceLocationType.SALON
-  if (normalized === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
+  if (normalized === ServiceLocationType.MOBILE) {
+    return ServiceLocationType.MOBILE
+  }
 
   return null
 }
@@ -182,20 +184,80 @@ function hasSchedulingWorkingHours(value: unknown): boolean {
   return normalizeWorkingHours(value) !== null
 }
 
+function normalizeRequestedLocationId(value: string | null | undefined): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
 function shouldAllowLocationFallback(args: {
   requestedLocationId: string | null
   allowFallback: boolean
 }): boolean {
-  const requestedLocationId =
-    typeof args.requestedLocationId === 'string'
-      ? args.requestedLocationId.trim()
-      : ''
+  return !args.requestedLocationId && args.allowFallback
+}
 
-  if (requestedLocationId) {
-    return false
+function resolveEffectiveFallbackTimeZone(args: {
+  professionalTimeZone?: string | null
+  fallbackTimeZone?: string
+}): string {
+  const fallbackBase = sanitizeTimeZone(args.fallbackTimeZone ?? 'UTC', 'UTC')
+
+  if (
+    typeof args.professionalTimeZone === 'string' &&
+    isValidIanaTimeZone(args.professionalTimeZone)
+  ) {
+    return sanitizeTimeZone(args.professionalTimeZone, fallbackBase)
   }
 
-  return args.allowFallback
+  return fallbackBase
+}
+
+function resolveFinalAppointmentTimeZone(args: {
+  rawTimeZone: unknown
+  effectiveFallbackTimeZone: string
+  requireValidTimeZone: boolean
+}): string | null {
+  const raw =
+    typeof args.rawTimeZone === 'string' ? args.rawTimeZone.trim() : ''
+
+  if (args.requireValidTimeZone && !isValidIanaTimeZone(raw)) {
+    return null
+  }
+
+  const resolved = sanitizeTimeZone(
+    raw || args.effectiveFallbackTimeZone,
+    args.effectiveFallbackTimeZone,
+  )
+
+  return isValidIanaTimeZone(resolved) ? resolved : null
+}
+
+function buildBookingLocationContext(args: {
+  location: BookableLocation
+  locationType: ServiceLocationType
+  timeZone: string
+  timeZoneSource: TimeZoneTruthSource
+}): BookingLocationContext {
+  const { location, locationType, timeZone, timeZoneSource } = args
+
+  return {
+    location,
+    locationId: location.id,
+    locationType,
+    timeZone,
+    timeZoneSource,
+    stepMinutes: normalizeStepMinutes(location.stepMinutes, 15),
+    bufferMinutes: clampInt(Number(location.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES),
+    advanceNoticeMinutes: clampInt(
+      Number(location.advanceNoticeMinutes ?? 15),
+      0,
+      MAX_ADVANCE_NOTICE_MINUTES,
+    ),
+    maxDaysAhead: clampInt(Number(location.maxDaysAhead ?? 365), 1, MAX_DAYS_AHEAD),
+    workingHours: location.workingHours,
+    formattedAddress: normalizeFormattedAddress(location.formattedAddress),
+    lat: decimalToNumber(location.lat),
+    lng: decimalToNumber(location.lng),
+  }
 }
 
 export function getModeDurationMinutesOrNull(args: {
@@ -339,29 +401,17 @@ export function validateOfferingScheduling(args: {
 export async function resolveBookingLocationContext(
   args: ResolveBookingLocationContextArgs,
 ): Promise<ResolveBookingLocationContextResult> {
-  const {
-    tx,
-    professionalId,
-    requestedLocationId = null,
-    locationType,
-    bookingLocationTimeZone = null,
-    holdLocationTimeZone = null,
-    professionalTimeZone = null,
-    fallbackTimeZone = 'UTC',
-    requireValidTimeZone = true,
-    allowFallback = true,
-  } = args
-
+  const requestedLocationId = normalizeRequestedLocationId(args.requestedLocationId)
   const effectiveAllowFallback = shouldAllowLocationFallback({
     requestedLocationId,
-    allowFallback,
+    allowFallback: args.allowFallback ?? true,
   })
 
   const location = await pickBookableLocation({
-    tx,
-    professionalId,
+    tx: args.tx,
+    professionalId: args.professionalId,
     requestedLocationId,
-    locationType,
+    locationType: args.locationType,
     allowFallback: effectiveAllowFallback,
   })
 
@@ -369,71 +419,43 @@ export async function resolveBookingLocationContext(
     return { ok: false, error: 'LOCATION_NOT_FOUND' }
   }
 
-const effectiveFallbackTimeZone =
-  typeof professionalTimeZone === 'string' &&
-  isValidIanaTimeZone(professionalTimeZone)
-    ? sanitizeTimeZone(professionalTimeZone, fallbackTimeZone)
-    : sanitizeTimeZone(fallbackTimeZone, 'UTC')
+  const effectiveFallbackTimeZone = resolveEffectiveFallbackTimeZone({
+    professionalTimeZone: args.professionalTimeZone ?? null,
+    fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',
+  })
 
   const tzResult = await resolveApptTimeZone({
-    bookingLocationTimeZone,
-    holdLocationTimeZone,
+    bookingLocationTimeZone: args.bookingLocationTimeZone ?? null,
+    holdLocationTimeZone: args.holdLocationTimeZone ?? null,
     location: { id: location.id, timeZone: location.timeZone },
-    professionalId,
-    professionalTimeZone,
+    professionalId: args.professionalId,
+    professionalTimeZone: args.professionalTimeZone ?? null,
     fallback: effectiveFallbackTimeZone,
-    requireValid: requireValidTimeZone,
+    requireValid: args.requireValidTimeZone ?? true,
   })
 
   if (!tzResult.ok) {
     return { ok: false, error: 'TIMEZONE_REQUIRED' }
   }
 
-  const rawResolvedTimeZone =
-    typeof tzResult.timeZone === 'string' ? tzResult.timeZone.trim() : ''
-
-  if (requireValidTimeZone && !isValidIanaTimeZone(rawResolvedTimeZone)) {
-    return { ok: false, error: 'TIMEZONE_REQUIRED' }
-  }
-
-  const timeZone = sanitizeTimeZone(
-    rawResolvedTimeZone || effectiveFallbackTimeZone,
+  const timeZone = resolveFinalAppointmentTimeZone({
+    rawTimeZone: tzResult.timeZone,
     effectiveFallbackTimeZone,
-  )
+    requireValidTimeZone: args.requireValidTimeZone ?? true,
+  })
 
-  if (!isValidIanaTimeZone(timeZone)) {
+  if (!timeZone) {
     return { ok: false, error: 'TIMEZONE_REQUIRED' }
   }
 
   return {
     ok: true,
-    context: {
+    context: buildBookingLocationContext({
       location,
-      locationId: location.id,
-      locationType,
+      locationType: args.locationType,
       timeZone,
       timeZoneSource: tzResult.source,
-      stepMinutes: normalizeStepMinutes(location.stepMinutes, 15),
-      bufferMinutes: clampInt(
-        Number(location.bufferMinutes ?? 0),
-        0,
-        MAX_BUFFER_MINUTES,
-      ),
-      advanceNoticeMinutes: clampInt(
-        Number(location.advanceNoticeMinutes ?? 15),
-        0,
-        MAX_ADVANCE_NOTICE_MINUTES,
-      ),
-      maxDaysAhead: clampInt(
-        Number(location.maxDaysAhead ?? 365),
-        1,
-        MAX_DAYS_AHEAD,
-      ),
-      workingHours: location.workingHours,
-      formattedAddress: normalizeFormattedAddress(location.formattedAddress),
-      lat: decimalToNumber(location.lat),
-      lng: decimalToNumber(location.lng),
-    },
+    }),
   }
 }
 

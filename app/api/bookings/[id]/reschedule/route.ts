@@ -41,6 +41,8 @@ export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
+const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
+
 function bookingJsonFail(
   code: BookingErrorCode,
   overrides?: {
@@ -142,6 +144,18 @@ function mapSlotReadinessCodeToBookingCode(
   }
 }
 
+function getReadableWorkingHoursMessage(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return 'That time is outside working hours.'
+  }
+
+  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
+    return 'That time is outside working hours.'
+  }
+
+  return value
+}
+
 function throwSlotReadinessError(
   code: SlotReadinessCode,
   args: {
@@ -157,14 +171,13 @@ function throwSlotReadinessError(
   }
 
   if (code === 'OUTSIDE_WORKING_HOURS') {
-    const workingHoursError =
-      typeof args.meta?.workingHoursError === 'string'
-        ? args.meta.workingHoursError
-        : 'That time is outside working hours.'
+    const message = getReadableWorkingHoursMessage(
+      args.meta?.workingHoursError,
+    )
 
     throw bookingError('OUTSIDE_WORKING_HOURS', {
-      message: workingHoursError,
-      userMessage: workingHoursError,
+      message,
+      userMessage: message,
     })
   }
 
@@ -334,7 +347,8 @@ export async function POST(req: Request, { params }: Ctx) {
           hold.locationType !== requestedLocationType
         ) {
           throw bookingError('HOLD_MISMATCH', {
-            message: 'Hold location type does not match the requested location type.',
+            message:
+              'Hold location type does not match the requested location type.',
             userMessage:
               'That hold no longer matches this booking. Please pick a new slot.',
           })
@@ -424,6 +438,11 @@ export async function POST(req: Request, { params }: Ctx) {
           throw bookingError('TIME_IN_PAST')
         }
 
+        const computedNewEnd = addMinutes(
+          newStart,
+          totalDurationMinutes + locationContext.bufferMinutes,
+        )
+
         const slotReadiness = checkSlotReadiness({
           startUtc: newStart,
           nowUtc: now,
@@ -437,19 +456,14 @@ export async function POST(req: Request, { params }: Ctx) {
           fallbackTimeZone: DEFAULT_TIME_ZONE,
         })
 
-        const newEnd = slotReadiness.ok
-          ? slotReadiness.endUtc
-          : addMinutes(
-              newStart,
-              totalDurationMinutes + locationContext.bufferMinutes,
-            )
-
         if (!slotReadiness.ok) {
           throwSlotReadinessError(slotReadiness.code, {
             stepMinutes: locationContext.stepMinutes,
             meta: slotReadiness.meta,
           })
         }
+
+        const newEnd = slotReadiness.endUtc ?? computedNewEnd
 
         try {
           await assertTimeRangeAvailable({
