@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   resolveAppointmentSchedulingContext: vi.fn(),
   isValidIanaTimeZone: vi.fn(),
   sanitizeTimeZone: vi.fn(),
-  minutesSinceMidnightInTimeZone: vi.fn(),
 
   moneyToFixed2String: vi.fn(),
   clampInt: vi.fn(),
@@ -25,6 +24,11 @@ const mocks = vi.hoisted(() => ({
   ensureWithinWorkingHours: vi.fn(),
   getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
+
+  isStartAlignedToWorkingWindowStep: vi.fn(),
+  checkAdvanceNotice: vi.fn(),
+  checkMaxDaysAheadExact: vi.fn(),
+  computeRequestedEndUtc: vi.fn(),
 
   buildNormalizedBookingItemsFromRequestedOfferings: vi.fn(),
   computeBookingItemLikeTotals: vi.fn(),
@@ -64,7 +68,6 @@ vi.mock('@/lib/booking/timeZoneTruth', () => ({
 vi.mock('@/lib/timeZone', () => ({
   isValidIanaTimeZone: mocks.isValidIanaTimeZone,
   sanitizeTimeZone: mocks.sanitizeTimeZone,
-  minutesSinceMidnightInTimeZone: mocks.minutesSinceMidnightInTimeZone,
 }))
 
 vi.mock('@/lib/money', () => ({
@@ -89,6 +92,13 @@ vi.mock('@/lib/booking/conflictQueries', () => ({
 
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
+}))
+
+vi.mock('@/lib/booking/slotReadiness', () => ({
+  isStartAlignedToWorkingWindowStep: mocks.isStartAlignedToWorkingWindowStep,
+  checkAdvanceNotice: mocks.checkAdvanceNotice,
+  checkMaxDaysAheadExact: mocks.checkMaxDaysAheadExact,
+  computeRequestedEndUtc: mocks.computeRequestedEndUtc,
 }))
 
 vi.mock('@/lib/booking/serviceItems', () => ({
@@ -257,19 +267,39 @@ describe('PATCH /api/pro/bookings/[id]', () => {
 
     mocks.isValidIanaTimeZone.mockReturnValue(true)
     mocks.sanitizeTimeZone.mockImplementation((tz: string) => tz)
+
     mocks.moneyToFixed2String.mockImplementation((value: Prisma.Decimal) =>
       value.toFixed(2),
     )
 
-    mocks.clampInt.mockImplementation((value: unknown, min: number, max: number) => {
-      const parsed = Number(value)
-      const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
-      return Math.max(min, Math.min(max, n))
-    })
+    mocks.clampInt.mockImplementation(
+      (value: unknown, min: number, max: number) => {
+        const parsed = Number(value)
+        const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
+        return Math.max(min, Math.min(max, n))
+      },
+    )
 
     mocks.normalizeStepMinutes.mockReturnValue(15)
     mocks.snapToStepMinutes.mockImplementation((value: number) => value)
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValue(30)
+
+    mocks.isStartAlignedToWorkingWindowStep.mockReturnValue({ ok: true })
+    mocks.checkAdvanceNotice.mockReturnValue({ ok: true })
+    mocks.checkMaxDaysAheadExact.mockReturnValue({ ok: true })
+    mocks.computeRequestedEndUtc.mockImplementation(
+      ({
+        startUtc,
+        durationMinutes,
+        bufferMinutes,
+      }: {
+        startUtc: Date
+        durationMinutes: number
+        bufferMinutes: number
+      }) =>
+        new Date(
+          startUtc.getTime() + (durationMinutes + bufferMinutes) * 60_000,
+        ),
+    )
 
     mocks.ensureWithinWorkingHours.mockReturnValue({ ok: true })
     mocks.getTimeRangeConflict.mockResolvedValue(null)
@@ -372,31 +402,40 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValueOnce(17)
+    mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      meta: {
+        reason: 'step-mismatch',
+      },
+    })
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: '2026-03-17T13:17:00.000Z',
+        scheduledFor: '2026-03-17T16:37:00.000Z',
       }),
       makeCtx(),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_UPDATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-17T13:17:00.000Z'),
-      requestedEnd: new Date('2026-03-17T13:18:00.000Z'),
-      conflictType: 'STEP_BOUNDARY',
-      bookingId: 'booking_1',
-      meta: {
-        route: 'app/api/pro/bookings/[id]/route.ts',
-        stepMinutes: 15,
-        timeZone: 'America/Los_Angeles',
-        timeZoneSource: 'BOOKING_SNAPSHOT',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_UPDATE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-17T16:37:00.000Z'),
+        requestedEnd: new Date('2026-03-17T16:38:00.000Z'),
+        conflictType: 'STEP_BOUNDARY',
+        bookingId: 'booking_1',
+        meta: expect.objectContaining({
+          route: 'app/api/pro/bookings/[id]/route.ts',
+          stepMinutes: 15,
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+          reason: 'step-mismatch',
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
@@ -417,27 +456,29 @@ describe('PATCH /api/pro/bookings/[id]', () => {
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: PATCH_START.toISOString(),
+        scheduledFor: '2026-03-17T16:30:00.000Z',
       }),
       makeCtx(),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_UPDATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: PATCH_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
-      conflictType: 'WORKING_HOURS',
-      bookingId: 'booking_1',
-      meta: {
-        route: 'app/api/pro/bookings/[id]/route.ts',
-        workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
-        timeZone: 'America/Los_Angeles',
-        timeZoneSource: 'BOOKING_SNAPSHOT',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_UPDATE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-17T16:30:00.000Z'),
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+        conflictType: 'WORKING_HOURS',
+        bookingId: 'booking_1',
+        meta: expect.objectContaining({
+          route: 'app/api/pro/bookings/[id]/route.ts',
+          workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
@@ -455,26 +496,28 @@ describe('PATCH /api/pro/bookings/[id]', () => {
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: PATCH_START.toISOString(),
+        scheduledFor: '2026-03-17T16:30:00.000Z',
       }),
       makeCtx(),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_UPDATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: PATCH_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
-      conflictType: 'BLOCKED',
-      bookingId: 'booking_1',
-      meta: {
-        route: 'app/api/pro/bookings/[id]/route.ts',
-        timeZone: 'America/Los_Angeles',
-        timeZoneSource: 'BOOKING_SNAPSHOT',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_UPDATE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-17T16:30:00.000Z'),
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+        conflictType: 'BLOCKED',
+        bookingId: 'booking_1',
+        meta: expect.objectContaining({
+          route: 'app/api/pro/bookings/[id]/route.ts',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
@@ -492,31 +535,33 @@ describe('PATCH /api/pro/bookings/[id]', () => {
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: PATCH_START.toISOString(),
+        scheduledFor: '2026-03-17T16:30:00.000Z',
       }),
       makeCtx(),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_UPDATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: PATCH_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
-      conflictType: 'BOOKING',
-      bookingId: 'booking_1',
-      meta: {
-        route: 'app/api/pro/bookings/[id]/route.ts',
-        timeZone: 'America/Los_Angeles',
-        timeZoneSource: 'BOOKING_SNAPSHOT',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_UPDATE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-17T16:30:00.000Z'),
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+        conflictType: 'BOOKING',
+        bookingId: 'booking_1',
+        meta: expect.objectContaining({
+          route: 'app/api/pro/bookings/[id]/route.ts',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is not available.',
+      error: 'That time was just taken. Please choose another slot.',
       code: 'TIME_BOOKED',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',
@@ -529,31 +574,33 @@ describe('PATCH /api/pro/bookings/[id]', () => {
 
     const result = await PATCH(
       makeRequest({
-        scheduledFor: PATCH_START.toISOString(),
+        scheduledFor: '2026-03-17T16:30:00.000Z',
       }),
       makeCtx(),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_UPDATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: PATCH_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
-      conflictType: 'HOLD',
-      bookingId: 'booking_1',
-      meta: {
-        route: 'app/api/pro/bookings/[id]/route.ts',
-        timeZone: 'America/Los_Angeles',
-        timeZoneSource: 'BOOKING_SNAPSHOT',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_UPDATE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-17T16:30:00.000Z'),
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+        conflictType: 'HOLD',
+        bookingId: 'booking_1',
+        meta: expect.objectContaining({
+          route: 'app/api/pro/bookings/[id]/route.ts',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is not available.',
+      error: 'Someone is already holding that time. Please try another slot.',
       code: 'TIME_HELD',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',

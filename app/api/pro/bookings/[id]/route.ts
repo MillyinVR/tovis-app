@@ -19,7 +19,6 @@ import {
 } from '@prisma/client'
 import {
   isValidIanaTimeZone,
-  minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
 } from '@/lib/timeZone'
 import {
@@ -55,6 +54,12 @@ import {
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
+import {
+  checkAdvanceNotice,
+  checkMaxDaysAheadExact,
+  computeRequestedEndUtc,
+  isStartAlignedToWorkingWindowStep,
+} from '@/lib/booking/slotReadiness'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -803,12 +808,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
           throw bookingError('INVALID_SCHEDULED_FOR')
         }
 
-        const startMinutes = minutesSinceMidnightInTimeZone(
-          finalStart,
-          appointmentTimeZone,
-        )
+        const stepCheck = isStartAlignedToWorkingWindowStep({
+          startUtc: finalStart,
+          workingHours: location.workingHours,
+          timeZone: appointmentTimeZone,
+          stepMinutes,
+          fallbackTimeZone: 'UTC',
+        })
 
-        if (startMinutes % stepMinutes !== 0) {
+        if (!stepCheck.ok) {
           logBookingConflict({
             action: 'BOOKING_UPDATE',
             professionalId: existing.professionalId,
@@ -823,8 +831,23 @@ export async function PATCH(req: Request, ctx: Ctx) {
               stepMinutes,
               timeZone: appointmentTimeZone,
               timeZoneSource: appointmentTimeZoneSource,
+              ...(stepCheck.meta ?? {}),
             },
           })
+
+          if (stepCheck.code === 'WORKING_HOURS_REQUIRED') {
+            throw bookingError('WORKING_HOURS_REQUIRED')
+          }
+
+          if (stepCheck.code === 'WORKING_HOURS_INVALID') {
+            throw bookingError('WORKING_HOURS_INVALID')
+          }
+
+          if (stepCheck.code === 'OUTSIDE_WORKING_HOURS') {
+            throw bookingError('OUTSIDE_WORKING_HOURS', {
+              userMessage: 'That time is outside your working hours.',
+            })
+          }
 
           throw bookingError('STEP_MISMATCH', {
             message: `Start time must be on a ${stepMinutes}-minute boundary.`,
@@ -941,77 +964,88 @@ export async function PATCH(req: Request, ctx: Ctx) {
             ? snappedNextDuration
             : durationOrFallback(existing.totalDurationMinutes)
 
-        const finalEnd = addMinutes(finalStart, finalDuration + finalBuffer)
+        const finalEnd = computeRequestedEndUtc({
+          startUtc: finalStart,
+          durationMinutes: finalDuration,
+          bufferMinutes: finalBuffer,
+        })
 
         const effectiveAllowShortNotice = allowShortNotice === true
         const effectiveAllowFarFuture = allowFarFuture === true
         const effectiveAllowOutsideWorkingHours =
           allowOutsideWorkingHours === true
 
-        if (
-          !effectiveAllowShortNotice &&
-          finalStart.getTime() <
-            now.getTime() +
-              Math.max(0, Number(location.advanceNoticeMinutes ?? 0)) * 60_000
-        ) {
-          logBookingConflict({
-            action: 'BOOKING_UPDATE',
-            professionalId: existing.professionalId,
-            locationId: location.id,
-            locationType: existing.locationType,
-            requestedStart: finalStart,
-            requestedEnd: finalEnd,
-            conflictType: 'TIME_NOT_AVAILABLE',
-            bookingId: existing.id,
-            meta: {
-              route: 'app/api/pro/bookings/[id]/route.ts',
-              rule: 'ADVANCE_NOTICE',
-              advanceNoticeMinutes: Number(location.advanceNoticeMinutes ?? 0),
-              allowShortNotice: effectiveAllowShortNotice,
-              timeZone: appointmentTimeZone,
-              timeZoneSource: appointmentTimeZoneSource,
-            },
+        if (!effectiveAllowShortNotice) {
+          const advanceNoticeCheck = checkAdvanceNotice({
+            startUtc: finalStart,
+            nowUtc: now,
+            advanceNoticeMinutes: Math.max(
+              0,
+              Number(location.advanceNoticeMinutes ?? 0),
+            ),
           })
 
-          throw bookingError('ADVANCE_NOTICE_REQUIRED', {
-            userMessage:
-              'That booking is too soon unless you explicitly override advance notice.',
-          })
+          if (!advanceNoticeCheck.ok) {
+            logBookingConflict({
+              action: 'BOOKING_UPDATE',
+              professionalId: existing.professionalId,
+              locationId: location.id,
+              locationType: existing.locationType,
+              requestedStart: finalStart,
+              requestedEnd: finalEnd,
+              conflictType: 'TIME_NOT_AVAILABLE',
+              bookingId: existing.id,
+              meta: {
+                route: 'app/api/pro/bookings/[id]/route.ts',
+                rule: 'ADVANCE_NOTICE',
+                advanceNoticeMinutes: Number(location.advanceNoticeMinutes ?? 0),
+                allowShortNotice: effectiveAllowShortNotice,
+                timeZone: appointmentTimeZone,
+                timeZoneSource: appointmentTimeZoneSource,
+                ...advanceNoticeCheck.meta,
+              },
+            })
+
+            throw bookingError('ADVANCE_NOTICE_REQUIRED', {
+              userMessage:
+                'That booking is too soon unless you explicitly override advance notice.',
+            })
+          }
         }
 
-        if (
-          !effectiveAllowFarFuture &&
-          finalStart.getTime() >
-            now.getTime() +
-              Math.max(0, Number(location.maxDaysAhead ?? 0)) *
-                24 *
-                60 *
-                60 *
-                1000
-        ) {
-          logBookingConflict({
-            action: 'BOOKING_UPDATE',
-            professionalId: existing.professionalId,
-            locationId: location.id,
-            locationType: existing.locationType,
-            requestedStart: finalStart,
-            requestedEnd: finalEnd,
-            conflictType: 'TIME_NOT_AVAILABLE',
-            bookingId: existing.id,
-            meta: {
-              route: 'app/api/pro/bookings/[id]/route.ts',
-              rule: 'MAX_DAYS_AHEAD',
-              maxDaysAhead: Number(location.maxDaysAhead ?? 0),
-              allowFarFuture: effectiveAllowFarFuture,
-              timeZone: appointmentTimeZone,
-              timeZoneSource: appointmentTimeZoneSource,
-            },
+        if (!effectiveAllowFarFuture) {
+          const maxDaysAheadCheck = checkMaxDaysAheadExact({
+            startUtc: finalStart,
+            nowUtc: now,
+            maxDaysAhead: Math.max(1, Number(location.maxDaysAhead ?? 0)),
           })
 
-          throw bookingError('MAX_DAYS_AHEAD_EXCEEDED', {
-            userMessage:
-              'That booking is too far in the future unless you explicitly override the booking window.',
-          })
+          if (!maxDaysAheadCheck.ok) {
+            logBookingConflict({
+              action: 'BOOKING_UPDATE',
+              professionalId: existing.professionalId,
+              locationId: location.id,
+              locationType: existing.locationType,
+              requestedStart: finalStart,
+              requestedEnd: finalEnd,
+              conflictType: 'TIME_NOT_AVAILABLE',
+              bookingId: existing.id,
+              meta: {
+                route: 'app/api/pro/bookings/[id]/route.ts',
+                rule: 'MAX_DAYS_AHEAD',
+                maxDaysAhead: Number(location.maxDaysAhead ?? 0),
+                allowFarFuture: effectiveAllowFarFuture,
+                timeZone: appointmentTimeZone,
+                timeZoneSource: appointmentTimeZoneSource,
+                ...maxDaysAheadCheck.meta,
+              },
+            })
+
+            throw bookingError('MAX_DAYS_AHEAD_EXCEEDED', {
+              userMessage:
+                'That booking is too far in the future unless you explicitly override the booking window.',
+            })
+          }
         }
 
         if (!effectiveAllowOutsideWorkingHours) {

@@ -30,7 +30,6 @@ import {
   normalizeStepMinutes,
   pickEffectiveLocationType,
   resolveValidatedBookingContext,
-  type SchedulingReadinessError,
   type OfferingSchedulingSnapshot,
 } from '@/lib/booking/locationContext'
 import { decimalToNumber } from '@/lib/booking/snapshots'
@@ -183,6 +182,8 @@ type DayComputationResult =
       debug?: unknown
     }
 
+type LocalMinuteCandidateIndex = Map<number, Date[]>
+
 const redis = getRedis()
 
 function bookingJsonFail(
@@ -227,7 +228,11 @@ function parseYYYYMMDD(value: unknown) {
   const month = Number(m[2])
   const day = Number(m[3])
 
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
     return null
   }
 
@@ -303,7 +308,9 @@ function localSlotToUtcOrNull(args: {
   const localValue = buildLocalDateTimeString(args)
 
   try {
-    const utc = normalizeToMinute(dateTimeLocalToUtcDate(localValue, args.timeZone))
+    const utc = normalizeToMinute(
+      dateTimeLocalToUtcDate(localValue, args.timeZone),
+    )
 
     const roundTrip = utcDateToLocalParts(utc, args.timeZone)
     const matches =
@@ -397,9 +404,13 @@ function parseCachedPlacement(raw: unknown): CachedPlacement | null {
   if (typeof raw.offersMobile !== 'boolean') return null
 
   const lat =
-    typeof raw.lat === 'number' && Number.isFinite(raw.lat) ? raw.lat : undefined
+    typeof raw.lat === 'number' && Number.isFinite(raw.lat)
+      ? raw.lat
+      : undefined
   const lng =
-    typeof raw.lng === 'number' && Number.isFinite(raw.lng) ? raw.lng : undefined
+    typeof raw.lng === 'number' && Number.isFinite(raw.lng)
+      ? raw.lng
+      : undefined
 
   const salonDurationMinutes =
     typeof raw.salonDurationMinutes === 'number'
@@ -499,13 +510,16 @@ function resolvePlacementTimeZoneSource(args: {
   professionalTimeZone?: unknown
   fallbackTimeZone?: string
 }): AvailabilityTimeZoneSource {
-  const explicit = normalizeAvailabilityTimeZoneSource(args.contextTimeZoneSource)
+  const explicit = normalizeAvailabilityTimeZoneSource(
+    args.contextTimeZoneSource,
+  )
   if (explicit) return explicit
 
   const contextTimeZone = sanitizeTimeZone(args.contextTimeZone, 'UTC')
 
   const locationTimeZone =
-    typeof args.locationTimeZone === 'string' && isValidIanaTimeZone(args.locationTimeZone)
+    typeof args.locationTimeZone === 'string' &&
+    isValidIanaTimeZone(args.locationTimeZone)
       ? sanitizeTimeZone(args.locationTimeZone, 'UTC')
       : null
   if (locationTimeZone && locationTimeZone === contextTimeZone) {
@@ -521,7 +535,10 @@ function resolvePlacementTimeZoneSource(args: {
     return 'PROFESSIONAL'
   }
 
-  const fallbackTimeZone = sanitizeTimeZone(args.fallbackTimeZone ?? 'UTC', 'UTC')
+  const fallbackTimeZone = sanitizeTimeZone(
+    args.fallbackTimeZone ?? 'UTC',
+    'UTC',
+  )
   if (fallbackTimeZone === contextTimeZone) {
     return 'FALLBACK'
   }
@@ -564,14 +581,20 @@ async function validateAvailabilityPlacement(args: {
   const context = validated.context
   const formattedAddress = normalizeAddress(context.formattedAddress)
 
-  if (args.locationType === ServiceLocationType.MOBILE && !args.clientAddressId) {
+  if (
+    args.locationType === ServiceLocationType.MOBILE &&
+    !args.clientAddressId
+  ) {
     return {
       ok: false,
       code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
     }
   }
 
-  if (args.locationType === ServiceLocationType.SALON && !formattedAddress) {
+  if (
+    args.locationType === ServiceLocationType.SALON &&
+    !formattedAddress
+  ) {
     return {
       ok: false,
       code: 'SALON_LOCATION_ADDRESS_REQUIRED',
@@ -837,51 +860,50 @@ async function loadBusyIntervals(args: {
   return busy
 }
 
-function utcMinuteOfDayInLocalTimeZone(date: Date, timeZone: string): number {
-  const parts = utcDateToLocalParts(date, timeZone)
-  return parts.hour * 60 + parts.minute
-}
-
-function localDaySerialFromUtc(date: Date, timeZone: string): number {
-  const parts = utcDateToLocalParts(date, timeZone)
-  return Math.floor(
-    Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0) / 86_400_000,
-  )
-}
-
-function requestedDaySerial(ymd: {
-  year: number
-  month: number
-  day: number
-}): number {
-  return Math.floor(
-    Date.UTC(ymd.year, ymd.month - 1, ymd.day, 12, 0, 0, 0) / 86_400_000,
-  )
-}
-
-/**
- * Returns minutes from the requested local day start.
- *
- * Examples:
- * - same day 01:30 => 90
- * - same day 23:15 => 1395
- * - next day 00:30 => 1470
- *
- * Returns null if the date is not on the requested day or the next local day.
- */
-function localMinutesFromRequestedDayStart(args: {
-  date: Date
-  timeZone: string
+function buildLocalMinuteCandidateIndex(args: {
   dateYMD: { year: number; month: number; day: number }
-}): number | null {
-  const { date, timeZone, dateYMD } = args
-  const daySerial = localDaySerialFromUtc(date, timeZone)
-  const baseSerial = requestedDaySerial(dateYMD)
-  const dayOffset = daySerial - baseSerial
+  timeZone: string
+  dayStartUtc: Date
+  dayEndExclusiveUtc: Date
+}): LocalMinuteCandidateIndex {
+  const { dateYMD, timeZone, dayStartUtc, dayEndExclusiveUtc } = args
 
-  if (dayOffset !== 0 && dayOffset !== 1) return null
+  const requestedSerial = ymdSerial(dateYMD)
+  const index: LocalMinuteCandidateIndex = new Map()
 
-  return dayOffset * 1440 + utcMinuteOfDayInLocalTimeZone(date, timeZone)
+  const scanEndUtc = addMinutes(dayEndExclusiveUtc, 24 * 60)
+
+  for (
+    let cursor = new Date(dayStartUtc.getTime());
+    cursor.getTime() < scanEndUtc.getTime();
+    cursor = addMinutes(cursor, 1)
+  ) {
+    const utc = normalizeToMinute(cursor)
+    const parts = utcDateToLocalParts(utc, timeZone)
+
+    const localSerial = ymdSerial({
+      year: parts.year,
+      month: parts.month,
+      day: parts.day,
+    })
+
+    const dayOffset = localSerial - requestedSerial
+    if (dayOffset !== 0 && dayOffset !== 1) continue
+
+    const localMinuteOffset = dayOffset * 1440 + parts.hour * 60 + parts.minute
+    const existing = index.get(localMinuteOffset)
+
+    if (existing) {
+      const last = existing[existing.length - 1]
+      if (!last || last.getTime() !== utc.getTime()) {
+        existing.push(utc)
+      }
+    } else {
+      index.set(localMinuteOffset, [utc])
+    }
+  }
+
+  return index
 }
 
 async function computeDaySlotsFast(args: {
@@ -953,7 +975,9 @@ async function computeDaySlotsFast(args: {
       code: 'WORKING_HOURS_INVALID',
       dayStartUtc,
       dayEndExclusiveUtc,
-      debug: debug ? { timeZone, reason: 'misconfigured-workingHours' } : undefined,
+      debug: debug
+        ? { timeZone, reason: 'misconfigured-workingHours' }
+        : undefined,
     }
   }
 
@@ -968,97 +992,66 @@ async function computeDaySlotsFast(args: {
     0,
     MAX_BUFFER_MINUTES,
   )
+  const normalizedLeadTimeMinutes = clampInt(
+    Number(leadTimeMinutes ?? 0) || 0,
+    0,
+    MAX_LEAD_MINUTES,
+  )
 
-  const slots: string[] = []
+  const rawSlots: string[] = []
   const skippedDstWallTimes: string[] = []
 
-  const scanEndUtc = addMinutes(dayStartUtc, window.endMinutes)
+  const candidateIndex = buildLocalMinuteCandidateIndex({
+    dateYMD,
+    timeZone,
+    dayStartUtc,
+    dayEndExclusiveUtc,
+  })
 
   for (
-    let cursor = new Date(dayStartUtc.getTime());
-    cursor.getTime() < scanEndUtc.getTime();
-    cursor = addMinutes(cursor, step)
+    let minute = window.startMinutes;
+    minute + dur + buf <= window.endMinutes;
+    minute += step
   ) {
-    const slotStartUtc = normalizeToMinute(cursor)
+    const normalizedMinute = minute % 1440
+    const dayOffset = Math.floor(minute / 1440)
 
-    const localStartOffset = localMinutesFromRequestedDayStart({
-      date: slotStartUtc,
-      timeZone,
-      dateYMD,
-    })
-    if (localStartOffset == null) continue
+    const hh = Math.floor(normalizedMinute / 60)
+    const mm = normalizedMinute % 60
 
-    const readiness = checkSlotReadiness({
-      startUtc: slotStartUtc,
-      nowUtc,
-      durationMinutes: dur,
-      bufferMinutes: buf,
-      workingHours,
-      timeZone,
-      stepMinutes: step,
-      advanceNoticeMinutes: clampInt(
-        Number(leadTimeMinutes ?? 0) || 0,
-        0,
-        MAX_LEAD_MINUTES,
-      ),
-      maxDaysAhead: maxAdvanceDays,
-      fallbackTimeZone: 'UTC',
-    })
+    const slotStartUtcCandidates = candidateIndex.get(minute) ?? []
 
-    if (!readiness.ok) continue
-
-    if (!isSlotFree(busy, slotStartUtc, readiness.endUtc)) continue
-
-    slots.push(slotStartUtc.toISOString())
-  }
-
-  if (debug) {
-    for (
-      let minute = window.startMinutes;
-      minute + dur + buf <= window.endMinutes;
-      minute += step
-    ) {
-      const normalizedMinute = minute % 1440
-      const dayOffset = Math.floor(minute / 1440)
-
-      const hh = Math.floor(normalizedMinute / 60)
-      const mm = normalizedMinute % 60
-      const localValue = `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-
-      const matched = slots.some((iso) => {
-        const parts = utcDateToLocalParts(new Date(iso), timeZone)
-        const isoSerial = Math.floor(
-          Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0) / 86_400_000,
+    if (slotStartUtcCandidates.length === 0) {
+      if (debug) {
+        skippedDstWallTimes.push(
+          `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
         )
-        const baseSerial = requestedDaySerial(dateYMD)
-        return (
-          isoSerial - baseSerial === dayOffset &&
-          parts.hour === hh &&
-          parts.minute === mm
-        )
+      }
+      continue
+    }
+
+    for (const slotStartUtc of slotStartUtcCandidates) {
+      const readiness = checkSlotReadiness({
+        startUtc: slotStartUtc,
+        nowUtc,
+        durationMinutes: dur,
+        bufferMinutes: buf,
+        workingHours,
+        timeZone,
+        stepMinutes: step,
+        advanceNoticeMinutes: normalizedLeadTimeMinutes,
+        maxDaysAhead: maxAdvanceDays,
+        fallbackTimeZone: 'UTC',
       })
 
-      if (!matched) {
-        const shiftedYmd = addDaysToYMD(
-          dateYMD.year,
-          dateYMD.month,
-          dateYMD.day,
-          dayOffset,
-        )
-        const maybeUtc = localSlotToUtcOrNull({
-          year: shiftedYmd.year,
-          month: shiftedYmd.month,
-          day: shiftedYmd.day,
-          hour: hh,
-          minute: mm,
-          timeZone,
-        })
-        if (!maybeUtc) {
-          skippedDstWallTimes.push(localValue)
-        }
-      }
+      if (!readiness.ok) continue
+      if (!isSlotFree(busy, slotStartUtc, readiness.endUtc)) continue
+
+      rawSlots.push(slotStartUtc.toISOString())
     }
   }
+
+  const slots = [...new Set(rawSlots)].sort()
 
   return {
     ok: true,
@@ -1138,7 +1131,10 @@ function parseSummaryWindowDays(
   value: string | null,
   maxAdvanceDays: number,
 ): number {
-  const fallback = Math.min(DEFAULT_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays))
+  const fallback = Math.min(
+    DEFAULT_SUMMARY_WINDOW_DAYS,
+    Math.max(1, maxAdvanceDays),
+  )
   const parsed = toInt(value, fallback)
   return clampInt(
     parsed,
@@ -1809,23 +1805,23 @@ export async function GET(req: Request) {
 
       const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
 
-      const proAddOnOfferings = await prisma.professionalServiceOffering.findMany({
-        where: {
-          professionalId,
-          isActive: true,
-          serviceId: { in: addOnServiceIds },
+      const proAddOnOfferings = await prisma.professionalServiceOffering.findMany(
+        {
+          where: {
+            professionalId,
+            isActive: true,
+            serviceId: { in: addOnServiceIds },
+          },
+          select: {
+            serviceId: true,
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+          },
+          take: 200,
         },
-        select: {
-          serviceId: true,
-          salonDurationMinutes: true,
-          mobileDurationMinutes: true,
-        },
-        take: 200,
-      })
-
-      const byServiceId = new Map(
-        proAddOnOfferings.map((o) => [o.serviceId, o]),
       )
+
+      const byServiceId = new Map(proAddOnOfferings.map((o) => [o.serviceId, o]))
 
       const addOnDurationTotal = addOnLinks.reduce((sum, link) => {
         const proOffering = byServiceId.get(link.addOnServiceId) ?? null

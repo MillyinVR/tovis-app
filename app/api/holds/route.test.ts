@@ -5,6 +5,7 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 import { NextRequest } from 'next/server'
+
 const TEST_NOW = new Date('2026-03-17T12:55:00.000Z')
 const SLOT_START = new Date('2026-03-17T13:30:00.000Z')
 const HOLD_EXPIRES = new Date('2026-03-17T13:05:00.000Z')
@@ -26,8 +27,7 @@ const mocks = vi.hoisted(() => ({
   buildAddressSnapshot: vi.fn(),
   decimalToNumber: vi.fn(),
 
-  minutesSinceMidnightInTimeZone: vi.fn(),
-  ensureWithinWorkingHours: vi.fn(),
+  checkSlotReadiness: vi.fn(),
 
   withLockedProfessionalTransaction: vi.fn(),
 
@@ -68,12 +68,8 @@ vi.mock('@/lib/booking/snapshots', () => ({
   decimalToNumber: mocks.decimalToNumber,
 }))
 
-vi.mock('@/lib/timeZone', () => ({
-  minutesSinceMidnightInTimeZone: mocks.minutesSinceMidnightInTimeZone,
-}))
-
-vi.mock('@/lib/booking/workingHoursGuard', () => ({
-  ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
+vi.mock('@/lib/booking/slotReadiness', () => ({
+  checkSlotReadiness: mocks.checkSlotReadiness,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -90,8 +86,6 @@ const tx = {
     create: mocks.txBookingHoldCreate,
   },
 }
-
-
 
 function makeRequest(body: unknown): NextRequest {
   const req = new Request('http://localhost/api/holds', {
@@ -113,6 +107,9 @@ const offering = {
   mobileDurationMinutes: 75,
   salonPriceStartingAt: new Prisma.Decimal('100.00'),
   mobilePriceStartingAt: new Prisma.Decimal('120.00'),
+  professional: {
+    timeZone: 'America/Los_Angeles',
+  },
 }
 
 describe('POST /api/holds', () => {
@@ -184,9 +181,15 @@ describe('POST /api/holds', () => {
       return null
     })
 
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValue(30)
-
-    mocks.ensureWithinWorkingHours.mockReturnValue({ ok: true })
+    mocks.checkSlotReadiness.mockReturnValue({
+      ok: true,
+      startUtc: SLOT_START,
+      endUtc: new Date('2026-03-17T14:45:00.000Z'),
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
 
     mocks.getTimeRangeConflict.mockResolvedValue(null)
 
@@ -236,6 +239,7 @@ describe('POST /api/holds', () => {
       expect.any(Function),
     )
 
+    expect(mocks.checkSlotReadiness).toHaveBeenCalled()
     expect(mocks.getTimeRangeConflict).toHaveBeenCalled()
     expect(mocks.txBookingHoldCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -279,12 +283,18 @@ describe('POST /api/holds', () => {
   })
 
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValueOnce(17)
+    const offStepStart = new Date('2026-03-17T13:17:00.000Z')
+
+    mocks.checkSlotReadiness.mockReturnValueOnce({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      meta: {},
+    })
 
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
-        scheduledFor: '2026-03-17T13:17:00.000Z',
+        scheduledFor: offStepStart.toISOString(),
         locationType: 'SALON',
         locationId: 'loc_1',
       }),
@@ -295,7 +305,7 @@ describe('POST /api/holds', () => {
       professionalId: 'pro_123',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-17T13:17:00.000Z'),
+      requestedStart: offStepStart,
       requestedEnd: new Date('2026-03-17T14:32:00.000Z'),
       conflictType: 'STEP_BOUNDARY',
       note: null,
@@ -304,7 +314,7 @@ describe('POST /api/holds', () => {
         offeringId: 'offering_1',
         clientId: 'client_1',
         clientAddressId: null,
-        stepMinutes: 15,
+        slotReadinessCode: 'STEP_MISMATCH',
       },
     })
 
@@ -320,9 +330,12 @@ describe('POST /api/holds', () => {
   })
 
   it('logs WORKING_HOURS and returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+    mocks.checkSlotReadiness.mockReturnValueOnce({
       ok: false,
-      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+      code: 'OUTSIDE_WORKING_HOURS',
+      meta: {
+        workingHoursError: 'That time is outside working hours.',
+      },
     })
 
     const result = await POST(
@@ -348,7 +361,8 @@ describe('POST /api/holds', () => {
         offeringId: 'offering_1',
         clientId: 'client_1',
         clientAddressId: null,
-        workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+        slotReadinessCode: 'OUTSIDE_WORKING_HOURS',
+        workingHoursError: 'That time is outside working hours.',
       },
     })
 
@@ -359,7 +373,7 @@ describe('POST /api/holds', () => {
       code: 'OUTSIDE_WORKING_HOURS',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is outside working hours.',
+      message: 'That time is outside working hours.',
     })
   })
 

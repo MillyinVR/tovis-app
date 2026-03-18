@@ -12,8 +12,6 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
 
-  minutesSinceMidnightInTimeZone: vi.fn(),
-
   clampInt: vi.fn(),
 
   assertTimeRangeAvailable: vi.fn(),
@@ -25,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   decimalToNumber: vi.fn(),
   pickFormattedAddressFromSnapshot: vi.fn(),
 
-  ensureWithinWorkingHours: vi.fn(),
+  checkSlotReadiness: vi.fn(),
 
   withLockedClientOwnedBookingTransaction: vi.fn(),
 
@@ -52,7 +50,6 @@ vi.mock('@/app/api/_utils/responses', () => ({
 
 vi.mock('@/lib/timeZone', () => ({
   DEFAULT_TIME_ZONE: 'UTC',
-  minutesSinceMidnightInTimeZone: mocks.minutesSinceMidnightInTimeZone,
 }))
 
 vi.mock('@/lib/pick', () => ({
@@ -74,8 +71,8 @@ vi.mock('@/lib/booking/snapshots', () => ({
   pickFormattedAddressFromSnapshot: mocks.pickFormattedAddressFromSnapshot,
 }))
 
-vi.mock('@/lib/booking/workingHoursGuard', () => ({
-  ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
+vi.mock('@/lib/booking/slotReadiness', () => ({
+  checkSlotReadiness: mocks.checkSlotReadiness,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -136,6 +133,9 @@ const bookingOffering = {
   salonDurationMinutes: 60,
   mobilePriceStartingAt: new Prisma.Decimal('120.00'),
   mobileDurationMinutes: 75,
+  professional: {
+    timeZone: 'America/Los_Angeles',
+  },
 }
 
 const hold = {
@@ -188,19 +188,19 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       data,
     }))
 
-    mocks.clampInt.mockImplementation((value: unknown, min: number, max: number) => {
-      const parsed = Number(value)
-      const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
-      return Math.max(min, Math.min(max, n))
-    })
+    mocks.clampInt.mockImplementation(
+      (value: unknown, min: number, max: number) => {
+        const parsed = Number(value)
+        const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
+        return Math.max(min, Math.min(max, n))
+      },
+    )
 
     mocks.normalizeLocationType.mockImplementation((value: unknown) => {
       if (value === 'SALON') return ServiceLocationType.SALON
       if (value === 'MOBILE') return ServiceLocationType.MOBILE
       return null
     })
-
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValue(30)
 
     mocks.resolveValidatedBookingContext.mockResolvedValue({
       ok: true,
@@ -245,7 +245,15 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       return null
     })
 
-    mocks.ensureWithinWorkingHours.mockReturnValue({ ok: true })
+    mocks.checkSlotReadiness.mockReturnValue({
+      ok: true,
+      startUtc: new Date('2026-03-11T19:30:00.000Z'),
+      endUtc: new Date('2026-03-11T20:45:00.000Z'),
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
 
     mocks.assertTimeRangeAvailable.mockResolvedValue(undefined)
 
@@ -305,6 +313,7 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       run: expect.any(Function),
     })
 
+    expect(mocks.checkSlotReadiness).toHaveBeenCalled()
     expect(mocks.assertTimeRangeAvailable).toHaveBeenCalled()
     expect(mocks.txBookingUpdate).toHaveBeenCalledWith({
       where: { id: 'booking_1' },
@@ -372,7 +381,16 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns STEP_MISMATCH when the held time is off step', async () => {
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValueOnce(17)
+    mocks.checkSlotReadiness.mockReturnValueOnce({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      startUtc: new Date('2026-03-11T19:30:00.000Z'),
+      endUtc: new Date('2026-03-11T20:45:00.000Z'),
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
 
     const result = await POST(
       makeRequest({
@@ -393,9 +411,15 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+    mocks.checkSlotReadiness.mockReturnValueOnce({
       ok: false,
-      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+      code: 'OUTSIDE_WORKING_HOURS',
+      startUtc: new Date('2026-03-11T19:30:00.000Z'),
+      endUtc: new Date('2026-03-11T20:45:00.000Z'),
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      durationMinutes: 60,
+      bufferMinutes: 15,
     })
 
     const result = await POST(
@@ -412,7 +436,7 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       code: 'OUTSIDE_WORKING_HOURS',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is outside working hours.',
+      message: 'That time is outside working hours.',
     })
   })
 

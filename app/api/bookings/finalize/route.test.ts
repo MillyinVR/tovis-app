@@ -1,11 +1,9 @@
-// app/api/bookings/finalize/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
   NotificationType,
-  OpeningStatus,
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
@@ -37,7 +35,7 @@ const mocks = vi.hoisted(() => ({
   getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
   resolveValidatedBookingContext: vi.fn(),
-  ensureWithinWorkingHours: vi.fn(),
+  checkSlotReadiness: vi.fn(),
   withLockedProfessionalTransaction: vi.fn(),
 }))
 
@@ -89,13 +87,21 @@ vi.mock('@/lib/booking/locationContext', () => ({
   resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
 }))
 
-vi.mock('@/lib/booking/workingHoursGuard', () => ({
-  ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
+vi.mock('@/lib/booking/slotReadiness', () => ({
+  checkSlotReadiness: mocks.checkSlotReadiness,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
 }))
+
+vi.mock('@/lib/timeZone', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/timeZone')>()
+  return {
+    ...actual,
+    DEFAULT_TIME_ZONE: 'UTC',
+  }
+})
 
 vi.mock('@/lib/booking/snapshots', () => ({
   buildAddressSnapshot: (formattedAddress: string) => ({ formattedAddress }),
@@ -211,6 +217,7 @@ describe('POST /api/bookings/finalize', () => {
       mobileDurationMinutes: 75,
       professional: {
         autoAcceptBookings: false,
+        timeZone: 'America/Los_Angeles',
       },
     })
 
@@ -247,12 +254,14 @@ describe('POST /api/bookings/finalize', () => {
     mocks.lastMinuteOpeningUpdateMany.mockResolvedValue({ count: 1 })
     mocks.offeringAddOnFindMany.mockResolvedValue([])
     mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
+
     mocks.bookingCreate.mockResolvedValue({
       id: 'booking_1',
       status: BookingStatus.PENDING,
       scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
       professionalId: 'pro_123',
     })
+
     mocks.bookingServiceItemCreate.mockResolvedValue({ id: 'item_base_1' })
     mocks.bookingServiceItemCreateMany.mockResolvedValue({ count: 0 })
     mocks.openingNotificationUpdateMany.mockResolvedValue({ count: 0 })
@@ -281,8 +290,14 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    mocks.ensureWithinWorkingHours.mockReturnValue({
+    mocks.checkSlotReadiness.mockReturnValue({
       ok: true,
+      startUtc: new Date('2026-03-11T19:30:00.000Z'),
+      endUtc: new Date('2026-03-11T20:45:00.000Z'),
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      durationMinutes: 60,
+      bufferMinutes: 15,
     })
 
     mocks.getTimeRangeConflict.mockResolvedValue(null)
@@ -410,6 +425,12 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
+    mocks.checkSlotReadiness.mockReturnValueOnce({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      meta: {},
+    })
+
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -418,20 +439,23 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_FINALIZE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:37:00.000Z'),
-      requestedEnd: new Date('2026-03-11T19:38:00.000Z'),
-      conflictType: 'STEP_BOUNDARY',
-      holdId: 'hold_1',
-      meta: {
-        route: 'app/api/bookings/finalize/route.ts',
-        stepMinutes: 30,
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_FINALIZE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-11T19:37:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:52:00.000Z'),
+        conflictType: 'STEP_BOUNDARY',
+        holdId: 'hold_1',
+        meta: expect.objectContaining({
+          route: 'app/api/bookings/finalize/route.ts',
+          stepMinutes: 30,
+          slotReadinessCode: 'STEP_MISMATCH',
+        }),
+      }),
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
@@ -466,19 +490,21 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_FINALIZE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
-      conflictType: 'BLOCKED',
-      holdId: 'hold_1',
-      meta: {
-        route: 'app/api/bookings/finalize/route.ts',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_FINALIZE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+        conflictType: 'BLOCKED',
+        holdId: 'hold_1',
+        meta: expect.objectContaining({
+          route: 'app/api/bookings/finalize/route.ts',
+        }),
+      }),
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -513,19 +539,21 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_FINALIZE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
-      conflictType: 'BOOKING',
-      holdId: 'hold_1',
-      meta: {
-        route: 'app/api/bookings/finalize/route.ts',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_FINALIZE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+        conflictType: 'BOOKING',
+        holdId: 'hold_1',
+        meta: expect.objectContaining({
+          route: 'app/api/bookings/finalize/route.ts',
+        }),
+      }),
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -560,19 +588,21 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_FINALIZE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
-      conflictType: 'HOLD',
-      holdId: 'hold_1',
-      meta: {
-        route: 'app/api/bookings/finalize/route.ts',
-      },
-    })
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_FINALIZE',
+        professionalId: 'pro_123',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+        conflictType: 'HOLD',
+        holdId: 'hold_1',
+        meta: expect.objectContaining({
+          route: 'app/api/bookings/finalize/route.ts',
+        }),
+      }),
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -611,6 +641,7 @@ describe('POST /api/bookings/finalize', () => {
       expect.any(Function),
     )
 
+    expect(mocks.checkSlotReadiness).toHaveBeenCalled()
     expect(mocks.bookingCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         clientId: 'client_1',

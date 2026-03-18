@@ -480,7 +480,7 @@ describe('POST /api/pro/bookings', () => {
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is not available.',
+      error: 'That time was just taken. Please choose another slot.',
       code: 'TIME_BOOKED',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',
@@ -519,7 +519,7 @@ describe('POST /api/pro/bookings', () => {
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'That time is not available.',
+      error: 'Someone is already holding that time. Please try another slot.',
       code: 'TIME_HELD',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',

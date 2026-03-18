@@ -1,5 +1,5 @@
 // app/api/availability/day/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -68,6 +68,11 @@ function makeLocation(args: {
   type: 'SALON' | 'SUITE' | 'MOBILE_BASE'
   isPrimary?: boolean
   timeZone?: string | null
+  workingHours?: typeof WORKING_HOURS
+  bufferMinutes?: number
+  stepMinutes?: number
+  advanceNoticeMinutes?: number
+  maxDaysAhead?: number
 }) {
   return {
     id: args.id,
@@ -75,11 +80,11 @@ function makeLocation(args: {
     isPrimary: args.isPrimary ?? false,
     isBookable: true,
     timeZone: args.timeZone === undefined ? 'UTC' : args.timeZone,
-    workingHours: WORKING_HOURS,
-    bufferMinutes: 0,
-    stepMinutes: 60,
-    advanceNoticeMinutes: 0,
-    maxDaysAhead: 365,
+    workingHours: args.workingHours ?? WORKING_HOURS,
+    bufferMinutes: args.bufferMinutes ?? 0,
+    stepMinutes: args.stepMinutes ?? 60,
+    advanceNoticeMinutes: args.advanceNoticeMinutes ?? 0,
+    maxDaysAhead: args.maxDaysAhead ?? 365,
     lat: null,
     lng: null,
     city: null,
@@ -404,6 +409,150 @@ describe('GET /api/availability/day', () => {
   })
 })
 
+describe('GET /api/availability/day parity regressions', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
+    vi.clearAllMocks()
+
+    mocks.professionalProfileFindUnique.mockResolvedValue({
+      id: 'pro-1',
+      businessName: 'Parity Pro',
+      avatarUrl: null,
+      location: null,
+      timeZone: 'UTC',
+    })
+
+    mocks.serviceFindUnique.mockResolvedValue({
+      id: 'service-1',
+      name: 'Haircut',
+      category: { name: 'Hair' },
+    })
+
+    mocks.professionalServiceOfferingFindFirst.mockResolvedValue({
+      id: 'offering-1',
+      offersInSalon: true,
+      offersMobile: false,
+      salonDurationMinutes: 15,
+      mobileDurationMinutes: null,
+      salonPriceStartingAt: '50.00',
+      mobilePriceStartingAt: null,
+    })
+
+    mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
+    mocks.offeringAddOnFindMany.mockResolvedValue([])
+    mocks.bookingFindMany.mockResolvedValue([])
+    mocks.bookingHoldFindMany.mockResolvedValue([])
+    mocks.calendarBlockFindMany.mockResolvedValue([])
+    mocks.professionalLocationFindMany.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('returns working-window aligned slots when the window starts off the midnight step boundary', async () => {
+    const stepAnchoredLocation = makeLocation({
+      id: 'step-salon-1',
+      type: 'SALON',
+      isPrimary: true,
+      timeZone: 'UTC',
+      stepMinutes: 15,
+      bufferMinutes: 0,
+      workingHours: {
+        sun: { enabled: true, start: '09:10', end: '10:10' },
+        mon: { enabled: true, start: '09:10', end: '10:10' },
+        tue: { enabled: true, start: '09:10', end: '10:10' },
+        wed: { enabled: true, start: '09:10', end: '10:10' },
+        thu: { enabled: true, start: '09:10', end: '10:10' },
+        fri: { enabled: true, start: '09:10', end: '10:10' },
+        sat: { enabled: true, start: '09:10', end: '10:10' },
+      },
+    })
+
+    mocks.professionalLocationFindFirst.mockImplementationOnce(
+      async (args: { where?: { id?: string } }) => {
+        if (args.where?.id === 'step-salon-1') return stepAnchoredLocation
+        return null
+      },
+    )
+
+    const response = await getAvailability({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+      locationType: 'SALON',
+      locationId: 'step-salon-1',
+      date: '2026-03-12',
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+
+    // These are the slots write paths should accept after the step-anchor fix.
+    expect(body.slots).toContain('2026-03-12T09:10:00.000Z')
+    expect(body.slots).toContain('2026-03-12T09:25:00.000Z')
+    expect(body.slots).toContain('2026-03-12T09:40:00.000Z')
+    expect(body.slots).toContain('2026-03-12T09:55:00.000Z')
+
+    // And these midnight-aligned slots should not appear just because they are :00/:15/:30/:45.
+    expect(body.slots).not.toContain('2026-03-12T09:00:00.000Z')
+    expect(body.slots).not.toContain('2026-03-12T09:15:00.000Z')
+    expect(body.slots).not.toContain('2026-03-12T09:30:00.000Z')
+    expect(body.slots).not.toContain('2026-03-12T09:45:00.000Z')
+  })
+
+  it('does not expose slots past the exact max-days-ahead timestamp boundary on the final allowed date', async () => {
+    const horizonLocation = makeLocation({
+      id: 'horizon-salon-1',
+      type: 'SALON',
+      isPrimary: true,
+      timeZone: 'UTC',
+      stepMinutes: 30,
+      bufferMinutes: 0,
+      maxDaysAhead: 7,
+      workingHours: {
+        sun: { enabled: true, start: '18:00', end: '21:00' },
+        mon: { enabled: true, start: '18:00', end: '21:00' },
+        tue: { enabled: true, start: '18:00', end: '21:00' },
+        wed: { enabled: true, start: '18:00', end: '21:00' },
+        thu: { enabled: true, start: '18:00', end: '21:00' },
+        fri: { enabled: true, start: '18:00', end: '21:00' },
+        sat: { enabled: true, start: '18:00', end: '21:00' },
+      },
+    })
+
+    mocks.professionalLocationFindFirst.mockImplementationOnce(
+      async (args: { where?: { id?: string } }) => {
+        if (args.where?.id === 'horizon-salon-1') return horizonLocation
+        return null
+      },
+    )
+
+    const response = await getAvailability({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+      locationType: 'SALON',
+      locationId: 'horizon-salon-1',
+      date: '2026-03-18',
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+
+    // now = 2026-03-11T19:00:00Z, maxDaysAhead = 7
+    // last valid start is exactly 2026-03-18T19:00:00Z
+    expect(body.slots).toContain('2026-03-18T18:00:00.000Z')
+    expect(body.slots).toContain('2026-03-18T18:30:00.000Z')
+    expect(body.slots).toContain('2026-03-18T19:00:00.000Z')
+
+    expect(body.slots).not.toContain('2026-03-18T19:30:00.000Z')
+    expect(body.slots).not.toContain('2026-03-18T20:00:00.000Z')
+    expect(body.slots).not.toContain('2026-03-18T20:30:00.000Z')
+  })
+})
+
 describe('GET /api/availability/day DST behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -509,7 +658,6 @@ describe('GET /api/availability/day DST behavior', () => {
 
     expect(localTimes).toContain('02:00')
     expect(localTimes).toContain('02:30')
-
   })
 
   it('near midnight: returned slots stay on the requested local date', async () => {
