@@ -39,6 +39,7 @@ import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import { checkSlotReadiness } from '@/lib/booking/slotReadiness'
 import {
   getBookingFailPayload,
   type BookingErrorCode,
@@ -883,16 +884,6 @@ function localMinutesFromRequestedDayStart(args: {
   return dayOffset * 1440 + utcMinuteOfDayInLocalTimeZone(date, timeZone)
 }
 
-function localStepOffsetMinutes(
-  localMinutes: number,
-  startMinutes: number,
-  stepMinutes: number,
-): number {
-  const diff = localMinutes - startMinutes
-  const mod = diff % stepMinutes
-  return mod >= 0 ? mod : mod + stepMinutes
-}
-
 async function computeDaySlotsFast(args: {
   dateYMD: { year: number; month: number; day: number }
   durationMinutes: number
@@ -901,6 +892,7 @@ async function computeDaySlotsFast(args: {
   workingHours: unknown | null
   leadTimeMinutes: number
   locationBufferMinutes: number
+  maxAdvanceDays: number
   busy: BusyInterval[]
   debug?: boolean
 }): Promise<DayComputationResult> {
@@ -912,6 +904,7 @@ async function computeDaySlotsFast(args: {
     workingHours,
     leadTimeMinutes,
     locationBufferMinutes,
+    maxAdvanceDays,
     busy,
     debug,
   } = args
@@ -976,11 +969,6 @@ async function computeDaySlotsFast(args: {
     MAX_BUFFER_MINUTES,
   )
 
-  const cutoffUtc = addMinutes(
-    nowUtc,
-    clampInt(Number(leadTimeMinutes ?? 0) || 0, 0, MAX_LEAD_MINUTES),
-  )
-
   const slots: string[] = []
   const skippedDstWallTimes: string[] = []
 
@@ -993,35 +981,33 @@ async function computeDaySlotsFast(args: {
   ) {
     const slotStartUtc = normalizeToMinute(cursor)
 
-    if (slotStartUtc.getTime() < cutoffUtc.getTime()) continue
-
     const localStartOffset = localMinutesFromRequestedDayStart({
       date: slotStartUtc,
       timeZone,
       dateYMD,
     })
     if (localStartOffset == null) continue
-    if (localStartOffset < window.startMinutes) continue
 
-    const stepOffset = localStepOffsetMinutes(
-      localStartOffset,
-      window.startMinutes,
-      step,
-    )
-    if (stepOffset !== 0) continue
-
-    const slotEndWithBufferUtc = addMinutes(slotStartUtc, dur + buf)
-
-    const localEndOffset = localMinutesFromRequestedDayStart({
-      date: slotEndWithBufferUtc,
+    const readiness = checkSlotReadiness({
+      startUtc: slotStartUtc,
+      nowUtc,
+      durationMinutes: dur,
+      bufferMinutes: buf,
+      workingHours,
       timeZone,
-      dateYMD,
+      stepMinutes: step,
+      advanceNoticeMinutes: clampInt(
+        Number(leadTimeMinutes ?? 0) || 0,
+        0,
+        MAX_LEAD_MINUTES,
+      ),
+      maxDaysAhead: maxAdvanceDays,
+      fallbackTimeZone: 'UTC',
     })
-    if (localEndOffset == null) continue
-    if (localEndOffset > window.endMinutes) continue
-    if (localEndOffset <= localStartOffset) continue
 
-    if (!isSlotFree(busy, slotStartUtc, slotEndWithBufferUtc)) continue
+    if (!readiness.ok) continue
+
+    if (!isSlotFree(busy, slotStartUtc, readiness.endUtc)) continue
 
     slots.push(slotStartUtc.toISOString())
   }
@@ -1998,6 +1984,7 @@ export async function GET(req: Request) {
             workingHours,
             leadTimeMinutes,
             locationBufferMinutes,
+            maxAdvanceDays,
             busy,
             debug: false,
           })
@@ -2194,6 +2181,7 @@ export async function GET(req: Request) {
       workingHours,
       leadTimeMinutes,
       locationBufferMinutes,
+      maxAdvanceDays,
       busy,
       debug,
     })

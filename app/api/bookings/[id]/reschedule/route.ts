@@ -9,10 +9,7 @@ import {
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
-import {
-  DEFAULT_TIME_ZONE,
-  minutesSinceMidnightInTimeZone,
-} from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
@@ -28,7 +25,10 @@ import {
   decimalToNumber,
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
-import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
+import {
+  checkSlotReadiness,
+  type SlotReadinessCode,
+} from '@/lib/booking/slotReadiness'
 import { withLockedClientOwnedBookingTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -40,13 +40,6 @@ import {
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
-
-type WorkingHoursGuardCode =
-  | 'WORKING_HOURS_REQUIRED'
-  | 'WORKING_HOURS_INVALID'
-  | 'OUTSIDE_WORKING_HOURS'
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -122,27 +115,60 @@ function mapSchedulingReadinessErrorToBookingCode(
   }
 }
 
-function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
-  return `${WORKING_HOURS_ERROR_PREFIX}${code}`
-}
-
-function parseWorkingHoursGuardMessage(
-  value: string,
-): WorkingHoursGuardCode | null {
-  if (!value.startsWith(WORKING_HOURS_ERROR_PREFIX)) return null
-
-  const code = value.slice(WORKING_HOURS_ERROR_PREFIX.length)
-
+function mapSlotReadinessCodeToBookingCode(
+  code: SlotReadinessCode,
+): BookingErrorCode {
   switch (code) {
+    case 'STEP_MISMATCH':
+      return 'STEP_MISMATCH'
+    case 'ADVANCE_NOTICE_REQUIRED':
+      return 'ADVANCE_NOTICE_REQUIRED'
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return 'MAX_DAYS_AHEAD_EXCEEDED'
     case 'WORKING_HOURS_REQUIRED':
       return 'WORKING_HOURS_REQUIRED'
     case 'WORKING_HOURS_INVALID':
       return 'WORKING_HOURS_INVALID'
     case 'OUTSIDE_WORKING_HOURS':
       return 'OUTSIDE_WORKING_HOURS'
-    default:
-      return null
+    case 'INVALID_START':
+      return 'HOLD_TIME_INVALID'
+    case 'INVALID_DURATION':
+      return 'INVALID_DURATION'
+    case 'INVALID_BUFFER':
+      return 'INTERNAL_ERROR'
+    case 'INVALID_RANGE':
+      return 'HOLD_TIME_INVALID'
   }
+}
+
+function throwSlotReadinessError(
+  code: SlotReadinessCode,
+  args: {
+    stepMinutes: number
+    meta?: Record<string, unknown>
+  },
+): never {
+  if (code === 'STEP_MISMATCH') {
+    throw bookingError('STEP_MISMATCH', {
+      message: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
+      userMessage: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
+    })
+  }
+
+  if (code === 'OUTSIDE_WORKING_HOURS') {
+    const workingHoursError =
+      typeof args.meta?.workingHoursError === 'string'
+        ? args.meta.workingHoursError
+        : 'That time is outside working hours.'
+
+    throw bookingError('OUTSIDE_WORKING_HOURS', {
+      message: workingHoursError,
+      userMessage: workingHoursError,
+    })
+  }
+
+  throw bookingError(mapSlotReadinessCodeToBookingCode(code))
 }
 
 export async function POST(req: Request, { params }: Ctx) {
@@ -226,6 +252,11 @@ export async function POST(req: Request, { params }: Ctx) {
             salonDurationMinutes: true,
             mobilePriceStartingAt: true,
             mobileDurationMinutes: true,
+            professional: {
+              select: {
+                timeZone: true,
+              },
+            },
           },
         })
 
@@ -346,6 +377,7 @@ export async function POST(req: Request, { params }: Ctx) {
           requestedLocationId: hold.locationId,
           locationType: hold.locationType,
           holdLocationTimeZone: hold.locationTimeZone,
+          professionalTimeZone: bookingOffering.professional?.timeZone ?? null,
           fallbackTimeZone: DEFAULT_TIME_ZONE,
           requireValidTimeZone: true,
           allowFallback: false,
@@ -392,71 +424,30 @@ export async function POST(req: Request, { params }: Ctx) {
           throw bookingError('TIME_IN_PAST')
         }
 
-        if (
-          newStart.getTime() <
-          now.getTime() + locationContext.advanceNoticeMinutes * 60_000
-        ) {
-          throw bookingError('ADVANCE_NOTICE_REQUIRED')
-        }
-
-        if (
-          newStart.getTime() >
-          now.getTime() + locationContext.maxDaysAhead * 24 * 60 * 60_000
-        ) {
-          throw bookingError('MAX_DAYS_AHEAD_EXCEEDED')
-        }
-
-        const startMinuteOfDay = minutesSinceMidnightInTimeZone(
-          newStart,
-          locationContext.timeZone,
-        )
-
-        if (startMinuteOfDay % locationContext.stepMinutes !== 0) {
-          throw bookingError('STEP_MISMATCH', {
-            message: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
-            userMessage: `Start time must be on a ${locationContext.stepMinutes}-minute boundary.`,
-          })
-        }
-
-        const newEnd = addMinutes(
-          newStart,
-          totalDurationMinutes + locationContext.bufferMinutes,
-        )
-
-        const workingHoursCheck = ensureWithinWorkingHours({
-          scheduledStartUtc: newStart,
-          scheduledEndUtc: newEnd,
+        const slotReadiness = checkSlotReadiness({
+          startUtc: newStart,
+          nowUtc: now,
+          durationMinutes: totalDurationMinutes,
+          bufferMinutes: locationContext.bufferMinutes,
           workingHours: locationContext.workingHours,
           timeZone: locationContext.timeZone,
+          stepMinutes: locationContext.stepMinutes,
+          advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+          maxDaysAhead: locationContext.maxDaysAhead,
           fallbackTimeZone: DEFAULT_TIME_ZONE,
-          messages: {
-            missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
-            outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
-            misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
-          },
         })
 
-        if (!workingHoursCheck.ok) {
-          const workingHoursCode = parseWorkingHoursGuardMessage(
-            workingHoursCheck.error,
-          )
+        const newEnd = slotReadiness.ok
+          ? slotReadiness.endUtc
+          : addMinutes(
+              newStart,
+              totalDurationMinutes + locationContext.bufferMinutes,
+            )
 
-          if (workingHoursCode === 'WORKING_HOURS_REQUIRED') {
-            throw bookingError('WORKING_HOURS_REQUIRED')
-          }
-
-          if (workingHoursCode === 'WORKING_HOURS_INVALID') {
-            throw bookingError('WORKING_HOURS_INVALID')
-          }
-
-          if (workingHoursCode === 'OUTSIDE_WORKING_HOURS') {
-            throw bookingError('OUTSIDE_WORKING_HOURS')
-          }
-
-          throw bookingError('OUTSIDE_WORKING_HOURS', {
-            message: workingHoursCheck.error,
-            userMessage:
-              workingHoursCheck.error || 'That time is outside working hours.',
+        if (!slotReadiness.ok) {
+          throwSlotReadinessError(slotReadiness.code, {
+            stepMinutes: locationContext.stepMinutes,
+            meta: slotReadiness.meta,
           })
         }
 
