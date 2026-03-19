@@ -360,6 +360,47 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     vi.useRealTimers()
   })
 
+  it('returns stable success shape for no-op PATCH', async () => {
+    const result = await PATCH(makeRequest({ notifyClient: true }), makeCtx())
+
+    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
+      'pro_123',
+      expect.any(Function),
+    )
+
+    expect(mocks.txBookingFindFirst).toHaveBeenCalled()
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        booking: {
+          id: 'booking_1',
+          scheduledFor: '2026-03-17T13:00:00.000Z',
+          endsAt: '2026-03-17T14:15:00.000Z',
+          bufferMinutes: 15,
+          durationMinutes: 60,
+          totalDurationMinutes: 60,
+          status: BookingStatus.ACCEPTED,
+          subtotalSnapshot: '50.00',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+          locationId: 'loc_1',
+          locationType: ServiceLocationType.SALON,
+          locationAddressSnapshot: null,
+          locationLatSnapshot: null,
+          locationLngSnapshot: null,
+        },
+        meta: {
+          mutated: false,
+          noOp: true,
+        },
+      },
+    })
+  })
+
   it('uses the locked professional transaction before conflict check and booking update', async () => {
     const result = await PATCH(
       makeRequest({
@@ -396,6 +437,10 @@ describe('PATCH /api/pro/bookings/[id]', () => {
           locationAddressSnapshot: null,
           locationLatSnapshot: null,
           locationLngSnapshot: null,
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
         },
       },
     })

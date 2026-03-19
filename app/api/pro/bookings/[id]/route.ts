@@ -208,6 +208,27 @@ function buildBookingOutput(args: {
   }
 }
 
+type BookingMutationPayload = {
+  booking: ReturnType<typeof buildBookingOutput>
+  meta: {
+    mutated: boolean
+    noOp: boolean
+  }
+}
+
+function buildBookingMutationPayload(args: {
+  booking: ReturnType<typeof buildBookingOutput>
+  mutated: boolean
+}): BookingMutationPayload {
+  return {
+    booking: args.booking,
+    meta: {
+      mutated: args.mutated,
+      noOp: !args.mutated,
+    },
+  }
+}
+
 function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
   return `${WORKING_HOURS_ERROR_PREFIX}${code}`
 }
@@ -537,10 +558,9 @@ function enforcePatchedBookingScheduling(args: {
       })
     }
 
-    // IMPORTANT:
-    // OUTSIDE_WORKING_HOURS here is not treated as a hard failure yet.
-    // Step alignment is always enforced, but outside-hours enforcement is controlled
-    // separately so allowOutsideWorkingHours can do its job.
+    // OUTSIDE_WORKING_HOURS here is not a hard failure yet.
+    // Step alignment is always enforced, while outside-hours enforcement is
+    // controlled separately so allowOutsideWorkingHours can do its job.
   }
 
   if (!args.allowShortNotice) {
@@ -921,10 +941,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
       hasDuration ||
       hasServiceItems
 
-    if (!wantsMutation) {
-      return jsonOk({ booking: null, noOp: true }, 200)
-    }
-
     const result = await withLockedProfessionalTransaction(
       professionalId,
       async ({ tx, now }) => {
@@ -982,6 +998,30 @@ export async function PATCH(req: Request, ctx: Ctx) {
           existing.locationLngSnapshot,
         )
 
+        if (!wantsMutation) {
+          return buildBookingMutationPayload({
+            booking: buildBookingOutput({
+              id: existing.id,
+              scheduledFor: new Date(existing.scheduledFor),
+              totalDurationMinutes: durationOrFallback(
+                existing.totalDurationMinutes,
+              ),
+              bufferMinutes: Math.max(0, Number(existing.bufferMinutes ?? 0)),
+              status: existing.status,
+              subtotalSnapshot:
+                existing.subtotalSnapshot ?? new Prisma.Decimal(0),
+              appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
+              timeZoneSource: outputSchedulingContext.timeZoneSource,
+              locationId: existing.locationId ?? null,
+              locationType: existing.locationType,
+              locationAddressSnapshot: existingLocationAddressSnapshot,
+              locationLatSnapshot: existingLocationLatSnapshot,
+              locationLngSnapshot: existingLocationLngSnapshot,
+            }),
+            mutated: false,
+          })
+        }
+
         if (nextStatus === BookingStatus.CANCELLED) {
           const updated = await tx.booking.update({
             where: { id: existing.id },
@@ -1010,20 +1050,25 @@ export async function PATCH(req: Request, ctx: Ctx) {
             })
           }
 
-          return buildBookingOutput({
-            id: updated.id,
-            scheduledFor: new Date(updated.scheduledFor),
-            totalDurationMinutes: durationOrFallback(updated.totalDurationMinutes),
-            bufferMinutes: Math.max(0, Number(updated.bufferMinutes ?? 0)),
-            status: updated.status,
-            subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
-            appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
-            timeZoneSource: outputSchedulingContext.timeZoneSource,
-            locationId: existing.locationId ?? null,
-            locationType: existing.locationType,
-            locationAddressSnapshot: existingLocationAddressSnapshot,
-            locationLatSnapshot: existingLocationLatSnapshot,
-            locationLngSnapshot: existingLocationLngSnapshot,
+          return buildBookingMutationPayload({
+            booking: buildBookingOutput({
+              id: updated.id,
+              scheduledFor: new Date(updated.scheduledFor),
+              totalDurationMinutes: durationOrFallback(
+                updated.totalDurationMinutes,
+              ),
+              bufferMinutes: Math.max(0, Number(updated.bufferMinutes ?? 0)),
+              status: updated.status,
+              subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
+              appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
+              timeZoneSource: outputSchedulingContext.timeZoneSource,
+              locationId: existing.locationId ?? null,
+              locationType: existing.locationType,
+              locationAddressSnapshot: existingLocationAddressSnapshot,
+              locationLatSnapshot: existingLocationLatSnapshot,
+              locationLngSnapshot: existingLocationLngSnapshot,
+            }),
+            mutated: true,
           })
         }
 
@@ -1371,25 +1416,28 @@ export async function PATCH(req: Request, ctx: Ctx) {
           })
         }
 
-        return buildBookingOutput({
-          id: updated.id,
-          scheduledFor: new Date(updated.scheduledFor),
-          totalDurationMinutes: Number(updated.totalDurationMinutes),
-          bufferMinutes: Math.max(0, Number(updated.bufferMinutes)),
-          status: updated.status,
-          subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
-          appointmentTimeZone,
-          timeZoneSource: appointmentTimeZoneSource,
-          locationId: existing.locationId ?? null,
-          locationType: existing.locationType,
-          locationAddressSnapshot: existingLocationAddressSnapshot,
-          locationLatSnapshot: existingLocationLatSnapshot,
-          locationLngSnapshot: existingLocationLngSnapshot,
+        return buildBookingMutationPayload({
+          booking: buildBookingOutput({
+            id: updated.id,
+            scheduledFor: new Date(updated.scheduledFor),
+            totalDurationMinutes: Number(updated.totalDurationMinutes),
+            bufferMinutes: Math.max(0, Number(updated.bufferMinutes)),
+            status: updated.status,
+            subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
+            appointmentTimeZone,
+            timeZoneSource: appointmentTimeZoneSource,
+            locationId: existing.locationId ?? null,
+            locationType: existing.locationType,
+            locationAddressSnapshot: existingLocationAddressSnapshot,
+            locationLatSnapshot: existingLocationLatSnapshot,
+            locationLngSnapshot: existingLocationLngSnapshot,
+          }),
+          mutated: true,
         })
       },
     )
 
-    return jsonOk({ booking: result }, 200)
+    return jsonOk(result, 200)
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -1400,7 +1448,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     console.error('PATCH /api/pro/bookings/[id] error:', error)
     return bookingJsonFail('INTERNAL_ERROR', {
-      message: error instanceof Error ? error.message : 'Failed to update booking.',
+      message:
+        error instanceof Error ? error.message : 'Failed to update booking.',
       userMessage: 'Failed to update booking.',
     })
   }
