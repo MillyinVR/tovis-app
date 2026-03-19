@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({
 
   moneyToString: vi.fn(),
 
-  getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
 
   normalizeLocationType: vi.fn(),
@@ -28,14 +27,11 @@ const mocks = vi.hoisted(() => ({
   decimalFromUnknown: vi.fn(),
   decimalToNumber: vi.fn(),
 
-  ensureWithinWorkingHours: vi.fn(),
   snapToStepMinutes: vi.fn(),
   getProCreatedBookingStatus: vi.fn(),
 
-  checkAdvanceNotice: vi.fn(),
-  checkMaxDaysAheadExact: vi.fn(),
   computeRequestedEndUtc: vi.fn(),
-  isStartAlignedToWorkingWindowStep: vi.fn(),
+  evaluateProSchedulingDecision: vi.fn(),
 
   withLockedProfessionalTransaction: vi.fn(),
 
@@ -63,10 +59,6 @@ vi.mock('@/lib/money', () => ({
   moneyToString: mocks.moneyToString,
 }))
 
-vi.mock('@/lib/booking/conflictQueries', () => ({
-  getTimeRangeConflict: mocks.getTimeRangeConflict,
-}))
-
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
 }))
@@ -82,10 +74,6 @@ vi.mock('@/lib/booking/snapshots', () => ({
   decimalToNumber: mocks.decimalToNumber,
 }))
 
-vi.mock('@/lib/booking/workingHoursGuard', () => ({
-  ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
-}))
-
 vi.mock('@/lib/booking/serviceItems', () => ({
   snapToStepMinutes: mocks.snapToStepMinutes,
 }))
@@ -95,10 +83,11 @@ vi.mock('@/lib/booking/statusRules', () => ({
 }))
 
 vi.mock('@/lib/booking/slotReadiness', () => ({
-  checkAdvanceNotice: mocks.checkAdvanceNotice,
-  checkMaxDaysAheadExact: mocks.checkMaxDaysAheadExact,
   computeRequestedEndUtc: mocks.computeRequestedEndUtc,
-  isStartAlignedToWorkingWindowStep: mocks.isStartAlignedToWorkingWindowStep,
+}))
+
+vi.mock('@/lib/booking/policies/proSchedulingPolicy', () => ({
+  evaluateProSchedulingDecision: mocks.evaluateProSchedulingDecision,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -134,6 +123,8 @@ function makeRequest(body: unknown): Request {
 }
 
 const requestedStart = new Date('2026-03-11T19:30:00.000Z')
+const requestedEnd = new Date('2026-03-11T20:45:00.000Z')
+const now = new Date('2026-03-11T19:00:00.000Z')
 
 describe('POST /api/pro/bookings', () => {
   beforeEach(() => {
@@ -196,14 +187,9 @@ describe('POST /api/pro/bookings', () => {
       formattedAddress,
     }))
     mocks.snapToStepMinutes.mockImplementation((value: number) => value)
-    mocks.ensureWithinWorkingHours.mockReturnValue({ ok: true })
-    mocks.getTimeRangeConflict.mockResolvedValue(null)
     mocks.moneyToString.mockReturnValue('50.00')
     mocks.getProCreatedBookingStatus.mockReturnValue(BookingStatus.ACCEPTED)
 
-    mocks.isStartAlignedToWorkingWindowStep.mockReturnValue({ ok: true })
-    mocks.checkAdvanceNotice.mockReturnValue({ ok: true })
-    mocks.checkMaxDaysAheadExact.mockReturnValue({ ok: true })
     mocks.computeRequestedEndUtc.mockImplementation(
       ({
         startUtc,
@@ -218,6 +204,13 @@ describe('POST /api/pro/bookings', () => {
           startUtc.getTime() + (durationMinutes + bufferMinutes) * 60_000,
         ),
     )
+
+    mocks.evaluateProSchedulingDecision.mockResolvedValue({
+      ok: true,
+      value: {
+        requestedEnd,
+      },
+    })
 
     mocks.resolveValidatedBookingContext.mockResolvedValue({
       ok: true,
@@ -287,7 +280,7 @@ describe('POST /api/pro/bookings', () => {
       async (
         professionalId: string,
         callback: (args: { tx: typeof tx; now: Date }) => Promise<unknown>,
-      ) => callback({ tx, now: new Date('2026-03-11T19:00:00.000Z') }),
+      ) => callback({ tx, now }),
     )
   })
 
@@ -307,7 +300,33 @@ describe('POST /api/pro/bookings', () => {
       expect.any(Function),
     )
 
-    expect(mocks.getTimeRangeConflict).toHaveBeenCalled()
+    expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith({
+      tx,
+      now,
+      professionalId: 'pro_123',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      workingHours: {
+        mon: { enabled: true, start: '09:00', end: '17:00' },
+        tue: { enabled: true, start: '09:00', end: '17:00' },
+        wed: { enabled: true, start: '09:00', end: '17:00' },
+        thu: { enabled: true, start: '09:00', end: '17:00' },
+        fri: { enabled: true, start: '09:00', end: '17:00' },
+        sat: { enabled: false, start: '09:00', end: '17:00' },
+        sun: { enabled: false, start: '09:00', end: '17:00' },
+      },
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 30,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      allowOutsideWorkingHours: false,
+    })
+
     expect(mocks.txBookingCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         professionalId: 'pro_123',
@@ -357,10 +376,12 @@ describe('POST /api/pro/bookings', () => {
   })
 
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
-    mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
       ok: false,
       code: 'STEP_MISMATCH',
-      meta: {},
+      logHint: {
+        meta: {},
+      },
     })
 
     const result = await POST(
@@ -401,9 +422,15 @@ describe('POST /api/pro/bookings', () => {
   })
 
   it('logs WORKING_HOURS and returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
       ok: false,
-      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+      code: 'OUTSIDE_WORKING_HOURS',
+      logHint: {
+        requestedEnd,
+        meta: {
+          workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+        },
+      },
     })
 
     const result = await POST(
@@ -444,7 +471,13 @@ describe('POST /api/pro/bookings', () => {
   })
 
   it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BLOCKED',
+      logHint: {
+        requestedEnd,
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -483,7 +516,13 @@ describe('POST /api/pro/bookings', () => {
   })
 
   it('logs BOOKING and returns TIME_BOOKED when blocked by another booking', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BOOKED',
+      logHint: {
+        requestedEnd,
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -522,7 +561,13 @@ describe('POST /api/pro/bookings', () => {
   })
 
   it('logs HOLD and returns TIME_HELD when blocked by an active hold', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_HELD',
+      logHint: {
+        requestedEnd,
+      },
+    })
 
     const result = await POST(
       makeRequest({

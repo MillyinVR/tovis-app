@@ -8,6 +8,9 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
+const HOLD_START = new Date('2026-03-11T19:30:00.000Z')
+const NOW = new Date('2026-03-11T19:00:00.000Z')
+
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
   pickString: vi.fn((value: unknown) =>
@@ -20,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   aftercareSummaryFindUnique: vi.fn(),
 
   bookingHoldFindUnique: vi.fn(),
-  clientAddressFindFirst: vi.fn(),
   lastMinuteOpeningFindFirst: vi.fn(),
   lastMinuteOpeningUpdateMany: vi.fn(),
   offeringAddOnFindMany: vi.fn(),
@@ -32,11 +34,13 @@ const mocks = vi.hoisted(() => ({
   bookingHoldDelete: vi.fn(),
 
   createProNotification: vi.fn(),
-  getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
   resolveValidatedBookingContext: vi.fn(),
-  checkSlotReadiness: vi.fn(),
   withLockedProfessionalTransaction: vi.fn(),
+
+  validateHoldForClientMutation: vi.fn(),
+  resolveHeldSalonAddressText: vi.fn(),
+  evaluateFinalizeDecision: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -68,10 +72,6 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
   createProNotification: mocks.createProNotification,
 }))
 
-vi.mock('@/lib/booking/conflictQueries', () => ({
-  getTimeRangeConflict: mocks.getTimeRangeConflict,
-}))
-
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
 }))
@@ -87,12 +87,17 @@ vi.mock('@/lib/booking/locationContext', () => ({
   resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
 }))
 
-vi.mock('@/lib/booking/slotReadiness', () => ({
-  checkSlotReadiness: mocks.checkSlotReadiness,
-}))
-
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
+}))
+
+vi.mock('@/lib/booking/policies/holdRules', () => ({
+  validateHoldForClientMutation: mocks.validateHoldForClientMutation,
+  resolveHeldSalonAddressText: mocks.resolveHeldSalonAddressText,
+}))
+
+vi.mock('@/lib/booking/policies/finalizePolicy', () => ({
+  evaluateFinalizeDecision: mocks.evaluateFinalizeDecision,
 }))
 
 vi.mock('@/lib/timeZone', async (importOriginal) => {
@@ -122,18 +127,6 @@ vi.mock('@/lib/booking/snapshots', () => ({
     if (value instanceof Prisma.Decimal) return Number(value.toString())
     return null
   },
-  pickFormattedAddressFromSnapshot: (value: unknown) => {
-    if (
-      value &&
-      typeof value === 'object' &&
-      'formattedAddress' in value &&
-      typeof value.formattedAddress === 'string' &&
-      value.formattedAddress.trim()
-    ) {
-      return value.formattedAddress.trim()
-    }
-    return null
-  },
 }))
 
 import { POST } from './route'
@@ -142,9 +135,6 @@ const tx = {
   bookingHold: {
     findUnique: mocks.bookingHoldFindUnique,
     delete: mocks.bookingHoldDelete,
-  },
-  clientAddress: {
-    findFirst: mocks.clientAddressFindFirst,
   },
   lastMinuteOpening: {
     findFirst: mocks.lastMinuteOpeningFindFirst,
@@ -176,10 +166,29 @@ function makeRequest(body: unknown): Request {
   })
 }
 
+const hold = {
+  id: 'hold_1',
+  offeringId: 'offering_1',
+  professionalId: 'pro_123',
+  clientId: 'client_1',
+  scheduledFor: HOLD_START,
+  expiresAt: new Date('2026-03-11T19:45:00.000Z'),
+  locationType: ServiceLocationType.SALON,
+  locationId: 'loc_1',
+  locationTimeZone: 'America/Los_Angeles',
+  locationAddressSnapshot: { formattedAddress: '123 Salon St' },
+  locationLatSnapshot: 34.05,
+  locationLngSnapshot: -118.25,
+  clientAddressId: null,
+  clientAddressSnapshot: null,
+  clientAddressLatSnapshot: null,
+  clientAddressLngSnapshot: null,
+}
+
 describe('POST /api/bookings/finalize', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
+    vi.setSystemTime(NOW)
 
     vi.clearAllMocks()
 
@@ -227,29 +236,29 @@ describe('POST /api/bookings/finalize', () => {
       async (
         _professionalId: string,
         callback: (args: { tx: typeof tx; now: Date }) => Promise<unknown>,
-      ) => callback({ tx, now: new Date('2026-03-11T19:00:00.000Z') }),
+      ) => callback({ tx, now: NOW }),
     )
 
-    mocks.bookingHoldFindUnique.mockResolvedValue({
-      id: 'hold_1',
-      offeringId: 'offering_1',
-      professionalId: 'pro_123',
-      clientId: 'client_1',
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      expiresAt: new Date('2026-03-11T19:45:00.000Z'),
-      locationType: ServiceLocationType.SALON,
-      locationId: 'loc_1',
-      locationTimeZone: 'America/Los_Angeles',
-      locationAddressSnapshot: { formattedAddress: '123 Salon St' },
-      locationLatSnapshot: 34.05,
-      locationLngSnapshot: -118.25,
-      clientAddressId: null,
-      clientAddressSnapshot: null,
-      clientAddressLatSnapshot: null,
-      clientAddressLngSnapshot: null,
+    mocks.bookingHoldFindUnique.mockResolvedValue(hold)
+
+    mocks.validateHoldForClientMutation.mockResolvedValue({
+      ok: true,
+      value: {
+        holdId: 'hold_1',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        locationTimeZone: 'America/Los_Angeles',
+        holdClientAddressId: null,
+        holdClientServiceAddressText: null,
+        holdSalonAddressTextFromSnapshot: '123 Salon St',
+      },
     })
 
-    mocks.clientAddressFindFirst.mockResolvedValue({ id: 'addr_1' })
+    mocks.resolveHeldSalonAddressText.mockReturnValue({
+      ok: true,
+      value: '123 Salon St',
+    })
+
     mocks.lastMinuteOpeningFindFirst.mockResolvedValue(null)
     mocks.lastMinuteOpeningUpdateMany.mockResolvedValue({ count: 1 })
     mocks.offeringAddOnFindMany.mockResolvedValue([])
@@ -258,7 +267,7 @@ describe('POST /api/bookings/finalize', () => {
     mocks.bookingCreate.mockResolvedValue({
       id: 'booking_1',
       status: BookingStatus.PENDING,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+      scheduledFor: HOLD_START,
       professionalId: 'pro_123',
     })
 
@@ -290,17 +299,13 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    mocks.checkSlotReadiness.mockReturnValue({
+    mocks.evaluateFinalizeDecision.mockResolvedValue({
       ok: true,
-      startUtc: new Date('2026-03-11T19:30:00.000Z'),
-      endUtc: new Date('2026-03-11T20:45:00.000Z'),
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      durationMinutes: 60,
-      bufferMinutes: 15,
+      value: {
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      },
     })
 
-    mocks.getTimeRangeConflict.mockResolvedValue(null)
     mocks.createProNotification.mockResolvedValue(undefined)
   })
 
@@ -335,23 +340,11 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('returns HOLD_EXPIRED when the hold is expired', async () => {
-    mocks.bookingHoldFindUnique.mockResolvedValueOnce({
-      id: 'hold_1',
-      offeringId: 'offering_1',
-      professionalId: 'pro_123',
-      clientId: 'client_1',
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      expiresAt: new Date('2000-01-01T00:00:00.000Z'),
-      locationType: ServiceLocationType.SALON,
-      locationId: 'loc_1',
-      locationTimeZone: 'America/Los_Angeles',
-      locationAddressSnapshot: { formattedAddress: '123 Salon St' },
-      locationLatSnapshot: 34.05,
-      locationLngSnapshot: -118.25,
-      clientAddressId: null,
-      clientAddressSnapshot: null,
-      clientAddressLatSnapshot: null,
-      clientAddressLngSnapshot: null,
+    mocks.validateHoldForClientMutation.mockResolvedValueOnce({
+      ok: false,
+      code: 'HOLD_EXPIRED',
+      message: 'Hold expired.',
+      userMessage: 'That hold expired. Please pick a new slot.',
     })
 
     const result = await POST(
@@ -361,6 +354,8 @@ describe('POST /api/bookings/finalize', () => {
         locationType: 'SALON',
       }),
     )
+
+    expect(mocks.evaluateFinalizeDecision).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -386,22 +381,8 @@ describe('POST /api/bookings/finalize', () => {
 
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when the held time is off step', async () => {
     mocks.bookingHoldFindUnique.mockResolvedValueOnce({
-      id: 'hold_1',
-      offeringId: 'offering_1',
-      professionalId: 'pro_123',
-      clientId: 'client_1',
+      ...hold,
       scheduledFor: new Date('2026-03-11T19:37:00.000Z'),
-      expiresAt: new Date('2026-03-11T19:45:00.000Z'),
-      locationType: ServiceLocationType.SALON,
-      locationId: 'loc_1',
-      locationTimeZone: 'America/Los_Angeles',
-      locationAddressSnapshot: { formattedAddress: '123 Salon St' },
-      locationLatSnapshot: 34.05,
-      locationLngSnapshot: -118.25,
-      clientAddressId: null,
-      clientAddressSnapshot: null,
-      clientAddressLatSnapshot: null,
-      clientAddressLngSnapshot: null,
     })
 
     mocks.resolveValidatedBookingContext.mockResolvedValueOnce({
@@ -425,10 +406,20 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    mocks.checkSlotReadiness.mockReturnValueOnce({
+    mocks.evaluateFinalizeDecision.mockResolvedValueOnce({
       ok: false,
       code: 'STEP_MISMATCH',
-      meta: {},
+      message: 'Start time must be on a 30-minute boundary.',
+      userMessage: 'Start time must be on a 30-minute boundary.',
+      logHint: {
+        requestedStart: new Date('2026-03-11T19:37:00.000Z'),
+        requestedEnd: new Date('2026-03-11T19:38:00.000Z'),
+        conflictType: 'STEP_BOUNDARY',
+        meta: {
+          slotReadinessCode: 'STEP_MISMATCH',
+          stepMinutes: 30,
+        },
+      },
     })
 
     const result = await POST(
@@ -447,9 +438,12 @@ describe('POST /api/bookings/finalize', () => {
         locationType: ServiceLocationType.SALON,
         requestedStart: new Date('2026-03-11T19:37:00.000Z'),
         requestedEnd: new Date('2026-03-11T19:38:00.000Z'),
+        conflictType: 'STEP_BOUNDARY',
+        holdId: 'hold_1',
         meta: expect.objectContaining({
           route: 'app/api/bookings/finalize/route.ts',
           stepMinutes: 30,
+          slotReadinessCode: 'STEP_MISMATCH',
         }),
       }),
     )
@@ -477,7 +471,15 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
+    mocks.evaluateFinalizeDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BLOCKED',
+      logHint: {
+        requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+        conflictType: 'BLOCKED',
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -526,7 +528,15 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('logs BOOKING and returns TIME_BOOKED when blocked by existing booking', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
+    mocks.evaluateFinalizeDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BOOKED',
+      logHint: {
+        requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+        conflictType: 'BOOKING',
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -575,7 +585,15 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('logs HOLD and returns TIME_HELD when blocked by existing hold', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
+    mocks.evaluateFinalizeDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_HELD',
+      logHint: {
+        requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+        conflictType: 'HOLD',
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -638,7 +656,42 @@ describe('POST /api/bookings/finalize', () => {
       expect.any(Function),
     )
 
-    expect(mocks.checkSlotReadiness).toHaveBeenCalled()
+    expect(mocks.validateHoldForClientMutation).toHaveBeenCalledWith({
+      tx,
+      hold,
+      clientId: 'client_1',
+      now: new Date('2026-03-11T19:00:00.000Z'),
+      expectedProfessionalId: 'pro_123',
+      expectedOfferingId: 'offering_1',
+      expectedLocationType: ServiceLocationType.SALON,
+    })
+
+    expect(mocks.resolveHeldSalonAddressText).toHaveBeenCalledWith({
+      holdLocationType: ServiceLocationType.SALON,
+      holdLocationAddressSnapshot: hold.locationAddressSnapshot,
+      fallbackFormattedAddress: '123 Salon St',
+    })
+
+    expect(mocks.evaluateFinalizeDecision).toHaveBeenCalledWith({
+      tx,
+      now: new Date('2026-03-11T19:00:00.000Z'),
+      professionalId: 'pro_123',
+      holdId: 'hold_1',
+      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      workingHours: {
+        wed: { enabled: true, start: '09:00', end: '18:00' },
+      },
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 30,
+      fallbackTimeZone: 'UTC',
+    })
+
     expect(mocks.bookingCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         clientId: 'client_1',

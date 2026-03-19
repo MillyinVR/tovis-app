@@ -489,13 +489,11 @@ describe('GET /api/availability/day parity regressions', () => {
 
     expect(response.status).toBe(200)
 
-    // These are the slots write paths should accept after the step-anchor fix.
     expect(body.slots).toContain('2026-03-12T09:10:00.000Z')
     expect(body.slots).toContain('2026-03-12T09:25:00.000Z')
     expect(body.slots).toContain('2026-03-12T09:40:00.000Z')
     expect(body.slots).toContain('2026-03-12T09:55:00.000Z')
 
-    // And these midnight-aligned slots should not appear just because they are :00/:15/:30/:45.
     expect(body.slots).not.toContain('2026-03-12T09:00:00.000Z')
     expect(body.slots).not.toContain('2026-03-12T09:15:00.000Z')
     expect(body.slots).not.toContain('2026-03-12T09:30:00.000Z')
@@ -541,8 +539,6 @@ describe('GET /api/availability/day parity regressions', () => {
 
     expect(response.status).toBe(200)
 
-    // now = 2026-03-11T19:00:00Z, maxDaysAhead = 7
-    // last valid start is exactly 2026-03-18T19:00:00Z
     expect(body.slots).toContain('2026-03-18T18:00:00.000Z')
     expect(body.slots).toContain('2026-03-18T18:30:00.000Z')
     expect(body.slots).toContain('2026-03-18T19:00:00.000Z')

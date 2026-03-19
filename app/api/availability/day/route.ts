@@ -20,7 +20,6 @@ import {
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import {
   addMinutes,
-  isSlotFree,
   normalizeToMinute,
   type BusyInterval,
 } from '@/lib/booking/conflicts'
@@ -38,7 +37,7 @@ import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
-import { checkSlotReadiness } from '@/lib/booking/slotReadiness'
+import { canShowSlot } from '@/lib/booking/policies/showSlotPolicy'
 import {
   getBookingFailPayload,
   type BookingErrorCode,
@@ -1031,7 +1030,7 @@ async function computeDaySlotsFast(args: {
     }
 
     for (const slotStartUtc of slotStartUtcCandidates) {
-      const readiness = checkSlotReadiness({
+      const slotDecision = canShowSlot({
         startUtc: slotStartUtc,
         nowUtc,
         durationMinutes: dur,
@@ -1041,13 +1040,13 @@ async function computeDaySlotsFast(args: {
         stepMinutes: step,
         advanceNoticeMinutes: normalizedLeadTimeMinutes,
         maxDaysAhead: maxAdvanceDays,
+        busy,
         fallbackTimeZone: 'UTC',
       })
 
-      if (!readiness.ok) continue
-      if (!isSlotFree(busy, slotStartUtc, readiness.endUtc)) continue
+      if (!slotDecision.ok) continue
 
-      rawSlots.push(slotStartUtc.toISOString())
+      rawSlots.push(slotDecision.value.startUtc.toISOString())
     }
   }
 

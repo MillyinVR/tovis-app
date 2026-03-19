@@ -1,7 +1,7 @@
+// app/api/bookings/[id]/reschedule/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
-  ClientAddressKind,
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
@@ -14,23 +14,21 @@ const mocks = vi.hoisted(() => ({
 
   clampInt: vi.fn(),
 
-  assertTimeRangeAvailable: vi.fn(),
-
   normalizeLocationType: vi.fn(),
   resolveValidatedBookingContext: vi.fn(),
 
   buildAddressSnapshot: vi.fn(),
   decimalToNumber: vi.fn(),
-  pickFormattedAddressFromSnapshot: vi.fn(),
 
-  checkSlotReadiness: vi.fn(),
+  validateHoldForClientMutation: vi.fn(),
+  resolveHeldSalonAddressText: vi.fn(),
+  evaluateRescheduleDecision: vi.fn(),
 
   withLockedClientOwnedBookingTransaction: vi.fn(),
 
   txBookingFindUnique: vi.fn(),
   txProfessionalServiceOfferingFindUnique: vi.fn(),
   txBookingHoldFindUnique: vi.fn(),
-  txClientAddressFindFirst: vi.fn(),
   txBookingUpdate: vi.fn(),
   txBookingHoldDelete: vi.fn(),
 }))
@@ -56,10 +54,6 @@ vi.mock('@/lib/pick', () => ({
   clampInt: mocks.clampInt,
 }))
 
-vi.mock('@/lib/booking/conflictQueries', () => ({
-  assertTimeRangeAvailable: mocks.assertTimeRangeAvailable,
-}))
-
 vi.mock('@/lib/booking/locationContext', () => ({
   normalizeLocationType: mocks.normalizeLocationType,
   resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
@@ -68,11 +62,15 @@ vi.mock('@/lib/booking/locationContext', () => ({
 vi.mock('@/lib/booking/snapshots', () => ({
   buildAddressSnapshot: mocks.buildAddressSnapshot,
   decimalToNumber: mocks.decimalToNumber,
-  pickFormattedAddressFromSnapshot: mocks.pickFormattedAddressFromSnapshot,
 }))
 
-vi.mock('@/lib/booking/slotReadiness', () => ({
-  checkSlotReadiness: mocks.checkSlotReadiness,
+vi.mock('@/lib/booking/policies/holdRules', () => ({
+  validateHoldForClientMutation: mocks.validateHoldForClientMutation,
+  resolveHeldSalonAddressText: mocks.resolveHeldSalonAddressText,
+}))
+
+vi.mock('@/lib/booking/policies/reschedulePolicy', () => ({
+  evaluateRescheduleDecision: mocks.evaluateRescheduleDecision,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -94,9 +92,6 @@ const tx = {
     findUnique: mocks.txBookingHoldFindUnique,
     delete: mocks.txBookingHoldDelete,
   },
-  clientAddress: {
-    findFirst: mocks.txClientAddressFindFirst,
-  },
 }
 
 function makeRequest(body: unknown): Request {
@@ -112,6 +107,9 @@ function makeCtx(id = 'booking_1') {
     params: Promise.resolve({ id }),
   }
 }
+
+const NOW = new Date('2026-03-11T19:00:00.000Z')
+const HOLD_START = new Date('2026-03-11T19:30:00.000Z')
 
 const existingBooking = {
   id: 'booking_1',
@@ -143,7 +141,7 @@ const hold = {
   clientId: 'client_1',
   professionalId: 'pro_123',
   offeringId: 'offering_1',
-  scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+  scheduledFor: HOLD_START,
   expiresAt: new Date('2026-03-11T19:45:00.000Z'),
   locationType: ServiceLocationType.SALON,
   locationId: 'loc_1',
@@ -160,7 +158,7 @@ const hold = {
 describe('POST /api/bookings/[id]/reschedule', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
+    vi.setSystemTime(NOW)
 
     vi.clearAllMocks()
 
@@ -232,38 +230,34 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       return null
     })
 
-    mocks.pickFormattedAddressFromSnapshot.mockImplementation((value: unknown) => {
-      if (
-        value &&
-        typeof value === 'object' &&
-        'formattedAddress' in value &&
-        typeof value.formattedAddress === 'string' &&
-        value.formattedAddress.trim()
-      ) {
-        return value.formattedAddress.trim()
-      }
-      return null
-    })
-
-    mocks.checkSlotReadiness.mockReturnValue({
+    mocks.validateHoldForClientMutation.mockResolvedValue({
       ok: true,
-      startUtc: new Date('2026-03-11T19:30:00.000Z'),
-      endUtc: new Date('2026-03-11T20:45:00.000Z'),
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      durationMinutes: 60,
-      bufferMinutes: 15,
+      value: {
+        holdId: 'hold_1',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        locationTimeZone: 'America/Los_Angeles',
+        holdClientAddressId: null,
+        holdClientServiceAddressText: null,
+        holdSalonAddressTextFromSnapshot: '123 Salon St',
+      },
     })
 
-    mocks.assertTimeRangeAvailable.mockResolvedValue(undefined)
+    mocks.resolveHeldSalonAddressText.mockReturnValue({
+      ok: true,
+      value: '123 Salon St',
+    })
+
+    mocks.evaluateRescheduleDecision.mockResolvedValue({
+      ok: true,
+      value: {
+        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
+      },
+    })
 
     mocks.txBookingFindUnique.mockResolvedValue(existingBooking)
     mocks.txProfessionalServiceOfferingFindUnique.mockResolvedValue(bookingOffering)
     mocks.txBookingHoldFindUnique.mockResolvedValue(hold)
-    mocks.txClientAddressFindFirst.mockResolvedValue({
-      id: 'addr_1',
-      kind: ClientAddressKind.SERVICE_ADDRESS,
-    })
 
     mocks.txBookingUpdate.mockResolvedValue({
       id: 'booking_1',
@@ -289,7 +283,7 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       }) =>
         run({
           tx,
-          now: new Date('2026-03-11T19:00:00.000Z'),
+          now: NOW,
         }),
     )
   })
@@ -298,7 +292,7 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     vi.useRealTimers()
   })
 
-  it('uses the locked client-owned booking transaction before availability check and booking update', async () => {
+  it('uses the locked client-owned booking transaction before reschedule decision and booking update', async () => {
     const result = await POST(
       makeRequest({
         holdId: 'hold_1',
@@ -313,8 +307,42 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       run: expect.any(Function),
     })
 
-    expect(mocks.checkSlotReadiness).toHaveBeenCalled()
-    expect(mocks.assertTimeRangeAvailable).toHaveBeenCalled()
+    expect(mocks.validateHoldForClientMutation).toHaveBeenCalledWith({
+      tx,
+      hold,
+      clientId: 'client_1',
+      now: NOW,
+      expectedProfessionalId: 'pro_123',
+      expectedOfferingId: 'offering_1',
+      expectedLocationType: ServiceLocationType.SALON,
+    })
+
+    expect(mocks.resolveHeldSalonAddressText).toHaveBeenCalledWith({
+      holdLocationType: ServiceLocationType.SALON,
+      holdLocationAddressSnapshot: hold.locationAddressSnapshot,
+      fallbackFormattedAddress: '123 Salon St',
+    })
+
+    expect(mocks.evaluateRescheduleDecision).toHaveBeenCalledWith({
+      tx,
+      now: NOW,
+      professionalId: 'pro_123',
+      bookingId: 'booking_1',
+      holdId: 'hold_1',
+      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      locationId: 'loc_1',
+      workingHours: {
+        wed: { enabled: true, start: '09:00', end: '18:00' },
+      },
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 30,
+      fallbackTimeZone: 'UTC',
+    })
+
     expect(mocks.txBookingUpdate).toHaveBeenCalledWith({
       where: { id: 'booking_1' },
       data: expect.objectContaining({
@@ -357,9 +385,11 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns HOLD_EXPIRED when the hold is expired', async () => {
-    mocks.txBookingHoldFindUnique.mockResolvedValueOnce({
-      ...hold,
-      expiresAt: new Date('2000-01-01T00:00:00.000Z'),
+    mocks.validateHoldForClientMutation.mockResolvedValueOnce({
+      ok: false,
+      code: 'HOLD_EXPIRED',
+      message: 'Hold expired.',
+      userMessage: 'That hold expired. Please pick a new slot.',
     })
 
     const result = await POST(
@@ -368,6 +398,8 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       }),
       makeCtx(),
     )
+
+    expect(mocks.evaluateRescheduleDecision).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: false,
@@ -381,15 +413,11 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns STEP_MISMATCH when the held time is off step', async () => {
-    mocks.checkSlotReadiness.mockReturnValueOnce({
+    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
       ok: false,
       code: 'STEP_MISMATCH',
-      startUtc: new Date('2026-03-11T19:30:00.000Z'),
-      endUtc: new Date('2026-03-11T20:45:00.000Z'),
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      durationMinutes: 60,
-      bufferMinutes: 15,
+      message: 'Start time must be on a 15-minute boundary.',
+      userMessage: 'Start time must be on a 15-minute boundary.',
     })
 
     const result = await POST(
@@ -411,15 +439,11 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.checkSlotReadiness.mockReturnValueOnce({
+    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
       ok: false,
       code: 'OUTSIDE_WORKING_HOURS',
-      startUtc: new Date('2026-03-11T19:30:00.000Z'),
-      endUtc: new Date('2026-03-11T20:45:00.000Z'),
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      durationMinutes: 60,
-      bufferMinutes: 15,
+      message: 'That time is outside working hours.',
+      userMessage: 'That time is outside working hours.',
     })
 
     const result = await POST(
@@ -441,7 +465,10 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns TIME_BLOCKED when the time is blocked', async () => {
-    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('TIME_BLOCKED'))
+    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BLOCKED',
+    })
 
     const result = await POST(
       makeRequest({
@@ -462,7 +489,10 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns TIME_BOOKED when the time is no longer available because another booking exists', async () => {
-    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('TIME_BOOKED'))
+    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BOOKED',
+    })
 
     const result = await POST(
       makeRequest({
@@ -483,7 +513,10 @@ describe('POST /api/bookings/[id]/reschedule', () => {
   })
 
   it('returns TIME_HELD when the time is currently held', async () => {
-    mocks.assertTimeRangeAvailable.mockRejectedValueOnce(new Error('TIME_HELD'))
+    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_HELD',
+    })
 
     const result = await POST(
       makeRequest({

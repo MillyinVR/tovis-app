@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 
 const TEST_NOW = new Date('2026-03-17T12:55:00.000Z')
 const SLOT_START = new Date('2026-03-17T13:30:00.000Z')
+const SLOT_END = new Date('2026-03-17T14:45:00.000Z')
 const HOLD_EXPIRES = new Date('2026-03-17T13:05:00.000Z')
 
 const mocks = vi.hoisted(() => ({
@@ -18,7 +19,6 @@ const mocks = vi.hoisted(() => ({
 
   professionalServiceOfferingFindUnique: vi.fn(),
 
-  getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
 
   normalizeLocationType: vi.fn(),
@@ -27,7 +27,8 @@ const mocks = vi.hoisted(() => ({
   buildAddressSnapshot: vi.fn(),
   decimalToNumber: vi.fn(),
 
-  checkSlotReadiness: vi.fn(),
+  normalizeAddress: vi.fn(),
+  evaluateHoldCreationDecision: vi.fn(),
 
   withLockedProfessionalTransaction: vi.fn(),
 
@@ -50,10 +51,6 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/booking/conflictQueries', () => ({
-  getTimeRangeConflict: mocks.getTimeRangeConflict,
-}))
-
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
 }))
@@ -68,8 +65,12 @@ vi.mock('@/lib/booking/snapshots', () => ({
   decimalToNumber: mocks.decimalToNumber,
 }))
 
-vi.mock('@/lib/booking/slotReadiness', () => ({
-  checkSlotReadiness: mocks.checkSlotReadiness,
+vi.mock('@/lib/booking/policies/holdRules', () => ({
+  normalizeAddress: mocks.normalizeAddress,
+}))
+
+vi.mock('@/lib/booking/policies/holdPolicy', () => ({
+  evaluateHoldCreationDecision: mocks.evaluateHoldCreationDecision,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -149,6 +150,10 @@ describe('POST /api/holds', () => {
       return null
     })
 
+    mocks.normalizeAddress.mockImplementation((value: unknown) =>
+      typeof value === 'string' && value.trim() ? value.trim() : null,
+    )
+
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
 
     mocks.resolveValidatedBookingContext.mockResolvedValue({
@@ -181,17 +186,12 @@ describe('POST /api/holds', () => {
       return null
     })
 
-    mocks.checkSlotReadiness.mockReturnValue({
+    mocks.evaluateHoldCreationDecision.mockResolvedValue({
       ok: true,
-      startUtc: SLOT_START,
-      endUtc: new Date('2026-03-17T14:45:00.000Z'),
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      durationMinutes: 60,
-      bufferMinutes: 15,
+      value: {
+        requestedEnd: SLOT_END,
+      },
     })
-
-    mocks.getTimeRangeConflict.mockResolvedValue(null)
 
     mocks.txClientAddressFindFirst.mockResolvedValue({
       id: 'addr_1',
@@ -224,7 +224,7 @@ describe('POST /api/holds', () => {
     vi.useRealTimers()
   })
 
-  it('uses the locked professional transaction before conflict check and hold create', async () => {
+  it('uses the locked professional transaction before hold decision and hold create', async () => {
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -239,8 +239,29 @@ describe('POST /api/holds', () => {
       expect.any(Function),
     )
 
-    expect(mocks.checkSlotReadiness).toHaveBeenCalled()
-    expect(mocks.getTimeRangeConflict).toHaveBeenCalled()
+    expect(mocks.evaluateHoldCreationDecision).toHaveBeenCalledWith({
+      tx,
+      now: TEST_NOW,
+      professionalId: 'pro_123',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      offeringId: 'offering_1',
+      clientId: 'client_1',
+      clientAddressId: null,
+      requestedStart: SLOT_START,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      workingHours: {
+        wed: { enabled: true, start: '09:00', end: '18:00' },
+      },
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 30,
+      salonLocationAddress: '123 Salon St',
+      clientServiceAddress: null,
+    })
+
     expect(mocks.txBookingHoldCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         offeringId: 'offering_1',
@@ -285,10 +306,19 @@ describe('POST /api/holds', () => {
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
     const offStepStart = new Date('2026-03-17T13:17:00.000Z')
 
-    mocks.checkSlotReadiness.mockReturnValueOnce({
+    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
       ok: false,
       code: 'STEP_MISMATCH',
-      meta: {},
+      message: 'Start time must be on a 15-minute boundary.',
+      userMessage: 'Start time must be on a 15-minute boundary.',
+      logHint: {
+        requestedStart: offStepStart,
+        requestedEnd: new Date('2026-03-17T14:32:00.000Z'),
+        conflictType: 'STEP_BOUNDARY',
+        meta: {
+          slotReadinessCode: 'STEP_MISMATCH',
+        },
+      },
     })
 
     const result = await POST(
@@ -330,11 +360,19 @@ describe('POST /api/holds', () => {
   })
 
   it('logs WORKING_HOURS and returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.checkSlotReadiness.mockReturnValueOnce({
+    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
       ok: false,
       code: 'OUTSIDE_WORKING_HOURS',
-      meta: {
-        workingHoursError: 'That time is outside working hours.',
+      message: 'That time is outside working hours.',
+      userMessage: 'That time is outside working hours.',
+      logHint: {
+        requestedStart: SLOT_START,
+        requestedEnd: SLOT_END,
+        conflictType: 'WORKING_HOURS',
+        meta: {
+          slotReadinessCode: 'OUTSIDE_WORKING_HOURS',
+          workingHoursError: 'That time is outside working hours.',
+        },
       },
     })
 
@@ -353,7 +391,7 @@ describe('POST /api/holds', () => {
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
       requestedStart: SLOT_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
+      requestedEnd: SLOT_END,
       conflictType: 'WORKING_HOURS',
       note: null,
       meta: {
@@ -378,7 +416,15 @@ describe('POST /api/holds', () => {
   })
 
   it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
+    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BLOCKED',
+      logHint: {
+        requestedStart: SLOT_START,
+        requestedEnd: SLOT_END,
+        conflictType: 'BLOCKED',
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -395,7 +441,7 @@ describe('POST /api/holds', () => {
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
       requestedStart: SLOT_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
+      requestedEnd: SLOT_END,
       conflictType: 'BLOCKED',
       note: null,
       meta: {
@@ -418,7 +464,15 @@ describe('POST /api/holds', () => {
   })
 
   it('logs BOOKING and returns TIME_BOOKED when blocked by existing booking', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
+    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BOOKED',
+      logHint: {
+        requestedStart: SLOT_START,
+        requestedEnd: SLOT_END,
+        conflictType: 'BOOKING',
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -435,7 +489,7 @@ describe('POST /api/holds', () => {
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
       requestedStart: SLOT_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
+      requestedEnd: SLOT_END,
       conflictType: 'BOOKING',
       note: null,
       meta: {
@@ -458,7 +512,15 @@ describe('POST /api/holds', () => {
   })
 
   it('logs HOLD and returns TIME_HELD when blocked by active hold', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
+    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_HELD',
+      logHint: {
+        requestedStart: SLOT_START,
+        requestedEnd: SLOT_END,
+        conflictType: 'HOLD',
+      },
+    })
 
     const result = await POST(
       makeRequest({
@@ -475,7 +537,7 @@ describe('POST /api/holds', () => {
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
       requestedStart: SLOT_START,
-      requestedEnd: new Date('2026-03-17T14:45:00.000Z'),
+      requestedEnd: SLOT_END,
       conflictType: 'HOLD',
       note: null,
       meta: {
@@ -507,10 +569,14 @@ describe('POST /api/holds', () => {
       }),
     )
 
+    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
+    expect(mocks.evaluateHoldCreationDecision).not.toHaveBeenCalled()
+
     expect(result).toEqual({
       ok: false,
       status: 400,
-      error: 'Add or select a mobile service address before booking this in-home appointment.',
+      error:
+        'Add or select a mobile service address before booking this in-home appointment.',
       code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
       retryable: false,
       uiAction: 'ADD_SERVICE_ADDRESS',
@@ -527,6 +593,11 @@ describe('POST /api/holds', () => {
       kind: ClientAddressKind.SERVICE_ADDRESS,
     })
 
+    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+    })
+
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -536,6 +607,30 @@ describe('POST /api/holds', () => {
         clientAddressId: 'addr_1',
       }),
     )
+
+    expect(mocks.txClientAddressFindFirst).toHaveBeenCalled()
+    expect(mocks.evaluateHoldCreationDecision).toHaveBeenCalledWith({
+      tx,
+      now: TEST_NOW,
+      professionalId: 'pro_123',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.MOBILE,
+      offeringId: 'offering_1',
+      clientId: 'client_1',
+      clientAddressId: 'addr_1',
+      requestedStart: SLOT_START,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      workingHours: {
+        wed: { enabled: true, start: '09:00', end: '18:00' },
+      },
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 30,
+      salonLocationAddress: null,
+      clientServiceAddress: null,
+    })
 
     expect(result).toEqual({
       ok: false,

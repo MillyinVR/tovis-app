@@ -36,7 +36,6 @@ import {
   durationOrFallback,
   normalizeToMinute,
 } from '@/lib/booking/conflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import {
@@ -50,13 +49,6 @@ import {
   decimalToNullableNumber,
   pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
-import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
-import {
-  checkAdvanceNotice,
-  checkMaxDaysAheadExact,
-  computeRequestedEndUtc,
-  isStartAlignedToWorkingWindowStep,
-} from '@/lib/booking/slotReadiness'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -64,6 +56,7 @@ import {
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { evaluateProSchedulingDecision } from '@/lib/booking/policies/proSchedulingPolicy'
 
 export const dynamic = 'force-dynamic'
 
@@ -482,7 +475,8 @@ async function resolveBookingSchedulingContext(args: {
   }
 }
 
-function enforcePatchedBookingScheduling(args: {
+async function enforcePatchedBookingScheduling(args: {
+  tx: Prisma.TransactionClient
   now: Date
   finalStart: Date
   finalDuration: number
@@ -500,24 +494,38 @@ function enforcePatchedBookingScheduling(args: {
   locationType: ServiceLocationType
   bookingId: string
   timeZoneSource: TimeZoneTruthSource
-}): Date {
-  const finalEnd = computeRequestedEndUtc({
-    startUtc: args.finalStart,
+}): Promise<Date> {
+  const decision = await evaluateProSchedulingDecision({
+    tx: args.tx,
+    now: args.now,
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.finalStart,
     durationMinutes: args.finalDuration,
     bufferMinutes: args.finalBuffer,
-  })
-
-  const stepCheck = isStartAlignedToWorkingWindowStep({
-    startUtc: args.finalStart,
     workingHours: args.workingHours,
     timeZone: args.appointmentTimeZone,
     stepMinutes: args.stepMinutes,
-    fallbackTimeZone: 'UTC',
+    advanceNoticeMinutes: args.advanceNoticeMinutes,
+    maxDaysAhead: args.maxDaysAhead,
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    excludeBookingId: args.bookingId,
   })
 
-  if (!stepCheck.ok) {
-    if (stepCheck.code === 'STEP_MISMATCH') {
-      logAndThrowStepMismatch({
+  if (decision.ok) {
+    return decision.value.requestedEnd
+  }
+
+  const requestedEnd =
+    decision.logHint?.requestedEnd ??
+    addMinutes(args.finalStart, args.finalDuration + args.finalBuffer)
+
+  switch (decision.code) {
+    case 'STEP_MISMATCH':
+      return logAndThrowStepMismatch({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -526,119 +534,127 @@ function enforcePatchedBookingScheduling(args: {
         stepMinutes: args.stepMinutes,
         appointmentTimeZone: args.appointmentTimeZone,
         timeZoneSource: args.timeZoneSource,
-        meta: stepCheck.meta,
+        meta: decision.logHint?.meta,
       })
-    }
 
-    if (stepCheck.code === 'WORKING_HOURS_REQUIRED') {
-      logAndThrowWorkingHoursFailure({
+    case 'WORKING_HOURS_REQUIRED':
+      return logAndThrowWorkingHoursFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.finalStart,
-        requestedEnd: finalEnd,
+        requestedEnd,
         bookingId: args.bookingId,
         appointmentTimeZone: args.appointmentTimeZone,
         timeZoneSource: args.timeZoneSource,
-        workingHoursError: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
+        workingHoursError: makeWorkingHoursGuardMessage(
+          'WORKING_HOURS_REQUIRED',
+        ),
       })
-    }
 
-    if (stepCheck.code === 'WORKING_HOURS_INVALID') {
-      logAndThrowWorkingHoursFailure({
+    case 'WORKING_HOURS_INVALID':
+      return logAndThrowWorkingHoursFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.finalStart,
-        requestedEnd: finalEnd,
+        requestedEnd,
         bookingId: args.bookingId,
         appointmentTimeZone: args.appointmentTimeZone,
         timeZoneSource: args.timeZoneSource,
-        workingHoursError: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
+        workingHoursError: makeWorkingHoursGuardMessage(
+          'WORKING_HOURS_INVALID',
+        ),
       })
-    }
 
-    // OUTSIDE_WORKING_HOURS here is not a hard failure yet.
-    // Step alignment is always enforced, while outside-hours enforcement is
-    // controlled separately so allowOutsideWorkingHours can do its job.
-  }
-
-  if (!args.allowShortNotice) {
-    const advanceNoticeCheck = checkAdvanceNotice({
-      startUtc: args.finalStart,
-      nowUtc: args.now,
-      advanceNoticeMinutes: args.advanceNoticeMinutes,
-    })
-
-    if (!advanceNoticeCheck.ok) {
-      logAndThrowAdvanceNoticeFailure({
+    case 'OUTSIDE_WORKING_HOURS':
+      return logAndThrowWorkingHoursFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.finalStart,
-        requestedEnd: finalEnd,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        workingHoursError:
+          typeof decision.logHint?.meta?.workingHoursError === 'string'
+            ? decision.logHint.meta.workingHoursError
+            : makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
+      })
+
+    case 'ADVANCE_NOTICE_REQUIRED':
+      return logAndThrowAdvanceNoticeFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
         bookingId: args.bookingId,
         appointmentTimeZone: args.appointmentTimeZone,
         timeZoneSource: args.timeZoneSource,
         advanceNoticeMinutes: args.advanceNoticeMinutes,
-        meta: advanceNoticeCheck.meta,
+        meta: decision.logHint?.meta,
       })
-    }
-  }
 
-  if (!args.allowFarFuture) {
-    const maxDaysAheadCheck = checkMaxDaysAheadExact({
-      startUtc: args.finalStart,
-      nowUtc: args.now,
-      maxDaysAhead: args.maxDaysAhead,
-    })
-
-    if (!maxDaysAheadCheck.ok) {
-      logAndThrowMaxDaysAheadFailure({
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return logAndThrowMaxDaysAheadFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.finalStart,
-        requestedEnd: finalEnd,
+        requestedEnd,
         bookingId: args.bookingId,
         appointmentTimeZone: args.appointmentTimeZone,
         timeZoneSource: args.timeZoneSource,
         maxDaysAhead: args.maxDaysAhead,
-        meta: maxDaysAheadCheck.meta,
+        meta: decision.logHint?.meta,
       })
-    }
-  }
 
-  if (!args.allowOutsideWorkingHours) {
-    const workingHoursCheck = ensureWithinWorkingHours({
-      scheduledStartUtc: args.finalStart,
-      scheduledEndUtc: finalEnd,
-      workingHours: args.workingHours,
-      timeZone: args.appointmentTimeZone,
-      fallbackTimeZone: 'UTC',
-      messages: {
-        missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
-        outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
-        misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
-      },
-    })
-
-    if (!workingHoursCheck.ok) {
-      logAndThrowWorkingHoursFailure({
+    case 'TIME_BLOCKED':
+      return logAndThrowTimeRangeConflict({
+        conflict: 'BLOCKED',
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.finalStart,
-        requestedEnd: finalEnd,
+        requestedEnd,
         bookingId: args.bookingId,
         appointmentTimeZone: args.appointmentTimeZone,
         timeZoneSource: args.timeZoneSource,
-        workingHoursError: workingHoursCheck.error,
       })
-    }
+
+    case 'TIME_BOOKED':
+      return logAndThrowTimeRangeConflict({
+        conflict: 'BOOKING',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+      })
+
+    case 'TIME_HELD':
+      return logAndThrowTimeRangeConflict({
+        conflict: 'HOLD',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+      })
   }
 
-  return finalEnd
+  const exhaustiveCheck: never = decision.code
+  throw new Error(
+    `Unhandled scheduling decision code: ${String(exhaustiveCheck)}`,
+  )
 }
 
 /* ---------------------------------------------
@@ -1281,7 +1297,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
             ? snappedNextDuration
             : durationOrFallback(existing.totalDurationMinutes)
 
-        const finalEnd = enforcePatchedBookingScheduling({
+        await enforcePatchedBookingScheduling({
+          tx,
           now,
           finalStart,
           finalDuration,
@@ -1303,31 +1320,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
           bookingId: existing.id,
           timeZoneSource: appointmentTimeZoneSource,
         })
-
-        const timeRangeConflict = await getTimeRangeConflict({
-          tx,
-          professionalId: existing.professionalId,
-          locationId: location.id,
-          requestedStart: finalStart,
-          requestedEnd: finalEnd,
-          defaultBufferMinutes: finalBuffer,
-          fallbackDurationMinutes: finalDuration,
-          excludeBookingId: existing.id,
-        })
-
-        if (timeRangeConflict) {
-          logAndThrowTimeRangeConflict({
-            conflict: timeRangeConflict,
-            professionalId: existing.professionalId,
-            locationId: location.id,
-            locationType: existing.locationType,
-            requestedStart: finalStart,
-            requestedEnd: finalEnd,
-            bookingId: existing.id,
-            appointmentTimeZone,
-            timeZoneSource: appointmentTimeZoneSource,
-          })
-        }
 
         if (normalizedServiceItems) {
           await tx.bookingServiceItem.deleteMany({

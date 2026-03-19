@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
+import {
+  BookingStatus,
+  Prisma,
+  ProfessionalLocationType,
+  ServiceLocationType,
+} from '@prisma/client'
 
 const TEST_NOW = new Date('2026-03-17T12:55:00.000Z')
 const PATCH_START = new Date('2026-03-17T13:30:00.000Z')
+const PATCH_END = new Date('2026-03-17T14:45:00.000Z')
 
 const mocks = vi.hoisted(() => ({
+  prismaBookingFindFirst: vi.fn(),
+
   requirePro: vi.fn(),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
@@ -21,14 +29,8 @@ const mocks = vi.hoisted(() => ({
   clampInt: vi.fn(),
 
   normalizeStepMinutes: vi.fn(),
-  ensureWithinWorkingHours: vi.fn(),
-  getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
-
-  isStartAlignedToWorkingWindowStep: vi.fn(),
-  checkAdvanceNotice: vi.fn(),
-  checkMaxDaysAheadExact: vi.fn(),
-  computeRequestedEndUtc: vi.fn(),
+  evaluateProSchedulingDecision: vi.fn(),
 
   buildNormalizedBookingItemsFromRequestedOfferings: vi.fn(),
   computeBookingItemLikeTotals: vi.fn(),
@@ -49,6 +51,14 @@ const mocks = vi.hoisted(() => ({
   txBookingServiceItemCreate: vi.fn(),
   txBookingServiceItemCreateMany: vi.fn(),
   txClientNotificationCreate: vi.fn(),
+}))
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    booking: {
+      findFirst: mocks.prismaBookingFindFirst,
+    },
+  },
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -82,23 +92,12 @@ vi.mock('@/lib/booking/locationContext', () => ({
   normalizeStepMinutes: mocks.normalizeStepMinutes,
 }))
 
-vi.mock('@/lib/booking/workingHoursGuard', () => ({
-  ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
-}))
-
-vi.mock('@/lib/booking/conflictQueries', () => ({
-  getTimeRangeConflict: mocks.getTimeRangeConflict,
-}))
-
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
 }))
 
-vi.mock('@/lib/booking/slotReadiness', () => ({
-  isStartAlignedToWorkingWindowStep: mocks.isStartAlignedToWorkingWindowStep,
-  checkAdvanceNotice: mocks.checkAdvanceNotice,
-  checkMaxDaysAheadExact: mocks.checkMaxDaysAheadExact,
-  computeRequestedEndUtc: mocks.computeRequestedEndUtc,
+vi.mock('@/lib/booking/policies/proSchedulingPolicy', () => ({
+  evaluateProSchedulingDecision: mocks.evaluateProSchedulingDecision,
 }))
 
 vi.mock('@/lib/booking/serviceItems', () => ({
@@ -178,7 +177,7 @@ const existingBooking = {
 
 const location = {
   id: 'loc_1',
-  type: 'SALON',
+  type: ProfessionalLocationType.SALON,
   timeZone: 'America/Los_Angeles',
   workingHours: {
     mon: { enabled: true, start: '09:00', end: '17:00' },
@@ -283,26 +282,12 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     mocks.normalizeStepMinutes.mockReturnValue(15)
     mocks.snapToStepMinutes.mockImplementation((value: number) => value)
 
-    mocks.isStartAlignedToWorkingWindowStep.mockReturnValue({ ok: true })
-    mocks.checkAdvanceNotice.mockReturnValue({ ok: true })
-    mocks.checkMaxDaysAheadExact.mockReturnValue({ ok: true })
-    mocks.computeRequestedEndUtc.mockImplementation(
-      ({
-        startUtc,
-        durationMinutes,
-        bufferMinutes,
-      }: {
-        startUtc: Date
-        durationMinutes: number
-        bufferMinutes: number
-      }) =>
-        new Date(
-          startUtc.getTime() + (durationMinutes + bufferMinutes) * 60_000,
-        ),
-    )
-
-    mocks.ensureWithinWorkingHours.mockReturnValue({ ok: true })
-    mocks.getTimeRangeConflict.mockResolvedValue(null)
+    mocks.evaluateProSchedulingDecision.mockResolvedValue({
+      ok: true,
+      value: {
+        requestedEnd: PATCH_END,
+      },
+    })
 
     mocks.computeBookingItemLikeTotals.mockReturnValue({
       primaryServiceId: 'service_1',
@@ -370,7 +355,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
 
     expect(mocks.txBookingFindFirst).toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
-    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+    expect(mocks.evaluateProSchedulingDecision).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: true,
@@ -401,7 +386,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     })
   })
 
-  it('uses the locked professional transaction before conflict check and booking update', async () => {
+  it('uses the locked professional transaction before scheduling decision and booking update', async () => {
     const result = await PATCH(
       makeRequest({
         scheduledFor: PATCH_START.toISOString(),
@@ -414,7 +399,26 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       expect.any(Function),
     )
 
-    expect(mocks.getTimeRangeConflict).toHaveBeenCalled()
+    expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith({
+      tx,
+      now: TEST_NOW,
+      professionalId: 'pro_123',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      requestedStart: new Date('2026-03-17T13:30:00.000Z'),
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      workingHours: location.workingHours,
+      timeZone: 'America/Los_Angeles',
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 30,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      allowOutsideWorkingHours: false,
+      excludeBookingId: 'booking_1',
+    })
+
     expect(mocks.txBookingUpdate).toHaveBeenCalled()
 
     expect(result).toEqual({
@@ -447,11 +451,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
-    mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
       ok: false,
       code: 'STEP_MISMATCH',
-      meta: {
-        reason: 'step-mismatch',
+      logHint: {
+        meta: {
+          reason: 'step-mismatch',
+        },
       },
     })
 
@@ -494,9 +500,15 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('logs WORKING_HOURS and returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
       ok: false,
-      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+      code: 'OUTSIDE_WORKING_HOURS',
+      logHint: {
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+        meta: {
+          workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+        },
+      },
     })
 
     const result = await PATCH(
@@ -537,7 +549,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BLOCKED',
+      logHint: {
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+      },
+    })
 
     const result = await PATCH(
       makeRequest({
@@ -576,7 +594,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('logs BOOKING and returns TIME_BOOKED when blocked by another booking', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_BOOKED',
+      logHint: {
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+      },
+    })
 
     const result = await PATCH(
       makeRequest({
@@ -615,7 +639,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('logs HOLD and returns TIME_HELD when blocked by an active hold', async () => {
-    mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
+    mocks.evaluateProSchedulingDecision.mockResolvedValueOnce({
+      ok: false,
+      code: 'TIME_HELD',
+      logHint: {
+        requestedEnd: new Date('2026-03-17T17:45:00.000Z'),
+      },
+    })
 
     const result = await PATCH(
       makeRequest({

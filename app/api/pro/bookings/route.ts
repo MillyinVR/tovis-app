@@ -15,7 +15,6 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import {
   normalizeLocationType,
@@ -27,15 +26,9 @@ import {
   decimalFromUnknown,
   decimalToNumber,
 } from '@/lib/booking/snapshots'
-import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { snapToStepMinutes } from '@/lib/booking/serviceItems'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
-import {
-  checkAdvanceNotice,
-  checkMaxDaysAheadExact,
-  computeRequestedEndUtc,
-  isStartAlignedToWorkingWindowStep,
-} from '@/lib/booking/slotReadiness'
+import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -43,6 +36,7 @@ import {
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { evaluateProSchedulingDecision } from '@/lib/booking/policies/proSchedulingPolicy'
 
 export const dynamic = 'force-dynamic'
 
@@ -336,7 +330,8 @@ function logAndThrowTimeRangeConflict(args: {
   }
 }
 
-function enforceProCreateScheduling(args: {
+async function enforceProCreateScheduling(args: {
+  tx: Prisma.TransactionClient
   now: Date
   requestedStart: Date
   durationMinutes: number
@@ -354,24 +349,33 @@ function enforceProCreateScheduling(args: {
   locationType: ServiceLocationType
   offeringId: string
   clientId: string
-}): Date {
-  const requestedEnd = computeRequestedEndUtc({
-    startUtc: args.requestedStart,
+}): Promise<Date> {
+  const decision = await evaluateProSchedulingDecision({
+    tx: args.tx,
+    now: args.now,
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
     durationMinutes: args.durationMinutes,
     bufferMinutes: args.bufferMinutes,
-  })
-
-  const stepCheck = isStartAlignedToWorkingWindowStep({
-    startUtc: args.requestedStart,
     workingHours: args.workingHours,
     timeZone: args.timeZone,
     stepMinutes: args.stepMinutes,
-    fallbackTimeZone: 'UTC',
+    advanceNoticeMinutes: args.advanceNoticeMinutes,
+    maxDaysAhead: args.maxDaysAhead,
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
   })
 
-  if (!stepCheck.ok) {
-    if (stepCheck.code === 'STEP_MISMATCH') {
-      logAndThrowStepMismatch({
+  if (decision.ok) {
+    return decision.value.requestedEnd
+  }
+
+  switch (decision.code) {
+    case 'STEP_MISMATCH':
+      return logAndThrowStepMismatch({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -379,111 +383,157 @@ function enforceProCreateScheduling(args: {
         offeringId: args.offeringId,
         clientId: args.clientId,
         stepMinutes: args.stepMinutes,
-        meta: stepCheck.meta,
+        meta: decision.logHint?.meta,
       })
-    }
 
-    if (stepCheck.code === 'WORKING_HOURS_REQUIRED') {
-      logAndThrowWorkingHoursFailure({
+    case 'WORKING_HOURS_REQUIRED':
+      return logAndThrowWorkingHoursFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.requestedStart,
-        requestedEnd,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
         offeringId: args.offeringId,
         clientId: args.clientId,
-        workingHoursError: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
+        workingHoursError: makeWorkingHoursGuardMessage(
+          'WORKING_HOURS_REQUIRED',
+        ),
       })
-    }
 
-    if (stepCheck.code === 'WORKING_HOURS_INVALID') {
-      logAndThrowWorkingHoursFailure({
+    case 'WORKING_HOURS_INVALID':
+      return logAndThrowWorkingHoursFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.requestedStart,
-        requestedEnd,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
         offeringId: args.offeringId,
         clientId: args.clientId,
-        workingHoursError: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
+        workingHoursError: makeWorkingHoursGuardMessage(
+          'WORKING_HOURS_INVALID',
+        ),
       })
-    }
 
-    // OUTSIDE_WORKING_HOURS is intentionally not fatal here.
-    // It is enforced later, so allowOutsideWorkingHours can actually work.
-  }
-
-  if (!args.allowShortNotice) {
-    const advanceNoticeCheck = checkAdvanceNotice({
-      startUtc: args.requestedStart,
-      nowUtc: args.now,
-      advanceNoticeMinutes: args.advanceNoticeMinutes,
-    })
-
-    if (!advanceNoticeCheck.ok) {
-      logAndThrowAdvanceNoticeFailure({
+    case 'OUTSIDE_WORKING_HOURS':
+      return logAndThrowWorkingHoursFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.requestedStart,
-        requestedEnd,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
+        offeringId: args.offeringId,
+        clientId: args.clientId,
+        workingHoursError:
+          typeof decision.logHint?.meta?.workingHoursError === 'string'
+            ? decision.logHint.meta.workingHoursError
+            : makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
+      })
+
+    case 'ADVANCE_NOTICE_REQUIRED':
+      return logAndThrowAdvanceNoticeFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.requestedStart,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
         offeringId: args.offeringId,
         clientId: args.clientId,
         advanceNoticeMinutes: args.advanceNoticeMinutes,
       })
-    }
-  }
 
-  if (!args.allowFarFuture) {
-    const maxDaysAheadCheck = checkMaxDaysAheadExact({
-      startUtc: args.requestedStart,
-      nowUtc: args.now,
-      maxDaysAhead: args.maxDaysAhead,
-    })
-
-    if (!maxDaysAheadCheck.ok) {
-      logAndThrowMaxDaysAheadFailure({
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return logAndThrowMaxDaysAheadFailure({
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.requestedStart,
-        requestedEnd,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
         offeringId: args.offeringId,
         clientId: args.clientId,
         maxDaysAhead: args.maxDaysAhead,
       })
-    }
-  }
 
-  if (!args.allowOutsideWorkingHours) {
-    const workingHoursResult = ensureWithinWorkingHours({
-      scheduledStartUtc: args.requestedStart,
-      scheduledEndUtc: requestedEnd,
-      workingHours: args.workingHours,
-      timeZone: args.timeZone,
-      fallbackTimeZone: 'UTC',
-      messages: {
-        missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
-        outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
-        misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
-      },
-    })
-
-    if (!workingHoursResult.ok) {
-      logAndThrowWorkingHoursFailure({
+    case 'TIME_BLOCKED':
+      return logAndThrowTimeRangeConflict({
+        conflict: 'BLOCKED',
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
         requestedStart: args.requestedStart,
-        requestedEnd,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
         offeringId: args.offeringId,
         clientId: args.clientId,
-        workingHoursError: workingHoursResult.error,
       })
-    }
+
+    case 'TIME_BOOKED':
+      return logAndThrowTimeRangeConflict({
+        conflict: 'BOOKING',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.requestedStart,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
+        offeringId: args.offeringId,
+        clientId: args.clientId,
+      })
+
+    case 'TIME_HELD':
+      return logAndThrowTimeRangeConflict({
+        conflict: 'HOLD',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.requestedStart,
+        requestedEnd:
+          decision.logHint?.requestedEnd ??
+          addMinutes(
+            args.requestedStart,
+            args.durationMinutes + args.bufferMinutes,
+          ),
+        offeringId: args.offeringId,
+        clientId: args.clientId,
+      })
   }
 
-  return requestedEnd
+  const exhaustiveCheck: never = decision.code
+  throw new Error(
+    `Unhandled scheduling decision code: ${String(exhaustiveCheck)}`,
+  )
 }
 
 export async function POST(req: Request) {
@@ -714,7 +764,8 @@ export async function POST(req: Request) {
               )
             : computedDurationMinutes
 
-        const requestedEnd = enforceProCreateScheduling({
+        const requestedEnd = await enforceProCreateScheduling({
+          tx,
           now,
           requestedStart,
           durationMinutes: totalDurationMinutes,
@@ -733,29 +784,6 @@ export async function POST(req: Request) {
           offeringId,
           clientId,
         })
-
-        const timeRangeConflict = await getTimeRangeConflict({
-          tx,
-          professionalId,
-          locationId: locationContext.locationId,
-          requestedStart,
-          requestedEnd,
-          defaultBufferMinutes: bufferMinutes,
-          fallbackDurationMinutes: totalDurationMinutes,
-        })
-
-        if (timeRangeConflict) {
-          logAndThrowTimeRangeConflict({
-            conflict: timeRangeConflict,
-            professionalId,
-            locationId: locationContext.locationId,
-            locationType,
-            requestedStart,
-            requestedEnd,
-            offeringId,
-            clientId,
-          })
-        }
 
         const salonLocationAddressSnapshot:
           | Prisma.InputJsonValue

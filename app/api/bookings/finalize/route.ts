@@ -4,7 +4,6 @@ import {
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
-  ClientAddressKind,
   NotificationType,
   OpeningStatus,
   Prisma,
@@ -17,8 +16,7 @@ import { createProNotification } from '@/lib/notifications/proNotifications'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
-import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { normalizeToMinute } from '@/lib/booking/conflicts'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import {
   normalizeLocationType,
@@ -29,13 +27,8 @@ import {
   buildAddressSnapshot,
   decimalFromUnknown,
   decimalToNumber,
-  pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
-import {
-  checkSlotReadiness,
-  type SlotReadinessCode,
-} from '@/lib/booking/slotReadiness'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -43,10 +36,13 @@ import {
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import {
+  resolveHeldSalonAddressText,
+  validateHoldForClientMutation,
+} from '@/lib/booking/policies/holdRules'
+import { evaluateFinalizeDecision } from '@/lib/booking/policies/finalizePolicy'
 
 export const dynamic = 'force-dynamic'
-
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -57,10 +53,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function normalizeAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function normalizeSourceLoose(args: {
@@ -165,206 +157,38 @@ function mapSchedulingReadinessErrorToBookingCode(
   }
 }
 
-function mapSlotReadinessCodeToBookingCode(
-  code: SlotReadinessCode,
-): BookingErrorCode {
-  switch (code) {
-    case 'STEP_MISMATCH':
-      return 'STEP_MISMATCH'
-    case 'ADVANCE_NOTICE_REQUIRED':
-      return 'ADVANCE_NOTICE_REQUIRED'
-    case 'MAX_DAYS_AHEAD_EXCEEDED':
-      return 'MAX_DAYS_AHEAD_EXCEEDED'
-    case 'WORKING_HOURS_REQUIRED':
-      return 'WORKING_HOURS_REQUIRED'
-    case 'WORKING_HOURS_INVALID':
-      return 'WORKING_HOURS_INVALID'
-    case 'OUTSIDE_WORKING_HOURS':
-      return 'OUTSIDE_WORKING_HOURS'
-    case 'INVALID_START':
-      return 'INVALID_SCHEDULED_FOR'
-    case 'INVALID_DURATION':
-      return 'INVALID_DURATION'
-    case 'INVALID_BUFFER':
-      return 'INTERNAL_ERROR'
-    case 'INVALID_RANGE':
-      return 'INVALID_SCHEDULED_FOR'
-  }
-}
-
-function getReadableWorkingHoursMessage(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    return 'That time is outside working hours.'
-  }
-
-  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
-    return 'That time is outside working hours.'
-  }
-
-  return value
-}
-
-function getSlotReadinessConflictType(
-  code: SlotReadinessCode,
-): 'STEP_BOUNDARY' | 'WORKING_HOURS' | 'TIME_NOT_AVAILABLE' {
-  if (code === 'STEP_MISMATCH') return 'STEP_BOUNDARY'
-
-  if (
-    code === 'WORKING_HOURS_REQUIRED' ||
-    code === 'WORKING_HOURS_INVALID' ||
-    code === 'OUTSIDE_WORKING_HOURS'
-  ) {
-    return 'WORKING_HOURS'
-  }
-
-  return 'TIME_NOT_AVAILABLE'
-}
-
-function getSlotReadinessLoggedEnd(args: {
-  code: SlotReadinessCode
-  requestedStart: Date
-  requestedEnd: Date
-}): Date {
-  switch (args.code) {
-    case 'STEP_MISMATCH':
-    case 'INVALID_START':
-    case 'INVALID_RANGE':
-      return addMinutes(args.requestedStart, 1)
-    default:
-      return args.requestedEnd
-  }
-}
-
-function buildSlotReadinessLogMeta(args: {
-  code: SlotReadinessCode
-  stepMinutes: number
-  meta?: Record<string, unknown>
-}): Record<string, unknown> {
-  const base = {
-    route: 'app/api/bookings/finalize/route.ts',
-  }
-
-  switch (args.code) {
-    case 'STEP_MISMATCH':
-      return {
-        ...base,
-        stepMinutes: args.stepMinutes,
-      }
-
-    case 'OUTSIDE_WORKING_HOURS':
-    case 'WORKING_HOURS_REQUIRED':
-    case 'WORKING_HOURS_INVALID': {
-      const workingHoursError =
-        typeof args.meta?.workingHoursError === 'string'
-          ? args.meta.workingHoursError
-          : undefined
-
-      return workingHoursError
-        ? {
-            ...base,
-            workingHoursError,
-          }
-        : base
-    }
-
-    case 'ADVANCE_NOTICE_REQUIRED':
-      return {
-        ...base,
-        rule: 'ADVANCE_NOTICE',
-      }
-
-    case 'MAX_DAYS_AHEAD_EXCEEDED':
-      return {
-        ...base,
-        rule: 'MAX_DAYS_AHEAD',
-      }
-
-    default:
-      return base
-  }
-}
-
-function logAndThrowSlotReadinessFailure(args: {
-  code: SlotReadinessCode
+function logFinalizePolicyFailure(args: {
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
-  requestedStart: Date
-  requestedEnd: Date
   holdId: string
-  stepMinutes: number
-  meta?: Record<string, unknown>
-}): never {
+  logHint: {
+    requestedStart: Date
+    requestedEnd: Date
+    conflictType:
+      | 'BLOCKED'
+      | 'BOOKING'
+      | 'HOLD'
+      | 'WORKING_HOURS'
+      | 'STEP_BOUNDARY'
+      | 'TIME_NOT_AVAILABLE'
+    meta?: Record<string, unknown>
+  }
+}) {
   logBookingConflict({
     action: 'BOOKING_FINALIZE',
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
-    requestedStart: args.requestedStart,
-    requestedEnd: getSlotReadinessLoggedEnd({
-      code: args.code,
-      requestedStart: args.requestedStart,
-      requestedEnd: args.requestedEnd,
-    }),
-    conflictType: getSlotReadinessConflictType(args.code),
-    holdId: args.holdId,
-    meta: buildSlotReadinessLogMeta({
-      code: args.code,
-      stepMinutes: args.stepMinutes,
-      meta: args.meta,
-    }),
-  })
-
-  if (args.code === 'STEP_MISMATCH') {
-    throw bookingError('STEP_MISMATCH', {
-      message: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
-      userMessage: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
-    })
-  }
-
-  if (args.code === 'OUTSIDE_WORKING_HOURS') {
-    const message = getReadableWorkingHoursMessage(args.meta?.workingHoursError)
-
-    throw bookingError('OUTSIDE_WORKING_HOURS', {
-      message,
-      userMessage: message,
-    })
-  }
-
-  throw bookingError(mapSlotReadinessCodeToBookingCode(args.code))
-}
-
-function logAndThrowTimeRangeConflict(args: {
-  conflict: 'BLOCKED' | 'BOOKING' | 'HOLD'
-  professionalId: string
-  locationId: string
-  locationType: ServiceLocationType
-  requestedStart: Date
-  requestedEnd: Date
-  holdId: string
-}): never {
-  logBookingConflict({
-    action: 'BOOKING_FINALIZE',
-    professionalId: args.professionalId,
-    locationId: args.locationId,
-    locationType: args.locationType,
-    requestedStart: args.requestedStart,
-    requestedEnd: args.requestedEnd,
-    conflictType: args.conflict,
+    requestedStart: args.logHint.requestedStart,
+    requestedEnd: args.logHint.requestedEnd,
+    conflictType: args.logHint.conflictType,
     holdId: args.holdId,
     meta: {
       route: 'app/api/bookings/finalize/route.ts',
+      ...(args.logHint.meta ?? {}),
     },
   })
-
-  switch (args.conflict) {
-    case 'BLOCKED':
-      throw bookingError('TIME_BLOCKED')
-    case 'BOOKING':
-      throw bookingError('TIME_BOOKED')
-    case 'HOLD':
-      throw bookingError('TIME_HELD')
-  }
 }
 
 export async function POST(request: Request) {
@@ -518,48 +342,33 @@ export async function POST(request: Request) {
           },
         })
 
-        if (!hold) throw bookingError('HOLD_NOT_FOUND')
-        if (hold.clientId !== clientId) throw bookingError('HOLD_NOT_FOUND')
-        if (hold.expiresAt.getTime() <= now.getTime()) {
-          throw bookingError('HOLD_EXPIRED')
-        }
+        const validatedHold = await validateHoldForClientMutation({
+          tx,
+          hold,
+          clientId,
+          now,
+          expectedProfessionalId: offering.professionalId,
+          expectedOfferingId: offering.id,
+          expectedLocationType: locationType,
+        })
 
-        if (hold.offeringId !== offering.id) throw bookingError('HOLD_MISMATCH')
-        if (hold.professionalId !== offering.professionalId) {
-          throw bookingError('HOLD_MISMATCH')
-        }
-        if (hold.locationType !== locationType) throw bookingError('HOLD_MISMATCH')
-        if (!hold.locationId) throw bookingError('HOLD_MISMATCH')
-
-        if (hold.locationType === ServiceLocationType.MOBILE) {
-          const clientServiceAddressFromHold = pickFormattedAddressFromSnapshot(
-            hold.clientAddressSnapshot,
-          )
-
-          if (!hold.clientAddressId || !clientServiceAddressFromHold) {
-            throw bookingError('HOLD_MISSING_CLIENT_ADDRESS')
-          }
-
-          const ownedClientAddress = await tx.clientAddress.findFirst({
-            where: {
-              id: hold.clientAddressId,
-              clientId,
-              kind: ClientAddressKind.SERVICE_ADDRESS,
-            },
-            select: { id: true },
+        if (!validatedHold.ok) {
+          throw bookingError(validatedHold.code, {
+            message: validatedHold.message,
+            userMessage: validatedHold.userMessage,
           })
+        }
 
-          if (!ownedClientAddress) {
-            throw bookingError('CLIENT_SERVICE_ADDRESS_REQUIRED')
-          }
+        if (!hold) {
+          throw bookingError('HOLD_NOT_FOUND')
         }
 
         const validatedContextResult = await resolveValidatedBookingContext({
           tx,
           professionalId: offering.professionalId,
-          requestedLocationId: hold.locationId,
-          locationType: hold.locationType,
-          holdLocationTimeZone: hold.locationTimeZone,
+          requestedLocationId: validatedHold.value.locationId,
+          locationType: validatedHold.value.locationType,
+          holdLocationTimeZone: validatedHold.value.locationTimeZone,
           professionalTimeZone: offering.professional?.timeZone ?? null,
           fallbackTimeZone: 'UTC',
           requireValidTimeZone: true,
@@ -585,24 +394,20 @@ export async function POST(request: Request) {
         const baseDurationMinutes = validatedContextResult.durationMinutes
         const priceStartingAt = validatedContextResult.priceStartingAt
 
-        const salonAddressText =
-          hold.locationType === ServiceLocationType.SALON
-            ? pickFormattedAddressFromSnapshot(hold.locationAddressSnapshot) ??
-              normalizeAddress(locationContext.formattedAddress)
-            : null
+        const salonAddressResolution = resolveHeldSalonAddressText({
+          holdLocationType: validatedHold.value.locationType,
+          holdLocationAddressSnapshot: hold.locationAddressSnapshot,
+          fallbackFormattedAddress: locationContext.formattedAddress,
+        })
 
-        if (hold.locationType === ServiceLocationType.SALON && !salonAddressText) {
-          throw bookingError('SALON_LOCATION_ADDRESS_REQUIRED')
+        if (!salonAddressResolution.ok) {
+          throw bookingError(salonAddressResolution.code, {
+            message: salonAddressResolution.message,
+            userMessage: salonAddressResolution.userMessage,
+          })
         }
 
         const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
-        if (!Number.isFinite(requestedStart.getTime())) {
-          throw bookingError('INVALID_SCHEDULED_FOR')
-        }
-
-        if (requestedStart.getTime() < now.getTime()) {
-          throw bookingError('TIME_IN_PAST')
-        }
 
         if (openingId) {
           const activeOpening = await tx.lastMinuteOpening.findFirst({
@@ -765,16 +570,16 @@ export async function POST(request: Request) {
           MAX_SLOT_DURATION_MINUTES,
         )
 
-        const computedRequestedEnd = addMinutes(
+        const decision = await evaluateFinalizeDecision({
+          tx,
+          now,
+          professionalId: offering.professionalId,
+          holdId: hold.id,
           requestedStart,
-          totalDurationMinutes + locationContext.bufferMinutes,
-        )
-
-        const slotReadiness = checkSlotReadiness({
-          startUtc: requestedStart,
-          nowUtc: now,
           durationMinutes: totalDurationMinutes,
           bufferMinutes: locationContext.bufferMinutes,
+          locationId: locationContext.locationId,
+          locationType: validatedHold.value.locationType,
           workingHours: locationContext.workingHours,
           timeZone: locationContext.timeZone,
           stepMinutes: locationContext.stepMinutes,
@@ -783,50 +588,29 @@ export async function POST(request: Request) {
           fallbackTimeZone: 'UTC',
         })
 
-        if (!slotReadiness.ok) {
-          logAndThrowSlotReadinessFailure({
-            code: slotReadiness.code,
-            professionalId: offering.professionalId,
-            locationId: locationContext.locationId,
-            locationType: hold.locationType,
-            requestedStart,
-            requestedEnd: computedRequestedEnd,
-            holdId: hold.id,
-            stepMinutes: locationContext.stepMinutes,
-            meta: slotReadiness.meta,
-          })
-        }
+        if (!decision.ok) {
+          if (decision.logHint) {
+            logFinalizePolicyFailure({
+              professionalId: offering.professionalId,
+              locationId: locationContext.locationId,
+              locationType: validatedHold.value.locationType,
+              holdId: hold.id,
+              logHint: decision.logHint,
+            })
+          }
 
-        const requestedEnd = slotReadiness.endUtc
-
-        const timeRangeConflict = await getTimeRangeConflict({
-          tx,
-          professionalId: offering.professionalId,
-          locationId: locationContext.locationId,
-          requestedStart,
-          requestedEnd,
-          defaultBufferMinutes: locationContext.bufferMinutes,
-          fallbackDurationMinutes: totalDurationMinutes,
-          excludeHoldId: hold.id,
-        })
-
-        if (timeRangeConflict) {
-          logAndThrowTimeRangeConflict({
-            conflict: timeRangeConflict,
-            professionalId: offering.professionalId,
-            locationId: locationContext.locationId,
-            locationType: hold.locationType,
-            requestedStart,
-            requestedEnd,
-            holdId: hold.id,
+          throw bookingError(decision.code, {
+            message: decision.message,
+            userMessage: decision.userMessage,
           })
         }
 
         const salonLocationAddressSnapshotInput:
           | Prisma.InputJsonValue
           | Prisma.NullableJsonNullValueInput =
-          hold.locationType === ServiceLocationType.SALON && salonAddressText
-            ? buildAddressSnapshot(salonAddressText) ?? Prisma.JsonNull
+          validatedHold.value.locationType === ServiceLocationType.SALON &&
+          salonAddressResolution.value
+            ? buildAddressSnapshot(salonAddressResolution.value) ?? Prisma.JsonNull
             : Prisma.JsonNull
 
         let created: {
@@ -861,19 +645,19 @@ export async function POST(request: Request) {
                 decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
 
               clientAddressId:
-                hold.locationType === ServiceLocationType.MOBILE
-                  ? hold.clientAddressId
+                validatedHold.value.locationType === ServiceLocationType.MOBILE
+                  ? validatedHold.value.holdClientAddressId
                   : null,
               clientAddressSnapshot:
-                hold.locationType === ServiceLocationType.MOBILE
+                validatedHold.value.locationType === ServiceLocationType.MOBILE
                   ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
                   : Prisma.JsonNull,
               clientAddressLatSnapshot:
-                hold.locationType === ServiceLocationType.MOBILE
+                validatedHold.value.locationType === ServiceLocationType.MOBILE
                   ? decimalToNumber(hold.clientAddressLatSnapshot)
                   : null,
               clientAddressLngSnapshot:
-                hold.locationType === ServiceLocationType.MOBILE
+                validatedHold.value.locationType === ServiceLocationType.MOBILE
                   ? decimalToNumber(hold.clientAddressLngSnapshot)
                   : null,
             },
