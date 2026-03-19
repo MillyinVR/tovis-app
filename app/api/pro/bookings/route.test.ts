@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   clampInt: vi.fn(),
 
   moneyToString: vi.fn(),
-  minutesSinceMidnightInTimeZone: vi.fn(),
 
   getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
@@ -32,6 +31,11 @@ const mocks = vi.hoisted(() => ({
   ensureWithinWorkingHours: vi.fn(),
   snapToStepMinutes: vi.fn(),
   getProCreatedBookingStatus: vi.fn(),
+
+  checkAdvanceNotice: vi.fn(),
+  checkMaxDaysAheadExact: vi.fn(),
+  computeRequestedEndUtc: vi.fn(),
+  isStartAlignedToWorkingWindowStep: vi.fn(),
 
   withLockedProfessionalTransaction: vi.fn(),
 
@@ -57,10 +61,6 @@ vi.mock('@/lib/pick', () => ({
 
 vi.mock('@/lib/money', () => ({
   moneyToString: mocks.moneyToString,
-}))
-
-vi.mock('@/lib/timeZone', () => ({
-  minutesSinceMidnightInTimeZone: mocks.minutesSinceMidnightInTimeZone,
 }))
 
 vi.mock('@/lib/booking/conflictQueries', () => ({
@@ -92,6 +92,13 @@ vi.mock('@/lib/booking/serviceItems', () => ({
 
 vi.mock('@/lib/booking/statusRules', () => ({
   getProCreatedBookingStatus: mocks.getProCreatedBookingStatus,
+}))
+
+vi.mock('@/lib/booking/slotReadiness', () => ({
+  checkAdvanceNotice: mocks.checkAdvanceNotice,
+  checkMaxDaysAheadExact: mocks.checkMaxDaysAheadExact,
+  computeRequestedEndUtc: mocks.computeRequestedEndUtc,
+  isStartAlignedToWorkingWindowStep: mocks.isStartAlignedToWorkingWindowStep,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -169,11 +176,13 @@ describe('POST /api/pro/bookings', () => {
       return null
     })
 
-    mocks.clampInt.mockImplementation((value: unknown, min: number, max: number) => {
-      const parsed = Number(value)
-      const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
-      return Math.max(min, Math.min(max, n))
-    })
+    mocks.clampInt.mockImplementation(
+      (value: unknown, min: number, max: number) => {
+        const parsed = Number(value)
+        const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
+        return Math.max(min, Math.min(max, n))
+      },
+    )
 
     mocks.normalizeLocationType.mockImplementation((value: unknown) => {
       if (value === 'SALON') return ServiceLocationType.SALON
@@ -187,11 +196,28 @@ describe('POST /api/pro/bookings', () => {
       formattedAddress,
     }))
     mocks.snapToStepMinutes.mockImplementation((value: number) => value)
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValue(30)
     mocks.ensureWithinWorkingHours.mockReturnValue({ ok: true })
     mocks.getTimeRangeConflict.mockResolvedValue(null)
     mocks.moneyToString.mockReturnValue('50.00')
     mocks.getProCreatedBookingStatus.mockReturnValue(BookingStatus.ACCEPTED)
+
+    mocks.isStartAlignedToWorkingWindowStep.mockReturnValue({ ok: true })
+    mocks.checkAdvanceNotice.mockReturnValue({ ok: true })
+    mocks.checkMaxDaysAheadExact.mockReturnValue({ ok: true })
+    mocks.computeRequestedEndUtc.mockImplementation(
+      ({
+        startUtc,
+        durationMinutes,
+        bufferMinutes,
+      }: {
+        startUtc: Date
+        durationMinutes: number
+        bufferMinutes: number
+      }) =>
+        new Date(
+          startUtc.getTime() + (durationMinutes + bufferMinutes) * 60_000,
+        ),
+    )
 
     mocks.resolveValidatedBookingContext.mockResolvedValue({
       ok: true,
@@ -238,6 +264,9 @@ describe('POST /api/pro/bookings', () => {
       mobilePriceStartingAt: new Prisma.Decimal('60.00'),
       salonDurationMinutes: 60,
       mobileDurationMinutes: 75,
+      professional: {
+        timeZone: 'America/Los_Angeles',
+      },
       service: {
         id: 'service_1',
         name: 'Haircut',
@@ -328,7 +357,11 @@ describe('POST /api/pro/bookings', () => {
   })
 
   it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
-    mocks.minutesSinceMidnightInTimeZone.mockReturnValueOnce(17)
+    mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      meta: {},
+    })
 
     const result = await POST(
       makeRequest({
@@ -406,7 +439,7 @@ describe('POST /api/pro/bookings', () => {
       code: 'OUTSIDE_WORKING_HOURS',
       retryable: true,
       uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is outside working hours.',
+      message: 'That time is outside working hours.',
     })
   })
 

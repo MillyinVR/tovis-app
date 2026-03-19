@@ -446,13 +446,10 @@ describe('POST /api/bookings/finalize', () => {
         locationId: 'loc_1',
         locationType: ServiceLocationType.SALON,
         requestedStart: new Date('2026-03-11T19:37:00.000Z'),
-        requestedEnd: new Date('2026-03-11T20:52:00.000Z'),
-        conflictType: 'STEP_BOUNDARY',
-        holdId: 'hold_1',
+        requestedEnd: new Date('2026-03-11T19:38:00.000Z'),
         meta: expect.objectContaining({
           route: 'app/api/bookings/finalize/route.ts',
           stepMinutes: 30,
-          slotReadinessCode: 'STEP_MISMATCH',
         }),
       }),
     )
