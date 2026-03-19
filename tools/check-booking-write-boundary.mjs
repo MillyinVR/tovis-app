@@ -8,13 +8,9 @@ const ALLOWED_FILES = new Set([
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
-  normalize('app/api/client/rebook/[token]/route.ts'),
-  normalize('app/api/pro/bookings/[id]/rebook/route.ts'),
   normalize('app/api/pro/bookings/[id]/aftercare/route.ts'),
-  normalize('app/api/pro/bookings/[id]/cancel/route.ts'),
   normalize('app/api/pro/bookings/[id]/finish/route.ts'),
   normalize('app/api/pro/bookings/[id]/media/route.ts'),
-  normalize('app/api/pro/bookings/[id]/route.ts'),
   normalize('app/api/pro/bookings/[id]/start/route.ts'),
   normalize('app/api/pro/last-minute/route.ts'),
   normalize('lib/booking/transitions.ts'),

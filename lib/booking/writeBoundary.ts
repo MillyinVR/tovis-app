@@ -1,5 +1,6 @@
 // lib/booking/writeBoundary.ts
 import {
+  AftercareRebookMode,
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
@@ -7,6 +8,7 @@ import {
   ClientNotificationType,
   OpeningStatus,
   Prisma,
+  ProfessionalLocationType,
   ServiceLocationType,
   SessionStep,
 } from '@prisma/client'
@@ -23,18 +25,29 @@ import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
-import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
+import {
+  addMinutes,
+  durationOrFallback,
+  normalizeToMinute,
+} from '@/lib/booking/conflicts'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import {
+  normalizeStepMinutes,
   resolveValidatedBookingContext,
   type SchedulingReadinessError,
 } from '@/lib/booking/locationContext'
 import {
   buildAddressSnapshot,
   decimalFromUnknown,
+  decimalToNullableNumber,
   decimalToNumber,
+  pickFormattedAddressFromSnapshot,
 } from '@/lib/booking/snapshots'
-import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
+import {
+  DEFAULT_TIME_ZONE,
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+} from '@/lib/timeZone'
 import { clampInt } from '@/lib/pick'
 import {
   normalizeAddress,
@@ -45,8 +58,20 @@ import { evaluateHoldCreationDecision } from '@/lib/booking/policies/holdPolicy'
 import { evaluateRescheduleDecision } from '@/lib/booking/policies/reschedulePolicy'
 import { evaluateFinalizeDecision } from '@/lib/booking/policies/finalizePolicy'
 import { evaluateProSchedulingDecision } from '@/lib/booking/policies/proSchedulingPolicy'
-import { snapToStepMinutes } from '@/lib/booking/serviceItems'
+import {
+  type RequestedServiceItemInput,
+  buildNormalizedBookingItemsFromRequestedOfferings,
+  computeBookingItemLikeTotals,
+  snapToStepMinutes,
+  sumDecimal,
+} from '@/lib/booking/serviceItems'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
+import { moneyToFixed2String } from '@/lib/money'
+import {
+  resolveAppointmentSchedulingContext,
+  type AppointmentSchedulingContext,
+  type TimeZoneTruthSource,
+} from '@/lib/booking/timeZoneTruth'
 
 type MutationMeta = {
   mutated: boolean
@@ -216,6 +241,87 @@ type CreateProBookingResult = {
   meta: MutationMeta
 }
 
+type CreateRebookedBookingFromCompletedBookingArgs = {
+  bookingId: string
+  professionalId: string
+  scheduledFor: Date
+}
+
+type CreateRebookedBookingFromCompletedBookingResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    scheduledFor: Date
+  }
+  aftercare: {
+    id: string
+    rebookMode: AftercareRebookMode
+    rebookedFor: Date | null
+  }
+  meta: MutationMeta
+}
+
+type CreateClientRebookedBookingFromAftercareArgs = {
+  aftercareId: string
+  bookingId: string
+  clientId: string
+  scheduledFor: Date
+}
+
+type CreateClientRebookedBookingFromAftercareResult =
+  CreateRebookedBookingFromCompletedBookingResult
+
+type PerformLockedCreateRebookedBookingArgs = {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+  scheduledFor: Date
+  initialStatus: BookingStatus
+}
+
+type UpdateRequestedStatus =
+  | typeof BookingStatus.ACCEPTED
+  | typeof BookingStatus.CANCELLED
+
+type UpdateProBookingArgs = {
+  professionalId: string
+  bookingId: string
+  nextStatus: UpdateRequestedStatus | null
+  notifyClient: boolean
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  nextStart: Date | null
+  nextBuffer: number | null
+  nextDuration: number | null
+  parsedRequestedItems: RequestedServiceItemInput[] | null
+  hasBuffer: boolean
+  hasDuration: boolean
+  hasServiceItems: boolean
+}
+
+type UpdateProBookingResult = {
+  booking: {
+    id: string
+    scheduledFor: string
+    endsAt: string
+    bufferMinutes: number
+    durationMinutes: number
+    totalDurationMinutes: number
+    status: BookingStatus
+    subtotalSnapshot: string
+    timeZone: string
+    timeZoneSource: TimeZoneTruthSource
+    locationId: string | null
+    locationType: ServiceLocationType | null
+    locationAddressSnapshot: string | null
+    locationLatSnapshot: number | null
+    locationLngSnapshot: number | null
+  }
+  meta: MutationMeta
+}
+
 type WorkingHoursGuardCode =
   | 'WORKING_HOURS_REQUIRED'
   | 'WORKING_HOURS_INVALID'
@@ -378,6 +484,72 @@ const PRO_CREATE_OFFERING_SELECT = {
     },
   },
 } satisfies Prisma.ProfessionalServiceOfferingSelect
+
+const REBOOK_SOURCE_BOOKING_SELECT = {
+  id: true,
+  status: true,
+  clientId: true,
+  professionalId: true,
+
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  locationAddressSnapshot: true,
+  locationLatSnapshot: true,
+  locationLngSnapshot: true,
+
+  clientAddressId: true,
+  clientAddressSnapshot: true,
+  clientAddressLatSnapshot: true,
+  clientAddressLngSnapshot: true,
+  clientTimeZoneAtBooking: true,
+
+  subtotalSnapshot: true,
+  totalAmount: true,
+  depositAmount: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalDurationMinutes: true,
+  bufferMinutes: true,
+
+  serviceItems: {
+    orderBy: { sortOrder: 'asc' },
+    select: {
+      serviceId: true,
+      offeringId: true,
+      priceSnapshot: true,
+      durationMinutesSnapshot: true,
+      sortOrder: true,
+    },
+  },
+
+  professional: {
+    select: {
+      timeZone: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type RebookSourceBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof REBOOK_SOURCE_BOOKING_SELECT
+}>
+
+const AFTERCARE_REBOOK_LOCK_SELECT = {
+  id: true,
+  bookingId: true,
+  booking: {
+    select: {
+      id: true,
+      clientId: true,
+      professionalId: true,
+    },
+  },
+} satisfies Prisma.AftercareSummarySelect
+
+type AftercareRebookLockRecord = Prisma.AftercareSummaryGetPayload<{
+  select: typeof AFTERCARE_REBOOK_LOCK_SELECT
+}>
 
 function buildMeta(mutated: boolean): MutationMeta {
   return {
@@ -569,6 +741,506 @@ function getReadableWorkingHoursMessage(value: unknown): string {
   }
 
   return value
+}
+
+function normalizeOutputTimeZone(value: string): string {
+  return isValidIanaTimeZone(value) ? sanitizeTimeZone(value, 'UTC') : 'UTC'
+}
+
+function buildBookingOutput(args: {
+  id: string
+  scheduledFor: Date
+  totalDurationMinutes: number
+  bufferMinutes: number
+  status: BookingStatus
+  subtotalSnapshot: Prisma.Decimal
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  locationId?: string | null
+  locationType?: ServiceLocationType | null
+  locationAddressSnapshot?: string | null
+  locationLatSnapshot?: number | null
+  locationLngSnapshot?: number | null
+}) {
+  const {
+    id,
+    scheduledFor,
+    totalDurationMinutes,
+    bufferMinutes,
+    status,
+    subtotalSnapshot,
+    appointmentTimeZone,
+    timeZoneSource,
+    locationId,
+    locationType,
+    locationAddressSnapshot,
+    locationLatSnapshot,
+    locationLngSnapshot,
+  } = args
+
+  return {
+    id,
+    scheduledFor: scheduledFor.toISOString(),
+    endsAt: addMinutes(
+      scheduledFor,
+      totalDurationMinutes + bufferMinutes,
+    ).toISOString(),
+    bufferMinutes,
+    durationMinutes: totalDurationMinutes,
+    totalDurationMinutes,
+    status,
+    subtotalSnapshot: moneyToFixed2String(subtotalSnapshot),
+    timeZone: appointmentTimeZone,
+    timeZoneSource,
+    locationId: locationId ?? null,
+    locationType: locationType ?? null,
+    locationAddressSnapshot: locationAddressSnapshot ?? null,
+    locationLatSnapshot: locationLatSnapshot ?? null,
+    locationLngSnapshot: locationLngSnapshot ?? null,
+  }
+}
+
+function buildBookingMutationPayload(args: {
+  booking: UpdateProBookingResult['booking']
+  mutated: boolean
+}): UpdateProBookingResult {
+  return {
+    booking: args.booking,
+    meta: buildMeta(args.mutated),
+  }
+}
+
+async function createUpdateClientNotification(args: {
+  tx: Prisma.TransactionClient
+  clientId: string
+  bookingId: string
+  type: ClientNotificationType
+  title: string
+  body: string
+  dedupeKey: string
+}): Promise<void> {
+  await args.tx.clientNotification.create({
+    data: {
+      clientId: args.clientId,
+      bookingId: args.bookingId,
+      type: args.type,
+      title: args.title,
+      body: args.body,
+      dedupeKey: args.dedupeKey,
+    },
+  })
+}
+
+async function resolveUpdateBookingSchedulingContext(args: {
+  bookingLocationTimeZone?: unknown
+  locationId?: string | null
+  professionalId: string
+  professionalTimeZone?: unknown
+  fallback?: string
+  requireValid?: boolean
+}): Promise<AppointmentSchedulingContext> {
+  const result = await resolveAppointmentSchedulingContext({
+    bookingLocationTimeZone: args.bookingLocationTimeZone,
+    locationId: args.locationId ?? null,
+    professionalId: args.professionalId,
+    professionalTimeZone: args.professionalTimeZone,
+    fallback: args.fallback ?? 'UTC',
+    requireValid: args.requireValid,
+  })
+
+  if (!result.ok) {
+    throw bookingError('TIMEZONE_REQUIRED')
+  }
+
+  return {
+    ...result.context,
+    appointmentTimeZone: normalizeOutputTimeZone(
+      result.context.appointmentTimeZone,
+    ),
+  }
+}
+
+function logAndThrowUpdateStepMismatch(args: {
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  bookingId: string
+  stepMinutes: number
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  meta?: Record<string, unknown>
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: addMinutes(args.requestedStart, 1),
+    conflictType: 'STEP_BOUNDARY',
+    bookingId: args.bookingId,
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      stepMinutes: args.stepMinutes,
+      timeZone: args.appointmentTimeZone,
+      timeZoneSource: args.timeZoneSource,
+      ...(args.meta ?? {}),
+    },
+  })
+
+  throw bookingError('STEP_MISMATCH', {
+    message: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
+    userMessage: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
+  })
+}
+
+function logAndThrowUpdateWorkingHoursFailure(args: {
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  bookingId: string
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  workingHoursError: string
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: 'WORKING_HOURS',
+    bookingId: args.bookingId,
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      workingHoursError: args.workingHoursError,
+      timeZone: args.appointmentTimeZone,
+      timeZoneSource: args.timeZoneSource,
+    },
+  })
+
+  const workingHoursCode = parseWorkingHoursGuardMessage(args.workingHoursError)
+
+  if (workingHoursCode === 'WORKING_HOURS_REQUIRED') {
+    throw bookingError('WORKING_HOURS_REQUIRED')
+  }
+
+  if (workingHoursCode === 'WORKING_HOURS_INVALID') {
+    throw bookingError('WORKING_HOURS_INVALID')
+  }
+
+  if (workingHoursCode === 'OUTSIDE_WORKING_HOURS') {
+    throw bookingError('OUTSIDE_WORKING_HOURS', {
+      userMessage: 'That time is outside your working hours.',
+    })
+  }
+
+  const message = getReadableWorkingHoursMessage(args.workingHoursError)
+  throw bookingError('OUTSIDE_WORKING_HOURS', {
+    message,
+    userMessage: message,
+  })
+}
+
+function logAndThrowUpdateAdvanceNoticeFailure(args: {
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  bookingId: string
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  advanceNoticeMinutes: number
+  meta?: Record<string, unknown>
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: 'TIME_NOT_AVAILABLE',
+    bookingId: args.bookingId,
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      rule: 'ADVANCE_NOTICE',
+      advanceNoticeMinutes: args.advanceNoticeMinutes,
+      allowShortNotice: false,
+      timeZone: args.appointmentTimeZone,
+      timeZoneSource: args.timeZoneSource,
+      ...(args.meta ?? {}),
+    },
+  })
+
+  throw bookingError('ADVANCE_NOTICE_REQUIRED', {
+    userMessage:
+      'That booking is too soon unless you explicitly override advance notice.',
+  })
+}
+
+function logAndThrowUpdateMaxDaysAheadFailure(args: {
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  bookingId: string
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  maxDaysAhead: number
+  meta?: Record<string, unknown>
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: 'TIME_NOT_AVAILABLE',
+    bookingId: args.bookingId,
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      rule: 'MAX_DAYS_AHEAD',
+      maxDaysAhead: args.maxDaysAhead,
+      allowFarFuture: false,
+      timeZone: args.appointmentTimeZone,
+      timeZoneSource: args.timeZoneSource,
+      ...(args.meta ?? {}),
+    },
+  })
+
+  throw bookingError('MAX_DAYS_AHEAD_EXCEEDED', {
+    userMessage:
+      'That booking is too far in the future unless you explicitly override the booking window.',
+  })
+}
+
+function logAndThrowUpdateTimeRangeConflict(args: {
+  conflict: 'BLOCKED' | 'BOOKING' | 'HOLD'
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  bookingId: string
+  appointmentTimeZone: string
+  timeZoneSource: TimeZoneTruthSource
+}): never {
+  logBookingConflict({
+    action: 'BOOKING_UPDATE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: args.conflict,
+    bookingId: args.bookingId,
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      timeZone: args.appointmentTimeZone,
+      timeZoneSource: args.timeZoneSource,
+    },
+  })
+
+  switch (args.conflict) {
+    case 'BLOCKED':
+      throw bookingError('TIME_BLOCKED', {
+        userMessage: 'That time is blocked on your calendar.',
+      })
+    case 'BOOKING':
+      throw bookingError('TIME_BOOKED')
+    case 'HOLD':
+      throw bookingError('TIME_HELD')
+  }
+}
+
+async function enforceUpdateBookingScheduling(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  finalStart: Date
+  finalDuration: number
+  finalBuffer: number
+  workingHours: unknown
+  appointmentTimeZone: string
+  stepMinutes: number
+  advanceNoticeMinutes: number
+  maxDaysAhead: number
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  allowOutsideWorkingHours: boolean
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  bookingId: string
+  timeZoneSource: TimeZoneTruthSource
+}): Promise<Date> {
+  const decision = await evaluateProSchedulingDecision({
+    tx: args.tx,
+    now: args.now,
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.finalStart,
+    durationMinutes: args.finalDuration,
+    bufferMinutes: args.finalBuffer,
+    workingHours: args.workingHours,
+    timeZone: args.appointmentTimeZone,
+    stepMinutes: args.stepMinutes,
+    advanceNoticeMinutes: args.advanceNoticeMinutes,
+    maxDaysAhead: args.maxDaysAhead,
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    excludeBookingId: args.bookingId,
+  })
+
+  if (decision.ok) {
+    return decision.value.requestedEnd
+  }
+
+  const requestedEnd =
+    decision.logHint?.requestedEnd ??
+    addMinutes(args.finalStart, args.finalDuration + args.finalBuffer)
+
+  switch (decision.code) {
+    case 'STEP_MISMATCH':
+      return logAndThrowUpdateStepMismatch({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        bookingId: args.bookingId,
+        stepMinutes: args.stepMinutes,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        meta: decision.logHint?.meta,
+      })
+
+    case 'WORKING_HOURS_REQUIRED':
+      return logAndThrowUpdateWorkingHoursFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        workingHoursError: makeWorkingHoursGuardMessage(
+          'WORKING_HOURS_REQUIRED',
+        ),
+      })
+
+    case 'WORKING_HOURS_INVALID':
+      return logAndThrowUpdateWorkingHoursFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        workingHoursError: makeWorkingHoursGuardMessage(
+          'WORKING_HOURS_INVALID',
+        ),
+      })
+
+    case 'OUTSIDE_WORKING_HOURS':
+      return logAndThrowUpdateWorkingHoursFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        workingHoursError:
+          typeof decision.logHint?.meta?.workingHoursError === 'string'
+            ? decision.logHint.meta.workingHoursError
+            : makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
+      })
+
+    case 'ADVANCE_NOTICE_REQUIRED':
+      return logAndThrowUpdateAdvanceNoticeFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        advanceNoticeMinutes: args.advanceNoticeMinutes,
+        meta: decision.logHint?.meta,
+      })
+
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return logAndThrowUpdateMaxDaysAheadFailure({
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+        maxDaysAhead: args.maxDaysAhead,
+        meta: decision.logHint?.meta,
+      })
+
+    case 'TIME_BLOCKED':
+      return logAndThrowUpdateTimeRangeConflict({
+        conflict: 'BLOCKED',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+      })
+
+    case 'TIME_BOOKED':
+      return logAndThrowUpdateTimeRangeConflict({
+        conflict: 'BOOKING',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+      })
+
+    case 'TIME_HELD':
+      return logAndThrowUpdateTimeRangeConflict({
+        conflict: 'HOLD',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.finalStart,
+        requestedEnd,
+        bookingId: args.bookingId,
+        appointmentTimeZone: args.appointmentTimeZone,
+        timeZoneSource: args.timeZoneSource,
+      })
+  }
+
+  const exhaustiveCheck: never = decision.code
+  throw new Error(
+    `Unhandled scheduling decision code: ${String(exhaustiveCheck)}`,
+  )
 }
 
 async function loadBookingForCancel(
@@ -2336,6 +3008,807 @@ async function performLockedCreateProBooking(args: {
   }
 }
 
+async function performLockedCreateRebookedBooking(
+  args: PerformLockedCreateRebookedBookingArgs,
+): Promise<CreateRebookedBookingFromCompletedBookingResult> {
+  const source: RebookSourceBookingRecord | null = await args.tx.booking.findFirst({
+    where: {
+      id: args.bookingId,
+      professionalId: args.professionalId,
+    },
+    select: REBOOK_SOURCE_BOOKING_SELECT,
+  })
+
+  if (!source) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (source.status !== BookingStatus.COMPLETED) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Only COMPLETED bookings can be rebooked.',
+      userMessage: 'Only COMPLETED bookings can be rebooked.',
+    })
+  }
+
+  const requestedStart = normalizeToMinute(new Date(args.scheduledFor))
+  if (!Number.isFinite(requestedStart.getTime())) {
+    throw bookingError('INVALID_SCHEDULED_FOR')
+  }
+
+  if (requestedStart.getTime() < args.now.getTime() + 60_000) {
+    throw bookingError('INVALID_SCHEDULED_FOR', {
+      message: 'scheduledFor must be at least 1 minute in the future.',
+      userMessage: 'scheduledFor must be at least 1 minute in the future.',
+    })
+  }
+
+  if (!source.locationId) {
+    throw bookingError('BAD_LOCATION')
+  }
+
+  const items = source.serviceItems ?? []
+  const primary = items[0] ?? null
+
+  if (!primary?.serviceId || !primary.offeringId) {
+    throw bookingError('INVALID_SERVICE_ITEMS', {
+      message: 'This booking has no service items to rebook.',
+      userMessage: 'This booking has no service items to rebook.',
+    })
+  }
+
+  const normalizedItems = items.map((item, index) => ({
+    serviceId: item.serviceId,
+    offeringId: item.offeringId,
+    priceSnapshot: item.priceSnapshot ?? new Prisma.Decimal(0),
+    durationMinutesSnapshot:
+      normalizePositiveDurationMinutes(item.durationMinutesSnapshot) ?? 60,
+    itemType:
+      index === 0
+        ? BookingServiceItemType.BASE
+        : BookingServiceItemType.ADD_ON,
+    sortOrder: index,
+  }))
+
+  const subtotalFromItems = normalizedItems.reduce(
+    (sum, item) => sum.plus(item.priceSnapshot),
+    new Prisma.Decimal(0),
+  )
+
+  const subtotalSnapshot = source.subtotalSnapshot ?? subtotalFromItems
+
+  const totalDurationFromItems = normalizedItems.reduce(
+    (sum, item) => sum + item.durationMinutesSnapshot,
+    0,
+  )
+
+  const totalDurationMinutes =
+    totalDurationFromItems > 0
+      ? clampInt(totalDurationFromItems, 15, MAX_SLOT_DURATION_MINUTES)
+      : normalizePositiveDurationMinutes(source.totalDurationMinutes) ?? 60
+
+  const bufferMinutes = clampInt(
+    Number(source.bufferMinutes ?? 0),
+    0,
+    MAX_BUFFER_MINUTES,
+  )
+
+  const validatedContextResult = await resolveValidatedBookingContext({
+    tx: args.tx,
+    professionalId: source.professionalId,
+    requestedLocationId: source.locationId,
+    locationType: source.locationType,
+    holdLocationTimeZone: null,
+    professionalTimeZone: source.professional?.timeZone ?? null,
+    fallbackTimeZone: source.professional?.timeZone ?? DEFAULT_TIME_ZONE,
+    requireValidTimeZone: true,
+    allowFallback: false,
+    requireCoordinates: false,
+    offering: {
+      offersInSalon: source.locationType === ServiceLocationType.SALON,
+      offersMobile: source.locationType === ServiceLocationType.MOBILE,
+      salonDurationMinutes:
+        source.locationType === ServiceLocationType.SALON
+          ? totalDurationMinutes
+          : null,
+      mobileDurationMinutes:
+        source.locationType === ServiceLocationType.MOBILE
+          ? totalDurationMinutes
+          : null,
+      salonPriceStartingAt:
+        source.locationType === ServiceLocationType.SALON
+          ? subtotalSnapshot
+          : null,
+      mobilePriceStartingAt:
+        source.locationType === ServiceLocationType.MOBILE
+          ? subtotalSnapshot
+          : null,
+    },
+  })
+
+  if (!validatedContextResult.ok) {
+    throw bookingError(
+      mapSchedulingReadinessErrorToBookingCode(validatedContextResult.error),
+    )
+  }
+
+  const locationContext = validatedContextResult.context
+
+  await enforceProCreateScheduling({
+    tx: args.tx,
+    now: args.now,
+    requestedStart,
+    durationMinutes: totalDurationMinutes,
+    bufferMinutes,
+    workingHours: locationContext.workingHours,
+    timeZone: locationContext.timeZone,
+    stepMinutes: locationContext.stepMinutes,
+    advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+    maxDaysAhead: locationContext.maxDaysAhead,
+    allowShortNotice: false,
+    allowFarFuture: false,
+    allowOutsideWorkingHours: false,
+    professionalId: source.professionalId,
+    locationId: locationContext.locationId,
+    locationType: source.locationType,
+    offeringId: primary.offeringId,
+    clientId: source.clientId,
+  })
+
+  const salonAddressSnapshot =
+    source.locationType === ServiceLocationType.SALON
+      ? source.locationAddressSnapshot != null
+        ? toNullableJsonCreateInput(source.locationAddressSnapshot)
+        : locationContext.formattedAddress
+          ? buildAddressSnapshot(locationContext.formattedAddress) ?? Prisma.JsonNull
+          : Prisma.JsonNull
+      : Prisma.JsonNull
+
+  let createdBooking: {
+    id: string
+    status: BookingStatus
+    scheduledFor: Date
+  }
+
+  try {
+    createdBooking = await args.tx.booking.create({
+      data: {
+        clientId: source.clientId,
+        professionalId: source.professionalId,
+
+        serviceId: primary.serviceId,
+        offeringId: primary.offeringId,
+
+        scheduledFor: requestedStart,
+        status: args.initialStatus,
+        source: BookingSource.AFTERCARE,
+        rebookOfBookingId: source.id,
+
+        locationType: source.locationType,
+        locationId: locationContext.locationId,
+        locationTimeZone: locationContext.timeZone,
+
+        locationAddressSnapshot: salonAddressSnapshot,
+        locationLatSnapshot:
+          decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
+        locationLngSnapshot:
+          decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
+
+        clientAddressId:
+          source.locationType === ServiceLocationType.MOBILE
+            ? source.clientAddressId
+            : null,
+        clientAddressSnapshot:
+          source.locationType === ServiceLocationType.MOBILE
+            ? toNullableJsonCreateInput(source.clientAddressSnapshot)
+            : Prisma.JsonNull,
+        clientAddressLatSnapshot:
+          source.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(source.clientAddressLatSnapshot)
+            : null,
+        clientAddressLngSnapshot:
+          source.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(source.clientAddressLngSnapshot)
+            : null,
+
+        clientTimeZoneAtBooking: source.clientTimeZoneAtBooking ?? undefined,
+
+        subtotalSnapshot,
+        totalAmount: source.totalAmount ?? undefined,
+        depositAmount: source.depositAmount ?? undefined,
+        tipAmount: source.tipAmount ?? undefined,
+        taxAmount: source.taxAmount ?? undefined,
+        discountAmount: source.discountAmount ?? undefined,
+        totalDurationMinutes,
+        bufferMinutes,
+
+        sessionStep: SessionStep.NONE,
+      },
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+      } satisfies Prisma.BookingSelect,
+    })
+  } catch (error: unknown) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw bookingError('TIME_BOOKED')
+    }
+
+    throw error
+  }
+
+  const baseItem = await args.tx.bookingServiceItem.create({
+    data: {
+      bookingId: createdBooking.id,
+      serviceId: primary.serviceId,
+      offeringId: primary.offeringId,
+      itemType: BookingServiceItemType.BASE,
+      parentItemId: null,
+      priceSnapshot: normalizedItems[0]?.priceSnapshot ?? new Prisma.Decimal(0),
+      durationMinutesSnapshot:
+        normalizedItems[0]?.durationMinutesSnapshot ?? totalDurationMinutes,
+      sortOrder: 0,
+    },
+    select: { id: true },
+  })
+
+  const addOnItems = normalizedItems.slice(1)
+  if (addOnItems.length > 0) {
+    await args.tx.bookingServiceItem.createMany({
+      data: addOnItems.map((item, index) => ({
+        bookingId: createdBooking.id,
+        serviceId: item.serviceId,
+        offeringId: item.offeringId,
+        itemType: BookingServiceItemType.ADD_ON,
+        parentItemId: baseItem.id,
+        priceSnapshot: item.priceSnapshot,
+        durationMinutesSnapshot: item.durationMinutesSnapshot,
+        sortOrder: index + 1,
+      })),
+    })
+  }
+
+  const aftercare = await args.tx.aftercareSummary.upsert({
+    where: { bookingId: source.id },
+    create: {
+      bookingId: source.id,
+      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+      rebookedFor: requestedStart,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+    },
+    update: {
+      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+      rebookedFor: requestedStart,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+    },
+    select: {
+      id: true,
+      rebookMode: true,
+      rebookedFor: true,
+    },
+  })
+
+  return {
+    booking: {
+      id: createdBooking.id,
+      status: createdBooking.status,
+      scheduledFor: createdBooking.scheduledFor,
+    },
+    aftercare,
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedCreateRebookedBookingFromCompletedBooking(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+  scheduledFor: Date
+}): Promise<CreateRebookedBookingFromCompletedBookingResult> {
+  return performLockedCreateRebookedBooking({
+    tx: args.tx,
+    now: args.now,
+    bookingId: args.bookingId,
+    professionalId: args.professionalId,
+    scheduledFor: args.scheduledFor,
+    initialStatus: BookingStatus.ACCEPTED,
+  })
+}
+
+async function performLockedUpdateProBooking(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  professionalId: string
+  bookingId: string
+  nextStatus: UpdateRequestedStatus | null
+  notifyClient: boolean
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  nextStart: Date | null
+  nextBuffer: number | null
+  nextDuration: number | null
+  parsedRequestedItems: RequestedServiceItemInput[] | null
+  hasBuffer: boolean
+  hasDuration: boolean
+  hasServiceItems: boolean
+}): Promise<UpdateProBookingResult> {
+  const existing = await args.tx.booking.findFirst({
+    where: { id: args.bookingId, professionalId: args.professionalId },
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+      locationType: true,
+      bufferMinutes: true,
+      totalDurationMinutes: true,
+      subtotalSnapshot: true,
+      clientId: true,
+      locationId: true,
+      locationTimeZone: true,
+      locationAddressSnapshot: true,
+      locationLatSnapshot: true,
+      locationLngSnapshot: true,
+      professionalId: true,
+      professional: {
+        select: { timeZone: true },
+      },
+    },
+  })
+
+  if (!existing) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (existing.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  if (existing.status === BookingStatus.COMPLETED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED')
+  }
+
+  const outputSchedulingContext = await resolveUpdateBookingSchedulingContext({
+    bookingLocationTimeZone: existing.locationTimeZone,
+    locationId: existing.locationId ?? null,
+    professionalId: existing.professionalId,
+    professionalTimeZone: existing.professional?.timeZone,
+    fallback: 'UTC',
+    requireValid: false,
+  })
+
+  const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
+    existing.locationAddressSnapshot,
+  )
+  const existingLocationLatSnapshot = decimalToNullableNumber(
+    existing.locationLatSnapshot,
+  )
+  const existingLocationLngSnapshot = decimalToNullableNumber(
+    existing.locationLngSnapshot,
+  )
+
+  const wantsMutation =
+    args.nextStatus != null ||
+    args.nextStart != null ||
+    args.hasBuffer ||
+    args.hasDuration ||
+    args.hasServiceItems
+
+  if (!wantsMutation) {
+    return buildBookingMutationPayload({
+      booking: buildBookingOutput({
+        id: existing.id,
+        scheduledFor: new Date(existing.scheduledFor),
+        totalDurationMinutes: durationOrFallback(existing.totalDurationMinutes),
+        bufferMinutes: Math.max(0, Number(existing.bufferMinutes ?? 0)),
+        status: existing.status,
+        subtotalSnapshot: existing.subtotalSnapshot ?? new Prisma.Decimal(0),
+        appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
+        timeZoneSource: outputSchedulingContext.timeZoneSource,
+        locationId: existing.locationId ?? null,
+        locationType: existing.locationType,
+        locationAddressSnapshot: existingLocationAddressSnapshot,
+        locationLatSnapshot: existingLocationLatSnapshot,
+        locationLngSnapshot: existingLocationLngSnapshot,
+      }),
+      mutated: false,
+    })
+  }
+
+  if (args.nextStatus === BookingStatus.CANCELLED) {
+    const updated = await args.tx.booking.update({
+      where: { id: existing.id },
+      data: { status: BookingStatus.CANCELLED },
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+        bufferMinutes: true,
+        totalDurationMinutes: true,
+        subtotalSnapshot: true,
+      } satisfies Prisma.BookingSelect,
+    })
+
+    if (args.notifyClient) {
+      await createUpdateClientNotification({
+        tx: args.tx,
+        clientId: existing.clientId,
+        bookingId: updated.id,
+        type: ClientNotificationType.BOOKING_CANCELLED,
+        title: 'Appointment cancelled',
+        body: 'Your appointment was cancelled.',
+        dedupeKey: `BOOKING_CANCELLED:${updated.id}:${new Date(
+          updated.scheduledFor,
+        ).toISOString()}`,
+      })
+    }
+
+    return buildBookingMutationPayload({
+      booking: buildBookingOutput({
+        id: updated.id,
+        scheduledFor: new Date(updated.scheduledFor),
+        totalDurationMinutes: durationOrFallback(updated.totalDurationMinutes),
+        bufferMinutes: Math.max(0, Number(updated.bufferMinutes ?? 0)),
+        status: updated.status,
+        subtotalSnapshot: updated.subtotalSnapshot ?? new Prisma.Decimal(0),
+        appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
+        timeZoneSource: outputSchedulingContext.timeZoneSource,
+        locationId: existing.locationId ?? null,
+        locationType: existing.locationType,
+        locationAddressSnapshot: existingLocationAddressSnapshot,
+        locationLatSnapshot: existingLocationLatSnapshot,
+        locationLngSnapshot: existingLocationLngSnapshot,
+      }),
+      mutated: true,
+    })
+  }
+
+  if (!existing.locationId) {
+    throw bookingError('BAD_LOCATION')
+  }
+
+  const location = await args.tx.professionalLocation.findFirst({
+    where: {
+      id: existing.locationId,
+      professionalId: existing.professionalId,
+      isBookable: true,
+    },
+    select: {
+      id: true,
+      type: true,
+      timeZone: true,
+      workingHours: true,
+      stepMinutes: true,
+      bufferMinutes: true,
+      advanceNoticeMinutes: true,
+      maxDaysAhead: true,
+    },
+  })
+
+  if (!location) {
+    throw bookingError('BAD_LOCATION')
+  }
+
+  if (
+    existing.locationType === ServiceLocationType.MOBILE &&
+    location.type !== ProfessionalLocationType.MOBILE_BASE
+  ) {
+    throw bookingError('BAD_LOCATION_MODE')
+  }
+
+  if (
+    existing.locationType === ServiceLocationType.SALON &&
+    location.type === ProfessionalLocationType.MOBILE_BASE
+  ) {
+    throw bookingError('BAD_LOCATION_MODE')
+  }
+
+  const schedulingContextResult = await resolveAppointmentSchedulingContext({
+    bookingLocationTimeZone: existing.locationTimeZone,
+    location: { id: location.id, timeZone: location.timeZone },
+    professionalId: existing.professionalId,
+    professionalTimeZone: existing.professional?.timeZone,
+    fallback: 'UTC',
+    requireValid: true,
+  })
+
+  if (!schedulingContextResult.ok) {
+    console.error(
+      'updateProBooking invalid appointment timezone',
+      {
+        route: 'lib/booking/writeBoundary.ts',
+        bookingId: existing.id,
+        professionalId: existing.professionalId,
+        bookingLocationTimeZone: existing.locationTimeZone,
+        locationId: location.id,
+        locationTimeZone: location.timeZone,
+        professionalTimeZone: existing.professional?.timeZone ?? null,
+        resolveResult: schedulingContextResult,
+      },
+    )
+    throw bookingError('TIMEZONE_REQUIRED')
+  }
+
+  const schedulingContext = {
+    ...schedulingContextResult.context,
+    appointmentTimeZone: normalizeOutputTimeZone(
+      schedulingContextResult.context.appointmentTimeZone,
+    ),
+  }
+
+  const appointmentTimeZone = schedulingContext.appointmentTimeZone
+  const appointmentTimeZoneSource = schedulingContext.timeZoneSource
+
+  const stepMinutes = normalizeStepMinutes(location.stepMinutes, 15)
+
+  if (
+    args.nextBuffer != null &&
+    (args.nextBuffer < 0 || args.nextBuffer > MAX_BUFFER_MINUTES)
+  ) {
+    throw bookingError('INVALID_BUFFER_MINUTES')
+  }
+
+  if (
+    args.nextDuration != null &&
+    (args.nextDuration < 15 || args.nextDuration > MAX_SLOT_DURATION_MINUTES)
+  ) {
+    throw bookingError('INVALID_DURATION_MINUTES')
+  }
+
+  const finalStart = args.nextStart
+    ? normalizeToMinute(args.nextStart)
+    : normalizeToMinute(new Date(existing.scheduledFor))
+
+  if (!Number.isFinite(finalStart.getTime())) {
+    throw bookingError('INVALID_SCHEDULED_FOR')
+  }
+
+  const finalBuffer =
+    args.nextBuffer != null
+      ? clampInt(
+          snapToStepMinutes(args.nextBuffer, stepMinutes),
+          0,
+          MAX_BUFFER_MINUTES,
+        )
+      : Math.max(0, Number(existing.bufferMinutes ?? 0))
+
+  let normalizedServiceItems:
+    | ReturnType<typeof buildNormalizedBookingItemsFromRequestedOfferings>
+    | null = null
+
+  if (args.parsedRequestedItems) {
+    const offeringIds = Array.from(
+      new Set(args.parsedRequestedItems.map((item) => item.offeringId)),
+    ).slice(0, 50)
+
+    const offerings = await args.tx.professionalServiceOffering.findMany({
+      where: {
+        id: { in: offeringIds },
+        professionalId: existing.professionalId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        serviceId: true,
+        offersInSalon: true,
+        offersMobile: true,
+        salonDurationMinutes: true,
+        mobileDurationMinutes: true,
+        salonPriceStartingAt: true,
+        mobilePriceStartingAt: true,
+        service: {
+          select: {
+            defaultDurationMinutes: true,
+          },
+        },
+      },
+      take: 100,
+    })
+
+    const offeringById = new Map(
+      offerings.map((offering) => [offering.id, offering]),
+    )
+
+    normalizedServiceItems =
+      buildNormalizedBookingItemsFromRequestedOfferings({
+        requestedItems: args.parsedRequestedItems,
+        locationType: existing.locationType,
+        stepMinutes,
+        offeringById,
+        badItemsCode: 'INVALID_SERVICE_ITEMS',
+      })
+  }
+
+  const previewItems =
+    normalizedServiceItems?.map((item, index) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      priceSnapshot: item.priceSnapshot,
+      itemType:
+        index === 0
+          ? BookingServiceItemType.BASE
+          : BookingServiceItemType.ADD_ON,
+    })) ??
+    (await args.tx.bookingServiceItem.findMany({
+      where: { bookingId: existing.id },
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        serviceId: true,
+        offeringId: true,
+        priceSnapshot: true,
+        durationMinutesSnapshot: true,
+        itemType: true,
+      },
+    }))
+
+  const {
+    primaryServiceId,
+    primaryOfferingId,
+    computedDurationMinutes,
+    computedSubtotal,
+  } = computeBookingItemLikeTotals(previewItems, 'INVALID_SERVICE_ITEMS')
+
+  const snappedNextDuration =
+    args.nextDuration != null
+      ? clampInt(
+          snapToStepMinutes(args.nextDuration, stepMinutes),
+          15,
+          MAX_SLOT_DURATION_MINUTES,
+        )
+      : null
+
+  if (
+    normalizedServiceItems &&
+    snappedNextDuration != null &&
+    snappedNextDuration !== computedDurationMinutes
+  ) {
+    throw bookingError('DURATION_MISMATCH')
+  }
+
+  const finalDuration = normalizedServiceItems
+    ? computedDurationMinutes
+    : snappedNextDuration != null
+      ? snappedNextDuration
+      : durationOrFallback(existing.totalDurationMinutes)
+
+  await enforceUpdateBookingScheduling({
+    tx: args.tx,
+    now: args.now,
+    finalStart,
+    finalDuration,
+    finalBuffer,
+    workingHours: location.workingHours,
+    appointmentTimeZone,
+    stepMinutes,
+    advanceNoticeMinutes: Math.max(
+      0,
+      Number(location.advanceNoticeMinutes ?? 0),
+    ),
+    maxDaysAhead: Math.max(1, Number(location.maxDaysAhead ?? 1)),
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    professionalId: existing.professionalId,
+    locationId: location.id,
+    locationType: existing.locationType,
+    bookingId: existing.id,
+    timeZoneSource: appointmentTimeZoneSource,
+  })
+
+  if (normalizedServiceItems) {
+    await args.tx.bookingServiceItem.deleteMany({
+      where: { bookingId: existing.id },
+    })
+
+    const baseItem = normalizedServiceItems[0]
+    if (!baseItem) {
+      throw bookingError('INVALID_SERVICE_ITEMS')
+    }
+
+    const createdBaseItem = await args.tx.bookingServiceItem.create({
+      data: {
+        bookingId: existing.id,
+        serviceId: baseItem.serviceId,
+        offeringId: baseItem.offeringId,
+        itemType: BookingServiceItemType.BASE,
+        parentItemId: null,
+        priceSnapshot: baseItem.priceSnapshot,
+        durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
+        sortOrder: 0,
+      },
+      select: { id: true },
+    })
+
+    const addOnItems = normalizedServiceItems.slice(1)
+
+    if (addOnItems.length > 0) {
+      await args.tx.bookingServiceItem.createMany({
+        data: addOnItems.map((item, index) => ({
+          bookingId: existing.id,
+          serviceId: item.serviceId,
+          offeringId: item.offeringId,
+          itemType: BookingServiceItemType.ADD_ON,
+          parentItemId: createdBaseItem.id,
+          priceSnapshot: item.priceSnapshot,
+          durationMinutesSnapshot: item.durationMinutesSnapshot,
+          sortOrder: index + 1,
+          notes: 'MANUAL_ADDON',
+        })),
+      })
+    }
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: existing.id },
+    data: {
+      ...(args.nextStatus === BookingStatus.ACCEPTED
+        ? { status: BookingStatus.ACCEPTED }
+        : {}),
+      scheduledFor: finalStart,
+      bufferMinutes: finalBuffer,
+      totalDurationMinutes: finalDuration,
+      subtotalSnapshot: computedSubtotal,
+      serviceId: primaryServiceId,
+      offeringId: primaryOfferingId,
+    },
+    select: {
+      id: true,
+      scheduledFor: true,
+      bufferMinutes: true,
+      totalDurationMinutes: true,
+      status: true,
+      subtotalSnapshot: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  if (args.notifyClient) {
+    const isConfirm = args.nextStatus === BookingStatus.ACCEPTED
+    const title = isConfirm ? 'Appointment confirmed' : 'Appointment updated'
+    const bodyText = isConfirm
+      ? 'Your appointment has been confirmed.'
+      : 'Your appointment details were updated.'
+    const type = isConfirm
+      ? ClientNotificationType.BOOKING_CONFIRMED
+      : ClientNotificationType.BOOKING_RESCHEDULED
+
+    await createUpdateClientNotification({
+      tx: args.tx,
+      clientId: existing.clientId,
+      bookingId: updated.id,
+      type,
+      title,
+      body: bodyText,
+      dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
+    })
+  }
+
+  return buildBookingMutationPayload({
+    booking: buildBookingOutput({
+      id: updated.id,
+      scheduledFor: new Date(updated.scheduledFor),
+      totalDurationMinutes: Number(updated.totalDurationMinutes),
+      bufferMinutes: Math.max(0, Number(updated.bufferMinutes)),
+      status: updated.status,
+      subtotalSnapshot: updated.subtotalSnapshot ?? computedSubtotal,
+      appointmentTimeZone,
+      timeZoneSource: appointmentTimeZoneSource,
+      locationId: existing.locationId ?? null,
+      locationType: existing.locationType,
+      locationAddressSnapshot: existingLocationAddressSnapshot,
+      locationLatSnapshot: existingLocationLatSnapshot,
+      locationLngSnapshot: existingLocationLngSnapshot,
+    }),
+    mutated: true,
+  })
+}
+
 async function resolveAdminProfessionalId(bookingId: string): Promise<string> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -2603,4 +4076,116 @@ export async function createProBooking(
         allowFarFuture: args.allowFarFuture,
       }),
   )
+}
+
+export async function updateProBooking(
+  args: UpdateProBookingArgs,
+): Promise<UpdateProBookingResult> {
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyBookingId(args.bookingId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedUpdateProBooking({
+        tx,
+        now,
+        professionalId: args.professionalId,
+        bookingId: args.bookingId,
+        nextStatus: args.nextStatus,
+        notifyClient: args.notifyClient,
+        allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+        allowShortNotice: args.allowShortNotice,
+        allowFarFuture: args.allowFarFuture,
+        nextStart: args.nextStart,
+        nextBuffer: args.nextBuffer,
+        nextDuration: args.nextDuration,
+        parsedRequestedItems: args.parsedRequestedItems,
+        hasBuffer: args.hasBuffer,
+        hasDuration: args.hasDuration,
+        hasServiceItems: args.hasServiceItems,
+      }),
+  )
+}
+
+export async function createRebookedBookingFromCompletedBooking(
+  args: CreateRebookedBookingFromCompletedBookingArgs,
+): Promise<CreateRebookedBookingFromCompletedBookingResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertValidRequestedStart(args.scheduledFor)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedCreateRebookedBookingFromCompletedBooking({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        scheduledFor: args.scheduledFor,
+      }),
+  )
+}
+export async function createClientRebookedBookingFromAftercare(
+  args: CreateClientRebookedBookingFromAftercareArgs,
+): Promise<CreateClientRebookedBookingFromAftercareResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+  assertValidRequestedStart(args.scheduledFor)
+
+  return prisma.$transaction(async (tx) => {
+    const aftercareRef: AftercareRebookLockRecord | null =
+      await tx.aftercareSummary.findUnique({
+        where: { id: args.aftercareId },
+        select: AFTERCARE_REBOOK_LOCK_SELECT,
+      })
+
+    if (!aftercareRef || !aftercareRef.booking) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    if (
+      aftercareRef.bookingId !== args.bookingId ||
+      aftercareRef.booking.id !== args.bookingId
+    ) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    if (aftercareRef.booking.clientId !== args.clientId) {
+      throw bookingError('FORBIDDEN')
+    }
+
+    await lockProfessionalSchedule(tx, aftercareRef.booking.professionalId)
+
+    const lockedAftercareRef: AftercareRebookLockRecord | null =
+      await tx.aftercareSummary.findUnique({
+        where: { id: args.aftercareId },
+        select: AFTERCARE_REBOOK_LOCK_SELECT,
+      })
+
+    if (!lockedAftercareRef || !lockedAftercareRef.booking) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    if (
+      lockedAftercareRef.bookingId !== args.bookingId ||
+      lockedAftercareRef.booking.id !== args.bookingId
+    ) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    if (lockedAftercareRef.booking.clientId !== args.clientId) {
+      throw bookingError('FORBIDDEN')
+    }
+
+    return performLockedCreateRebookedBooking({
+      tx,
+      now: new Date(),
+      bookingId: lockedAftercareRef.booking.id,
+      professionalId: lockedAftercareRef.booking.professionalId,
+      scheduledFor: args.scheduledFor,
+      initialStatus: BookingStatus.PENDING,
+    })
+  })
 }

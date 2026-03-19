@@ -1,143 +1,87 @@
 // app/api/pro/bookings/[id]/rebook/route.ts
 import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
-  AftercareRebookMode,
-  BookingSource,
-  BookingStatus,
-  Prisma,
-  ServiceLocationType,
-} from '@prisma/client'
+  jsonFail,
+  jsonOk,
+  pickIsoDate,
+  pickString,
+  requirePro,
+} from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
+import {
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
+import { AftercareRebookMode, BookingStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type RebookMode = 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
-
-type Body = {
-  mode?: unknown
-  scheduledFor?: unknown
-  windowStart?: unknown
-  windowEnd?: unknown
-}
-
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function parseISODate(v: unknown): Date | null {
-  const s = pickString(v)
-  if (!s) return null
-  const d = new Date(s)
-  return Number.isNaN(d.getTime()) ? null : d
+function isMode(value: unknown): value is RebookMode {
+  return (
+    value === 'BOOK' ||
+    value === 'RECOMMEND_WINDOW' ||
+    value === 'CLEAR'
+  )
 }
 
-function isMode(x: unknown): x is RebookMode {
-  return x === 'BOOK' || x === 'RECOMMEND_WINDOW' || x === 'CLEAR'
-}
-
-function mustLocationType(v: ServiceLocationType): ServiceLocationType {
-  if (v === ServiceLocationType.SALON) return v
-  if (v === ServiceLocationType.MOBILE) return v
-  throw new Error(`Unsupported ServiceLocationType: ${String(v)}`)
-}
-
-function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
-  }
-
-  if (value && typeof value === 'object') {
-    const out: Record<string, Prisma.InputJsonValue | null> = {}
-    for (const [key, item] of Object.entries(value)) {
-      if (item === undefined) continue
-      out[key] = item === null ? null : toInputJsonValue(item)
-    }
-    return out
-  }
-
-  throw new Error('Unsupported JSON snapshot value.')
-}
-
-function toPositiveIntOrNull(value: unknown): number | null {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return null
-  const rounded = Math.round(n)
-  return rounded > 0 ? rounded : null
-}
-
-const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
-  id: true,
-  status: true,
-  clientId: true,
-  professionalId: true,
-
-  locationType: true,
-  locationId: true,
-  locationTimeZone: true,
-  locationAddressSnapshot: true,
-  locationLatSnapshot: true,
-  locationLngSnapshot: true,
-
-  totalDurationMinutes: true,
-  bufferMinutes: true,
-
-  serviceItems: {
-    orderBy: { sortOrder: 'asc' },
-    select: {
-      serviceId: true,
-      offeringId: true,
-      priceSnapshot: true,
-      durationMinutesSnapshot: true,
-      sortOrder: true,
-      itemType: true,
-      parentItemId: true,
-    },
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
   },
-})
-
-type BookingPayload = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const proId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const params = await Promise.resolve(ctx.params)
-    const originalBookingId = pickString(params?.id)
-    if (!originalBookingId) return jsonFail(400, 'Missing booking id.')
+    const bookingId = pickString(params?.id)
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body: Body =
-      rawBody && typeof rawBody === 'object' ? (rawBody as Body) : {}
+    if (!bookingId) {
+      return jsonFail(400, 'Missing booking id.')
+    }
 
-    const modeRaw = body.mode ?? 'BOOK'
-    const mode: RebookMode = isMode(modeRaw) ? modeRaw : 'BOOK'
+    const rawBody: unknown = await req.json().catch(() => null)
+    const body = isRecord(rawBody) ? rawBody : {}
 
-    const booking: BookingPayload | null = await prisma.booking.findUnique({
-      where: { id: originalBookingId },
-      select: bookingSelect,
+    const mode = isMode(body.mode) ? body.mode : 'BOOK'
+
+    const existing = await prisma.booking.findFirst({
+      where: {
+        id: bookingId,
+        professionalId,
+      },
+      select: {
+        id: true,
+        status: true,
+      },
     })
 
-    if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
-    if (booking.status !== BookingStatus.COMPLETED) {
+    if (!existing) {
+      return jsonFail(404, 'Booking not found.')
+    }
+
+    if (existing.status !== BookingStatus.COMPLETED) {
       return jsonFail(409, 'Only COMPLETED bookings can be rebooked.')
     }
 
-    const bookingId = booking.id
-
     if (mode === 'CLEAR') {
       const aftercare = await prisma.aftercareSummary.upsert({
-        where: { bookingId },
+        where: { bookingId: existing.id },
         create: {
-          bookingId,
+          bookingId: existing.id,
           rebookMode: AftercareRebookMode.NONE,
           rebookedFor: null,
           rebookWindowStart: null,
@@ -149,18 +93,25 @@ export async function POST(req: Request, ctx: Ctx) {
           rebookWindowStart: null,
           rebookWindowEnd: null,
         },
-        select: { id: true, rebookMode: true },
+        select: {
+          id: true,
+          rebookMode: true,
+        },
       })
 
       return jsonOk(
-        { mode, aftercareId: aftercare.id, rebookMode: aftercare.rebookMode },
+        {
+          mode,
+          aftercareId: aftercare.id,
+          rebookMode: aftercare.rebookMode,
+        },
         200,
       )
     }
 
     if (mode === 'RECOMMEND_WINDOW') {
-      const windowStart = parseISODate(body.windowStart)
-      const windowEnd = parseISODate(body.windowEnd)
+      const windowStart = pickIsoDate(body.windowStart)
+      const windowEnd = pickIsoDate(body.windowEnd)
 
       if (!windowStart || !windowEnd) {
         return jsonFail(
@@ -168,14 +119,15 @@ export async function POST(req: Request, ctx: Ctx) {
           'windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.',
         )
       }
+
       if (windowEnd <= windowStart) {
         return jsonFail(400, 'windowEnd must be after windowStart.')
       }
 
       const aftercare = await prisma.aftercareSummary.upsert({
-        where: { bookingId },
+        where: { bookingId: existing.id },
         create: {
-          bookingId,
+          bookingId: existing.id,
           rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
           rebookWindowStart: windowStart,
           rebookWindowEnd: windowEnd,
@@ -199,128 +151,37 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonOk({ mode, aftercare }, 200)
     }
 
-    const scheduledFor = parseISODate(body.scheduledFor)
+    const scheduledFor = pickIsoDate(body.scheduledFor)
     if (!scheduledFor) {
-      return jsonFail(400, 'scheduledFor is required (ISO string) for BOOK mode.')
+      return jsonFail(
+        400,
+        'scheduledFor is required (ISO string) for BOOK mode.',
+      )
     }
 
-    const now = new Date()
-    if (scheduledFor.getTime() < now.getTime() + 60_000) {
-      return jsonFail(400, 'scheduledFor must be at least 1 minute in the future.')
-    }
-
-    const items = booking.serviceItems ?? []
-    const primary = items[0] ?? null
-    if (!primary?.serviceId || !primary?.offeringId) {
-      return jsonFail(409, 'This booking has no service items to rebook.')
-    }
-
-    const locationType = mustLocationType(booking.locationType)
-
-    const locationAddressSnapshot =
-      booking.locationAddressSnapshot == null
-        ? undefined
-        : toInputJsonValue(booking.locationAddressSnapshot)
-
-    const locationLatSnapshot = booking.locationLatSnapshot ?? undefined
-    const locationLngSnapshot = booking.locationLngSnapshot ?? undefined
-    const locationTimeZone = booking.locationTimeZone ?? undefined
-
-    const zero = new Prisma.Decimal(0)
-
-    const normalizedItems = items.map((i) => ({
-      serviceId: i.serviceId,
-      offeringId: i.offeringId,
-      itemType: i.itemType,
-      parentItemId: i.parentItemId,
-      priceSnapshot: i.priceSnapshot ?? zero,
-      durationMinutesSnapshot:
-        toPositiveIntOrNull(i.durationMinutesSnapshot) ??
-        toPositiveIntOrNull(booking.totalDurationMinutes) ??
-        60,
-      sortOrder: Number.isFinite(Number(i.sortOrder)) ? Number(i.sortOrder) : 0,
-    }))
-
-    const subtotal = normalizedItems.reduce(
-      (sum, i) => sum.plus(i.priceSnapshot),
-      new Prisma.Decimal(0),
-    )
-
-    const totalDurationFromItems = normalizedItems.reduce(
-      (sum, i) => sum + i.durationMinutesSnapshot,
-      0,
-    )
-
-    const totalDurationMinutes =
-      toPositiveIntOrNull(totalDurationFromItems) ??
-      toPositiveIntOrNull(booking.totalDurationMinutes) ??
-      60
-
-    const created = await prisma.$transaction(async (tx) => {
-      const nextBooking = await tx.booking.create({
-        data: {
-          clientId: booking.clientId,
-          professionalId: booking.professionalId,
-
-          serviceId: primary.serviceId,
-          offeringId: primary.offeringId,
-
-          scheduledFor,
-          status: BookingStatus.ACCEPTED,
-
-          locationType,
-          locationId: booking.locationId,
-
-          locationTimeZone,
-          locationAddressSnapshot,
-          locationLatSnapshot,
-          locationLngSnapshot,
-
-          subtotalSnapshot: subtotal,
-          totalDurationMinutes,
-          bufferMinutes: Math.max(0, Number(booking.bufferMinutes ?? 0)),
-
-          source: BookingSource.AFTERCARE,
-          rebookOfBookingId: bookingId,
-
-          serviceItems: {
-            create: normalizedItems,
-          },
-        },
-        select: { id: true, scheduledFor: true, status: true },
-      })
-
-      const aftercare = await tx.aftercareSummary.upsert({
-        where: { bookingId },
-        create: {
-          bookingId,
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor: scheduledFor,
-          rebookWindowStart: null,
-          rebookWindowEnd: null,
-        },
-        update: {
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor: scheduledFor,
-          rebookWindowStart: null,
-          rebookWindowEnd: null,
-        },
-        select: { id: true, rebookMode: true, rebookedFor: true },
-      })
-
-      return { nextBooking, aftercare }
+    const result = await createRebookedBookingFromCompletedBooking({
+      bookingId: existing.id,
+      professionalId,
+      scheduledFor,
     })
 
     return jsonOk(
       {
         mode,
-        nextBookingId: created.nextBooking.id,
-        aftercare: created.aftercare,
+        nextBookingId: result.booking.id,
+        aftercare: result.aftercare,
       },
       201,
     )
-  } catch (e) {
-    console.error('POST /api/pro/bookings/[id]/rebook error', e)
+  } catch (error: unknown) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
+
+    console.error('POST /api/pro/bookings/[id]/rebook error', error)
     return jsonFail(500, 'Internal server error')
   }
 }
