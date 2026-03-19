@@ -1,14 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ClientAddressKind,
-  Prisma,
-  ServiceLocationType,
-} from '@prisma/client'
+import { Prisma, ServiceLocationType } from '@prisma/client'
 import { NextRequest } from 'next/server'
+import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
 
 const TEST_NOW = new Date('2026-03-17T12:55:00.000Z')
 const SLOT_START = new Date('2026-03-17T13:30:00.000Z')
-const SLOT_END = new Date('2026-03-17T14:45:00.000Z')
 const HOLD_EXPIRES = new Date('2026-03-17T13:05:00.000Z')
 
 const mocks = vi.hoisted(() => ({
@@ -19,21 +15,9 @@ const mocks = vi.hoisted(() => ({
 
   professionalServiceOfferingFindUnique: vi.fn(),
 
-  logBookingConflict: vi.fn(),
-
   normalizeLocationType: vi.fn(),
-  resolveValidatedBookingContext: vi.fn(),
 
-  buildAddressSnapshot: vi.fn(),
-  decimalToNumber: vi.fn(),
-
-  normalizeAddress: vi.fn(),
-  evaluateHoldCreationDecision: vi.fn(),
-
-  withLockedProfessionalTransaction: vi.fn(),
-
-  txClientAddressFindFirst: vi.fn(),
-  txBookingHoldCreate: vi.fn(),
+  createHold: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -51,42 +35,15 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/booking/conflictLogging', () => ({
-  logBookingConflict: mocks.logBookingConflict,
-}))
-
 vi.mock('@/lib/booking/locationContext', () => ({
   normalizeLocationType: mocks.normalizeLocationType,
-  resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
 }))
 
-vi.mock('@/lib/booking/snapshots', () => ({
-  buildAddressSnapshot: mocks.buildAddressSnapshot,
-  decimalToNumber: mocks.decimalToNumber,
-}))
-
-vi.mock('@/lib/booking/policies/holdRules', () => ({
-  normalizeAddress: mocks.normalizeAddress,
-}))
-
-vi.mock('@/lib/booking/policies/holdPolicy', () => ({
-  evaluateHoldCreationDecision: mocks.evaluateHoldCreationDecision,
-}))
-
-vi.mock('@/lib/booking/scheduleTransaction', () => ({
-  withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  createHold: mocks.createHold,
 }))
 
 import { POST } from './route'
-
-const tx = {
-  clientAddress: {
-    findFirst: mocks.txClientAddressFindFirst,
-  },
-  bookingHold: {
-    create: mocks.txBookingHoldCreate,
-  },
-}
 
 function makeRequest(body: unknown): NextRequest {
   const req = new Request('http://localhost/api/holds', {
@@ -150,81 +107,31 @@ describe('POST /api/holds', () => {
       return null
     })
 
-    mocks.normalizeAddress.mockImplementation((value: unknown) =>
-      typeof value === 'string' && value.trim() ? value.trim() : null,
-    )
-
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
 
-    mocks.resolveValidatedBookingContext.mockResolvedValue({
-      ok: true,
-      durationMinutes: 60,
-      priceStartingAt: new Prisma.Decimal('100.00'),
-      context: {
+    mocks.createHold.mockResolvedValue({
+      hold: {
+        id: 'hold_1',
+        expiresAt: HOLD_EXPIRES,
+        scheduledFor: SLOT_START,
+        locationType: ServiceLocationType.SALON,
         locationId: 'loc_1',
-        timeZone: 'America/Los_Angeles',
-        workingHours: {
-          wed: { enabled: true, start: '09:00', end: '18:00' },
-        },
-        stepMinutes: 15,
-        advanceNoticeMinutes: 0,
-        maxDaysAhead: 30,
-        bufferMinutes: 15,
-        formattedAddress: '123 Salon St',
-        lat: 34.05,
-        lng: -118.25,
+        locationTimeZone: 'America/Los_Angeles',
+        clientAddressId: null,
+        clientAddressSnapshot: null,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
       },
     })
-
-    mocks.buildAddressSnapshot.mockImplementation((formattedAddress: string) => ({
-      formattedAddress,
-    }))
-
-    mocks.decimalToNumber.mockImplementation((value: unknown) => {
-      if (typeof value === 'number' && Number.isFinite(value)) return value
-      if (value instanceof Prisma.Decimal) return Number(value.toString())
-      return null
-    })
-
-    mocks.evaluateHoldCreationDecision.mockResolvedValue({
-      ok: true,
-      value: {
-        requestedEnd: SLOT_END,
-      },
-    })
-
-    mocks.txClientAddressFindFirst.mockResolvedValue({
-      id: 'addr_1',
-      formattedAddress: '789 Client Ave',
-      lat: null,
-      lng: null,
-      kind: ClientAddressKind.SERVICE_ADDRESS,
-    })
-
-    mocks.txBookingHoldCreate.mockResolvedValue({
-      id: 'hold_1',
-      expiresAt: HOLD_EXPIRES,
-      scheduledFor: SLOT_START,
-      locationType: ServiceLocationType.SALON,
-      locationId: 'loc_1',
-      locationTimeZone: 'America/Los_Angeles',
-      clientAddressId: null,
-      clientAddressSnapshot: null,
-    })
-
-    mocks.withLockedProfessionalTransaction.mockImplementation(
-      async (
-        professionalId: string,
-        run: (args: { tx: typeof tx; now: Date }) => Promise<unknown>,
-      ) => run({ tx, now: TEST_NOW }),
-    )
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('uses the locked professional transaction before hold decision and hold create', async () => {
+  it('calls createHold with parsed values and returns hold payload', async () => {
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -234,56 +141,64 @@ describe('POST /api/holds', () => {
       }),
     )
 
-    expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
-      'pro_123',
-      expect.any(Function),
-    )
-
-    expect(mocks.evaluateHoldCreationDecision).toHaveBeenCalledWith({
-      tx,
-      now: TEST_NOW,
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      offeringId: 'offering_1',
-      clientId: 'client_1',
-      clientAddressId: null,
-      requestedStart: SLOT_START,
-      durationMinutes: 60,
-      bufferMinutes: 15,
-      workingHours: {
-        wed: { enabled: true, start: '09:00', end: '18:00' },
-      },
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      advanceNoticeMinutes: 0,
-      maxDaysAhead: 30,
-      salonLocationAddress: '123 Salon St',
-      clientServiceAddress: null,
-    })
-
-    expect(mocks.txBookingHoldCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        offeringId: 'offering_1',
-        professionalId: 'pro_123',
-        clientId: 'client_1',
-        scheduledFor: SLOT_START,
-        expiresAt: HOLD_EXPIRES,
-        locationType: ServiceLocationType.SALON,
-        locationId: 'loc_1',
-        locationTimeZone: 'America/Los_Angeles',
-      }),
+    expect(mocks.professionalServiceOfferingFindUnique).toHaveBeenCalledWith({
+      where: { id: 'offering_1' },
       select: {
         id: true,
-        expiresAt: true,
-        scheduledFor: true,
-        locationType: true,
-        locationId: true,
-        locationTimeZone: true,
-        clientAddressId: true,
-        clientAddressSnapshot: true,
+        isActive: true,
+        professionalId: true,
+        offersInSalon: true,
+        offersMobile: true,
+        salonDurationMinutes: true,
+        mobileDurationMinutes: true,
+        salonPriceStartingAt: true,
+        mobilePriceStartingAt: true,
+        professional: {
+          select: {
+            timeZone: true,
+          },
+        },
       },
     })
+
+    expect(mocks.createHold).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      offering: {
+        id: 'offering_1',
+        professionalId: 'pro_123',
+        offersInSalon: true,
+        offersMobile: true,
+        salonDurationMinutes: 60,
+        mobileDurationMinutes: 75,
+        salonPriceStartingAt: new Prisma.Decimal('100.00'),
+        mobilePriceStartingAt: new Prisma.Decimal('120.00'),
+        professionalTimeZone: 'America/Los_Angeles',
+      },
+      requestedStart: SLOT_START,
+      requestedLocationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+    })
+
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
+      {
+        hold: {
+          id: 'hold_1',
+          expiresAt: HOLD_EXPIRES,
+          scheduledFor: SLOT_START,
+          locationType: ServiceLocationType.SALON,
+          locationId: 'loc_1',
+          locationTimeZone: 'America/Los_Angeles',
+          clientAddressId: null,
+          clientAddressSnapshot: null,
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+      201,
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -299,264 +214,111 @@ describe('POST /api/holds', () => {
           clientAddressId: null,
           clientAddressSnapshot: null,
         },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
     })
   })
 
-  it('logs STEP_BOUNDARY and returns STEP_MISMATCH when scheduled time is off step', async () => {
-    const offStepStart = new Date('2026-03-17T13:17:00.000Z')
+  it('returns auth response when client auth fails', async () => {
+    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
 
-    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
+    mocks.requireClient.mockResolvedValueOnce({
       ok: false,
-      code: 'STEP_MISMATCH',
-      message: 'Start time must be on a 15-minute boundary.',
-      userMessage: 'Start time must be on a 15-minute boundary.',
-      logHint: {
-        requestedStart: offStepStart,
-        requestedEnd: new Date('2026-03-17T14:32:00.000Z'),
-        conflictType: 'STEP_BOUNDARY',
-        meta: {
-          slotReadinessCode: 'STEP_MISMATCH',
-        },
-      },
+      res: authRes,
     })
 
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
-        scheduledFor: offStepStart.toISOString(),
+        scheduledFor: SLOT_START.toISOString(),
         locationType: 'SALON',
-        locationId: 'loc_1',
       }),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_CREATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: offStepStart,
-      requestedEnd: new Date('2026-03-17T14:32:00.000Z'),
-      conflictType: 'STEP_BOUNDARY',
-      note: null,
-      meta: {
-        route: 'app/api/holds/route.ts',
-        offeringId: 'offering_1',
-        clientId: 'client_1',
-        clientAddressId: null,
-        slotReadinessCode: 'STEP_MISMATCH',
+    expect(result).toBe(authRes)
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('returns OFFERING_ID_REQUIRED when offering id is missing', async () => {
+    const descriptor = getBookingErrorDescriptor('OFFERING_ID_REQUIRED')
+
+    const result = await POST(
+      makeRequest({
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
+
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('returns invalid scheduled time when scheduledFor is missing', async () => {
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        locationType: 'SALON',
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
       status: 400,
-      error: 'Start time must be on a 15-minute boundary.',
-      code: 'STEP_MISMATCH',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Start time must be on a 15-minute boundary.',
+      error: 'Missing scheduled time.',
+      code: 'INVALID_SCHEDULED_FOR',
+      retryable: false,
+      uiAction: 'NONE',
+      message: 'Scheduled time is required.',
     })
+
+    expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
-  it('logs WORKING_HOURS and returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'OUTSIDE_WORKING_HOURS',
-      message: 'That time is outside working hours.',
-      userMessage: 'That time is outside working hours.',
-      logHint: {
-        requestedStart: SLOT_START,
-        requestedEnd: SLOT_END,
-        conflictType: 'WORKING_HOURS',
-        meta: {
-          slotReadinessCode: 'OUTSIDE_WORKING_HOURS',
-          workingHoursError: 'That time is outside working hours.',
-        },
-      },
-    })
+  it('returns LOCATION_TYPE_REQUIRED when location type is missing', async () => {
+    const descriptor = getBookingErrorDescriptor('LOCATION_TYPE_REQUIRED')
 
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
       }),
     )
 
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_CREATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: SLOT_START,
-      requestedEnd: SLOT_END,
-      conflictType: 'WORKING_HOURS',
-      note: null,
-      meta: {
-        route: 'app/api/holds/route.ts',
-        offeringId: 'offering_1',
-        clientId: 'client_1',
-        clientAddressId: null,
-        slotReadinessCode: 'OUTSIDE_WORKING_HOURS',
-        workingHoursError: 'That time is outside working hours.',
-      },
-    })
-
     expect(result).toEqual({
       ok: false,
-      status: 400,
-      error: 'That time is outside working hours.',
-      code: 'OUTSIDE_WORKING_HOURS',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'That time is outside working hours.',
-    })
-  })
-
-  it('logs BLOCKED and returns TIME_BLOCKED when blocked by calendar block', async () => {
-    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'TIME_BLOCKED',
-      logHint: {
-        requestedStart: SLOT_START,
-        requestedEnd: SLOT_END,
-        conflictType: 'BLOCKED',
-      },
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
 
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-      }),
-    )
-
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_CREATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: SLOT_START,
-      requestedEnd: SLOT_END,
-      conflictType: 'BLOCKED',
-      note: null,
-      meta: {
-        route: 'app/api/holds/route.ts',
-        offeringId: 'offering_1',
-        clientId: 'client_1',
-        clientAddressId: null,
-      },
-    })
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'That time is blocked. Please choose another slot.',
-      code: 'TIME_BLOCKED',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is blocked.',
-    })
-  })
-
-  it('logs BOOKING and returns TIME_BOOKED when blocked by existing booking', async () => {
-    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'TIME_BOOKED',
-      logHint: {
-        requestedStart: SLOT_START,
-        requestedEnd: SLOT_END,
-        conflictType: 'BOOKING',
-      },
-    })
-
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-      }),
-    )
-
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_CREATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: SLOT_START,
-      requestedEnd: SLOT_END,
-      conflictType: 'BOOKING',
-      note: null,
-      meta: {
-        route: 'app/api/holds/route.ts',
-        offeringId: 'offering_1',
-        clientId: 'client_1',
-        clientAddressId: null,
-      },
-    })
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'That time was just taken. Please choose another slot.',
-      code: 'TIME_BOOKED',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time already has a booking.',
-    })
-  })
-
-  it('logs HOLD and returns TIME_HELD when blocked by active hold', async () => {
-    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'TIME_HELD',
-      logHint: {
-        requestedStart: SLOT_START,
-        requestedEnd: SLOT_END,
-        conflictType: 'HOLD',
-      },
-    })
-
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-      }),
-    )
-
-    expect(mocks.logBookingConflict).toHaveBeenCalledWith({
-      action: 'BOOKING_CREATE',
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      requestedStart: SLOT_START,
-      requestedEnd: SLOT_END,
-      conflictType: 'HOLD',
-      note: null,
-      meta: {
-        route: 'app/api/holds/route.ts',
-        offeringId: 'offering_1',
-        clientId: 'client_1',
-        clientAddressId: null,
-      },
-    })
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'Someone is already holding that time. Please try another slot.',
-      code: 'TIME_HELD',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is currently held.',
-    })
+    expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns CLIENT_SERVICE_ADDRESS_REQUIRED when mobile booking is missing client address id', async () => {
@@ -569,8 +331,7 @@ describe('POST /api/holds', () => {
       }),
     )
 
-    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
-    expect(mocks.evaluateHoldCreationDecision).not.toHaveBeenCalled()
+    expect(mocks.createHold).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: false,
@@ -584,63 +345,164 @@ describe('POST /api/holds', () => {
     })
   })
 
-  it('returns CLIENT_SERVICE_ADDRESS_INVALID when mobile selected address is invalid', async () => {
-    mocks.txClientAddressFindFirst.mockResolvedValueOnce({
-      id: 'addr_1',
-      formattedAddress: '',
-      lat: null,
-      lng: null,
-      kind: ClientAddressKind.SERVICE_ADDRESS,
+  it('returns INVALID_SCHEDULED_FOR when date is invalid', async () => {
+    const descriptor = getBookingErrorDescriptor('INVALID_SCHEDULED_FOR')
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: 'definitely-not-a-date',
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
 
-    mocks.evaluateHoldCreationDecision.mockResolvedValueOnce({
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('returns TIME_IN_PAST when requested time is too soon', async () => {
+    const descriptor = getBookingErrorDescriptor('TIME_IN_PAST')
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: '2026-03-17T12:55:30.000Z',
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(result).toEqual({
       ok: false,
-      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
+    })
+
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('returns OFFERING_NOT_FOUND when offering does not exist', async () => {
+    const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
+
+    mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(null)
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'missing_offering',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
+    })
+
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('returns OFFERING_NOT_FOUND when offering is inactive', async () => {
+    const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
+
+    mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce({
+      ...offering,
+      isActive: false,
     })
 
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
-        locationType: 'MOBILE',
-        locationId: 'loc_1',
-        clientAddressId: 'addr_1',
+        locationType: 'SALON',
       }),
     )
 
-    expect(mocks.txClientAddressFindFirst).toHaveBeenCalled()
-    expect(mocks.evaluateHoldCreationDecision).toHaveBeenCalledWith({
-      tx,
-      now: TEST_NOW,
-      professionalId: 'pro_123',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.MOBILE,
-      offeringId: 'offering_1',
-      clientId: 'client_1',
-      clientAddressId: 'addr_1',
-      requestedStart: SLOT_START,
-      durationMinutes: 60,
-      bufferMinutes: 15,
-      workingHours: {
-        wed: { enabled: true, start: '09:00', end: '18:00' },
-      },
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      advanceNoticeMinutes: 0,
-      maxDaysAhead: 30,
-      salonLocationAddress: null,
-      clientServiceAddress: null,
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
+
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('maps BookingError from createHold', async () => {
+    const descriptor = getBookingErrorDescriptor('TIME_HELD')
+
+    mocks.createHold.mockRejectedValueOnce(new BookingError('TIME_HELD'))
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
-      status: 400,
-      error:
-        'That service address is incomplete. Please update it before booking.',
-      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
+    })
+  })
+
+  it('returns 500 when createHold throws a non-booking error', async () => {
+    mocks.createHold.mockRejectedValueOnce(new Error('boom'))
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      500,
+      'Something went wrong while processing the booking.',
+      {
+        code: 'INTERNAL_ERROR',
+        retryable: false,
+        uiAction: 'CONTACT_SUPPORT',
+        message: 'Internal booking error.',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 500,
+      error: 'Something went wrong while processing the booking.',
+      code: 'INTERNAL_ERROR',
       retryable: false,
-      uiAction: 'ADD_SERVICE_ADDRESS',
-      message: 'Client service address is invalid.',
+      uiAction: 'CONTACT_SUPPORT',
+      message: 'Internal booking error.',
     })
   })
 })

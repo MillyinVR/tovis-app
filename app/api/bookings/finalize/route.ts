@@ -1,48 +1,50 @@
 // app/api/bookings/finalize/route.ts
 import { prisma } from '@/lib/prisma'
 import {
-  BookingServiceItemType,
   BookingSource,
   BookingStatus,
   NotificationType,
-  OpeningStatus,
   Prisma,
-  ServiceLocationType,
+  type ServiceLocationType,
 } from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { isRecord } from '@/lib/guards'
-import { clampInt } from '@/lib/pick'
-import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
-import { normalizeToMinute } from '@/lib/booking/conflicts'
-import { logBookingConflict } from '@/lib/booking/conflictLogging'
-import {
-  normalizeLocationType,
-  resolveValidatedBookingContext,
-  type SchedulingReadinessError,
-} from '@/lib/booking/locationContext'
-import {
-  buildAddressSnapshot,
-  decimalFromUnknown,
-  decimalToNumber,
-} from '@/lib/booking/snapshots'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
-import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
+import { normalizeLocationType } from '@/lib/booking/locationContext'
 import {
-  bookingError,
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
-import {
-  resolveHeldSalonAddressText,
-  validateHoldForClientMutation,
-} from '@/lib/booking/policies/holdRules'
-import { evaluateFinalizeDecision } from '@/lib/booking/policies/finalizePolicy'
+import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
+
+const FINALIZE_OFFERING_SELECT = {
+  id: true,
+  isActive: true,
+  professionalId: true,
+  serviceId: true,
+  offersInSalon: true,
+  offersMobile: true,
+  salonPriceStartingAt: true,
+  salonDurationMinutes: true,
+  mobilePriceStartingAt: true,
+  mobileDurationMinutes: true,
+  professional: {
+    select: {
+      autoAcceptBookings: true,
+      timeZone: true,
+    },
+  },
+} satisfies Prisma.ProfessionalServiceOfferingSelect
+
+type FinalizeOfferingRecord = Prisma.ProfessionalServiceOfferingGetPayload<{
+  select: typeof FINALIZE_OFFERING_SELECT
+}>
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -88,107 +90,32 @@ function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length
 }
 
-function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
-  }
-
-  if (value === null || typeof value !== 'object') {
-    return {}
-  }
-
-  const out: Record<string, Prisma.InputJsonValue | null> = {}
-
-  for (const key of Object.keys(value)) {
-    const child = value[key]
-    if (child === undefined) continue
-    out[key] = child === null ? null : toInputJsonValue(child)
-  }
-
-  return out
-}
-
-function toNullableJsonCreateInput(
-  value: Prisma.JsonValue | null | undefined,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return Prisma.JsonNull
-  return toInputJsonValue(value)
-}
-
-function normalizePositiveDurationMinutes(value: unknown): number | null {
-  const parsed = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(parsed)) return null
-
-  const minutes = Math.trunc(parsed)
-  if (minutes <= 0) return null
-
-  return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
-}
-
-function mapSchedulingReadinessErrorToBookingCode(
-  error: SchedulingReadinessError,
-): BookingErrorCode {
-  switch (error) {
-    case 'LOCATION_NOT_FOUND':
-      return 'LOCATION_NOT_FOUND'
-    case 'TIMEZONE_REQUIRED':
-      return 'TIMEZONE_REQUIRED'
-    case 'WORKING_HOURS_REQUIRED':
-      return 'WORKING_HOURS_REQUIRED'
-    case 'WORKING_HOURS_INVALID':
-      return 'WORKING_HOURS_INVALID'
-    case 'MODE_NOT_SUPPORTED':
-      return 'MODE_NOT_SUPPORTED'
-    case 'DURATION_REQUIRED':
-      return 'DURATION_REQUIRED'
-    case 'PRICE_REQUIRED':
-      return 'PRICE_REQUIRED'
-    case 'COORDINATES_REQUIRED':
-      return 'COORDINATES_REQUIRED'
-  }
-}
-
-function logFinalizePolicyFailure(args: {
+function toFinalizeOffering(
+  offering: FinalizeOfferingRecord,
+): {
+  id: string
   professionalId: string
-  locationId: string
-  locationType: ServiceLocationType
-  holdId: string
-  logHint: {
-    requestedStart: Date
-    requestedEnd: Date
-    conflictType:
-      | 'BLOCKED'
-      | 'BOOKING'
-      | 'HOLD'
-      | 'WORKING_HOURS'
-      | 'STEP_BOUNDARY'
-      | 'TIME_NOT_AVAILABLE'
-    meta?: Record<string, unknown>
+  serviceId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonPriceStartingAt: Prisma.Decimal | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: Prisma.Decimal | null
+  mobileDurationMinutes: number | null
+  professionalTimeZone: string | null
+} {
+  return {
+    id: offering.id,
+    professionalId: offering.professionalId,
+    serviceId: offering.serviceId,
+    offersInSalon: offering.offersInSalon,
+    offersMobile: offering.offersMobile,
+    salonPriceStartingAt: offering.salonPriceStartingAt,
+    salonDurationMinutes: offering.salonDurationMinutes,
+    mobilePriceStartingAt: offering.mobilePriceStartingAt,
+    mobileDurationMinutes: offering.mobileDurationMinutes,
+    professionalTimeZone: offering.professional?.timeZone ?? null,
   }
-}) {
-  logBookingConflict({
-    action: 'BOOKING_FINALIZE',
-    professionalId: args.professionalId,
-    locationId: args.locationId,
-    locationType: args.locationType,
-    requestedStart: args.logHint.requestedStart,
-    requestedEnd: args.logHint.requestedEnd,
-    conflictType: args.logHint.conflictType,
-    holdId: args.holdId,
-    meta: {
-      route: 'app/api/bookings/finalize/route.ts',
-      ...(args.logHint.meta ?? {}),
-    },
-  })
 }
 
 export async function POST(request: Request) {
@@ -238,24 +165,7 @@ export async function POST(request: Request) {
 
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
-      select: {
-        id: true,
-        isActive: true,
-        professionalId: true,
-        serviceId: true,
-        offersInSalon: true,
-        offersMobile: true,
-        salonPriceStartingAt: true,
-        salonDurationMinutes: true,
-        mobilePriceStartingAt: true,
-        mobileDurationMinutes: true,
-        professional: {
-          select: {
-            autoAcceptBookings: true,
-            timeZone: true,
-          },
-        },
-      },
+      select: FINALIZE_OFFERING_SELECT,
     })
 
     if (!offering || !offering.isActive) {
@@ -265,7 +175,7 @@ export async function POST(request: Request) {
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = getClientSubmittedBookingStatus(autoAccept)
 
-    let rebookOfBookingIdForCreate: string | null = null
+    let rebookOfBookingId: string | null = null
 
     if (source === BookingSource.AFTERCARE) {
       if (!aftercareToken) {
@@ -311,443 +221,51 @@ export async function POST(request: Request) {
         return bookingJsonFail('AFTERCARE_OFFERING_MISMATCH')
       }
 
-      rebookOfBookingIdForCreate =
+      rebookOfBookingId =
         requestedRebookOfBookingId && requestedRebookOfBookingId === original.id
           ? requestedRebookOfBookingId
           : original.id
     }
 
-    const booking = await withLockedProfessionalTransaction(
-      offering.professionalId,
-      async ({ tx, now }) => {
-        const hold = await tx.bookingHold.findUnique({
-          where: { id: holdId },
-          select: {
-            id: true,
-            offeringId: true,
-            professionalId: true,
-            clientId: true,
-            scheduledFor: true,
-            expiresAt: true,
-            locationType: true,
-            locationId: true,
-            locationTimeZone: true,
-            locationAddressSnapshot: true,
-            locationLatSnapshot: true,
-            locationLngSnapshot: true,
-            clientAddressId: true,
-            clientAddressSnapshot: true,
-            clientAddressLatSnapshot: true,
-            clientAddressLngSnapshot: true,
-          },
-        })
-
-        const validatedHold = await validateHoldForClientMutation({
-          tx,
-          hold,
-          clientId,
-          now,
-          expectedProfessionalId: offering.professionalId,
-          expectedOfferingId: offering.id,
-          expectedLocationType: locationType,
-        })
-
-        if (!validatedHold.ok) {
-          throw bookingError(validatedHold.code, {
-            message: validatedHold.message,
-            userMessage: validatedHold.userMessage,
-          })
-        }
-
-        if (!hold) {
-          throw bookingError('HOLD_NOT_FOUND')
-        }
-
-        const validatedContextResult = await resolveValidatedBookingContext({
-          tx,
-          professionalId: offering.professionalId,
-          requestedLocationId: validatedHold.value.locationId,
-          locationType: validatedHold.value.locationType,
-          holdLocationTimeZone: validatedHold.value.locationTimeZone,
-          professionalTimeZone: offering.professional?.timeZone ?? null,
-          fallbackTimeZone: 'UTC',
-          requireValidTimeZone: true,
-          allowFallback: false,
-          requireCoordinates: false,
-          offering: {
-            offersInSalon: offering.offersInSalon,
-            offersMobile: offering.offersMobile,
-            salonDurationMinutes: offering.salonDurationMinutes,
-            mobileDurationMinutes: offering.mobileDurationMinutes,
-            salonPriceStartingAt: offering.salonPriceStartingAt,
-            mobilePriceStartingAt: offering.mobilePriceStartingAt,
-          },
-        })
-
-        if (!validatedContextResult.ok) {
-          throw bookingError(
-            mapSchedulingReadinessErrorToBookingCode(validatedContextResult.error),
-          )
-        }
-
-        const locationContext = validatedContextResult.context
-        const baseDurationMinutes = validatedContextResult.durationMinutes
-        const priceStartingAt = validatedContextResult.priceStartingAt
-
-        const salonAddressResolution = resolveHeldSalonAddressText({
-          holdLocationType: validatedHold.value.locationType,
-          holdLocationAddressSnapshot: hold.locationAddressSnapshot,
-          fallbackFormattedAddress: locationContext.formattedAddress,
-        })
-
-        if (!salonAddressResolution.ok) {
-          throw bookingError(salonAddressResolution.code, {
-            message: salonAddressResolution.message,
-            userMessage: salonAddressResolution.userMessage,
-          })
-        }
-
-        const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
-
-        if (openingId) {
-          const activeOpening = await tx.lastMinuteOpening.findFirst({
-            where: {
-              id: openingId,
-              status: OpeningStatus.ACTIVE,
-            },
-            select: {
-              id: true,
-              startAt: true,
-              professionalId: true,
-              offeringId: true,
-              serviceId: true,
-            },
-          })
-
-          if (!activeOpening) throw bookingError('OPENING_NOT_AVAILABLE')
-          if (activeOpening.professionalId !== offering.professionalId) {
-            throw bookingError('OPENING_NOT_AVAILABLE')
-          }
-          if (activeOpening.offeringId && activeOpening.offeringId !== offering.id) {
-            throw bookingError('OPENING_NOT_AVAILABLE')
-          }
-          if (
-            activeOpening.serviceId &&
-            activeOpening.serviceId !== offering.serviceId
-          ) {
-            throw bookingError('OPENING_NOT_AVAILABLE')
-          }
-          if (
-            normalizeToMinute(new Date(activeOpening.startAt)).getTime() !==
-            requestedStart.getTime()
-          ) {
-            throw bookingError('OPENING_NOT_AVAILABLE')
-          }
-
-          const updated = await tx.lastMinuteOpening.updateMany({
-            where: {
-              id: openingId,
-              status: OpeningStatus.ACTIVE,
-            },
-            data: {
-              status: OpeningStatus.BOOKED,
-            },
-          })
-
-          if (updated.count !== 1) throw bookingError('OPENING_NOT_AVAILABLE')
-        }
-
-        const addOnLinks = addOnIds.length
-          ? await tx.offeringAddOn.findMany({
-              where: {
-                id: { in: addOnIds },
-                offeringId: offering.id,
-                isActive: true,
-                OR: [{ locationType: null }, { locationType }],
-                addOnService: {
-                  isActive: true,
-                  isAddOnEligible: true,
-                },
-              },
-              select: {
-                id: true,
-                addOnServiceId: true,
-                sortOrder: true,
-                priceOverride: true,
-                durationOverrideMinutes: true,
-                addOnService: {
-                  select: {
-                    id: true,
-                    defaultDurationMinutes: true,
-                    minPrice: true,
-                  },
-                },
-              },
-              take: 50,
-            })
-          : []
-
-        if (addOnIds.length && addOnLinks.length !== addOnIds.length) {
-          throw bookingError('ADDONS_INVALID')
-        }
-
-        const addOnServiceIds = addOnLinks.map((row) => row.addOnServiceId)
-
-        const proAddOnOfferings = addOnServiceIds.length
-          ? await tx.professionalServiceOffering.findMany({
-              where: {
-                professionalId: offering.professionalId,
-                isActive: true,
-                serviceId: { in: addOnServiceIds },
-              },
-              select: {
-                serviceId: true,
-                salonPriceStartingAt: true,
-                salonDurationMinutes: true,
-                mobilePriceStartingAt: true,
-                mobileDurationMinutes: true,
-              },
-              take: 200,
-            })
-          : []
-
-        const addOnOfferingByServiceId = new Map(
-          proAddOnOfferings.map((row) => [row.serviceId, row]),
-        )
-
-        const resolvedAddOns = addOnLinks.map((row) => {
-          const service = row.addOnService
-          const proOffering = addOnOfferingByServiceId.get(service.id) ?? null
-
-          const durationRaw =
-            row.durationOverrideMinutes ??
-            (locationType === ServiceLocationType.MOBILE
-              ? proOffering?.mobileDurationMinutes
-              : proOffering?.salonDurationMinutes) ??
-            service.defaultDurationMinutes
-
-          const durationMinutesSnapshot = normalizePositiveDurationMinutes(durationRaw)
-
-          const priceRaw =
-            row.priceOverride ??
-            (locationType === ServiceLocationType.MOBILE
-              ? proOffering?.mobilePriceStartingAt
-              : proOffering?.salonPriceStartingAt) ??
-            service.minPrice
-
-          return {
-            offeringAddOnId: row.id,
-            serviceId: service.id,
-            durationMinutesSnapshot,
-            priceSnapshot: decimalFromUnknown(priceRaw),
-            sortOrder: row.sortOrder ?? 0,
-          }
-        })
-
-        for (const addOn of resolvedAddOns) {
-          if (addOn.durationMinutesSnapshot == null) {
-            throw bookingError('ADDONS_INVALID')
-          }
-        }
-
-        const basePrice = decimalFromUnknown(priceStartingAt)
-
-        const addOnsPriceTotal = resolvedAddOns.reduce(
-          (acc, row) => acc.add(row.priceSnapshot),
-          new Prisma.Decimal(0),
-        )
-
-        const subtotal = basePrice.add(addOnsPriceTotal)
-
-        const addOnsDurationTotal = resolvedAddOns.reduce(
-          (sum, row) => sum + (row.durationMinutesSnapshot ?? 0),
-          0,
-        )
-
-        const totalDurationMinutes = clampInt(
-          baseDurationMinutes + addOnsDurationTotal,
-          15,
-          MAX_SLOT_DURATION_MINUTES,
-        )
-
-        const decision = await evaluateFinalizeDecision({
-          tx,
-          now,
-          professionalId: offering.professionalId,
-          holdId: hold.id,
-          requestedStart,
-          durationMinutes: totalDurationMinutes,
-          bufferMinutes: locationContext.bufferMinutes,
-          locationId: locationContext.locationId,
-          locationType: validatedHold.value.locationType,
-          workingHours: locationContext.workingHours,
-          timeZone: locationContext.timeZone,
-          stepMinutes: locationContext.stepMinutes,
-          advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
-          maxDaysAhead: locationContext.maxDaysAhead,
-          fallbackTimeZone: 'UTC',
-        })
-
-        if (!decision.ok) {
-          if (decision.logHint) {
-            logFinalizePolicyFailure({
-              professionalId: offering.professionalId,
-              locationId: locationContext.locationId,
-              locationType: validatedHold.value.locationType,
-              holdId: hold.id,
-              logHint: decision.logHint,
-            })
-          }
-
-          throw bookingError(decision.code, {
-            message: decision.message,
-            userMessage: decision.userMessage,
-          })
-        }
-
-        const salonLocationAddressSnapshotInput:
-          | Prisma.InputJsonValue
-          | Prisma.NullableJsonNullValueInput =
-          validatedHold.value.locationType === ServiceLocationType.SALON &&
-          salonAddressResolution.value
-            ? buildAddressSnapshot(salonAddressResolution.value) ?? Prisma.JsonNull
-            : Prisma.JsonNull
-
-        let created: {
-          id: string
-          status: BookingStatus
-          scheduledFor: Date
-          professionalId: string
-        }
-
-        try {
-          created = await tx.booking.create({
-            data: {
-              clientId,
-              professionalId: offering.professionalId,
-              serviceId: offering.serviceId,
-              offeringId: offering.id,
-              scheduledFor: requestedStart,
-              status: initialStatus,
-              source,
-              locationType,
-              rebookOfBookingId: rebookOfBookingIdForCreate,
-              subtotalSnapshot: subtotal,
-              totalDurationMinutes,
-              bufferMinutes: locationContext.bufferMinutes,
-              locationId: locationContext.locationId,
-              locationTimeZone: locationContext.timeZone,
-
-              locationAddressSnapshot: salonLocationAddressSnapshotInput,
-              locationLatSnapshot:
-                decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
-              locationLngSnapshot:
-                decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
-
-              clientAddressId:
-                validatedHold.value.locationType === ServiceLocationType.MOBILE
-                  ? validatedHold.value.holdClientAddressId
-                  : null,
-              clientAddressSnapshot:
-                validatedHold.value.locationType === ServiceLocationType.MOBILE
-                  ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
-                  : Prisma.JsonNull,
-              clientAddressLatSnapshot:
-                validatedHold.value.locationType === ServiceLocationType.MOBILE
-                  ? decimalToNumber(hold.clientAddressLatSnapshot)
-                  : null,
-              clientAddressLngSnapshot:
-                validatedHold.value.locationType === ServiceLocationType.MOBILE
-                  ? decimalToNumber(hold.clientAddressLngSnapshot)
-                  : null,
-            },
-            select: {
-              id: true,
-              status: true,
-              scheduledFor: true,
-              professionalId: true,
-            },
-          })
-        } catch (error: unknown) {
-          if (
-            error instanceof Prisma.PrismaClientKnownRequestError &&
-            error.code === 'P2002'
-          ) {
-            throw bookingError('TIME_NOT_AVAILABLE')
-          }
-          throw error
-        }
-
-        const baseItem = await tx.bookingServiceItem.create({
-          data: {
-            bookingId: created.id,
-            serviceId: offering.serviceId,
-            offeringId: offering.id,
-            itemType: BookingServiceItemType.BASE,
-            priceSnapshot: basePrice,
-            durationMinutesSnapshot: baseDurationMinutes,
-            sortOrder: 0,
-          },
-          select: { id: true },
-        })
-
-        if (resolvedAddOns.length) {
-          await tx.bookingServiceItem.createMany({
-            data: resolvedAddOns.map((row, index) => ({
-              bookingId: created.id,
-              serviceId: row.serviceId,
-              offeringId: null,
-              itemType: BookingServiceItemType.ADD_ON,
-              parentItemId: baseItem.id,
-              priceSnapshot: row.priceSnapshot,
-              durationMinutesSnapshot: row.durationMinutesSnapshot ?? 0,
-              sortOrder: index + 1,
-              notes: `ADDON:${row.offeringAddOnId}`,
-            })),
-          })
-        }
-
-        if (openingId) {
-          await tx.openingNotification.updateMany({
-            where: {
-              clientId,
-              openingId,
-              bookedAt: null,
-            },
-            data: {
-              bookedAt: new Date(),
-            },
-          })
-        }
-
-        await tx.bookingHold.delete({
-          where: { id: hold.id },
-        })
-
-        return created
-      },
-    )
+    const result = await finalizeBookingFromHold({
+      clientId,
+      holdId,
+      openingId,
+      addOnIds,
+      locationType,
+      source,
+      initialStatus,
+      rebookOfBookingId,
+      offering: toFinalizeOffering(offering),
+      fallbackTimeZone: 'UTC',
+    })
 
     const notificationType =
-      booking.status === BookingStatus.PENDING
+      result.booking.status === BookingStatus.PENDING
         ? NotificationType.BOOKING_REQUEST
         : NotificationType.BOOKING_UPDATE
 
     await createProNotification({
-      professionalId: booking.professionalId,
+      professionalId: result.booking.professionalId,
       type: notificationType,
       title:
         notificationType === NotificationType.BOOKING_REQUEST
           ? 'New booking request'
           : 'New booking confirmed',
       body: '',
-      href: `/pro/bookings/${booking.id}`,
+      href: `/pro/bookings/${result.booking.id}`,
       actorUserId: user.id,
-      bookingId: booking.id,
-      dedupeKey: `PRO_NOTIF:${String(notificationType)}:${booking.id}`,
+      bookingId: result.booking.id,
+      dedupeKey: `PRO_NOTIF:${String(notificationType)}:${result.booking.id}`,
     })
 
-    return jsonOk({ booking }, 201)
+    return jsonOk(
+      {
+        booking: result.booking,
+        meta: result.meta,
+      },
+      201,
+    )
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {

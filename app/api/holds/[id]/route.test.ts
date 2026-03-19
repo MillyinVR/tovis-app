@@ -1,6 +1,6 @@
-// app/api/holds/[id]/route.test.ts 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServiceLocationType } from '@prisma/client'
+import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
 
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   bookingHoldFindUnique: vi.fn(),
-  bookingHoldDeleteMany: vi.fn(),
+  releaseHold: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -24,18 +24,19 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     bookingHold: {
       findUnique: mocks.bookingHoldFindUnique,
-      deleteMany: mocks.bookingHoldDeleteMany,
     },
   },
 }))
 
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  releaseHold: mocks.releaseHold,
+}))
+
 import { GET, DELETE } from './route'
 
-function makeCtx(id: string | null) {
+function makeCtx(id: string): { params: Promise<{ id: string }> } {
   return {
-    params: Promise.resolve(
-      id == null ? ({} as { id: string }) : { id },
-    ),
+    params: Promise.resolve({ id }),
   }
 }
 
@@ -78,7 +79,13 @@ describe('app/api/holds/[id]/route.ts', () => {
       locationLngSnapshot: -118.25,
     })
 
-    mocks.bookingHoldDeleteMany.mockResolvedValue({ count: 1 })
+    mocks.releaseHold.mockResolvedValue({
+      holdId: 'hold_1',
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
   })
 
   describe('GET', () => {
@@ -95,21 +102,41 @@ describe('app/api/holds/[id]/route.ts', () => {
       expect(mocks.bookingHoldFindUnique).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when hold id is missing', async () => {
-      const result = await GET(new Request('http://localhost'), makeCtx(null))
+    it('returns HOLD_ID_REQUIRED when hold id is missing', async () => {
+      const descriptor = getBookingErrorDescriptor('HOLD_ID_REQUIRED')
 
-      expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing hold id.')
+      const result = await GET(new Request('http://localhost'), makeCtx(''))
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        descriptor.httpStatus,
+        descriptor.userMessage,
+        {
+          code: descriptor.code,
+          retryable: descriptor.retryable,
+          uiAction: descriptor.uiAction,
+          message: descriptor.message,
+        },
+      )
+
       expect(result).toEqual({
         ok: false,
-        status: 400,
-        error: 'Missing hold id.',
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       })
     })
 
-    it('returns 404 when hold does not exist', async () => {
+    it('returns HOLD_NOT_FOUND when hold does not exist', async () => {
+      const descriptor = getBookingErrorDescriptor('HOLD_NOT_FOUND')
       mocks.bookingHoldFindUnique.mockResolvedValueOnce(null)
 
-      const result = await GET(new Request('http://localhost'), makeCtx('hold_404'))
+      const result = await GET(
+        new Request('http://localhost'),
+        makeCtx('hold_404'),
+      )
 
       expect(mocks.bookingHoldFindUnique).toHaveBeenCalledWith({
         where: { id: 'hold_404' },
@@ -129,15 +156,31 @@ describe('app/api/holds/[id]/route.ts', () => {
         },
       })
 
-      expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Hold not found.')
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        descriptor.httpStatus,
+        descriptor.userMessage,
+        {
+          code: descriptor.code,
+          retryable: descriptor.retryable,
+          uiAction: descriptor.uiAction,
+          message: descriptor.message,
+        },
+      )
+
       expect(result).toEqual({
         ok: false,
-        status: 404,
-        error: 'Hold not found.',
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       })
     })
 
-    it('returns 403 when hold belongs to another client', async () => {
+    it('returns HOLD_FORBIDDEN when hold belongs to another client', async () => {
+      const descriptor = getBookingErrorDescriptor('HOLD_FORBIDDEN')
+
       mocks.bookingHoldFindUnique.mockResolvedValueOnce({
         id: 'hold_1',
         clientId: 'client_other',
@@ -155,11 +198,25 @@ describe('app/api/holds/[id]/route.ts', () => {
 
       const result = await GET(new Request('http://localhost'), makeCtx('hold_1'))
 
-      expect(mocks.jsonFail).toHaveBeenCalledWith(403, 'Forbidden.')
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        descriptor.httpStatus,
+        descriptor.userMessage,
+        {
+          code: descriptor.code,
+          retryable: descriptor.retryable,
+          uiAction: descriptor.uiAction,
+          message: descriptor.message,
+        },
+      )
+
       expect(result).toEqual({
         ok: false,
-        status: 403,
-        error: 'Forbidden.',
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       })
     })
 
@@ -290,69 +347,132 @@ describe('app/api/holds/[id]/route.ts', () => {
         res: authRes,
       })
 
-      const result = await DELETE(new Request('http://localhost'), makeCtx('hold_1'))
+      const result = await DELETE(
+        new Request('http://localhost'),
+        makeCtx('hold_1'),
+      )
 
       expect(result).toBe(authRes)
-      expect(mocks.bookingHoldDeleteMany).not.toHaveBeenCalled()
+      expect(mocks.releaseHold).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when hold id is missing', async () => {
-      const result = await DELETE(new Request('http://localhost'), makeCtx(null))
+    it('returns HOLD_ID_REQUIRED when hold id is missing', async () => {
+      const descriptor = getBookingErrorDescriptor('HOLD_ID_REQUIRED')
 
-      expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing hold id.')
+      const result = await DELETE(new Request('http://localhost'), makeCtx(''))
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        descriptor.httpStatus,
+        descriptor.userMessage,
+        {
+          code: descriptor.code,
+          retryable: descriptor.retryable,
+          uiAction: descriptor.uiAction,
+          message: descriptor.message,
+        },
+      )
+
       expect(result).toEqual({
         ok: false,
-        status: 400,
-        error: 'Missing hold id.',
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       })
     })
 
-    it('deletes a caller-owned hold', async () => {
-      mocks.bookingHoldDeleteMany.mockResolvedValueOnce({ count: 1 })
-
-      const result = await DELETE(new Request('http://localhost'), makeCtx('hold_1'))
-
-      expect(mocks.bookingHoldDeleteMany).toHaveBeenCalledWith({
-        where: {
-          id: 'hold_1',
-          clientId: 'client_1',
+    it('releases a caller-owned hold through the write boundary', async () => {
+      mocks.releaseHold.mockResolvedValueOnce({
+        holdId: 'hold_1',
+        meta: {
+          mutated: true,
+          noOp: false,
         },
       })
 
-      expect(mocks.jsonOk).toHaveBeenCalledWith({ deleted: true }, 200)
+      const result = await DELETE(
+        new Request('http://localhost'),
+        makeCtx('hold_1'),
+      )
+
+      expect(mocks.releaseHold).toHaveBeenCalledWith({
+        holdId: 'hold_1',
+        clientId: 'client_1',
+      })
+
+      expect(mocks.jsonOk).toHaveBeenCalledWith(
+        {
+          deleted: true,
+          holdId: 'hold_1',
+          meta: {
+            mutated: true,
+            noOp: false,
+          },
+        },
+        200,
+      )
+
       expect(result).toEqual({
         ok: true,
         status: 200,
-        data: { deleted: true },
-      })
-    })
-
-    it('is idempotent when nothing is deleted', async () => {
-      mocks.bookingHoldDeleteMany.mockResolvedValueOnce({ count: 0 })
-
-      const result = await DELETE(new Request('http://localhost'), makeCtx('hold_missing'))
-
-      expect(mocks.bookingHoldDeleteMany).toHaveBeenCalledWith({
-        where: {
-          id: 'hold_missing',
-          clientId: 'client_1',
+        data: {
+          deleted: true,
+          holdId: 'hold_1',
+          meta: {
+            mutated: true,
+            noOp: false,
+          },
         },
       })
+    })
 
-      expect(mocks.jsonOk).toHaveBeenCalledWith({ deleted: false }, 200)
+    it('maps booking errors from releaseHold', async () => {
+      const descriptor = getBookingErrorDescriptor('HOLD_FORBIDDEN')
+
+      mocks.releaseHold.mockRejectedValueOnce(new BookingError('HOLD_FORBIDDEN'))
+
+      const result = await DELETE(
+        new Request('http://localhost'),
+        makeCtx('hold_1'),
+      )
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        descriptor.httpStatus,
+        descriptor.userMessage,
+        {
+          code: descriptor.code,
+          retryable: descriptor.retryable,
+          uiAction: descriptor.uiAction,
+          message: descriptor.message,
+        },
+      )
+
       expect(result).toEqual({
-        ok: true,
-        status: 200,
-        data: { deleted: false },
+        ok: false,
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       })
     })
 
-    it('returns 500 when DELETE throws', async () => {
-      mocks.bookingHoldDeleteMany.mockRejectedValueOnce(new Error('db blew up'))
+    it('returns 500 when DELETE throws a non-booking error', async () => {
+      mocks.releaseHold.mockRejectedValueOnce(new Error('db blew up'))
 
-      const result = await DELETE(new Request('http://localhost'), makeCtx('hold_1'))
+      const result = await DELETE(
+        new Request('http://localhost'),
+        makeCtx('hold_1'),
+      )
 
-      expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Failed to release hold.')
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        500,
+        'Failed to release hold.',
+      )
+
       expect(result).toEqual({
         ok: false,
         status: 500,

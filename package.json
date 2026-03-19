@@ -17,7 +17,8 @@
     "db:test:stop": "docker stop tovis-test-postgres",
     "db:test:down": "docker rm -f tovis-test-postgres",
     "db:test:push": "node scripts/with-test-db.mjs npx prisma db push --skip-generate",
-    "test:integration": "node scripts/with-test-db.mjs npx vitest run --config vitest.integration.config.mts"
+    "test:integration": "node scripts/with-test-db.mjs npx vitest run --config vitest.integration.config.mts",
+    "check:booking-boundary": "node tools/check-booking-write-boundary.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
