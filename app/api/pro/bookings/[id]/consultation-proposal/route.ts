@@ -8,8 +8,7 @@ import {
   ClientNotificationType,
   Prisma,
 } from '@prisma/client'
-import { transitionSessionStepTx } from '@/lib/booking/transitions'
-
+import { transitionSessionStepInTransaction } from '@/lib/booking/writeBoundary'
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -227,11 +226,11 @@ export async function POST(req: Request, ctx: Ctx) {
         select: { id: true, status: true, proposedTotal: true, updatedAt: true },
       })
 
-      const stepRes = await transitionSessionStepTx(tx, {
-        bookingId: booking.id,
-        proId,
-        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-      })
+  const stepRes = await transitionSessionStepInTransaction(tx, {
+    bookingId: booking.id,
+    professionalId: proId,
+    nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+  })
 
       if (!stepRes.ok) {
         return {

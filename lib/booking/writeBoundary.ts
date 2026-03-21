@@ -350,6 +350,16 @@ type MarkBookingRemindersSentResult = {
   count: number
   meta: MutationMeta
 }
+type UpdateBookingLastMinuteDiscountArgs = {
+  bookingId: string
+  professionalId: string
+  discountAmount: Prisma.Decimal
+}
+
+type UpdateBookingLastMinuteDiscountResult = {
+  bookingId: string
+  meta: MutationMeta
+}
 
 type CreateRebookedBookingFromCompletedBookingArgs = {
   bookingId: string
@@ -5239,6 +5249,22 @@ export async function finishBookingSession(
       }),
   )
 }
+
+export async function transitionSessionStepInTransaction(
+  tx: Prisma.TransactionClient,
+  args: TransitionSessionStepArgs,
+): Promise<TransitionSessionStepResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return performLockedTransitionSessionStep({
+    tx,
+    bookingId: args.bookingId,
+    professionalId: args.professionalId,
+    nextStep: args.nextStep,
+  })
+}
+
 export async function transitionSessionStep(
   args: TransitionSessionStepArgs,
 ): Promise<TransitionSessionStepResult> {
@@ -5363,6 +5389,38 @@ export async function createHold(
         clientAddressId: args.clientAddressId,
       }),
   )
+}
+
+export async function updateBookingLastMinuteDiscount(
+  args: UpdateBookingLastMinuteDiscountArgs,
+): Promise<UpdateBookingLastMinuteDiscountResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: args.bookingId },
+    select: {
+      id: true,
+      professionalId: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  if (!booking || booking.professionalId !== args.professionalId) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  await prisma.booking.update({
+    where: { id: booking.id },
+    data: {
+      discountAmount: args.discountAmount,
+    },
+    select: { id: true } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    bookingId: booking.id,
+    meta: buildMeta(true),
+  }
 }
 
 /**
