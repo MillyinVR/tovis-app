@@ -64,6 +64,7 @@ import { evaluateHoldCreationDecision } from '@/lib/booking/policies/holdPolicy'
 import { evaluateRescheduleDecision } from '@/lib/booking/policies/reschedulePolicy'
 import { evaluateFinalizeDecision } from '@/lib/booking/policies/finalizePolicy'
 import { evaluateProSchedulingDecision } from '@/lib/booking/policies/proSchedulingPolicy'
+import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import {
   type RequestedServiceItemInput,
   buildNormalizedBookingItemsFromRequestedOfferings,
@@ -832,6 +833,13 @@ function buildMeta(mutated: boolean): MutationMeta {
     mutated,
     noOp: !mutated,
   }
+}
+
+async function bumpProfessionalScheduleVersion(
+  professionalId: string,
+): Promise<void> {
+  if (!professionalId.trim()) return
+  await bumpScheduleVersion(professionalId)
 }
 
 function normalizeReason(reason?: string | null): string | null {
@@ -2308,12 +2316,14 @@ async function performLockedCancel(args: {
     } satisfies Prisma.BookingSelect,
   })
 
-  await maybeCreateBookingCancelledNotification({
+    await maybeCreateBookingCancelledNotification({
     tx: args.tx,
     booking,
     notifyClient: args.notifyClient,
     reason: args.reason,
   })
+
+  await bumpProfessionalScheduleVersion(booking.professionalId)
 
   return {
     booking: {
@@ -2993,6 +3003,8 @@ async function performLockedCreateHold(args: {
       select: CREATE_HOLD_SELECT,
     })
 
+    await bumpProfessionalScheduleVersion(offering.professionalId)
+
     return {
       hold: {
         id: hold.id,
@@ -3240,9 +3252,11 @@ async function performLockedRescheduleBookingFromHold(args: {
     } satisfies Prisma.BookingSelect,
   })
 
-  await args.tx.bookingHold.delete({
+    await args.tx.bookingHold.delete({
     where: { id: hold.id },
   })
+
+  await bumpProfessionalScheduleVersion(booking.professionalId)
 
   return {
     booking: {
@@ -3671,6 +3685,8 @@ async function performLockedFinalizeBookingFromHold(args: {
     where: { id: hold.id },
   })
 
+  await bumpProfessionalScheduleVersion(created.professionalId)
+
   return {
     booking: {
       id: created.id,
@@ -3951,7 +3967,7 @@ async function performLockedCreateProBooking(args: {
     throw error
   }
 
-  await args.tx.bookingServiceItem.create({
+    await args.tx.bookingServiceItem.create({
     data: {
       bookingId: booking.id,
       serviceId: offering.serviceId,
@@ -3962,6 +3978,8 @@ async function performLockedCreateProBooking(args: {
       sortOrder: 0,
     },
   })
+
+  await bumpProfessionalScheduleVersion(args.professionalId)
 
   return {
     booking: {
@@ -4270,6 +4288,8 @@ async function performLockedCreateRebookedBooking(
     },
   })
 
+    await bumpProfessionalScheduleVersion(source.professionalId)
+
   return {
     booking: {
       id: createdBooking.id,
@@ -4360,6 +4380,10 @@ async function performLockedUpdateProBooking(args: {
     requireValid: false,
   })
 
+  const existingScheduledFor = normalizeToMinute(new Date(existing.scheduledFor))
+  const existingBufferMinutes = Math.max(0, Number(existing.bufferMinutes ?? 0))
+  const existingDurationMinutes = durationOrFallback(existing.totalDurationMinutes)
+
   const existingLocationAddressSnapshot = pickFormattedAddressFromSnapshot(
     existing.locationAddressSnapshot,
   )
@@ -4381,9 +4405,9 @@ async function performLockedUpdateProBooking(args: {
     return buildBookingMutationPayload({
       booking: buildBookingOutput({
         id: existing.id,
-        scheduledFor: new Date(existing.scheduledFor),
-        totalDurationMinutes: durationOrFallback(existing.totalDurationMinutes),
-        bufferMinutes: Math.max(0, Number(existing.bufferMinutes ?? 0)),
+        scheduledFor: existingScheduledFor,
+        totalDurationMinutes: existingDurationMinutes,
+        bufferMinutes: existingBufferMinutes,
         status: existing.status,
         subtotalSnapshot: existing.subtotalSnapshot ?? new Prisma.Decimal(0),
         appointmentTimeZone: outputSchedulingContext.appointmentTimeZone,
@@ -4425,6 +4449,8 @@ async function performLockedUpdateProBooking(args: {
         ).toISOString()}`,
       })
     }
+
+    await bumpProfessionalScheduleVersion(existing.professionalId)
 
     return buildBookingMutationPayload({
       booking: buildBookingOutput({
@@ -4553,7 +4579,7 @@ async function performLockedUpdateProBooking(args: {
           0,
           MAX_BUFFER_MINUTES,
         )
-      : Math.max(0, Number(existing.bufferMinutes ?? 0))
+      : existingBufferMinutes
 
   let normalizedServiceItems:
     | ReturnType<typeof buildNormalizedBookingItemsFromRequestedOfferings>
@@ -4649,11 +4675,16 @@ async function performLockedUpdateProBooking(args: {
     throw bookingError('DURATION_MISMATCH')
   }
 
-  const finalDuration = normalizedServiceItems
+    const finalDuration = normalizedServiceItems
     ? computedDurationMinutes
     : snappedNextDuration != null
       ? snappedNextDuration
-      : durationOrFallback(existing.totalDurationMinutes)
+      : existingDurationMinutes
+
+  const occupancyChanged =
+    finalStart.getTime() !== existingScheduledFor.getTime() ||
+    finalBuffer !== existingBufferMinutes ||
+    finalDuration !== existingDurationMinutes
 
   await enforceUpdateBookingScheduling({
     tx: args.tx,
@@ -4764,6 +4795,10 @@ async function performLockedUpdateProBooking(args: {
       body: bodyText,
       dedupeKey: `BOOKING_UPDATED:${updated.id}:${finalStart.toISOString()}:${finalDuration}:${finalBuffer}:${String(updated.status)}`,
     })
+  }
+
+  if (occupancyChanged) {
+    await bumpProfessionalScheduleVersion(existing.professionalId)
   }
 
   return buildBookingMutationPayload({
@@ -5443,6 +5478,8 @@ export async function releaseHold(
       await tx.bookingHold.delete({
         where: { id: hold.id },
       })
+
+      await bumpProfessionalScheduleVersion(hold.professionalId)
 
       return {
         holdId: hold.id,

@@ -39,6 +39,10 @@ import {
 } from '@/lib/booking/constants'
 import { canShowSlot } from '@/lib/booking/policies/showSlotPolicy'
 import {
+  getScheduleConfigVersion,
+  getScheduleVersion,
+} from '@/lib/booking/cacheVersion'
+import {
   getBookingFailPayload,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
@@ -49,11 +53,11 @@ const MAX_LEAD_MINUTES = 30 * 24 * 60
 const OCCUPANCY_WINDOW_PADDING_MINUTES =
   MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 
-const TTL_DAY_SECONDS = 90
-const TTL_SUMMARY_SECONDS = 60
-const TTL_BUSY_SECONDS = 60
+const TTL_DAY_SECONDS = 30
+const TTL_SUMMARY_SECONDS = 30
+const TTL_BUSY_SECONDS = 30
 const TTL_OTHER_PROS_SECONDS = 600
-const TTL_PLACEMENT_SECONDS = 600
+const TTL_PLACEMENT_SECONDS = 60
 
 const DEFAULT_SUMMARY_WINDOW_DAYS = 7
 const MAX_SUMMARY_WINDOW_DAYS = 21
@@ -364,14 +368,16 @@ function buildPlacementCacheKey(args: {
   locationType: string | null
   locationId: string | null
   clientAddressId: string | null
+  scheduleConfigVersion: number
 }): string {
   return [
-    'avail:placement:v1',
+    'avail:placement:v2',
     args.professionalId,
     args.serviceId,
     args.locationType ?? 'AUTO',
     args.locationId ?? 'AUTO',
     args.clientAddressId ?? 'none',
+    String(args.scheduleConfigVersion),
   ].join(':')
 }
 
@@ -803,6 +809,7 @@ async function loadBusyIntervals(args: {
   nowUtc: Date
   fallbackDurationMinutes: number
   locationBufferMinutes: number
+  scheduleVersion: number
   cache?: { enabled: boolean }
 }): Promise<BusyInterval[]> {
   const cacheEnabled = Boolean(args.cache?.enabled)
@@ -819,14 +826,15 @@ async function loadBusyIntervals(args: {
     })
   }
 
-  const key = [
-    'avail:busy:v6',
+    const key = [
+    'avail:busy:v7',
     args.professionalId,
     args.locationId ?? 'GLOBAL',
     args.windowStartUtc.toISOString(),
     args.windowEndUtc.toISOString(),
     String(args.locationBufferMinutes ?? ''),
     String(args.fallbackDurationMinutes ?? ''),
+    String(args.scheduleVersion),
   ].join(':')
 
   const hit = await cacheGetJson<unknown>(key)
@@ -1556,9 +1564,14 @@ export async function GET(req: Request) {
     const radiusMilesRaw = parseFloatParam(searchParams.get('radiusMiles'))
     const radiusMiles = clampFloat(radiusMilesRaw ?? 15, 5, 50)
 
-    if (!professionalId || !serviceId) {
+        if (!professionalId || !serviceId) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
     }
+
+    const [scheduleVersion, scheduleConfigVersion] = await Promise.all([
+      getScheduleVersion(professionalId),
+      getScheduleConfigVersion(professionalId),
+    ])
 
     const placementCacheKey = debug
       ? null
@@ -1568,6 +1581,7 @@ export async function GET(req: Request) {
           locationType: requestedLocationType,
           locationId: requestedLocationId,
           clientAddressId,
+          scheduleConfigVersion,
         })
 
     const cachedPlacement = placementCacheKey
@@ -1881,10 +1895,10 @@ export async function GET(req: Request) {
         ? ymdToString(summaryWindow.nextStartYMD)
         : null
 
-      const cacheKey = debug
+            const cacheKey = debug
         ? null
         : [
-            'avail:summary:v8',
+            'avail:summary:v9',
             professionalId,
             serviceId,
             locationId,
@@ -1898,6 +1912,8 @@ export async function GET(req: Request) {
             String(locationBufferMinutes),
             String(maxAdvanceDays),
             String(includeOtherPros ? 1 : 0),
+            String(scheduleVersion),
+            String(scheduleConfigVersion),
             stableHash({
               addOnIds,
               viewerLat: roundedViewerLat,
@@ -1953,6 +1969,7 @@ export async function GET(req: Request) {
           nowUtc,
           fallbackDurationMinutes: durationMinutes,
           locationBufferMinutes,
+          scheduleVersion,
           cache: { enabled: !debug },
         }),
         includeOtherPros && centerLat != null && centerLng != null
@@ -2102,10 +2119,10 @@ export async function GET(req: Request) {
       )
     }
 
-    const dayCacheKey = debug
+        const dayCacheKey = debug
       ? null
       : [
-          'avail:day:v6',
+          'avail:day:v7',
           professionalId,
           serviceId,
           locationId,
@@ -2115,6 +2132,8 @@ export async function GET(req: Request) {
           String(stepMinutes),
           String(leadTimeMinutes),
           String(locationBufferMinutes),
+          String(scheduleVersion),
+          String(scheduleConfigVersion),
           stableHash({
             addOnIds,
             durationMinutes,
@@ -2165,6 +2184,7 @@ export async function GET(req: Request) {
       nowUtc,
       fallbackDurationMinutes: durationMinutes,
       locationBufferMinutes,
+      scheduleVersion,
       cache: { enabled: !debug },
     })
 
