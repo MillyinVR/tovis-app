@@ -6,11 +6,14 @@ import {
   BookingStatus,
   ClientAddressKind,
   ClientNotificationType,
+  MediaPhase,
   OpeningStatus,
   Prisma,
   ProfessionalLocationType,
+  Role,
   ServiceLocationType,
   SessionStep,
+  ReminderType,
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -72,6 +75,7 @@ import {
   type AppointmentSchedulingContext,
   type TimeZoneTruthSource,
 } from '@/lib/booking/timeZoneTruth'
+import crypto from 'node:crypto'
 
 type MutationMeta = {
   mutated: boolean
@@ -241,6 +245,40 @@ type CreateProBookingResult = {
   meta: MutationMeta
 }
 
+type StartBookingSessionArgs = {
+  bookingId: string
+  professionalId: string
+}
+
+
+type StartBookingSessionResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    startedAt: Date | null
+    finishedAt: Date | null
+    sessionStep: SessionStep
+  }
+  meta: MutationMeta
+}
+
+type FinishBookingSessionArgs = {
+  bookingId: string
+  professionalId: string
+}
+
+type FinishBookingSessionResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    startedAt: Date | null
+    finishedAt: Date | null
+    sessionStep: SessionStep
+  }
+  afterCount: number
+  meta: MutationMeta
+}
+
 type CreateRebookedBookingFromCompletedBookingArgs = {
   bookingId: string
   professionalId: string
@@ -278,6 +316,46 @@ type PerformLockedCreateRebookedBookingArgs = {
   professionalId: string
   scheduledFor: Date
   initialStatus: BookingStatus
+}
+type UpsertBookingAftercareArgs = {
+  bookingId: string
+  professionalId: string
+  notes: string | null
+  rebookMode: AftercareRebookMode
+  rebookedFor: Date | null
+  rebookWindowStart: Date | null
+  rebookWindowEnd: Date | null
+  createRebookReminder: boolean
+  rebookReminderDaysBefore: number
+  createProductReminder: boolean
+  productReminderDaysAfter: number
+  recommendedProducts: {
+    name: string
+    url: string
+    note: string | null
+  }[]
+  sendToClient: boolean
+}
+
+type UpsertBookingAftercareResult = {
+  aftercare: {
+    id: string
+    publicToken: string
+    rebookMode: AftercareRebookMode
+    rebookedFor: Date | null
+    rebookWindowStart: Date | null
+    rebookWindowEnd: Date | null
+  }
+  remindersTouched: number
+  clientNotified: boolean
+  bookingFinished: boolean
+  booking: {
+    status: BookingStatus
+    sessionStep: SessionStep
+    finishedAt: Date | null
+  } | null
+  timeZoneUsed: string
+  meta: MutationMeta
 }
 
 type UpdateRequestedStatus =
@@ -349,6 +427,20 @@ const CANCEL_BOOKING_SELECT = {
 
 type CancelBookingRecord = Prisma.BookingGetPayload<{
   select: typeof CANCEL_BOOKING_SELECT
+}>
+
+const START_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  scheduledFor: true,
+  startedAt: true,
+  finishedAt: true,
+  sessionStep: true,
+} satisfies Prisma.BookingSelect
+
+type StartBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof START_BOOKING_SELECT
 }>
 
 const HOLD_OWNERSHIP_SELECT = {
@@ -452,6 +544,19 @@ const FINALIZE_HOLD_SELECT = {
   clientAddressLngSnapshot: true,
 } satisfies Prisma.BookingHoldSelect
 
+const FINISH_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  startedAt: true,
+  finishedAt: true,
+  sessionStep: true,
+} satisfies Prisma.BookingSelect
+
+type FinishBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof FINISH_BOOKING_SELECT
+}>
+
 const PRO_CREATE_CLIENT_SELECT = {
   id: true,
 } satisfies Prisma.ClientProfileSelect
@@ -551,6 +656,42 @@ type AftercareRebookLockRecord = Prisma.AftercareSummaryGetPayload<{
   select: typeof AFTERCARE_REBOOK_LOCK_SELECT
 }>
 
+const AFTERCARE_UPSERT_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  sessionStep: true,
+  scheduledFor: true,
+  finishedAt: true,
+  locationTimeZone: true,
+  service: {
+    select: {
+      name: true,
+    },
+  },
+  client: {
+    select: {
+      firstName: true,
+      lastName: true,
+    },
+  },
+  aftercareSummary: {
+    select: {
+      publicToken: true,
+    },
+  },
+  professional: {
+    select: {
+      timeZone: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type AftercareUpsertBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof AFTERCARE_UPSERT_BOOKING_SELECT
+}>
+
 function buildMeta(mutated: boolean): MutationMeta {
   return {
     mutated,
@@ -562,6 +703,94 @@ function normalizeReason(reason?: string | null): string | null {
   if (typeof reason !== 'string') return null
   const trimmed = reason.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
+  const start = scheduledFor.getTime() - 15 * 60 * 1000
+  const end = scheduledFor.getTime() + 15 * 60 * 1000
+  const t = now.getTime()
+  return t >= start && t <= end
+}
+
+function newPublicToken(): string {
+  return crypto.randomBytes(16).toString('hex')
+}
+
+function addDaysByMs(base: Date, days: number): Date | null {
+  const ms = base.getTime() + days * 24 * 60 * 60 * 1000
+  const d = new Date(ms)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function makeAftercareReminderDedupeKey(
+  bookingId: string,
+  type: 'REBOOK' | 'PRODUCT_FOLLOWUP',
+): string {
+  return `aftercare:${bookingId}:${type}`
+}
+
+function makeAftercareClientNotifDedupeKey(bookingId: string): string {
+  return `client_aftercare:${bookingId}`
+}
+
+function resolveAftercareTimeZone(args: {
+  bookingLocationTimeZone?: unknown
+  professionalTimeZone?: unknown
+}): string {
+  const bookingTz =
+    typeof args.bookingLocationTimeZone === 'string'
+      ? args.bookingLocationTimeZone.trim()
+      : ''
+
+  if (bookingTz && isValidIanaTimeZone(bookingTz)) return bookingTz
+
+  const proTz =
+    typeof args.professionalTimeZone === 'string'
+      ? args.professionalTimeZone.trim()
+      : ''
+
+  if (proTz && isValidIanaTimeZone(proTz)) return proTz
+
+  return 'UTC'
+}
+
+function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
+  const tz = timeZone && isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function computeRebookReminderDueAt(args: {
+  mode: AftercareRebookMode
+  rebookedFor: Date | null
+  windowStart: Date | null
+  daysBefore: number
+}): Date | null {
+  const base =
+    args.mode === AftercareRebookMode.RECOMMENDED_WINDOW
+      ? args.windowStart
+      : args.rebookedFor
+
+  if (!base) return null
+  return addDaysByMs(base, -Math.abs(args.daysBefore))
+}
+
+function isAftercareSessionStepEligible(
+  step: SessionStep | null | undefined,
+): boolean {
+  return (
+    step === SessionStep.FINISH_REVIEW ||
+    step === SessionStep.AFTER_PHOTOS ||
+    step === SessionStep.DONE
+  )
 }
 
 function normalizePositiveDurationMinutes(value: unknown): number | null {
@@ -1852,6 +2081,218 @@ async function performLockedCancel(args: {
       status: updated.status,
       sessionStep: updated.sessionStep ?? SessionStep.NONE,
     },
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedStartBookingSession(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+}): Promise<StartBookingSessionResult> {
+  const booking: StartBookingRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: START_BOOKING_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED', {
+      message: 'Cancelled bookings cannot be started.',
+      userMessage: 'Cancelled bookings cannot be started.',
+    })
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+      message: 'This session is already finished.',
+      userMessage: 'This session is already finished.',
+    })
+  }
+
+  if (booking.status === BookingStatus.PENDING) {
+    throw bookingError('FORBIDDEN', {
+      message: 'You must accept this appointment before you can start it.',
+      userMessage: 'You must accept this appointment before you can start it.',
+    })
+  }
+
+  if (booking.startedAt) {
+    if (booking.sessionStep && booking.sessionStep !== SessionStep.NONE) {
+      return {
+        booking: {
+          id: booking.id,
+          status: booking.status,
+          startedAt: booking.startedAt,
+          finishedAt: booking.finishedAt,
+          sessionStep: booking.sessionStep,
+        },
+        meta: buildMeta(false),
+      }
+    }
+
+    const healed = await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        sessionStep: SessionStep.CONSULTATION,
+      },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        sessionStep: true,
+      } satisfies Prisma.BookingSelect,
+    })
+
+    return {
+      booking: {
+        id: healed.id,
+        status: healed.status,
+        startedAt: healed.startedAt,
+        finishedAt: healed.finishedAt,
+        sessionStep: healed.sessionStep ?? SessionStep.NONE,
+      },
+      meta: buildMeta(true),
+    }
+  }
+
+  if (!isWithinStartWindow(booking.scheduledFor, args.now)) {
+    throw bookingError('FORBIDDEN', {
+      message:
+        'You can start this appointment 15 minutes before or after the scheduled time.',
+      userMessage:
+        'You can start this appointment 15 minutes before or after the scheduled time.',
+    })
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      startedAt: args.now,
+      sessionStep: SessionStep.CONSULTATION,
+    },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      finishedAt: true,
+      sessionStep: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      status: updated.status,
+      startedAt: updated.startedAt,
+      finishedAt: updated.finishedAt,
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+    },
+    meta: buildMeta(true),
+  }
+} 
+
+
+async function performLockedFinishBookingSession(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+}): Promise<FinishBookingSessionResult> {
+  const booking: FinishBookingRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: FINISH_BOOKING_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'You can only finish your own bookings.',
+      userMessage: 'You can only finish your own bookings.',
+    })
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED', {
+      message: 'Cancelled bookings cannot be finished.',
+      userMessage: 'Cancelled bookings cannot be finished.',
+    })
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+      message: 'This booking is already completed.',
+      userMessage: 'This booking is already completed.',
+    })
+  }
+
+  if (!booking.startedAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'You can only finish after the session has started.',
+      userMessage: 'You can only finish after the session has started.',
+    })
+  }
+
+  const afterCount = await args.tx.mediaAsset.count({
+    where: {
+      bookingId: booking.id,
+      phase: MediaPhase.AFTER,
+      uploadedByRole: Role.PRO,
+    },
+  })
+
+  const step = booking.sessionStep ?? SessionStep.NONE
+
+  if (
+    step === SessionStep.FINISH_REVIEW ||
+    step === SessionStep.AFTER_PHOTOS ||
+    step === SessionStep.DONE
+  ) {
+    return {
+      booking: {
+        id: booking.id,
+        status: booking.status,
+        startedAt: booking.startedAt,
+        finishedAt: booking.finishedAt,
+        sessionStep: step,
+      },
+      afterCount,
+      meta: buildMeta(false),
+    }
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: { sessionStep: SessionStep.FINISH_REVIEW },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      finishedAt: true,
+      sessionStep: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      status: updated.status,
+      startedAt: updated.startedAt,
+      finishedAt: updated.finishedAt,
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+    },
+    afterCount,
     meta: buildMeta(true),
   }
 }
@@ -3809,6 +4250,311 @@ async function performLockedUpdateProBooking(args: {
   })
 }
 
+async function performLockedUpsertBookingAftercare(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  notes: string | null
+  rebookMode: AftercareRebookMode
+  rebookedFor: Date | null
+  rebookWindowStart: Date | null
+  rebookWindowEnd: Date | null
+  createRebookReminder: boolean
+  rebookReminderDaysBefore: number
+  createProductReminder: boolean
+  productReminderDaysAfter: number
+  recommendedProducts: {
+    name: string
+    url: string
+    note: string | null
+  }[]
+  sendToClient: boolean
+}): Promise<UpsertBookingAftercareResult> {
+  const booking: AftercareUpsertBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: AFTERCARE_UPSERT_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED', {
+      message: 'This booking is cancelled.',
+      userMessage: 'This booking is cancelled.',
+    })
+  }
+
+  if (booking.status === BookingStatus.PENDING) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Aftercare can’t be posted until the booking is confirmed.',
+      userMessage: 'Aftercare can’t be posted until the booking is confirmed.',
+    })
+  }
+
+  if (!isAftercareSessionStepEligible(booking.sessionStep)) {
+    throw bookingError('FORBIDDEN', {
+      message: `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`,
+      userMessage: `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`,
+    })
+  }
+
+  const timeZoneUsed = resolveAftercareTimeZone({
+    bookingLocationTimeZone: booking.locationTimeZone,
+    professionalTimeZone: booking.professional?.timeZone,
+  })
+
+  const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
+
+  const aftercare = await args.tx.aftercareSummary.upsert({
+    where: { bookingId: booking.id },
+    create: {
+      bookingId: booking.id,
+      publicToken: tokenToUse,
+      notes: args.notes,
+      rebookMode: args.rebookMode,
+      rebookedFor: args.rebookedFor,
+      rebookWindowStart: args.rebookWindowStart,
+      rebookWindowEnd: args.rebookWindowEnd,
+    },
+    update: {
+      publicToken: tokenToUse,
+      notes: args.notes,
+      rebookMode: args.rebookMode,
+      rebookedFor: args.rebookedFor,
+      rebookWindowStart: args.rebookWindowStart,
+      rebookWindowEnd: args.rebookWindowEnd,
+    },
+    select: {
+      id: true,
+      publicToken: true,
+      rebookMode: true,
+      rebookedFor: true,
+      rebookWindowStart: true,
+      rebookWindowEnd: true,
+    },
+  })
+
+  await args.tx.productRecommendation.deleteMany({
+    where: { aftercareSummaryId: aftercare.id },
+  })
+
+  if (args.recommendedProducts.length > 0) {
+    await args.tx.productRecommendation.createMany({
+      data: args.recommendedProducts.map((product) => ({
+        aftercareSummaryId: aftercare.id,
+        productId: null,
+        externalName: product.name,
+        externalUrl: product.url,
+        note: product.note,
+      })),
+    })
+  }
+
+  let clientNotified = false
+
+  if (args.sendToClient) {
+    const notifKey = makeAftercareClientNotifDedupeKey(booking.id)
+    const notifTitle = `Aftercare: ${booking.service?.name ?? 'Your appointment'}`
+    const bodyPreview =
+      (args.notes ?? '').trim().length > 0
+        ? (args.notes ?? '').trim().slice(0, 240)
+        : null
+
+    await args.tx.clientNotification.upsert({
+      where: { dedupeKey: notifKey },
+      create: {
+        dedupeKey: notifKey,
+        clientId: booking.clientId,
+        type: ClientNotificationType.AFTERCARE,
+        title: notifTitle,
+        body: bodyPreview,
+        bookingId: booking.id,
+        aftercareId: aftercare.id,
+        readAt: null,
+      },
+      update: {
+        type: ClientNotificationType.AFTERCARE,
+        title: notifTitle,
+        body: bodyPreview,
+        bookingId: booking.id,
+        aftercareId: aftercare.id,
+        readAt: null,
+      },
+    })
+
+    clientNotified = true
+  }
+
+  let remindersTouched = 0
+
+  const clientName =
+    `${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
+  const serviceName = (booking.service?.name ?? 'service').trim()
+
+  const rebookKey = makeAftercareReminderDedupeKey(booking.id, 'REBOOK')
+  const rebookDue = computeRebookReminderDueAt({
+    mode: args.rebookMode,
+    rebookedFor: args.rebookedFor,
+    windowStart: args.rebookWindowStart,
+    daysBefore: args.rebookReminderDaysBefore,
+  })
+
+  if (
+    args.createRebookReminder &&
+    rebookDue &&
+    args.rebookMode !== AftercareRebookMode.NONE
+  ) {
+    const title = clientName ? `Rebook: ${clientName}` : 'Rebook reminder'
+
+    const bodyText =
+      args.rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW &&
+      args.rebookWindowStart &&
+      args.rebookWindowEnd
+        ? `Recommended booking window for ${serviceName}: ${formatDateTimeInTimeZone(
+            args.rebookWindowStart,
+            timeZoneUsed,
+          )} → ${formatDateTimeInTimeZone(args.rebookWindowEnd, timeZoneUsed)} (${timeZoneUsed})`
+        : args.rebookedFor
+          ? `Recommended next visit for ${serviceName}: ${formatDateTimeInTimeZone(
+              args.rebookedFor,
+              timeZoneUsed,
+            )} (${timeZoneUsed})`
+          : `Follow up for ${serviceName}.`
+
+    await args.tx.reminder.upsert({
+      where: { dedupeKey: rebookKey },
+      create: {
+        dedupeKey: rebookKey,
+        professionalId: booking.professionalId,
+        clientId: booking.clientId,
+        bookingId: booking.id,
+        type: ReminderType.REBOOK,
+        title,
+        body: bodyText,
+        dueAt: rebookDue,
+      },
+      update: {
+        title,
+        body: bodyText,
+        dueAt: rebookDue,
+        completedAt: null,
+      },
+    })
+
+    remindersTouched += 1
+  } else {
+    const del = await args.tx.reminder.deleteMany({
+      where: { dedupeKey: rebookKey, completedAt: null },
+    })
+    remindersTouched += del.count
+  }
+
+  const productKey = makeAftercareReminderDedupeKey(
+    booking.id,
+    'PRODUCT_FOLLOWUP',
+  )
+
+  if (args.createProductReminder) {
+    const base = booking.finishedAt ?? booking.scheduledFor ?? new Date()
+    const due = addDaysByMs(base, args.productReminderDaysAfter)
+
+    if (due) {
+      const title = clientName
+        ? `Product follow-up: ${clientName}`
+        : 'Product follow-up'
+
+      const bodyText = `Follow up on products after ${serviceName}. Due: ${formatDateTimeInTimeZone(
+        due,
+        timeZoneUsed,
+      )} (${timeZoneUsed})`
+
+      await args.tx.reminder.upsert({
+        where: { dedupeKey: productKey },
+        create: {
+          dedupeKey: productKey,
+          professionalId: booking.professionalId,
+          clientId: booking.clientId,
+          bookingId: booking.id,
+          type: ReminderType.PRODUCT_FOLLOWUP,
+          title,
+          body: bodyText,
+          dueAt: due,
+        },
+        update: {
+          title,
+          body: bodyText,
+          dueAt: due,
+          completedAt: null,
+        },
+      })
+
+      remindersTouched += 1
+    }
+  } else {
+    const del = await args.tx.reminder.deleteMany({
+      where: { dedupeKey: productKey, completedAt: null },
+    })
+    remindersTouched += del.count
+  }
+
+  let bookingFinished = false
+  let bookingNow: {
+    status: BookingStatus
+    sessionStep: SessionStep
+    finishedAt: Date | null
+  } | null = null
+
+  if (args.sendToClient) {
+    const now = new Date()
+
+    const updatedBooking = await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: booking.finishedAt ?? now,
+      },
+      select: {
+        status: true,
+        sessionStep: true,
+        finishedAt: true,
+      } satisfies Prisma.BookingSelect,
+    })
+
+    bookingNow = {
+      status: updatedBooking.status,
+      sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
+      finishedAt: updatedBooking.finishedAt,
+    }
+
+    bookingFinished = true
+  }
+
+  return {
+    aftercare: {
+      id: aftercare.id,
+      publicToken: aftercare.publicToken,
+      rebookMode: aftercare.rebookMode,
+      rebookedFor: aftercare.rebookedFor,
+      rebookWindowStart: aftercare.rebookWindowStart,
+      rebookWindowEnd: aftercare.rebookWindowEnd,
+    },
+    remindersTouched,
+    clientNotified,
+    bookingFinished,
+    booking: bookingNow,
+    timeZoneUsed,
+    meta: buildMeta(true),
+  }
+}
+
 async function resolveAdminProfessionalId(bookingId: string): Promise<string> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -3933,6 +4679,68 @@ export async function cancelBooking(
   )
 }
 
+export async function startBookingSession(
+  args: StartBookingSessionArgs,
+): Promise<StartBookingSessionResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedStartBookingSession({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+      }),
+  )
+}
+
+export async function finishBookingSession(
+  args: FinishBookingSessionArgs,
+): Promise<FinishBookingSessionResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx }) =>
+      performLockedFinishBookingSession({
+        tx,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+      }),
+  )
+}
+
+export async function upsertBookingAftercare(
+  args: UpsertBookingAftercareArgs,
+): Promise<UpsertBookingAftercareResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx }) =>
+      performLockedUpsertBookingAftercare({
+        tx,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        notes: args.notes,
+        rebookMode: args.rebookMode,
+        rebookedFor: args.rebookedFor,
+        rebookWindowStart: args.rebookWindowStart,
+        rebookWindowEnd: args.rebookWindowEnd,
+        createRebookReminder: args.createRebookReminder,
+        rebookReminderDaysBefore: args.rebookReminderDaysBefore,
+        createProductReminder: args.createProductReminder,
+        productReminderDaysAfter: args.productReminderDaysAfter,
+        recommendedProducts: args.recommendedProducts,
+        sendToClient: args.sendToClient,
+      }),
+  )
+}
 /**
  * Single internal boundary for hold creation.
  *

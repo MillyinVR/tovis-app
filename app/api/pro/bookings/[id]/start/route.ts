@@ -1,24 +1,15 @@
 // app/api/pro/bookings/[id]/start/route.ts
-import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { getProOwnedBooking } from '@/lib/booking/guards'
-import { BookingStatus, SessionStep } from '@prisma/client'
+import {
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import { startBookingSession } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-
-/**
- * Start window: 15 min before -> 15 min after scheduledFor (UTC instants)
- * Only enforced for first-time start.
- * Once started, the pro can resume regardless of window.
- */
-function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
-  const start = scheduledFor.getTime() - 15 * 60 * 1000
-  const end = scheduledFor.getTime() + 15 * 60 * 1000
-  const t = now.getTime()
-  return t >= start && t <= end
-}
 
 function bookingBase(bookingId: string): string {
   return `/pro/bookings/${encodeURIComponent(bookingId)}`
@@ -28,104 +19,52 @@ function sessionHubHref(bookingId: string): string {
   return `${bookingBase(bookingId)}/session`
 }
 
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
 export async function POST(_request: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const proId = auth.professionalId
 
+    const proId = auth.professionalId
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params.id)
-    if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const found = await getProOwnedBooking({
+    if (!bookingId) {
+      return jsonFail(400, 'Missing booking id.')
+    }
+
+    const result = await startBookingSession({
       bookingId,
-      proId,
-      select: {
-        id: true,
-        professionalId: true,
-        status: true,
-        scheduledFor: true,
-        startedAt: true,
-        finishedAt: true,
-        sessionStep: true,
-      },
+      professionalId: proId,
     })
 
-    if (!found.ok) return jsonFail(found.status, found.error)
-    const booking = found.booking
-
-    if (booking.status === BookingStatus.CANCELLED) {
-      return jsonFail(409, 'Cancelled bookings cannot be started.')
-    }
-
-    if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
-      return jsonFail(409, 'This session is already finished.')
-    }
-
-    if (booking.status === BookingStatus.PENDING) {
-      return jsonFail(409, 'You must accept this appointment before you can start it.')
-    }
-
-    const nextHref = sessionHubHref(booking.id)
-
-    if (booking.startedAt) {
-      const needsHeal = booking.sessionStep === SessionStep.NONE
-
-      if (!needsHeal) {
-        return jsonOk(
-          {
-            booking: {
-              id: booking.id,
-              status: booking.status,
-              startedAt: booking.startedAt,
-              finishedAt: booking.finishedAt,
-              sessionStep: booking.sessionStep,
-            },
-            nextHref,
-          },
-          200,
-        )
-      }
-
-      const healed = await prisma.booking.update({
-        where: { id: booking.id },
-        data: { sessionStep: SessionStep.CONSULTATION },
-        select: {
-          id: true,
-          status: true,
-          startedAt: true,
-          finishedAt: true,
-          sessionStep: true,
-        },
+    return jsonOk(
+      {
+        booking: result.booking,
+        nextHref: sessionHubHref(result.booking.id),
+        meta: result.meta,
+      },
+      200,
+    )
+  } catch (error: unknown) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
       })
-
-      return jsonOk({ booking: healed, nextHref }, 200)
     }
 
-    const now = new Date()
-    if (!isWithinStartWindow(booking.scheduledFor, now)) {
-      return jsonFail(409, 'You can start this appointment 15 minutes before or after the scheduled time.')
-    }
-
-    const updated = await prisma.booking.update({
-      where: { id: booking.id },
-      data: {
-        startedAt: now,
-        sessionStep: SessionStep.CONSULTATION,
-      },
-      select: {
-        id: true,
-        status: true,
-        startedAt: true,
-        finishedAt: true,
-        sessionStep: true,
-      },
-    })
-
-    return jsonOk({ booking: updated, nextHref }, 200)
-  } catch (e) {
-    console.error('POST /api/pro/bookings/[id]/start error', e)
+    console.error('POST /api/pro/bookings/[id]/start error', error)
     return jsonFail(500, 'Internal server error')
   }
 }
