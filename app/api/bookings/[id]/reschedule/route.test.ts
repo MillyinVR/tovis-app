@@ -380,6 +380,10 @@ describe('POST /api/bookings/[id]/reschedule', () => {
           totalDurationMinutes: 60,
           locationTimeZone: 'America/Los_Angeles',
         },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
     })
   })

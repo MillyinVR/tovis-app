@@ -46,6 +46,17 @@ enum BookingSource {
   AFTERCARE // rebooked from aftercare summary link/button
 }
 
+enum BookingOverrideRule {
+  ADVANCE_NOTICE
+  MAX_DAYS_AHEAD
+  WORKING_HOURS
+}
+
+enum BookingOverrideAction {
+  CREATE
+  UPDATE
+}
+
 enum ProfessionType {
   COSMETOLOGIST
   BARBER
@@ -335,7 +346,8 @@ model User {
   sentMessages       Message[]                  @relation("UserSentMessages")
   threadParticipants MessageThreadParticipant[] @relation("UserThreadParticipants")
 
-  notificationActor Notification[] @relation("NotificationActor")
+  notificationActor        Notification[]            @relation("NotificationActor")
+  bookingOverrideAuditLogs BookingOverrideAuditLog[] @relation("BookingOverrideActor")
 
   // NFC attribution events
   attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
@@ -506,10 +518,11 @@ model ProfessionalProfile {
   autoAcceptBookings Boolean @default(false)
 
   // Admin / internal
-  adminPermissions AdminPermission[]
-  adminActionLogs  AdminActionLog[]  @relation("ProfessionalLogs")
-  productSales     ProductSale[]
-  nfcCards         NfcCard[]
+  adminPermissions         AdminPermission[]
+  adminActionLogs          AdminActionLog[]          @relation("ProfessionalLogs")
+  bookingOverrideAuditLogs BookingOverrideAuditLog[]
+  productSales             ProductSale[]
+  nfcCards                 NfcCard[]
 
   lastMinuteSettings LastMinuteSettings? @relation("ProLastMinuteSettings")
   lastMinuteOpenings LastMinuteOpening[] @relation("ProOpenings")
@@ -981,7 +994,8 @@ model Booking {
   reviews             Review[]
   reminders           Reminder[]
 
-  notifications Notification[]
+  notifications     Notification[]
+  overrideAuditLogs BookingOverrideAuditLog[]
 
   sessionStep           SessionStep      @default(NONE)
   reminderMinutesBefore Int?             @default(1440)
@@ -1003,6 +1017,40 @@ model Booking {
   @@index([locationId, scheduledFor])
   @@index([professionalId, source])
   @@index([clientAddressId])
+}
+
+model BookingOverrideAuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  bookingId      String
+  professionalId String
+  actorUserId    String
+
+  action BookingOverrideAction
+  rule   BookingOverrideRule
+
+  reason    String
+  route     String
+  requestId String?
+
+  oldValue Json
+  newValue Json
+
+  bookingScheduledForBefore DateTime?
+  bookingScheduledForAfter  DateTime?
+
+  metadata Json?
+
+  booking      Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  actorUser    User                @relation("BookingOverrideActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId, createdAt])
+  @@index([professionalId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([rule, createdAt])
+  @@index([action, createdAt])
 }
 
 model BookingHold {

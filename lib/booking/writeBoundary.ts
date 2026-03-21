@@ -63,7 +63,10 @@ import {
 import { evaluateHoldCreationDecision } from '@/lib/booking/policies/holdPolicy'
 import { evaluateRescheduleDecision } from '@/lib/booking/policies/reschedulePolicy'
 import { evaluateFinalizeDecision } from '@/lib/booking/policies/finalizePolicy'
-import { evaluateProSchedulingDecision } from '@/lib/booking/policies/proSchedulingPolicy'
+import {
+  evaluateProSchedulingDecision,
+  type ProSchedulingAppliedOverride,
+} from '@/lib/booking/policies/proSchedulingPolicy'
 import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import {
   type RequestedServiceItemInput,
@@ -80,6 +83,8 @@ import {
   type TimeZoneTruthSource,
 } from '@/lib/booking/timeZoneTruth'
 import crypto from 'node:crypto'
+import { buildBookingOverrideAuditRows } from '@/lib/booking/overrideAudit'
+import { assertCanUseBookingOverride } from '@/lib/booking/overrideAuthorization'
 
 type MutationMeta = {
   mutated: boolean
@@ -217,6 +222,8 @@ type FinalizeBookingFromHoldResult = {
 
 type CreateProBookingArgs = {
   professionalId: string
+  actorUserId: string
+  overrideReason: string | null
   clientId: string
   offeringId: string
   locationId: string
@@ -447,6 +454,8 @@ type UpdateRequestedStatus =
 
 type UpdateProBookingArgs = {
   professionalId: string
+  actorUserId: string
+  overrideReason: string | null
   bookingId: string
   nextStatus: UpdateRequestedStatus | null
   notifyClient: boolean
@@ -846,6 +855,43 @@ function normalizeReason(reason?: string | null): string | null {
   if (typeof reason !== 'string') return null
   const trimmed = reason.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function hasAnyRequestedBookingOverride(args: {
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  allowOutsideWorkingHours: boolean
+}): boolean {
+  return (
+    args.allowShortNotice ||
+    args.allowFarFuture ||
+    args.allowOutsideWorkingHours
+  )
+}
+
+function assertExplicitOverrideReasonIfNeeded(args: {
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  allowOutsideWorkingHours: boolean
+  overrideReason: string | null
+}): string | null {
+  const reason = normalizeReason(args.overrideReason)
+
+  if (
+    hasAnyRequestedBookingOverride({
+      allowShortNotice: args.allowShortNotice,
+      allowFarFuture: args.allowFarFuture,
+      allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    }) &&
+    !reason
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Override reason is required when using booking rule overrides.',
+      userMessage: 'Please add a reason for this override.',
+    })
+  }
+
+  return reason
 }
 
 function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
@@ -1287,6 +1333,47 @@ function buildBookingMutationPayload(args: {
   }
 }
 
+async function createBookingOverrideAuditLogs(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  action: 'CREATE' | 'UPDATE'
+  route: string
+  reason: string
+  appliedOverrides: ProSchedulingAppliedOverride[]
+  bookingScheduledForBefore?: Date | null
+  bookingScheduledForAfter: Date
+  advanceNoticeMinutes: number
+  maxDaysAhead: number
+  workingHours: unknown
+  timeZone: string
+}): Promise<void> {
+  if (args.appliedOverrides.length === 0) return
+
+  const rows = buildBookingOverrideAuditRows({
+    bookingId: args.bookingId,
+    professionalId: args.professionalId,
+    actorUserId: args.actorUserId,
+    action: args.action,
+    route: args.route,
+    reason: args.reason,
+    appliedOverrides: args.appliedOverrides,
+    bookingScheduledForBefore: args.bookingScheduledForBefore ?? null,
+    bookingScheduledForAfter: args.bookingScheduledForAfter,
+    advanceNoticeMinutes: args.advanceNoticeMinutes,
+    maxDaysAhead: args.maxDaysAhead,
+    workingHours: args.workingHours,
+    timeZone: args.timeZone,
+  })
+
+  if (rows.length === 0) return
+
+  await args.tx.bookingOverrideAuditLog.createMany({
+    data: rows,
+  })
+}
+
 async function createUpdateClientNotification(args: {
   tx: Prisma.TransactionClient
   clientId: string
@@ -1557,7 +1644,10 @@ async function enforceUpdateBookingScheduling(args: {
   locationType: ServiceLocationType
   bookingId: string
   timeZoneSource: TimeZoneTruthSource
-}): Promise<Date> {
+}): Promise<{
+  requestedEnd: Date
+  appliedOverrides: ProSchedulingAppliedOverride[]
+}> {
   const decision = await evaluateProSchedulingDecision({
     tx: args.tx,
     now: args.now,
@@ -1578,8 +1668,11 @@ async function enforceUpdateBookingScheduling(args: {
     excludeBookingId: args.bookingId,
   })
 
-  if (decision.ok) {
-    return decision.value.requestedEnd
+    if (decision.ok) {
+    return {
+      requestedEnd: decision.value.requestedEnd,
+      appliedOverrides: decision.value.appliedOverrides,
+    }
   }
 
   const requestedEnd =
@@ -2079,7 +2172,10 @@ async function enforceProCreateScheduling(args: {
   locationType: ServiceLocationType
   offeringId: string
   clientId: string
-}): Promise<Date> {
+}): Promise<{
+  requestedEnd: Date
+  appliedOverrides: ProSchedulingAppliedOverride[]
+}> {
   const decision = await evaluateProSchedulingDecision({
     tx: args.tx,
     now: args.now,
@@ -2100,7 +2196,10 @@ async function enforceProCreateScheduling(args: {
   })
 
   if (decision.ok) {
-    return decision.value.requestedEnd
+    return {
+      requestedEnd: decision.value.requestedEnd,
+      appliedOverrides: decision.value.appliedOverrides,
+    }
   }
 
   switch (decision.code) {
@@ -3714,7 +3813,19 @@ async function performLockedCreateProBooking(args: {
   allowOutsideWorkingHours: boolean
   allowShortNotice: boolean
   allowFarFuture: boolean
+  actorUserId: string
+  overrideReason: string | null
 }): Promise<CreateProBookingResult> {
+
+    assertNonEmptyUserId(args.actorUserId)
+
+  const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    overrideReason: args.overrideReason,
+  })
+
   const requestedStart = normalizeToMinute(args.scheduledFor)
 
   const [client, clientAddress, offering] = await Promise.all([
@@ -3861,7 +3972,7 @@ async function performLockedCreateProBooking(args: {
         )
       : computedDurationMinutes
 
-  await enforceProCreateScheduling({
+    const schedulingDecision = await enforceProCreateScheduling({
     tx: args.tx,
     now: args.now,
     requestedStart,
@@ -3956,6 +4067,8 @@ async function performLockedCreateProBooking(args: {
         status: true,
       } satisfies Prisma.BookingSelect,
     })
+
+
   } catch (error: unknown) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -3978,6 +4091,35 @@ async function performLockedCreateProBooking(args: {
       sortOrder: 0,
     },
   })
+if (
+  schedulingDecision.appliedOverrides.length > 0 &&
+  normalizedOverrideReason
+) {
+  for (const rule of schedulingDecision.appliedOverrides) {
+    await assertCanUseBookingOverride({
+      actorUserId: args.actorUserId,
+      professionalId: args.professionalId,
+      rule,
+    })
+  }
+
+  await createBookingOverrideAuditLogs({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    actorUserId: args.actorUserId,
+    action: 'CREATE',
+    route: 'lib/booking/writeBoundary.ts:createProBooking',
+    reason: normalizedOverrideReason,
+    appliedOverrides: schedulingDecision.appliedOverrides,
+    bookingScheduledForBefore: null,
+    bookingScheduledForAfter: requestedStart,
+    advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+    maxDaysAhead: locationContext.maxDaysAhead,
+    workingHours: locationContext.workingHours,
+    timeZone: locationContext.timeZone,
+  })
+}
 
   await bumpProfessionalScheduleVersion(args.professionalId)
 
@@ -4335,7 +4477,18 @@ async function performLockedUpdateProBooking(args: {
   hasBuffer: boolean
   hasDuration: boolean
   hasServiceItems: boolean
+  actorUserId: string
+  overrideReason: string | null
 }): Promise<UpdateProBookingResult> {
+    assertNonEmptyUserId(args.actorUserId)
+
+  const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    overrideReason: args.overrideReason,
+  })
+
   const existing = await args.tx.booking.findFirst({
     where: { id: args.bookingId, professionalId: args.professionalId },
     select: {
@@ -4686,7 +4839,7 @@ async function performLockedUpdateProBooking(args: {
     finalBuffer !== existingBufferMinutes ||
     finalDuration !== existingDurationMinutes
 
-  await enforceUpdateBookingScheduling({
+  const schedulingDecision = await enforceUpdateBookingScheduling({
     tx: args.tx,
     now: args.now,
     finalStart,
@@ -4775,6 +4928,39 @@ async function performLockedUpdateProBooking(args: {
       subtotalSnapshot: true,
     } satisfies Prisma.BookingSelect,
   })
+
+    if (
+  schedulingDecision.appliedOverrides.length > 0 &&
+  normalizedOverrideReason
+) {
+  for (const rule of schedulingDecision.appliedOverrides) {
+    await assertCanUseBookingOverride({
+      actorUserId: args.actorUserId,
+      professionalId: existing.professionalId,
+      rule,
+    })
+  }
+
+  await createBookingOverrideAuditLogs({
+    tx: args.tx,
+    bookingId: updated.id,
+    professionalId: existing.professionalId,
+    actorUserId: args.actorUserId,
+    action: 'UPDATE',
+    route: 'lib/booking/writeBoundary.ts:updateProBooking',
+    reason: normalizedOverrideReason,
+    appliedOverrides: schedulingDecision.appliedOverrides,
+    bookingScheduledForBefore: existingScheduledFor,
+    bookingScheduledForAfter: finalStart,
+    advanceNoticeMinutes: Math.max(
+      0,
+      Number(location.advanceNoticeMinutes ?? 0),
+    ),
+    maxDaysAhead: Math.max(1, Number(location.maxDaysAhead ?? 1)),
+    workingHours: location.workingHours,
+    timeZone: appointmentTimeZone,
+  })
+}
 
   if (args.notifyClient) {
     const isConfirm = args.nextStatus === BookingStatus.ACCEPTED
@@ -5549,6 +5735,7 @@ export async function createProBooking(
   args: CreateProBookingArgs,
 ): Promise<CreateProBookingResult> {
   assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
   assertNonEmptyClientId(args.clientId)
   assertNonEmptyOfferingId(args.offeringId)
   assertNonEmptyLocationId(args.locationId)
@@ -5573,6 +5760,8 @@ export async function createProBooking(
         allowOutsideWorkingHours: args.allowOutsideWorkingHours,
         allowShortNotice: args.allowShortNotice,
         allowFarFuture: args.allowFarFuture,
+        actorUserId: args.actorUserId,
+        overrideReason: args.overrideReason,
       }),
   )
 }
@@ -5581,6 +5770,7 @@ export async function updateProBooking(
   args: UpdateProBookingArgs,
 ): Promise<UpdateProBookingResult> {
   assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
   assertNonEmptyBookingId(args.bookingId)
 
   return withLockedProfessionalTransaction(
@@ -5603,6 +5793,8 @@ export async function updateProBooking(
         hasBuffer: args.hasBuffer,
         hasDuration: args.hasDuration,
         hasServiceItems: args.hasServiceItems,
+        actorUserId: args.actorUserId,
+        overrideReason: args.overrideReason,
       }),
   )
 }

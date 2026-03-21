@@ -95,7 +95,7 @@ describe('evaluateProSchedulingDecision', () => {
     mocks.getTimeRangeConflict.mockResolvedValue(null)
   })
 
-  it('returns ok with requestedEnd when all checks pass', async () => {
+  it('returns ok with requestedEnd and no applied overrides when all checks pass', async () => {
     const result = await evaluateProSchedulingDecision(makeArgs())
 
     expect(mocks.computeRequestedEndUtc).toHaveBeenCalledWith({
@@ -154,6 +154,7 @@ describe('evaluateProSchedulingDecision', () => {
       ok: true,
       value: {
         requestedEnd,
+        appliedOverrides: [],
       },
     })
   })
@@ -300,17 +301,42 @@ describe('evaluateProSchedulingDecision', () => {
     })
   })
 
-  it('skips advance notice when allowShortNotice is true', async () => {
+  it('applies ADVANCE_NOTICE override when short notice is allowed and actually needed', async () => {
+    mocks.checkAdvanceNotice.mockReturnValueOnce({
+      ok: false,
+      code: 'ADVANCE_NOTICE_REQUIRED',
+      meta: {
+        earliestAllowedStart: '2026-03-11T20:00:00.000Z',
+      },
+    })
+
     const result = await evaluateProSchedulingDecision({
       ...makeArgs(),
       allowShortNotice: true,
     })
 
-    expect(mocks.checkAdvanceNotice).not.toHaveBeenCalled()
+    expect(mocks.checkAdvanceNotice).toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       value: {
         requestedEnd,
+        appliedOverrides: ['ADVANCE_NOTICE'],
+      },
+    })
+  })
+
+  it('does not record ADVANCE_NOTICE override when short notice is allowed but not needed', async () => {
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      allowShortNotice: true,
+    })
+
+    expect(mocks.checkAdvanceNotice).toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [],
       },
     })
   })
@@ -345,32 +371,157 @@ describe('evaluateProSchedulingDecision', () => {
     })
   })
 
-  it('skips max days ahead when allowFarFuture is true', async () => {
+  it('applies MAX_DAYS_AHEAD override when far future is allowed and actually needed', async () => {
+    mocks.checkMaxDaysAheadExact.mockReturnValueOnce({
+      ok: false,
+      code: 'MAX_DAYS_AHEAD_EXCEEDED',
+      meta: {
+        latestAllowedStart: '2026-04-10T19:00:00.000Z',
+      },
+    })
+
     const result = await evaluateProSchedulingDecision({
       ...makeArgs(),
       allowFarFuture: true,
     })
 
-    expect(mocks.checkMaxDaysAheadExact).not.toHaveBeenCalled()
+    expect(mocks.checkMaxDaysAheadExact).toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       value: {
         requestedEnd,
+        appliedOverrides: ['MAX_DAYS_AHEAD'],
       },
     })
   })
 
-  it('skips full working-hours guard when allowOutsideWorkingHours is true', async () => {
+  it('does not record MAX_DAYS_AHEAD override when far future is allowed but not needed', async () => {
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      allowFarFuture: true,
+    })
+
+    expect(mocks.checkMaxDaysAheadExact).toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [],
+      },
+    })
+  })
+
+  it('returns OUTSIDE_WORKING_HOURS when range working-hours check fails and override is not allowed', async () => {
+    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+      ok: false,
+      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+    })
+
+    const result = await evaluateProSchedulingDecision(makeArgs())
+
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'OUTSIDE_WORKING_HOURS',
+      logHint: {
+        requestedStart,
+        requestedEnd,
+        conflictType: 'WORKING_HOURS',
+        meta: {
+          workingHoursError: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+        },
+      },
+    })
+  })
+
+  it('applies WORKING_HOURS override when outside working hours is allowed and actually needed', async () => {
+    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+      ok: false,
+      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+    })
+
     const result = await evaluateProSchedulingDecision({
       ...makeArgs(),
       allowOutsideWorkingHours: true,
     })
 
-    expect(mocks.ensureWithinWorkingHours).not.toHaveBeenCalled()
+    expect(mocks.ensureWithinWorkingHours).toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       value: {
         requestedEnd,
+        appliedOverrides: ['WORKING_HOURS'],
+      },
+    })
+  })
+
+  it('does not record WORKING_HOURS override when outside working hours is allowed but not needed', async () => {
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      allowOutsideWorkingHours: true,
+    })
+
+    expect(mocks.ensureWithinWorkingHours).toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [],
+      },
+    })
+  })
+
+  it('does not allow allowOutsideWorkingHours to bypass missing working-hours config', async () => {
+    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+      ok: false,
+      error: 'BOOKING_WORKING_HOURS:WORKING_HOURS_REQUIRED',
+    })
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      allowOutsideWorkingHours: true,
+    })
+
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'WORKING_HOURS_REQUIRED',
+      logHint: {
+        requestedStart,
+        requestedEnd,
+        conflictType: 'WORKING_HOURS',
+        meta: {
+          workingHoursError: 'BOOKING_WORKING_HOURS:WORKING_HOURS_REQUIRED',
+        },
+      },
+    })
+  })
+
+  it('does not allow allowOutsideWorkingHours to bypass invalid working-hours config', async () => {
+    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+      ok: false,
+      error: 'BOOKING_WORKING_HOURS:WORKING_HOURS_INVALID',
+    })
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      allowOutsideWorkingHours: true,
+    })
+
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'WORKING_HOURS_INVALID',
+      logHint: {
+        requestedStart,
+        requestedEnd,
+        conflictType: 'WORKING_HOURS',
+        meta: {
+          workingHoursError: 'BOOKING_WORKING_HOURS:WORKING_HOURS_INVALID',
+        },
       },
     })
   })
@@ -441,6 +592,48 @@ describe('evaluateProSchedulingDecision', () => {
       excludeBookingId: 'booking_123',
       excludeHoldId: 'hold_456',
       nowUtc: now,
+    })
+  })
+
+  it('records multiple applied overrides when multiple rule failures are explicitly allowed', async () => {
+    mocks.checkAdvanceNotice.mockReturnValueOnce({
+      ok: false,
+      code: 'ADVANCE_NOTICE_REQUIRED',
+      meta: {
+        earliestAllowedStart: '2026-03-11T20:00:00.000Z',
+      },
+    })
+
+    mocks.checkMaxDaysAheadExact.mockReturnValueOnce({
+      ok: false,
+      code: 'MAX_DAYS_AHEAD_EXCEEDED',
+      meta: {
+        latestAllowedStart: '2026-04-10T19:00:00.000Z',
+      },
+    })
+
+    mocks.ensureWithinWorkingHours.mockReturnValueOnce({
+      ok: false,
+      error: 'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+    })
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      allowShortNotice: true,
+      allowFarFuture: true,
+      allowOutsideWorkingHours: true,
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [
+          'ADVANCE_NOTICE',
+          'MAX_DAYS_AHEAD',
+          'WORKING_HOURS',
+        ],
+      },
     })
   })
 })

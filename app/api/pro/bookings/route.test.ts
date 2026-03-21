@@ -1,6 +1,6 @@
-// app/api/pro/bookings/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
+import { bookingError } from '@/lib/booking/errors'
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -66,6 +66,10 @@ describe('POST /api/pro/bookings', () => {
     mocks.requirePro.mockResolvedValue({
       ok: true,
       professionalId: 'pro_123',
+      proId: 'pro_123',
+      user: {
+        id: 'user_123',
+      },
     })
 
     mocks.jsonFail.mockImplementation(
@@ -157,7 +161,7 @@ describe('POST /api/pro/bookings', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
-      'Missing client.',
+      'Missing client id.',
       expect.objectContaining({
         code: 'CLIENT_ID_REQUIRED',
       }),
@@ -309,6 +313,113 @@ describe('POST /api/pro/bookings', () => {
     )
   })
 
+  it('passes missing overrideReason through to createProBooking and maps FORBIDDEN from the boundary', async () => {
+    mocks.createProBooking.mockRejectedValueOnce(
+      bookingError('FORBIDDEN', {
+        message: 'Override reason is required when using booking rule overrides.',
+        userMessage: 'Please add a reason for this override.',
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        clientId: 'client_1',
+        scheduledFor: '2026-03-11T19:30:00.000Z',
+        locationId: 'loc_1',
+        locationType: 'SALON',
+        offeringId: 'offering_1',
+        allowShortNotice: true,
+      }),
+    )
+
+    expect(mocks.createProBooking).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: null,
+      clientId: 'client_1',
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      403,
+      'Please add a reason for this override.',
+      expect.objectContaining({
+        code: 'FORBIDDEN',
+      }),
+    )
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: 403,
+        code: 'FORBIDDEN',
+      }),
+    )
+  })
+
+  it('passes non-text overrideReason through as null and maps FORBIDDEN from the boundary', async () => {
+    mocks.createProBooking.mockRejectedValueOnce(
+      bookingError('FORBIDDEN', {
+        message: 'Override reason is required when using booking rule overrides.',
+        userMessage: 'Please add a reason for this override.',
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        clientId: 'client_1',
+        scheduledFor: '2026-03-11T19:30:00.000Z',
+        locationId: 'loc_1',
+        locationType: 'SALON',
+        offeringId: 'offering_1',
+        allowShortNotice: true,
+        overrideReason: 123,
+      }),
+    )
+
+    expect(mocks.createProBooking).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: null,
+      clientId: 'client_1',
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      403,
+      'Please add a reason for this override.',
+      expect.objectContaining({
+        code: 'FORBIDDEN',
+      }),
+    )
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: 403,
+        code: 'FORBIDDEN',
+      }),
+    )
+  })
+
   it('calls createProBooking with the parsed request payload', async () => {
     await POST(
       makeRequest({
@@ -324,11 +435,14 @@ describe('POST /api/pro/bookings', () => {
         allowOutsideWorkingHours: true,
         allowShortNotice: false,
         allowFarFuture: true,
+        overrideReason: '  VIP manual exception  ',
       }),
     )
 
     expect(mocks.createProBooking).toHaveBeenCalledWith({
       professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: 'VIP manual exception',
       clientId: 'client_1',
       offeringId: 'offering_1',
       locationId: 'loc_1',
@@ -357,6 +471,8 @@ describe('POST /api/pro/bookings', () => {
 
     expect(mocks.createProBooking).toHaveBeenCalledWith({
       professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: null,
       clientId: 'client_1',
       offeringId: 'offering_1',
       locationId: 'loc_1',
@@ -423,18 +539,13 @@ describe('POST /api/pro/bookings', () => {
     })
   })
 
-  it('maps booking boundary errors to jsonFail', async () => {
-    const error = new Error('Requested time is blocked.') as Error & {
-      name: string
-      code: string
-      userMessage: string
-    }
-
-    error.name = 'BookingError'
-    error.code = 'TIME_BLOCKED'
-    error.userMessage = 'That time is blocked on your calendar.'
-
-    mocks.createProBooking.mockRejectedValueOnce(error)
+  it('maps booking errors to jsonFail', async () => {
+    mocks.createProBooking.mockRejectedValueOnce(
+      bookingError('TIME_BLOCKED', {
+        message: 'Requested time is blocked.',
+        userMessage: 'That time is blocked on your calendar.',
+      }),
+    )
 
     const result = await POST(
       makeRequest({

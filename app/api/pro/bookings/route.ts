@@ -53,6 +53,15 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
+    const actorUserId = auth.user.id
+
+    if (!actorUserId || !actorUserId.trim()) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to create this booking.',
+      })
+    }
+
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
@@ -60,6 +69,7 @@ export async function POST(req: Request) {
     const clientAddressId = pickString(body.clientAddressId)
     const scheduledFor = toDateOrNull(body.scheduledFor)
     const internalNotes = pickString(body.internalNotes)
+    const overrideReason = pickString(body.overrideReason)
 
     const locationId = pickString(body.locationId)
     const locationType = normalizeLocationType(body.locationType)
@@ -101,6 +111,8 @@ export async function POST(req: Request) {
 
     const result = await createProBooking({
       professionalId,
+      actorUserId,
+      overrideReason,
       clientId,
       offeringId,
       locationId,

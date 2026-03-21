@@ -1,4 +1,3 @@
-// app/api/_utils/auth/requirePro.ts
 import { requireUser } from './requireUser'
 import { jsonFail } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -9,8 +8,9 @@ type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
 export type RequireProOk = {
   ok: true
   user: CurrentUser
+  userId: string
   professionalId: string
-  proId: string // alias
+  proId: string
 }
 
 export type RequireProFail = {
@@ -22,17 +22,20 @@ export type RequireProResult = RequireProOk | RequireProFail
 
 export async function requirePro(): Promise<RequireProResult> {
   const auth = await requireUser({ roles: [Role.PRO] })
-  if (!auth.ok) return auth // same union shape; Response is compatible
+  if (!auth.ok) return auth
 
   const professionalId = auth.user.professionalProfile?.id
   if (!professionalId) {
-    // Authenticated but missing a pro profile -> still forbidden
-    return { ok: false, res: jsonFail(403, 'Only professionals can perform this action.') }
+    return {
+      ok: false,
+      res: jsonFail(403, 'Only professionals can perform this action.'),
+    }
   }
 
   return {
     ok: true,
     user: auth.user,
+    userId: auth.user.id,
     professionalId,
     proId: professionalId,
   }

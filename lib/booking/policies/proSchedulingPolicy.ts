@@ -47,6 +47,11 @@ function parseWorkingHoursGuardMessage(
   }
 }
 
+export type ProSchedulingAppliedOverride =
+  | 'ADVANCE_NOTICE'
+  | 'MAX_DAYS_AHEAD'
+  | 'WORKING_HOURS'
+
 export type EvaluateProSchedulingDecisionArgs = {
   tx?: Prisma.TransactionClient
   now: Date
@@ -70,6 +75,7 @@ export type EvaluateProSchedulingDecisionArgs = {
 
 export type ProSchedulingDecision = {
   requestedEnd: Date
+  appliedOverrides: ProSchedulingAppliedOverride[]
 }
 
 export type ProSchedulingDecisionResult = PolicyResult<
@@ -85,6 +91,8 @@ export async function evaluateProSchedulingDecision(
     durationMinutes: args.durationMinutes,
     bufferMinutes: args.bufferMinutes,
   })
+
+  const appliedOverrides: ProSchedulingAppliedOverride[] = []
 
   const stepCheck = isStartAlignedToWorkingWindowStep({
     startUtc: args.requestedStart,
@@ -134,18 +142,17 @@ export async function evaluateProSchedulingDecision(
     }
 
     // OUTSIDE_WORKING_HOURS is intentionally not fatal here.
-    // We let the full range guard decide, so the behavior stays aligned
-    // with the current pro create/edit routes.
+    // We let the full range guard decide.
   }
 
-  if (!args.allowShortNotice) {
-    const advanceNoticeCheck = checkAdvanceNotice({
-      startUtc: args.requestedStart,
-      nowUtc: args.now,
-      advanceNoticeMinutes: args.advanceNoticeMinutes,
-    })
+  const advanceNoticeCheck = checkAdvanceNotice({
+    startUtc: args.requestedStart,
+    nowUtc: args.now,
+    advanceNoticeMinutes: args.advanceNoticeMinutes,
+  })
 
-    if (!advanceNoticeCheck.ok) {
+  if (!advanceNoticeCheck.ok) {
+    if (!args.allowShortNotice) {
       return policyFail('ADVANCE_NOTICE_REQUIRED', {
         requestedStart: args.requestedStart,
         requestedEnd,
@@ -157,16 +164,18 @@ export async function evaluateProSchedulingDecision(
         },
       })
     }
+
+    appliedOverrides.push('ADVANCE_NOTICE')
   }
 
-  if (!args.allowFarFuture) {
-    const maxDaysAheadCheck = checkMaxDaysAheadExact({
-      startUtc: args.requestedStart,
-      nowUtc: args.now,
-      maxDaysAhead: args.maxDaysAhead,
-    })
+  const maxDaysAheadCheck = checkMaxDaysAheadExact({
+    startUtc: args.requestedStart,
+    nowUtc: args.now,
+    maxDaysAhead: args.maxDaysAhead,
+  })
 
-    if (!maxDaysAheadCheck.ok) {
+  if (!maxDaysAheadCheck.ok) {
+    if (!args.allowFarFuture) {
       return policyFail('MAX_DAYS_AHEAD_EXCEEDED', {
         requestedStart: args.requestedStart,
         requestedEnd,
@@ -178,47 +187,49 @@ export async function evaluateProSchedulingDecision(
         },
       })
     }
+
+    appliedOverrides.push('MAX_DAYS_AHEAD')
   }
 
-  if (!args.allowOutsideWorkingHours) {
-    const workingHoursCheck = ensureWithinWorkingHours({
-      scheduledStartUtc: args.requestedStart,
-      scheduledEndUtc: requestedEnd,
-      workingHours: args.workingHours,
-      timeZone: args.timeZone,
-      fallbackTimeZone: 'UTC',
-      messages: {
-        missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
-        outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
-        misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
-      },
-    })
+  const workingHoursCheck = ensureWithinWorkingHours({
+    scheduledStartUtc: args.requestedStart,
+    scheduledEndUtc: requestedEnd,
+    workingHours: args.workingHours,
+    timeZone: args.timeZone,
+    fallbackTimeZone: 'UTC',
+    messages: {
+      missing: makeWorkingHoursGuardMessage('WORKING_HOURS_REQUIRED'),
+      outside: makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS'),
+      misconfigured: makeWorkingHoursGuardMessage('WORKING_HOURS_INVALID'),
+    },
+  })
 
-    if (!workingHoursCheck.ok) {
-      const parsed = parseWorkingHoursGuardMessage(workingHoursCheck.error)
+  if (!workingHoursCheck.ok) {
+    const parsed = parseWorkingHoursGuardMessage(workingHoursCheck.error)
 
-      if (parsed === 'WORKING_HOURS_REQUIRED') {
-        return policyFail('WORKING_HOURS_REQUIRED', {
-          requestedStart: args.requestedStart,
-          requestedEnd,
-          conflictType: 'WORKING_HOURS',
-          meta: {
-            workingHoursError: workingHoursCheck.error,
-          },
-        })
-      }
+    if (parsed === 'WORKING_HOURS_REQUIRED') {
+      return policyFail('WORKING_HOURS_REQUIRED', {
+        requestedStart: args.requestedStart,
+        requestedEnd,
+        conflictType: 'WORKING_HOURS',
+        meta: {
+          workingHoursError: workingHoursCheck.error,
+        },
+      })
+    }
 
-      if (parsed === 'WORKING_HOURS_INVALID') {
-        return policyFail('WORKING_HOURS_INVALID', {
-          requestedStart: args.requestedStart,
-          requestedEnd,
-          conflictType: 'WORKING_HOURS',
-          meta: {
-            workingHoursError: workingHoursCheck.error,
-          },
-        })
-      }
+    if (parsed === 'WORKING_HOURS_INVALID') {
+      return policyFail('WORKING_HOURS_INVALID', {
+        requestedStart: args.requestedStart,
+        requestedEnd,
+        conflictType: 'WORKING_HOURS',
+        meta: {
+          workingHoursError: workingHoursCheck.error,
+        },
+      })
+    }
 
+    if (!args.allowOutsideWorkingHours) {
       return policyFail('OUTSIDE_WORKING_HOURS', {
         requestedStart: args.requestedStart,
         requestedEnd,
@@ -228,6 +239,8 @@ export async function evaluateProSchedulingDecision(
         },
       })
     }
+
+    appliedOverrides.push('WORKING_HOURS')
   }
 
   const conflict = await getTimeRangeConflict({
@@ -269,5 +282,6 @@ export async function evaluateProSchedulingDecision(
 
   return policyOk({
     requestedEnd,
+    appliedOverrides,
   })
 }

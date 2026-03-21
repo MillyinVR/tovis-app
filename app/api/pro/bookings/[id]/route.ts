@@ -19,7 +19,10 @@ import { moneyToFixed2String } from '@/lib/money'
 import { isRecord } from '@/lib/guards'
 import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
-import { type RequestedServiceItemInput, sumDecimal } from '@/lib/booking/serviceItems'
+import {
+  type RequestedServiceItemInput,
+  sumDecimal,
+} from '@/lib/booking/serviceItems'
 import {
   decimalToNullableNumber,
   pickFormattedAddressFromSnapshot,
@@ -304,11 +307,19 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
+    const actorUserId = auth.user.id
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
+    }
+
+    if (!actorUserId || !actorUserId.trim()) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to update this booking.',
+      })
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
@@ -342,6 +353,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const hasServiceItems = Object.prototype.hasOwnProperty.call(
       rec,
       'serviceItems',
+    )
+    const hasOverrideReason = Object.prototype.hasOwnProperty.call(
+      rec,
+      'overrideReason',
     )
 
     const nextStatus = normalizeRequestedStatus(rec.status)
@@ -401,6 +416,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return bookingJsonFail('INVALID_DURATION_MINUTES')
     }
 
+    const overrideReason = hasOverrideReason ? pickString(rec.overrideReason) : null
+    if (hasOverrideReason && rec.overrideReason != null && overrideReason == null) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'overrideReason must be a string when provided.',
+        userMessage: 'Override reason must be text.',
+      })
+    }
+
     let parsedRequestedItems: RequestedServiceItemInput[] | null
     try {
       parsedRequestedItems = parseRequestedServiceItems(rec.serviceItems)
@@ -416,6 +439,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     const result = await updateProBooking({
       professionalId,
+      actorUserId,
+      overrideReason,
       bookingId,
       nextStatus,
       notifyClient: notifyClient === true,
