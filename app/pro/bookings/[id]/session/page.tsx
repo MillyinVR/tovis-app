@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from '../ConsultationForm'
 import { moneyToFixed2String } from '@/lib/money'
-import { transitionSessionStep } from '@/lib/booking/transitions'
+import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import {
   BookingStatus,
   ConsultationApprovalStatus,
@@ -189,7 +189,11 @@ async function transitionAction(bookingId: string, next: SessionStep) {
   if (b.professionalId !== proId) redirect('/pro')
   if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
 
-  await transitionSessionStep({ bookingId, proId, nextStep: next })
+  await transitionSessionStep({
+  bookingId,
+  professionalId: proId,
+  nextStep: next,
+})
   redirect(bookingHubHref(bookingId))
 }
 
@@ -362,7 +366,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
 
     const done = await transitionSessionStep({
       bookingId,
-      proId,
+      professionalId: proId,
       nextStep: SessionStep.DONE,
     })
 
@@ -370,7 +374,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
 
     await transitionSessionStep({
       bookingId,
-      proId,
+      professionalId: proId,
       nextStep: SessionStep.AFTER_PHOTOS,
     }).catch(() => null)
 

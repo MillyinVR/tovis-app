@@ -8,10 +8,7 @@ const ALLOWED_FILES = new Set([
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
-  normalize('app/api/pro/bookings/[id]/media/route.ts'),
   normalize('app/api/pro/last-minute/route.ts'),
-  normalize('lib/booking/transitions.ts'),
-  normalize('lib/reminders.ts'),
 ])
 
 const IGNORE_DIRS = new Set([

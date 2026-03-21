@@ -4,6 +4,7 @@ import type { ServiceLocationType, Prisma } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
 import { parseMoney } from '@/lib/money'
+import { updateBookingLastMinuteDiscount } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
 
@@ -104,13 +105,11 @@ export async function POST(req: Request) {
     // ✅ discountAmount stored as Decimal? per schema
     const discountAmountDecimal = parseMoney(discount.discountAmount)
 
-    await prisma.booking.update({
-      where: { id: booking.id },
-      data: {
-        discountAmount: discountAmountDecimal,
-      },
-      select: { id: true },
-    })
+  await updateBookingLastMinuteDiscount({
+    bookingId: booking.id,
+    professionalId,
+    discountAmount: discountAmountDecimal,
+  })
 
     return jsonOk(
       {

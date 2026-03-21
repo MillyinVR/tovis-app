@@ -12,7 +12,7 @@ import { pickString } from '@/lib/pick'
 import MediaUploader from '../MediaUploader'
 import MediaPreviewGrid from '../_components/MediaPreviewGrid'
 import { cn } from '@/lib/utils'
-import { transitionSessionStep } from '@/lib/booking/transitions'
+import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import {
   BookingStatus,
   ConsultationApprovalStatus,
@@ -192,7 +192,7 @@ export default async function ProBeforePhotosPage(props: PageProps) {
 
     const result = await transitionSessionStep({
       bookingId,
-      proId: maybeUserProId,
+      professionalId: maybeUserProId,
       nextStep: SessionStep.SERVICE_IN_PROGRESS,
     })
 

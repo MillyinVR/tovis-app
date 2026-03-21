@@ -1,6 +1,6 @@
 // app/api/pro/bookings/[id]/session-step/route.ts
 import { SessionStep } from '@prisma/client'
-import { transitionSessionStep } from '@/lib/booking/transitions'
+import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
@@ -10,14 +10,17 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 function parseStep(v: unknown): SessionStep | null {
   if (typeof v !== 'string') return null
   const s = v.trim().toUpperCase()
-  return (Object.values(SessionStep) as string[]).includes(s) ? (s as SessionStep) : null
+  return (Object.values(SessionStep) as string[]).includes(s)
+    ? (s as SessionStep)
+    : null
 }
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const proId = auth.professionalId
+
+    const professionalId = auth.professionalId
 
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params?.id)
@@ -27,16 +30,21 @@ export async function POST(req: Request, ctx: Ctx) {
     const nextStep = parseStep(body?.step)
     if (!nextStep) return jsonFail(400, 'Missing or invalid step.')
 
-    const result = await transitionSessionStep({ bookingId, proId, nextStep })
+    const result = await transitionSessionStep({
+      bookingId,
+      professionalId,
+      nextStep,
+    })
 
     if (!result.ok) {
-      // If a forced step is returned, send it back for UI healing
-      return jsonFail(result.status, result.error, { forcedStep: result.forcedStep ?? null })
+      return jsonFail(result.status, result.error, {
+        forcedStep: result.forcedStep ?? null,
+      })
     }
 
     return jsonOk({ booking: result.booking }, 200)
-  } catch (e) {
-    console.error('POST /api/pro/bookings/[id]/session-step error', e)
+  } catch (error) {
+    console.error('POST /api/pro/bookings/[id]/session-step error', error)
     return jsonFail(500, 'Internal server error')
   }
 }

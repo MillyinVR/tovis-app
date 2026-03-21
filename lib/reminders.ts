@@ -1,8 +1,7 @@
-// lib/reminders.ts
 import twilio from 'twilio'
-import { prisma } from './prisma'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { markBookingRemindersSent } from '@/lib/booking/writeBoundary'
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID
 const authToken = process.env.TWILIO_AUTH_TOKEN
@@ -28,7 +27,7 @@ export function formatReminderMessage(args: {
   serviceName: string
   scheduledFor: Date
   businessName?: string | null
-  timeZone: string // REQUIRED: IANA tz (pro/business)
+  timeZone: string
 }) {
   const tz = sanitizeTimeZone(args.timeZone, 'UTC')
 
@@ -41,12 +40,8 @@ export function formatReminderMessage(args: {
   return `Hi ${clientFirstName}! Reminder: ${serviceName} on ${when} with ${businessName}. Reply to confirm or message to reschedule.`
 }
 
-// mark bookings as reminded
 export async function markRemindersSent(bookingIds: string[]) {
   if (!bookingIds.length) return
 
-  await prisma.booking.updateMany({
-    where: { id: { in: bookingIds } },
-    data: { reminderSentAt: new Date() },
-  })
+  await markBookingRemindersSent({ bookingIds })
 }

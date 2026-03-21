@@ -1,10 +1,16 @@
 // app/api/pro/bookings/[id]/media/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { BookingStatus, MediaPhase, MediaType, MediaVisibility, Role, SessionStep } from '@prisma/client'
+import { MediaPhase, MediaType } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import {
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,9 +20,19 @@ const CAPTION_MAX = 300
 const PATH_MAX = 2048
 const BUCKET_MAX = 128
 
-// Session uploads must go to private bucket
 const SESSION_BUCKET = BUCKETS.mediaPrivate
-const SIGNED_URL_TTL_SECONDS = 60 * 10 // 10 minutes
+const SIGNED_URL_TTL_SECONDS = 60 * 10
+
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
 
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -61,28 +77,6 @@ function safeCaption(raw: unknown): string | null {
   return s.slice(0, CAPTION_MAX)
 }
 
-function canUploadPhase(sessionStep: SessionStep | null, phase: MediaPhase): boolean {
-  const step = sessionStep ?? SessionStep.NONE
-
-  if (phase === MediaPhase.BEFORE) {
-    return (
-      step === SessionStep.CONSULTATION ||
-      step === SessionStep.CONSULTATION_PENDING_CLIENT ||
-      step === SessionStep.BEFORE_PHOTOS ||
-      step === SessionStep.SERVICE_IN_PROGRESS ||
-      step === SessionStep.FINISH_REVIEW ||
-      step === SessionStep.AFTER_PHOTOS ||
-      step === SessionStep.DONE
-    )
-  }
-
-  if (phase === MediaPhase.AFTER) {
-    return step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
-  }
-
-  return true
-}
-
 function mustStartWithBookingPrefix(path: string, bookingId: string) {
   return path.startsWith(`bookings/${bookingId}/`)
 }
@@ -94,8 +88,12 @@ function mustStartWithBookingPrefix(path: string, bookingId: string) {
 async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<boolean> {
   try {
     const admin = getSupabaseAdmin()
-    const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+    const { data, error } = await admin.storage
+      .from(bucket)
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+
     if (error) return false
+
     const signed = data?.signedUrl
     if (!signed) return false
 
@@ -132,7 +130,9 @@ export async function GET(req: Request, ctx: Ctx) {
     const urlObj = new URL(req.url)
     const phaseParam = urlObj.searchParams.get('phase')
     const phase = phaseParam == null ? null : parsePhase(phaseParam)
-    if (phaseParam != null && !phase) return jsonFail(400, 'Invalid phase query param.')
+    if (phaseParam != null && !phase) {
+      return jsonFail(400, 'Invalid phase query param.')
+    }
 
     const where: { bookingId: string; phase?: MediaPhase } = { bookingId }
     if (phase) where.phase = phase
@@ -149,14 +149,10 @@ export async function GET(req: Request, ctx: Ctx) {
         reviewId: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
-
-        // Canonical pointers
         storageBucket: true,
         storagePath: true,
         thumbBucket: true,
         thumbPath: true,
-
-        // Legacy (don’t treat as canonical)
         url: true,
         thumbUrl: true,
       },
@@ -178,8 +174,6 @@ export async function GET(req: Request, ctx: Ctx) {
           ...m,
           renderUrl,
           renderThumbUrl,
-
-          // Optional “response-heal” for old UI that expects url/thumbUrl to be renderable:
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         }
@@ -187,8 +181,8 @@ export async function GET(req: Request, ctx: Ctx) {
     )
 
     return jsonOk({ items }, 200)
-  } catch (e) {
-    console.error('GET /api/pro/bookings/[id]/media error', e)
+  } catch (error) {
+    console.error('GET /api/pro/bookings/[id]/media error', error)
     return jsonFail(500, 'Internal server error')
   }
 }
@@ -217,10 +211,19 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const storageBucket = safeBucket(body.storageBucket)
     const storagePath = safeStoragePath(body.storagePath)
-    if (!storageBucket || !storagePath) return jsonFail(400, 'Missing storageBucket/storagePath.')
+    if (!storageBucket || !storagePath) {
+      return jsonFail(400, 'Missing storageBucket/storagePath.')
+    }
 
-    const thumbBucket = body.thumbBucket == null || body.thumbBucket === '' ? null : safeBucket(body.thumbBucket)
-    const thumbPath = body.thumbPath == null || body.thumbPath === '' ? null : safeStoragePath(body.thumbPath)
+    const thumbBucket =
+      body.thumbBucket == null || body.thumbBucket === ''
+        ? null
+        : safeBucket(body.thumbBucket)
+
+    const thumbPath =
+      body.thumbPath == null || body.thumbPath === ''
+        ? null
+        : safeStoragePath(body.thumbPath)
 
     if ((thumbBucket && !thumbPath) || (!thumbBucket && thumbPath)) {
       return jsonFail(400, 'thumbBucket and thumbPath must be provided together.')
@@ -237,141 +240,43 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!mustStartWithBookingPrefix(storagePath, bookingId)) {
       return jsonFail(400, 'storagePath must be under bookings/<bookingId>/.')
     }
+
     if (thumbPath && !mustStartWithBookingPrefix(thumbPath, bookingId)) {
       return jsonFail(400, 'thumbPath must be under bookings/<bookingId>/.')
     }
 
-    // Session media MUST go to private bucket
-    if (storageBucket !== SESSION_BUCKET) return jsonFail(400, `Session media must upload to ${SESSION_BUCKET}.`)
-    if (thumbBucket && thumbBucket !== SESSION_BUCKET) return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
-
-    // Verify the object exists before writing DB row
-    const mainExists = await objectExistsViaSignedUrl(storageBucket, storagePath)
-    if (!mainExists) return jsonFail(400, 'Uploaded file not found in storage.')
-
-    if (thumbBucket && thumbPath) {
-      const tExists = await objectExistsViaSignedUrl(thumbBucket, thumbPath)
-      if (!tExists) return jsonFail(400, 'Uploaded thumb not found in storage.')
+    if (storageBucket !== SESSION_BUCKET) {
+      return jsonFail(400, `Session media must upload to ${SESSION_BUCKET}.`)
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const booking = await tx.booking.findUnique({
-        where: { id: bookingId },
-        select: {
-          id: true,
-          professionalId: true,
-          status: true,
-          sessionStep: true,
-          finishedAt: true,
-        },
-      })
+    if (thumbBucket && thumbBucket !== SESSION_BUCKET) {
+      return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
+    }
 
-      if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
-      if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden.' }
+    const mainExists = await objectExistsViaSignedUrl(storageBucket, storagePath)
+    if (!mainExists) {
+      return jsonFail(400, 'Uploaded file not found in storage.')
+    }
 
-      if (booking.status === BookingStatus.CANCELLED) {
-        return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
+    if (thumbBucket && thumbPath) {
+      const thumbExists = await objectExistsViaSignedUrl(thumbBucket, thumbPath)
+      if (!thumbExists) {
+        return jsonFail(400, 'Uploaded thumb not found in storage.')
       }
-      if (booking.status === BookingStatus.PENDING) {
-        return { ok: false as const, status: 409, error: 'Media uploads require an accepted booking.' }
-      }
-      if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
-        return { ok: false as const, status: 409, error: 'This booking is completed. Media uploads are locked.' }
-      }
+    }
 
-      if (!canUploadPhase(booking.sessionStep, phase)) {
-        return {
-          ok: false as const,
-          status: 409,
-          error: `You can’t upload ${phase} media at session step: ${String(booking.sessionStep ?? SessionStep.NONE)}.`,
-        }
-      }
-
-      // ✅ Single source of truth: store pointers only.
-      // url/thumbUrl stay NULL for new rows.
-      const created = await tx.mediaAsset.create({
-        data: {
-          professionalId: booking.professionalId,
-          bookingId: booking.id,
-          uploadedByUserId: user.id,
-          uploadedByRole: Role.PRO,
-
-          storageBucket,
-          storagePath,
-          thumbBucket,
-          thumbPath,
-
-          url: null,
-          thumbUrl: null,
-
-          mediaType,
-          phase,
-          caption,
-
-          visibility: MediaVisibility.PRO_CLIENT,
-          isEligibleForLooks: false,
-          isFeaturedInPortfolio: false,
-
-          reviewId: null,
-          reviewLocked: false,
-        },
-        select: {
-          id: true,
-          mediaType: true,
-          visibility: true,
-          phase: true,
-          caption: true,
-          createdAt: true,
-          reviewId: true,
-          isEligibleForLooks: true,
-          isFeaturedInPortfolio: true,
-          storageBucket: true,
-          storagePath: true,
-          thumbBucket: true,
-          thumbPath: true,
-          url: true,
-          thumbUrl: true,
-        },
-      })
-
-      let advancedTo: SessionStep | null = null
-
-      if (phase === MediaPhase.BEFORE) {
-        const step = booking.sessionStep ?? SessionStep.NONE
-        const canAdvanceFrom =
-          step === SessionStep.CONSULTATION ||
-          step === SessionStep.CONSULTATION_PENDING_CLIENT ||
-          step === SessionStep.BEFORE_PHOTOS
-
-        if (canAdvanceFrom) {
-          const beforeCount = await tx.mediaAsset.count({
-            where: { bookingId: booking.id, phase: MediaPhase.BEFORE },
-          })
-
-          if (beforeCount > 0) {
-            await tx.booking.update({
-              where: { id: booking.id },
-              data: { sessionStep: SessionStep.SERVICE_IN_PROGRESS },
-              select: { id: true },
-            })
-            advancedTo = SessionStep.SERVICE_IN_PROGRESS
-          }
-        }
-      }
-
-      if (phase === MediaPhase.AFTER && booking.sessionStep === SessionStep.AFTER_PHOTOS) {
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: { sessionStep: SessionStep.DONE },
-          select: { id: true },
-        })
-        advancedTo = SessionStep.DONE
-      }
-
-      return { ok: true as const, created, advancedTo }
+    const result = await uploadProBookingMedia({
+      bookingId,
+      professionalId: proId,
+      uploadedByUserId: user.id,
+      storageBucket,
+      storagePath,
+      thumbBucket,
+      thumbPath,
+      caption,
+      phase,
+      mediaType,
     })
-
-    if (!result.ok) return jsonFail(result.status, result.error)
 
     const { renderUrl, renderThumbUrl } = await renderMediaUrls({
       storageBucket: result.created.storageBucket,
@@ -388,8 +293,6 @@ export async function POST(req: Request, ctx: Ctx) {
           ...result.created,
           renderUrl,
           renderThumbUrl,
-
-          // Optional response-heal for old UI:
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         },
@@ -397,8 +300,15 @@ export async function POST(req: Request, ctx: Ctx) {
       },
       200,
     )
-  } catch (e) {
-    console.error('POST /api/pro/bookings/[id]/media error', e)
+  } catch (error: unknown) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
+
+    console.error('POST /api/pro/bookings/[id]/media error', error)
     return jsonFail(500, 'Internal server error')
   }
 }

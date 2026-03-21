@@ -7,6 +7,8 @@ import {
   ClientAddressKind,
   ClientNotificationType,
   MediaPhase,
+  MediaType,
+  MediaVisibility,
   OpeningStatus,
   Prisma,
   ProfessionalLocationType,
@@ -17,6 +19,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { upper } from '@/lib/booking/guards'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
   withLockedClientOwnedBookingTransaction,
@@ -276,6 +279,75 @@ type FinishBookingSessionResult = {
     sessionStep: SessionStep
   }
   afterCount: number
+  meta: MutationMeta
+}
+
+type TransitionSessionStepArgs = {
+  bookingId: string
+  professionalId: string
+  nextStep: SessionStep
+}
+
+type TransitionSessionStepResult =
+  | {
+      ok: true
+      booking: {
+        id: string
+        sessionStep: SessionStep
+        startedAt: Date | null
+      }
+      meta: MutationMeta
+    }
+  | {
+      ok: false
+      status: number
+      error: string
+      forcedStep?: SessionStep
+      meta: MutationMeta
+    }
+
+type UploadProBookingMediaArgs = {
+  bookingId: string
+  professionalId: string
+  uploadedByUserId: string
+  storageBucket: string
+  storagePath: string
+  thumbBucket: string | null
+  thumbPath: string | null
+  caption: string | null
+  phase: MediaPhase
+  mediaType: MediaType
+}
+
+type UploadProBookingMediaResult = {
+  created: {
+    id: string
+    mediaType: MediaType
+    visibility: MediaVisibility
+    phase: MediaPhase
+    caption: string | null
+    createdAt: Date
+    reviewId: string | null
+    isEligibleForLooks: boolean
+    isFeaturedInPortfolio: boolean
+    storageBucket: string | null
+    storagePath: string | null
+    thumbBucket: string | null
+    thumbPath: string | null
+    url: string | null
+    thumbUrl: string | null
+  }
+  advancedTo: SessionStep | null
+  meta: MutationMeta
+}
+
+type MarkBookingRemindersSentArgs = {
+  bookingIds: string[]
+  sentAt?: Date
+}
+
+type MarkBookingRemindersSentResult = {
+  count: number
   meta: MutationMeta
 }
 
@@ -557,6 +629,24 @@ type FinishBookingRecord = Prisma.BookingGetPayload<{
   select: typeof FINISH_BOOKING_SELECT
 }>
 
+const TRANSITION_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  finishedAt: true,
+  startedAt: true,
+  sessionStep: true,
+  consultationApproval: {
+    select: {
+      status: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type TransitionBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof TRANSITION_BOOKING_SELECT
+}>
+
 const PRO_CREATE_CLIENT_SELECT = {
   id: true,
 } satisfies Prisma.ClientProfileSelect
@@ -635,6 +725,41 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
     },
   },
 } satisfies Prisma.BookingSelect
+
+const BOOKING_MEDIA_UPLOAD_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  sessionStep: true,
+  finishedAt: true,
+} satisfies Prisma.BookingSelect
+
+type BookingMediaUploadRecord = Prisma.BookingGetPayload<{
+  select: typeof BOOKING_MEDIA_UPLOAD_SELECT
+}>
+
+const BOOKING_MEDIA_ASSET_SELECT = {
+  id: true,
+  mediaType: true,
+  visibility: true,
+  phase: true,
+  caption: true,
+  createdAt: true,
+  reviewId: true,
+  isEligibleForLooks: true,
+  isFeaturedInPortfolio: true,
+  storageBucket: true,
+  storagePath: true,
+  thumbBucket: true,
+  thumbPath: true,
+  url: true,
+  thumbUrl: true,
+} satisfies Prisma.MediaAssetSelect
+
+type BookingMediaAssetRecord = Prisma.MediaAssetGetPayload<{
+  select: typeof BOOKING_MEDIA_ASSET_SELECT
+}>
+
 
 type RebookSourceBookingRecord = Prisma.BookingGetPayload<{
   select: typeof REBOOK_SOURCE_BOOKING_SELECT
@@ -793,6 +918,105 @@ function isAftercareSessionStepEligible(
   )
 }
 
+function isTerminalSessionBooking(
+  status: BookingStatus,
+  finishedAt: Date | null,
+): boolean {
+  return (
+    status === BookingStatus.CANCELLED ||
+    status === BookingStatus.COMPLETED ||
+    Boolean(finishedAt)
+  )
+}
+
+function requiresApprovedConsultForStep(step: SessionStep): boolean {
+  return (
+    step === SessionStep.SERVICE_IN_PROGRESS ||
+    step === SessionStep.FINISH_REVIEW ||
+    step === SessionStep.AFTER_PHOTOS ||
+    step === SessionStep.DONE ||
+    step === SessionStep.BEFORE_PHOTOS
+  )
+}
+
+function isAllowedSessionTransition(
+  from: SessionStep,
+  to: SessionStep,
+): boolean {
+  if (from === to) return true
+
+  if (from === SessionStep.NONE) {
+    return to === SessionStep.CONSULTATION
+  }
+
+  if (from === SessionStep.CONSULTATION) {
+    return (
+      to === SessionStep.CONSULTATION_PENDING_CLIENT ||
+      to === SessionStep.BEFORE_PHOTOS
+    )
+  }
+
+  if (from === SessionStep.CONSULTATION_PENDING_CLIENT) {
+    return (
+      to === SessionStep.BEFORE_PHOTOS ||
+      to === SessionStep.CONSULTATION
+    )
+  }
+
+  if (from === SessionStep.BEFORE_PHOTOS) {
+    return (
+      to === SessionStep.SERVICE_IN_PROGRESS ||
+      to === SessionStep.CONSULTATION
+    )
+  }
+
+  if (from === SessionStep.SERVICE_IN_PROGRESS) {
+    return to === SessionStep.FINISH_REVIEW
+  }
+
+  if (from === SessionStep.FINISH_REVIEW) {
+    return to === SessionStep.AFTER_PHOTOS
+  }
+
+  if (from === SessionStep.AFTER_PHOTOS) {
+    return (
+      to === SessionStep.DONE ||
+      to === SessionStep.FINISH_REVIEW
+    )
+  }
+
+  if (from === SessionStep.DONE) {
+    return false
+  }
+
+  return false
+}
+
+function canUploadBookingMediaPhase(
+  sessionStep: SessionStep | null,
+  phase: MediaPhase,
+): boolean {
+  const step = sessionStep ?? SessionStep.NONE
+
+  if (phase === MediaPhase.BEFORE) {
+    return (
+      step === SessionStep.CONSULTATION ||
+      step === SessionStep.CONSULTATION_PENDING_CLIENT ||
+      step === SessionStep.BEFORE_PHOTOS ||
+      step === SessionStep.SERVICE_IN_PROGRESS ||
+      step === SessionStep.FINISH_REVIEW ||
+      step === SessionStep.AFTER_PHOTOS ||
+      step === SessionStep.DONE
+    )
+  }
+
+  if (phase === MediaPhase.AFTER) {
+    return step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
+  }
+
+  return true
+}
+
 function normalizePositiveDurationMinutes(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed)) return null
@@ -823,6 +1047,12 @@ function assertNonEmptyClientId(clientId: string): void {
 
 function assertNonEmptyProfessionalId(professionalId: string): void {
   if (!professionalId.trim()) {
+    throw bookingError('FORBIDDEN')
+  }
+}
+
+function assertNonEmptyUserId(userId: string): void {
+  if (!userId.trim()) {
     throw bookingError('FORBIDDEN')
   }
 }
@@ -2293,6 +2523,302 @@ async function performLockedFinishBookingSession(args: {
       sessionStep: updated.sessionStep ?? SessionStep.NONE,
     },
     afterCount,
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedTransitionSessionStep(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  nextStep: SessionStep
+}): Promise<TransitionSessionStepResult> {
+  const booking: TransitionBookingRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: TRANSITION_BOOKING_SELECT,
+  })
+
+  if (!booking) {
+    return {
+      ok: false,
+      status: 404,
+      error: 'Booking not found.',
+      meta: buildMeta(false),
+    }
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Forbidden.',
+      meta: buildMeta(false),
+    }
+  }
+
+  if (isTerminalSessionBooking(booking.status, booking.finishedAt)) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'Booking is completed/cancelled.',
+      meta: buildMeta(false),
+    }
+  }
+
+  if (booking.status === BookingStatus.PENDING) {
+    if (
+      args.nextStep !== SessionStep.CONSULTATION &&
+      args.nextStep !== SessionStep.NONE
+    ) {
+      await args.tx.booking.update({
+        where: { id: booking.id },
+        data: { sessionStep: SessionStep.CONSULTATION },
+        select: { id: true } satisfies Prisma.BookingSelect,
+      })
+
+      return {
+        ok: false,
+        status: 409,
+        error: 'Pending bookings are consultation-only.',
+        forcedStep: SessionStep.CONSULTATION,
+        meta: buildMeta(true),
+      }
+    }
+  }
+
+  const from = booking.sessionStep ?? SessionStep.NONE
+
+  if (!isAllowedSessionTransition(from, args.nextStep)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Invalid transition: ${from} → ${args.nextStep}.`,
+      meta: buildMeta(false),
+    }
+  }
+
+  const approval = upper(booking.consultationApproval?.status)
+
+  if (
+    requiresApprovedConsultForStep(args.nextStep) &&
+    approval !== 'APPROVED'
+  ) {
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: { sessionStep: SessionStep.CONSULTATION },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+
+    return {
+      ok: false,
+      status: 409,
+      error: 'Waiting for client approval.',
+      forcedStep: SessionStep.CONSULTATION,
+      meta: buildMeta(true),
+    }
+  }
+
+  if (args.nextStep === SessionStep.SERVICE_IN_PROGRESS) {
+    const beforeCount = await args.tx.mediaAsset.count({
+      where: {
+        bookingId: booking.id,
+        phase: MediaPhase.BEFORE,
+        uploadedByRole: Role.PRO,
+      },
+    })
+
+    if (beforeCount <= 0) {
+      return {
+        ok: false,
+        status: 409,
+        error: 'Upload at least one BEFORE photo before starting service.',
+        meta: buildMeta(false),
+      }
+    }
+  }
+
+  if (args.nextStep === SessionStep.DONE) {
+    const [beforeCount, afterCount, aftercare] = await Promise.all([
+      args.tx.mediaAsset.count({
+        where: {
+          bookingId: booking.id,
+          phase: MediaPhase.BEFORE,
+          uploadedByRole: Role.PRO,
+        },
+      }),
+      args.tx.mediaAsset.count({
+        where: {
+          bookingId: booking.id,
+          phase: MediaPhase.AFTER,
+          uploadedByRole: Role.PRO,
+        },
+      }),
+      args.tx.aftercareSummary.findFirst({
+        where: { bookingId: booking.id },
+        select: { id: true },
+      }),
+    ])
+
+    const missing: string[] = []
+    if (beforeCount <= 0) missing.push('BEFORE photo')
+    if (afterCount <= 0) missing.push('AFTER photo')
+    if (!aftercare?.id) missing.push('aftercare')
+
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        error: `Wrap-up incomplete: add ${missing.join(' + ')} before completing the session.`,
+        forcedStep: SessionStep.AFTER_PHOTOS,
+        meta: buildMeta(false),
+      }
+    }
+  }
+
+  const shouldSetStartedAt =
+    args.nextStep === SessionStep.SERVICE_IN_PROGRESS &&
+    !booking.startedAt
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      sessionStep: args.nextStep,
+      ...(shouldSetStartedAt ? { startedAt: new Date() } : {}),
+    },
+    select: {
+      id: true,
+      sessionStep: true,
+      startedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    ok: true,
+    booking: {
+      id: updated.id,
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+      startedAt: updated.startedAt,
+    },
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedUploadProBookingMedia(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  uploadedByUserId: string
+  storageBucket: string
+  storagePath: string
+  thumbBucket: string | null
+  thumbPath: string | null
+  caption: string | null
+  phase: MediaPhase
+  mediaType: MediaType
+}): Promise<UploadProBookingMediaResult> {
+  const booking: BookingMediaUploadRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: BOOKING_MEDIA_UPLOAD_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED', {
+      message: 'This booking is cancelled.',
+      userMessage: 'This booking is cancelled.',
+    })
+  }
+
+  if (booking.status === BookingStatus.PENDING) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Media uploads require an accepted booking.',
+      userMessage: 'Media uploads require an accepted booking.',
+    })
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+      message: 'This booking is completed. Media uploads are locked.',
+      userMessage: 'This booking is completed. Media uploads are locked.',
+    })
+  }
+
+  if (!canUploadBookingMediaPhase(booking.sessionStep, args.phase)) {
+    const step = booking.sessionStep ?? SessionStep.NONE
+    throw bookingError('STEP_MISMATCH', {
+      message: `You can’t upload ${args.phase} media at session step: ${String(step)}.`,
+      userMessage: `You can’t upload ${args.phase} media at session step: ${String(step)}.`,
+    })
+  }
+
+  const created: BookingMediaAssetRecord = await args.tx.mediaAsset.create({
+    data: {
+      professionalId: booking.professionalId,
+      bookingId: booking.id,
+      uploadedByUserId: args.uploadedByUserId,
+      uploadedByRole: Role.PRO,
+
+      storageBucket: args.storageBucket,
+      storagePath: args.storagePath,
+      thumbBucket: args.thumbBucket,
+      thumbPath: args.thumbPath,
+
+      url: null,
+      thumbUrl: null,
+
+      mediaType: args.mediaType,
+      phase: args.phase,
+      caption: args.caption,
+
+      visibility: MediaVisibility.PRO_CLIENT,
+      isEligibleForLooks: false,
+      isFeaturedInPortfolio: false,
+
+      reviewId: null,
+      reviewLocked: false,
+    },
+    select: BOOKING_MEDIA_ASSET_SELECT,
+  })
+
+  let advancedTo: SessionStep | null = null
+  const step = booking.sessionStep ?? SessionStep.NONE
+
+  if (
+    args.phase === MediaPhase.BEFORE &&
+    (step === SessionStep.CONSULTATION ||
+      step === SessionStep.CONSULTATION_PENDING_CLIENT ||
+      step === SessionStep.BEFORE_PHOTOS)
+  ) {
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: { sessionStep: SessionStep.SERVICE_IN_PROGRESS },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+    advancedTo = SessionStep.SERVICE_IN_PROGRESS
+  }
+
+  if (
+    args.phase === MediaPhase.AFTER &&
+    booking.sessionStep === SessionStep.AFTER_PHOTOS
+  ) {
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: { sessionStep: SessionStep.DONE },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+    advancedTo = SessionStep.DONE
+  }
+
+  return {
+    created,
+    advancedTo,
     meta: buildMeta(true),
   }
 }
@@ -4712,6 +5238,76 @@ export async function finishBookingSession(
         professionalId: args.professionalId,
       }),
   )
+}
+export async function transitionSessionStep(
+  args: TransitionSessionStepArgs,
+): Promise<TransitionSessionStepResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx }) =>
+      performLockedTransitionSessionStep({
+        tx,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        nextStep: args.nextStep,
+      }),
+  )
+}
+
+export async function uploadProBookingMedia(
+  args: UploadProBookingMediaArgs,
+): Promise<UploadProBookingMediaResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.uploadedByUserId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx }) =>
+      performLockedUploadProBookingMedia({
+        tx,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        uploadedByUserId: args.uploadedByUserId,
+        storageBucket: args.storageBucket,
+        storagePath: args.storagePath,
+        thumbBucket: args.thumbBucket,
+        thumbPath: args.thumbPath,
+        caption: args.caption,
+        phase: args.phase,
+        mediaType: args.mediaType,
+      }),
+  )
+}
+
+export async function markBookingRemindersSent(
+  args: MarkBookingRemindersSentArgs,
+): Promise<MarkBookingRemindersSentResult> {
+  const bookingIds = Array.from(
+    new Set(args.bookingIds.map((id) => id.trim()).filter(Boolean)),
+  )
+
+  if (bookingIds.length === 0) {
+    return {
+      count: 0,
+      meta: buildMeta(false),
+    }
+  }
+
+  const result = await prisma.booking.updateMany({
+    where: { id: { in: bookingIds } },
+    data: {
+      reminderSentAt: args.sentAt ?? new Date(),
+    },
+  })
+
+  return {
+    count: result.count,
+    meta: buildMeta(result.count > 0),
+  }
 }
 
 export async function upsertBookingAftercare(
