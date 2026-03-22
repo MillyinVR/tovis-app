@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
+import {
+  BookingStatus,
+  BookingOverridePermissionScope,
+  BookingOverrideRule,
+  Prisma,
+  Role,
+  ServiceLocationType,
+} from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
 
 const mocks = vi.hoisted(() => ({
@@ -158,6 +165,8 @@ describe('POST /api/pro/bookings', () => {
         offeringId: 'offering_1',
       }),
     )
+
+    
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
@@ -420,6 +429,64 @@ describe('POST /api/pro/bookings', () => {
     )
   })
 
+    it('maps override permission denial from the boundary', async () => {
+    mocks.createProBooking.mockRejectedValueOnce(
+      bookingError('FORBIDDEN', {
+        message:
+          'Booking override permission denied. actorUserId=user_123 professionalId=pro_123 rule=ADVANCE_NOTICE role=PRO',
+        userMessage: 'You are not allowed to use that override.',
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        clientId: 'client_1',
+        scheduledFor: '2026-03-11T19:30:00.000Z',
+        locationId: 'loc_1',
+        locationType: 'SALON',
+        offeringId: 'offering_1',
+        allowShortNotice: true,
+        overrideReason: 'Need manual exception',
+      }),
+    )
+
+    expect(mocks.createProBooking).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: 'Need manual exception',
+      clientId: 'client_1',
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      403,
+      'You are not allowed to use that override.',
+      expect.objectContaining({
+        code: 'FORBIDDEN',
+        message:
+          'Booking override permission denied. actorUserId=user_123 professionalId=pro_123 rule=ADVANCE_NOTICE role=PRO',
+      }),
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: 403,
+        code: 'FORBIDDEN',
+      }),
+    )
+  })
+
   it('calls createProBooking with the parsed request payload', async () => {
     await POST(
       makeRequest({
@@ -457,6 +524,8 @@ describe('POST /api/pro/bookings', () => {
       allowFarFuture: true,
     })
   })
+
+  
 
   it('creates a booking successfully and formats the response', async () => {
     const result = await POST(
@@ -521,6 +590,104 @@ describe('POST /api/pro/bookings', () => {
       data: {
         booking: {
           id: 'booking_1',
+          scheduledFor: '2026-03-11T19:30:00.000Z',
+          endsAt: '2026-03-11T20:45:00.000Z',
+          totalDurationMinutes: 60,
+          bufferMinutes: 15,
+          status: BookingStatus.ACCEPTED,
+          serviceName: 'Haircut',
+          subtotalSnapshot: '50.00',
+          subtotalCents: 5000,
+          locationId: 'loc_1',
+          locationType: ServiceLocationType.SALON,
+          clientAddressId: null,
+          stepMinutes: 15,
+          timeZone: 'America/Los_Angeles',
+        },
+      },
+    })
+  })
+
+    it('creates a booking successfully when an authorized override is used', async () => {
+    mocks.createProBooking.mockResolvedValueOnce({
+      booking: {
+        id: 'booking_override_ok',
+        scheduledFor,
+        totalDurationMinutes: 60,
+        bufferMinutes: 15,
+        status: BookingStatus.ACCEPTED,
+      },
+      subtotalSnapshot: new Prisma.Decimal('50.00'),
+      stepMinutes: 15,
+      appointmentTimeZone: 'America/Los_Angeles',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+      serviceName: 'Haircut',
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
+
+    const result = await POST(
+      makeRequest({
+        clientId: 'client_1',
+        scheduledFor: '2026-03-11T19:30:00.000Z',
+        locationId: 'loc_1',
+        locationType: 'SALON',
+        offeringId: 'offering_1',
+        allowShortNotice: true,
+        overrideReason: 'Approved operational exception',
+      }),
+    )
+
+    expect(mocks.createProBooking).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: 'Approved operational exception',
+      clientId: 'client_1',
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
+      {
+        booking: {
+          id: 'booking_override_ok',
+          scheduledFor: '2026-03-11T19:30:00.000Z',
+          endsAt: '2026-03-11T20:45:00.000Z',
+          totalDurationMinutes: 60,
+          bufferMinutes: 15,
+          status: BookingStatus.ACCEPTED,
+          serviceName: 'Haircut',
+          subtotalSnapshot: '50.00',
+          subtotalCents: 5000,
+          locationId: 'loc_1',
+          locationType: ServiceLocationType.SALON,
+          clientAddressId: null,
+          stepMinutes: 15,
+          timeZone: 'America/Los_Angeles',
+        },
+      },
+      201,
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: {
+        booking: {
+          id: 'booking_override_ok',
           scheduledFor: '2026-03-11T19:30:00.000Z',
           endsAt: '2026-03-11T20:45:00.000Z',
           totalDurationMinutes: 60,

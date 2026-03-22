@@ -357,6 +357,62 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     )
   })
 
+    it('maps override permission denial from the boundary on PATCH', async () => {
+    mocks.updateProBooking.mockRejectedValueOnce(
+      bookingError('FORBIDDEN', {
+        message:
+          'Booking override permission denied. actorUserId=user_123 professionalId=pro_123 rule=ADVANCE_NOTICE role=PRO',
+        userMessage: 'You are not allowed to use that override.',
+      }),
+    )
+
+    const result = await PATCH(
+      makeRequest({
+        scheduledFor: '2026-03-17T13:30:00.000Z',
+        allowShortNotice: true,
+        overrideReason: 'Approved operational exception',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.updateProBooking).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: 'Approved operational exception',
+      bookingId: 'booking_1',
+      nextStatus: null,
+      notifyClient: false,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+      nextStart: new Date('2026-03-17T13:30:00.000Z'),
+      nextBuffer: null,
+      nextDuration: null,
+      parsedRequestedItems: null,
+      hasBuffer: false,
+      hasDuration: false,
+      hasServiceItems: false,
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      403,
+      'You are not allowed to use that override.',
+      expect.objectContaining({
+        code: 'FORBIDDEN',
+        message:
+          'Booking override permission denied. actorUserId=user_123 professionalId=pro_123 rule=ADVANCE_NOTICE role=PRO',
+      }),
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: 403,
+        code: 'FORBIDDEN',
+      }),
+    )
+  })
+
   it('returns stable success shape for no-op PATCH', async () => {
     const result = await PATCH(makeRequest({ notifyClient: true }), makeCtx())
 
@@ -430,6 +486,115 @@ describe('PATCH /api/pro/bookings/[id]', () => {
         meta: {
           mutated: false,
           noOp: true,
+        },
+      },
+    })
+  })
+
+    it('updates a booking successfully when an authorized override is used', async () => {
+    mocks.updateProBooking.mockResolvedValueOnce({
+      booking: {
+        id: 'booking_1',
+        scheduledFor: '2026-03-17T13:30:00.000Z',
+        endsAt: '2026-03-17T14:45:00.000Z',
+        bufferMinutes: 15,
+        durationMinutes: 60,
+        totalDurationMinutes: 60,
+        status: BookingStatus.ACCEPTED,
+        subtotalSnapshot: '50.00',
+        timeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        locationAddressSnapshot: null,
+        locationLatSnapshot: null,
+        locationLngSnapshot: null,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
+
+    const result = await PATCH(
+      makeRequest({
+        scheduledFor: '2026-03-17T13:30:00.000Z',
+        allowShortNotice: true,
+        overrideReason: 'Approved operational exception',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.updateProBooking).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: 'Approved operational exception',
+      bookingId: 'booking_1',
+      nextStatus: null,
+      notifyClient: false,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+      nextStart: new Date('2026-03-17T13:30:00.000Z'),
+      nextBuffer: null,
+      nextDuration: null,
+      parsedRequestedItems: null,
+      hasBuffer: false,
+      hasDuration: false,
+      hasServiceItems: false,
+    })
+
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
+      {
+        booking: {
+          id: 'booking_1',
+          scheduledFor: '2026-03-17T13:30:00.000Z',
+          endsAt: '2026-03-17T14:45:00.000Z',
+          bufferMinutes: 15,
+          durationMinutes: 60,
+          totalDurationMinutes: 60,
+          status: BookingStatus.ACCEPTED,
+          subtotalSnapshot: '50.00',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+          locationId: 'loc_1',
+          locationType: ServiceLocationType.SALON,
+          locationAddressSnapshot: null,
+          locationLatSnapshot: null,
+          locationLngSnapshot: null,
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+      200,
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        booking: {
+          id: 'booking_1',
+          scheduledFor: '2026-03-17T13:30:00.000Z',
+          endsAt: '2026-03-17T14:45:00.000Z',
+          bufferMinutes: 15,
+          durationMinutes: 60,
+          totalDurationMinutes: 60,
+          status: BookingStatus.ACCEPTED,
+          subtotalSnapshot: '50.00',
+          timeZone: 'America/Los_Angeles',
+          timeZoneSource: 'BOOKING_SNAPSHOT',
+          locationId: 'loc_1',
+          locationType: ServiceLocationType.SALON,
+          locationAddressSnapshot: null,
+          locationLatSnapshot: null,
+          locationLngSnapshot: null,
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
         },
       },
     })

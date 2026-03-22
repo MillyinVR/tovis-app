@@ -246,6 +246,12 @@ enum WaitlistTimeOfDay {
   EVENING
 }
 
+enum BookingOverridePermissionScope {
+  SELF_ONLY
+  PROFESSIONAL_TEAM
+  ANY_PROFESSIONAL
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -348,6 +354,10 @@ model User {
 
   notificationActor        Notification[]            @relation("NotificationActor")
   bookingOverrideAuditLogs BookingOverrideAuditLog[] @relation("BookingOverrideActor")
+
+  bookingOverridePermissionsGranted BookingOverridePermission[] @relation("BookingOverridePermissionGrantedBy")
+  bookingOverridePermissionsRevoked BookingOverridePermission[] @relation("BookingOverridePermissionRevokedBy")
+  bookingOverridePermissionsAsActor BookingOverridePermission[] @relation("BookingOverridePermissionActor")
 
   // NFC attribution events
   attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
@@ -518,11 +528,12 @@ model ProfessionalProfile {
   autoAcceptBookings Boolean @default(false)
 
   // Admin / internal
-  adminPermissions         AdminPermission[]
-  adminActionLogs          AdminActionLog[]          @relation("ProfessionalLogs")
-  bookingOverrideAuditLogs BookingOverrideAuditLog[]
-  productSales             ProductSale[]
-  nfcCards                 NfcCard[]
+  adminPermissions           AdminPermission[]
+  adminActionLogs            AdminActionLog[]            @relation("ProfessionalLogs")
+  bookingOverrideAuditLogs   BookingOverrideAuditLog[]
+  bookingOverridePermissions BookingOverridePermission[] @relation("BookingOverridePermissionProfessional")
+  productSales               ProductSale[]
+  nfcCards                   NfcCard[]
 
   lastMinuteSettings LastMinuteSettings? @relation("ProLastMinuteSettings")
   lastMinuteOpenings LastMinuteOpening[] @relation("ProOpenings")
@@ -1051,6 +1062,61 @@ model BookingOverrideAuditLog {
   @@index([actorUserId, createdAt])
   @@index([rule, createdAt])
   @@index([action, createdAt])
+}
+
+model BookingOverridePermission {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actorUserId String
+  actorUser   User   @relation("BookingOverridePermissionActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  grantedByUserId String?
+  grantedByUser   User?   @relation("BookingOverridePermissionGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  rule  BookingOverrideRule
+  scope BookingOverridePermissionScope @default(SELF_ONLY)
+
+  /**
+   * Required for SELF_ONLY and PROFESSIONAL_TEAM.
+   * Nullable only for ANY_PROFESSIONAL.
+   */
+  professionalId String?
+  professional   ProfessionalProfile? @relation("BookingOverridePermissionProfessional", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  /**
+   * Operational controls
+   */
+  isActive        Boolean   @default(true)
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  revokedByUserId String?
+  revokedByUser   User?     @relation("BookingOverridePermissionRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  /**
+   * Why this permission exists.
+   * Keep boring and explicit.
+   */
+  reason String?
+
+  /**
+   * Optional metadata for ticket id / change request / rollout note.
+   */
+  metadata Json?
+
+  /**
+   * Prevent duplicate active-looking grants for same actor/rule/scope/target.
+   * Prisma can't do partial unique indexes, so we use a plain compound unique key.
+   * Your app logic should revoke/disable old rows instead of inserting duplicates.
+   */
+  @@unique([actorUserId, rule, scope, professionalId])
+  @@index([actorUserId, isActive, rule])
+  @@index([professionalId, isActive, rule])
+  @@index([rule, isActive, startsAt, expiresAt])
+  @@index([grantedByUserId, createdAt])
+  @@index([revokedByUserId, createdAt])
 }
 
 model BookingHold {
