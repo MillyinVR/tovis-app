@@ -1,3 +1,4 @@
+// app/_components/ProSessionFooter/ProSessionFooter.tsx 
 'use client'
 
 import { usePathname } from 'next/navigation'
@@ -27,14 +28,48 @@ function clampCenterLabel(raw: string) {
   return s.slice(0, 8) + '…'
 }
 
+function formatBookingPickerLine(args: {
+  serviceName?: string
+  clientName?: string
+  scheduledFor?: string | null
+}) {
+  const service = args.serviceName?.trim() || 'Service'
+  const client = args.clientName?.trim() || 'Client'
+
+  let when = ''
+  if (args.scheduledFor) {
+    const date = new Date(args.scheduledFor)
+    if (!Number.isNaN(date.getTime())) {
+      when = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    }
+  }
+
+  return when ? `${service} • ${client} • ${when}` : `${service} • ${client}`
+}
+
 export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
   const pathname = usePathname()
   const path = pathname ?? ''
 
-  const { mode, booking, center, error, centerDisabled, displayLabel, handleCenterClick, loading } = useProSession()
+  const {
+    mode,
+    booking,
+    eligibleBookings,
+    center,
+    error,
+    centerDisabled,
+    displayLabel,
+    handleCenterClick,
+    loading,
+    actionLoading,
+    pickerOpen,
+    setPickerOpen,
+    startSelectedBooking,
+  } = useProSession()
 
   const isActive = mode === 'ACTIVE'
   const isUpcoming = mode === 'UPCOMING'
+  const isUpcomingPicker = mode === 'UPCOMING_PICKER'
   const showCameraIcon = center.action === 'CAPTURE_BEFORE' || center.action === 'CAPTURE_AFTER'
 
   const title = useMemo(() => {
@@ -43,9 +78,14 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
       const client = booking.clientName?.trim()
       return client ? `${service} • ${client}` : service
     }
+
+    if (isUpcomingPicker && eligibleBookings.length > 1) {
+      return `${eligibleBookings.length} eligible bookings — choose one to start`
+    }
+
     if ((isUpcoming || isActive) && (loading || center.action !== 'NONE')) return 'Loading session…'
     return 'No upcoming session'
-  }, [booking, isUpcoming, isActive, loading, center.action])
+  }, [booking, eligibleBookings.length, isUpcoming, isUpcomingPicker, isActive, loading, center.action])
 
   const rawLabel = (displayLabel || center.label || 'Start').trim()
   const label = clampCenterLabel(rawLabel)
@@ -54,7 +94,7 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
 
   const centerRingClass = isActive
     ? 'ring-2 ring-toneDanger/60'
-    : isUpcoming
+    : isUpcoming || isUpcomingPicker
       ? 'ring-2 ring-accentPrimary/30'
       : 'ring-2 ring-white/10'
 
@@ -70,6 +110,49 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
         </div>
       ) : null}
 
+      {pickerOpen && isUpcomingPicker && eligibleBookings.length > 1 ? (
+        <div className="mx-auto mb-2 w-[min(520px,92vw)] rounded-[22px] border border-white/10 bg-bgSecondary p-3 shadow-xl">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[13px] font-extrabold text-textPrimary">Choose booking to start</div>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(false)}
+              className="rounded-full px-2 py-1 text-[12px] font-bold text-textSecondary hover:bg-white/5"
+              aria-label="Close booking picker"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {eligibleBookings.map((item) => {
+              const busy = actionLoading === 'start'
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void startSelectedBooking(item.id)}
+                  disabled={busy}
+                  className={[
+                    'w-full rounded-[16px] border border-white/10 px-3 py-3 text-left',
+                    'bg-white/5 hover:bg-white/8',
+                    busy ? 'cursor-wait opacity-70' : '',
+                  ].join(' ')}
+                  title={formatBookingPickerLine(item)}
+                >
+                  <div className="text-[13px] font-extrabold text-textPrimary">
+                    {item.serviceName?.trim() || 'Service'}
+                  </div>
+                  <div className="mt-1 text-[12px] text-textSecondary">
+                    {formatBookingPickerLine(item)}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
       <div className="tovis-glass border-t border-white/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
           <NavItem label="Looks" href={ROUTES.looks} icon="✨" active={isActivePath(path, ROUTES.looks)} />
@@ -78,7 +161,7 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
           <div className="relative -mt-8 flex w-22 justify-center">
             <button
               type="button"
-              onClick={handleCenterClick}
+              onClick={() => void handleCenterClick()}
               disabled={centerDisabled}
               aria-disabled={centerDisabled}
               aria-label={showCameraIcon ? 'Open camera' : rawLabel || 'Start'}
