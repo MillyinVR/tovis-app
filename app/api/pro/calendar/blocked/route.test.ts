@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
   withLockedProfessionalTransaction: vi.fn(),
+
+  bookingError: vi.fn(),
+  isBookingError: vi.fn(),
+  getBookingFailPayload: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -41,7 +45,15 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
 }))
 
+vi.mock('@/lib/booking/errors', () => ({
+  bookingError: mocks.bookingError,
+  isBookingError: mocks.isBookingError,
+  getBookingFailPayload: mocks.getBookingFailPayload,
+}))
+
 import { POST } from './route'
+
+type BookingConflictCode = 'TIME_BLOCKED' | 'TIME_BOOKED' | 'TIME_HELD'
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/pro/calendar/blocked', {
@@ -49,6 +61,54 @@ function makeRequest(body: unknown): Request {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+function makeBookingConflictPayload(
+  code: BookingConflictCode,
+  overrides?: { message?: string; userMessage?: string },
+) {
+  const defaults = {
+    TIME_BLOCKED: {
+      httpStatus: 409,
+      userMessage: 'That time is blocked. Please choose another slot.',
+      extra: {
+        code: 'TIME_BLOCKED' as const,
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT' as const,
+        message: 'Requested time is blocked.',
+      },
+    },
+    TIME_BOOKED: {
+      httpStatus: 409,
+      userMessage: 'That time was just taken. Please choose another slot.',
+      extra: {
+        code: 'TIME_BOOKED' as const,
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT' as const,
+        message: 'Requested time already has a booking.',
+      },
+    },
+    TIME_HELD: {
+      httpStatus: 409,
+      userMessage:
+        'Someone is already holding that time. Please try another slot.',
+      extra: {
+        code: 'TIME_HELD' as const,
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT' as const,
+        message: 'Requested time is currently held.',
+      },
+    },
+  }[code]
+
+  return {
+    httpStatus: defaults.httpStatus,
+    userMessage: overrides?.userMessage ?? defaults.userMessage,
+    extra: {
+      ...defaults.extra,
+      message: overrides?.message ?? defaults.extra.message,
+    },
+  }
 }
 
 describe('POST /api/pro/calendar/blocked', () => {
@@ -60,11 +120,14 @@ describe('POST /api/pro/calendar/blocked', () => {
       professionalId: 'pro_123',
     })
 
-    mocks.jsonFail.mockImplementation((status: number, error: string) => ({
-      ok: false,
-      status,
-      error,
-    }))
+    mocks.jsonFail.mockImplementation(
+      (status: number, error: string, extra?: Record<string, unknown>) => ({
+        ok: false,
+        status,
+        error,
+        ...(extra ? { extra } : {}),
+      }),
+    )
 
     mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
       ok: true,
@@ -86,6 +149,46 @@ describe('POST /api/pro/calendar/blocked', () => {
     })
 
     mocks.getTimeRangeConflict.mockResolvedValue(null)
+
+    mocks.bookingError.mockImplementation(
+      (
+        code: BookingConflictCode,
+        overrides?: { message?: string; userMessage?: string },
+      ) => {
+        const payload = makeBookingConflictPayload(code, overrides)
+        const err = new Error(payload.extra.message) as Error & {
+          name: string
+          code: BookingConflictCode
+          httpStatus: number
+          retryable: boolean
+          uiAction: 'PICK_NEW_SLOT'
+          userMessage: string
+        }
+
+        err.name = 'BookingError'
+        err.code = code
+        err.httpStatus = payload.httpStatus
+        err.retryable = payload.extra.retryable
+        err.uiAction = payload.extra.uiAction
+        err.userMessage = payload.userMessage
+        return err
+      },
+    )
+
+    mocks.isBookingError.mockImplementation(
+      (value: unknown): value is Error & { code: string; userMessage: string } =>
+        value instanceof Error &&
+        (value as { name?: unknown }).name === 'BookingError' &&
+        typeof (value as { code?: unknown }).code === 'string' &&
+        typeof (value as { userMessage?: unknown }).userMessage === 'string',
+    )
+
+    mocks.getBookingFailPayload.mockImplementation(
+      (
+        code: BookingConflictCode,
+        overrides?: { message?: string; userMessage?: string },
+      ) => makeBookingConflictPayload(code, overrides),
+    )
 
     mocks.withLockedProfessionalTransaction.mockImplementation(
       async (
@@ -115,7 +218,7 @@ describe('POST /api/pro/calendar/blocked', () => {
     )
   })
 
-  it('returns 400 when startsAt or endsAt is missing', async () => {
+  it('returns 400 with a local code when startsAt or endsAt is missing', async () => {
     const result = await POST(
       makeRequest({
         locationId: 'loc_1',
@@ -124,15 +227,22 @@ describe('POST /api/pro/calendar/blocked', () => {
     )
 
     expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing startsAt/endsAt.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      400,
+      'Missing startsAt/endsAt.',
+      { code: 'BLOCK_WINDOW_REQUIRED' },
+    )
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Missing startsAt/endsAt.',
+      extra: {
+        code: 'BLOCK_WINDOW_REQUIRED',
+      },
     })
   })
 
-  it('returns 400 when locationId is missing', async () => {
+  it('returns 400 with a local code when locationId is missing', async () => {
     const result = await POST(
       makeRequest({
         startsAt: '2026-03-11T17:00:00.000Z',
@@ -144,11 +254,15 @@ describe('POST /api/pro/calendar/blocked', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
       'Blocked time requires a locationId.',
+      { code: 'LOCATION_ID_REQUIRED' },
     )
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Blocked time requires a locationId.',
+      extra: {
+        code: 'LOCATION_ID_REQUIRED',
+      },
     })
   })
 
@@ -168,7 +282,7 @@ describe('POST /api/pro/calendar/blocked', () => {
     )
   })
 
-  it('returns 404 when location is not found', async () => {
+  it('returns 404 with a local code when location is not found', async () => {
     mocks.professionalLocationFindFirst.mockResolvedValueOnce(null)
 
     const result = await POST(
@@ -194,15 +308,22 @@ describe('POST /api/pro/calendar/blocked', () => {
     expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
     expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Location not found.')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      404,
+      'Location not found.',
+      { code: 'BLOCK_LOCATION_NOT_FOUND' },
+    )
     expect(result).toEqual({
       ok: false,
       status: 404,
       error: 'Location not found.',
+      extra: {
+        code: 'BLOCK_LOCATION_NOT_FOUND',
+      },
     })
   })
 
-  it('returns 409 and logs when the block overlaps an existing block', async () => {
+  it('returns a booking-contract 409 and logs when the block overlaps an existing block', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
 
     const result = await POST(
@@ -226,20 +347,35 @@ describe('POST /api/pro/calendar/blocked', () => {
       },
     })
 
+    expect(mocks.bookingError).toHaveBeenCalledWith('TIME_BLOCKED', {
+      userMessage: 'That time overlaps an existing block.',
+    })
     expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time overlaps an existing block.',
+      {
+        code: 'TIME_BLOCKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is blocked.',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 409,
       error: 'That time overlaps an existing block.',
+      extra: {
+        code: 'TIME_BLOCKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is blocked.',
+      },
     })
   })
 
-  it('returns 409 and logs when the block overlaps an existing booking', async () => {
+  it('returns a booking-contract 409 and logs when the block overlaps an existing booking', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
 
     const result = await POST(
@@ -262,20 +398,35 @@ describe('POST /api/pro/calendar/blocked', () => {
       },
     })
 
+    expect(mocks.bookingError).toHaveBeenCalledWith('TIME_BOOKED', {
+      userMessage: 'That time overlaps an existing booking.',
+    })
     expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time overlaps an existing booking.',
+      {
+        code: 'TIME_BOOKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time already has a booking.',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 409,
       error: 'That time overlaps an existing booking.',
+      extra: {
+        code: 'TIME_BOOKED',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time already has a booking.',
+      },
     })
   })
 
-  it('returns 409 and logs when the block overlaps an active hold', async () => {
+  it('returns a booking-contract 409 and logs when the block overlaps an active hold', async () => {
     mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
 
     const result = await POST(
@@ -298,16 +449,31 @@ describe('POST /api/pro/calendar/blocked', () => {
       },
     })
 
+    expect(mocks.bookingError).toHaveBeenCalledWith('TIME_HELD', {
+      userMessage: 'That time is temporarily held for booking.',
+    })
     expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time is temporarily held for booking.',
+      {
+        code: 'TIME_HELD',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is currently held.',
+      },
     )
     expect(result).toEqual({
       ok: false,
       status: 409,
       error: 'That time is temporarily held for booking.',
+      extra: {
+        code: 'TIME_HELD',
+        retryable: true,
+        uiAction: 'PICK_NEW_SLOT',
+        message: 'Requested time is currently held.',
+      },
     })
   })
 

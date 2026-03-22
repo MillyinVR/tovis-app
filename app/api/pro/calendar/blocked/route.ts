@@ -8,6 +8,12 @@ import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
+  bookingError,
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import {
   clampRange,
   parseLocationIdInput,
   parseNoteInput,
@@ -18,8 +24,38 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+type BlockCollectionRouteLocalErrorCode =
+  | 'BLOCK_WINDOW_REQUIRED'
+  | 'INVALID_STARTS_AT'
+  | 'INVALID_ENDS_AT'
+  | 'INVALID_NOTE'
+  | 'INVALID_LOCATION_ID'
+  | 'LOCATION_ID_REQUIRED'
+  | 'BLOCK_LOCATION_NOT_FOUND'
+  | 'INVALID_BLOCK_WINDOW'
+  | 'INTERNAL_ERROR'
+
 function normalizeLocationBufferMinutes(value: unknown): number {
   return clampInt(value, 0, MAX_BUFFER_MINUTES)
+}
+
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function localJsonFail(
+  status: number,
+  code: BlockCollectionRouteLocalErrorCode,
+  error: string,
+) {
+  return jsonFail(status, error, { code })
 }
 
 function logBlockConflict(args: {
@@ -89,7 +125,7 @@ export async function GET(req: Request) {
     )
   } catch (error) {
     console.error('GET /api/pro/calendar/blocked error:', error)
-    return jsonFail(500, 'Failed to load blocked time.')
+    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to load blocked time.')
   }
 }
 
@@ -102,31 +138,49 @@ export async function POST(req: Request) {
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
-    const startsAt = toDateOrNull(body.startsAt)
-    const endsAt = toDateOrNull(body.endsAt)
+    const hasStartsAt = Object.prototype.hasOwnProperty.call(body, 'startsAt')
+    const hasEndsAt = Object.prototype.hasOwnProperty.call(body, 'endsAt')
 
-    if (!startsAt || !endsAt) {
-      return jsonFail(400, 'Missing startsAt/endsAt.')
+    if (!hasStartsAt || !hasEndsAt) {
+      return localJsonFail(
+        400,
+        'BLOCK_WINDOW_REQUIRED',
+        'Missing startsAt/endsAt.',
+      )
+    }
+
+    const startsAt = toDateOrNull(body.startsAt)
+    if (!startsAt) {
+      return localJsonFail(400, 'INVALID_STARTS_AT', 'Invalid startsAt.')
+    }
+
+    const endsAt = toDateOrNull(body.endsAt)
+    if (!endsAt) {
+      return localJsonFail(400, 'INVALID_ENDS_AT', 'Invalid endsAt.')
     }
 
     const windowError = validateBlockWindow(startsAt, endsAt)
     if (windowError) {
-      return jsonFail(400, windowError)
+      return localJsonFail(400, 'INVALID_BLOCK_WINDOW', windowError)
     }
 
     const noteInput = parseNoteInput(body.note, 'post')
     if (!noteInput.ok) {
-      return jsonFail(400, 'Invalid note.')
+      return localJsonFail(400, 'INVALID_NOTE', 'Invalid note.')
     }
 
     const locationIdInput = parseLocationIdInput(body.locationId)
     if (!locationIdInput.ok) {
-      return jsonFail(400, 'Invalid locationId.')
+      return localJsonFail(400, 'INVALID_LOCATION_ID', 'Invalid locationId.')
     }
 
     const locationId = locationIdInput.value
     if (!locationId) {
-      return jsonFail(400, 'Blocked time requires a locationId.')
+      return localJsonFail(
+        400,
+        'LOCATION_ID_REQUIRED',
+        'Blocked time requires a locationId.',
+      )
     }
 
     const result = await withLockedProfessionalTransaction(
@@ -148,6 +202,7 @@ export async function POST(req: Request) {
           return {
             ok: false as const,
             status: 404,
+            code: 'BLOCK_LOCATION_NOT_FOUND' as const,
             error: 'Location not found.',
           }
         }
@@ -172,11 +227,9 @@ export async function POST(req: Request) {
             conflictType: 'BLOCKED',
           })
 
-          return {
-            ok: false as const,
-            status: 409,
-            error: 'That time overlaps an existing block.',
-          }
+          throw bookingError('TIME_BLOCKED', {
+            userMessage: 'That time overlaps an existing block.',
+          })
         }
 
         if (timeRangeConflict === 'BOOKING') {
@@ -188,11 +241,9 @@ export async function POST(req: Request) {
             conflictType: 'BOOKING',
           })
 
-          return {
-            ok: false as const,
-            status: 409,
-            error: 'That time overlaps an existing booking.',
-          }
+          throw bookingError('TIME_BOOKED', {
+            userMessage: 'That time overlaps an existing booking.',
+          })
         }
 
         if (timeRangeConflict === 'HOLD') {
@@ -204,11 +255,9 @@ export async function POST(req: Request) {
             conflictType: 'HOLD',
           })
 
-          return {
-            ok: false as const,
-            status: 409,
-            error: 'That time is temporarily held for booking.',
-          }
+          throw bookingError('TIME_HELD', {
+            userMessage: 'That time is temporarily held for booking.',
+          })
         }
 
         const created = await tx.calendarBlock.create({
@@ -237,12 +286,23 @@ export async function POST(req: Request) {
     )
 
     if (!result.ok) {
-      return jsonFail(result.status, result.error)
+      return localJsonFail(result.status, result.code, result.error)
     }
 
     return jsonOk({ block: toBlockDto(result.block) }, result.status)
   } catch (error) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
+
     console.error('POST /api/pro/calendar/blocked error:', error)
-    return jsonFail(500, 'Failed to create blocked time.')
+    return localJsonFail(
+      500,
+      'INTERNAL_ERROR',
+      'Failed to create blocked time.',
+    )
   }
 }
