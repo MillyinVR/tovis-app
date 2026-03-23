@@ -1,83 +1,167 @@
 // app/client/bookings/[id]/_view/buildBookingViewModel.ts
-import { sanitizeTimeZone } from '@/lib/timeZone'
 import { COPY } from '@/lib/copy'
+import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { sanitizeTimeZone } from '@/lib/timeZone'
+
+import { loadClientBookingPage } from '../_data/loadClientBookingPage'
 
 export type StepKey = 'overview' | 'consult' | 'aftercare'
 
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+type LoadedClientBookingPage = Awaited<ReturnType<typeof loadClientBookingPage>>
+type ClientBookingDTO = Awaited<ReturnType<typeof buildClientBookingDTO>>
+type LoadedRawBooking = LoadedClientBookingPage['raw']
+type LoadedAftercare = LoadedClientBookingPage['aftercare']
+type ClientBookingItem = ClientBookingDTO['items'][number]
+
+type TimelineItem = {
+  key: 'requested' | 'confirmed' | 'consult' | 'completed'
+  label: string
+  on: boolean
 }
 
-function toDate(v: unknown): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(String(v))
-  return Number.isNaN(d.getTime()) ? null : d
+const PENDING_CONSULTATION_STATUSES = new Set([
+  'PENDING',
+  'PENDING_CLIENT',
+  'PENDING_CLIENT_APPROVAL',
+  'AWAITING_CLIENT',
+  'WAITING_CLIENT',
+  'SENT',
+])
+
+function upper(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
 
-function formatMoney(v: unknown): string | null {
-  if (v == null) return null
-  if (typeof v === 'string') {
-    const s = v.trim()
-    if (!s) return null
-    const n = Number(s)
-    if (Number.isFinite(n)) return `$${n.toFixed(2)}`
-    return s.startsWith('$') ? s : `$${s}`
+function toDate(value: unknown): Date | null {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(String(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatMoney(value: unknown): string | null {
+  if (value == null) return null
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `$${value.toFixed(2)}`
   }
-  if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(2)}`
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return `$${parsed.toFixed(2)}`
+    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const asString = value.toString()
+    return typeof asString === 'string' ? formatMoney(asString) : null
+  }
+
   return null
 }
 
-function formatWhen(d: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+function formatWhen(date: Date, timeZone: string): string {
+  const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
   return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+    timeZone: safeTimeZone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(d)
+  }).format(date)
 }
 
-function computePendingConsultation(raw: {
-  status: unknown
-  sessionStep: unknown
-  finishedAt: Date | null
-  consultationApproval?: { status: unknown } | null
-}) {
+function sumPricedItems(items: ClientBookingItem[]): {
+  subtotal: number
+  hasAnyPrice: boolean
+} {
+  let subtotal = 0
+  let hasAnyPrice = false
+
+  for (const item of items) {
+    const numericPrice = Number(item.price)
+    if (Number.isFinite(numericPrice)) {
+      subtotal += numericPrice
+      hasAnyPrice = true
+    }
+  }
+
+  return { subtotal, hasAnyPrice }
+}
+
+export function computePendingConsultation(raw: {
+  status: LoadedRawBooking['status']
+  sessionStep: LoadedRawBooking['sessionStep']
+  finishedAt: LoadedRawBooking['finishedAt']
+  consultationApproval: LoadedRawBooking['consultationApproval']
+}): boolean {
   const status = upper(raw.status)
   if (status === 'CANCELLED' || status === 'COMPLETED') return false
   if (raw.finishedAt) return false
 
-  const step = upper(raw.sessionStep)
-  if (step === 'CONSULTATION_PENDING_CLIENT') return true
+  const sessionStep = upper(raw.sessionStep)
+  if (sessionStep === 'CONSULTATION_PENDING_CLIENT') return true
 
-  const approval = upper(raw.consultationApproval?.status)
-  const PENDING_SET = new Set(['PENDING', 'PENDING_CLIENT', 'PENDING_CLIENT_APPROVAL', 'AWAITING_CLIENT', 'WAITING_CLIENT', 'SENT'])
-  return PENDING_SET.has(approval)
+  const approvalStatus = upper(raw.consultationApproval?.status)
+  return PENDING_CONSULTATION_STATUSES.has(approvalStatus)
+}
+
+function buildTimeline(raw: LoadedRawBooking, statusUpper: string): TimelineItem[] {
+  return [
+    {
+      key: 'requested',
+      label: 'Requested',
+      on:
+        statusUpper === 'PENDING' ||
+        statusUpper === 'ACCEPTED' ||
+        statusUpper === 'COMPLETED',
+    },
+    {
+      key: 'confirmed',
+      label: 'Confirmed',
+      on: statusUpper === 'ACCEPTED' || statusUpper === 'COMPLETED',
+    },
+    {
+      key: 'consult',
+      label: 'Consultation confirmed',
+      on: Boolean(raw.consultationConfirmedAt) || statusUpper === 'COMPLETED',
+    },
+    {
+      key: 'completed',
+      label: 'Completed',
+      on: statusUpper === 'COMPLETED',
+    },
+  ]
 }
 
 export function buildBookingViewModel(input: {
   step: StepKey
-  booking: any // ClientBookingDTO-ish
-  raw: any
-  aftercare: any | null
+  booking: ClientBookingDTO
+  raw: LoadedRawBooking
+  aftercare: LoadedAftercare
 }) {
-  const statusUpper = upper(input.booking?.status)
-  const sessionStepUpper = upper(input.booking?.sessionStep)
+  const statusUpper = upper(input.booking.status)
+  const sessionStepUpper = upper(input.booking.sessionStep)
 
-  const appointmentTz = sanitizeTimeZone(input.booking?.timeZone, 'UTC')
-  const scheduled = toDate(input.booking?.scheduledFor)
-  const whenLabel = scheduled ? formatWhen(scheduled, appointmentTz) : COPY.common.unknownTime
+  const appointmentTz = sanitizeTimeZone(input.booking.timeZone, 'UTC')
+  const scheduled = toDate(input.booking.scheduledFor)
+  const whenLabel = scheduled
+    ? formatWhen(scheduled, appointmentTz)
+    : COPY.common.unknownTime
 
-  // Prefer DTO truth, but fall back to raw if needed
-  const rawPending = computePendingConsultation(input.raw)
-  const dtoPending = Boolean(input.booking?.hasPendingConsultationApproval)
-  const pendingConsult = dtoPending || rawPending
+  const rawPendingConsultation = computePendingConsultation(input.raw)
+  const dtoPendingConsultation = Boolean(
+    input.booking.hasPendingConsultationApproval,
+  )
+  const pendingConsultation =
+    dtoPendingConsultation || rawPendingConsultation
 
   const showConsultationApproval =
-    pendingConsult &&
+    pendingConsultation &&
     statusUpper !== 'CANCELLED' &&
     statusUpper !== 'COMPLETED'
 
@@ -85,20 +169,18 @@ export function buildBookingViewModel(input: {
     statusUpper !== 'CANCELLED' &&
     statusUpper !== 'COMPLETED' &&
     statusUpper !== 'PENDING' &&
-    (sessionStepUpper === 'CONSULTATION_PENDING_CLIENT' || showConsultationApproval)
+    (sessionStepUpper === 'CONSULTATION_PENDING_CLIENT' ||
+      showConsultationApproval)
 
-  const canShowAftercareTab = statusUpper === 'COMPLETED' || Boolean(input.aftercare?.id)
+  const canShowAftercareTab =
+    statusUpper === 'COMPLETED' || Boolean(input.aftercare?.id)
 
-  const timeline = [
-    { key: 'requested', label: 'Requested', on: statusUpper === 'PENDING' || statusUpper === 'ACCEPTED' || statusUpper === 'COMPLETED' },
-    { key: 'confirmed', label: 'Confirmed', on: statusUpper === 'ACCEPTED' || statusUpper === 'COMPLETED' },
-    { key: 'consult', label: 'Consultation confirmed', on: Boolean(input.raw?.consultationConfirmedAt) || statusUpper === 'COMPLETED' },
-    { key: 'completed', label: 'Completed', on: statusUpper === 'COMPLETED' },
-  ] as const
+  const { subtotal, hasAnyPrice } = sumPricedItems(input.booking.items)
+  const breakdownTotalLabel = hasAnyPrice
+    ? `$${subtotal.toFixed(2)}`
+    : formatMoney(input.booking.subtotalSnapshot)
 
-  const itemsSubtotal = (input.booking?.items || []).reduce((sum: number, it: any) => sum + (Number(it.price) || 0), 0)
-  const hasItemPrices = (input.booking?.items || []).some((it: any) => Number.isFinite(Number(it.price)))
-  const breakdownTotalLabel = hasItemPrices ? `$${itemsSubtotal.toFixed(2)}` : formatMoney(input.booking?.subtotalSnapshot)
+  const timeline = buildTimeline(input.raw, statusUpper)
 
   return {
     appointmentTz,
