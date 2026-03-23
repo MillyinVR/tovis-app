@@ -1077,9 +1077,10 @@ model Booking {
   finishedAt DateTime?
 
   mediaAssets             MediaAsset[]
-  messageThreads          MessageThread[]          @relation("BookingThreads")
+  messageThreads          MessageThread[]              @relation("BookingThreads")
   productSales            ProductSale[]
   serviceItems            BookingServiceItem[]
+  checkoutProductItems    BookingCheckoutProductItem[]
   clientProfessionalNotes ClientProfessionalNote[]
 
   @@unique([professionalId, scheduledFor])
@@ -1257,6 +1258,7 @@ model Product {
   isActive       Boolean  @default(true)
 
   recommendations ProductRecommendation[]
+  checkoutItems   BookingCheckoutProductItem[]
   productSales    ProductSale[]
 }
 
@@ -1273,10 +1275,31 @@ model ProductRecommendation {
 
   note String?
 
-  aftercareSummary AftercareSummary @relation(fields: [aftercareSummaryId], references: [id])
-  product          Product?         @relation(fields: [productId], references: [id])
+  aftercareSummary AftercareSummary             @relation(fields: [aftercareSummaryId], references: [id])
+  product          Product?                     @relation(fields: [productId], references: [id])
+  checkoutItems    BookingCheckoutProductItem[]
 
   @@index([aftercareSummaryId])
+  @@index([productId])
+}
+
+model BookingCheckoutProductItem {
+  id               String   @id @default(cuid())
+  bookingId        String
+  recommendationId String
+  productId        String
+  quantity         Int
+  unitPrice        Decimal  @db.Decimal(10, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  booking        Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  recommendation ProductRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  product        Product               @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, recommendationId])
+  @@index([bookingId])
+  @@index([recommendationId])
   @@index([productId])
 }
 

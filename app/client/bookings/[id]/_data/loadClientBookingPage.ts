@@ -75,6 +75,17 @@ const bookingPageBookingSelect = {
     },
   },
 
+  checkoutProductItems: {
+    orderBy: [{ createdAt: 'asc' }],
+    select: {
+      id: true,
+      recommendationId: true,
+      productId: true,
+      quantity: true,
+      unitPrice: true,
+    },
+  },
+
   serviceItems: {
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 80,
@@ -143,6 +154,7 @@ const aftercareSummarySelect = {
     orderBy: { id: 'asc' },
     select: {
       id: true,
+      productId: true,
       note: true,
       externalName: true,
       externalUrl: true,
@@ -272,5 +284,6 @@ export async function loadClientBookingPage(bookingId: string) {
     existingReview,
     media,
     paymentSettings,
+    checkoutProductItems: raw.checkoutProductItems,
   }
 }

@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
+import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ReviewSection from './ReviewSection'
@@ -28,6 +29,8 @@ type LoadedAftercare = LoadedClientBookingPage['aftercare']
 type LoadedExistingReview = LoadedClientBookingPage['existingReview']
 type LoadedMedia = LoadedClientBookingPage['media'][number]
 type LoadedPaymentSettings = LoadedClientBookingPage['paymentSettings']
+type LoadedCheckoutProductItem =
+  LoadedClientBookingPage['checkoutProductItems'][number]
 type LoadedReviewMedia =
   NonNullable<LoadedExistingReview>['mediaAssets'][number]
 
@@ -320,7 +323,9 @@ function statusMessage(statusRaw: unknown): {
   }
 }
 
-function pillClassByVariant(_variant: Exclude<StatusVariant, 'neutral'>): string {
+function pillClassByVariant(
+  _variant: Exclude<StatusVariant, 'neutral'>,
+): string {
   return 'border border-white/10 bg-surfaceGlass text-textPrimary'
 }
 
@@ -625,92 +630,6 @@ function PurchasedProductsCard(props: {
   )
 }
 
-function ProductRecommendationsCard(props: {
-  aftercare: LoadedAftercare
-}) {
-  const recommendedProducts = props.aftercare?.recommendedProducts ?? []
-
-  if (recommendedProducts.length === 0) {
-    return (
-      <div className="text-[12px] font-semibold text-textSecondary">
-        No product recommendations were added yet.
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid gap-2">
-      {recommendedProducts.map((recommendation) => {
-        const productName =
-          recommendation.product?.name ??
-          recommendation.externalName ??
-          'Recommended product'
-
-        const productBrand = recommendation.product?.brand?.trim() || null
-        const priceLabel = formatMoneyFromUnknown(
-          recommendation.product?.retailPrice,
-        )
-        const href =
-          typeof recommendation.externalUrl === 'string' &&
-          recommendation.externalUrl.trim()
-            ? recommendation.externalUrl.trim()
-            : null
-
-        const content = (
-          <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[14px] font-black text-textPrimary">
-                  {productName}
-                </div>
-
-                {productBrand ? (
-                  <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
-                    {productBrand}
-                  </div>
-                ) : null}
-
-                {recommendation.note ? (
-                  <div className="mt-2 whitespace-pre-wrap text-[12px] leading-snug text-textPrimary">
-                    {recommendation.note}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="shrink-0 text-right">
-                {priceLabel ? (
-                  <div className="text-[12px] font-black text-textPrimary">
-                    {priceLabel}
-                  </div>
-                ) : null}
-
-                {href ? (
-                  <div className="mt-1 text-[11px] font-semibold text-accentPrimary">
-                    View
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        )
-
-        return href ? (
-          <a
-            key={recommendation.id}
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {content}
-          </a>
-        ) : (
-          <div key={recommendation.id}>{content}</div>
-        )
-      })}
-    </div>
-  )
-}
-
 export default async function ClientBookingPage(props: {
   params: Promise<PageParams> | PageParams
   searchParams?: Promise<PageSearchParams> | PageSearchParams
@@ -727,8 +646,15 @@ export default async function ClientBookingPage(props: {
   )
   const step = normalizeStep(firstSearchParam(resolvedSearchParams.step))
 
-  const { user, raw, aftercare, existingReview, media, paymentSettings } =
-    await loadClientBookingPage(bookingId)
+  const {
+    user,
+    raw,
+    aftercare,
+    existingReview,
+    media,
+    paymentSettings,
+    checkoutProductItems,
+  } = await loadClientBookingPage(bookingId)
 
   const clientId = user.clientProfile?.id
   if (!clientId) {
@@ -914,6 +840,14 @@ export default async function ClientBookingPage(props: {
 
   const safeExistingReview = toSafeExistingReview(existingReview)
 
+  const selectedCheckoutProducts = checkoutProductItems.map(
+    (item: LoadedCheckoutProductItem) => ({
+      recommendationId: item.recommendationId,
+      productId: item.productId,
+      quantity: item.quantity,
+    }),
+  )
+
   const drawerProfessionalId = booking.professional?.id
   if (!drawerProfessionalId) notFound()
 
@@ -1027,7 +961,9 @@ export default async function ClientBookingPage(props: {
                 pillClassByVariant(statusVariant),
               )}
             >
-              {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
+              {String(
+                booking.status || COPY.bookings.status.pillUnknown,
+              ).toUpperCase()}
             </span>
 
             <a
@@ -1042,7 +978,9 @@ export default async function ClientBookingPage(props: {
         {(durationMinutes || subtotalLabel || modeLabel || sourceLabel) && (
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {durationMinutes ? <TinyMetaPill>{durationMinutes} min</TinyMetaPill> : null}
-            {serviceSubtotalLabel ? <TinyMetaPill>{serviceSubtotalLabel}</TinyMetaPill> : null}
+            {serviceSubtotalLabel ? (
+              <TinyMetaPill>{serviceSubtotalLabel}</TinyMetaPill>
+            ) : null}
             {modeLabel ? <TinyMetaPill>{modeLabel}</TinyMetaPill> : null}
             {sourceLabel ? <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill> : null}
 
@@ -1058,7 +996,9 @@ export default async function ClientBookingPage(props: {
         )}
       </section>
 
-      {consultApprovalMode ? <div className="mt-4">{renderConsultationSection(true)}</div> : null}
+      {consultApprovalMode ? (
+        <div className="mt-4">{renderConsultationSection(true)}</div>
+      ) : null}
 
       {!consultApprovalMode ? (
         <>
@@ -1150,7 +1090,9 @@ export default async function ClientBookingPage(props: {
           </section>
 
           {step === 'consult' ? (
-            <div className="mt-4">{renderConsultationSection(showConsultationApproval)}</div>
+            <div className="mt-4">
+              {renderConsultationSection(showConsultationApproval)}
+            </div>
           ) : null}
 
           {step === 'overview' ? (
@@ -1331,7 +1273,14 @@ export default async function ClientBookingPage(props: {
                       Recommended products
                     </div>
                     <div className="mt-3">
-                      <ProductRecommendationsCard aftercare={aftercare} />
+                      <AftercareProductRecommendationsCard
+                        bookingId={booking.id}
+                        checkoutStatus={booking.checkout.checkoutStatus}
+                        paymentCollectedAt={booking.checkout.paymentCollectedAt}
+                        recommendedProducts={aftercare?.recommendedProducts ?? []}
+                        purchasedProducts={booking.productSales}
+                        selectedCheckoutProducts={selectedCheckoutProducts}
+                      />
                     </div>
                   </div>
 
@@ -1415,7 +1364,8 @@ export default async function ClientBookingPage(props: {
 
                     <div className="mt-3 text-[12px] font-semibold text-textSecondary">
                       Tip applies to services only. Product purchases are shown
-                      separately from aftercare recommendations.
+                      separately from aftercare recommendations and must stay tied
+                      to this booking’s checkout flow.
                     </div>
                   </div>
 
