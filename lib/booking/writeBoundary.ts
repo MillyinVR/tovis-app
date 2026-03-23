@@ -1,6 +1,7 @@
 // lib/booking/writeBoundary.ts
 import {
   AftercareRebookMode,
+  BookingCheckoutStatus,
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
@@ -11,6 +12,7 @@ import {
   MediaType,
   MediaVisibility,
   OpeningStatus,
+  PaymentMethod,
   Prisma,
   ProfessionalLocationType,
   Role,
@@ -436,6 +438,36 @@ type UpdateBookingLastMinuteDiscountArgs = {
 
 type UpdateBookingLastMinuteDiscountResult = {
   bookingId: string
+  meta: MutationMeta
+}
+
+type UpdateBookingCheckoutArgs = {
+  bookingId: string
+  professionalId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  taxAmount?: Prisma.Decimal | string | number | null
+  discountAmount?: Prisma.Decimal | string | number | null
+  selectedPaymentMethod?: PaymentMethod | null
+  checkoutStatus?: BookingCheckoutStatus | null
+  markPaymentAuthorized?: boolean
+  markPaymentCollected?: boolean
+}
+
+type UpdateBookingCheckoutResult = {
+  booking: {
+    id: string
+    checkoutStatus: BookingCheckoutStatus
+    selectedPaymentMethod: PaymentMethod | null
+    serviceSubtotalSnapshot: Prisma.Decimal | null
+    productSubtotalSnapshot: Prisma.Decimal | null
+    subtotalSnapshot: Prisma.Decimal | null
+    tipAmount: Prisma.Decimal | null
+    taxAmount: Prisma.Decimal | null
+    discountAmount: Prisma.Decimal | null
+    totalAmount: Prisma.Decimal | null
+    paymentAuthorizedAt: Date | null
+    paymentCollectedAt: Date | null
+  }
   meta: MutationMeta
 }
 
@@ -962,6 +994,34 @@ type AftercareUpsertBookingRecord = Prisma.BookingGetPayload<{
   select: typeof AFTERCARE_UPSERT_BOOKING_SELECT
 }>
 
+const BOOKING_CHECKOUT_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  finishedAt: true,
+  subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+  productSales: {
+    select: {
+      unitPrice: true,
+      quantity: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type BookingCheckoutRecord = Prisma.BookingGetPayload<{
+  select: typeof BOOKING_CHECKOUT_SELECT
+}>
+
 function buildMeta(mutated: boolean): MutationMeta {
   return {
     mutated,
@@ -1223,6 +1283,109 @@ function normalizePositiveMoneyDecimal(value: unknown): Prisma.Decimal | null {
     return dec
   } catch {
     return null
+  }
+}
+
+function zeroMoney(): Prisma.Decimal {
+  return new Prisma.Decimal(0)
+}
+
+function decimalOrZero(
+  value: Prisma.Decimal | null | undefined,
+): Prisma.Decimal {
+  return value ?? zeroMoney()
+}
+
+function computeProductSubtotalFromSales(
+  sales: Array<{
+    unitPrice: Prisma.Decimal | null
+    quantity: number | null
+  }>,
+): Prisma.Decimal {
+  return sales.reduce((sum, sale) => {
+    const unitPrice = sale.unitPrice ?? zeroMoney()
+    const quantity =
+      typeof sale.quantity === 'number' && Number.isFinite(sale.quantity)
+        ? Math.max(0, Math.trunc(sale.quantity))
+        : 0
+
+    return sum.add(unitPrice.mul(quantity))
+  }, zeroMoney())
+}
+
+function computeCheckoutTotal(args: {
+  serviceSubtotal: Prisma.Decimal
+  productSubtotal: Prisma.Decimal
+  tipAmount: Prisma.Decimal
+  taxAmount: Prisma.Decimal
+  discountAmount: Prisma.Decimal
+}): Prisma.Decimal {
+  return args.serviceSubtotal
+    .add(args.productSubtotal)
+    .add(args.tipAmount)
+    .add(args.taxAmount)
+    .sub(args.discountAmount)
+}
+
+async function buildBookingCheckoutRollupUpdate(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  nextServiceSubtotal?: Prisma.Decimal | null
+  nextTipAmount?: Prisma.Decimal | null
+  nextTaxAmount?: Prisma.Decimal | null
+  nextDiscountAmount?: Prisma.Decimal | null
+}): Promise<{
+  serviceSubtotalSnapshot: Prisma.Decimal
+  productSubtotalSnapshot: Prisma.Decimal
+  subtotalSnapshot: Prisma.Decimal
+  tipAmount: Prisma.Decimal
+  taxAmount: Prisma.Decimal
+  discountAmount: Prisma.Decimal
+  totalAmount: Prisma.Decimal
+}> {
+  const booking: BookingCheckoutRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: BOOKING_CHECKOUT_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  const serviceSubtotal =
+    args.nextServiceSubtotal ??
+    booking.serviceSubtotalSnapshot ??
+    booking.subtotalSnapshot ??
+    zeroMoney()
+
+  const productSubtotal = computeProductSubtotalFromSales(
+    booking.productSales.map((sale) => ({
+      unitPrice: sale.unitPrice,
+      quantity: sale.quantity,
+    })),
+  )
+
+  const tipAmount = args.nextTipAmount ?? decimalOrZero(booking.tipAmount)
+  const taxAmount = args.nextTaxAmount ?? decimalOrZero(booking.taxAmount)
+  const discountAmount =
+    args.nextDiscountAmount ?? decimalOrZero(booking.discountAmount)
+
+  const totalAmount = computeCheckoutTotal({
+    serviceSubtotal,
+    productSubtotal,
+    tipAmount,
+    taxAmount,
+    discountAmount,
+  })
+
+  return {
+    serviceSubtotalSnapshot: serviceSubtotal,
+    productSubtotalSnapshot: productSubtotal,
+    subtotalSnapshot: serviceSubtotal,
+    tipAmount,
+    taxAmount,
+    discountAmount,
+    totalAmount,
   }
 }
 
@@ -2961,14 +3124,27 @@ async function performLockedConfirmBookingFinalReview(args: {
     })
   }
 
+  const checkoutRollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextServiceSubtotal: computedSubtotal,
+  })
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
       serviceId: primaryServiceId,
       offeringId: primaryOfferingId,
-      subtotalSnapshot: computedSubtotal,
+      subtotalSnapshot: checkoutRollup.subtotalSnapshot,
+      serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
+      tipAmount: checkoutRollup.tipAmount,
+      taxAmount: checkoutRollup.taxAmount,
+      discountAmount: checkoutRollup.discountAmount,
+      totalAmount: checkoutRollup.totalAmount,
       totalDurationMinutes: computedDurationMinutes,
       sessionStep: SessionStep.AFTER_PHOTOS,
+      checkoutStatus: BookingCheckoutStatus.READY,
     },
     select: {
       id: true,
@@ -3923,12 +4099,24 @@ const offeringIds = Array.from(
     })
   }
 
+  const checkoutRollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextServiceSubtotal: computedSubtotal,
+  })
+
   const updatedBooking = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
       serviceId: primaryServiceId,
       offeringId: primaryOfferingId,
-      subtotalSnapshot: computedSubtotal,
+      subtotalSnapshot: checkoutRollup.subtotalSnapshot,
+      serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
+      tipAmount: checkoutRollup.tipAmount,
+      taxAmount: checkoutRollup.taxAmount,
+      discountAmount: checkoutRollup.discountAmount,
+      totalAmount: checkoutRollup.totalAmount,
       totalDurationMinutes: computedDurationMinutes,
       consultationConfirmedAt: args.now,
     },
@@ -4287,6 +4475,16 @@ async function performLockedFinalizeBookingFromHold(args: {
         locationType: args.locationType,
         rebookOfBookingId: args.rebookOfBookingId,
         subtotalSnapshot: subtotal,
+        serviceSubtotalSnapshot: subtotal,
+        productSubtotalSnapshot: zeroMoney(),
+        tipAmount: zeroMoney(),
+        taxAmount: zeroMoney(),
+        discountAmount: zeroMoney(),
+        totalAmount: subtotal,
+        checkoutStatus: BookingCheckoutStatus.NOT_READY,
+        selectedPaymentMethod: null,
+        paymentAuthorizedAt: null,
+        paymentCollectedAt: null,
         totalDurationMinutes,
         bufferMinutes: locationContext.bufferMinutes,
         locationId: locationContext.locationId,
@@ -4653,6 +4851,16 @@ async function performLockedCreateProBooking(args: {
         bufferMinutes,
         totalDurationMinutes,
         subtotalSnapshot: basePrice,
+        serviceSubtotalSnapshot: basePrice,
+        productSubtotalSnapshot: zeroMoney(),
+        tipAmount: zeroMoney(),
+        taxAmount: zeroMoney(),
+        discountAmount: zeroMoney(),
+        totalAmount: basePrice,
+        checkoutStatus: BookingCheckoutStatus.NOT_READY,
+        selectedPaymentMethod: null,
+        paymentAuthorizedAt: null,
+        paymentCollectedAt: null,
       },
       select: {
         id: true,
@@ -4945,11 +5153,17 @@ async function performLockedCreateRebookedBooking(
         clientTimeZoneAtBooking: source.clientTimeZoneAtBooking ?? undefined,
 
         subtotalSnapshot,
-        totalAmount: source.totalAmount ?? undefined,
-        depositAmount: source.depositAmount ?? undefined,
-        tipAmount: source.tipAmount ?? undefined,
-        taxAmount: source.taxAmount ?? undefined,
-        discountAmount: source.discountAmount ?? undefined,
+        serviceSubtotalSnapshot: subtotalSnapshot,
+        productSubtotalSnapshot: zeroMoney(),
+        totalAmount: subtotalSnapshot,
+        depositAmount: null,
+        tipAmount: zeroMoney(),
+        taxAmount: zeroMoney(),
+        discountAmount: zeroMoney(),
+        checkoutStatus: BookingCheckoutStatus.NOT_READY,
+        selectedPaymentMethod: null,
+        paymentAuthorizedAt: null,
+        paymentCollectedAt: null,
         totalDurationMinutes,
         bufferMinutes,
 
@@ -5502,6 +5716,12 @@ async function performLockedUpdateProBooking(args: {
     }
   }
 
+  const checkoutRollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: existing.id,
+    nextServiceSubtotal: computedSubtotal,
+  })
+
   const updated = await args.tx.booking.update({
     where: { id: existing.id },
     data: {
@@ -5511,7 +5731,13 @@ async function performLockedUpdateProBooking(args: {
       scheduledFor: finalStart,
       bufferMinutes: finalBuffer,
       totalDurationMinutes: finalDuration,
-      subtotalSnapshot: computedSubtotal,
+      subtotalSnapshot: checkoutRollup.subtotalSnapshot,
+      serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
+      tipAmount: checkoutRollup.tipAmount,
+      taxAmount: checkoutRollup.taxAmount,
+      discountAmount: checkoutRollup.discountAmount,
+      totalAmount: checkoutRollup.totalAmount,
       serviceId: primaryServiceId,
       offeringId: primaryOfferingId,
     },
@@ -5928,6 +6154,124 @@ async function performLockedUpsertBookingAftercare(args: {
   }
 }
 
+async function performLockedUpdateBookingCheckout(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  taxAmount?: Prisma.Decimal | string | number | null
+  discountAmount?: Prisma.Decimal | string | number | null
+  selectedPaymentMethod?: PaymentMethod | null
+  checkoutStatus?: BookingCheckoutStatus | null
+  markPaymentAuthorized?: boolean
+  markPaymentCollected?: boolean
+}): Promise<UpdateBookingCheckoutResult> {
+  const booking: BookingCheckoutRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: BOOKING_CHECKOUT_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  const nextTipAmount =
+    args.tipAmount === undefined
+      ? undefined
+      : normalizePositiveMoneyDecimal(args.tipAmount) ?? zeroMoney()
+
+  const nextTaxAmount =
+    args.taxAmount === undefined
+      ? undefined
+      : normalizePositiveMoneyDecimal(args.taxAmount) ?? zeroMoney()
+
+  const nextDiscountAmount =
+    args.discountAmount === undefined
+      ? undefined
+      : normalizePositiveMoneyDecimal(args.discountAmount) ?? zeroMoney()
+
+  const rollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextTipAmount,
+    nextTaxAmount,
+    nextDiscountAmount,
+  })
+
+  const shouldSetAuthorizedAt = args.markPaymentAuthorized === true
+  const shouldSetCollectedAt = args.markPaymentCollected === true
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+      subtotalSnapshot: rollup.subtotalSnapshot,
+      tipAmount: rollup.tipAmount,
+      taxAmount: rollup.taxAmount,
+      discountAmount: rollup.discountAmount,
+      totalAmount: rollup.totalAmount,
+      ...(args.selectedPaymentMethod !== undefined
+        ? { selectedPaymentMethod: args.selectedPaymentMethod }
+        : {}),
+      ...(args.checkoutStatus != null
+        ? { checkoutStatus: args.checkoutStatus }
+        : {}),
+      ...(shouldSetAuthorizedAt
+        ? { paymentAuthorizedAt: booking.paymentAuthorizedAt ?? args.now }
+        : {}),
+      ...(shouldSetCollectedAt
+        ? {
+            paymentCollectedAt: booking.paymentCollectedAt ?? args.now,
+            checkoutStatus:
+              args.checkoutStatus ?? BookingCheckoutStatus.PAID,
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      checkoutStatus: true,
+      selectedPaymentMethod: true,
+      serviceSubtotalSnapshot: true,
+      productSubtotalSnapshot: true,
+      subtotalSnapshot: true,
+      tipAmount: true,
+      taxAmount: true,
+      discountAmount: true,
+      totalAmount: true,
+      paymentAuthorizedAt: true,
+      paymentCollectedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      paymentAuthorizedAt: updated.paymentAuthorizedAt,
+      paymentCollectedAt: updated.paymentCollectedAt,
+    },
+    meta: buildMeta(true),
+  }
+}
+
 async function resolveAdminProfessionalId(bookingId: string): Promise<string> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -6284,18 +6628,57 @@ export async function updateBookingLastMinuteDiscount(
     throw bookingError('BOOKING_NOT_FOUND')
   }
 
-  await prisma.booking.update({
-    where: { id: booking.id },
-    data: {
-      discountAmount: args.discountAmount,
-    },
-    select: { id: true } satisfies Prisma.BookingSelect,
+  await prisma.$transaction(async (tx) => {
+    const checkoutRollup = await buildBookingCheckoutRollupUpdate({
+      tx,
+      bookingId: booking.id,
+      nextDiscountAmount: args.discountAmount,
+    })
+
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        discountAmount: checkoutRollup.discountAmount,
+        subtotalSnapshot: checkoutRollup.subtotalSnapshot,
+        serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
+        productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
+        tipAmount: checkoutRollup.tipAmount,
+        taxAmount: checkoutRollup.taxAmount,
+        totalAmount: checkoutRollup.totalAmount,
+      },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
   })
 
   return {
     bookingId: booking.id,
     meta: buildMeta(true),
   }
+}
+
+export async function updateBookingCheckout(
+  args: UpdateBookingCheckoutArgs,
+): Promise<UpdateBookingCheckoutResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedUpdateBookingCheckout({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        tipAmount: args.tipAmount,
+        taxAmount: args.taxAmount,
+        discountAmount: args.discountAmount,
+        selectedPaymentMethod: args.selectedPaymentMethod,
+        checkoutStatus: args.checkoutStatus,
+        markPaymentAuthorized: args.markPaymentAuthorized,
+        markPaymentCollected: args.markPaymentCollected,
+      }),
+  )
 }
 
 /**

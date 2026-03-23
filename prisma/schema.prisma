@@ -252,6 +252,28 @@ enum BookingOverridePermissionScope {
   ANY_PROFESSIONAL
 }
 
+enum BookingCheckoutStatus {
+  NOT_READY
+  READY
+  PARTIALLY_PAID
+  PAID
+  WAIVED
+}
+
+enum PaymentCollectionTiming {
+  AT_BOOKING
+  AFTER_SERVICE
+}
+
+enum PaymentMethod {
+  CASH
+  CARD_ON_FILE
+  TAP_TO_PAY
+  VENMO
+  ZELLE
+  APPLE_CASH
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -535,8 +557,9 @@ model ProfessionalProfile {
   productSales               ProductSale[]
   nfcCards                   NfcCard[]
 
-  lastMinuteSettings LastMinuteSettings? @relation("ProLastMinuteSettings")
-  lastMinuteOpenings LastMinuteOpening[] @relation("ProOpenings")
+  paymentSettings    ProfessionalPaymentSettings?
+  lastMinuteSettings LastMinuteSettings?          @relation("ProLastMinuteSettings")
+  lastMinuteOpenings LastMinuteOpening[]          @relation("ProOpenings")
 
   holds BookingHold[] @relation("ProHolds") // name optional but makes it clear
 
@@ -546,6 +569,36 @@ model ProfessionalProfile {
   reminders         Reminder[]
 
   @@index([handleNormalized])
+}
+
+model ProfessionalPaymentSettings {
+  id             String @id @default(cuid())
+  professionalId String @unique
+
+  collectPaymentAt PaymentCollectionTiming @default(AFTER_SERVICE)
+
+  acceptCash       Boolean @default(true)
+  acceptCardOnFile Boolean @default(false)
+  acceptTapToPay   Boolean @default(false)
+  acceptVenmo      Boolean @default(false)
+  acceptZelle      Boolean @default(false)
+  acceptAppleCash  Boolean @default(false)
+
+  tipsEnabled    Boolean @default(true)
+  allowCustomTip Boolean @default(true)
+  tipSuggestions Json?
+
+  venmoHandle     String?
+  zelleHandle     String?
+  appleCashHandle String?
+  paymentNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
 }
 
 model ProfessionalLocation {
@@ -970,12 +1023,19 @@ model Booking {
   clientTimeZoneAtBooking String? @db.VarChar(64)
 
   // Pricing + duration
-  subtotalSnapshot Decimal  @db.Decimal(10, 2)
-  totalAmount      Decimal? @db.Decimal(10, 2)
-  depositAmount    Decimal? @db.Decimal(10, 2)
-  tipAmount        Decimal? @db.Decimal(10, 2)
-  taxAmount        Decimal? @db.Decimal(10, 2)
-  discountAmount   Decimal? @db.Decimal(10, 2)
+  subtotalSnapshot        Decimal  @db.Decimal(10, 2)
+  totalAmount             Decimal? @db.Decimal(10, 2)
+  depositAmount           Decimal? @db.Decimal(10, 2)
+  tipAmount               Decimal? @db.Decimal(10, 2)
+  taxAmount               Decimal? @db.Decimal(10, 2)
+  discountAmount          Decimal? @db.Decimal(10, 2)
+  serviceSubtotalSnapshot Decimal? @db.Decimal(10, 2)
+  productSubtotalSnapshot Decimal? @db.Decimal(10, 2)
+
+  checkoutStatus        BookingCheckoutStatus @default(NOT_READY)
+  selectedPaymentMethod PaymentMethod?
+  paymentCollectedAt    DateTime?
+  paymentAuthorizedAt   DateTime?
 
   totalDurationMinutes Int
   bufferMinutes        Int @default(0)

@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { loadProfessionalPaymentSettings } from './loadProfessionalPaymentSettings'
 
 type CurrentUserResult = Awaited<ReturnType<typeof getCurrentUser>>
 
@@ -22,11 +23,17 @@ const bookingPageBookingSelect = {
   finishedAt: true,
 
   subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
   totalAmount: true,
   depositAmount: true,
   tipAmount: true,
   taxAmount: true,
   discountAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
 
   totalDurationMinutes: true,
   bufferMinutes: true,
@@ -80,6 +87,22 @@ const bookingPageBookingSelect = {
       priceSnapshot: true,
       serviceId: true,
       service: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  },
+
+  productSales: {
+    orderBy: [{ createdAt: 'asc' }],
+    take: 80,
+    select: {
+      id: true,
+      productId: true,
+      quantity: true,
+      unitPrice: true,
+      product: {
         select: {
           name: true,
         },
@@ -169,7 +192,9 @@ const bookingMediaSelect = {
   reviewId: true,
 } satisfies Prisma.MediaAssetSelect
 
-function isAuthedClientUser(user: CurrentUserResult | null): user is AuthedClientUser {
+function isAuthedClientUser(
+  user: CurrentUserResult | null,
+): user is AuthedClientUser {
   return Boolean(
     user &&
       user.role === 'CLIENT' &&
@@ -179,7 +204,9 @@ function isAuthedClientUser(user: CurrentUserResult | null): user is AuthedClien
   )
 }
 
-async function requireAuthedClientUser(bookingId: string): Promise<AuthedClientUser> {
+async function requireAuthedClientUser(
+  bookingId: string,
+): Promise<AuthedClientUser> {
   const user = await getCurrentUser().catch(() => null)
 
   if (!isAuthedClientUser(user)) {
@@ -205,31 +232,38 @@ export async function loadClientBookingPage(bookingId: string) {
     redirect('/client/bookings')
   }
 
-  const aftercare = await prisma.aftercareSummary.findFirst({
-    where: {
-      bookingId: raw.id,
-      sentToClientAt: {
-        not: null,
-      },
-    },
-    select: aftercareSummarySelect,
-  })
+  const [aftercare, existingReview, media, paymentSettings] =
+    await Promise.all([
+      prisma.aftercareSummary.findFirst({
+        where: {
+          bookingId: raw.id,
+          sentToClientAt: {
+            not: null,
+          },
+        },
+        select: aftercareSummarySelect,
+      }),
 
-  const existingReview = await prisma.review.findFirst({
-    where: {
-      bookingId: raw.id,
-      clientId: user.clientProfile.id,
-    },
-    orderBy: { createdAt: 'desc' },
-    select: reviewSelect,
-  })
+      prisma.review.findFirst({
+        where: {
+          bookingId: raw.id,
+          clientId: user.clientProfile.id,
+        },
+        orderBy: { createdAt: 'desc' },
+        select: reviewSelect,
+      }),
 
-  const media = await prisma.mediaAsset.findMany({
-    where: { bookingId: raw.id },
-    orderBy: { createdAt: 'asc' },
-    take: 80,
-    select: bookingMediaSelect,
-  })
+      prisma.mediaAsset.findMany({
+        where: { bookingId: raw.id },
+        orderBy: { createdAt: 'asc' },
+        take: 80,
+        select: bookingMediaSelect,
+      }),
+
+      loadProfessionalPaymentSettings({
+        professionalId: raw.professional.id,
+      }),
+    ])
 
   return {
     user,
@@ -237,5 +271,6 @@ export async function loadClientBookingPage(bookingId: string) {
     aftercare,
     existingReview,
     media,
+    paymentSettings,
   }
 }

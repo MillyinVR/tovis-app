@@ -56,6 +56,16 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   finishedAt: true,
 
   subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
   totalDurationMinutes: true,
   bufferMinutes: true,
 
@@ -91,6 +101,18 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
       priceSnapshot: true,
       serviceId: true,
       service: { select: { name: true } },
+    },
+  },
+
+    productSales: {
+    orderBy: { createdAt: 'asc' },
+    take: 80,
+    select: {
+      id: true,
+      productId: true,
+      quantity: true,
+      unitPrice: true,
+      product: { select: { name: true } },
     },
   },
 

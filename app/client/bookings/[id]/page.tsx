@@ -27,6 +27,7 @@ type LoadedClientBookingPage = Awaited<ReturnType<typeof loadClientBookingPage>>
 type LoadedAftercare = LoadedClientBookingPage['aftercare']
 type LoadedExistingReview = LoadedClientBookingPage['existingReview']
 type LoadedMedia = LoadedClientBookingPage['media'][number]
+type LoadedPaymentSettings = LoadedClientBookingPage['paymentSettings']
 type LoadedReviewMedia =
   NonNullable<LoadedExistingReview>['mediaAssets'][number]
 
@@ -51,6 +52,12 @@ type AftercareRebookInfo =
   | { mode: 'RECOMMENDED_WINDOW'; label: string }
   | { mode: 'RECOMMENDED_DATE'; label: string }
   | { mode: 'NONE'; label: null }
+
+type AcceptedMethod = {
+  key: string
+  label: string
+  handle: string | null
+}
 
 const NO_REBOOK_INFO: AftercareRebookInfo = { mode: 'NONE', label: null }
 
@@ -161,6 +168,99 @@ function friendlySource(value: unknown): string | null {
   if (normalized === 'REQUESTED') return 'Requested'
   if (normalized === 'AFTERCARE') return 'Aftercare rebook'
   return null
+}
+
+function friendlyCheckoutStatus(value: unknown): string | null {
+  const normalized = upper(value)
+  if (!normalized) return null
+
+  if (normalized === 'NOT_READY') return 'Not ready'
+  if (normalized === 'READY') return 'Ready'
+  if (normalized === 'PARTIALLY_PAID') return 'Partially paid'
+  if (normalized === 'PAID') return 'Paid'
+  if (normalized === 'WAIVED') return 'Waived'
+
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function friendlyPaymentMethod(value: unknown): string | null {
+  const normalized = upper(value)
+  if (!normalized) return null
+
+  if (normalized === 'CASH') return 'Cash'
+  if (normalized === 'CARD_ON_FILE') return 'Card on file'
+  if (normalized === 'TAP_TO_PAY') return 'Tap to pay'
+  if (normalized === 'VENMO') return 'Venmo'
+  if (normalized === 'ZELLE') return 'Zelle'
+  if (normalized === 'APPLE_CASH') return 'Apple Cash'
+
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function friendlyCollectionTiming(value: unknown): string | null {
+  const normalized = upper(value)
+  if (!normalized) return null
+  if (normalized === 'AT_BOOKING') return 'At booking'
+  if (normalized === 'AFTER_SERVICE') return 'After service'
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function buildAcceptedMethods(
+  paymentSettings: LoadedPaymentSettings,
+): AcceptedMethod[] {
+  if (!paymentSettings) return []
+
+  const methods: AcceptedMethod[] = []
+
+  if (paymentSettings.acceptCash) {
+    methods.push({ key: 'cash', label: 'Cash', handle: null })
+  }
+
+  if (paymentSettings.acceptCardOnFile) {
+    methods.push({ key: 'card_on_file', label: 'Card on file', handle: null })
+  }
+
+  if (paymentSettings.acceptTapToPay) {
+    methods.push({ key: 'tap_to_pay', label: 'Tap to pay', handle: null })
+  }
+
+  if (paymentSettings.acceptVenmo) {
+    methods.push({
+      key: 'venmo',
+      label: 'Venmo',
+      handle: paymentSettings.venmoHandle ?? null,
+    })
+  }
+
+  if (paymentSettings.acceptZelle) {
+    methods.push({
+      key: 'zelle',
+      label: 'Zelle',
+      handle: paymentSettings.zelleHandle ?? null,
+    })
+  }
+
+  if (paymentSettings.acceptAppleCash) {
+    methods.push({
+      key: 'apple_cash',
+      label: 'Apple Cash',
+      handle: paymentSettings.appleCashHandle ?? null,
+    })
+  }
+
+  return methods
 }
 
 function statusPillVariant(
@@ -488,6 +588,43 @@ function ServiceBreakdownCard(props: {
   )
 }
 
+function PurchasedProductsCard(props: {
+  productSales: Awaited<ReturnType<typeof buildClientBookingDTO>>['productSales']
+}) {
+  if (props.productSales.length === 0) return null
+
+  return (
+    <div className="grid gap-2">
+      {props.productSales.map((sale) => (
+        <div
+          key={sale.id}
+          className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[14px] font-black text-textPrimary">
+                {sale.name || 'Product'}
+              </div>
+              <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+                Qty {sale.quantity}
+              </div>
+            </div>
+
+            <div className="shrink-0 text-right">
+              <div className="text-[12px] font-semibold text-textSecondary">
+                {formatMoneyFromUnknown(sale.unitPrice) || COPY.common.emDash} each
+              </div>
+              <div className="text-[13px] font-black text-textPrimary">
+                {formatMoneyFromUnknown(sale.lineTotal) || COPY.common.emDash}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ProductRecommendationsCard(props: {
   aftercare: LoadedAftercare
 }) {
@@ -590,7 +727,7 @@ export default async function ClientBookingPage(props: {
   )
   const step = normalizeStep(firstSearchParam(resolvedSearchParams.step))
 
-  const { user, raw, aftercare, existingReview, media } =
+  const { user, raw, aftercare, existingReview, media, paymentSettings } =
     await loadClientBookingPage(bookingId)
 
   const clientId = user.clientProfile?.id
@@ -697,6 +834,47 @@ export default async function ClientBookingPage(props: {
     ? `$${itemSubtotal.toFixed(2)}`
     : formatMoneyFromUnknown(booking.subtotalSnapshot)
 
+  const serviceSubtotalLabel =
+    formatMoneyFromUnknown(booking.checkout.serviceSubtotalSnapshot) ||
+    subtotalLabel ||
+    COPY.common.notProvided
+
+  const productSubtotalLabel = formatMoneyFromUnknown(
+    booking.checkout.productSubtotalSnapshot,
+  )
+
+  const discountLabel = formatMoneyFromUnknown(booking.checkout.discountAmount)
+  const taxLabel = formatMoneyFromUnknown(booking.checkout.taxAmount)
+  const tipLabel = formatMoneyFromUnknown(booking.checkout.tipAmount)
+
+  const finalTotalLabel =
+    formatMoneyFromUnknown(booking.checkout.totalAmount) ||
+    serviceSubtotalLabel ||
+    COPY.common.notProvided
+
+  const checkoutStatusLabel = friendlyCheckoutStatus(
+    booking.checkout.checkoutStatus,
+  )
+  const selectedPaymentMethodLabel = friendlyPaymentMethod(
+    booking.checkout.selectedPaymentMethod,
+  )
+
+  const paymentAuthorizedAt = toDate(booking.checkout.paymentAuthorizedAt)
+  const paymentCollectedAt = toDate(booking.checkout.paymentCollectedAt)
+
+  const paymentAuthorizedLabel = paymentAuthorizedAt
+    ? formatWhenInTimeZone(paymentAuthorizedAt, appointmentTimeZone)
+    : null
+
+  const paymentCollectedLabel = paymentCollectedAt
+    ? formatWhenInTimeZone(paymentCollectedAt, appointmentTimeZone)
+    : null
+
+  const collectionTimingLabel = friendlyCollectionTiming(
+    paymentSettings?.collectPaymentAt,
+  )
+  const acceptedMethods = buildAcceptedMethods(paymentSettings)
+
   const modeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
 
@@ -752,20 +930,6 @@ export default async function ClientBookingPage(props: {
     booking.source === 'AFTERCARE'
       ? booking.source
       : undefined
-
-  const finalTotalLabel =
-    formatMoneyFromUnknown((raw as { totalAmount?: unknown }).totalAmount) ||
-    subtotalLabel ||
-    COPY.common.notProvided
-
-  const depositLabel = formatMoneyFromUnknown(
-    (raw as { depositAmount?: unknown }).depositAmount,
-  )
-  const taxLabel = formatMoneyFromUnknown((raw as { taxAmount?: unknown }).taxAmount)
-  const tipLabel = formatMoneyFromUnknown((raw as { tipAmount?: unknown }).tipAmount)
-  const discountLabel = formatMoneyFromUnknown(
-    (raw as { discountAmount?: unknown }).discountAmount,
-  )
 
   const renderConsultationSection = (showDecisionCard: boolean) => (
     <SectionCard
@@ -878,7 +1042,7 @@ export default async function ClientBookingPage(props: {
         {(durationMinutes || subtotalLabel || modeLabel || sourceLabel) && (
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {durationMinutes ? <TinyMetaPill>{durationMinutes} min</TinyMetaPill> : null}
-            {subtotalLabel ? <TinyMetaPill>{subtotalLabel}</TinyMetaPill> : null}
+            {serviceSubtotalLabel ? <TinyMetaPill>{serviceSubtotalLabel}</TinyMetaPill> : null}
             {modeLabel ? <TinyMetaPill>{modeLabel}</TinyMetaPill> : null}
             {sourceLabel ? <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill> : null}
 
@@ -1062,11 +1226,9 @@ export default async function ClientBookingPage(props: {
                       <SummaryRow label="Time zone" value={appointmentTimeZone} />
                       <SummaryRow
                         label="Status"
-                        value={
-                          String(
-                            booking.status || COPY.bookings.status.pillUnknown,
-                          ).toUpperCase()
-                        }
+                        value={String(
+                          booking.status || COPY.bookings.status.pillUnknown,
+                        ).toUpperCase()}
                       />
                       {locationLine ? (
                         <SummaryRow label="Location" value={locationLine} />
@@ -1110,6 +1272,17 @@ export default async function ClientBookingPage(props: {
                     </div>
                   </div>
 
+                  {booking.productSales.length > 0 ? (
+                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                      <div className="text-[12px] font-black text-textPrimary">
+                        Purchased products
+                      </div>
+                      <div className="mt-3">
+                        <PurchasedProductsCard productSales={booking.productSales} />
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
                     <div className="text-[12px] font-black text-textPrimary">
                       Final cost recap
@@ -1118,16 +1291,19 @@ export default async function ClientBookingPage(props: {
                     <div className="mt-3 grid gap-1">
                       <SummaryRow
                         label="Services subtotal"
-                        value={subtotalLabel || COPY.common.notProvided}
+                        value={serviceSubtotalLabel || COPY.common.notProvided}
                       />
+                      {productSubtotalLabel ? (
+                        <SummaryRow
+                          label="Products subtotal"
+                          value={productSubtotalLabel}
+                        />
+                      ) : null}
                       {discountLabel ? (
                         <SummaryRow label="Discount" value={discountLabel} />
                       ) : null}
                       {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
                       {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
-                      {depositLabel ? (
-                        <SummaryRow label="Deposit" value={depositLabel} />
-                      ) : null}
                       <SummaryRow label="Final total" value={finalTotalLabel} />
                     </div>
                   </div>
@@ -1163,10 +1339,83 @@ export default async function ClientBookingPage(props: {
                     <div className="text-[12px] font-black text-textPrimary">
                       Payment &amp; checkout
                     </div>
-                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                      Checkout status is not fully wired into this view yet. This
-                      summary currently shows booking totals and keeps payment
-                      behavior out of scope for this step.
+
+                    <div className="mt-3 grid gap-1">
+                      <SummaryRow
+                        label="Checkout status"
+                        value={checkoutStatusLabel || COPY.common.notProvided}
+                      />
+                      {selectedPaymentMethodLabel ? (
+                        <SummaryRow
+                          label="Payment method"
+                          value={selectedPaymentMethodLabel}
+                        />
+                      ) : null}
+                      {collectionTimingLabel ? (
+                        <SummaryRow
+                          label="Collection timing"
+                          value={collectionTimingLabel}
+                        />
+                      ) : null}
+                      <SummaryRow
+                        label="Services subtotal"
+                        value={serviceSubtotalLabel || COPY.common.notProvided}
+                      />
+                      {productSubtotalLabel ? (
+                        <SummaryRow
+                          label="Products subtotal"
+                          value={productSubtotalLabel}
+                        />
+                      ) : null}
+                      {discountLabel ? (
+                        <SummaryRow label="Discount" value={discountLabel} />
+                      ) : null}
+                      {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
+                      {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
+                      <SummaryRow label="Final total" value={finalTotalLabel} />
+                      {paymentAuthorizedLabel ? (
+                        <SummaryRow
+                          label="Authorized"
+                          value={paymentAuthorizedLabel}
+                        />
+                      ) : null}
+                      {paymentCollectedLabel ? (
+                        <SummaryRow
+                          label="Collected"
+                          value={paymentCollectedLabel}
+                        />
+                      ) : null}
+                    </div>
+
+                    {acceptedMethods.length > 0 ? (
+                      <div className="mt-4">
+                        <div className="text-[11px] font-black text-textSecondary">
+                          Accepted methods
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {acceptedMethods.map((method) => (
+                            <span
+                              key={method.key}
+                              className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textPrimary"
+                              title={method.handle ?? undefined}
+                            >
+                              {method.label}
+                              {method.handle ? ` · ${method.handle}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {paymentSettings?.paymentNote ? (
+                      <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+                        {paymentSettings.paymentNote}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+                      Tip applies to services only. Product purchases are shown
+                      separately from aftercare recommendations.
                     </div>
                   </div>
 
