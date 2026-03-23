@@ -8,7 +8,6 @@ import { moneyToFixed2String } from '@/lib/money'
 import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import {
   BookingStatus,
-  BookingServiceItemType,
   ConsultationApprovalStatus,
   MediaPhase,
   SessionStep,
@@ -113,138 +112,6 @@ function formatMoneyFromUnknown(v: unknown): string {
   return ''
 }
 
-function pickString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function pickNumber(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v
-  if (typeof v === 'string' && v.trim()) {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-  }
-  return null
-}
-
-export type ConsultationInitialItem = {
-  key: string
-  bookingServiceItemId: string | null
-  serviceId: string
-  offeringId: string | null
-  itemType: BookingServiceItemType
-  label: string
-  categoryName: string | null
-  price: string
-  durationMinutes: string
-  notes: string
-  sortOrder: number
-  source: 'BOOKING' | 'PROPOSAL'
-}
-
-function normalizeMoneyString(v: unknown): string {
-  const n = pickNumber(v)
-  if (n == null || n <= 0) return ''
-  return n.toFixed(2)
-}
-
-function normalizeDurationString(v: unknown): string {
-  const n = pickNumber(v)
-  if (n == null || n <= 0) return ''
-  return String(Math.round(n))
-}
-
-function parseProposalItems(
-  proposedServicesJson: unknown,
-): ConsultationInitialItem[] {
-  if (
-    !proposedServicesJson ||
-    typeof proposedServicesJson !== 'object' ||
-    !('items' in proposedServicesJson)
-  ) {
-    return []
-  }
-
-  const rawItems = (proposedServicesJson as { items?: unknown }).items
-  if (!Array.isArray(rawItems)) return []
-
-  const out: ConsultationInitialItem[] = []
-
-  for (let i = 0; i < rawItems.length; i += 1) {
-    const row = rawItems[i]
-    if (!row || typeof row !== 'object') continue
-
-    const item = row as Record<string, unknown>
-    const serviceId = pickString(item.serviceId)
-    if (!serviceId) continue
-
-    const itemTypeRaw = upper(item.itemType ?? item.type)
-    const itemType =
-      itemTypeRaw === BookingServiceItemType.ADD_ON
-        ? BookingServiceItemType.ADD_ON
-        : BookingServiceItemType.BASE
-
-    const label =
-      pickString(item.label) ||
-      pickString(item.serviceName) ||
-      (itemType === BookingServiceItemType.ADD_ON ? 'Add-on' : 'Service')
-
-    out.push({
-      key: `proposal_${i}_${serviceId}`,
-      bookingServiceItemId: pickString(item.bookingServiceItemId),
-      serviceId,
-      offeringId: pickString(item.offeringId),
-      itemType,
-      label,
-      categoryName: pickString(item.categoryName),
-      price: normalizeMoneyString(item.price),
-      durationMinutes: normalizeDurationString(item.durationMinutes),
-      notes: pickString(item.notes) ?? '',
-      sortOrder: pickNumber(item.sortOrder) ?? i,
-      source: 'PROPOSAL',
-    })
-  }
-
-  return out.sort((a, b) => a.sortOrder - b.sortOrder)
-}
-
-type BookingInitialItemRow = {
-  id: string
-  serviceId: string
-  offeringId: string | null
-  itemType: BookingServiceItemType
-  priceSnapshot: unknown
-  durationMinutesSnapshot: number
-  notes: string | null
-  sortOrder: number
-  service: {
-    name: string | null
-    category: { name: string | null } | null
-  }
-}
-
-function mapBookingItemsToInitialItems(
-  items: BookingInitialItemRow[],
-): ConsultationInitialItem[] {
-  return items
-    .map((it, index): ConsultationInitialItem => ({
-      key: `booking_${it.id}`,
-      bookingServiceItemId: it.id,
-      serviceId: it.serviceId,
-      offeringId: it.offeringId,
-      itemType: it.itemType,
-      label:
-        it.service?.name ||
-        (it.itemType === BookingServiceItemType.ADD_ON ? 'Add-on' : 'Service'),
-      categoryName: it.service?.category?.name ?? null,
-      price: normalizeMoneyString(it.priceSnapshot),
-      durationMinutes: normalizeDurationString(it.durationMinutesSnapshot),
-      notes: it.notes ?? '',
-      sortOrder: it.sortOrder ?? index,
-      source: 'BOOKING',
-    }))
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-}
-
 function WaitingForClientBanner() {
   return (
     <section className="mt-3 rounded-card border border-white/10 tovis-glass p-4 shadow-[0_14px_48px_rgba(0,0,0,0.35)]">
@@ -309,14 +176,16 @@ async function transitionAction(bookingId: string, next: SessionStep) {
 
   const proId = maybeProId
 
-  const b = await prisma.booking.findUnique({
+  const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: { id: true, professionalId: true, status: true, finishedAt: true },
   })
 
-  if (!b) notFound()
-  if (b.professionalId !== proId) redirect('/pro')
-  if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
+  if (!booking) notFound()
+  if (booking.professionalId !== proId) redirect('/pro')
+  if (isTerminal(booking.status, booking.finishedAt)) {
+    redirect(bookingHubHref(bookingId))
+  }
 
   await transitionSessionStep({
     bookingId,
@@ -366,31 +235,10 @@ export default async function ProBookingSessionPage(props: PageProps) {
       totalAmount: true,
       consultationNotes: true,
 
-      serviceItems: {
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        select: {
-          id: true,
-          serviceId: true,
-          offeringId: true,
-          itemType: true,
-          priceSnapshot: true,
-          durationMinutesSnapshot: true,
-          notes: true,
-          sortOrder: true,
-          service: {
-            select: {
-              name: true,
-              category: { select: { name: true } },
-            },
-          },
-        },
-      },
-
       consultationApproval: {
         select: {
           status: true,
           proposedTotal: true,
-          proposedServicesJson: true,
         },
       },
     },
@@ -416,14 +264,6 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const approvalStatus = booking.consultationApproval?.status ?? null
   const consultApproved =
     approvalStatus === ConsultationApprovalStatus.APPROVED
-
-  const bookingInitialItems = mapBookingItemsToInitialItems(booking.serviceItems)
-  const proposalInitialItems = parseProposalItems(
-    booking.consultationApproval?.proposedServicesJson ?? null,
-  )
-
-  const initialItems =
-    proposalInitialItems.length > 0 ? proposalInitialItems : bookingInitialItems
 
   const initialPrice =
     formatMoneyFromUnknown(booking.consultationApproval?.proposedTotal) ||
@@ -513,20 +353,22 @@ export default async function ProBookingSessionPage(props: PageProps) {
       redirect(`/login?from=${encodeURIComponent(bookingHubHref(bookingId))}`)
     }
 
-    const proId = maybeUserProId
+    const currentProId = maybeUserProId
 
-    const b = await prisma.booking.findUnique({
+    const freshBooking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: { id: true, professionalId: true, status: true, finishedAt: true },
     })
 
-    if (!b) notFound()
-    if (b.professionalId !== proId) redirect('/pro')
-    if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
+    if (!freshBooking) notFound()
+    if (freshBooking.professionalId !== currentProId) redirect('/pro')
+    if (isTerminal(freshBooking.status, freshBooking.finishedAt)) {
+      redirect(bookingHubHref(bookingId))
+    }
 
     const done = await transitionSessionStep({
       bookingId,
-      professionalId: proId,
+      professionalId: currentProId,
       nextStep: SessionStep.DONE,
     })
 
@@ -534,7 +376,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
 
     await transitionSessionStep({
       bookingId,
-      professionalId: proId,
+      professionalId: currentProId,
       nextStep: SessionStep.AFTER_PHOTOS,
     }).catch(() => null)
 
@@ -612,8 +454,8 @@ export default async function ProBookingSessionPage(props: PageProps) {
         <section className="mt-6">
           <h2 className="text-lg font-black">Consultation</h2>
           <p className="mt-1 text-sm font-semibold text-textSecondary">
-            Confirm booked services, adjust proposal line items, then send it
-            for client approval.
+            Confirm services + price with the client, then send it for client
+            approval.
           </p>
 
           <div className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
@@ -621,7 +463,6 @@ export default async function ProBookingSessionPage(props: PageProps) {
               bookingId={booking.id}
               initialNotes={booking.consultationNotes ?? ''}
               initialPrice={initialPrice}
-              initialItems={initialItems}
             />
 
             <div className="mt-3 text-xs font-semibold text-textSecondary">

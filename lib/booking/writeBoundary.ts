@@ -317,6 +317,49 @@ type FinishBookingSessionResult = {
   meta: MutationMeta
 }
 
+type ConfirmBookingFinalReviewLineItemInput = {
+  bookingServiceItemId?: string | null
+  serviceId: string
+  offeringId: string | null
+  itemType: BookingServiceItemType
+  price: Prisma.Decimal | string | number
+  durationMinutes: number
+  notes?: string | null
+  sortOrder: number
+}
+
+type ConfirmBookingFinalReviewArgs = {
+  bookingId: string
+  professionalId: string
+  finalLineItems: ConfirmBookingFinalReviewLineItemInput[]
+  expectedSubtotal?: Prisma.Decimal | string | number | null
+
+  // Step 4 needs these, but they should only be persisted here
+  // if schema already has a safe draft location.
+  recommendedProducts?: {
+    name: string
+    url: string
+    note: string | null
+  }[]
+  rebookMode?: AftercareRebookMode | null
+  rebookedFor?: Date | null
+  rebookWindowStart?: Date | null
+  rebookWindowEnd?: Date | null
+}
+
+type ConfirmBookingFinalReviewResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    sessionStep: SessionStep
+    serviceId: string | null
+    offeringId: string | null
+    subtotalSnapshot: Prisma.Decimal | null
+    totalDurationMinutes: number
+  }
+  meta: MutationMeta
+}
+
 type TransitionSessionStepArgs = {
   bookingId: string
   professionalId: string
@@ -690,6 +733,36 @@ const FINISH_BOOKING_SELECT = {
 
 type FinishBookingRecord = Prisma.BookingGetPayload<{
   select: typeof FINISH_BOOKING_SELECT
+}>
+
+const FINAL_REVIEW_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  startedAt: true,
+  finishedAt: true,
+  sessionStep: true,
+  serviceId: true,
+  offeringId: true,
+  subtotalSnapshot: true,
+  totalDurationMinutes: true,
+  serviceItems: {
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      serviceId: true,
+      offeringId: true,
+      itemType: true,
+      priceSnapshot: true,
+      durationMinutesSnapshot: true,
+      notes: true,
+      sortOrder: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type FinalReviewBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof FINAL_REVIEW_BOOKING_SELECT
 }>
 
 const TRANSITION_BOOKING_SELECT = {
@@ -1132,6 +1205,57 @@ function normalizePositiveDurationMinutes(value: unknown): number | null {
   if (minutes <= 0) return null
 
   return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
+}
+
+function normalizePositiveMoneyDecimal(value: unknown): Prisma.Decimal | null {
+  try {
+    const dec = decimalFromUnknown(value)
+    if (dec.lt(0)) return null
+    return dec
+  } catch {
+    return null
+  }
+}
+
+function assertValidFinalReviewLineItems(
+  items: ConfirmBookingFinalReviewLineItemInput[],
+): void {
+  if (!Array.isArray(items) || items.length <= 0) {
+    throw bookingError('INVALID_SERVICE_ITEMS', {
+      message: 'Final review requires at least one service item.',
+      userMessage: 'Add at least one final service item.',
+    })
+  }
+
+  const baseCount = items.filter((item) => item.itemType === BookingServiceItemType.BASE).length
+  if (baseCount !== 1) {
+    throw bookingError('INVALID_SERVICE_ITEMS', {
+      message: 'Final review requires exactly one BASE service item.',
+      userMessage: 'You must have exactly one main service.',
+    })
+  }
+
+  for (const item of items) {
+    if (!item.serviceId.trim()) {
+      throw bookingError('INVALID_SERVICE_ITEMS')
+    }
+
+    const duration = normalizePositiveDurationMinutes(item.durationMinutes)
+    if (duration == null) {
+      throw bookingError('INVALID_SERVICE_ITEMS', {
+        message: 'Every final review line item needs a valid duration.',
+        userMessage: 'Each item needs a valid duration.',
+      })
+    }
+
+    const price = normalizePositiveMoneyDecimal(item.price)
+    if (price == null) {
+      throw bookingError('INVALID_SERVICE_ITEMS', {
+        message: 'Every final review line item needs a valid non-negative price.',
+        userMessage: 'Each item needs a valid price.',
+      })
+    }
+  }
 }
 
 function assertNonEmptyBookingId(bookingId: string): void {
@@ -2689,6 +2813,179 @@ async function performLockedFinishBookingSession(args: {
   }
 }
 
+async function performLockedConfirmBookingFinalReview(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  finalLineItems: ConfirmBookingFinalReviewLineItemInput[]
+  expectedSubtotal?: Prisma.Decimal | string | number | null
+}): Promise<ConfirmBookingFinalReviewResult> {
+  const booking: FinalReviewBookingRecord | null = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: FINAL_REVIEW_BOOKING_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED')
+  }
+
+  if (!booking.startedAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Final review is only available after the session has started.',
+      userMessage: 'Start the session first.',
+    })
+  }
+
+  if ((booking.sessionStep ?? SessionStep.NONE) !== SessionStep.FINISH_REVIEW) {
+    throw bookingError('STEP_MISMATCH', {
+      message: `Final review is only allowed in FINISH_REVIEW. Current step: ${booking.sessionStep ?? SessionStep.NONE}.`,
+      userMessage: 'You can only confirm final review from the Finish Review step.',
+    })
+  }
+
+  assertValidFinalReviewLineItems(args.finalLineItems)
+
+  const normalizedItems = [...args.finalLineItems]
+    .map((item, index) => {
+      const durationMinutes = normalizePositiveDurationMinutes(item.durationMinutes)
+      const priceSnapshot = normalizePositiveMoneyDecimal(item.price)
+
+      if (durationMinutes == null || priceSnapshot == null) {
+        throw bookingError('INVALID_SERVICE_ITEMS')
+      }
+
+      return {
+        bookingServiceItemId: item.bookingServiceItemId?.trim() || null,
+        serviceId: item.serviceId.trim(),
+        offeringId: item.offeringId?.trim() || null,
+        itemType: item.itemType,
+        priceSnapshot,
+        durationMinutesSnapshot: durationMinutes,
+        notes: normalizeReason(item.notes),
+        sortOrder: Number.isFinite(item.sortOrder) ? Math.max(0, Math.trunc(item.sortOrder)) : index,
+      }
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+
+  const {
+    primaryServiceId,
+    primaryOfferingId,
+    computedDurationMinutes,
+    computedSubtotal,
+  } = computeBookingItemLikeTotals(
+    normalizedItems.map((item) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      priceSnapshot: item.priceSnapshot,
+      itemType: item.itemType,
+    })),
+    'INVALID_SERVICE_ITEMS',
+  )
+
+  if (args.expectedSubtotal != null) {
+    const expectedSubtotal = normalizePositiveMoneyDecimal(args.expectedSubtotal)
+    if (!expectedSubtotal || !expectedSubtotal.eq(computedSubtotal)) {
+      throw bookingError('INVALID_SERVICE_ITEMS', {
+        message: 'Submitted subtotal does not match computed line item subtotal.',
+        userMessage: 'Subtotal does not match the final line items.',
+      })
+    }
+  }
+
+  await args.tx.bookingServiceItem.deleteMany({
+    where: { bookingId: booking.id },
+  })
+
+  const baseItem = normalizedItems.find(
+    (item) => item.itemType === BookingServiceItemType.BASE,
+  )
+
+  if (!baseItem) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  const createdBaseItem = await args.tx.bookingServiceItem.create({
+    data: {
+      bookingId: booking.id,
+      serviceId: baseItem.serviceId,
+      offeringId: baseItem.offeringId,
+      itemType: BookingServiceItemType.BASE,
+      parentItemId: null,
+      priceSnapshot: baseItem.priceSnapshot,
+      durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
+      notes: baseItem.notes,
+      sortOrder: 0,
+    },
+    select: { id: true },
+  })
+
+  const addOnItems = normalizedItems.filter(
+    (item) => item.itemType === BookingServiceItemType.ADD_ON,
+  )
+
+  if (addOnItems.length > 0) {
+    await args.tx.bookingServiceItem.createMany({
+      data: addOnItems.map((item, index) => ({
+        bookingId: booking.id,
+        serviceId: item.serviceId,
+        offeringId: item.offeringId,
+        itemType: BookingServiceItemType.ADD_ON,
+        parentItemId: createdBaseItem.id,
+        priceSnapshot: item.priceSnapshot,
+        durationMinutesSnapshot: item.durationMinutesSnapshot,
+        notes: item.notes,
+        sortOrder: index + 1,
+      })),
+    })
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceId: primaryServiceId,
+      offeringId: primaryOfferingId,
+      subtotalSnapshot: computedSubtotal,
+      totalDurationMinutes: computedDurationMinutes,
+      sessionStep: SessionStep.AFTER_PHOTOS,
+    },
+    select: {
+      id: true,
+      status: true,
+      sessionStep: true,
+      serviceId: true,
+      offeringId: true,
+      subtotalSnapshot: true,
+      totalDurationMinutes: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      status: updated.status,
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+      serviceId: updated.serviceId,
+      offeringId: updated.offeringId,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      totalDurationMinutes: updated.totalDurationMinutes ?? 0,
+    },
+    meta: buildMeta(true),
+  }
+}
+
 async function performLockedTransitionSessionStep(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -2755,6 +3052,18 @@ async function performLockedTransitionSessionStep(args: {
       ok: false,
       status: 409,
       error: `Invalid transition: ${from} → ${args.nextStep}.`,
+      meta: buildMeta(false),
+    }
+  }
+
+    if (
+    from === SessionStep.FINISH_REVIEW &&
+    args.nextStep === SessionStep.AFTER_PHOTOS
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'Use confirmBookingFinalReview before moving past Finish Review.',
       meta: buildMeta(false),
     }
   }
@@ -5741,6 +6050,25 @@ export async function finishBookingSession(
         tx,
         bookingId: args.bookingId,
         professionalId: args.professionalId,
+      }),
+  )
+}
+
+export async function confirmBookingFinalReview(
+  args: ConfirmBookingFinalReviewArgs,
+): Promise<ConfirmBookingFinalReviewResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx }) =>
+      performLockedConfirmBookingFinalReview({
+        tx,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        finalLineItems: args.finalLineItems,
+        expectedSubtotal: args.expectedSubtotal ?? null,
       }),
   )
 }
