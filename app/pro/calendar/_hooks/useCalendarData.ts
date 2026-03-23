@@ -390,8 +390,9 @@ export function useCalendarData({ view, currentDate }: Args) {
     applyingChange: confirm.applyingChange,
     cancelConfirm: confirm.cancelConfirm,
     applyConfirm: confirm.applyConfirm,
-
     pendingOutsideWorkingHours: confirm.pendingOutsideWorkingHours,
+    overrideReason: confirm.overrideReason,
+    setOverrideReason: confirm.setOverrideReason,
 
     ui: {
       suppressClickRef: dragDrop.ui.suppressClickRef,

@@ -488,6 +488,24 @@ type ClientCheckoutProductSelectionInput = {
   quantity: number
 }
 
+type AssertClientBookingReviewEligibilityArgs = {
+  bookingId: string
+  clientId: string
+}
+
+type AssertClientBookingReviewEligibilityResult = {
+  booking: {
+    id: string
+    professionalId: string
+    status: BookingStatus
+    finishedAt: Date | null
+    checkoutStatus: BookingCheckoutStatus
+    paymentCollectedAt: Date | null
+    aftercareSentAt: Date | null
+  }
+  meta: MutationMeta
+}
+
 type UpsertClientBookingCheckoutProductsArgs = {
   bookingId: string
   clientId: string
@@ -1005,6 +1023,7 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
   scheduledFor: true,
   finishedAt: true,
   checkoutStatus: true,
+  paymentCollectedAt: true,
   locationTimeZone: true,
   service: {
     select: {
@@ -1114,6 +1133,33 @@ const CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT = {
     orderBy: [{ createdAt: 'asc' }],
   },
 } satisfies Prisma.BookingSelect
+
+const CLIENT_REVIEW_ELIGIBILITY_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  finishedAt: true,
+  checkoutStatus: true,
+  paymentCollectedAt: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
+reviews: {
+  select: {
+    id: true,
+    clientId: true,
+  },
+  take: 10,
+},
+} satisfies Prisma.BookingSelect
+
+type ClientReviewEligibilityBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof CLIENT_REVIEW_ELIGIBILITY_BOOKING_SELECT
+}>
 
 type ClientCheckoutProductsBookingRecord = Prisma.BookingGetPayload<{
   select: typeof CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT
@@ -1264,11 +1310,19 @@ function isCheckoutCloseoutComplete(
 }
 
 function isReviewEligibleCloseout(args: {
+  bookingStatus: BookingStatus | null | undefined
+  finishedAt: Date | null | undefined
   aftercareSentAt: Date | null | undefined
   checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
 }): boolean {
+  const isCompleted =
+    args.bookingStatus === BookingStatus.COMPLETED || Boolean(args.finishedAt)
+
   return (
+    isCompleted &&
     Boolean(args.aftercareSentAt) &&
+    Boolean(args.paymentCollectedAt) &&
     isCheckoutCloseoutComplete(args.checkoutStatus)
   )
 }
@@ -1459,6 +1513,50 @@ function assertClientCanEditBookingCheckoutProducts(
     throw bookingError('FORBIDDEN', {
       message: 'Product checkout requires finalized aftercare.',
       userMessage: 'Products can only be selected after aftercare is finalized.',
+    })
+  }
+}
+
+function assertClientCanCreateBookingReview(
+  booking: ClientReviewEligibilityBookingRecord,
+  clientId: string,
+): void {
+  if (booking.clientId !== clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED', {
+      message: 'Cancelled bookings cannot be reviewed.',
+      userMessage: 'Cancelled bookings cannot be reviewed.',
+    })
+  }
+
+  const alreadyReviewed = booking.reviews.some(
+    (review) => review.clientId === clientId,
+  )
+
+  if (alreadyReviewed) {
+    throw bookingError('FORBIDDEN', {
+      message: 'A review already exists for this booking and client.',
+      userMessage: 'You already reviewed this appointment.',
+    })
+  }
+
+  const closeoutComplete = isReviewEligibleCloseout({
+    bookingStatus: booking.status,
+    finishedAt: booking.finishedAt,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: booking.checkoutStatus,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  if (!closeoutComplete) {
+    throw bookingError('FORBIDDEN', {
+      message:
+        'Review is only available after booking closeout is complete: completed booking, finalized aftercare, and collected payment are required.',
+      userMessage:
+        'You can leave a review after checkout is finished and aftercare has been sent.',
     })
   }
 }
@@ -6302,45 +6400,48 @@ async function performLockedUpsertBookingAftercare(args: {
     remindersTouched += del.count
   }
 
-    let bookingFinished = false
-  let bookingNow: {
-    status: BookingStatus
-    sessionStep: SessionStep
-    finishedAt: Date | null
-  } | null = null
+  let bookingFinished = false
+let bookingNow: {
+  status: BookingStatus
+  sessionStep: SessionStep
+  finishedAt: Date | null
+} | null = null
 
-  if (args.sendToClient) {
-    const shouldCompleteBooking = isReviewEligibleCloseout({
-      aftercareSentAt: aftercare.sentToClientAt,
-      checkoutStatus: booking.checkoutStatus,
+if (args.sendToClient) {
+  const shouldCompleteBooking = isReviewEligibleCloseout({
+    bookingStatus: booking.status,
+    finishedAt: booking.finishedAt,
+    aftercareSentAt: aftercare.sentToClientAt,
+    checkoutStatus: booking.checkoutStatus,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  if (shouldCompleteBooking) {
+    const updatedBooking = await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: booking.finishedAt ?? now,
+      },
+      select: {
+        status: true,
+        sessionStep: true,
+        finishedAt: true,
+      } satisfies Prisma.BookingSelect,
     })
 
-    if (shouldCompleteBooking) {
-      const updatedBooking = await args.tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: BookingStatus.COMPLETED,
-          sessionStep: SessionStep.DONE,
-          finishedAt: booking.finishedAt ?? now,
-        },
-        select: {
-          status: true,
-          sessionStep: true,
-          finishedAt: true,
-        } satisfies Prisma.BookingSelect,
-      })
-
-      bookingNow = {
-        status: updatedBooking.status,
-        sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
-        finishedAt: updatedBooking.finishedAt,
-      }
-
-      bookingFinished = true
+    bookingNow = {
+      status: updatedBooking.status,
+      sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
+      finishedAt: updatedBooking.finishedAt,
     }
-  }
 
-  return {
+    bookingFinished = true
+  }
+}
+
+return {
     aftercare: {
       id: aftercare.id,
       publicToken: aftercare.publicToken,
@@ -6424,9 +6525,13 @@ async function performLockedUpdateBookingCheckout(args: {
       : (args.checkoutStatus ?? booking.checkoutStatus)
 
   const shouldCompleteBooking = isReviewEligibleCloseout({
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: nextCheckoutStatus,
-  })
+  bookingStatus: booking.status,
+  finishedAt: booking.finishedAt,
+  aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+  checkoutStatus: nextCheckoutStatus,
+  paymentCollectedAt:
+    shouldSetCollectedAt ? booking.paymentCollectedAt ?? args.now : booking.paymentCollectedAt,
+})
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -6696,6 +6801,37 @@ async function performLockedUpsertClientBookingCheckoutProducts(args: {
   }
 }
 
+async function performLockedAssertClientBookingReviewEligibility(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+}): Promise<AssertClientBookingReviewEligibilityResult> {
+  const booking: ClientReviewEligibilityBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: CLIENT_REVIEW_ELIGIBILITY_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  assertClientCanCreateBookingReview(booking, args.clientId)
+
+  return {
+    booking: {
+      id: booking.id,
+      professionalId: booking.professionalId,
+      status: booking.status,
+      finishedAt: booking.finishedAt,
+      checkoutStatus: booking.checkoutStatus,
+      paymentCollectedAt: booking.paymentCollectedAt,
+      aftercareSentAt: booking.aftercareSummary?.sentToClientAt ?? null,
+    },
+    meta: buildMeta(false),
+  }
+}
+
 async function resolveAdminProfessionalId(bookingId: string): Promise<string> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -6906,6 +7042,16 @@ export async function approveConsultationAndMaterializeBooking(args: {
         now,
       }),
   })
+}
+
+export function canBookingAcceptClientReview(args: {
+  bookingStatus: BookingStatus | null | undefined
+  finishedAt: Date | null | undefined
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+}): boolean {
+  return isReviewEligibleCloseout(args)
 }
 
 export async function transitionSessionStep(
@@ -7120,6 +7266,24 @@ export async function upsertClientBookingCheckoutProducts(
         bookingId: args.bookingId,
         clientId: args.clientId,
         items: args.items,
+      }),
+  })
+}
+
+export async function assertClientBookingReviewEligibility(
+  args: AssertClientBookingReviewEligibilityArgs,
+): Promise<AssertClientBookingReviewEligibilityResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx }) =>
+      performLockedAssertClientBookingReviewEligibility({
+        tx,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
       }),
   })
 }

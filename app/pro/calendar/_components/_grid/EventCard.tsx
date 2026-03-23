@@ -34,6 +34,7 @@ type Props = {
   suppressClickRef: React.MutableRefObject<boolean>
   onClickEvent: (id: string) => void
   onDragStart: (ev: CalendarEvent, e: React.DragEvent<HTMLDivElement>) => void
+  onDropOnDayColumn: (day: Date, clientY: number, columnTop: number) => void
   onBeginResize: (args: BeginResizeArgs) => void
 }
 
@@ -75,6 +76,7 @@ export function EventCard(props: Props) {
     suppressClickRef,
     onClickEvent,
     onDragStart,
+    onDropOnDayColumn,
     onBeginResize,
   } = props
 
@@ -87,6 +89,14 @@ export function EventCard(props: Props) {
       data-cal-event="1"
       draggable={Boolean(apiId)}
       onDragStart={(e) => onDragStart(ev, e)}
+      onDragOver={(e) => {
+        e.preventDefault()
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        void onDropOnDayColumn(day, e.clientY, getColumnTop())
+      }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={() => {
         if (suppressClickRef.current) return
@@ -134,11 +144,11 @@ export function EventCard(props: Props) {
             {primaryText(ev)}
           </div>
 
-          {!micro && (
+          {!micro ? (
             <div className="shrink-0 rounded-full bg-black/40 px-2 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/10">
               {timeLabel}
             </div>
-          )}
+          ) : null}
         </div>
 
         {!micro ? (
@@ -162,11 +172,11 @@ export function EventCard(props: Props) {
           </div>
         )}
 
-        {micro && (
+        {micro ? (
           <div className="mt-0.5 truncate text-[10px] font-semibold text-white/80">
             {timeLabel}
           </div>
-        )}
+        ) : null}
 
         <div
           onMouseDown={(e) => {

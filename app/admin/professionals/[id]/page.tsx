@@ -7,6 +7,10 @@ import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
+type PageProps = {
+  params: Promise<{ id: string }>
+}
+
 function fmtUtcDate(d: Date) {
   const tz = sanitizeTimeZone('UTC', 'UTC')
   return new Intl.DateTimeFormat('en-US', {
@@ -30,14 +34,18 @@ function fmtUtcDateTime(d: Date) {
   }).format(d)
 }
 
-function formatLocationLabel(loc: {
-  type: ProfessionalLocationType
-  name: string | null
-  formattedAddress: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-} | null) {
+function formatLocationLabel(
+  loc:
+    | {
+        type: ProfessionalLocationType
+        name: string | null
+        formattedAddress: string | null
+        city: string | null
+        state: string | null
+        postalCode: string | null
+      }
+    | null,
+) {
   if (!loc) return 'No location yet'
 
   const mode =
@@ -49,7 +57,6 @@ function formatLocationLabel(loc: {
           ? 'Mobile'
           : String(loc.type)
 
-  // Prefer formattedAddress, else fall back to city/state, else just mode
   const where =
     loc.formattedAddress?.trim() ||
     [loc.city?.trim(), loc.state?.trim()].filter(Boolean).join(', ') ||
@@ -57,18 +64,33 @@ function formatLocationLabel(loc: {
     ''
 
   const named = loc.name?.trim()
+
   if (named && where) return `${named} · ${where} · ${mode}`
   if (named) return `${named} · ${mode}`
   if (where) return `${where} · ${mode}`
   return mode
 }
 
-export default async function AdminProfessionalDetailPage({
-  params,
-}: {
-  params: { id: string }
-}) {
-  const { id } = params
+export default async function AdminProfessionalDetailPage({ params }: PageProps) {
+  const { id: rawId } = await params
+  const id = rawId?.trim() ?? ''
+  const safeId = encodeURIComponent(id || 'unknown')
+  const fromHref = `/admin/professionals/${safeId}`
+
+  if (!id) {
+    return (
+      <AdminGuard
+        from={fromHref}
+        allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
+      >
+        <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
+            Missing professional id.
+          </div>
+        </main>
+      </AdminGuard>
+    )
+  }
 
   const pro = await prisma.professionalProfile.findUnique({
     where: { id },
@@ -84,9 +106,12 @@ export default async function AdminProfessionalDetailPage({
       licenseVerified: true,
       verificationStatus: true,
 
-      user: { select: { email: true } },
+      user: {
+        select: {
+          email: true,
+        },
+      },
 
-      // ✅ NEW location system
       locations: {
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
         select: {
@@ -95,14 +120,12 @@ export default async function AdminProfessionalDetailPage({
           name: true,
           isPrimary: true,
           isBookable: true,
-
           formattedAddress: true,
           city: true,
           state: true,
           postalCode: true,
           countryCode: true,
           placeId: true,
-
           lat: true,
           lng: true,
           timeZone: true,
@@ -128,8 +151,6 @@ export default async function AdminProfessionalDetailPage({
     },
   })
 
-  const fromHref = `/admin/professionals/${encodeURIComponent(id)}`
-
   if (!pro) {
     return (
       <AdminGuard
@@ -153,7 +174,7 @@ export default async function AdminProfessionalDetailPage({
   const email = pro.user?.email || 'No email'
   const profession = pro.professionType || 'Unknown'
 
-  const primaryLoc = pro.locations.find((l) => l.isPrimary) ?? pro.locations[0] ?? null
+  const primaryLoc = pro.locations.find((location) => location.isPrimary) ?? pro.locations[0] ?? null
   const locationLabel = formatLocationLabel(primaryLoc)
 
   const licenseLine = (() => {
@@ -174,7 +195,6 @@ export default async function AdminProfessionalDetailPage({
     >
       <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
         <div className="grid gap-4">
-          {/* PRO SUMMARY + ACTIONS */}
           <section className={card}>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-240px">
@@ -197,7 +217,6 @@ export default async function AdminProfessionalDetailPage({
                 ) : null}
               </div>
 
-              {/* Keep mutations in client component so auth cookies are included. */}
               <AdminProActions
                 professionalId={proId}
                 currentStatus={pro.verificationStatus}
@@ -218,28 +237,28 @@ export default async function AdminProfessionalDetailPage({
             </div>
           </section>
 
-          {/* OPTIONAL: LOCATIONS LIST (handy for debugging / future UI)
-              Delete this section if you don’t want it. */}
-          {pro.locations.length ? (
+          {pro.locations.length > 0 ? (
             <section className={card}>
               <div className="text-[14px] font-black text-textPrimary">Locations</div>
               <div className={`${hint} mt-1`}>Primary first.</div>
 
               <div className="mt-4 grid gap-2">
-                {pro.locations.map((l) => (
-                  <div key={l.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                {pro.locations.map((location) => (
+                  <div key={location.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-3">
                       <div className="text-[13px] font-black text-textPrimary">
-                        {formatLocationLabel(l)}
-                        {l.isPrimary ? <span className="ml-2 text-[12px] font-semibold text-accentPrimary">(Primary)</span> : null}
+                        {formatLocationLabel(location)}
+                        {location.isPrimary ? (
+                          <span className="ml-2 text-[12px] font-semibold text-accentPrimary">(Primary)</span>
+                        ) : null}
                       </div>
-                      <div className={hint}>{fmtUtcDateTime(new Date(l.createdAt))}</div>
+                      <div className={hint}>{fmtUtcDateTime(new Date(location.createdAt))}</div>
                     </div>
 
                     <div className={`${hint} mt-2`}>
-                      Type: <span className="font-black text-textPrimary">{String(l.type)}</span>
+                      Type: <span className="font-black text-textPrimary">{String(location.type)}</span>
                       {' · '}
-                      Bookable: <span className="font-black text-textPrimary">{String(l.isBookable)}</span>
+                      Bookable: <span className="font-black text-textPrimary">{String(location.isBookable)}</span>
                     </div>
                   </div>
                 ))}
@@ -247,7 +266,6 @@ export default async function AdminProfessionalDetailPage({
             </section>
           ) : null}
 
-          {/* VERIFICATION DOCS */}
           <section className={card}>
             <div className="text-[14px] font-black text-textPrimary">Verification documents</div>
             <div className={`${hint} mt-1`}>Newest first. Times shown in UTC.</div>
@@ -256,24 +274,24 @@ export default async function AdminProfessionalDetailPage({
               <div className="mt-3 text-[13px] font-semibold text-textSecondary">No docs uploaded.</div>
             ) : (
               <div className="mt-4 grid gap-3">
-                {pro.verificationDocs.map((d) => {
-                  const created = fmtUtcDateTime(new Date(d.createdAt))
-                  const hasFile = Boolean(d.url || d.imageUrl)
+                {pro.verificationDocs.map((doc) => {
+                  const created = fmtUtcDateTime(new Date(doc.createdAt))
+                  const hasFile = Boolean(doc.url || doc.imageUrl)
                   const openHref = hasFile
-                    ? `/api/admin/verification-docs/open?id=${encodeURIComponent(d.id)}`
+                    ? `/api/admin/verification-docs/open?id=${encodeURIComponent(doc.id)}`
                     : null
 
                   return (
-                    <div key={d.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div key={doc.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
                       <div className="flex flex-wrap items-baseline justify-between gap-3">
                         <div className="text-[13px] font-black text-textPrimary">
-                          {d.type}{' '}
-                          <span className="text-[12px] font-semibold text-textSecondary">({d.status})</span>
+                          {doc.type}{' '}
+                          <span className="text-[12px] font-semibold text-textSecondary">({doc.status})</span>
                         </div>
                         <div className={hint}>{created}</div>
                       </div>
 
-                      {d.label ? <div className={`${hint} mt-2`}>{d.label}</div> : null}
+                      {doc.label ? <div className={`${hint} mt-2`}>{doc.label}</div> : null}
 
                       {openHref ? (
                         <div className="mt-3">
@@ -292,9 +310,9 @@ export default async function AdminProfessionalDetailPage({
                         </div>
                       )}
 
-                      {d.adminNote ? (
+                      {doc.adminNote ? (
                         <div className={`${hint} mt-3`}>
-                          Admin note: <span className="text-textPrimary">{d.adminNote}</span>
+                          Admin note: <span className="text-textPrimary">{doc.adminNote}</span>
                         </div>
                       ) : null}
                     </div>

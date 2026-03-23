@@ -7,12 +7,12 @@ import {
   jsonOk,
 } from '@/app/api/_utils'
 import {
-  BookingCheckoutStatus,
   MediaType,
   MediaVisibility,
   MediaPhase,
   Role,
 } from '@prisma/client'
+import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,28 +22,17 @@ const PHASE_RANK: Record<MediaPhase, number> = {
   [MediaPhase.OTHER]: 2,
 }
 
-function phaseRank(v: MediaPhase): number {
-  return PHASE_RANK[v] ?? 9
+function phaseRank(value: MediaPhase): number {
+  return PHASE_RANK[value] ?? 9
 }
 
 function sortKey(
   a: { phase: MediaPhase; createdAt: Date },
   b: { phase: MediaPhase; createdAt: Date },
 ): number {
-  const pr = phaseRank(a.phase) - phaseRank(b.phase)
-  if (pr !== 0) return pr
+  const rankDelta = phaseRank(a.phase) - phaseRank(b.phase)
+  if (rankDelta !== 0) return rankDelta
   return b.createdAt.getTime() - a.createdAt.getTime()
-}
-
-function isReviewCloseoutEligible(args: {
-  aftercareSentAt: Date | null | undefined
-  checkoutStatus: BookingCheckoutStatus | null | undefined
-}): boolean {
-  return (
-    Boolean(args.aftercareSentAt) &&
-    (args.checkoutStatus === BookingCheckoutStatus.PAID ||
-      args.checkoutStatus === BookingCheckoutStatus.WAIVED)
-  )
 }
 
 export async function GET(
@@ -56,50 +45,19 @@ export async function GET(
 
     const { clientId } = auth
 
-    const { id } = await ctx.params
-    const bookingId = pickString(id)
+    const { id: rawId } = await ctx.params
+    const bookingId = pickString(rawId)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        clientId: true,
-        professionalId: true,
-        checkoutStatus: true,
-        aftercareSummary: {
-          select: {
-            id: true,
-            sentToClientAt: true,
-          },
-        },
-      },
+    const eligibility = await assertClientBookingReviewEligibility({
+      bookingId,
+      clientId,
     })
 
-    if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
-
-    const reviewEligible = isReviewCloseoutEligible({
-      aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-      checkoutStatus: booking.checkoutStatus,
-    })
-
-    if (!reviewEligible) {
-      return jsonFail(
-        409,
-        'Review media is not available until aftercare is finalized and checkout is complete.',
-      )
-    }
-
-    // Show only appointment media that can actually be attached by the review POST route:
-    // - tied to this booking
-    // - not already attached to a review
-    // - still private booking media
-    // - uploaded by PRO
     const raw = await prisma.mediaAsset.findMany({
       where: {
-        bookingId: booking.id,
-        professionalId: booking.professionalId,
+        bookingId: eligibility.booking.id,
+        professionalId: eligibility.booking.professionalId,
         reviewId: null,
         reviewLocked: false,
         visibility: MediaVisibility.PRO_CLIENT,
@@ -120,10 +78,10 @@ export async function GET(
     const items = raw.sort(sortKey)
 
     return jsonOk({ items })
-  } catch (e) {
+  } catch (error: unknown) {
     console.error(
       'GET /api/client/bookings/[id]/review-media-options error',
-      e,
+      error,
     )
     return jsonFail(500, 'Internal server error.')
   }

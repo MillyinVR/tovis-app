@@ -189,7 +189,7 @@ export async function GET(req: Request) {
               : null
 
         return {
-          serviceId: offering.service.id,
+          id: offering.service.id,
           name: offering.service.name,
           offeringId: offering.id,
 

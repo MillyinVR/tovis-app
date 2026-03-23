@@ -7,10 +7,15 @@ import {
   roundDurationMinutes,
   computeDurationMinutesFromIso,
   isOutsideWorkingHours,
+  snapMinutes,
 } from '../_utils/calendarMath'
-import { apiMessage, locationTypeFromBookingValue, type LocationType } from '../_utils/parsers'
+import {
+  apiMessage,
+  locationTypeFromBookingValue,
+  type LocationType,
+} from '../_utils/parsers'
 import { anchorDayLocalNoon } from '../_utils/calendarRange'
-import { getZonedParts } from '@/lib/timeZone'
+import { getZonedParts, utcFromDayAndMinutesInTimeZone } from '@/lib/timeZone'
 import { safeJson, errorMessageFromUnknown } from '@/lib/http'
 
 type ConfirmChangeDeps = {
@@ -39,12 +44,56 @@ function eventDurationMinutes(ev: CalendarEvent) {
     : computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
 }
 
+function resolveBookingContextForChange(
+  change: PendingChange,
+  deps: ConfirmChangeDeps,
+) {
+  if (change.entityType !== 'booking' || change.original.kind !== 'BOOKING') {
+    return null
+  }
+
+  const locationType = locationTypeFromBookingValue(change.original.locationType)
+
+  return deps.resolveBookingSchedulingContext({
+    locationId: change.original.locationId ?? null,
+    locationType,
+    fallbackTimeZone: deps.timeZoneRef.current,
+  })
+}
+
+function getSnappedMoveStartIso(change: PendingChange, deps: ConfirmChangeDeps) {
+  if (change.kind !== 'move') return null
+
+  const context = resolveBookingContextForChange(change, deps)
+  if (!context) return null
+
+  const nextStartUtc = new Date(change.nextStartIso)
+  if (!Number.isFinite(nextStartUtc.getTime())) {
+    throw new Error('Invalid start time.')
+  }
+
+  const parts = getZonedParts(nextStartUtc, context.timeZone)
+  const rawStartMinutes = parts.hour * 60 + parts.minute
+  const snappedStartMinutes = snapMinutes(rawStartMinutes, context.stepMinutes)
+  const dayAnchor = anchorDayLocalNoon(parts.year, parts.month, parts.day)
+
+  const snappedStartUtc = utcFromDayAndMinutesInTimeZone(
+    dayAnchor,
+    snappedStartMinutes,
+    context.timeZone,
+  )
+
+  return snappedStartUtc.toISOString()
+}
+
 export function useConfirmChange(deps: ConfirmChangeDeps) {
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [applyingChange, setApplyingChange] = useState(false)
+  const [overrideReason, setOverrideReason] = useState('')
 
   function openConfirm(change: PendingChange) {
+    setOverrideReason('')
     setPendingChange(change)
     setConfirmOpen(true)
   }
@@ -66,26 +115,30 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     )
   }
 
-  function cancelConfirm() {
-    rollbackPending()
+  function clearConfirmState() {
     setConfirmOpen(false)
     setPendingChange(null)
+    setOverrideReason('')
+  }
+
+  function cancelConfirm() {
+    rollbackPending()
+    clearConfirmState()
   }
 
   function isPendingChangeOutsideWorkingHours(change: PendingChange): boolean {
     if (change.entityType !== 'booking') return false
     if (change.original.kind !== 'BOOKING') return false
 
-    const originalLocationType = locationTypeFromBookingValue(change.original.locationType)
-    const context = deps.resolveBookingSchedulingContext({
-      locationId: change.original.locationId ?? null,
-      locationType: originalLocationType,
-      fallbackTimeZone: deps.timeZoneRef.current,
-    })
+    const context = resolveBookingContextForChange(change, deps)
+    if (!context) return false
 
     const originalDur = eventDurationMinutes(change.original)
     const nextStartIso =
-      change.kind === 'move' ? change.nextStartIso : change.original.startsAt
+      change.kind === 'move'
+        ? getSnappedMoveStartIso(change, deps) ?? change.nextStartIso
+        : change.original.startsAt
+
     const nextDurMinutes =
       change.kind === 'resize'
         ? Number(change.nextTotalDurationMinutes || originalDur)
@@ -115,28 +168,46 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
 
     try {
       if (pendingChange.entityType === 'booking') {
+        const outsideWorkingHours = isPendingChangeOutsideWorkingHours(pendingChange)
+        const reason = overrideReason.trim()
+
+        if (outsideWorkingHours && !reason) {
+          throw new Error('Please add a reason for this override.')
+        }
+
         const payload: {
           notifyClient: true
           durationMinutes?: number
           scheduledFor?: string
           allowOutsideWorkingHours?: boolean
+          overrideReason?: string
         } = { notifyClient: true }
 
         if (pendingChange.kind === 'resize') {
-          payload.durationMinutes = pendingChange.nextTotalDurationMinutes
+          const context = resolveBookingContextForChange(pendingChange, deps)
+          const nextDuration = Number(pendingChange.nextTotalDurationMinutes)
+
+          payload.durationMinutes = context
+            ? roundDurationMinutes(nextDuration, context.stepMinutes)
+            : nextDuration
         } else {
-          payload.scheduledFor = pendingChange.nextStartIso
+          payload.scheduledFor =
+            getSnappedMoveStartIso(pendingChange, deps) ?? pendingChange.nextStartIso
         }
 
-        if (isPendingChangeOutsideWorkingHours(pendingChange)) {
+        if (outsideWorkingHours) {
           payload.allowOutsideWorkingHours = true
+          payload.overrideReason = reason
         }
 
-        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(pendingChange.apiId)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
+        const res = await fetch(
+          `/api/pro/bookings/${encodeURIComponent(pendingChange.apiId)}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          },
+        )
 
         const data: unknown = await safeJson(res)
         if (!res.ok) throw new Error(apiMessage(data, 'Failed to apply changes.'))
@@ -152,9 +223,7 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
             ? pendingChange.nextTotalDurationMinutes
             : eventDurationMinutes(pendingChange.original)
 
-        const endIso = new Date(
-          new Date(startIso).getTime() + dur * 60_000,
-        ).toISOString()
+        const endIso = new Date(new Date(startIso).getTime() + dur * 60_000).toISOString()
 
         const res = await fetch(
           `/api/pro/calendar/blocked/${encodeURIComponent(pendingChange.apiId)}`,
@@ -169,15 +238,13 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
         if (!res.ok) throw new Error(apiMessage(data, 'Failed to apply changes.'))
       }
 
-      setConfirmOpen(false)
-      setPendingChange(null)
+      clearConfirmState()
       await deps.reloadCalendar()
       deps.forceProFooterRefresh()
     } catch (e: unknown) {
       console.error(e)
       rollbackPending()
-      setConfirmOpen(false)
-      setPendingChange(null)
+      clearConfirmState()
       deps.setError(errorMessageFromUnknown(e))
       window.setTimeout(() => deps.setError(null), 3500)
     } finally {
@@ -197,6 +264,8 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     cancelConfirm,
     applyConfirm,
     pendingOutsideWorkingHours,
+    overrideReason,
+    setOverrideReason,
   }
 }
 

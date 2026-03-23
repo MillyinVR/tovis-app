@@ -1,4 +1,3 @@
-// app/client/bookings/[id]/page.tsx
 import type { ReactNode } from 'react'
 import { notFound, redirect } from 'next/navigation'
 
@@ -6,6 +5,7 @@ import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
+import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
@@ -188,19 +188,6 @@ function friendlyCheckoutStatus(value: unknown): string | null {
     .split('_')
     .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
     .join(' ')
-}
-
-function isReviewCloseoutEligible(args: {
-  aftercareSentAt: Date | null | undefined
-  checkoutStatus: unknown
-}): boolean {
-  const normalizedCheckoutStatus = upper(args.checkoutStatus)
-
-  return (
-    Boolean(args.aftercareSentAt) &&
-    (normalizedCheckoutStatus === 'PAID' ||
-      normalizedCheckoutStatus === 'WAIVED')
-  )
 }
 
 function friendlyPaymentMethod(value: unknown): string | null {
@@ -831,9 +818,12 @@ export default async function ClientBookingPage(props: {
   const rebookInfo = getAftercareRebookInfo(aftercare, appointmentTimeZone)
   const aftercareToken = pickAftercareToken(aftercare)
 
-  const reviewCloseoutEligible = isReviewCloseoutEligible({
+  const reviewCloseoutEligible = canBookingAcceptClientReview({
+    bookingStatus: raw.status,
+    finishedAt: raw.finishedAt,
     aftercareSentAt: aftercare?.sentToClientAt,
-    checkoutStatus: booking.checkout.checkoutStatus,
+    checkoutStatus: raw.checkoutStatus ?? null,
+    paymentCollectedAt: raw.paymentCollectedAt ?? null,
   })
 
   const showRebookCTA =
@@ -1394,7 +1384,9 @@ export default async function ClientBookingPage(props: {
                         Review
                       </div>
                       <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                        Your review will unlock after aftercare is finalized and checkout is marked paid or waived.
+                        Your review will unlock after the booking is fully closed out:
+                        payment must be collected, checkout must be paid or waived,
+                        and aftercare must be finalized.
                       </div>
                     </div>
                   ) : null}

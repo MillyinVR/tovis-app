@@ -273,6 +273,9 @@ export default function ProCalendarPage() {
         open={cal.confirmOpen}
         change={cal.pendingChange}
         applying={cal.applyingChange}
+        outsideWorkingHours={cal.pendingOutsideWorkingHours}
+        overrideReason={cal.overrideReason}
+        onChangeOverrideReason={cal.setOverrideReason}
         onCancel={cal.cancelConfirm}
         onConfirm={cal.applyConfirm}
       />

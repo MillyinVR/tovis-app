@@ -37,11 +37,7 @@ function getWorkingWindowForDateInTimeZone(
   workingHours: WorkingHoursJson,
   timeZone: string,
 ): Window | null {
-  const result = getWorkingWindowForDay(
-    new Date(day.getTime() + MIDDAY_MS),
-    workingHours,
-    timeZone,
-  )
+  const result = getWorkingWindowForDay(new Date(day.getTime() + MIDDAY_MS), workingHours, timeZone)
   if (!result.ok) return null
 
   return {
@@ -125,23 +121,15 @@ export function DayColumn(props: {
   const dayYmd = stableYmdForVisibleDay(day, timeZone)
   const isToday = dayYmd === todayYmd
 
-  const salonWindow = getWorkingWindowForDateInTimeZone(
-    day,
-    workingHoursSalon,
-    timeZone,
-  )
-  const mobileWindow = getWorkingWindowForDateInTimeZone(
-    day,
-    workingHoursMobile,
-    timeZone,
-  )
+  const salonWindow = getWorkingWindowForDateInTimeZone(day, workingHoursSalon, timeZone)
+  const mobileWindow = getWorkingWindowForDateInTimeZone(day, workingHoursMobile, timeZone)
 
   const mergedWorking = useMemo<Window[]>(() => {
-  const list: Window[] = []
-  if (salonWindow) list.push(salonWindow)
-  if (mobileWindow) list.push(mobileWindow)
-  return mergeWindows(list)
-}, [salonWindow, mobileWindow])
+    const list: Window[] = []
+    if (salonWindow) list.push(salonWindow)
+    if (mobileWindow) list.push(mobileWindow)
+    return mergeWindows(list)
+  }, [salonWindow, mobileWindow])
 
   const dayEnabled = mergedWorking.length > 0
 
@@ -152,13 +140,11 @@ export function DayColumn(props: {
 
   const salonFill = 'bg-amber-300/22'
   const salonEdge = 'border-amber-200/70'
-  const salonSheen =
-    'bg-gradient-to-b from-white/10 via-transparent to-transparent'
+  const salonSheen = 'bg-gradient-to-b from-white/10 via-transparent to-transparent'
 
   const mobileFill = 'bg-teal-400/18'
   const mobileEdge = 'border-teal-200/70'
-  const mobileSheen =
-    'bg-gradient-to-r from-white/10 via-transparent to-transparent'
+  const mobileSheen = 'bg-gradient-to-r from-white/10 via-transparent to-transparent'
 
   const salonEdgeBoost =
     activeLocationType === 'SALON' ? 'border-amber-200/85' : salonEdge
@@ -206,16 +192,9 @@ export function DayColumn(props: {
         onCreateForClick(day, e.clientY, rect.top)
       }}
     >
-      <div
-        className="relative"
-        style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}
-      >
+      <div className="relative" style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}>
         <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/10" />
-        <div
-          className={['pointer-events-none absolute inset-0', zebraWash].join(
-            ' ',
-          )}
-        />
+        <div className={['pointer-events-none absolute inset-0', zebraWash].join(' ')} />
         {isToday ? (
           <div className="pointer-events-none absolute inset-0 bg-accentPrimary/8" />
         ) : null}
@@ -247,9 +226,7 @@ export function DayColumn(props: {
 
         {!dayEnabled ? (
           <div
-            className={['pointer-events-none absolute inset-0', outsideDim].join(
-              ' ',
-            )}
+            className={['pointer-events-none absolute inset-0', outsideDim].join(' ')}
           />
         ) : (
           <>
@@ -288,8 +265,7 @@ export function DayColumn(props: {
                 })
               : null}
 
-            {mergedWorking[mergedWorking.length - 1].endMinutes <
-            TOTAL_MINUTES ? (
+            {mergedWorking[mergedWorking.length - 1].endMinutes < TOTAL_MINUTES ? (
               <div
                 className={[
                   'pointer-events-none absolute left-0 right-0',
@@ -297,8 +273,7 @@ export function DayColumn(props: {
                 ].join(' ')}
                 style={{
                   top:
-                    mergedWorking[mergedWorking.length - 1].endMinutes *
-                    PX_PER_MINUTE,
+                    mergedWorking[mergedWorking.length - 1].endMinutes * PX_PER_MINUTE,
                   height:
                     (TOTAL_MINUTES -
                       mergedWorking[mergedWorking.length - 1].endMinutes) *
@@ -314,23 +289,16 @@ export function DayColumn(props: {
             className="pointer-events-none absolute left-0 right-0"
             style={{
               top: salonWindow.startMinutes * PX_PER_MINUTE,
-              height:
-                (salonWindow.endMinutes - salonWindow.startMinutes) *
-                PX_PER_MINUTE,
+              height: (salonWindow.endMinutes - salonWindow.startMinutes) * PX_PER_MINUTE,
             }}
           >
             <div className={['absolute inset-0', salonFill].join(' ')} />
             <div className={['absolute inset-0 opacity-70', salonSheen].join(' ')} />
             <div
-              className={['absolute inset-x-0 top-0 border-t', salonEdgeBoost].join(
-                ' ',
-              )}
+              className={['absolute inset-x-0 top-0 border-t', salonEdgeBoost].join(' ')}
             />
             <div
-              className={[
-                'absolute inset-x-0 bottom-0 border-t',
-                salonEdgeBoost,
-              ].join(' ')}
+              className={['absolute inset-x-0 bottom-0 border-t', salonEdgeBoost].join(' ')}
             />
           </div>
         ) : null}
@@ -340,24 +308,16 @@ export function DayColumn(props: {
             className="pointer-events-none absolute left-0 right-0"
             style={{
               top: mobileWindow.startMinutes * PX_PER_MINUTE,
-              height:
-                (mobileWindow.endMinutes - mobileWindow.startMinutes) *
-                PX_PER_MINUTE,
+              height: (mobileWindow.endMinutes - mobileWindow.startMinutes) * PX_PER_MINUTE,
             }}
           >
             <div className={['absolute inset-0', mobileFill].join(' ')} />
             <div className={['absolute inset-0 opacity-70', mobileSheen].join(' ')} />
             <div
-              className={[
-                'absolute inset-x-0 top-0 border-t',
-                mobileEdgeBoost,
-              ].join(' ')}
+              className={['absolute inset-x-0 top-0 border-t', mobileEdgeBoost].join(' ')}
             />
             <div
-              className={[
-                'absolute inset-x-0 bottom-0 border-t',
-                mobileEdgeBoost,
-              ].join(' ')}
+              className={['absolute inset-x-0 bottom-0 border-t', mobileEdgeBoost].join(' ')}
             />
           </div>
         ) : null}
@@ -372,20 +332,13 @@ export function DayColumn(props: {
           const evEnd = new Date(ev.endsAt)
 
           const startYmd = ymdInTimeZone(evStart, timeZone)
-          const endYmdInclusive = ymdInTimeZone(
-            new Date(evEnd.getTime() - 1),
-            timeZone,
-          )
+          const endYmdInclusive = ymdInTimeZone(new Date(evEnd.getTime() - 1), timeZone)
 
           const startMinutesRaw =
-            dayYmd === startYmd
-              ? minutesSinceMidnightInTimeZone(evStart, timeZone)
-              : 0
+            dayYmd === startYmd ? minutesSinceMidnightInTimeZone(evStart, timeZone) : 0
 
           const endMinutesRaw =
-            dayYmd === endYmdInclusive
-              ? minutesSinceMidnightInTimeZone(evEnd, timeZone)
-              : 24 * 60
+            dayYmd === endYmdInclusive ? minutesSinceMidnightInTimeZone(evEnd, timeZone) : 24 * 60
 
           const startMinutes = snapMinutes(startMinutesRaw, stepMinutes)
           const minEndMinutes = startMinutes + stepMinutes
@@ -427,6 +380,7 @@ export function DayColumn(props: {
               suppressClickRef={suppressClickRef}
               onClickEvent={onClickEvent}
               onDragStart={onDragStart}
+              onDropOnDayColumn={onDropOnDayColumn}
               onBeginResize={onBeginResize}
             />
           )
