@@ -14,14 +14,22 @@ import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
 
-type NormalizedProduct = {
-  name: string
-  url: string
-  note: string | null
-}
+type NormalizedRecommendedProduct =
+  | {
+      productId: string
+      externalName: null
+      externalUrl: null
+      note: string | null
+    }
+  | {
+      productId: null
+      externalName: string
+      externalUrl: string
+      note: string | null
+    }
 
 type ProductsParse =
-  | { ok: true; value: NormalizedProduct[] }
+  | { ok: true; value: NormalizedRecommendedProduct[] }
   | { ok: false; error: string }
 
 const AFTERCARE_REBOOK_MODE = {
@@ -52,6 +60,7 @@ type NormalizedRebook =
 
 const NOTES_MAX = 4000
 const MAX_PRODUCTS = 10
+const PRODUCT_ID_MAX = 191
 const PRODUCT_NAME_MAX = 80
 const PRODUCT_NOTE_MAX = 140
 const PRODUCT_URL_MAX = 2048
@@ -123,7 +132,7 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
     return { ok: false, error: `recommendedProducts max is ${MAX_PRODUCTS}.` }
   }
 
-  const out: NormalizedProduct[] = []
+  const out: NormalizedRecommendedProduct[] = []
 
   for (const row of input) {
     if (!isObject(row)) {
@@ -133,37 +142,88 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
       }
     }
 
-    const name =
-      typeof row.name === 'string'
-        ? row.name.trim().slice(0, PRODUCT_NAME_MAX)
+    const productId =
+      typeof row.productId === 'string'
+        ? row.productId.trim().slice(0, PRODUCT_ID_MAX)
         : ''
 
-    const url =
-      typeof row.url === 'string'
-        ? row.url.trim().slice(0, PRODUCT_URL_MAX)
-        : ''
+    const externalName =
+      typeof row.externalName === 'string'
+        ? row.externalName.trim().slice(0, PRODUCT_NAME_MAX)
+        : typeof row.name === 'string'
+          ? row.name.trim().slice(0, PRODUCT_NAME_MAX)
+          : ''
+
+    const externalUrl =
+      typeof row.externalUrl === 'string'
+        ? row.externalUrl.trim().slice(0, PRODUCT_URL_MAX)
+        : typeof row.url === 'string'
+          ? row.url.trim().slice(0, PRODUCT_URL_MAX)
+          : ''
 
     const noteRaw = typeof row.note === 'string' ? row.note.trim() : ''
     const note = noteRaw ? noteRaw.slice(0, PRODUCT_NOTE_MAX) : null
 
-    if (!name && !url && !note) continue
+    if (!productId && !externalName && !externalUrl && !note) continue
 
-    if (!name) {
-      return { ok: false, error: 'Each recommended product needs a name.' }
+    const hasProductId = productId.length > 0
+    const hasExternalName = externalName.length > 0
+    const hasExternalUrl = externalUrl.length > 0
+    const hasAnyExternalFields = hasExternalName || hasExternalUrl
+
+    if (hasProductId && hasAnyExternalFields) {
+      return {
+        ok: false,
+        error:
+          'Each recommended product must be either an internal product or an external link, not both.',
+      }
     }
 
-    if (!url) {
-      return { ok: false, error: 'Each recommended product needs a link.' }
+    if (hasProductId) {
+      out.push({
+        productId,
+        externalName: null,
+        externalUrl: null,
+        note,
+      })
+      continue
     }
 
-    if (!isValidHttpUrl(url)) {
+    if (!hasExternalName && !hasExternalUrl && note) {
+      return {
+        ok: false,
+        error:
+          'Recommendation note cannot be saved without a product selection or external link.',
+      }
+    }
+
+    if (!hasExternalName) {
+      return {
+        ok: false,
+        error: 'Each external recommended product needs a name.',
+      }
+    }
+
+    if (!hasExternalUrl) {
+      return {
+        ok: false,
+        error: 'Each external recommended product needs a link.',
+      }
+    }
+
+    if (!isValidHttpUrl(externalUrl)) {
       return {
         ok: false,
         error: 'Product link must be a valid http/https URL.',
       }
     }
 
-    out.push({ name, url, note })
+    out.push({
+      productId: null,
+      externalName,
+      externalUrl,
+      note,
+    })
   }
 
   return { ok: true, value: out }
@@ -316,6 +376,7 @@ export async function GET(
                     id: true,
                     name: true,
                     brand: true,
+                    retailPrice: true,
                   },
                 },
               },
@@ -369,7 +430,15 @@ export async function GET(
                     productId: product.productId,
                     externalName: product.externalName,
                     externalUrl: product.externalUrl,
-                    product: product.product,
+                    product: product.product
+                      ? {
+                          id: product.product.id,
+                          name: product.product.name,
+                          brand: product.product.brand,
+                          retailPrice:
+                            product.product.retailPrice?.toString() ?? null,
+                        }
+                      : null,
                   })),
               }
             : null,

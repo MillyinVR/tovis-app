@@ -330,6 +330,21 @@ type ConfirmBookingFinalReviewLineItemInput = {
   sortOrder: number
 }
 
+type RecommendedProductInput =
+  | {
+      productId: string
+      externalName: null
+      externalUrl: null
+      note: string | null
+    }
+  | {
+      productId: null
+      externalName: string
+      externalUrl: string
+      note: string | null
+    }
+    
+    
 type ConfirmBookingFinalReviewArgs = {
   bookingId: string
   professionalId: string
@@ -338,11 +353,7 @@ type ConfirmBookingFinalReviewArgs = {
 
   // Step 4 needs these, but they should only be persisted here
   // if schema already has a safe draft location.
-  recommendedProducts?: {
-    name: string
-    url: string
-    note: string | null
-  }[]
+  recommendedProducts?: RecommendedProductInput[]
   rebookMode?: AftercareRebookMode | null
   rebookedFor?: Date | null
   rebookWindowStart?: Date | null
@@ -471,6 +482,42 @@ type UpdateBookingCheckoutResult = {
   meta: MutationMeta
 }
 
+type ClientCheckoutProductSelectionInput = {
+  recommendationId: string
+  productId: string
+  quantity: number
+}
+
+type UpsertClientBookingCheckoutProductsArgs = {
+  bookingId: string
+  clientId: string
+  items: ClientCheckoutProductSelectionInput[]
+}
+
+type UpsertClientBookingCheckoutProductsResult = {
+  booking: {
+    id: string
+    checkoutStatus: BookingCheckoutStatus
+    serviceSubtotalSnapshot: Prisma.Decimal | null
+    productSubtotalSnapshot: Prisma.Decimal | null
+    subtotalSnapshot: Prisma.Decimal | null
+    tipAmount: Prisma.Decimal | null
+    taxAmount: Prisma.Decimal | null
+    discountAmount: Prisma.Decimal | null
+    totalAmount: Prisma.Decimal | null
+    paymentAuthorizedAt: Date | null
+    paymentCollectedAt: Date | null
+  }
+  selectedProducts: {
+    recommendationId: string
+    productId: string
+    quantity: number
+    unitPrice: Prisma.Decimal
+    lineTotal: Prisma.Decimal
+  }[]
+  meta: MutationMeta
+}
+
 type CreateRebookedBookingFromCompletedBookingArgs = {
   bookingId: string
   professionalId: string
@@ -521,11 +568,7 @@ type UpsertBookingAftercareArgs = {
   rebookReminderDaysBefore: number
   createProductReminder: boolean
   productReminderDaysAfter: number
-  recommendedProducts: {
-    name: string
-    url: string
-    note: string | null
-  }[]
+  recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
 }
 
@@ -1022,6 +1065,52 @@ type BookingCheckoutRecord = Prisma.BookingGetPayload<{
   select: typeof BOOKING_CHECKOUT_SELECT
 }>
 
+const CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  finishedAt: true,
+  checkoutStatus: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  subtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+      recommendedProducts: {
+        select: {
+          id: true,
+          productId: true,
+        },
+      },
+    },
+  },
+
+  // REQUIRES SCHEMA RELATION
+  checkoutProductItems: {
+    select: {
+      id: true,
+      recommendationId: true,
+      productId: true,
+      quantity: true,
+      unitPrice: true,
+    },
+    orderBy: [{ createdAt: 'asc' }],
+  },
+} satisfies Prisma.BookingSelect
+
+type ClientCheckoutProductsBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT
+}>
+
 function buildMeta(mutated: boolean): MutationMeta {
   return {
     mutated,
@@ -1313,6 +1402,40 @@ function computeProductSubtotalFromSales(
   }, zeroMoney())
 }
 
+function assertClientCanEditBookingCheckoutProducts(
+  booking: ClientCheckoutProductsBookingRecord,
+  clientId: string,
+): void {
+  if (booking.clientId !== clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+      message: 'Completed bookings cannot be changed.',
+      userMessage: 'This booking is already completed.',
+    })
+  }
+
+  if (booking.paymentCollectedAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Checkout is already paid and cannot be changed.',
+      userMessage: 'This checkout is already paid and cannot be changed.',
+    })
+  }
+
+  if (!booking.aftercareSummary?.id || !booking.aftercareSummary.sentToClientAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Product checkout requires finalized aftercare.',
+      userMessage: 'Products can only be selected after aftercare is finalized.',
+    })
+  }
+}
+
 function computeCheckoutTotal(args: {
   serviceSubtotal: Prisma.Decimal
   productSubtotal: Prisma.Decimal
@@ -1331,6 +1454,7 @@ async function buildBookingCheckoutRollupUpdate(args: {
   tx: Prisma.TransactionClient
   bookingId: string
   nextServiceSubtotal?: Prisma.Decimal | null
+  nextProductSubtotal?: Prisma.Decimal | null
   nextTipAmount?: Prisma.Decimal | null
   nextTaxAmount?: Prisma.Decimal | null
   nextDiscountAmount?: Prisma.Decimal | null
@@ -1358,12 +1482,14 @@ async function buildBookingCheckoutRollupUpdate(args: {
     booking.subtotalSnapshot ??
     zeroMoney()
 
-  const productSubtotal = computeProductSubtotalFromSales(
-    booking.productSales.map((sale) => ({
-      unitPrice: sale.unitPrice,
-      quantity: sale.quantity,
-    })),
-  )
+    const productSubtotal =
+    args.nextProductSubtotal ??
+    computeProductSubtotalFromSales(
+      booking.productSales.map((sale) => ({
+        unitPrice: sale.unitPrice,
+        quantity: sale.quantity,
+      })),
+    )
 
   const tipAmount = args.nextTipAmount ?? decimalOrZero(booking.tipAmount)
   const taxAmount = args.nextTaxAmount ?? decimalOrZero(booking.taxAmount)
@@ -5842,11 +5968,7 @@ async function performLockedUpsertBookingAftercare(args: {
   rebookReminderDaysBefore: number
   createProductReminder: boolean
   productReminderDaysAfter: number
-  recommendedProducts: {
-    name: string
-    url: string
-    note: string | null
-  }[]
+  recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
 }): Promise<UpsertBookingAftercareResult> {
   const booking: AftercareUpsertBookingRecord | null =
@@ -5942,13 +6064,65 @@ async function performLockedUpsertBookingAftercare(args: {
     where: { aftercareSummaryId: aftercare.id },
   })
 
+  for (const product of args.recommendedProducts) {
+    const hasInternal = typeof product.productId === 'string' && product.productId.trim().length > 0
+    const hasExternalName =
+      typeof product.externalName === 'string' && product.externalName.trim().length > 0
+    const hasExternalUrl =
+      typeof product.externalUrl === 'string' && product.externalUrl.trim().length > 0
+
+    if (hasInternal && (hasExternalName || hasExternalUrl)) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Recommended product cannot contain both productId and external link fields.',
+        userMessage:
+          'Pick either an internal product or an external link for each recommendation.',
+      })
+    }
+
+    if (!hasInternal && (!hasExternalName || !hasExternalUrl)) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'External recommended products require both externalName and externalUrl.',
+        userMessage:
+          'External recommendations need both a name and a link.',
+      })
+    }
+  }
+
+    const internalProductIds = Array.from(
+    new Set(
+      args.recommendedProducts
+        .map((product) => product.productId)
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+    ),
+  )
+
+  if (internalProductIds.length > 0) {
+  const validProducts = await args.tx.product.findMany({
+    where: {
+      id: { in: internalProductIds },
+      isActive: true,
+    },
+    select: { id: true },
+    take: internalProductIds.length,
+  })
+
+  if (validProducts.length !== internalProductIds.length) {
+    throw bookingError('FORBIDDEN', {
+      message: 'One or more recommended products are invalid.',
+      userMessage: 'One or more selected products are no longer available.',
+    })
+  }
+}
+
   if (args.recommendedProducts.length > 0) {
     await args.tx.productRecommendation.createMany({
       data: args.recommendedProducts.map((product) => ({
         aftercareSummaryId: aftercare.id,
-        productId: null,
-        externalName: product.name,
-        externalUrl: product.url,
+        productId: product.productId,
+        externalName: product.externalName,
+        externalUrl: product.externalUrl,
         note: product.note,
       })),
     })
@@ -6268,6 +6442,195 @@ async function performLockedUpdateBookingCheckout(args: {
       paymentAuthorizedAt: updated.paymentAuthorizedAt,
       paymentCollectedAt: updated.paymentCollectedAt,
     },
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedUpsertClientBookingCheckoutProducts(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+  items: ClientCheckoutProductSelectionInput[]
+}): Promise<UpsertClientBookingCheckoutProductsResult> {
+  const booking: ClientCheckoutProductsBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  assertClientCanEditBookingCheckoutProducts(booking, args.clientId)
+
+  const recommendationRows = booking.aftercareSummary?.recommendedProducts ?? []
+  const recommendationById = new Map(
+    recommendationRows.map((row) => [row.id, row]),
+  )
+
+  for (const item of args.items) {
+    const recommendation = recommendationById.get(item.recommendationId)
+
+    if (!recommendation) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Selected recommendation does not belong to this booking.',
+        userMessage: 'One or more selected products are invalid for this booking.',
+      })
+    }
+
+    if (!recommendation.productId) {
+      throw bookingError('FORBIDDEN', {
+        message: 'External recommendations cannot be added to booking checkout.',
+        userMessage: 'Only in-app recommended products can be added to checkout.',
+      })
+    }
+
+    if (recommendation.productId !== item.productId) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Selected product does not match its recommendation.',
+        userMessage: 'One or more selected products are invalid.',
+      })
+    }
+
+    if (!Number.isFinite(item.quantity) || Math.trunc(item.quantity) <= 0) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Quantity must be at least 1.',
+        userMessage: 'Each selected product needs a valid quantity.',
+      })
+    }
+  }
+
+  const uniqueProductIds = Array.from(
+    new Set(args.items.map((item) => item.productId)),
+  )
+
+  const products = uniqueProductIds.length
+    ? await args.tx.product.findMany({
+        where: {
+          id: { in: uniqueProductIds },
+          isActive: true,
+        },
+        select: {
+          id: true,
+          retailPrice: true,
+        },
+        take: uniqueProductIds.length,
+      })
+    : []
+
+  if (products.length !== uniqueProductIds.length) {
+    throw bookingError('FORBIDDEN', {
+      message: 'One or more selected products are unavailable.',
+      userMessage: 'One or more selected products are no longer available.',
+    })
+  }
+
+  const productById = new Map(products.map((product) => [product.id, product]))
+
+  const normalizedSelectedProducts = args.items.map((item) => {
+    const product = productById.get(item.productId)
+
+    if (!product) {
+      throw bookingError('FORBIDDEN', {
+        message: 'One or more selected products are unavailable.',
+        userMessage: 'One or more selected products are no longer available.',
+      })
+    }
+
+    const unitPrice = product.retailPrice
+    if (!unitPrice) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Selected product is missing retailPrice.',
+        userMessage: 'One or more selected products cannot be purchased right now.',
+      })
+    }
+
+    const quantity = Math.max(1, Math.trunc(item.quantity))
+    const lineTotal = unitPrice.mul(quantity)
+
+    return {
+      recommendationId: item.recommendationId,
+      productId: item.productId,
+      quantity,
+      unitPrice,
+      lineTotal,
+    }
+  })
+
+  // REQUIRES SCHEMA RELATION
+  await args.tx.bookingCheckoutProductItem.deleteMany({
+    where: { bookingId: booking.id },
+  })
+
+  if (normalizedSelectedProducts.length > 0) {
+    await args.tx.bookingCheckoutProductItem.createMany({
+      data: normalizedSelectedProducts.map((item) => ({
+        bookingId: booking.id,
+        recommendationId: item.recommendationId,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+    })
+  }
+
+  const nextProductSubtotal = normalizedSelectedProducts.reduce(
+    (sum, item) => sum.add(item.lineTotal),
+    zeroMoney(),
+  )
+
+  const rollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextProductSubtotal,
+  })
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+      subtotalSnapshot: rollup.subtotalSnapshot,
+      tipAmount: rollup.tipAmount,
+      taxAmount: rollup.taxAmount,
+      discountAmount: rollup.discountAmount,
+      totalAmount: rollup.totalAmount,
+      checkoutStatus:
+        booking.checkoutStatus === BookingCheckoutStatus.NOT_READY
+          ? BookingCheckoutStatus.READY
+          : booking.checkoutStatus,
+    },
+    select: {
+      id: true,
+      checkoutStatus: true,
+      serviceSubtotalSnapshot: true,
+      productSubtotalSnapshot: true,
+      subtotalSnapshot: true,
+      tipAmount: true,
+      taxAmount: true,
+      discountAmount: true,
+      totalAmount: true,
+      paymentAuthorizedAt: true,
+      paymentCollectedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      checkoutStatus: updated.checkoutStatus,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      paymentAuthorizedAt: updated.paymentAuthorizedAt,
+      paymentCollectedAt: updated.paymentCollectedAt,
+    },
+    selectedProducts: normalizedSelectedProducts,
     meta: buildMeta(true),
   }
 }
@@ -6679,6 +7042,25 @@ export async function updateBookingCheckout(
         markPaymentCollected: args.markPaymentCollected,
       }),
   )
+}
+
+export async function upsertClientBookingCheckoutProducts(
+  args: UpsertClientBookingCheckoutProductsArgs,
+): Promise<UpsertClientBookingCheckoutProductsResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx }) =>
+      performLockedUpsertClientBookingCheckoutProducts({
+        tx,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        items: args.items,
+      }),
+  })
 }
 
 /**
