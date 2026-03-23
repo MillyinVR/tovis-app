@@ -505,6 +505,10 @@ type UpsertBookingAftercareResult = {
     rebookedFor: Date | null
     rebookWindowStart: Date | null
     rebookWindowEnd: Date | null
+    draftSavedAt: Date | null
+    sentToClientAt: Date | null
+    lastEditedAt: Date | null
+    version: number
   }
   remindersTouched: number
   clientNotified: boolean
@@ -939,7 +943,12 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
   },
   aftercareSummary: {
     select: {
+      id: true,
       publicToken: true,
+      draftSavedAt: true,
+      sentToClientAt: true,
+      lastEditedAt: true,
+      version: true,
     },
   },
   professional: {
@@ -3126,14 +3135,17 @@ async function performLockedTransitionSessionStep(args: {
       }),
       args.tx.aftercareSummary.findFirst({
         where: { bookingId: booking.id },
-        select: { id: true },
+        select: {
+          id: true,
+          sentToClientAt: true,
+        },
       }),
     ])
 
     const missing: string[] = []
     if (beforeCount <= 0) missing.push('BEFORE photo')
     if (afterCount <= 0) missing.push('AFTER photo')
-    if (!aftercare?.id) missing.push('aftercare')
+    if (!aftercare?.sentToClientAt) missing.push('finalized aftercare')
 
     if (missing.length > 0) {
       return {
@@ -4991,27 +5003,28 @@ async function performLockedCreateRebookedBooking(
     })
   }
 
-  const aftercare = await args.tx.aftercareSummary.upsert({
-    where: { bookingId: source.id },
-    create: {
-      bookingId: source.id,
-      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-      rebookedFor: requestedStart,
-      rebookWindowStart: null,
-      rebookWindowEnd: null,
-    },
-    update: {
-      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-      rebookedFor: requestedStart,
-      rebookWindowStart: null,
-      rebookWindowEnd: null,
-    },
-    select: {
-      id: true,
-      rebookMode: true,
-      rebookedFor: true,
-    },
-  })
+const aftercare = await args.tx.aftercareSummary.upsert({
+  where: { bookingId: source.id },
+  create: {
+    bookingId: source.id,
+    publicToken: newPublicToken(),
+    rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+    rebookedFor: requestedStart,
+    rebookWindowStart: null,
+    rebookWindowEnd: null,
+  },
+  update: {
+    rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+    rebookedFor: requestedStart,
+    rebookWindowStart: null,
+    rebookWindowEnd: null,
+  },
+  select: {
+    id: true,
+    rebookMode: true,
+    rebookedFor: true,
+  },
+})
 
     await bumpProfessionalScheduleVersion(source.professionalId)
 
@@ -5650,7 +5663,9 @@ async function performLockedUpsertBookingAftercare(args: {
     professionalTimeZone: booking.professional?.timeZone,
   })
 
-  const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
+    const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
+  const now = new Date()
+  const nextVersion = (booking.aftercareSummary?.version ?? 0) + 1
 
   const aftercare = await args.tx.aftercareSummary.upsert({
     where: { bookingId: booking.id },
@@ -5662,6 +5677,10 @@ async function performLockedUpsertBookingAftercare(args: {
       rebookedFor: args.rebookedFor,
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
+      draftSavedAt: args.sendToClient ? null : now,
+      sentToClientAt: args.sendToClient ? now : null,
+      lastEditedAt: now,
+      version: 1,
     },
     update: {
       publicToken: tokenToUse,
@@ -5670,6 +5689,14 @@ async function performLockedUpsertBookingAftercare(args: {
       rebookedFor: args.rebookedFor,
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
+      draftSavedAt: args.sendToClient
+        ? booking.aftercareSummary?.draftSavedAt ?? now
+        : now,
+      sentToClientAt: args.sendToClient
+        ? booking.aftercareSummary?.sentToClientAt ?? now
+        : booking.aftercareSummary?.sentToClientAt ?? null,
+      lastEditedAt: now,
+      version: nextVersion,
     },
     select: {
       id: true,
@@ -5678,6 +5705,10 @@ async function performLockedUpsertBookingAftercare(args: {
       rebookedFor: true,
       rebookWindowStart: true,
       rebookWindowEnd: true,
+      draftSavedAt: true,
+      sentToClientAt: true,
+      lastEditedAt: true,
+      version: true,
     },
   })
 
@@ -5851,9 +5882,7 @@ async function performLockedUpsertBookingAftercare(args: {
     finishedAt: Date | null
   } | null = null
 
-  if (args.sendToClient) {
-    const now = new Date()
-
+    if (args.sendToClient) {
     const updatedBooking = await args.tx.booking.update({
       where: { id: booking.id },
       data: {
@@ -5885,6 +5914,10 @@ async function performLockedUpsertBookingAftercare(args: {
       rebookedFor: aftercare.rebookedFor,
       rebookWindowStart: aftercare.rebookWindowStart,
       rebookWindowEnd: aftercare.rebookWindowEnd,
+      draftSavedAt: aftercare.draftSavedAt,
+      sentToClientAt: aftercare.sentToClientAt,
+      lastEditedAt: aftercare.lastEditedAt,
+      version: aftercare.version,
     },
     remindersTouched,
     clientNotified,

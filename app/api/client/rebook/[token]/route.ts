@@ -25,12 +25,12 @@ const REBOOK_GET_SELECT = {
   id: true,
   bookingId: true,
   notes: true,
-  serviceNotes: true,
   rebookMode: true,
   rebookedFor: true,
   rebookWindowStart: true,
   rebookWindowEnd: true,
   publicToken: true,
+  sentToClientAt: true,
   booking: {
     select: {
       id: true,
@@ -72,6 +72,7 @@ const REBOOK_POST_SELECT = {
   rebookMode: true,
   rebookWindowStart: true,
   rebookWindowEnd: true,
+  sentToClientAt: true,
   booking: {
     select: {
       id: true,
@@ -109,7 +110,6 @@ function toGetResponse(aftercare: RebookGetRecord) {
       id: aftercare.id,
       bookingId: aftercare.bookingId,
       notes: aftercare.notes,
-      serviceNotes: aftercare.serviceNotes,
       rebookMode: aftercare.rebookMode,
       rebookedFor: aftercare.rebookedFor
         ? aftercare.rebookedFor.toISOString()
@@ -121,6 +121,10 @@ function toGetResponse(aftercare: RebookGetRecord) {
         ? aftercare.rebookWindowEnd.toISOString()
         : null,
       publicToken: aftercare.publicToken,
+      sentToClientAt: aftercare.sentToClientAt
+        ? aftercare.sentToClientAt.toISOString()
+        : null,
+      isFinalized: Boolean(aftercare.sentToClientAt),
     },
     booking: booking
       ? {
@@ -156,6 +160,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 
     if (!aftercare.booking) {
       return jsonFail(409, 'Rebook link is missing booking context.')
+    }
+
+    if (!aftercare.sentToClientAt) {
+      return jsonFail(404, 'Invalid rebook link.')
     }
 
     if (aftercare.booking.clientId !== auth.clientId) {
@@ -201,6 +209,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     if (!aftercare.booking) {
       return jsonFail(409, 'Rebook link is missing booking context.')
+    }
+
+    if (!aftercare.sentToClientAt) {
+      return jsonFail(404, 'Invalid rebook link.')
     }
 
     if (aftercare.booking.clientId !== auth.clientId) {

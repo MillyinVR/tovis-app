@@ -1162,21 +1162,28 @@ model BookingHold {
 }
 
 model AftercareSummary {
-  id           String    @id @default(cuid())
-  bookingId    String    @unique
-  notes        String?
-  rebookedFor  DateTime?
-  serviceNotes String?
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  publicToken String @unique
+
+  notes String?
+
+  rebookMode        AftercareRebookMode @default(NONE)
+  rebookedFor       DateTime?
   rebookWindowStart DateTime?
   rebookWindowEnd   DateTime?
 
-  rebookMode AftercareRebookMode @default(NONE)
+  draftSavedAt   DateTime?
+  sentToClientAt DateTime?
+  lastEditedAt   DateTime?
+  version        Int       @default(1)
 
-  publicToken String @unique @default(cuid())
-
-  booking             Booking                 @relation(fields: [bookingId], references: [id])
-  recommendations     ProductRecommendation[]
+  recommendedProducts ProductRecommendation[]
   clientNotifications ClientNotification[]
 }
 

@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { BookingStatus, SessionStep } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import AftercareForm from './AftercareForm'
@@ -93,6 +94,7 @@ export default async function ProAftercarePage(props: {
 
   const user = await getCurrentUser().catch(() => null)
   const proId = user?.role === 'PRO' ? user.professionalProfile?.id : null
+
   if (!proId) {
     redirect(`/login?from=${encodeURIComponent(aftercareHref(bookingId))}`)
   }
@@ -106,32 +108,52 @@ export default async function ProAftercarePage(props: {
       startedAt: true,
       finishedAt: true,
       sessionStep: true,
-
       locationTimeZone: true,
 
-      service: { select: { name: true } },
+      service: {
+        select: {
+          name: true,
+        },
+      },
+
       client: {
         select: {
           firstName: true,
           lastName: true,
-          user: { select: { email: true } },
+          user: {
+            select: {
+              email: true,
+            },
+          },
         },
       },
 
       aftercareSummary: {
         select: {
           id: true,
+          publicToken: true,
           notes: true,
           rebookedFor: true,
           rebookMode: true,
           rebookWindowStart: true,
           rebookWindowEnd: true,
-          recommendations: {
+
+          // Step 5 explicit state
+          draftSavedAt: true,
+          sentToClientAt: true,
+          lastEditedAt: true,
+          version: true,
+
+          recommendedProducts: {
             orderBy: { id: 'asc' },
             select: {
               id: true,
               note: true,
-              product: { select: { name: true } },
+              product: {
+                select: {
+                  name: true,
+                },
+              },
               externalName: true,
               externalUrl: true,
             },
@@ -151,7 +173,6 @@ export default async function ProAftercarePage(props: {
           reviewId: true,
           createdAt: true,
           phase: true,
-
           storageBucket: true,
           storagePath: true,
           thumbBucket: true,
@@ -189,48 +210,45 @@ export default async function ProAftercarePage(props: {
   })
 
   const timeZone = tzRes.ok ? tzRes.timeZone : 'UTC'
-
   const aftercare = booking.aftercareSummary
 
   const existingRebookMode = pickRebookModeOrNull(aftercare?.rebookMode)
-  const existingRebookedFor = pickDateOrNull(aftercare?.rebookedFor)?.toISOString() ?? null
+  const existingRebookedFor =
+    pickDateOrNull(aftercare?.rebookedFor)?.toISOString() ?? null
   const existingRebookWindowStart =
     pickDateOrNull(aftercare?.rebookWindowStart)?.toISOString() ?? null
   const existingRebookWindowEnd =
     pickDateOrNull(aftercare?.rebookWindowEnd)?.toISOString() ?? null
 
-  const existingMedia =
-    (await Promise.all(
-      (booking.mediaAssets ?? []).map(async (m) => {
-        const httpUrl = isHttpUrl(m.url) ? m.url : null
-        const httpThumbUrl = isHttpUrl(m.thumbUrl) ? m.thumbUrl : null
+  const existingMedia = await Promise.all(
+    (booking.mediaAssets ?? []).map(async (m) => {
+      const httpUrl = isHttpUrl(m.url) ? m.url : null
+      const httpThumbUrl = isHttpUrl(m.thumbUrl) ? m.thumbUrl : null
 
-        const signedUrl =
-          httpUrl ?? (await signObjectUrl(m.storageBucket, m.storagePath))
-        const signedThumbUrl =
-          httpThumbUrl ??
-          (await signObjectUrl(m.thumbBucket ?? null, m.thumbPath ?? null))
+      const signedUrl =
+        httpUrl ?? (await signObjectUrl(m.storageBucket, m.storagePath))
+      const signedThumbUrl =
+        httpThumbUrl ??
+        (await signObjectUrl(m.thumbBucket ?? null, m.thumbPath ?? null))
 
-        return {
-          id: m.id,
-          url: m.url ?? null,
-          thumbUrl: m.thumbUrl ?? null,
-
-          renderUrl: signedUrl,
-          renderThumbUrl: signedThumbUrl,
-
-          mediaType: m.mediaType,
-          visibility: m.visibility,
-          uploadedByRole: m.uploadedByRole ?? null,
-          reviewId: m.reviewId ?? null,
-          createdAt: m.createdAt.toISOString(),
-          phase: pickMediaPhaseOrOther(m.phase),
-        }
-      }),
-    )) ?? []
+      return {
+        id: m.id,
+        url: m.url ?? null,
+        thumbUrl: m.thumbUrl ?? null,
+        renderUrl: signedUrl,
+        renderThumbUrl: signedThumbUrl,
+        mediaType: m.mediaType,
+        visibility: m.visibility,
+        uploadedByRole: m.uploadedByRole ?? null,
+        reviewId: m.reviewId ?? null,
+        createdAt: m.createdAt.toISOString(),
+        phase: pickMediaPhaseOrOther(m.phase),
+      }
+    }),
+  )
 
   const existingRecommendedProducts =
-    aftercare?.recommendations?.map((r) => ({
+    aftercare?.recommendedProducts?.map((r) => ({
       id: r.id,
       name:
         r.product?.name ??
@@ -245,6 +263,9 @@ export default async function ProAftercarePage(props: {
     `${booking.client?.firstName ?? ''} ${booking.client?.lastName ?? ''}`.trim() ||
     booking.client?.user?.email ||
     'Client'
+
+  const hasAftercareDraft = Boolean(aftercare?.id)
+  const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
 
   return (
     <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
@@ -266,6 +287,46 @@ export default async function ProAftercarePage(props: {
           Aftercare and after-photos are a wrap-up pair. Do either first — then
           complete the session from the session hub.
         </div>
+
+        <div className="mt-3 grid gap-2 text-sm">
+          <div className="text-textSecondary">
+            Aftercare status:{' '}
+            <span className="font-black text-textPrimary">
+              {hasFinalizedAftercare
+                ? '✅ finalized + sent'
+                : hasAftercareDraft
+                  ? '📝 draft saved'
+                  : '❌ not started'}
+            </span>
+          </div>
+
+          {aftercare?.lastEditedAt ? (
+            <div className="text-textSecondary">
+              Last edited:{' '}
+              <span className="font-black text-textPrimary">
+                {aftercare.lastEditedAt.toLocaleString()}
+              </span>
+            </div>
+          ) : null}
+
+          {aftercare?.draftSavedAt && !hasFinalizedAftercare ? (
+            <div className="text-textSecondary">
+              Draft saved:{' '}
+              <span className="font-black text-textPrimary">
+                {aftercare.draftSavedAt.toLocaleString()}
+              </span>
+            </div>
+          ) : null}
+
+          {aftercare?.sentToClientAt ? (
+            <div className="text-textSecondary">
+              Sent to client:{' '}
+              <span className="font-black text-textPrimary">
+                {aftercare.sentToClientAt.toLocaleString()}
+              </span>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-4">
@@ -279,6 +340,11 @@ export default async function ProAftercarePage(props: {
           existingRebookWindowEnd={existingRebookWindowEnd}
           existingMedia={existingMedia}
           existingRecommendedProducts={existingRecommendedProducts}
+          existingDraftSavedAt={aftercare?.draftSavedAt?.toISOString() ?? null}
+          existingSentToClientAt={aftercare?.sentToClientAt?.toISOString() ?? null}
+          existingLastEditedAt={aftercare?.lastEditedAt?.toISOString() ?? null}
+          existingVersion={aftercare?.version ?? null}
+          existingIsFinalized={hasFinalizedAftercare}
         />
       </div>
     </main>

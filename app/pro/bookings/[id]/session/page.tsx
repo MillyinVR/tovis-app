@@ -10,6 +10,7 @@ import {
   BookingStatus,
   ConsultationApprovalStatus,
   MediaPhase,
+  Role,
   SessionStep,
 } from '@prisma/client'
 
@@ -276,25 +277,33 @@ export default async function ProBookingSessionPage(props: PageProps) {
       where: {
         bookingId: booking.id,
         phase: MediaPhase.BEFORE,
-        uploadedByRole: 'PRO',
+        uploadedByRole: Role.PRO,
       },
     }),
     prisma.mediaAsset.count({
       where: {
         bookingId: booking.id,
         phase: MediaPhase.AFTER,
-        uploadedByRole: 'PRO',
+        uploadedByRole: Role.PRO,
       },
     }),
     prisma.aftercareSummary.findFirst({
       where: { bookingId: booking.id },
-      select: { id: true, publicToken: true },
+      select: {
+        id: true,
+        publicToken: true,
+        draftSavedAt: true,
+        sentToClientAt: true,
+        lastEditedAt: true,
+        version: true,
+      },
     }),
   ])
 
   const hasBeforePhoto = beforeCount > 0
   const hasAfterPhoto = afterCount > 0
-  const hasAftercare = Boolean(aftercare?.id)
+  const hasAftercareDraft = Boolean(aftercare?.id)
+  const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
 
   const effectiveStep: SessionStep = (() => {
     if (bookingStatus === BookingStatus.PENDING) {
@@ -605,12 +614,26 @@ export default async function ProBookingSessionPage(props: PageProps) {
                   {hasAfterPhoto ? `✅ (${afterCount})` : '❌ missing'}
                 </span>
               </div>
+
               <div className="text-textSecondary">
                 Aftercare:{' '}
                 <span className="font-black text-textPrimary">
-                  {hasAftercare ? '✅ created' : '❌ missing'}
+                  {hasFinalizedAftercare
+                    ? '✅ finalized + sent'
+                    : hasAftercareDraft
+                      ? '📝 draft saved (not finalized)'
+                      : '❌ missing'}
                 </span>
               </div>
+
+              {aftercare?.lastEditedAt && !hasFinalizedAftercare ? (
+                <div className="text-xs font-semibold text-textSecondary">
+                  Draft last edited:{' '}
+                  <span className="font-black text-textPrimary">
+                    {aftercare.lastEditedAt.toLocaleString()}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-4">
@@ -619,13 +642,13 @@ export default async function ProBookingSessionPage(props: PageProps) {
                   type="submit"
                   className={[
                     primaryBtnClass,
-                    !(hasAfterPhoto && hasAftercare)
+                    !(hasAfterPhoto && hasFinalizedAftercare)
                       ? 'pointer-events-none cursor-not-allowed opacity-60'
                       : '',
                   ].join(' ')}
-                  aria-disabled={!(hasAfterPhoto && hasAftercare)}
+                  aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
                 >
-                  Complete session (locks step → DONE)
+                  Complete session (requires finalized aftercare)
                 </button>
               </form>
             </div>

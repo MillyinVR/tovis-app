@@ -7,16 +7,17 @@ type AuthedClientUser = Awaited<ReturnType<typeof getCurrentUser>> & {
   role: 'CLIENT'
   clientProfile: { id: string }
 }
- 
+
 export async function loadClientBookingPage(bookingId: string) {
   const userBase = await getCurrentUser().catch(() => null)
 
   if (!userBase || userBase.role !== 'CLIENT' || !userBase.clientProfile?.id) {
-    redirect(`/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`)
+    redirect(
+      `/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`,
+    )
   }
 
   const user = userBase as AuthedClientUser
-
 
   const raw = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -38,7 +39,12 @@ export async function loadClientBookingPage(bookingId: string) {
       locationTimeZone: true,
       locationAddressSnapshot: true,
 
-      service: { select: { id: true, name: true } },
+      service: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
 
       professional: {
         select: {
@@ -46,7 +52,11 @@ export async function loadClientBookingPage(bookingId: string) {
           businessName: true,
           location: true,
           timeZone: true,
-          user: { select: { email: true } },
+          user: {
+            select: {
+              email: true,
+            },
+          },
         },
       },
 
@@ -72,7 +82,11 @@ export async function loadClientBookingPage(bookingId: string) {
           durationMinutesSnapshot: true,
           priceSnapshot: true,
           serviceId: true,
-          service: { select: { name: true } },
+          service: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
 
@@ -97,7 +111,12 @@ export async function loadClientBookingPage(bookingId: string) {
   if (raw.clientId !== user.clientProfile.id) redirect('/client/bookings')
 
   const aftercare = await prisma.aftercareSummary.findFirst({
-    where: { bookingId: raw.id },
+    where: {
+      bookingId: raw.id,
+      sentToClientAt: {
+        not: null,
+      },
+    },
     select: {
       id: true,
       notes: true,
@@ -106,7 +125,11 @@ export async function loadClientBookingPage(bookingId: string) {
       rebookedFor: true,
       rebookWindowStart: true,
       rebookWindowEnd: true,
-      recommendations: {
+      draftSavedAt: true,
+      sentToClientAt: true,
+      lastEditedAt: true,
+      version: true,
+      recommendedProducts: {
         take: 50,
         orderBy: { id: 'asc' },
         select: {
@@ -114,14 +137,24 @@ export async function loadClientBookingPage(bookingId: string) {
           note: true,
           externalName: true,
           externalUrl: true,
-          product: { select: { id: true, name: true, brand: true, retailPrice: true } },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              brand: true,
+              retailPrice: true,
+            },
+          },
         },
       },
     },
   })
 
   const existingReview = await prisma.review.findFirst({
-    where: { bookingId: raw.id, clientId: user.clientProfile.id },
+    where: {
+      bookingId: raw.id,
+      clientId: user.clientProfile.id,
+    },
     include: {
       mediaAssets: {
         select: {
@@ -140,22 +173,27 @@ export async function loadClientBookingPage(bookingId: string) {
   })
 
   const media = await prisma.mediaAsset.findMany({
-  where: { bookingId: raw.id },
-  orderBy: { createdAt: 'asc' },
-  take: 80,
-  select: {
-    id: true,
-    url: true,
-    thumbUrl: true,
-    mediaType: true,
-    phase: true,
-    createdAt: true,
-    visibility: true,
-    uploadedByRole: true,
-    reviewId: true,
-  },
-})
+    where: { bookingId: raw.id },
+    orderBy: { createdAt: 'asc' },
+    take: 80,
+    select: {
+      id: true,
+      url: true,
+      thumbUrl: true,
+      mediaType: true,
+      phase: true,
+      createdAt: true,
+      visibility: true,
+      uploadedByRole: true,
+      reviewId: true,
+    },
+  })
 
-
-  return { user, raw, aftercare, existingReview, media }
+  return {
+    user,
+    raw,
+    aftercare,
+    existingReview,
+    media,
+  }
 }

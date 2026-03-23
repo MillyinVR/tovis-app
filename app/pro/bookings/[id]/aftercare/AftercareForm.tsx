@@ -3,7 +3,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getZonedParts, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import {
+  getZonedParts,
+  sanitizeTimeZone,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
@@ -45,6 +49,13 @@ type Props = {
   existingRebookWindowEnd?: string | null
   existingMedia: MediaItem[]
   existingRecommendedProducts?: RecommendedProduct[]
+
+  // Step 5 explicit state
+  existingDraftSavedAt?: string | null
+  existingSentToClientAt?: string | null
+  existingLastEditedAt?: string | null
+  existingVersion?: number | null
+  existingIsFinalized?: boolean
 }
 
 const FORCE_EVENT = 'tovis:pro-session:force'
@@ -56,7 +67,9 @@ const NOTES_MAX = 4000
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/pro'
-  return window.location.pathname + window.location.search + window.location.hash
+  return (
+    window.location.pathname + window.location.search + window.location.hash
+  )
 }
 
 function sanitizeFrom(from: string) {
@@ -67,7 +80,10 @@ function sanitizeFrom(from: string) {
   return trimmed
 }
 
-function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
+function redirectToLogin(
+  router: ReturnType<typeof useRouter>,
+  reason?: string,
+) {
   const from = sanitizeFrom(currentPathWithQuery())
   const qs = new URLSearchParams({ from })
   if (reason) qs.set('reason', reason)
@@ -128,7 +144,10 @@ function safeId() {
   return `${Date.now()}-${Math.random()}`
 }
 
-function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): string {
+function isoToDatetimeLocalInTimeZone(
+  iso: string | null,
+  timeZone: string,
+): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -145,7 +164,10 @@ function isoToDatetimeLocalInTimeZone(iso: string | null, timeZone: string): str
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
 }
 
-function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string | null {
+function isoFromDatetimeLocalInTimeZone(
+  value: string,
+  timeZone: string,
+): string | null {
   const v = (value || '').trim()
   if (!v) return null
 
@@ -174,6 +196,7 @@ function isoFromDatetimeLocalInTimeZone(value: string, timeZone: string): string
     second: 0,
     timeZone: tz,
   })
+
   if (Number.isNaN(utc.getTime())) return null
   return utc.toISOString()
 }
@@ -226,7 +249,26 @@ function inputClass(disabled: boolean) {
 }
 
 function labelClass() {
-  return 'block text-xs font-black text-textSecondary mb-1'
+  return 'mb-1 block text-xs font-black text-textSecondary'
+}
+
+function toDisplayDateTime(iso: string | null | undefined, timeZone: string) {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: sanitizeTimeZone(timeZone, 'UTC') || 'UTC',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d)
+  } catch {
+    return d.toLocaleString()
+  }
 }
 
 export default function AftercareForm({
@@ -239,10 +281,18 @@ export default function AftercareForm({
   existingRebookWindowEnd,
   existingMedia,
   existingRecommendedProducts,
+  existingDraftSavedAt,
+  existingSentToClientAt,
+  existingLastEditedAt,
+  existingVersion,
+  existingIsFinalized,
 }: Props) {
   const router = useRouter()
 
-  const tz = useMemo(() => sanitizeTimeZone(timeZone, 'UTC') || 'UTC', [timeZone])
+  const tz = useMemo(
+    () => sanitizeTimeZone(timeZone, 'UTC') || 'UTC',
+    [timeZone],
+  )
 
   const [notes, setNotes] = useState((existingNotes || '').slice(0, NOTES_MAX))
 
@@ -263,8 +313,17 @@ export default function AftercareForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [saved, setSaved] = useState(false)
-  const [sent, setSent] = useState(false)
+  // Explicit server-backed state
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(
+    existingDraftSavedAt ?? null,
+  )
+  const [sentToClientAt, setSentToClientAt] = useState<string | null>(
+    existingSentToClientAt ?? null,
+  )
+  const [lastEditedAt, setLastEditedAt] = useState<string | null>(
+    existingLastEditedAt ?? null,
+  )
+  const [version, setVersion] = useState<number | null>(existingVersion ?? null)
 
   const abortRef = useRef<AbortController | null>(null)
 
@@ -310,12 +369,21 @@ export default function AftercareForm({
         note: p.note || '',
       })),
     )
+
+    setDraftSavedAt(existingDraftSavedAt ?? null)
+    setSentToClientAt(existingSentToClientAt ?? null)
+    setLastEditedAt(existingLastEditedAt ?? null)
+    setVersion(existingVersion ?? null)
   }, [
     existingRebookMode,
     existingRebookedFor,
     existingRebookWindowStart,
     existingRebookWindowEnd,
     existingRecommendedProducts,
+    existingDraftSavedAt,
+    existingSentToClientAt,
+    existingLastEditedAt,
+    existingVersion,
     tz,
   ])
 
@@ -327,13 +395,14 @@ export default function AftercareForm({
   }, [])
 
   function markDirty() {
-    if (saved) setSaved(false)
-    if (sent) setSent(false)
+    setError(null)
+    setProductsError(null)
   }
 
   const sortedMedia = useMemo(() => {
     return [...(existingMedia || [])].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     )
   }, [existingMedia])
 
@@ -371,10 +440,7 @@ export default function AftercareForm({
       : null
 
   useEffect(() => {
-    if (
-      rebookMode !== 'BOOKED_NEXT_APPOINTMENT' &&
-      createRebookReminder
-    ) {
+    if (rebookMode !== 'BOOKED_NEXT_APPOINTMENT' && createRebookReminder) {
       setCreateRebookReminder(false)
     }
   }, [rebookMode, createRebookReminder])
@@ -425,7 +491,9 @@ export default function AftercareForm({
   function updateProduct(id: string, patch: Partial<RecommendedProduct>) {
     setProductsError(null)
     markDirty()
-    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+    setProducts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    )
   }
 
   function removeProduct(id: string) {
@@ -584,6 +652,7 @@ export default function AftercareForm({
       }
 
       const r = isRecord(data) ? data : null
+      const aftercare = isRecord(r?.aftercare) ? r.aftercare : null
 
       const clientNotified = r?.clientNotified === true
       const bookingFinished = r?.bookingFinished === true
@@ -596,18 +665,32 @@ export default function AftercareForm({
           ? r.redirectTo
           : null
 
-      if (clientNotified) {
-        setSent(true)
-        setSaved(false)
-      } else {
-        setSaved(true)
-        setSent(false)
-      }
+      setDraftSavedAt(
+        typeof aftercare?.draftSavedAt === 'string'
+          ? aftercare.draftSavedAt
+          : null,
+      )
+
+      setSentToClientAt(
+        typeof aftercare?.sentToClientAt === 'string'
+          ? aftercare.sentToClientAt
+          : null,
+      )
+
+      setLastEditedAt(
+        typeof aftercare?.lastEditedAt === 'string'
+          ? aftercare.lastEditedAt
+          : null,
+      )
+
+      setVersion(
+        typeof aftercare?.version === 'number' ? aftercare.version : null,
+      )
 
       router.refresh()
       dispatchForceRefresh()
 
-      if (sendToClient && bookingFinished && redirectTo) {
+      if (sendToClient && clientNotified && bookingFinished && redirectTo) {
         router.replace(redirectTo)
         return
       }
@@ -625,13 +708,67 @@ export default function AftercareForm({
   const showWindow = rebookMode === 'RECOMMENDED_WINDOW'
   const disabled = loading
 
+  const finalized = Boolean(sentToClientAt || existingIsFinalized)
+  const draftExists = Boolean(draftSavedAt) && !finalized
+
+  const lastEditedLabel = toDisplayDateTime(lastEditedAt, tz)
+  const draftSavedLabel = toDisplayDateTime(draftSavedAt, tz)
+  const sentLabel = toDisplayDateTime(sentToClientAt, tz)
+
   return (
     <div className="grid gap-3">
       <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
-        <div className="text-xs font-black text-accentPrimary">Client-facing</div>
+        <div className="text-xs font-black text-accentPrimary">
+          Client-facing
+        </div>
         <div className="mt-1 text-sm font-semibold text-textSecondary">
-          This is the client’s official appointment summary. You can save drafts
-          and only send when it’s ready.
+          This is the client’s official appointment summary. Drafts are not
+          completed closeout. Only sending finalizes aftercare.
+        </div>
+
+        <div className="mt-3 grid gap-2 text-sm">
+          <div className="text-textSecondary">
+            Status:{' '}
+            <span className="font-black text-textPrimary">
+              {finalized
+                ? '✅ finalized + sent'
+                : draftExists
+                  ? '📝 draft saved'
+                  : '❌ not started'}
+            </span>
+          </div>
+
+          {version != null ? (
+            <div className="text-textSecondary">
+              Version:{' '}
+              <span className="font-black text-textPrimary">{version}</span>
+            </div>
+          ) : null}
+
+          {lastEditedLabel ? (
+            <div className="text-textSecondary">
+              Last edited:{' '}
+              <span className="font-black text-textPrimary">
+                {lastEditedLabel}
+              </span>
+            </div>
+          ) : null}
+
+          {draftSavedLabel && !finalized ? (
+            <div className="text-textSecondary">
+              Draft saved:{' '}
+              <span className="font-black text-textPrimary">
+                {draftSavedLabel}
+              </span>
+            </div>
+          ) : null}
+
+          {sentLabel ? (
+            <div className="text-textSecondary">
+              Sent to client:{' '}
+              <span className="font-black text-textPrimary">{sentLabel}</span>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -757,7 +894,9 @@ export default function AftercareForm({
             type="button"
             onClick={addProduct}
             disabled={disabled || products.length >= MAX_PRODUCTS}
-            className={secondaryBtn(Boolean(disabled || products.length >= MAX_PRODUCTS))}
+            className={secondaryBtn(
+              Boolean(disabled || products.length >= MAX_PRODUCTS),
+            )}
           >
             + Add product
           </button>
@@ -791,8 +930,10 @@ export default function AftercareForm({
             disabled={disabled}
             placeholder="E.g. wash after 48 hours, use sulfate-free shampoo, avoid tight ponytails for 7 days…"
             className={[
-              'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none resize-y',
-              disabled ? 'opacity-60 cursor-not-allowed' : 'focus:border-white/20',
+              'w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
+              disabled
+                ? 'cursor-not-allowed opacity-60'
+                : 'focus:border-white/20',
             ].join(' ')}
           />
           <div className="mt-1 text-xs font-semibold text-textSecondary">
@@ -801,7 +942,9 @@ export default function AftercareForm({
         </div>
 
         <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
-          <div className="text-sm font-black text-textPrimary">Rebook guidance</div>
+          <div className="text-sm font-black text-textPrimary">
+            Rebook guidance
+          </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -817,7 +960,9 @@ export default function AftercareForm({
               type="button"
               onClick={() => onChangeMode('BOOKED_NEXT_APPOINTMENT')}
               disabled={disabled}
-              className={pillClass(rebookMode === 'BOOKED_NEXT_APPOINTMENT')}
+              className={pillClass(
+                rebookMode === 'BOOKED_NEXT_APPOINTMENT',
+              )}
               title="Recommend a single ideal next visit date"
             >
               Next visit date
@@ -906,7 +1051,9 @@ export default function AftercareForm({
         </div>
 
         <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
-          <div className="text-sm font-black text-textPrimary">Smart reminders</div>
+          <div className="text-sm font-black text-textPrimary">
+            Smart reminders
+          </div>
 
           <label
             className={[
@@ -949,7 +1096,7 @@ export default function AftercareForm({
                   'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
                   !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
                   disabled
-                    ? 'opacity-60 cursor-not-allowed'
+                    ? 'cursor-not-allowed opacity-60'
                     : '',
                 ].join(' ')}
               >
@@ -983,7 +1130,7 @@ export default function AftercareForm({
                 }}
                 className={[
                   'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
-                  disabled ? 'opacity-60 cursor-not-allowed' : '',
+                  disabled ? 'cursor-not-allowed opacity-60' : '',
                 ].join(' ')}
               >
                 <option value="3">3 days</option>
@@ -1001,7 +1148,9 @@ export default function AftercareForm({
         </div>
 
         {error ? (
-          <div className="mt-3 text-sm font-semibold text-microAccent">{error}</div>
+          <div className="mt-3 text-sm font-semibold text-microAccent">
+            {error}
+          </div>
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
@@ -1020,7 +1169,7 @@ export default function AftercareForm({
             onClick={() => postAftercare(true)}
             className={primaryBtn(Boolean(disabled || !!windowError))}
           >
-            {loading ? 'Sending…' : 'Send to client'}
+            {loading ? 'Sending…' : finalized ? 'Send update to client' : 'Send to client'}
           </button>
         </div>
       </div>
@@ -1051,7 +1200,9 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
             key={m.id}
             className={[
               'relative block aspect-square overflow-hidden rounded-card bg-bgPrimary transition',
-              isProClient ? 'border border-white/10' : 'border border-transparent',
+              isProClient
+                ? 'border border-white/10'
+                : 'border border-transparent',
               'hover:bg-surfaceGlass',
             ].join(' ')}
             title={isProClient ? 'Visible to pro + client' : 'Public'}

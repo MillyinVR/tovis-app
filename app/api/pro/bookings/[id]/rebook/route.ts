@@ -1,4 +1,5 @@
 // app/api/pro/bookings/[id]/rebook/route.ts
+import crypto from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import {
   jsonFail,
@@ -20,6 +21,10 @@ export const dynamic = 'force-dynamic'
 
 type RebookMode = 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
+
+function newPublicToken(): string {
+  return crypto.randomUUID()
+} 
 
 function isMode(value: unknown): value is RebookMode {
   return (
@@ -82,6 +87,7 @@ export async function POST(req: Request, ctx: Ctx) {
         where: { bookingId: existing.id },
         create: {
           bookingId: existing.id,
+          publicToken: newPublicToken(),
           rebookMode: AftercareRebookMode.NONE,
           rebookedFor: null,
           rebookWindowStart: null,
@@ -128,6 +134,7 @@ export async function POST(req: Request, ctx: Ctx) {
         where: { bookingId: existing.id },
         create: {
           bookingId: existing.id,
+          publicToken: newPublicToken(),
           rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
           rebookWindowStart: windowStart,
           rebookWindowEnd: windowEnd,
