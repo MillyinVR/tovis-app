@@ -6,6 +6,7 @@ import {
   BookingStatus,
   ClientAddressKind,
   ClientNotificationType,
+  ConsultationApprovalStatus,
   MediaPhase,
   MediaType,
   MediaVisibility,
@@ -104,6 +105,32 @@ type CancelActor =
       kind: 'admin'
       professionalId?: string | null
     }
+
+type ApproveConsultationMaterializationArgs = {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+  professionalId: string
+  now: Date
+}
+
+type ApproveConsultationMaterializationResult = {
+  booking: {
+    id: string
+    serviceId: string | null
+    offeringId: string | null
+    subtotalSnapshot: Prisma.Decimal | null
+    totalDurationMinutes: number
+    consultationConfirmedAt: Date | null
+  }
+  approval: {
+    id: string
+    status: ConsultationApprovalStatus
+    approvedAt: Date | null
+    rejectedAt: Date | null
+  }
+  meta: MutationMeta
+}
 
 type CancelBookingArgs = {
   bookingId: string
@@ -570,6 +597,22 @@ const CREATE_HOLD_SELECT = {
 type CreateHoldRecord = Prisma.BookingHoldGetPayload<{
   select: typeof CREATE_HOLD_SELECT
 }>
+
+const APPROVE_CONSULTATION_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  locationType: true,
+  consultationApproval: {
+    select: {
+      id: true,
+      status: true,
+      proposedServicesJson: true,
+      proposedTotal: true,
+      notes: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
 
 const RESCHEDULE_BOOKING_SELECT = {
   id: true,
@@ -3371,6 +3414,237 @@ async function performLockedRescheduleBookingFromHold(args: {
   }
 }
 
+type ConsultationProposedServiceItem = {
+  offeringId: string
+  sortOrder: number
+}
+
+function isJsonObjectRecord(
+  value: Prisma.JsonValue,
+): value is Prisma.JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+async function performLockedApproveConsultationMaterialization(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+  professionalId: string
+  now: Date
+}): Promise<ApproveConsultationMaterializationResult> {
+  const booking = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: APPROVE_CONSULTATION_BOOKING_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.clientId !== args.clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  const approval = booking.consultationApproval
+  if (!approval?.id) {
+    throw bookingError('FORBIDDEN', {
+      message: 'No consultation proposal exists for this booking.',
+      userMessage: 'No consultation proposal exists for this booking.',
+    })
+  }
+
+  if (approval.status !== ConsultationApprovalStatus.PENDING) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Consultation proposal is no longer pending.',
+      userMessage: 'Consultation proposal is no longer pending.',
+    })
+  }
+
+  const proposed = approval.proposedServicesJson
+
+  if (!Array.isArray(proposed) || proposed.length === 0) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  const proposedItems: ConsultationProposedServiceItem[] = proposed.map((row, index) => {
+  if (!isJsonObjectRecord(row)) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  const offeringId =
+    typeof row.offeringId === 'string' ? row.offeringId.trim() : ''
+
+  if (!offeringId) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  return {
+    offeringId,
+    sortOrder:
+      typeof row.sortOrder === 'number' ? row.sortOrder : index,
+  }
+})
+
+const offeringIds = Array.from(
+  new Set(proposedItems.map((item) => item.offeringId)),
+).slice(0, 50)
+
+  const offerings = await args.tx.professionalServiceOffering.findMany({
+    where: {
+      id: { in: offeringIds },
+      professionalId: booking.professionalId,
+      isActive: true,
+    },
+    select: {
+      id: true,
+      serviceId: true,
+      offersInSalon: true,
+      offersMobile: true,
+      salonDurationMinutes: true,
+      mobileDurationMinutes: true,
+      salonPriceStartingAt: true,
+      mobilePriceStartingAt: true,
+      service: {
+        select: {
+          defaultDurationMinutes: true,
+        },
+      },
+    },
+    take: 100,
+  })
+
+  const offeringById = new Map(
+    offerings.map((offering) => [offering.id, offering]),
+  )
+
+  const requestedItems: RequestedServiceItemInput[] = proposedItems.map((item) => {
+  const offering = offeringById.get(item.offeringId)
+
+  if (!offering) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  return {
+    serviceId: offering.serviceId,
+    offeringId: offering.id,
+    sortOrder: item.sortOrder,
+  }
+})
+
+  const normalizedItems = buildNormalizedBookingItemsFromRequestedOfferings({
+    requestedItems,
+    locationType: booking.locationType,
+    stepMinutes: 15,
+    offeringById,
+    badItemsCode: 'INVALID_SERVICE_ITEMS',
+  })
+
+  const {
+    primaryServiceId,
+    primaryOfferingId,
+    computedDurationMinutes,
+    computedSubtotal,
+  } = computeBookingItemLikeTotals(
+    normalizedItems.map((item, index) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      priceSnapshot: item.priceSnapshot,
+      itemType:
+        index === 0
+          ? BookingServiceItemType.BASE
+          : BookingServiceItemType.ADD_ON,
+    })),
+    'INVALID_SERVICE_ITEMS',
+  )
+
+  await args.tx.bookingServiceItem.deleteMany({
+    where: { bookingId: booking.id },
+  })
+
+  const baseItem = normalizedItems[0]
+  if (!baseItem) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  const createdBaseItem = await args.tx.bookingServiceItem.create({
+    data: {
+      bookingId: booking.id,
+      serviceId: baseItem.serviceId,
+      offeringId: baseItem.offeringId,
+      itemType: BookingServiceItemType.BASE,
+      parentItemId: null,
+      priceSnapshot: baseItem.priceSnapshot,
+      durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
+      sortOrder: 0,
+    },
+    select: { id: true },
+  })
+
+  const addOnItems = normalizedItems.slice(1)
+  if (addOnItems.length > 0) {
+    await args.tx.bookingServiceItem.createMany({
+      data: addOnItems.map((item, index) => ({
+        bookingId: booking.id,
+        serviceId: item.serviceId,
+        offeringId: item.offeringId,
+        itemType: BookingServiceItemType.ADD_ON,
+        parentItemId: createdBaseItem.id,
+        priceSnapshot: item.priceSnapshot,
+        durationMinutesSnapshot: item.durationMinutesSnapshot,
+        sortOrder: index + 1,
+        notes: 'CONSULTATION_APPROVED',
+      })),
+    })
+  }
+
+  const updatedBooking = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceId: primaryServiceId,
+      offeringId: primaryOfferingId,
+      subtotalSnapshot: computedSubtotal,
+      totalDurationMinutes: computedDurationMinutes,
+      consultationConfirmedAt: args.now,
+    },
+    select: {
+      id: true,
+      serviceId: true,
+      offeringId: true,
+      subtotalSnapshot: true,
+      totalDurationMinutes: true,
+      consultationConfirmedAt: true,
+    },
+  })
+
+  const updatedApproval = await args.tx.consultationApproval.update({
+    where: { bookingId: booking.id },
+    data: {
+      status: ConsultationApprovalStatus.APPROVED,
+      approvedAt: args.now,
+      rejectedAt: null,
+      clientId: args.clientId,
+      proId: args.professionalId,
+    },
+    select: {
+      id: true,
+      status: true,
+      approvedAt: true,
+      rejectedAt: true,
+    },
+  })
+
+  return {
+    booking: updatedBooking,
+    approval: updatedApproval,
+    meta: buildMeta(true),
+  }
+}
+
 async function performLockedFinalizeBookingFromHold(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -5483,6 +5757,25 @@ export async function transitionSessionStepInTransaction(
     bookingId: args.bookingId,
     professionalId: args.professionalId,
     nextStep: args.nextStep,
+  })
+}
+
+export async function approveConsultationAndMaterializeBooking(args: {
+  bookingId: string
+  clientId: string
+  professionalId: string
+}): Promise<ApproveConsultationMaterializationResult> {
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx, now }) =>
+      performLockedApproveConsultationMaterialization({
+        tx,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        professionalId: args.professionalId,
+        now,
+      }),
   })
 }
 
