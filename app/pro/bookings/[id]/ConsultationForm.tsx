@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { BookingServiceItemType } from '@prisma/client'
 import {
   safeJson,
   readErrorMessage,
@@ -11,10 +12,26 @@ import {
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
 
+export type ConsultationInitialItem = {
+  key: string
+  bookingServiceItemId: string | null
+  serviceId: string
+  offeringId: string | null
+  itemType: BookingServiceItemType
+  label: string
+  categoryName: string | null
+  price: string
+  durationMinutes: string
+  notes: string
+  sortOrder: number
+  source: 'BOOKING' | 'PROPOSAL'
+}
+
 type Props = {
   bookingId: string
   initialNotes: string
   initialPrice: string | number | null
+  initialItems?: ConsultationInitialItem[]
 }
 
 type ServiceOption = {
@@ -27,11 +44,17 @@ type ServiceOption = {
 
 type LineItem = {
   key: string
-  offeringId: string
+  bookingServiceItemId: string | null
+  offeringId: string | null
   serviceId: string
+  itemType: BookingServiceItemType
   label: string
   categoryName: string | null
   price: string
+  durationMinutes: string
+  notes: string
+  sortOrder: number
+  source: 'BOOKING' | 'PROPOSAL'
 }
 
 const FORCE_EVENT = 'tovis:pro-session:force'
@@ -73,6 +96,17 @@ function normalizeMoneyInput(raw: string) {
   }
 
   return { value: normalized, ok: true }
+}
+
+function normalizeDurationInput(raw: string) {
+  const s = String(raw || '').trim()
+  if (!s) return { value: null as string | null, ok: true }
+  if (!/^\d+$/.test(s)) return { value: s, ok: false }
+
+  const n = Number(s)
+  if (!Number.isFinite(n) || n <= 0) return { value: s, ok: false }
+
+  return { value: String(Math.round(n)), ok: true }
 }
 
 function normalizeInitialPrice(v: unknown): string | null {
@@ -144,10 +178,38 @@ function parseServiceOptions(payload: unknown): ServiceOption[] {
   return out
 }
 
+function sortLineItems(items: LineItem[]) {
+  return [...items].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+    if (a.source !== b.source) return a.source === 'BOOKING' ? -1 : 1
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function normalizeInitialItems(items: ConsultationInitialItem[]): LineItem[] {
+  return sortLineItems(
+    items.map((it, index) => ({
+      key: it.key || uid(),
+      bookingServiceItemId: it.bookingServiceItemId ?? null,
+      offeringId: it.offeringId ?? null,
+      serviceId: it.serviceId,
+      itemType: it.itemType,
+      label: it.label,
+      categoryName: it.categoryName ?? null,
+      price: it.price ?? '',
+      durationMinutes: it.durationMinutes ?? '',
+      notes: it.notes ?? '',
+      sortOrder: Number.isFinite(it.sortOrder) ? it.sortOrder : index,
+      source: it.source,
+    })),
+  )
+}
+
 export default function ConsultationForm({
   bookingId,
   initialNotes,
   initialPrice,
+  initialItems = [],
 }: Props) {
   const router = useRouter()
 
@@ -158,7 +220,9 @@ export default function ConsultationForm({
 
   const [notes, setNotes] = useState(initialNotes || '')
   const [services, setServices] = useState<ServiceOption[]>([])
-  const [items, setItems] = useState<LineItem[]>([])
+  const [items, setItems] = useState<LineItem[]>(() =>
+    normalizeInitialItems(initialItems),
+  )
   const [selectedOfferingId, setSelectedOfferingId] = useState<string>('')
 
   const [saving, setSaving] = useState(false)
@@ -174,6 +238,10 @@ export default function ConsultationForm({
       abortRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    setItems(normalizeInitialItems(initialItems))
+  }, [initialItems])
 
   useEffect(() => {
     let cancelled = false
@@ -197,13 +265,11 @@ export default function ConsultationForm({
 
         if (!cancelled) {
           setServices(list)
-          setSelectedOfferingId(list[0]?.offeringId ?? '')
+          setSelectedOfferingId((current) => current || list[0]?.offeringId || '')
         }
       } catch (e: unknown) {
         if (!cancelled) {
-          setError(
-            errorMessageFromUnknown(e, 'Failed to load services.'),
-          )
+          setError(errorMessageFromUnknown(e, 'Failed to load services.'))
         }
       } finally {
         if (!cancelled) setLoadingServices(false)
@@ -237,26 +303,43 @@ export default function ConsultationForm({
           ? opt.defaultPrice.toFixed(2)
           : ''
 
-    setItems((prev) => [
-      ...prev,
-      {
-        key: uid(),
-        offeringId: opt.offeringId,
-        serviceId: opt.serviceId,
-        label: opt.serviceName,
-        categoryName: opt.categoryName,
-        price,
-      },
-    ])
+    setItems((prev) =>
+      sortLineItems([
+        ...prev,
+        {
+          key: uid(),
+          bookingServiceItemId: null,
+          offeringId: opt.offeringId,
+          serviceId: opt.serviceId,
+          itemType: BookingServiceItemType.BASE,
+          label: opt.serviceName,
+          categoryName: opt.categoryName,
+          price,
+          durationMinutes: '',
+          notes: '',
+          sortOrder: prev.length,
+          source: 'PROPOSAL',
+        },
+      ]),
+    )
   }
 
   function removeItem(key: string) {
-    setItems((prev) => prev.filter((x) => x.key !== key))
+    setItems((prev) =>
+      sortLineItems(
+        prev
+          .filter((x) => x.key !== key)
+          .map((x, index) => ({ ...x, sortOrder: index })),
+      ),
+    )
   }
 
-  function updateItemPrice(key: string, price: string) {
+  function updateItem(
+    key: string,
+    patch: Partial<Pick<LineItem, 'price' | 'durationMinutes' | 'notes'>>,
+  ) {
     setItems((prev) =>
-      prev.map((x) => (x.key === key ? { ...x, price } : x)),
+      prev.map((x) => (x.key === key ? { ...x, ...patch } : x)),
     )
   }
 
@@ -264,13 +347,20 @@ export default function ConsultationForm({
     if (!items.length) return false
 
     for (const it of items) {
-      if (!it.offeringId || !it.serviceId) return false
+      if (!it.serviceId) return false
+
+      if (it.itemType === BookingServiceItemType.BASE && !it.offeringId) {
+        return false
+      }
 
       const p = normalizeMoneyInput(it.price)
       if (!p.ok || p.value == null) return false
 
       const n = Number(p.value)
       if (!Number.isFinite(n) || n <= 0) return false
+
+      const d = normalizeDurationInput(it.durationMinutes)
+      if (!d.ok || d.value == null) return false
     }
 
     return true
@@ -293,7 +383,7 @@ export default function ConsultationForm({
       return
     }
     if (!itemsValid) {
-      setError('Fix the prices (numbers only, up to 2 decimals).')
+      setError('Fix line items before sending. Price must be valid and duration must be whole minutes.')
       return
     }
 
@@ -305,18 +395,29 @@ export default function ConsultationForm({
     try {
       const proposedServicesJson = {
         currency: 'USD',
-        items: items.map((it) => {
-          const parsed = normalizeMoneyInput(it.price)
-          if (!parsed.ok || !parsed.value) {
+        items: items.map((it, index) => {
+          const parsedPrice = normalizeMoneyInput(it.price)
+          const parsedDuration = normalizeDurationInput(it.durationMinutes)
+
+          if (!parsedPrice.ok || !parsedPrice.value) {
             throw new Error('Invalid price in line items.')
+          }
+          if (!parsedDuration.ok || !parsedDuration.value) {
+            throw new Error('Invalid duration in line items.')
           }
 
           return {
+            bookingServiceItemId: it.bookingServiceItemId,
             offeringId: it.offeringId,
             serviceId: it.serviceId,
+            itemType: it.itemType,
             label: it.label,
             categoryName: it.categoryName || null,
-            price: parsed.value,
+            price: parsedPrice.value,
+            durationMinutes: parsedDuration.value,
+            notes: it.notes.trim() || null,
+            sortOrder: index,
+            source: it.source,
           }
         }),
       }
@@ -356,10 +457,7 @@ export default function ConsultationForm({
 
       console.error(err)
       setError(
-        errorMessageFromUnknown(
-          err,
-          'Network error sending consultation.',
-        ),
+        errorMessageFromUnknown(err, 'Network error sending consultation.'),
       )
     } finally {
       if (abortRef.current === controller) abortRef.current = null
@@ -370,10 +468,13 @@ export default function ConsultationForm({
   const field =
     'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
 
+  const pillBase =
+    'inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black'
+
   return (
     <form
       onSubmit={handleSubmit}
-      className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4"
+      className="grid gap-4 rounded-card border border-white/10 bg-bgSecondary p-4 tovis-glass"
     >
       <div>
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -409,11 +510,8 @@ export default function ConsultationForm({
             >
               {services.map((s) => (
                 <option key={s.offeringId} value={s.offeringId}>
-                  {(s.categoryName ? `${s.categoryName} · ` : '') +
-                    s.serviceName}
-                  {s.defaultPrice != null
-                    ? ` ($${s.defaultPrice.toFixed(2)})`
-                    : ''}
+                  {(s.categoryName ? `${s.categoryName} · ` : '') + s.serviceName}
+                  {s.defaultPrice != null ? ` ($${s.defaultPrice.toFixed(2)})` : ''}
                 </option>
               ))}
             </select>
@@ -424,13 +522,12 @@ export default function ConsultationForm({
               disabled={saving}
               className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
             >
-              + Add
+              + Add service
             </button>
           </div>
         ) : (
           <div className="mt-3 rounded-card border border-toneDanger/30 bg-bgPrimary p-3 text-[12px] text-toneDanger">
-            No services found for your profile. Add offerings before sending
-            consult approvals.
+            No services found for your profile. Add offerings before sending consult approvals.
           </div>
         )}
       </div>
@@ -438,42 +535,48 @@ export default function ConsultationForm({
       <div className="grid gap-2">
         {items.length ? (
           items.map((it) => {
-            const parsed = normalizeMoneyInput(it.price)
+            const parsedPrice = normalizeMoneyInput(it.price)
+            const parsedDuration = normalizeDurationInput(it.durationMinutes)
+            const isAddOn = it.itemType === BookingServiceItemType.ADD_ON
 
             return (
               <div
                 key={it.key}
                 className="rounded-card border border-white/10 bg-bgPrimary p-3"
               >
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="min-w-[220px]">
-                    <div className="text-[13px] font-black text-textPrimary">
-                      {it.label}
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-[220px] flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[13px] font-black text-textPrimary">
+                        {it.label}
+                      </div>
+
+                      <span
+                        className={[
+                          pillBase,
+                          'border-white/10 bg-bgSecondary text-textSecondary',
+                        ].join(' ')}
+                      >
+                        {isAddOn ? 'Add-on' : 'Service'}
+                      </span>
+
+                      <span
+                        className={[
+                          pillBase,
+                          it.source === 'BOOKING'
+                            ? 'border-accentPrimary/30 bg-bgSecondary text-textPrimary'
+                            : 'border-white/10 bg-bgSecondary text-textSecondary',
+                        ].join(' ')}
+                      >
+                        {it.source === 'BOOKING' ? 'Booked' : 'Proposal'}
+                      </span>
                     </div>
+
                     {it.categoryName ? (
-                      <div className="text-[12px] text-textSecondary">
+                      <div className="mt-1 text-[12px] text-textSecondary">
                         {it.categoryName}
                       </div>
                     ) : null}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] text-textSecondary">$</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={it.price}
-                      disabled={saving}
-                      onChange={(e) =>
-                        updateItemPrice(it.key, e.target.value)
-                      }
-                      placeholder="0.00"
-                      className={[
-                        field,
-                        'w-[140px]',
-                        parsed.ok ? '' : 'ring-2 ring-toneDanger/40',
-                      ].join(' ')}
-                    />
                   </div>
 
                   <button
@@ -485,13 +588,69 @@ export default function ConsultationForm({
                     Remove
                   </button>
                 </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-black text-textPrimary">
+                      Line-item price
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] text-textSecondary">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={it.price}
+                        disabled={saving}
+                        onChange={(e) => updateItem(it.key, { price: e.target.value })}
+                        placeholder="0.00"
+                        className={[
+                          field,
+                          parsedPrice.ok ? '' : 'ring-2 ring-toneDanger/40',
+                        ].join(' ')}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-black text-textPrimary">
+                      Duration (minutes)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={it.durationMinutes}
+                      disabled={saving}
+                      onChange={(e) =>
+                        updateItem(it.key, { durationMinutes: e.target.value })
+                      }
+                      placeholder="60"
+                      className={[
+                        field,
+                        parsedDuration.ok ? '' : 'ring-2 ring-toneDanger/40',
+                      ].join(' ')}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <label className="mb-1 block text-[11px] font-black text-textPrimary">
+                    Line-item notes
+                  </label>
+                  <textarea
+                    value={it.notes}
+                    onChange={(e) => updateItem(it.key, { notes: e.target.value })}
+                    rows={2}
+                    disabled={saving}
+                    placeholder="Optional details for this line item…"
+                    className={field}
+                  />
+                </div>
               </div>
             )
           })
         ) : (
           <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] text-textSecondary">
-            Add services above. Sending a consult with “nothing” is not a
-            personality trait.
+            Add services above. Sending a consult with “nothing” is not a personality trait.
           </div>
         )}
       </div>
