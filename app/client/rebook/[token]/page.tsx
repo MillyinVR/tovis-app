@@ -39,6 +39,18 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   finishedAt: true,
 
   subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  totalAmount: true,
+  depositAmount: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+
   totalDurationMinutes: true,
   bufferMinutes: true,
 
@@ -87,6 +99,22 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
       priceSnapshot: true,
       serviceId: true,
       service: { select: { name: true } },
+    },
+  },
+
+  productSales: {
+    orderBy: [{ createdAt: 'asc' }],
+    take: 80,
+    select: {
+      id: true,
+      productId: true,
+      quantity: true,
+      unitPrice: true,
+      product: {
+        select: {
+          name: true,
+        },
+      },
     },
   },
 
@@ -169,7 +197,9 @@ function buildRawLocationLabel(booking: RawBooking): string | null {
 
 function buildFallbackClientBookingDTO(rawBooking: RawBooking): ClientBookingDTO {
   const fallbackTz = sanitizeTimeZone(
-    rawBooking.locationTimeZone ?? rawBooking.location?.timeZone ?? rawBooking.professional?.timeZone,
+    rawBooking.locationTimeZone ??
+      rawBooking.location?.timeZone ??
+      rawBooking.professional?.timeZone,
     'UTC',
   )
 
@@ -179,11 +209,34 @@ function buildFallbackClientBookingDTO(rawBooking: RawBooking): ClientBookingDTO
     source: rawBooking.source ?? null,
     sessionStep: rawBooking.sessionStep ?? null,
 
-    scheduledFor: rawBooking.scheduledFor?.toISOString?.() ?? new Date().toISOString(),
+    scheduledFor:
+      rawBooking.scheduledFor?.toISOString?.() ?? new Date().toISOString(),
     totalDurationMinutes: Number(rawBooking.totalDurationMinutes ?? 0),
     bufferMinutes: Number(rawBooking.bufferMinutes ?? 0),
 
     subtotalSnapshot: safeDecimalString(rawBooking.subtotalSnapshot),
+
+    checkout: {
+      subtotalSnapshot: safeDecimalString(rawBooking.subtotalSnapshot),
+      serviceSubtotalSnapshot: safeDecimalString(
+        rawBooking.serviceSubtotalSnapshot ?? rawBooking.subtotalSnapshot,
+      ),
+      productSubtotalSnapshot: safeDecimalString(
+        rawBooking.productSubtotalSnapshot,
+      ),
+      tipAmount: safeDecimalString(rawBooking.tipAmount),
+      taxAmount: safeDecimalString(rawBooking.taxAmount),
+      discountAmount: safeDecimalString(rawBooking.discountAmount),
+      totalAmount: safeDecimalString(rawBooking.totalAmount),
+      checkoutStatus: rawBooking.checkoutStatus ?? null,
+      selectedPaymentMethod: rawBooking.selectedPaymentMethod ?? null,
+      paymentAuthorizedAt: rawBooking.paymentAuthorizedAt
+        ? rawBooking.paymentAuthorizedAt.toISOString()
+        : null,
+      paymentCollectedAt: rawBooking.paymentCollectedAt
+        ? rawBooking.paymentCollectedAt.toISOString()
+        : null,
+    },
 
     locationType: safeLocationType(rawBooking.locationType),
     locationId: rawBooking.locationId ? String(rawBooking.locationId) : null,
@@ -221,6 +274,8 @@ function buildFallbackClientBookingDTO(rawBooking: RawBooking): ClientBookingDTO
     },
 
     items: [],
+
+    productSales: [],
 
     hasUnreadAftercare: false,
     hasPendingConsultationApproval: false,

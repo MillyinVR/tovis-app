@@ -1,7 +1,11 @@
 // app/api/pro/session/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import type { ProSessionPayload, UiSessionCenterAction, UiSessionMode } from '@/lib/proSession/types'
+import type {
+  ProSessionPayload,
+  UiSessionCenterAction,
+  UiSessionMode,
+} from '@/lib/proSession/types'
 import { BookingStatus, MediaPhase, Role, SessionStep } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -71,6 +75,11 @@ function centerFrom(args: {
     return { label: 'Start', action: 'NONE', href: null }
   }
 
+  // Multiple eligible bookings must not auto-pick one.
+  if (mode === 'UPCOMING_PICKER') {
+    return { label: 'Choose booking', action: 'PICK_BOOKING', href: null }
+  }
+
   // UPCOMING: footer will POST /start; consult lives in session hub.
   if (mode === 'UPCOMING') {
     return { label: 'Start', action: 'START', href: sessionHubHref(bookingId) }
@@ -81,41 +90,81 @@ function centerFrom(args: {
     return { label: 'Consult', action: 'NAVIGATE', href: sessionHubHref(bookingId) }
   }
 
-  // DONE always routes to aftercare
   if (sessionStep === SessionStep.DONE) {
     return { label: 'Aftercare', action: 'NAVIGATE', href: aftercareHref(bookingId) }
   }
 
-  // Consultation + pending client approval: hub is source of truth
-  if (sessionStep === SessionStep.CONSULTATION || sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT) {
-    // While waiting on approval, pro should still be able to take before photos.
+  if (
+    sessionStep === SessionStep.CONSULTATION ||
+    sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT
+  ) {
     return { label: 'Camera', action: 'CAPTURE_BEFORE', href: beforePhotosHref(bookingId) }
   }
 
-  // Before photos step
   if (sessionStep === SessionStep.BEFORE_PHOTOS) {
-    if (!hasBeforeMedia) return { label: 'Camera', action: 'CAPTURE_BEFORE', href: beforePhotosHref(bookingId) }
+    if (!hasBeforeMedia) {
+      return { label: 'Camera', action: 'CAPTURE_BEFORE', href: beforePhotosHref(bookingId) }
+    }
     return { label: 'Continue', action: 'NAVIGATE', href: sessionHubHref(bookingId) }
   }
 
-  // Service in progress: center button should be Finish (POST /finish)
   if (sessionStep === SessionStep.SERVICE_IN_PROGRESS) {
     return { label: 'Finish', action: 'FINISH', href: null }
   }
 
-  // Finish review lives in hub today (can be a dedicated page later)
   if (sessionStep === SessionStep.FINISH_REVIEW) {
     return { label: 'Continue', action: 'NAVIGATE', href: sessionHubHref(bookingId) }
   }
 
-  // Wrap-up: after photos + aftercare
   if (sessionStep === SessionStep.AFTER_PHOTOS) {
-    if (!hasAfterMedia) return { label: 'Camera', action: 'CAPTURE_AFTER', href: afterPhotosHref(bookingId) }
+    if (!hasAfterMedia) {
+      return { label: 'Camera', action: 'CAPTURE_AFTER', href: afterPhotosHref(bookingId) }
+    }
     return { label: 'Aftercare', action: 'NAVIGATE', href: aftercareHref(bookingId) }
   }
 
-  // Fallback: hub is safe
   return { label: 'Continue', action: 'NAVIGATE', href: sessionHubHref(bookingId) }
+}
+
+const bookingCardSelect = {
+  id: true,
+  scheduledFor: true,
+  sessionStep: true,
+  client: {
+    select: {
+      firstName: true,
+      lastName: true,
+      user: { select: { email: true } },
+    },
+  },
+  service: { select: { name: true } },
+  serviceItems: {
+    select: { sortOrder: true, service: { select: { name: true } } },
+    orderBy: { sortOrder: 'asc' as const },
+    take: 1,
+  },
+}
+
+type BookingCardRecord = Awaited<
+  ReturnType<typeof prisma.booking.findFirst<{ select: typeof bookingCardSelect }>>
+>
+
+function toBookingCard(
+  booking: NonNullable<BookingCardRecord>,
+) {
+  const firstItemName = booking.serviceItems?.[0]?.service?.name ?? null
+  const serviceName = firstItemName ?? booking.service?.name ?? ''
+
+  return {
+    id: booking.id,
+    sessionStep: booking.sessionStep ?? null,
+    serviceName,
+    clientName:
+      fullName(booking.client?.firstName, booking.client?.lastName) ||
+      booking.client?.user?.email ||
+      '',
+    scheduledFor: booking.scheduledFor ? booking.scheduledFor.toISOString() : null,
+  }
 }
 
 export async function GET() {
@@ -125,8 +174,10 @@ export async function GET() {
     const proId = auth.professionalId
 
     const now = new Date()
+    const windowStart = new Date(now.getTime() - 15 * 60_000)
+    const windowEnd = new Date(now.getTime() + 15 * 60_000)
 
-    // 1) ACTIVE session wins: ACCEPTED + startedAt present + not finishedAt
+    // 1) ACTIVE booking wins and stays pinned until finished.
     const active = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
@@ -135,49 +186,29 @@ export async function GET() {
         finishedAt: null,
       },
       orderBy: { startedAt: 'desc' },
-      select: {
-        id: true,
-        scheduledFor: true,
-        sessionStep: true,
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            user: { select: { email: true } },
-          },
-        },
-        service: { select: { name: true } },
-        serviceItems: {
-          select: { sortOrder: true, service: { select: { name: true } } },
-          orderBy: { sortOrder: 'asc' },
-          take: 1,
-        },
-      },
+      select: bookingCardSelect,
     })
 
     if (active) {
+      const booking = toBookingCard(active)
       const { before, after } = await getProBeforeAfterCounts(active.id)
-
-      const firstItemName = active.serviceItems?.[0]?.service?.name ?? null
-      const serviceName = firstItemName ?? active.service?.name ?? ''
-
-      const sessionStep = active.sessionStep ?? null
 
       const payload: ProSessionPayload = {
         ok: true,
         mode: 'ACTIVE',
-        targetStep: sessionStep === SessionStep.DONE ? 'aftercare' : sessionStep === SessionStep.CONSULTATION || sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT ? 'consult' : 'session',
-        booking: {
-          id: active.id,
-          sessionStep,
-          serviceName,
-          clientName: fullName(active.client?.firstName, active.client?.lastName) || active.client?.user?.email || '',
-          scheduledFor: active.scheduledFor ? active.scheduledFor.toISOString() : null,
-        },
+        targetStep:
+          booking.sessionStep === SessionStep.DONE
+            ? 'aftercare'
+            : booking.sessionStep === SessionStep.CONSULTATION ||
+                booking.sessionStep === SessionStep.CONSULTATION_PENDING_CLIENT
+              ? 'consult'
+              : 'session',
+        booking,
+        eligibleBookings: null,
         center: centerFrom({
           mode: 'ACTIVE',
-          bookingId: active.id,
-          sessionStep,
+          bookingId: booking.id,
+          sessionStep: booking.sessionStep,
           hasBeforeMedia: before > 0,
           hasAfterMedia: after > 0,
         }),
@@ -186,11 +217,11 @@ export async function GET() {
       return jsonOk(payload, 200)
     }
 
-    // 2) UPCOMING in window (15 min before -> 15 min after)
-    const windowStart = new Date(now.getTime() - 15 * 60_000)
-    const windowEnd = new Date(now.getTime() + 15 * 60_000)
-
-    const next = await prisma.booking.findFirst({
+    // 2) Upcoming accepted bookings inside the start window.
+    // Deterministic rule:
+    // - exactly 1 => one-tap start
+    // - more than 1 => explicit picker
+    const eligibleUpcoming = await prisma.booking.findMany({
       where: {
         professionalId: proId,
         status: BookingStatus.ACCEPTED,
@@ -198,48 +229,23 @@ export async function GET() {
         finishedAt: null,
         scheduledFor: { gte: windowStart, lte: windowEnd },
       },
-      orderBy: { scheduledFor: 'asc' },
-      select: {
-        id: true,
-        scheduledFor: true,
-        sessionStep: true,
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            user: { select: { email: true } },
-          },
-        },
-        service: { select: { name: true } },
-        serviceItems: {
-          select: { sortOrder: true, service: { select: { name: true } } },
-          orderBy: { sortOrder: 'asc' },
-          take: 1,
-        },
-      },
+      orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+      select: bookingCardSelect,
     })
 
-    if (next) {
-      const firstItemName = next.serviceItems?.[0]?.service?.name ?? null
-      const serviceName = firstItemName ?? next.service?.name ?? ''
-
-      const sessionStep = next.sessionStep ?? null
+    if (eligibleUpcoming.length === 1) {
+      const booking = toBookingCard(eligibleUpcoming[0])
 
       const payload: ProSessionPayload = {
         ok: true,
         mode: 'UPCOMING',
         targetStep: 'consult',
-        booking: {
-          id: next.id,
-          sessionStep,
-          serviceName,
-          clientName: fullName(next.client?.firstName, next.client?.lastName) || next.client?.user?.email || '',
-          scheduledFor: next.scheduledFor ? next.scheduledFor.toISOString() : null,
-        },
+        booking,
+        eligibleBookings: null,
         center: centerFrom({
           mode: 'UPCOMING',
-          bookingId: next.id,
-          sessionStep,
+          bookingId: booking.id,
+          sessionStep: booking.sessionStep,
           hasBeforeMedia: false,
           hasAfterMedia: false,
         }),
@@ -248,12 +254,34 @@ export async function GET() {
       return jsonOk(payload, 200)
     }
 
-    // 3) Nothing relevant right now
+    if (eligibleUpcoming.length > 1) {
+      const eligibleBookings = eligibleUpcoming.map(toBookingCard)
+
+      const payload: ProSessionPayload = {
+        ok: true,
+        mode: 'UPCOMING_PICKER',
+        targetStep: 'consult',
+        booking: null,
+        eligibleBookings,
+        center: centerFrom({
+          mode: 'UPCOMING_PICKER',
+          bookingId: null,
+          sessionStep: null,
+          hasBeforeMedia: false,
+          hasAfterMedia: false,
+        }),
+      }
+
+      return jsonOk(payload, 200)
+    }
+
+    // 3) Nothing relevant right now.
     const payload: ProSessionPayload = {
       ok: true,
       mode: 'IDLE',
       targetStep: null,
       booking: null,
+      eligibleBookings: null,
       center: { label: 'Start', action: 'NONE', href: null },
     }
 

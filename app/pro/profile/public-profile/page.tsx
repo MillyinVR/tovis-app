@@ -1,19 +1,21 @@
 // app/pro/profile/public-profile/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { MediaVisibility, MediaType } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { pickString } from '@/lib/pick'
 
 import ReviewsPanel from '../ReviewsPanel'
+import ServicesManagerSection from '../_sections/ServicesManagerSection'
 import EditProfileButton from './EditProfileButton'
+import EditPaymentSettingsButton from './EditPaymentSettingsButton'
+import type { PaymentCollectionTiming } from './EditPaymentSettingsButton'
 import ShareButton from './ShareButton'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import ProAccountMenu from './ProAccountMenu'
-import ServicesManagerSection from '../_sections/ServicesManagerSection'
-
-import { renderMediaUrls } from '@/lib/media/renderUrls'
-import { pickString } from '@/lib/pick'
-import { MediaVisibility, MediaType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,10 +37,15 @@ function pickTab(resolved: SearchParams | undefined): TabKey {
       : Array.isArray(resolved?.tab)
         ? resolved.tab[0]
         : undefined
+
   return raw === 'services' || raw === 'reviews' ? raw : 'portfolio'
 }
 
-function formatClientName(input: { userEmail?: string | null; firstName?: string | null; lastName?: string | null }) {
+function formatClientName(input: {
+  userEmail?: string | null
+  firstName?: string | null
+  lastName?: string | null
+}) {
   const email = (input.userEmail || '').trim()
   if (email) return email
 
@@ -52,13 +59,37 @@ function pickNonEmptyString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-function hasStoragePointers(m: { storageBucket: unknown; storagePath: unknown }): m is { storageBucket: string; storagePath: string } {
+function hasStoragePointers(m: {
+  storageBucket: unknown
+  storagePath: unknown
+}): m is { storageBucket: string; storagePath: string } {
   const b = pickString(m.storageBucket)
   const p = pickString(m.storagePath)
   return Boolean(b && p)
 }
 
-export default async function ProPublicProfilePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+type PaymentSettingsInitial = {
+  collectPaymentAt: PaymentCollectionTiming
+  acceptCash: boolean
+  acceptCardOnFile: boolean
+  acceptTapToPay: boolean
+  acceptVenmo: boolean
+  acceptZelle: boolean
+  acceptAppleCash: boolean
+  tipsEnabled: boolean
+  allowCustomTip: boolean
+  tipSuggestions: { label: string; percent: number }[] | null
+  venmoHandle: string | null
+  zelleHandle: string | null
+  appleCashHandle: string | null
+  paymentNote: string | null
+}
+
+export default async function ProPublicProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect(`/login?from=${encodeURIComponent(ROUTES.proPublicProfile)}`)
@@ -79,6 +110,26 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
       location: true,
       avatarUrl: true,
       professionType: true,
+
+      paymentSettings: {
+        select: {
+          collectPaymentAt: true,
+          acceptCash: true,
+          acceptCardOnFile: true,
+          acceptTapToPay: true,
+          acceptVenmo: true,
+          acceptZelle: true,
+          acceptAppleCash: true,
+          tipsEnabled: true,
+          allowCustomTip: true,
+          tipSuggestions: true,
+          venmoHandle: true,
+          zelleHandle: true,
+          appleCashHandle: true,
+          paymentNote: true,
+        },
+      },
+
       reviews: {
         orderBy: { createdAt: 'desc' },
         take: 200,
@@ -89,7 +140,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           body: true,
           createdAt: true,
           mediaAssets: {
-            // ✅ single source of truth: storage pointers (no url filter)
             select: {
               id: true,
               mediaType: true,
@@ -118,7 +168,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
 
   const [portfolioMedia, favoritesCount, serviceOptions] = await Promise.all([
     prisma.mediaAsset.findMany({
-      // ✅ Pro’s portfolio tab should show what’s marked as portfolio (even if PRO_CLIENT)
       where: {
         professionalId: pro.id,
         isFeaturedInPortfolio: true,
@@ -132,21 +181,18 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
         visibility: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
-
-        // canonical
         storageBucket: true,
         storagePath: true,
         thumbBucket: true,
         thumbPath: true,
-
-        // legacy fallback (renderUrls uses only if already http)
         url: true,
         thumbUrl: true,
-
         services: { select: { serviceId: true } },
       },
     }),
-    prisma.professionalFavorite.count({ where: { professionalId: pro.id } }),
+    prisma.professionalFavorite.count({
+      where: { professionalId: pro.id },
+    }),
     prisma.service.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
@@ -158,10 +204,12 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
   const reviewCount = pro.reviews.length
   const averageRating =
     reviewCount > 0
-      ? (pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount).toFixed(1)
+      ? (
+          pro.reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) /
+          reviewCount
+        ).toFixed(1)
       : null
 
-  // ✅ ReviewsPanel wants renderable URLs
   const reviewsForUI = await Promise.all(
     pro.reviews.map(async (rev) => {
       const clientName = formatClientName({
@@ -215,7 +263,6 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
   const subtitle = pro.professionType || 'Beauty professional'
   const location = pro.location?.trim() || null
 
-  // ✅ Portfolio tiles: render-safe src
   const portfolioTiles = (
     await Promise.all(
       portfolioMedia.map(async (m) => {
@@ -248,11 +295,58 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
     )
   ).filter((x): x is NonNullable<typeof x> => Boolean(x))
 
+  const paymentSettingsInitial: PaymentSettingsInitial | null = pro.paymentSettings
+    ? {
+        collectPaymentAt:
+          pro.paymentSettings.collectPaymentAt === 'AT_BOOKING'
+            ? 'AT_BOOKING'
+            : 'AFTER_SERVICE',
+        acceptCash: Boolean(pro.paymentSettings.acceptCash),
+        acceptCardOnFile: Boolean(pro.paymentSettings.acceptCardOnFile),
+        acceptTapToPay: Boolean(pro.paymentSettings.acceptTapToPay),
+        acceptVenmo: Boolean(pro.paymentSettings.acceptVenmo),
+        acceptZelle: Boolean(pro.paymentSettings.acceptZelle),
+        acceptAppleCash: Boolean(pro.paymentSettings.acceptAppleCash),
+        tipsEnabled: Boolean(pro.paymentSettings.tipsEnabled),
+        allowCustomTip: Boolean(pro.paymentSettings.allowCustomTip),
+        tipSuggestions: Array.isArray(pro.paymentSettings.tipSuggestions)
+          ? pro.paymentSettings.tipSuggestions
+              .map((row) => {
+                if (
+                  typeof row === 'object' &&
+                  row !== null &&
+                  'label' in row &&
+                  'percent' in row &&
+                  typeof row.label === 'string' &&
+                  typeof row.percent === 'number'
+                ) {
+                  return {
+                    label: row.label,
+                    percent: row.percent,
+                  }
+                }
+                return null
+              })
+              .filter(
+                (row): row is { label: string; percent: number } =>
+                  row !== null,
+              )
+          : null,
+        venmoHandle: pro.paymentSettings.venmoHandle ?? null,
+        zelleHandle: pro.paymentSettings.zelleHandle ?? null,
+        appleCashHandle: pro.paymentSettings.appleCashHandle ?? null,
+        paymentNote: pro.paymentSettings.paymentNote ?? null,
+      }
+    : null
+
   return (
     <main className="mx-auto max-w-5xl pb-6 font-sans">
       <section className="tovis-glass rounded-[18px] border border-white/10 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-3">
-          <Link href={ROUTES.proHome} className="text-[12px] font-black text-textSecondary hover:text-textPrimary">
+          <Link
+            href={ROUTES.proHome}
+            className="text-[12px] font-black text-textSecondary hover:text-textPrimary"
+          >
             ← Back
           </Link>
 
@@ -281,20 +375,30 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           <div className="grid h-18 w-18 place-items-center overflow-hidden rounded-full border border-white/10 bg-bgSecondary text-[26px] font-black text-textPrimary">
             {pro.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={pro.avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+              <img
+                src={pro.avatarUrl}
+                alt={displayName}
+                className="h-full w-full object-cover"
+              />
             ) : (
               (displayName || user.email || 'P').charAt(0).toUpperCase()
             )}
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[20px] font-black text-textPrimary">{displayName}</div>
+            <div className="truncate text-[20px] font-black text-textPrimary">
+              {displayName}
+            </div>
             <div className="mt-1 text-[13px] text-textSecondary">
               {subtitle}
               {location ? ` • ${location}` : ''}
             </div>
 
-            {pro.bio ? <div className="mt-3 max-w-160 text-[13px] text-textSecondary">{pro.bio}</div> : null}
+            {pro.bio ? (
+              <div className="mt-3 max-w-160 text-[13px] text-textSecondary">
+                {pro.bio}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-3">
@@ -304,16 +408,23 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                 bio: pro.bio ?? null,
                 location: pro.location ?? null,
                 avatarUrl: pro.avatarUrl ?? null,
-                professionType: pro.professionType ? String(pro.professionType) : null,
+                professionType: pro.professionType
+                  ? String(pro.professionType)
+                  : null,
                 handle: pro.handle ?? null,
                 isPremium: Boolean(pro.isPremium),
               }}
             />
+
+            <EditPaymentSettingsButton initial={paymentSettingsInitial} />
           </div>
         </div>
 
         <div className="mt-5 grid grid-cols-3 gap-3">
-          <Stat label="Rating" value={reviewCount ? averageRating || '–' : '–'} />
+          <Stat
+            label="Rating"
+            value={reviewCount ? averageRating || '–' : '–'}
+          />
           <Stat label="Reviews" value={String(reviewCount)} />
           <Stat label="Favorites" value={String(favoritesCount)} />
         </div>
@@ -349,10 +460,16 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
         <TabLink active={tab === 'portfolio'} href={ROUTES.proPublicProfile}>
           Portfolio
         </TabLink>
-        <TabLink active={tab === 'services'} href={`${ROUTES.proPublicProfile}?tab=services`}>
+        <TabLink
+          active={tab === 'services'}
+          href={`${ROUTES.proPublicProfile}?tab=services`}
+        >
           Services
         </TabLink>
-        <TabLink active={tab === 'reviews'} href={`${ROUTES.proPublicProfile}?tab=reviews`}>
+        <TabLink
+          active={tab === 'reviews'}
+          href={`${ROUTES.proPublicProfile}?tab=reviews`}
+        >
           Reviews
         </TabLink>
       </nav>
@@ -369,7 +486,9 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
                 <div className="grid h-12 w-12 place-items-center rounded-full border border-white/10 bg-bgPrimary/40 text-[22px] font-black">
                   +
                 </div>
-                <div className="text-[12px] font-extrabold text-textSecondary">Upload</div>
+                <div className="text-[12px] font-extrabold text-textSecondary">
+                  Upload
+                </div>
               </div>
             </Link>
 
@@ -381,18 +500,28 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
               >
                 <Link href={`/media/${m.id}`} className="absolute inset-0">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={m.src} alt={m.caption || 'Portfolio'} className="h-full w-full object-cover" />
+                  <img
+                    src={m.src}
+                    alt={m.caption || 'Portfolio'}
+                    className="h-full w-full object-cover"
+                  />
                 </Link>
 
                 <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1.5">
                   {m.isPrivate ? (
-                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">ONLY YOU</span>
+                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                      ONLY YOU
+                    </span>
                   ) : null}
                   {m.isEligibleForLooks ? (
-                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">LOOKS</span>
+                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                      LOOKS
+                    </span>
                   ) : null}
                   {m.isFeaturedInPortfolio ? (
-                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">PORTFOLIO</span>
+                    <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
+                      PORTFOLIO
+                    </span>
                   ) : null}
                 </div>
 
@@ -420,14 +549,20 @@ export default async function ProPublicProfilePage({ searchParams }: { searchPar
           </div>
 
           {portfolioTiles.length === 0 ? (
-            <div className="mt-3 text-[12px] text-textSecondary">No posts yet. Go ahead—feed the algorithm.</div>
+            <div className="mt-3 text-[12px] text-textSecondary">
+              No posts yet. Go ahead—feed the algorithm.
+            </div>
           ) : null}
         </section>
       ) : null}
 
       {tab === 'services' ? (
         <section className="pt-4">
-          <ServicesManagerSection variant="section" title={null} subtitle={null} />
+          <ServicesManagerSection
+            variant="section"
+            title={null}
+            subtitle={null}
+          />
         </section>
       ) : null}
 
@@ -450,18 +585,30 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[18px] border border-white/10 bg-bgSecondary p-3 text-center">
       <div className="text-[18px] font-black text-textPrimary">{value}</div>
-      <div className="mt-1 text-[11px] font-extrabold text-textSecondary">{label}</div>
+      <div className="mt-1 text-[11px] font-extrabold text-textSecondary">
+        {label}
+      </div>
     </div>
   )
 }
 
-function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function TabLink({
+  href,
+  active,
+  children,
+}: {
+  href: string
+  active: boolean
+  children: React.ReactNode
+}) {
   return (
     <Link
       href={href}
       className={[
         'border-b-2 px-3 py-3 text-[13px] font-black transition-colors',
-        active ? 'border-accentPrimary text-textPrimary' : 'border-transparent text-textSecondary hover:text-textPrimary',
+        active
+          ? 'border-accentPrimary text-textPrimary'
+          : 'border-transparent text-textSecondary hover:text-textPrimary',
       ].join(' ')}
     >
       {children}

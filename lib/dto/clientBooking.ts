@@ -1,6 +1,9 @@
 // lib/dto/clientBooking.ts
-import type { Prisma } from '@prisma/client'
-import { resolveApptTimeZone, type TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
+import { Prisma } from '@prisma/client'
+import {
+  resolveApptTimeZone,
+  type TimeZoneTruthSource,
+} from '@/lib/booking/timeZoneTruth'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
 
@@ -9,10 +12,19 @@ export type ClientBookingItemDTO = {
   type: 'BASE' | 'ADD_ON'
   serviceId: string
   name: string
-  price: string // decimal string
+  price: string
   durationMinutes: number
   parentItemId: string | null
   sortOrder: number
+}
+
+export type ClientBookingProductSaleDTO = {
+  id: string
+  productId: string | null
+  name: string
+  unitPrice: string
+  quantity: number
+  lineTotal: string
 }
 
 export type ClientBookingConsultationDTO = {
@@ -35,6 +47,20 @@ export type ClientBookingTimeZoneSource =
   | 'PRO'
   | 'FALLBACK'
 
+export type ClientBookingCheckoutDTO = {
+  subtotalSnapshot: string | null
+  serviceSubtotalSnapshot: string | null
+  productSubtotalSnapshot: string | null
+  tipAmount: string | null
+  taxAmount: string | null
+  discountAmount: string | null
+  totalAmount: string | null
+  checkoutStatus: string | null
+  selectedPaymentMethod: string | null
+  paymentAuthorizedAt: string | null
+  paymentCollectedAt: string | null
+}
+
 export type ClientBookingDTO = {
   id: string
   status: string | null
@@ -46,6 +72,8 @@ export type ClientBookingDTO = {
   bufferMinutes: number
 
   subtotalSnapshot: string | null
+
+  checkout: ClientBookingCheckoutDTO
 
   locationType: string | null
   locationId: string | null
@@ -79,6 +107,7 @@ export type ClientBookingDTO = {
   }
 
   items: ClientBookingItemDTO[]
+  productSales: ClientBookingProductSaleDTO[]
 
   hasUnreadAftercare: boolean
   hasPendingConsultationApproval: boolean
@@ -111,7 +140,7 @@ function pickFormattedAddress(snapshot: unknown): string | null {
 
 function decimalToString(v: unknown): string | null {
   if (v == null) return null
-  if (typeof v === 'string') return v
+  if (typeof v === "string") return v
   if (typeof v === 'number' && Number.isFinite(v)) return String(v)
   if (
     typeof v === 'object' &&
@@ -120,6 +149,20 @@ function decimalToString(v: unknown): string | null {
     return String((v as { toString: () => string }).toString())
   }
   return null
+}
+
+function decimalStringOrZero(v: unknown): string {
+  return decimalToString(v) ?? '0.00'
+}
+
+function multiplyMoneyString(unitPrice: unknown, quantity: unknown): string {
+  const unit = new Prisma.Decimal(decimalStringOrZero(unitPrice))
+  const qty =
+    typeof quantity === 'number' && Number.isFinite(quantity)
+      ? Math.max(0, Math.trunc(quantity))
+      : 0
+
+  return unit.mul(qty).toString()
 }
 
 function buildLocationLabel(args: {
@@ -167,6 +210,17 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
     finishedAt: true
 
     subtotalSnapshot: true
+    serviceSubtotalSnapshot: true
+    productSubtotalSnapshot: true
+    tipAmount: true
+    taxAmount: true
+    discountAmount: true
+    totalAmount: true
+    checkoutStatus: true
+    selectedPaymentMethod: true
+    paymentAuthorizedAt: true
+    paymentCollectedAt: true
+
     totalDurationMinutes: true
     bufferMinutes: true
 
@@ -217,7 +271,18 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
         serviceId: true
         service: { select: { name: true } }
       }
-      orderBy: { sortOrder: 'asc' }
+      orderBy: [{ sortOrder: 'asc' }]
+    }
+
+    productSales: {
+      select: {
+        id: true
+        productId: true
+        quantity: true
+        unitPrice: true
+        product: { select: { name: true } }
+      }
+      orderBy: [{ createdAt: 'asc' }]
     }
   }
 }>
@@ -239,12 +304,26 @@ export async function buildClientBookingDTO(input: {
       type,
       serviceId: String(it.serviceId),
       name: it.service?.name ?? 'Service',
-      price: decimalToString(it.priceSnapshot) ?? '0.00',
+      price: decimalStringOrZero(it.priceSnapshot),
       durationMinutes: Number(it.durationMinutesSnapshot ?? 0),
       parentItemId: it.parentItemId ? String(it.parentItemId) : null,
       sortOrder: Number(it.sortOrder ?? 0),
     }
   })
+
+  const productSales: ClientBookingProductSaleDTO[] = (b.productSales ?? []).map(
+    (sale) => ({
+      id: String(sale.id),
+      productId: sale.productId ? String(sale.productId) : null,
+      name: sale.product?.name ?? 'Product',
+      unitPrice: decimalStringOrZero(sale.unitPrice),
+      quantity:
+        typeof sale.quantity === 'number' && Number.isFinite(sale.quantity)
+          ? Math.max(0, Math.trunc(sale.quantity))
+          : 0,
+      lineTotal: multiplyMoneyString(sale.unitPrice, sale.quantity),
+    }),
+  )
 
   const baseItem = items.find((x) => x.type === 'BASE') ?? items[0] ?? null
   const baseName = baseItem?.name ?? (b.service?.name ?? 'Appointment')
@@ -303,7 +382,8 @@ export async function buildClientBookingDTO(input: {
         approvalNotes: b.consultationApproval?.notes ?? null,
         proposedTotal: decimalToString(b.consultationApproval?.proposedTotal),
         proposedServicesJson:
-          (b.consultationApproval?.proposedServicesJson ?? null) as Prisma.JsonValue | null,
+          (b.consultationApproval?.proposedServicesJson ??
+            null) as Prisma.JsonValue | null,
         approvedAt: b.consultationApproval?.approvedAt
           ? b.consultationApproval.approvedAt.toISOString()
           : null,
@@ -324,6 +404,27 @@ export async function buildClientBookingDTO(input: {
     bufferMinutes: Number(b.bufferMinutes ?? 0),
 
     subtotalSnapshot: decimalToString(b.subtotalSnapshot),
+
+    checkout: {
+      subtotalSnapshot: decimalToString(b.subtotalSnapshot),
+      serviceSubtotalSnapshot: decimalToString(
+        b.serviceSubtotalSnapshot ?? b.subtotalSnapshot,
+      ),
+      productSubtotalSnapshot: decimalToString(b.productSubtotalSnapshot),
+      tipAmount: decimalToString(b.tipAmount),
+      taxAmount: decimalToString(b.taxAmount),
+      discountAmount: decimalToString(b.discountAmount),
+      totalAmount: decimalToString(b.totalAmount),
+      checkoutStatus: b.checkoutStatus != null ? String(b.checkoutStatus) : null,
+      selectedPaymentMethod:
+        b.selectedPaymentMethod != null ? String(b.selectedPaymentMethod) : null,
+      paymentAuthorizedAt: b.paymentAuthorizedAt
+        ? b.paymentAuthorizedAt.toISOString()
+        : null,
+      paymentCollectedAt: b.paymentCollectedAt
+        ? b.paymentCollectedAt.toISOString()
+        : null,
+    },
 
     locationType: b.locationType != null ? String(b.locationType) : null,
     locationId: b.locationId ? String(b.locationId) : null,
@@ -353,12 +454,20 @@ export async function buildClientBookingDTO(input: {
         }
       : null,
 
-    display: { title, baseName, addOnNames, addOnCount: addOnNames.length },
+    display: {
+      title,
+      baseName,
+      addOnNames,
+      addOnCount: addOnNames.length,
+    },
 
     items,
+    productSales,
 
     hasUnreadAftercare: Boolean(input.unreadAftercare),
-    hasPendingConsultationApproval: Boolean(input.hasPendingConsultationApproval),
+    hasPendingConsultationApproval: Boolean(
+      input.hasPendingConsultationApproval,
+    ),
 
     consultation,
   }

@@ -1,17 +1,17 @@
 // app/client/bookings/[id]/page.tsx
 import type { ReactNode } from 'react'
-import { redirect, notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
-import { sanitizeTimeZone } from '@/lib/timeZone'
 import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 
-import ReviewSection from './ReviewSection'
-import ClientBookingActionsCard from './ClientBookingActionsCard'
-import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
+import ClientBookingActionsCard from './ClientBookingActionsCard'
+import ConsultationDecisionCard from './ConsultationDecisionCard'
+import ReviewSection from './ReviewSection'
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
 
@@ -19,6 +19,7 @@ export const dynamic = 'force-dynamic'
 
 type StepKey = 'overview' | 'consult' | 'aftercare'
 type StatusVariant = 'danger' | 'success' | 'warn' | 'info' | 'neutral'
+
 type PageParams = { id: string }
 type PageSearchParams = Record<string, string | string[] | undefined>
 
@@ -26,6 +27,25 @@ type LoadedClientBookingPage = Awaited<ReturnType<typeof loadClientBookingPage>>
 type LoadedAftercare = LoadedClientBookingPage['aftercare']
 type LoadedExistingReview = LoadedClientBookingPage['existingReview']
 type LoadedMedia = LoadedClientBookingPage['media'][number]
+type LoadedPaymentSettings = LoadedClientBookingPage['paymentSettings']
+type LoadedReviewMedia =
+  NonNullable<LoadedExistingReview>['mediaAssets'][number]
+
+type SafeExistingReview = {
+  id: string
+  rating: number
+  headline: string | null
+  body: string | null
+  mediaAssets: Array<{
+    id: string
+    url: string
+    thumbUrl: string | null
+    mediaType: LoadedReviewMedia['mediaType']
+    createdAt: string
+    isFeaturedInPortfolio: boolean
+    isEligibleForLooks: boolean
+  }>
+} | null
 
 type AftercareRebookInfo =
   | { mode: 'BOOKED_NEXT_APPOINTMENT'; label: string }
@@ -33,140 +53,27 @@ type AftercareRebookInfo =
   | { mode: 'RECOMMENDED_DATE'; label: string }
   | { mode: 'NONE'; label: null }
 
+type AcceptedMethod = {
+  key: string
+  label: string
+  handle: string | null
+}
+
 const NO_REBOOK_INFO: AftercareRebookInfo = { mode: 'NONE', label: null }
 
 function normalizeStep(raw: unknown): StepKey {
-  const s = String(raw || '').toLowerCase().trim()
-  if (s === 'consult' || s === 'consultation') return 'consult'
-  if (s === 'aftercare') return 'aftercare'
+  const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (normalized === 'consult' || normalized === 'consultation') return 'consult'
+  if (normalized === 'aftercare') return 'aftercare'
   return 'overview'
 }
 
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
-function toDate(v: unknown): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(String(v))
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-function formatMoneyFromDecimalString(v: unknown): string | null {
-  if (v == null) return null
-  if (typeof v !== 'string') return null
-  const s = v.trim()
-  if (!s) return null
-  const n = Number(s)
-  if (Number.isFinite(n)) return `$${n.toFixed(2)}`
-  return s.startsWith('$') ? s : `$${s}`
-}
-
-function formatWhenInTimeZone(d: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(d)
-}
-
-function formatDateRangeInTimeZone(start: Date, end: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const fmt = new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-  return `${fmt.format(start)} – ${fmt.format(end)}`
-}
-
-function friendlyLocationType(v: unknown) {
-  const s = upper(v)
-  if (s === 'SALON') return 'In salon'
-  if (s === 'MOBILE') return 'Mobile'
-  return null
-}
-
-function friendlySource(v: unknown) {
-  const s = upper(v)
-  if (s === 'DISCOVERY') return 'Looks'
-  if (s === 'REQUESTED') return 'Requested'
-  if (s === 'AFTERCARE') return 'Aftercare rebook'
-  return null
-}
-
-function statusPillVariant(
-  statusRaw: unknown,
-): Exclude<StatusVariant, 'neutral'> {
-  const s = upper(statusRaw)
-  if (s === 'CANCELLED') return 'danger'
-  if (s === 'COMPLETED') return 'success'
-  if (s === 'PENDING') return 'warn'
-  return 'info'
-}
-
-function statusMessage(statusRaw: unknown): {
-  title: string
-  body: string
-  variant: StatusVariant
-} {
-  const s = upper(statusRaw)
-  const M = COPY.bookings.status.messages
-
-  if (s === 'PENDING') {
-    return { title: M.pending.title, body: M.pending.body, variant: 'warn' }
-  }
-  if (s === 'ACCEPTED') {
-    return { title: M.accepted.title, body: M.accepted.body, variant: 'info' }
-  }
-  if (s === 'COMPLETED') {
-    return {
-      title: M.completed.title,
-      body: M.completed.body,
-      variant: 'success',
-    }
-  }
-  if (s === 'CANCELLED') {
-    return {
-      title: M.cancelled.title,
-      body: M.cancelled.body,
-      variant: 'danger',
-    }
-  }
-
-  return { title: M.fallback.title, body: M.fallback.body, variant: 'neutral' }
-}
-
-function pillClassByVariant(_variant: Exclude<StatusVariant, 'neutral'>) {
-  return 'border border-white/10 bg-surfaceGlass text-textPrimary'
-}
-
-function alertClassByVariant(variant: StatusVariant) {
-  if (variant === 'neutral') return 'tovis-glass-soft border border-white/10'
-  return 'tovis-glass border border-white/10'
-}
-
-function tabClass(active: boolean) {
-  return cn(
-    'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
-    'border border-white/10',
-    active
-      ? 'bg-accentPrimary text-bgPrimary shadow-sm'
-      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
-  )
-}
-
-function tabDisabledClass() {
-  return cn(
-    'inline-flex items-center rounded-full px-4 py-2 text-xs font-black',
-    'border border-white/10 bg-bgPrimary text-textSecondary opacity-50 cursor-not-allowed select-none',
-  )
+function firstSearchParam(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value[0]
+  return undefined
 }
 
 async function resolvePageValue<T>(
@@ -180,12 +87,263 @@ async function resolvePageValue<T>(
   }
 }
 
-function firstSearchParam(
-  value: string | string[] | undefined,
-): string | undefined {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value[0]
-  return undefined
+function upper(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
+function toDate(value: unknown): Date | null {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(String(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatMoneyFromUnknown(value: unknown): string | null {
+  if (value == null) return null
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `$${value.toFixed(2)}`
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return `$${parsed.toFixed(2)}`
+    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const maybeToString = value.toString
+    if (typeof maybeToString === 'function') {
+      const result = maybeToString.call(value)
+      if (typeof result === 'string') {
+        return formatMoneyFromUnknown(result)
+      }
+    }
+  }
+
+  return null
+}
+
+function formatWhenInTimeZone(date: Date, timeZone: string): string {
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: tz,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function formatDateRangeInTimeZone(
+  start: Date,
+  end: Date,
+  timeZone: string,
+): string {
+  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    timeZone: tz,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+
+  return `${formatter.format(start)} – ${formatter.format(end)}`
+}
+
+function friendlyLocationType(value: unknown): string | null {
+  const normalized = upper(value)
+  if (normalized === 'SALON') return 'In salon'
+  if (normalized === 'MOBILE') return 'Mobile'
+  return null
+}
+
+function friendlySource(value: unknown): string | null {
+  const normalized = upper(value)
+  if (normalized === 'DISCOVERY') return 'Looks'
+  if (normalized === 'REQUESTED') return 'Requested'
+  if (normalized === 'AFTERCARE') return 'Aftercare rebook'
+  return null
+}
+
+function friendlyCheckoutStatus(value: unknown): string | null {
+  const normalized = upper(value)
+  if (!normalized) return null
+
+  if (normalized === 'NOT_READY') return 'Not ready'
+  if (normalized === 'READY') return 'Ready'
+  if (normalized === 'PARTIALLY_PAID') return 'Partially paid'
+  if (normalized === 'PAID') return 'Paid'
+  if (normalized === 'WAIVED') return 'Waived'
+
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function friendlyPaymentMethod(value: unknown): string | null {
+  const normalized = upper(value)
+  if (!normalized) return null
+
+  if (normalized === 'CASH') return 'Cash'
+  if (normalized === 'CARD_ON_FILE') return 'Card on file'
+  if (normalized === 'TAP_TO_PAY') return 'Tap to pay'
+  if (normalized === 'VENMO') return 'Venmo'
+  if (normalized === 'ZELLE') return 'Zelle'
+  if (normalized === 'APPLE_CASH') return 'Apple Cash'
+
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function friendlyCollectionTiming(value: unknown): string | null {
+  const normalized = upper(value)
+  if (!normalized) return null
+  if (normalized === 'AT_BOOKING') return 'At booking'
+  if (normalized === 'AFTER_SERVICE') return 'After service'
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function buildAcceptedMethods(
+  paymentSettings: LoadedPaymentSettings,
+): AcceptedMethod[] {
+  if (!paymentSettings) return []
+
+  const methods: AcceptedMethod[] = []
+
+  if (paymentSettings.acceptCash) {
+    methods.push({ key: 'cash', label: 'Cash', handle: null })
+  }
+
+  if (paymentSettings.acceptCardOnFile) {
+    methods.push({ key: 'card_on_file', label: 'Card on file', handle: null })
+  }
+
+  if (paymentSettings.acceptTapToPay) {
+    methods.push({ key: 'tap_to_pay', label: 'Tap to pay', handle: null })
+  }
+
+  if (paymentSettings.acceptVenmo) {
+    methods.push({
+      key: 'venmo',
+      label: 'Venmo',
+      handle: paymentSettings.venmoHandle ?? null,
+    })
+  }
+
+  if (paymentSettings.acceptZelle) {
+    methods.push({
+      key: 'zelle',
+      label: 'Zelle',
+      handle: paymentSettings.zelleHandle ?? null,
+    })
+  }
+
+  if (paymentSettings.acceptAppleCash) {
+    methods.push({
+      key: 'apple_cash',
+      label: 'Apple Cash',
+      handle: paymentSettings.appleCashHandle ?? null,
+    })
+  }
+
+  return methods
+}
+
+function statusPillVariant(
+  statusRaw: unknown,
+): Exclude<StatusVariant, 'neutral'> {
+  const normalized = upper(statusRaw)
+  if (normalized === 'CANCELLED') return 'danger'
+  if (normalized === 'COMPLETED') return 'success'
+  if (normalized === 'PENDING') return 'warn'
+  return 'info'
+}
+
+function statusMessage(statusRaw: unknown): {
+  title: string
+  body: string
+  variant: StatusVariant
+} {
+  const normalized = upper(statusRaw)
+  const messages = COPY.bookings.status.messages
+
+  if (normalized === 'PENDING') {
+    return {
+      title: messages.pending.title,
+      body: messages.pending.body,
+      variant: 'warn',
+    }
+  }
+
+  if (normalized === 'ACCEPTED') {
+    return {
+      title: messages.accepted.title,
+      body: messages.accepted.body,
+      variant: 'info',
+    }
+  }
+
+  if (normalized === 'COMPLETED') {
+    return {
+      title: messages.completed.title,
+      body: messages.completed.body,
+      variant: 'success',
+    }
+  }
+
+  if (normalized === 'CANCELLED') {
+    return {
+      title: messages.cancelled.title,
+      body: messages.cancelled.body,
+      variant: 'danger',
+    }
+  }
+
+  return {
+    title: messages.fallback.title,
+    body: messages.fallback.body,
+    variant: 'neutral',
+  }
+}
+
+function pillClassByVariant(_variant: Exclude<StatusVariant, 'neutral'>): string {
+  return 'border border-white/10 bg-surfaceGlass text-textPrimary'
+}
+
+function alertClassByVariant(variant: StatusVariant): string {
+  if (variant === 'neutral') return 'tovis-glass-soft border border-white/10'
+  return 'tovis-glass border border-white/10'
+}
+
+function tabClass(active: boolean): string {
+  return cn(
+    'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
+    'border border-white/10',
+    active
+      ? 'bg-accentPrimary text-bgPrimary shadow-sm'
+      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+  )
+}
+
+function tabDisabledClass(): string {
+  return cn(
+    'inline-flex cursor-not-allowed select-none items-center rounded-full px-4 py-2 text-xs font-black opacity-50',
+    'border border-white/10 bg-bgPrimary text-textSecondary',
+  )
 }
 
 function getAftercareRebookInfo(
@@ -194,14 +352,14 @@ function getAftercareRebookInfo(
 ): AftercareRebookInfo {
   if (!aftercare) return NO_REBOOK_INFO
 
-  const modeRaw = upper(aftercare.rebookMode || 'NONE')
+  const mode = upper(aftercare.rebookMode)
 
-  if (modeRaw === 'BOOKED_NEXT_APPOINTMENT') {
-    const d = toDate(aftercare.rebookedFor)
-    return d
+  if (mode === 'BOOKED_NEXT_APPOINTMENT') {
+    const bookedFor = toDate(aftercare.rebookedFor)
+    return bookedFor
       ? {
           mode: 'BOOKED_NEXT_APPOINTMENT',
-          label: `Next appointment booked: ${formatWhenInTimeZone(d, timeZone)}`,
+          label: `Next appointment booked: ${formatWhenInTimeZone(bookedFor, timeZone)}`,
         }
       : {
           mode: 'BOOKED_NEXT_APPOINTMENT',
@@ -209,14 +367,14 @@ function getAftercareRebookInfo(
         }
   }
 
-  if (modeRaw === 'RECOMMENDED_WINDOW') {
-    const s = toDate(aftercare.rebookWindowStart)
-    const e = toDate(aftercare.rebookWindowEnd)
+  if (mode === 'RECOMMENDED_WINDOW') {
+    const start = toDate(aftercare.rebookWindowStart)
+    const end = toDate(aftercare.rebookWindowEnd)
 
-    if (s && e) {
+    if (start && end) {
       return {
         mode: 'RECOMMENDED_WINDOW',
-        label: `Recommended rebook window: ${formatDateRangeInTimeZone(s, e, timeZone)}`,
+        label: `Recommended rebook window: ${formatDateRangeInTimeZone(start, end, timeZone)}`,
       }
     }
 
@@ -226,23 +384,23 @@ function getAftercareRebookInfo(
     }
   }
 
-  if (modeRaw === 'NONE') return NO_REBOOK_INFO
+  if (mode === 'NONE') return NO_REBOOK_INFO
 
-  const legacy = toDate(aftercare.rebookedFor)
-  if (legacy) {
+  const legacyDate = toDate(aftercare.rebookedFor)
+  if (legacyDate) {
     return {
       mode: 'RECOMMENDED_DATE',
-      label: `Recommended next visit: ${formatWhenInTimeZone(legacy, timeZone)}`,
+      label: `Recommended next visit: ${formatWhenInTimeZone(legacyDate, timeZone)}`,
     }
   }
 
   return NO_REBOOK_INFO
 }
 
-function pickToken(aftercare: LoadedAftercare): string | null {
+function pickAftercareToken(aftercare: LoadedAftercare): string | null {
   if (!aftercare) return null
-  const t = aftercare.publicToken
-  return typeof t === 'string' && t.trim() ? t.trim() : null
+  const token = aftercare.publicToken
+  return typeof token === 'string' && token.trim() ? token.trim() : null
 }
 
 function hasUsableMediaUrl(
@@ -252,17 +410,14 @@ function hasUsableMediaUrl(
 }
 
 function hasUsableReviewMediaUrl(
-  media:
-    | NonNullable<LoadedExistingReview>['mediaAssets'][number]
-    | null
-    | undefined,
-): media is NonNullable<LoadedExistingReview>['mediaAssets'][number] & {
-  url: string
-} {
+  media: LoadedReviewMedia | null | undefined,
+): media is LoadedReviewMedia & { url: string } {
   return typeof media?.url === 'string' && media.url.trim().length > 0
 }
 
-function toSafeExistingReview(existingReview: LoadedExistingReview) {
+function toSafeExistingReview(
+  existingReview: LoadedExistingReview,
+): SafeExistingReview {
   if (!existingReview?.id) return null
 
   return {
@@ -270,16 +425,16 @@ function toSafeExistingReview(existingReview: LoadedExistingReview) {
     rating: existingReview.rating,
     headline: existingReview.headline,
     body: existingReview.body,
-    mediaAssets: (existingReview.mediaAssets || [])
+    mediaAssets: existingReview.mediaAssets
       .filter(hasUsableReviewMediaUrl)
-      .map((m) => ({
-        id: m.id,
-        url: m.url,
-        thumbUrl: m.thumbUrl,
-        mediaType: m.mediaType,
-        createdAt: m.createdAt.toISOString(),
-        isFeaturedInPortfolio: m.isFeaturedInPortfolio,
-        isEligibleForLooks: m.isEligibleForLooks,
+      .map((mediaItem) => ({
+        id: mediaItem.id,
+        url: mediaItem.url,
+        thumbUrl: mediaItem.thumbUrl,
+        mediaType: mediaItem.mediaType,
+        createdAt: mediaItem.createdAt.toISOString(),
+        isFeaturedInPortfolio: mediaItem.isFeaturedInPortfolio,
+        isEligibleForLooks: mediaItem.isEligibleForLooks,
       })),
   }
 }
@@ -294,9 +449,8 @@ function SectionCard(props: {
   return (
     <section
       className={cn(
-        'rounded-card border border-white/10 p-4',
+        'rounded-card border border-white/10 p-4 shadow-[0_14px_48px_rgba(0,0,0,0.35)]',
         'tovis-glass',
-        'shadow-[0_14px_48px_rgba(0,0,0,0.35)]',
         props.className,
       )}
     >
@@ -311,6 +465,7 @@ function SectionCard(props: {
             </div>
           ) : null}
         </div>
+
         {props.right ? <div className="shrink-0">{props.right}</div> : null}
       </div>
 
@@ -327,29 +482,233 @@ function TinyMetaPill({ children }: { children: ReactNode }) {
   )
 }
 
-function computePendingConsultation(raw: {
-  status: unknown
-  sessionStep: unknown
-  finishedAt: Date | null
-  consultationApproval?: { status: unknown } | null
+function SummaryRow(props: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-white/10 py-2 last:border-b-0 last:pb-0 first:pt-0">
+      <div className="text-[12px] font-black text-textSecondary">
+        {props.label}
+      </div>
+      <div className="text-right text-[13px] font-semibold text-textPrimary">
+        {props.value}
+      </div>
+    </div>
+  )
+}
+
+function MediaStrip(props: {
+  title: string
+  items: Array<LoadedMedia & { url: string }>
 }) {
-  const status = upper(raw.status)
-  if (status === 'CANCELLED' || status === 'COMPLETED') return false
-  if (raw.finishedAt) return false
+  if (props.items.length === 0) return null
 
-  const step = upper(raw.sessionStep)
-  if (step === 'CONSULTATION_PENDING_CLIENT') return true
+  return (
+    <div>
+      <div className="mb-2 text-[11px] font-black text-textSecondary">
+        {props.title}
+      </div>
+      <div className="looksNoScrollbar flex gap-2 overflow-x-auto pb-1">
+        {props.items.map((mediaItem) => {
+          const previewSrc =
+            typeof mediaItem.thumbUrl === 'string' && mediaItem.thumbUrl.trim()
+              ? mediaItem.thumbUrl
+              : mediaItem.url
 
-  const approval = upper(raw.consultationApproval?.status)
-  const PENDING_SET = new Set([
-    'PENDING',
-    'PENDING_CLIENT',
-    'PENDING_CLIENT_APPROVAL',
-    'AWAITING_CLIENT',
-    'WAITING_CLIENT',
-    'SENT',
-  ])
-  return PENDING_SET.has(approval)
+          return (
+            <a
+              key={mediaItem.id}
+              href={mediaItem.url}
+              className="block h-32 w-32 shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
+            >
+              <img
+                src={previewSrc}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            </a>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ServiceBreakdownCard(props: {
+  items: Awaited<ReturnType<typeof buildClientBookingDTO>>['items']
+  addOnCount: number
+}) {
+  if (props.items.length === 0) return null
+
+  return (
+    <div className="grid gap-2">
+      {props.items.map((item) => {
+        const itemName =
+          item.name || (item.type === 'ADD_ON' ? 'Add-on' : 'Service')
+        const priceLabel = formatMoneyFromUnknown(item.price)
+        const durationLabel =
+          item.durationMinutes > 0 ? `${item.durationMinutes} min` : null
+
+        return (
+          <div
+            key={item.id}
+            className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-[14px] font-black text-textPrimary">
+                    {itemName}
+                  </div>
+                  <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
+                    {item.type === 'ADD_ON' ? 'Add-on' : 'Base'}
+                  </span>
+                  {durationLabel ? (
+                    <span className="text-[11px] font-semibold text-textSecondary">
+                      · {durationLabel}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="shrink-0 text-[13px] font-black text-textPrimary">
+                {priceLabel || COPY.common.emDash}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      {props.addOnCount > 0 ? (
+        <div className="pt-1 text-[11px] font-semibold text-textSecondary">
+          Includes base service plus {props.addOnCount} add-on
+          {props.addOnCount === 1 ? '' : 's'}.
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PurchasedProductsCard(props: {
+  productSales: Awaited<ReturnType<typeof buildClientBookingDTO>>['productSales']
+}) {
+  if (props.productSales.length === 0) return null
+
+  return (
+    <div className="grid gap-2">
+      {props.productSales.map((sale) => (
+        <div
+          key={sale.id}
+          className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[14px] font-black text-textPrimary">
+                {sale.name || 'Product'}
+              </div>
+              <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+                Qty {sale.quantity}
+              </div>
+            </div>
+
+            <div className="shrink-0 text-right">
+              <div className="text-[12px] font-semibold text-textSecondary">
+                {formatMoneyFromUnknown(sale.unitPrice) || COPY.common.emDash} each
+              </div>
+              <div className="text-[13px] font-black text-textPrimary">
+                {formatMoneyFromUnknown(sale.lineTotal) || COPY.common.emDash}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ProductRecommendationsCard(props: {
+  aftercare: LoadedAftercare
+}) {
+  const recommendedProducts = props.aftercare?.recommendedProducts ?? []
+
+  if (recommendedProducts.length === 0) {
+    return (
+      <div className="text-[12px] font-semibold text-textSecondary">
+        No product recommendations were added yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-2">
+      {recommendedProducts.map((recommendation) => {
+        const productName =
+          recommendation.product?.name ??
+          recommendation.externalName ??
+          'Recommended product'
+
+        const productBrand = recommendation.product?.brand?.trim() || null
+        const priceLabel = formatMoneyFromUnknown(
+          recommendation.product?.retailPrice,
+        )
+        const href =
+          typeof recommendation.externalUrl === 'string' &&
+          recommendation.externalUrl.trim()
+            ? recommendation.externalUrl.trim()
+            : null
+
+        const content = (
+          <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[14px] font-black text-textPrimary">
+                  {productName}
+                </div>
+
+                {productBrand ? (
+                  <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+                    {productBrand}
+                  </div>
+                ) : null}
+
+                {recommendation.note ? (
+                  <div className="mt-2 whitespace-pre-wrap text-[12px] leading-snug text-textPrimary">
+                    {recommendation.note}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 text-right">
+                {priceLabel ? (
+                  <div className="text-[12px] font-black text-textPrimary">
+                    {priceLabel}
+                  </div>
+                ) : null}
+
+                {href ? (
+                  <div className="mt-1 text-[11px] font-semibold text-accentPrimary">
+                    View
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )
+
+        return href ? (
+          <a
+            key={recommendation.id}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {content}
+          </a>
+        ) : (
+          <div key={recommendation.id}>{content}</div>
+        )
+      })}
+    </div>
+  )
 }
 
 export default async function ClientBookingPage(props: {
@@ -362,10 +721,13 @@ export default async function ClientBookingPage(props: {
   const bookingId = resolvedParams.id.trim()
   if (!bookingId) notFound()
 
-  const sp = await resolvePageValue<PageSearchParams>(props.searchParams, {})
-  const step = normalizeStep(firstSearchParam(sp.step))
+  const resolvedSearchParams = await resolvePageValue<PageSearchParams>(
+    props.searchParams,
+    {},
+  )
+  const step = normalizeStep(firstSearchParam(resolvedSearchParams.step))
 
-  const { user, raw, aftercare, existingReview, media } =
+  const { user, raw, aftercare, existingReview, media, paymentSettings } =
     await loadClientBookingPage(bookingId)
 
   const clientId = user.clientProfile?.id
@@ -375,15 +737,20 @@ export default async function ClientBookingPage(props: {
     )
   }
 
-  const validMedia = (media || []).filter(hasUsableMediaUrl)
+  const validMedia = media.filter(hasUsableMediaUrl)
   const beforeMedia = validMedia.filter(
-    (m) => String(m.phase || '').toUpperCase() === 'BEFORE',
+    (mediaItem) => upper(mediaItem.phase) === 'BEFORE',
   )
   const afterMedia = validMedia.filter(
-    (m) => String(m.phase || '').toUpperCase() === 'AFTER',
+    (mediaItem) => upper(mediaItem.phase) === 'AFTER',
   )
 
-  const hasPendingConsultationApproval = computePendingConsultation(raw)
+  const hasPendingConsultationApproval =
+    upper(raw.status) !== 'CANCELLED' &&
+    upper(raw.status) !== 'COMPLETED' &&
+    !raw.finishedAt &&
+    (upper(raw.sessionStep) === 'CONSULTATION_PENDING_CLIENT' ||
+      upper(raw.consultationApproval?.status) === 'PENDING')
 
   const booking = await buildClientBookingDTO({
     booking: raw,
@@ -391,14 +758,20 @@ export default async function ClientBookingPage(props: {
     hasPendingConsultationApproval,
   })
 
-  const vm = buildBookingViewModel({ step, booking, raw, aftercare })
+  const viewModel = buildBookingViewModel({
+    step,
+    booking,
+    raw,
+    aftercare,
+  })
 
   const baseHref = `/client/bookings/${encodeURIComponent(booking.id)}`
 
-  if (step === 'consult' && !vm.canShowConsultTab) {
+  if (step === 'consult' && !viewModel.canShowConsultTab) {
     redirect(`${baseHref}?step=overview`)
   }
-  if (step === 'aftercare' && !vm.canShowAftercareTab) {
+
+  if (step === 'aftercare' && !viewModel.canShowAftercareTab) {
     redirect(`${baseHref}?step=overview`)
   }
 
@@ -406,7 +779,7 @@ export default async function ClientBookingPage(props: {
   if (step === 'aftercare' && aftercare?.id) {
     const { prisma } = await import('@/lib/prisma')
 
-    const unread = await prisma.clientNotification.findFirst({
+    const unreadNotification = await prisma.clientNotification.findFirst({
       where: {
         clientId,
         type: 'AFTERCARE',
@@ -417,9 +790,9 @@ export default async function ClientBookingPage(props: {
       select: { id: true },
     })
 
-    showUnreadAftercareBadge = Boolean(unread)
+    showUnreadAftercareBadge = Boolean(unreadNotification)
 
-    if (unread) {
+    if (unreadNotification) {
       await prisma.clientNotification.updateMany({
         where: {
           clientId,
@@ -434,68 +807,110 @@ export default async function ClientBookingPage(props: {
     }
   }
 
-  const appointmentTz = sanitizeTimeZone(booking.timeZone, 'UTC')
+  const appointmentTimeZone = sanitizeTimeZone(booking.timeZone, 'UTC')
   const scheduled = toDate(booking.scheduledFor)
   const whenLabel = scheduled
-    ? formatWhenInTimeZone(scheduled, appointmentTz)
+    ? formatWhenInTimeZone(scheduled, appointmentTimeZone)
     : COPY.common.unknownTime
 
-  const pillVariant = statusPillVariant(booking.status)
-  const msg = statusMessage(booking.status)
+  const statusVariant = statusPillVariant(booking.status)
+  const statusInfo = statusMessage(booking.status)
+  const statusUpper = upper(booking.status)
 
   const durationMinutes =
-    typeof booking.totalDurationMinutes === 'number' &&
-    booking.totalDurationMinutes > 0
-      ? booking.totalDurationMinutes
-      : null
+    booking.totalDurationMinutes > 0 ? booking.totalDurationMinutes : null
 
-  const itemsSubtotal = booking.items.reduce(
-    (sum, it) => sum + (Number(it.price) || 0),
-    0,
+  const itemSubtotal = booking.items.reduce((sum, item) => {
+    const numericPrice = Number(item.price)
+    return Number.isFinite(numericPrice) ? sum + numericPrice : sum
+  }, 0)
+
+  const hasItemPrices = booking.items.some((item) => {
+    const numericPrice = Number(item.price)
+    return Number.isFinite(numericPrice)
+  })
+
+  const subtotalLabel = hasItemPrices
+    ? `$${itemSubtotal.toFixed(2)}`
+    : formatMoneyFromUnknown(booking.subtotalSnapshot)
+
+  const serviceSubtotalLabel =
+    formatMoneyFromUnknown(booking.checkout.serviceSubtotalSnapshot) ||
+    subtotalLabel ||
+    COPY.common.notProvided
+
+  const productSubtotalLabel = formatMoneyFromUnknown(
+    booking.checkout.productSubtotalSnapshot,
   )
-  const hasItemPrices = booking.items.some((it) =>
-    Number.isFinite(Number(it.price)),
+
+  const discountLabel = formatMoneyFromUnknown(booking.checkout.discountAmount)
+  const taxLabel = formatMoneyFromUnknown(booking.checkout.taxAmount)
+  const tipLabel = formatMoneyFromUnknown(booking.checkout.tipAmount)
+
+  const finalTotalLabel =
+    formatMoneyFromUnknown(booking.checkout.totalAmount) ||
+    serviceSubtotalLabel ||
+    COPY.common.notProvided
+
+  const checkoutStatusLabel = friendlyCheckoutStatus(
+    booking.checkout.checkoutStatus,
   )
-  const breakdownTotalLabel = hasItemPrices
-    ? `$${itemsSubtotal.toFixed(2)}`
-    : formatMoneyFromDecimalString(booking.subtotalSnapshot)
+  const selectedPaymentMethodLabel = friendlyPaymentMethod(
+    booking.checkout.selectedPaymentMethod,
+  )
+
+  const paymentAuthorizedAt = toDate(booking.checkout.paymentAuthorizedAt)
+  const paymentCollectedAt = toDate(booking.checkout.paymentCollectedAt)
+
+  const paymentAuthorizedLabel = paymentAuthorizedAt
+    ? formatWhenInTimeZone(paymentAuthorizedAt, appointmentTimeZone)
+    : null
+
+  const paymentCollectedLabel = paymentCollectedAt
+    ? formatWhenInTimeZone(paymentCollectedAt, appointmentTimeZone)
+    : null
+
+  const collectionTimingLabel = friendlyCollectionTiming(
+    paymentSettings?.collectPaymentAt,
+  )
+  const acceptedMethods = buildAcceptedMethods(paymentSettings)
 
   const modeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
 
-  const statusUpper = upper(booking.status)
-  const showConsultationApproval = Boolean(vm.showConsultationApproval)
-
-  const rebookInfo = getAftercareRebookInfo(aftercare, appointmentTz)
-  const aftercareToken = pickToken(aftercare)
-  const showRebookCTA = statusUpper === 'COMPLETED' && Boolean(aftercareToken)
-
-  const consultNotes = String(
+  const consultationNotes = String(
     booking.consultation?.approvalNotes ||
       booking.consultation?.consultationNotes ||
       '',
   )
+
   const proposedTotalLabel =
-    formatMoneyFromDecimalString(booking.consultation?.proposedTotal) ||
-    formatMoneyFromDecimalString(booking.subtotalSnapshot) ||
+    formatMoneyFromUnknown(booking.consultation?.proposedTotal) ||
+    formatMoneyFromUnknown(booking.subtotalSnapshot) ||
     null
 
-  const proEmail =
-    raw.professional?.user?.email && raw.professional.user.email.trim()
+  const rebookInfo = getAftercareRebookInfo(aftercare, appointmentTimeZone)
+  const aftercareToken = pickAftercareToken(aftercare)
+  const showRebookCTA =
+    statusUpper === 'COMPLETED' && typeof aftercareToken === 'string'
+
+  const professionalEmail =
+    typeof raw.professional?.user?.email === 'string' &&
+    raw.professional.user.email.trim()
       ? raw.professional.user.email
       : null
 
-  const proLabel =
+  const professionalLabel =
     booking.professional?.businessName ||
-    proEmail ||
+    professionalEmail ||
     COPY.common.professionalFallback
 
   const title = booking.display?.title || COPY.bookings.titleFallback
-  const locLine = booking.locationLabel || ''
+  const locationLine = booking.locationLabel || ''
 
+  const showConsultationApproval = Boolean(viewModel.showConsultationApproval)
   const consultApprovalMode = step === 'consult' && showConsultationApproval
-  const shouldShowReview =
-    statusUpper === 'COMPLETED' && step === 'aftercare'
+  const shouldShowReview = statusUpper === 'COMPLETED' && step === 'aftercare'
 
   const safeExistingReview = toSafeExistingReview(existingReview)
 
@@ -516,13 +931,69 @@ export default async function ClientBookingPage(props: {
       ? booking.source
       : undefined
 
+  const renderConsultationSection = (showDecisionCard: boolean) => (
+    <SectionCard
+      title={COPY.bookings.consultation.header}
+      subtitle="Notes and consultation details"
+      right={
+        showConsultationApproval ? (
+          <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+            {COPY.bookings.consultation.approvalNeeded}
+          </span>
+        ) : null
+      }
+    >
+      <div className="grid gap-3">
+        <div>
+          <div className="text-[11px] font-black text-textSecondary">
+            {COPY.bookings.consultation.notesLabel}
+          </div>
+          <div className="mt-1 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
+            {consultationNotes.trim()
+              ? consultationNotes
+              : COPY.bookings.consultation.noNotes}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <TinyMetaPill>
+            <span className="text-textSecondary">
+              {COPY.bookings.consultation.proposedTotalLabel}{' '}
+            </span>
+            {proposedTotalLabel || COPY.common.notProvided}
+          </TinyMetaPill>
+
+          <TinyMetaPill>
+            <span className="text-textSecondary">
+              {COPY.bookings.consultation.timesShownIn}{' '}
+            </span>
+            {appointmentTimeZone}
+          </TinyMetaPill>
+        </div>
+
+        {showDecisionCard && showConsultationApproval ? (
+          <ConsultationDecisionCard
+            bookingId={booking.id}
+            appointmentTz={appointmentTimeZone}
+            notes={consultationNotes}
+            proposedTotalLabel={proposedTotalLabel}
+            proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
+          />
+        ) : (
+          <div className="text-[12px] font-semibold text-textSecondary">
+            {COPY.bookings.consultation.noApprovalNeeded}
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  )
+
   return (
     <main className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">
       <section
         className={cn(
-          'rounded-card border border-white/10 p-5',
+          'rounded-card border border-white/10 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.45)]',
           'tovis-glass',
-          'shadow-[0_18px_60px_rgba(0,0,0,0.45)]',
         )}
       >
         <div className="flex items-start justify-between gap-3">
@@ -535,16 +1006,16 @@ export default async function ClientBookingPage(props: {
               {COPY.bookings.withLabel}{' '}
               <ProProfileLink
                 proId={booking.professional?.id ?? null}
-                label={proLabel}
+                label={professionalLabel}
                 className="font-black text-textPrimary hover:opacity-80"
               />
             </div>
 
             <div className="mt-2 text-[13px] text-textPrimary">
               <span className="font-black">{whenLabel}</span>
-              <span className="text-textSecondary"> · {appointmentTz}</span>
-              {locLine ? (
-                <span className="text-textSecondary"> · {locLine}</span>
+              <span className="text-textSecondary"> · {appointmentTimeZone}</span>
+              {locationLine ? (
+                <span className="text-textSecondary"> · {locationLine}</span>
               ) : null}
             </div>
           </div>
@@ -553,12 +1024,10 @@ export default async function ClientBookingPage(props: {
             <span
               className={cn(
                 'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
-                pillClassByVariant(pillVariant),
+                pillClassByVariant(statusVariant),
               )}
             >
-              {String(
-                booking.status || COPY.bookings.status.pillUnknown,
-              ).toUpperCase()}
+              {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
             </span>
 
             <a
@@ -570,18 +1039,12 @@ export default async function ClientBookingPage(props: {
           </div>
         </div>
 
-        {(durationMinutes || breakdownTotalLabel || modeLabel || sourceLabel) && (
+        {(durationMinutes || subtotalLabel || modeLabel || sourceLabel) && (
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {durationMinutes ? (
-              <TinyMetaPill>{durationMinutes} min</TinyMetaPill>
-            ) : null}
-            {breakdownTotalLabel ? (
-              <TinyMetaPill>{breakdownTotalLabel}</TinyMetaPill>
-            ) : null}
+            {durationMinutes ? <TinyMetaPill>{durationMinutes} min</TinyMetaPill> : null}
+            {serviceSubtotalLabel ? <TinyMetaPill>{serviceSubtotalLabel}</TinyMetaPill> : null}
             {modeLabel ? <TinyMetaPill>{modeLabel}</TinyMetaPill> : null}
-            {sourceLabel ? (
-              <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill>
-            ) : null}
+            {sourceLabel ? <TinyMetaPill>Source: {sourceLabel}</TinyMetaPill> : null}
 
             {showConsultationApproval ? (
               <span
@@ -595,62 +1058,11 @@ export default async function ClientBookingPage(props: {
         )}
       </section>
 
-      {consultApprovalMode ? (
-        <div className="mt-4">
-          <SectionCard
-            title={COPY.bookings.consultation.header}
-            subtitle="Notes and consultation details"
-            right={
-              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
-                {COPY.bookings.consultation.approvalNeeded}
-              </span>
-            }
-          >
-            <div className="grid gap-3">
-              <div>
-                <div className="text-[11px] font-black text-textSecondary">
-                  {COPY.bookings.consultation.notesLabel}
-                </div>
-                <div className="mt-1 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
-                  {consultNotes.trim()
-                    ? consultNotes
-                    : COPY.bookings.consultation.noNotes}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <TinyMetaPill>
-                  <span className="text-textSecondary">
-                    {COPY.bookings.consultation.proposedTotalLabel}{' '}
-                  </span>
-                  {proposedTotalLabel || COPY.common.notProvided}
-                </TinyMetaPill>
-
-                <TinyMetaPill>
-                  <span className="text-textSecondary">
-                    {COPY.bookings.consultation.timesShownIn}{' '}
-                  </span>
-                  {appointmentTz}
-                </TinyMetaPill>
-              </div>
-
-              <ConsultationDecisionCard
-                bookingId={booking.id}
-                appointmentTz={appointmentTz}
-                notes={consultNotes}
-                proposedTotalLabel={proposedTotalLabel}
-                proposedServicesJson={
-                  booking.consultation?.proposedServicesJson ?? null
-                }
-              />
-            </div>
-          </SectionCard>
-        </div>
-      ) : null}
+      {consultApprovalMode ? <div className="mt-4">{renderConsultationSection(true)}</div> : null}
 
       {!consultApprovalMode ? (
         <>
-          {booking.items.length ? (
+          {step !== 'aftercare' && booking.items.length > 0 ? (
             <div className="mt-4">
               <SectionCard
                 title="What’s included"
@@ -668,49 +1080,10 @@ export default async function ClientBookingPage(props: {
                   ) : null
                 }
               >
-                <div className="grid gap-2">
-                  {booking.items.map((it) => {
-                    const name =
-                      it.name || (it.type === 'ADD_ON' ? 'Add-on' : 'Service')
-                    const price = formatMoneyFromDecimalString(it.price)
-                    const dur =
-                      it.durationMinutes && it.durationMinutes > 0
-                        ? `${it.durationMinutes} min`
-                        : null
-
-                    return (
-                      <div
-                        key={it.id}
-                        className={cn(
-                          'rounded-card border border-white/10 bg-bgPrimary px-4 py-3',
-                          'shadow-[0_10px_30px_rgba(0,0,0,0.25)]',
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-[14px] font-black text-textPrimary">
-                                {name}
-                              </div>
-                              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
-                                {it.type === 'ADD_ON' ? 'Add-on' : 'Base'}
-                              </span>
-                              {dur ? (
-                                <span className="text-[11px] font-semibold text-textSecondary">
-                                  · {dur}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 text-[13px] font-black text-textPrimary">
-                            {price || COPY.common.emDash}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                <ServiceBreakdownCard
+                  items={booking.items}
+                  addOnCount={booking.display?.addOnCount ?? 0}
+                />
               </SectionCard>
             </div>
           ) : null}
@@ -723,7 +1096,7 @@ export default async function ClientBookingPage(props: {
               {COPY.bookings.tabs.overview}
             </a>
 
-            {vm.canShowConsultTab ? (
+            {viewModel.canShowConsultTab ? (
               <a
                 href={`${baseHref}?step=consult`}
                 className={tabClass(step === 'consult')}
@@ -739,7 +1112,7 @@ export default async function ClientBookingPage(props: {
               </span>
             )}
 
-            {vm.canShowAftercareTab ? (
+            {viewModel.canShowAftercareTab ? (
               <a
                 href={`${baseHref}?step=aftercare`}
                 className={tabClass(step === 'aftercare')}
@@ -765,76 +1138,19 @@ export default async function ClientBookingPage(props: {
           <section
             className={cn(
               'mt-4 rounded-card p-4',
-              alertClassByVariant(msg.variant),
+              alertClassByVariant(statusInfo.variant),
             )}
           >
             <div className="text-[13px] font-black text-textPrimary">
-              {msg.title}
+              {statusInfo.title}
             </div>
             <div className="mt-1 text-[13px] font-semibold leading-snug text-textSecondary">
-              {msg.body}
+              {statusInfo.body}
             </div>
           </section>
 
           {step === 'consult' ? (
-            <div className="mt-4">
-              <SectionCard
-                title={COPY.bookings.consultation.header}
-                subtitle="Notes and consultation details"
-                right={
-                  showConsultationApproval ? (
-                    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
-                      {COPY.bookings.consultation.approvalNeeded}
-                    </span>
-                  ) : null
-                }
-              >
-                <div className="grid gap-3">
-                  <div>
-                    <div className="text-[11px] font-black text-textSecondary">
-                      {COPY.bookings.consultation.notesLabel}
-                    </div>
-                    <div className="mt-1 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
-                      {consultNotes.trim()
-                        ? consultNotes
-                        : COPY.bookings.consultation.noNotes}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <TinyMetaPill>
-                      <span className="text-textSecondary">
-                        {COPY.bookings.consultation.proposedTotalLabel}{' '}
-                      </span>
-                      {proposedTotalLabel || COPY.common.notProvided}
-                    </TinyMetaPill>
-
-                    <TinyMetaPill>
-                      <span className="text-textSecondary">
-                        {COPY.bookings.consultation.timesShownIn}{' '}
-                      </span>
-                      {appointmentTz}
-                    </TinyMetaPill>
-                  </div>
-
-                  {showConsultationApproval ? (
-                    <ConsultationDecisionCard
-                      bookingId={booking.id}
-                      appointmentTz={appointmentTz}
-                      notes={consultNotes}
-                      proposedTotalLabel={proposedTotalLabel}
-                      proposedServicesJson={
-                        booking.consultation?.proposedServicesJson ?? null
-                      }
-                    />
-                  ) : (
-                    <div className="text-[12px] font-semibold text-textSecondary">
-                      {COPY.bookings.consultation.noApprovalNeeded}
-                    </div>
-                  )}
-                </div>
-              </SectionCard>
-            </div>
+            <div className="mt-4">{renderConsultationSection(showConsultationApproval)}</div>
           ) : null}
 
           {step === 'overview' ? (
@@ -874,7 +1190,7 @@ export default async function ClientBookingPage(props: {
                   scheduled ? scheduled.toISOString() : new Date().toISOString()
                 }
                 durationMinutesSnapshot={durationMinutes ?? null}
-                appointmentTz={appointmentTz}
+                appointmentTz={appointmentTimeZone}
                 locationType={safeLocationType}
                 drawerContext={{
                   professionalId: drawerProfessionalId,
@@ -891,7 +1207,7 @@ export default async function ClientBookingPage(props: {
             <section id="aftercare" className="mt-4 grid gap-4">
               <SectionCard
                 title={COPY.bookings.aftercare.header}
-                subtitle="Photos, care notes, products, and rebook options."
+                subtitle="Your TOVIS post-appointment summary."
                 right={
                   showUnreadAftercareBadge ? (
                     <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill>
@@ -899,6 +1215,27 @@ export default async function ClientBookingPage(props: {
                 }
               >
                 <div className="grid gap-4">
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="text-[12px] font-black text-textPrimary">
+                      Appointment summary
+                    </div>
+
+                    <div className="mt-3 grid gap-1">
+                      <SummaryRow label="Provider" value={professionalLabel} />
+                      <SummaryRow label="Appointment" value={whenLabel} />
+                      <SummaryRow label="Time zone" value={appointmentTimeZone} />
+                      <SummaryRow
+                        label="Status"
+                        value={String(
+                          booking.status || COPY.bookings.status.pillUnknown,
+                        ).toUpperCase()}
+                      />
+                      {locationLine ? (
+                        <SummaryRow label="Location" value={locationLine} />
+                      ) : null}
+                    </div>
+                  </div>
+
                   <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
                     <div className="flex items-baseline justify-between gap-3">
                       <div className="text-[12px] font-black text-textPrimary">
@@ -913,77 +1250,62 @@ export default async function ClientBookingPage(props: {
 
                     {beforeMedia.length || afterMedia.length ? (
                       <div className="mt-3 grid gap-3">
-                        {beforeMedia.length ? (
-                          <div>
-                            <div className="mb-2 text-[11px] font-black text-textSecondary">
-                              Before
-                            </div>
-                            <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
-                              {beforeMedia.map((m) => {
-                                const src =
-                                  typeof m.thumbUrl === 'string' &&
-                                  m.thumbUrl.trim().length > 0
-                                    ? m.thumbUrl
-                                    : m.url
-
-                                return (
-                                  <a
-                                    key={m.id}
-                                    href={m.url}
-                                    className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
-                                    style={{ width: 128, height: 128 }}
-                                  >
-                                    <img
-                                      src={src}
-                                      alt=""
-                                      className="h-full w-full object-cover"
-                                      loading="lazy"
-                                    />
-                                  </a>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {afterMedia.length ? (
-                          <div>
-                            <div className="mb-2 text-[11px] font-black text-textSecondary">
-                              After
-                            </div>
-                            <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
-                              {afterMedia.map((m) => {
-                                const src =
-                                  typeof m.thumbUrl === 'string' &&
-                                  m.thumbUrl.trim().length > 0
-                                    ? m.thumbUrl
-                                    : m.url
-
-                                return (
-                                  <a
-                                    key={m.id}
-                                    href={m.url}
-                                    className="block shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
-                                    style={{ width: 128, height: 128 }}
-                                  >
-                                    <img
-                                      src={src}
-                                      alt=""
-                                      className="h-full w-full object-cover"
-                                      loading="lazy"
-                                    />
-                                  </a>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ) : null}
+                        <MediaStrip title="Before" items={beforeMedia} />
+                        <MediaStrip title="After" items={afterMedia} />
                       </div>
                     ) : (
                       <div className="mt-2 text-[12px] font-semibold text-textSecondary">
                         Your pro will attach photos during your appointment flow.
                       </div>
                     )}
+                  </div>
+
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="text-[12px] font-black text-textPrimary">
+                      Final service breakdown
+                    </div>
+                    <div className="mt-3">
+                      <ServiceBreakdownCard
+                        items={booking.items}
+                        addOnCount={booking.display?.addOnCount ?? 0}
+                      />
+                    </div>
+                  </div>
+
+                  {booking.productSales.length > 0 ? (
+                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                      <div className="text-[12px] font-black text-textPrimary">
+                        Purchased products
+                      </div>
+                      <div className="mt-3">
+                        <PurchasedProductsCard productSales={booking.productSales} />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="text-[12px] font-black text-textPrimary">
+                      Final cost recap
+                    </div>
+
+                    <div className="mt-3 grid gap-1">
+                      <SummaryRow
+                        label="Services subtotal"
+                        value={serviceSubtotalLabel || COPY.common.notProvided}
+                      />
+                      {productSubtotalLabel ? (
+                        <SummaryRow
+                          label="Products subtotal"
+                          value={productSubtotalLabel}
+                        />
+                      ) : null}
+                      {discountLabel ? (
+                        <SummaryRow label="Discount" value={discountLabel} />
+                      ) : null}
+                      {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
+                      {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
+                      <SummaryRow label="Final total" value={finalTotalLabel} />
+                    </div>
                   </div>
 
                   <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
@@ -997,11 +1319,104 @@ export default async function ClientBookingPage(props: {
                       </div>
                     ) : (
                       <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                        {upper(booking.status) === 'COMPLETED'
+                        {statusUpper === 'COMPLETED'
                           ? COPY.bookings.aftercare.noAftercareNotesCompleted
                           : COPY.bookings.aftercare.noAftercareNotesPending}
                       </div>
                     )}
+                  </div>
+
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="text-[12px] font-black text-textPrimary">
+                      Recommended products
+                    </div>
+                    <div className="mt-3">
+                      <ProductRecommendationsCard aftercare={aftercare} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div className="text-[12px] font-black text-textPrimary">
+                      Payment &amp; checkout
+                    </div>
+
+                    <div className="mt-3 grid gap-1">
+                      <SummaryRow
+                        label="Checkout status"
+                        value={checkoutStatusLabel || COPY.common.notProvided}
+                      />
+                      {selectedPaymentMethodLabel ? (
+                        <SummaryRow
+                          label="Payment method"
+                          value={selectedPaymentMethodLabel}
+                        />
+                      ) : null}
+                      {collectionTimingLabel ? (
+                        <SummaryRow
+                          label="Collection timing"
+                          value={collectionTimingLabel}
+                        />
+                      ) : null}
+                      <SummaryRow
+                        label="Services subtotal"
+                        value={serviceSubtotalLabel || COPY.common.notProvided}
+                      />
+                      {productSubtotalLabel ? (
+                        <SummaryRow
+                          label="Products subtotal"
+                          value={productSubtotalLabel}
+                        />
+                      ) : null}
+                      {discountLabel ? (
+                        <SummaryRow label="Discount" value={discountLabel} />
+                      ) : null}
+                      {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
+                      {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
+                      <SummaryRow label="Final total" value={finalTotalLabel} />
+                      {paymentAuthorizedLabel ? (
+                        <SummaryRow
+                          label="Authorized"
+                          value={paymentAuthorizedLabel}
+                        />
+                      ) : null}
+                      {paymentCollectedLabel ? (
+                        <SummaryRow
+                          label="Collected"
+                          value={paymentCollectedLabel}
+                        />
+                      ) : null}
+                    </div>
+
+                    {acceptedMethods.length > 0 ? (
+                      <div className="mt-4">
+                        <div className="text-[11px] font-black text-textSecondary">
+                          Accepted methods
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {acceptedMethods.map((method) => (
+                            <span
+                              key={method.key}
+                              className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textPrimary"
+                              title={method.handle ?? undefined}
+                            >
+                              {method.label}
+                              {method.handle ? ` · ${method.handle}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {paymentSettings?.paymentNote ? (
+                      <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+                        {paymentSettings.paymentNote}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+                      Tip applies to services only. Product purchases are shown
+                      separately from aftercare recommendations.
+                    </div>
                   </div>
 
                   {aftercare && (rebookInfo.label || showRebookCTA) ? (
@@ -1015,7 +1430,7 @@ export default async function ClientBookingPage(props: {
                           {rebookInfo.label}
                           <span className="text-textSecondary">
                             {' '}
-                            · {appointmentTz}
+                            · {appointmentTimeZone}
                           </span>
                         </div>
                       ) : (

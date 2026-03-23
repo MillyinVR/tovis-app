@@ -1,23 +1,65 @@
 // app/api/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 import {
+  BookingServiceItemType,
   BookingStatus,
-  ConsultationApprovalStatus,
-  SessionStep,
   ClientNotificationType,
+  ConsultationApprovalStatus,
   Prisma,
+  SessionStep,
 } from '@prisma/client'
 import { transitionSessionStepInTransaction } from '@/lib/booking/writeBoundary'
+
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 const NOTES_MAX = 2000
+const LINE_ITEM_NOTES_MAX = 1000
+const MAX_LINE_ITEMS = 100
 
-function isNonEmptyString(x: unknown): x is string {
-  return typeof x === 'string' && x.trim().length > 0
+type ParsedProposalItem = {
+  bookingServiceItemId: string | null
+  offeringId: string | null
+  serviceId: string
+  itemType: BookingServiceItemType
+  label: string
+  categoryName: string | null
+  priceText: string
+  priceCents: number
+  durationMinutes: number
+  notes: string | null
+  sortOrder: number
+  source: 'BOOKING' | 'PROPOSAL'
 }
+
+type ParsedProposalPayload = {
+  items: ParsedProposalItem[]
+  proposedServicesJson: Prisma.InputJsonValue
+}
+
+type TxFail = {
+  ok: false
+  status: number
+  error: string
+  forcedStep?: SessionStep
+}
+
+type TxOk = {
+  ok: true
+  approval: {
+    id: string
+    status: ConsultationApprovalStatus
+    proposedTotal: Prisma.Decimal | null
+    updatedAt: Date
+  }
+  sessionStep: SessionStep
+  proposedCents: number
+}
+
+type TxResult = TxFail | TxOk
 
 function parseMoneyToCents(v: unknown): number | null {
   if (v == null) return null
@@ -28,14 +70,15 @@ function parseMoneyToCents(v: unknown): number | null {
   }
 
   if (typeof v !== 'string') return null
+
   const cleaned = v.replace(/\$/g, '').replace(/,/g, '').trim()
   if (!cleaned) return null
 
-  const m = /^(\d+)(?:\.(\d{0,}))?$/.exec(cleaned)
+  const m = /^(\d+)(?:\.(\d{0,2}))?$/.exec(cleaned)
   if (!m) return null
 
-  const whole = m[1] || '0'
-  let frac = (m[2] || '').slice(0, 2)
+  const whole = m[1] ?? '0'
+  let frac = m[2] ?? ''
   while (frac.length < 2) frac += '0'
 
   const cents = Number(whole) * 100 + Number(frac)
@@ -44,65 +87,127 @@ function parseMoneyToCents(v: unknown): number | null {
 }
 
 function centsToDecimalDollars(cents: number): Prisma.Decimal {
-  // Decimal dollars, e.g. 1234 cents => 12.34
   return new Prisma.Decimal(cents).div(100)
 }
 
-function parseProposedServicesJson(v: unknown): Prisma.InputJsonValue | null {
-  if (v == null) return null
+function parsePositiveInt(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return null
+  const whole = Math.trunc(n)
+  return whole > 0 ? whole : null
+}
 
-  if (typeof v === 'string') {
-    const s = v.trim()
-    if (!s) return null
-    try {
-      const parsed: unknown = JSON.parse(s)
-      // Prisma JSON can be object/array/primitive — but we require "object-ish" for proposals
-      if (parsed && typeof parsed === 'object') return parsed as Prisma.InputJsonValue
-      return null
-    } catch {
-      return null
-    }
+function parseSortOrder(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return fallback
+  const whole = Math.trunc(n)
+  return whole >= 0 ? whole : fallback
+}
+
+function parseItemType(value: unknown): BookingServiceItemType | null {
+  if (value === BookingServiceItemType.BASE || value === 'BASE') {
+    return BookingServiceItemType.BASE
   }
-
-  if (v && typeof v === 'object') {
-    return v as Prisma.InputJsonValue
+  if (value === BookingServiceItemType.ADD_ON || value === 'ADD_ON') {
+    return BookingServiceItemType.ADD_ON
   }
-
   return null
 }
 
-type ProposedServiceRef = { serviceId?: unknown; offeringId?: unknown }
-
-function extractServiceRefsFromProposedJson(
-  v: unknown,
-): Array<{ serviceId: string | null; offeringId: string | null }> {
-  const out: Array<{ serviceId: string | null; offeringId: string | null }> = []
-
-  const visit = (node: unknown) => {
-    if (!node) return
-    if (Array.isArray(node)) {
-      for (const item of node) visit(item)
-      return
-    }
-    if (typeof node !== 'object') return
-
-    const obj = node as Record<string, unknown>
-
-    const maybe = obj as ProposedServiceRef
-    const serviceId = isNonEmptyString(maybe.serviceId) ? maybe.serviceId.trim() : null
-    const offeringId = isNonEmptyString(maybe.offeringId) ? maybe.offeringId.trim() : null
-
-    if (serviceId || offeringId) out.push({ serviceId, offeringId })
-
-    for (const k of Object.keys(obj)) visit(obj[k])
-  }
-
-  visit(v)
-  return out
+function normalizeOptionalNotes(value: unknown, max: number): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return trimmed.slice(0, max)
 }
 
-function canProSendProposal(step: SessionStep | null) {
-  return step === SessionStep.CONSULTATION || step === SessionStep.CONSULTATION_PENDING_CLIENT
+function buildProposalJson(items: ParsedProposalItem[]): Prisma.InputJsonValue {
+  return {
+    currency: 'USD',
+    items: items.map((item) => ({
+      bookingServiceItemId: item.bookingServiceItemId,
+      offeringId: item.offeringId,
+      serviceId: item.serviceId,
+      itemType: item.itemType,
+      label: item.label,
+      categoryName: item.categoryName,
+      price: item.priceText,
+      durationMinutes: item.durationMinutes,
+      notes: item.notes,
+      sortOrder: item.sortOrder,
+      source: item.source,
+    })),
+  }
+}
+
+function parseProposalPayload(raw: unknown): ParsedProposalPayload | null {
+  if (!isRecord(raw)) return null
+  if (!Array.isArray(raw.items)) return null
+  if (raw.items.length < 1 || raw.items.length > MAX_LINE_ITEMS) return null
+
+  const items: ParsedProposalItem[] = []
+
+  for (let index = 0; index < raw.items.length; index += 1) {
+    const entry = raw.items[index]
+    if (!isRecord(entry)) return null
+
+    const serviceId = pickString(entry.serviceId)
+    if (!serviceId) return null
+
+    const itemType = parseItemType(entry.itemType)
+    if (!itemType) return null
+
+    const offeringId = pickString(entry.offeringId)
+    const bookingServiceItemId = pickString(entry.bookingServiceItemId)
+
+    if (itemType === BookingServiceItemType.BASE && !offeringId) {
+      return null
+    }
+
+    const label = pickString(entry.label) ?? 'Service'
+    const categoryName = pickString(entry.categoryName) ?? null
+
+    const priceCents = parseMoneyToCents(entry.price)
+    if (priceCents == null || priceCents <= 0) return null
+
+    const durationMinutes = parsePositiveInt(entry.durationMinutes)
+    if (durationMinutes == null) return null
+
+    const sourceRaw = pickString(entry.source)
+    const source =
+      sourceRaw === 'BOOKING' || sourceRaw === 'PROPOSAL'
+        ? sourceRaw
+        : 'PROPOSAL'
+
+    items.push({
+      bookingServiceItemId: bookingServiceItemId ?? null,
+      offeringId: offeringId ?? null,
+      serviceId,
+      itemType,
+      label: label.slice(0, 200),
+      categoryName: categoryName ? categoryName.slice(0, 120) : null,
+      priceText: (priceCents / 100).toFixed(2),
+      priceCents,
+      durationMinutes,
+      notes: normalizeOptionalNotes(entry.notes, LINE_ITEM_NOTES_MAX),
+      sortOrder: parseSortOrder(entry.sortOrder, index),
+      source,
+    })
+  }
+
+  items.sort((a, b) => a.sortOrder - b.sortOrder)
+
+  return {
+    items,
+    proposedServicesJson: buildProposalJson(items),
+  }
+}
+
+function canProSendProposal(step: SessionStep | null): boolean {
+  return (
+    step === SessionStep.CONSULTATION ||
+    step === SessionStep.CONSULTATION_PENDING_CLIENT
+  )
 }
 
 export async function POST(req: Request, ctx: Ctx) {
@@ -115,24 +220,37 @@ export async function POST(req: Request, ctx: Ctx) {
     const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const body = (await req.json().catch(() => ({}))) as {
-      proposedServicesJson?: unknown
-      proposedTotal?: unknown
-      notes?: unknown
+    const body: unknown = await req.json().catch(() => null)
+    if (!isRecord(body)) {
+      return jsonFail(400, 'Invalid request body.')
     }
 
-    const proposedServicesJson = parseProposedServicesJson(body?.proposedServicesJson)
-    if (!proposedServicesJson) return jsonFail(400, 'Missing proposed services.')
+    const proposal = parseProposalPayload(body.proposedServicesJson)
+    if (!proposal) {
+      return jsonFail(
+        400,
+        'Invalid proposed services. Each line item needs service, type, price, and duration.',
+      )
+    }
 
-    const proposedCents = parseMoneyToCents(body?.proposedTotal)
-    if (proposedCents == null) return jsonFail(400, 'Enter a valid total.')
+    const proposedCents = parseMoneyToCents(body.proposedTotal)
+    if (proposedCents == null || proposedCents <= 0) {
+      return jsonFail(400, 'Enter a valid total.')
+    }
 
-    const notesRaw = pickString(body?.notes)
+    const computedCents = proposal.items.reduce(
+      (sum, item) => sum + item.priceCents,
+      0,
+    )
+    if (computedCents !== proposedCents) {
+      return jsonFail(400, 'Proposal total must equal the sum of the line items.')
+    }
+
+    const notesRaw = pickString(body.notes)
     const notes = notesRaw ? notesRaw.slice(0, NOTES_MAX) : null
-
     const proposedTotal = centsToDecimalDollars(proposedCents)
 
-    const txResult = await prisma.$transaction(async (tx) => {
+    const txResult: TxResult = await prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
         select: {
@@ -143,61 +261,136 @@ export async function POST(req: Request, ctx: Ctx) {
           startedAt: true,
           finishedAt: true,
           sessionStep: true,
+          serviceItems: {
+            select: {
+              id: true,
+              serviceId: true,
+              offeringId: true,
+              itemType: true,
+            },
+            take: 500,
+          },
         },
       })
 
-      if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
-      if (booking.professionalId !== proId) return { ok: false as const, status: 403, error: 'Forbidden.' }
-
-      if (booking.status === BookingStatus.CANCELLED)
-        return { ok: false as const, status: 409, error: 'This booking is cancelled.' }
-      if (booking.status === BookingStatus.COMPLETED || booking.finishedAt)
-        return { ok: false as const, status: 409, error: 'This booking is finalized.' }
-
+      if (!booking) {
+        return { ok: false, status: 404, error: 'Booking not found.' }
+      }
+      if (booking.professionalId !== proId) {
+        return { ok: false, status: 403, error: 'Forbidden.' }
+      }
+      if (booking.status === BookingStatus.CANCELLED) {
+        return { ok: false, status: 409, error: 'This booking is cancelled.' }
+      }
+      if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+        return { ok: false, status: 409, error: 'This booking is finalized.' }
+      }
       if (!booking.startedAt) {
         return {
-          ok: false as const,
+          ok: false,
           status: 409,
           error: 'Start the appointment before sending a consultation proposal.',
         }
       }
-
       if (!canProSendProposal(booking.sessionStep ?? null)) {
-        return { ok: false as const, status: 409, error: 'Booking is not in a consultation stage.' }
-      }
-
-      // Validate references exist in this pro's active offerings
-      const refs = extractServiceRefsFromProposedJson(proposedServicesJson)
-      if (!refs.length) {
         return {
-          ok: false as const,
-          status: 400,
-          error: 'Proposal must include serviceId (and ideally offeringId) for each line item.',
+          ok: false,
+          status: 409,
+          error: 'Booking is not in a consultation stage.',
         }
       }
 
-      const offerings = await tx.professionalServiceOffering.findMany({
-        where: { professionalId: proId, isActive: true },
-        select: { id: true, serviceId: true },
+      const activeOfferings = await tx.professionalServiceOffering.findMany({
+        where: {
+          professionalId: proId,
+          isActive: true,
+          service: { isActive: true },
+        },
+        select: {
+          id: true,
+          serviceId: true,
+          addOns: {
+            where: { isActive: true, addOnService: { isActive: true } },
+            select: {
+              addOnServiceId: true,
+            },
+          },
+        },
         take: 1000,
       })
 
-      const allowedOfferingIds = new Set(offerings.map((o) => o.id))
-      const allowedServiceIds = new Set(offerings.map((o) => o.serviceId))
+      const baseOfferingById = new Map(
+        activeOfferings.map((offering) => [offering.id, offering.serviceId]),
+      )
 
-      for (const r of refs) {
-        if (r.offeringId && !allowedOfferingIds.has(r.offeringId)) {
+      const allowedBaseServiceIds = new Set(
+        activeOfferings.map((offering) => offering.serviceId),
+      )
+
+      const allowedAddOnServiceIds = new Set(
+        activeOfferings.flatMap((offering) =>
+          offering.addOns.map((addOn) => addOn.addOnServiceId),
+        ),
+      )
+
+      const bookingItemIds = new Set(booking.serviceItems.map((item) => item.id))
+
+      for (const item of proposal.items) {
+        if (
+          item.bookingServiceItemId &&
+          !bookingItemIds.has(item.bookingServiceItemId)
+        ) {
           return {
-            ok: false as const,
+            ok: false,
             status: 400,
-            error: 'Proposal includes an offering that is not active for this pro.',
+            error: 'Proposal references a booking service item that does not belong to this booking.',
           }
         }
-        if (r.serviceId && !allowedServiceIds.has(r.serviceId)) {
-          return {
-            ok: false as const,
-            status: 400,
-            error: 'Proposal includes a service that is not active for this pro.',
+
+        if (item.itemType === BookingServiceItemType.BASE) {
+          if (!item.offeringId) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Base services must include an offeringId.',
+            }
+          }
+
+          const expectedServiceId = baseOfferingById.get(item.offeringId)
+          if (!expectedServiceId) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Proposal includes an offering that is not active for this pro.',
+            }
+          }
+
+          if (expectedServiceId !== item.serviceId) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Base service does not match the selected offering.',
+            }
+          }
+        } else {
+          if (!allowedAddOnServiceIds.has(item.serviceId)) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Proposal includes an add-on service that is not active for this pro.',
+            }
+          }
+
+          if (
+            item.offeringId &&
+            !baseOfferingById.has(item.offeringId) &&
+            !allowedBaseServiceIds.has(item.serviceId)
+          ) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Proposal includes an invalid offering reference on an add-on.',
+            }
           }
         }
       }
@@ -209,7 +402,7 @@ export async function POST(req: Request, ctx: Ctx) {
           clientId: booking.clientId,
           proId: booking.professionalId,
           status: ConsultationApprovalStatus.PENDING,
-          proposedServicesJson,
+          proposedServicesJson: proposal.proposedServicesJson,
           proposedTotal,
           notes,
           approvedAt: null,
@@ -217,31 +410,35 @@ export async function POST(req: Request, ctx: Ctx) {
         },
         update: {
           status: ConsultationApprovalStatus.PENDING,
-          proposedServicesJson,
+          proposedServicesJson: proposal.proposedServicesJson,
           proposedTotal,
           notes,
           approvedAt: null,
           rejectedAt: null,
         },
-        select: { id: true, status: true, proposedTotal: true, updatedAt: true },
+        select: {
+          id: true,
+          status: true,
+          proposedTotal: true,
+          updatedAt: true,
+        },
       })
 
-  const stepRes = await transitionSessionStepInTransaction(tx, {
-    bookingId: booking.id,
-    professionalId: proId,
-    nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-  })
+      const stepRes = await transitionSessionStepInTransaction(tx, {
+        bookingId: booking.id,
+        professionalId: proId,
+        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+      })
 
       if (!stepRes.ok) {
         return {
-          ok: false as const,
+          ok: false,
           status: stepRes.status,
           error: stepRes.error,
           forcedStep: stepRes.forcedStep,
         }
       }
 
-      // Best-effort notify client
       try {
         await tx.clientNotification.create({
           data: {
@@ -253,12 +450,12 @@ export async function POST(req: Request, ctx: Ctx) {
             dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
           },
         })
-      } catch (e) {
-        console.error('Client notification failed (consultation proposal):', e)
+      } catch (err: unknown) {
+        console.error('Client notification failed (consultation proposal):', err)
       }
 
       return {
-        ok: true as const,
+        ok: true,
         approval,
         sessionStep: stepRes.booking.sessionStep,
         proposedCents,
@@ -281,8 +478,8 @@ export async function POST(req: Request, ctx: Ctx) {
       },
       200,
     )
-  } catch (e) {
-    console.error('POST /api/pro/bookings/[id]/consultation-proposal error', e)
+  } catch (err: unknown) {
+    console.error('POST /api/pro/bookings/[id]/consultation-proposal error', err)
     return jsonFail(500, 'Internal server error')
   }
 }

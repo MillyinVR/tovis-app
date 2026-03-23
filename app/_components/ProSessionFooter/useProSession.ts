@@ -10,8 +10,9 @@ import type {
   UiSessionCenterAction,
   UiSessionMode,
 } from '@/lib/proSession/types'
-import { isRecord } from '@/lib/guards' 
+import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
+
 type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
 
 export const FORCE_EVENT = 'tovis:pro-session:force'
@@ -63,7 +64,6 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
-
 function errorFromResponse(res: Response, data: unknown) {
   const e = getStringProp(data, 'error')
   if (e) return e
@@ -80,6 +80,7 @@ function errorFromResponse(res: Response, data: unknown) {
 function normalizeMode(v: unknown): UiSessionMode {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
   if (s === 'UPCOMING') return 'UPCOMING'
+  if (s === 'UPCOMING_PICKER') return 'UPCOMING_PICKER'
   if (s === 'ACTIVE') return 'ACTIVE'
   return 'IDLE'
 }
@@ -91,6 +92,7 @@ function normalizeAction(v: unknown): UiSessionCenterAction {
   if (s === 'CAPTURE_BEFORE') return 'CAPTURE_BEFORE'
   if (s === 'CAPTURE_AFTER') return 'CAPTURE_AFTER'
   if (s === 'FINISH') return 'FINISH'
+  if (s === 'PICK_BOOKING') return 'PICK_BOOKING'
   return 'NONE'
 }
 
@@ -119,6 +121,11 @@ function parseBooking(v: unknown): SessionBooking | null {
     scheduledFor: scheduledFor?.trim() || null,
     sessionStep: sessionStep?.trim() || null,
   }
+}
+
+function parseBookingList(v: unknown): SessionBooking[] {
+  if (!Array.isArray(v)) return []
+  return v.map(parseBooking).filter((item): item is SessionBooking => Boolean(item))
 }
 
 function parseCenter(v: unknown): CenterState {
@@ -159,12 +166,15 @@ function canClickCenter(args: {
   action: UiSessionCenterAction
   href: string | null
   bookingId: string | null
+  eligibleCount: number
 }) {
-  const { actionLoading, action, href, bookingId } = args
+  const { actionLoading, action, href, bookingId, eligibleCount } = args
   if (actionLoading) return false
   if (action === 'NONE') return false
 
   if (action === 'START' || action === 'FINISH') return Boolean(bookingId)
+
+  if (action === 'PICK_BOOKING') return eligibleCount > 1
 
   if (action === 'NAVIGATE' || action === 'CAPTURE_BEFORE' || action === 'CAPTURE_AFTER') {
     return Boolean(href || bookingId)
@@ -184,8 +194,10 @@ export function useProSession() {
 
   const [mode, setMode] = useState<UiSessionMode>('IDLE')
   const [booking, setBooking] = useState<SessionBooking | null>(null)
+  const [eligibleBookings, setEligibleBookings] = useState<SessionBooking[]>([])
   const [targetStep, setTargetStep] = useState<StepKey | null>(null)
   const [center, setCenter] = useState<CenterState>(DEFAULT_CENTER)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(null)
@@ -210,14 +222,17 @@ export function useProSession() {
       action: center.action,
       href: center.href,
       bookingId,
+      eligibleCount: eligibleBookings.length,
     })
-  }, [actionLoading, center.action, center.href, bookingId])
+  }, [actionLoading, center.action, center.href, bookingId, eligibleBookings.length])
 
   const applyIdle = useCallback((opts?: LoadOpts, res?: Response, data?: unknown) => {
     setMode('IDLE')
     setBooking(null)
+    setEligibleBookings([])
     setTargetStep(null)
     setCenter(DEFAULT_CENTER)
+    setPickerOpen(false)
     if (!opts?.silent && res) setError(errorFromResponse(res, data))
   }, [])
 
@@ -230,7 +245,6 @@ export function useProSession() {
   const scheduleNextPoll = useCallback(
     (loadSessionFn: (opts?: LoadOpts) => Promise<ProSessionPayload | null>) => {
       stopPolling()
-      // small jitter prevents all clients hitting at exactly the same time
       const jitter = Math.floor(Math.random() * 1500)
       pollTimerRef.current = window.setTimeout(() => {
         if (document.visibilityState !== 'visible') return
@@ -274,7 +288,6 @@ export function useProSession() {
           signal: controller.signal,
         })
 
-        // stale response guard
         if (reqIdRef.current !== myReqId) return null
 
         if (res.status === 401) {
@@ -295,29 +308,33 @@ export function useProSession() {
           return null
         }
 
-        // Parse payload safely into canonical UI types
         const nextMode = normalizeMode(isRecord(data) ? data.mode : null)
-
         const nextBooking = parseBooking(isRecord(data) ? data.booking : null)
+        const nextEligibleBookings = parseBookingList(isRecord(data) ? data.eligibleBookings : null)
         const nextTarget = normalizeStepKey(isRecord(data) ? data.targetStep : null)
         const nextCenter = parseCenter(isRecord(data) ? data.center : null)
 
         setMode(nextMode)
         setBooking(nextBooking)
+        setEligibleBookings(nextEligibleBookings)
         setTargetStep(nextTarget)
         setCenter(nextCenter)
+
+        if (nextMode !== 'UPCOMING_PICKER') {
+          setPickerOpen(false)
+        }
 
         const payload: ProSessionPayload = {
           ok: true,
           mode: nextMode,
           booking: nextBooking,
+          eligibleBookings: nextEligibleBookings.length > 0 ? nextEligibleBookings : null,
           targetStep: nextTarget,
           center: nextCenter,
         }
 
         return payload
       } catch (err: unknown) {
-        // Abort is expected during force refresh / route changes
         if (err instanceof DOMException && err.name === 'AbortError') return null
         if (!opts?.silent) setError('Network error loading session.')
         return null
@@ -332,7 +349,6 @@ export function useProSession() {
     [applyIdle, router],
   )
 
-  // Initial load + visibility/focus management + polling (visible only)
   useEffect(() => {
     didInitRef.current = true
 
@@ -348,7 +364,6 @@ export function useProSession() {
       }, VISIBILITY_DEBOUNCE_MS)
     }
 
-    // initial load (non-silent) and start polling if visible
     void loadSession({ silent: false, force: true })
     if (document.visibilityState === 'visible') scheduleNextPoll(loadSession)
 
@@ -365,19 +380,59 @@ export function useProSession() {
     }
   }, [loadSession, scheduleNextPoll, stopPolling])
 
-  // Route change refresh (forced) — portal footers don’t unmount
   useEffect(() => {
     if (!didInitRef.current) return
     void loadSession({ silent: true, force: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname])
+  }, [pathname, loadSession])
 
-  // External force refresh (aftercare send, etc.)
   useEffect(() => {
     const onForce = () => void loadSession({ silent: true, force: true })
     window.addEventListener(FORCE_EVENT, onForce)
     return () => window.removeEventListener(FORCE_EVENT, onForce)
   }, [loadSession])
+
+  const startSelectedBooking = useCallback(
+    async (selectedBookingId: string) => {
+      const cleanId = selectedBookingId.trim()
+      if (!cleanId) return
+
+      setError(null)
+      setActionLoading('start')
+
+      const fallbackHub = bookingSessionHub(cleanId)
+
+      try {
+        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(cleanId)}/start`, { method: 'POST' })
+        if (res.status === 401) {
+          redirectToLogin(router, 'pro-start')
+          return
+        }
+
+        const data = await safeJson(res)
+        if (!res.ok) {
+          setError(errorFromResponse(res, data))
+          await loadSession({ silent: true, force: true })
+          return
+        }
+
+        setPickerOpen(false)
+
+        const nextHref = nextHrefFromStartFinish(data)
+        const fresh = await loadSession({ silent: true, force: true })
+        const freshHref = fresh?.center?.href ?? null
+
+        const target = nextHref ?? freshHref ?? fallbackHub
+        if (target === currentPathWithQuery()) router.refresh()
+        else router.push(target)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Something went wrong.'
+        setError(msg)
+      } finally {
+        setActionLoading(null)
+      }
+    },
+    [loadSession, router],
+  )
 
   const handleCenterClick = useCallback(async () => {
     if (centerDisabled) return
@@ -386,6 +441,11 @@ export function useProSession() {
     const fallbackHub = bookingId ? bookingSessionHub(bookingId) : '/pro/bookings'
 
     try {
+      if (center.action === 'PICK_BOOKING') {
+        setPickerOpen(true)
+        return
+      }
+
       if (center.action === 'START') {
         if (!bookingId) return
         setActionLoading('start')
@@ -434,7 +494,11 @@ export function useProSession() {
         return
       }
 
-      if (center.action === 'NAVIGATE' || center.action === 'CAPTURE_BEFORE' || center.action === 'CAPTURE_AFTER') {
+      if (
+        center.action === 'NAVIGATE' ||
+        center.action === 'CAPTURE_BEFORE' ||
+        center.action === 'CAPTURE_AFTER'
+      ) {
         setActionLoading('nav')
         const target = isSafeInternalHref(center.href) ? center.href : fallbackHub
         if (target === currentPathWithQuery()) router.refresh()
@@ -461,6 +525,7 @@ export function useProSession() {
     pathname,
     mode,
     booking,
+    eligibleBookings,
     targetStep,
     center,
     loading,
@@ -469,7 +534,10 @@ export function useProSession() {
     setError,
     centerDisabled,
     displayLabel,
+    pickerOpen,
+    setPickerOpen,
     handleCenterClick,
+    startSelectedBooking,
     FORCE_EVENT,
   }
 }

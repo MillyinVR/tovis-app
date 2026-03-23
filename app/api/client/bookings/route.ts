@@ -67,6 +67,17 @@ const bookingSelect = {
   finishedAt: true,
 
   subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  totalAmount: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+
   totalDurationMinutes: true,
   bufferMinutes: true,
 
@@ -77,7 +88,9 @@ const bookingSelect = {
 
   service: { select: { id: true, name: true } },
 
-  professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
+  professional: {
+    select: { id: true, businessName: true, location: true, timeZone: true },
+  },
 
   location: {
     select: {
@@ -117,6 +130,17 @@ const bookingSelect = {
       service: { select: { name: true } },
     },
     orderBy: bookingServiceItemsOrderBy,
+  },
+
+  productSales: {
+    select: {
+      id: true,
+      productId: true,
+      quantity: true,
+      unitPrice: true,
+      product: { select: { name: true } },
+    },
+    orderBy: [{ createdAt: 'asc' }],
   },
 } satisfies Prisma.BookingSelect
 

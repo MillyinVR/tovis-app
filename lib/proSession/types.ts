@@ -1,6 +1,6 @@
 // app/lib/proSession/types.ts
 
-export type UiSessionMode = 'IDLE' | 'UPCOMING' | 'ACTIVE'
+export type UiSessionMode = 'IDLE' | 'UPCOMING' | 'UPCOMING_PICKER' | 'ACTIVE'
 
 export type UiSessionCenterAction =
   | 'NONE'
@@ -9,6 +9,7 @@ export type UiSessionCenterAction =
   | 'FINISH' // POST /finish then go to nextHref
   | 'CAPTURE_BEFORE'
   | 'CAPTURE_AFTER'
+  | 'PICK_BOOKING' // open explicit booking picker; do not auto-start
 
 export type StepKey = 'consult' | 'session' | 'aftercare'
 
@@ -23,7 +24,12 @@ export type SessionBooking = {
 export type ProSessionPayload = {
   ok: true
   mode: UiSessionMode
+
+  // ACTIVE or single UPCOMING
   booking: SessionBooking | null
+
+  // multiple eligible UPCOMING bookings requiring explicit choice
+  eligibleBookings: SessionBooking[] | null
 
   targetStep: StepKey | null
 

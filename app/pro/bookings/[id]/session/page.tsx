@@ -10,12 +10,12 @@ import {
   BookingStatus,
   ConsultationApprovalStatus,
   MediaPhase,
+  Role,
   SessionStep,
 } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-// ---------- tiny deterministic helpers ----------
 function upper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
@@ -164,9 +164,6 @@ function bookingAfterPhotosHref(bookingId: string) {
   return `/pro/bookings/${encodeURIComponent(bookingId)}/session/after-photos`
 }
 
-/**
- * Module-scope Server Action
- */
 async function transitionAction(bookingId: string, next: SessionStep) {
   'use server'
 
@@ -180,20 +177,23 @@ async function transitionAction(bookingId: string, next: SessionStep) {
 
   const proId = maybeProId
 
-  const b = await prisma.booking.findUnique({
+  const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: { id: true, professionalId: true, status: true, finishedAt: true },
   })
 
-  if (!b) notFound()
-  if (b.professionalId !== proId) redirect('/pro')
-  if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
+  if (!booking) notFound()
+  if (booking.professionalId !== proId) redirect('/pro')
+  if (isTerminal(booking.status, booking.finishedAt)) {
+    redirect(bookingHubHref(bookingId))
+  }
 
   await transitionSessionStep({
-  bookingId,
-  professionalId: proId,
-  nextStep: next,
-})
+    bookingId,
+    professionalId: proId,
+    nextStep: next,
+  })
+
   redirect(bookingHubHref(bookingId))
 }
 
@@ -235,6 +235,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
       subtotalSnapshot: true,
       totalAmount: true,
       consultationNotes: true,
+
       consultationApproval: {
         select: {
           status: true,
@@ -276,25 +277,33 @@ export default async function ProBookingSessionPage(props: PageProps) {
       where: {
         bookingId: booking.id,
         phase: MediaPhase.BEFORE,
-        uploadedByRole: 'PRO',
+        uploadedByRole: Role.PRO,
       },
     }),
     prisma.mediaAsset.count({
       where: {
         bookingId: booking.id,
         phase: MediaPhase.AFTER,
-        uploadedByRole: 'PRO',
+        uploadedByRole: Role.PRO,
       },
     }),
     prisma.aftercareSummary.findFirst({
       where: { bookingId: booking.id },
-      select: { id: true, publicToken: true },
+      select: {
+        id: true,
+        publicToken: true,
+        draftSavedAt: true,
+        sentToClientAt: true,
+        lastEditedAt: true,
+        version: true,
+      },
     }),
   ])
 
   const hasBeforePhoto = beforeCount > 0
   const hasAfterPhoto = afterCount > 0
-  const hasAftercare = Boolean(aftercare?.id)
+  const hasAftercareDraft = Boolean(aftercare?.id)
+  const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
 
   const effectiveStep: SessionStep = (() => {
     if (bookingStatus === BookingStatus.PENDING) {
@@ -353,20 +362,22 @@ export default async function ProBookingSessionPage(props: PageProps) {
       redirect(`/login?from=${encodeURIComponent(bookingHubHref(bookingId))}`)
     }
 
-    const proId = maybeUserProId
+    const currentProId = maybeUserProId
 
-    const b = await prisma.booking.findUnique({
+    const freshBooking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: { id: true, professionalId: true, status: true, finishedAt: true },
     })
 
-    if (!b) notFound()
-    if (b.professionalId !== proId) redirect('/pro')
-    if (isTerminal(b.status, b.finishedAt)) redirect(bookingHubHref(bookingId))
+    if (!freshBooking) notFound()
+    if (freshBooking.professionalId !== currentProId) redirect('/pro')
+    if (isTerminal(freshBooking.status, freshBooking.finishedAt)) {
+      redirect(bookingHubHref(bookingId))
+    }
 
     const done = await transitionSessionStep({
       bookingId,
-      professionalId: proId,
+      professionalId: currentProId,
       nextStep: SessionStep.DONE,
     })
 
@@ -374,7 +385,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
 
     await transitionSessionStep({
       bookingId,
-      professionalId: proId,
+      professionalId: currentProId,
       nextStep: SessionStep.AFTER_PHOTOS,
     }).catch(() => null)
 
@@ -603,12 +614,26 @@ export default async function ProBookingSessionPage(props: PageProps) {
                   {hasAfterPhoto ? `✅ (${afterCount})` : '❌ missing'}
                 </span>
               </div>
+
               <div className="text-textSecondary">
                 Aftercare:{' '}
                 <span className="font-black text-textPrimary">
-                  {hasAftercare ? '✅ created' : '❌ missing'}
+                  {hasFinalizedAftercare
+                    ? '✅ finalized + sent'
+                    : hasAftercareDraft
+                      ? '📝 draft saved (not finalized)'
+                      : '❌ missing'}
                 </span>
               </div>
+
+              {aftercare?.lastEditedAt && !hasFinalizedAftercare ? (
+                <div className="text-xs font-semibold text-textSecondary">
+                  Draft last edited:{' '}
+                  <span className="font-black text-textPrimary">
+                    {aftercare.lastEditedAt.toLocaleString()}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-4">
@@ -617,13 +642,13 @@ export default async function ProBookingSessionPage(props: PageProps) {
                   type="submit"
                   className={[
                     primaryBtnClass,
-                    !(hasAfterPhoto && hasAftercare)
+                    !(hasAfterPhoto && hasFinalizedAftercare)
                       ? 'pointer-events-none cursor-not-allowed opacity-60'
                       : '',
                   ].join(' ')}
-                  aria-disabled={!(hasAfterPhoto && hasAftercare)}
+                  aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
                 >
-                  Complete session (locks step → DONE)
+                  Complete session (requires finalized aftercare)
                 </button>
               </form>
             </div>

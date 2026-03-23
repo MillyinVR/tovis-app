@@ -1,6 +1,7 @@
 // app/api/pro/bookings/[id]/aftercare/route.ts
 import type { NextRequest } from 'next/server'
 import { AftercareRebookMode } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
@@ -113,9 +114,11 @@ function isValidHttpUrl(raw: string): boolean {
 
 function normalizeRecommendedProducts(input: unknown): ProductsParse {
   if (input == null) return { ok: true, value: [] }
+
   if (!Array.isArray(input)) {
     return { ok: false, error: 'recommendedProducts must be an array.' }
   }
+
   if (input.length > MAX_PRODUCTS) {
     return { ok: false, error: `recommendedProducts max is ${MAX_PRODUCTS}.` }
   }
@@ -259,6 +262,10 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function toIsoOrNull(value: Date | null | undefined): string | null {
+  return value ? value.toISOString() : null
+}
+
 export async function GET(
   _req: NextRequest,
   props: { params: Promise<{ id: string }> },
@@ -267,11 +274,12 @@ export async function GET(
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const proId = auth.professionalId
     const { id } = await props.params
     const bookingId = trimmedString(id)
 
-    if (!bookingId) return jsonFail(400, 'Missing booking id.')
+    if (!bookingId) {
+      return jsonFail(400, 'Missing booking id.')
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -292,7 +300,11 @@ export async function GET(
             rebookWindowStart: true,
             rebookWindowEnd: true,
             publicToken: true,
-            recommendations: {
+            draftSavedAt: true,
+            sentToClientAt: true,
+            lastEditedAt: true,
+            version: true,
+            recommendedProducts: {
               select: {
                 id: true,
                 note: true,
@@ -315,9 +327,56 @@ export async function GET(
     })
 
     if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
+    if (booking.professionalId !== auth.professionalId) {
+      return jsonFail(403, 'Forbidden.')
+    }
 
-    return jsonOk({ booking }, 200)
+    return jsonOk(
+      {
+        booking: {
+          id: booking.id,
+          status: booking.status,
+          sessionStep: booking.sessionStep,
+          scheduledFor: booking.scheduledFor.toISOString(),
+          finishedAt: toIsoOrNull(booking.finishedAt),
+          locationTimeZone: booking.locationTimeZone,
+          aftercareSummary: booking.aftercareSummary
+            ? {
+                id: booking.aftercareSummary.id,
+                notes: booking.aftercareSummary.notes,
+                rebookMode: booking.aftercareSummary.rebookMode,
+                rebookedFor: toIsoOrNull(booking.aftercareSummary.rebookedFor),
+                rebookWindowStart: toIsoOrNull(
+                  booking.aftercareSummary.rebookWindowStart,
+                ),
+                rebookWindowEnd: toIsoOrNull(
+                  booking.aftercareSummary.rebookWindowEnd,
+                ),
+                publicToken: booking.aftercareSummary.publicToken,
+                draftSavedAt: toIsoOrNull(booking.aftercareSummary.draftSavedAt),
+                sentToClientAt: toIsoOrNull(
+                  booking.aftercareSummary.sentToClientAt,
+                ),
+                lastEditedAt: toIsoOrNull(
+                  booking.aftercareSummary.lastEditedAt,
+                ),
+                version: booking.aftercareSummary.version,
+                isFinalized: Boolean(booking.aftercareSummary.sentToClientAt),
+                recommendedProducts:
+                  booking.aftercareSummary.recommendedProducts.map((product) => ({
+                    id: product.id,
+                    note: product.note,
+                    productId: product.productId,
+                    externalName: product.externalName,
+                    externalUrl: product.externalUrl,
+                    product: product.product,
+                  })),
+              }
+            : null,
+        },
+      },
+      200,
+    )
   } catch (error) {
     console.error('GET /api/pro/bookings/[id]/aftercare error', error)
     return jsonFail(500, 'Internal server error.')
@@ -332,11 +391,12 @@ export async function POST(
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const proId = auth.professionalId
     const { id } = await props.params
     const bookingId = trimmedString(id)
 
-    if (!bookingId) return jsonFail(400, 'Missing booking id.')
+    if (!bookingId) {
+      return jsonFail(400, 'Missing booking id.')
+    }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body: Record<string, unknown> = isObject(rawBody) ? rawBody : {}
@@ -349,7 +409,9 @@ export async function POST(
     const sendToClient = toBool(body.sendToClient)
 
     const productsParsed = normalizeRecommendedProducts(body.recommendedProducts)
-    if (!productsParsed.ok) return jsonFail(400, productsParsed.error)
+    if (!productsParsed.ok) {
+      return jsonFail(400, productsParsed.error)
+    }
     const products = productsParsed.value
 
     const requestedMode = isAftercareRebookMode(body.rebookMode)
@@ -397,7 +459,7 @@ export async function POST(
 
     const result = await upsertBookingAftercare({
       bookingId,
-      professionalId: proId,
+      professionalId: auth.professionalId,
       notes: notes || null,
       rebookMode: normalizedMode,
       rebookedFor,
@@ -413,30 +475,29 @@ export async function POST(
 
     return jsonOk(
       {
-        aftercareId: result.aftercare.id,
-        publicToken: result.aftercare.publicToken,
+        aftercare: {
+          id: result.aftercare.id,
+          publicToken: result.aftercare.publicToken,
+          rebookMode: result.aftercare.rebookMode,
+          rebookedFor: toIsoOrNull(result.aftercare.rebookedFor),
+          rebookWindowStart: toIsoOrNull(result.aftercare.rebookWindowStart),
+          rebookWindowEnd: toIsoOrNull(result.aftercare.rebookWindowEnd),
+          draftSavedAt: toIsoOrNull(result.aftercare.draftSavedAt),
+          sentToClientAt: toIsoOrNull(result.aftercare.sentToClientAt),
+          lastEditedAt: toIsoOrNull(result.aftercare.lastEditedAt),
+          version: result.aftercare.version,
+          isFinalized: Boolean(result.aftercare.sentToClientAt),
+        },
         remindersTouched: result.remindersTouched,
         clientNotified: result.clientNotified,
-
-        rebookMode: result.aftercare.rebookMode,
-        rebookedFor: result.aftercare.rebookedFor
-          ? result.aftercare.rebookedFor.toISOString()
-          : null,
-        rebookWindowStart: result.aftercare.rebookWindowStart
-          ? result.aftercare.rebookWindowStart.toISOString()
-          : null,
-        rebookWindowEnd: result.aftercare.rebookWindowEnd
-          ? result.aftercare.rebookWindowEnd.toISOString()
-          : null,
-
         timeZoneUsed: result.timeZoneUsed,
         clientTimeZoneReceived,
-
         bookingFinished: result.bookingFinished,
         booking: result.booking
           ? {
-              ...result.booking,
-              finishedAt: result.booking.finishedAt?.toISOString() ?? null,
+              status: result.booking.status,
+              sessionStep: result.booking.sessionStep,
+              finishedAt: toIsoOrNull(result.booking.finishedAt),
             }
           : null,
         redirectTo: result.bookingFinished ? '/pro/calendar' : null,
