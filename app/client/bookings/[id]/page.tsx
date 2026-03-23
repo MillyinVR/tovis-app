@@ -190,6 +190,19 @@ function friendlyCheckoutStatus(value: unknown): string | null {
     .join(' ')
 }
 
+function isReviewCloseoutEligible(args: {
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: unknown
+}): boolean {
+  const normalizedCheckoutStatus = upper(args.checkoutStatus)
+
+  return (
+    Boolean(args.aftercareSentAt) &&
+    (normalizedCheckoutStatus === 'PAID' ||
+      normalizedCheckoutStatus === 'WAIVED')
+  )
+}
+
 function friendlyPaymentMethod(value: unknown): string | null {
   const normalized = upper(value)
   if (!normalized) return null
@@ -817,6 +830,12 @@ export default async function ClientBookingPage(props: {
 
   const rebookInfo = getAftercareRebookInfo(aftercare, appointmentTimeZone)
   const aftercareToken = pickAftercareToken(aftercare)
+
+  const reviewCloseoutEligible = isReviewCloseoutEligible({
+    aftercareSentAt: aftercare?.sentToClientAt,
+    checkoutStatus: booking.checkout.checkoutStatus,
+  })
+
   const showRebookCTA =
     statusUpper === 'COMPLETED' && typeof aftercareToken === 'string'
 
@@ -836,7 +855,7 @@ export default async function ClientBookingPage(props: {
 
   const showConsultationApproval = Boolean(viewModel.showConsultationApproval)
   const consultApprovalMode = step === 'consult' && showConsultationApproval
-  const shouldShowReview = statusUpper === 'COMPLETED' && step === 'aftercare'
+  const shouldShowReview = reviewCloseoutEligible && step === 'aftercare'
 
   const safeExistingReview = toSafeExistingReview(existingReview)
 
@@ -1368,6 +1387,17 @@ export default async function ClientBookingPage(props: {
                       to this booking’s checkout flow.
                     </div>
                   </div>
+
+                  {!reviewCloseoutEligible ? (
+                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                      <div className="text-[12px] font-black text-textPrimary">
+                        Review
+                      </div>
+                      <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                        Your review will unlock after aftercare is finalized and checkout is marked paid or waived.
+                      </div>
+                    </div>
+                  ) : null}
 
                   {aftercare && (rebookInfo.label || showRebookCTA) ? (
                     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">

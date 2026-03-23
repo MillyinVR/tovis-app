@@ -1004,6 +1004,7 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
   sessionStep: true,
   scheduledFor: true,
   finishedAt: true,
+  checkoutStatus: true,
   locationTimeZone: true,
   service: {
     select: {
@@ -1041,6 +1042,7 @@ const BOOKING_CHECKOUT_SELECT = {
   id: true,
   professionalId: true,
   status: true,
+  sessionStep: true,
   finishedAt: true,
   subtotalSnapshot: true,
   serviceSubtotalSnapshot: true,
@@ -1053,6 +1055,12 @@ const BOOKING_CHECKOUT_SELECT = {
   selectedPaymentMethod: true,
   paymentAuthorizedAt: true,
   paymentCollectedAt: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
   productSales: {
     select: {
       unitPrice: true,
@@ -1244,6 +1252,25 @@ function computeRebookReminderDueAt(args: {
 
   if (!base) return null
   return addDaysByMs(base, -Math.abs(args.daysBefore))
+}
+
+function isCheckoutCloseoutComplete(
+  checkoutStatus: BookingCheckoutStatus | null | undefined,
+): boolean {
+  return (
+    checkoutStatus === BookingCheckoutStatus.PAID ||
+    checkoutStatus === BookingCheckoutStatus.WAIVED
+  )
+}
+
+function isReviewEligibleCloseout(args: {
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+}): boolean {
+  return (
+    Boolean(args.aftercareSentAt) &&
+    isCheckoutCloseoutComplete(args.checkoutStatus)
+  )
 }
 
 function isAftercareSessionStepEligible(
@@ -6275,35 +6302,42 @@ async function performLockedUpsertBookingAftercare(args: {
     remindersTouched += del.count
   }
 
-  let bookingFinished = false
+    let bookingFinished = false
   let bookingNow: {
     status: BookingStatus
     sessionStep: SessionStep
     finishedAt: Date | null
   } | null = null
 
-    if (args.sendToClient) {
-    const updatedBooking = await args.tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        finishedAt: booking.finishedAt ?? now,
-      },
-      select: {
-        status: true,
-        sessionStep: true,
-        finishedAt: true,
-      } satisfies Prisma.BookingSelect,
+  if (args.sendToClient) {
+    const shouldCompleteBooking = isReviewEligibleCloseout({
+      aftercareSentAt: aftercare.sentToClientAt,
+      checkoutStatus: booking.checkoutStatus,
     })
 
-    bookingNow = {
-      status: updatedBooking.status,
-      sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
-      finishedAt: updatedBooking.finishedAt,
-    }
+    if (shouldCompleteBooking) {
+      const updatedBooking = await args.tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          status: BookingStatus.COMPLETED,
+          sessionStep: SessionStep.DONE,
+          finishedAt: booking.finishedAt ?? now,
+        },
+        select: {
+          status: true,
+          sessionStep: true,
+          finishedAt: true,
+        } satisfies Prisma.BookingSelect,
+      })
 
-    bookingFinished = true
+      bookingNow = {
+        status: updatedBooking.status,
+        sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
+        finishedAt: updatedBooking.finishedAt,
+      }
+
+      bookingFinished = true
+    }
   }
 
   return {
@@ -6384,6 +6418,16 @@ async function performLockedUpdateBookingCheckout(args: {
   const shouldSetAuthorizedAt = args.markPaymentAuthorized === true
   const shouldSetCollectedAt = args.markPaymentCollected === true
 
+  const nextCheckoutStatus =
+    shouldSetCollectedAt
+      ? (args.checkoutStatus ?? BookingCheckoutStatus.PAID)
+      : (args.checkoutStatus ?? booking.checkoutStatus)
+
+  const shouldCompleteBooking = isReviewEligibleCloseout({
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: nextCheckoutStatus,
+  })
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
@@ -6426,6 +6470,23 @@ async function performLockedUpdateBookingCheckout(args: {
       paymentCollectedAt: true,
     } satisfies Prisma.BookingSelect,
   })
+
+    if (
+    shouldCompleteBooking &&
+    (booking.status !== BookingStatus.COMPLETED ||
+      booking.sessionStep !== SessionStep.DONE ||
+      !booking.finishedAt)
+  ) {
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: booking.finishedAt ?? args.now,
+      },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+  }
 
   return {
     booking: {

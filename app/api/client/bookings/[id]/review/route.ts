@@ -1,8 +1,20 @@
 // app/api/client/bookings/[id]/review/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { MediaType, MediaVisibility, Role } from '@prisma/client'
-import { requireClient, pickString, jsonFail, jsonOk, safeUrl, resolveStoragePointers } from '@/app/api/_utils'
+import {
+  BookingCheckoutStatus,
+  MediaType,
+  MediaVisibility,
+  Role,
+} from '@prisma/client'
+import {
+  requireClient,
+  pickString,
+  jsonFail,
+  jsonOk,
+  safeUrl,
+  resolveStoragePointers,
+} from '@/app/api/_utils'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
 
 export const dynamic = 'force-dynamic'
@@ -21,12 +33,9 @@ type CreateReviewBody = {
 }
 
 type IncomingMediaItem = {
-  // These can be used to derive pointers, but are NOT canonical.
   url: string
   thumbUrl?: string | null
   mediaType: MediaType
-
-  // Preferred explicit pointers (canonical)
   storageBucket?: string | null
   storagePath?: string | null
   thumbBucket?: string | null
@@ -41,8 +50,20 @@ function isMediaType(x: unknown): x is MediaType {
   return x === MediaType.IMAGE || x === MediaType.VIDEO
 }
 
+function isReviewCloseoutEligible(args: {
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+}): boolean {
+  return (
+    Boolean(args.aftercareSentAt) &&
+    (args.checkoutStatus === BookingCheckoutStatus.PAID ||
+      args.checkoutStatus === BookingCheckoutStatus.WAIVED)
+  )
+}
+
 function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   if (!Array.isArray(bodyMedia)) return []
+
   const items: IncomingMediaItem[] = []
 
   for (const raw of bodyMedia) {
@@ -52,10 +73,13 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
     if (!url) continue
 
     const thumbUrlRaw = raw.thumbUrl
-    const thumbUrl = thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
+    const thumbUrl =
+      thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
     if (thumbUrlRaw && !thumbUrl) continue
 
-    const mediaType: MediaType = isMediaType(raw.mediaType) ? raw.mediaType : MediaType.IMAGE
+    const mediaType: MediaType = isMediaType(raw.mediaType)
+      ? raw.mediaType
+      : MediaType.IMAGE
 
     items.push({
       url,
@@ -80,13 +104,20 @@ function enforceClientMediaCaps(items: IncomingMediaItem[]): string | null {
 
   let images = 0
   let videos = 0
+
   for (const m of items) {
-    if (m.mediaType === MediaType.VIDEO) videos++
-    else images++
+    if (m.mediaType === MediaType.VIDEO) videos += 1
+    else images += 1
   }
 
-  if (images > MAX_CLIENT_IMAGES) return `You can upload up to ${MAX_CLIENT_IMAGES} images.`
-  if (videos > MAX_CLIENT_VIDEOS) return `You can upload up to ${MAX_CLIENT_VIDEOS} video.`
+  if (images > MAX_CLIENT_IMAGES) {
+    return `You can upload up to ${MAX_CLIENT_IMAGES} images.`
+  }
+
+  if (videos > MAX_CLIENT_VIDEOS) {
+    return `You can upload up to ${MAX_CLIENT_VIDEOS} video.`
+  }
+
   return null
 }
 
@@ -96,10 +127,14 @@ function enforceClientMediaCaps(items: IncomingMediaItem[]): string | null {
  */
 const REVIEW_MEDIA_VISIBILITY = MediaVisibility.PUBLIC
 
-export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
     const { user, clientId } = auth
 
     const { id: rawId } = await ctx.params
@@ -109,37 +144,68 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const body = (await req.json().catch(() => ({}))) as CreateReviewBody
 
     const rating = parseRating1to5(body.rating)
-    if (!rating) return jsonFail(400, 'Rating must be an integer from 1–5.')
+    if (!rating) {
+      return jsonFail(400, 'Rating must be an integer from 1–5.')
+    }
 
-    const headline = typeof body.headline === 'string' ? body.headline.trim() : null
+    const headline =
+      typeof body.headline === 'string' ? body.headline.trim() : null
     const reviewBody = typeof body.body === 'string' ? body.body.trim() : null
 
     const clientMediaItems = parseMedia(body.media)
+    const attachedMediaIds = parseIdArray(
+      body.attachedMediaIds,
+      MAX_ATTACH_APPT_MEDIA,
+    )
 
-    // Allow selecting up to 6 appointment media (pro-uploaded booking media only)
-    const attachedMediaIds = parseIdArray(body.attachedMediaIds, MAX_ATTACH_APPT_MEDIA)
-
-    // Enforce caps for client uploads
     const capError = enforceClientMediaCaps(clientMediaItems)
     if (capError) return jsonFail(400, capError)
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, clientId: true, professionalId: true },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        checkoutStatus: true,
+        aftercareSummary: {
+          select: {
+            id: true,
+            sentToClientAt: true,
+          },
+        },
+      },
     })
 
     if (!booking) return jsonFail(404, 'Booking not found.')
     if (booking.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    const existing = await prisma.review.findFirst({
-      where: { bookingId: booking.id, clientId },
-      select: { id: true },
+    const reviewEligible = isReviewCloseoutEligible({
+      aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+      checkoutStatus: booking.checkoutStatus,
     })
-    if (existing) {
-      return jsonFail(409, 'Review already exists for this booking.', { reviewId: existing.id })
+
+    if (!reviewEligible) {
+      return jsonFail(
+        409,
+        'Review is not available until aftercare is finalized and checkout is complete.',
+      )
     }
 
-    // Resolve pointers for client media (single source of truth)
+    const existing = await prisma.review.findFirst({
+      where: {
+        bookingId: booking.id,
+        clientId,
+      },
+      select: { id: true },
+    })
+
+    if (existing) {
+      return jsonFail(409, 'Review already exists for this booking.', {
+        reviewId: existing.id,
+      })
+    }
+
     const resolvedClientMedia = clientMediaItems.map((m) => {
       const ptrs = resolveStoragePointers({
         url: m.url,
@@ -157,21 +223,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return {
         mediaType: m.mediaType,
         caption: null as string | null,
-
         storageBucket: ptrs.storageBucket,
         storagePath: ptrs.storagePath,
         thumbBucket: ptrs.thumbBucket,
         thumbPath: ptrs.thumbPath,
-
-        // url fields are NOT canonical. Keep null to force rendering through storage pointers.
-        // If you want legacy compatibility, set url/thumbUrl to m.url/m.thumbUrl when bucket is public.
         url: null as string | null,
         thumbUrl: null as string | null,
       }
     })
 
     const fullReview = await prisma.$transaction(async (tx) => {
-      // Only allow attaching PRO-uploaded booking media that isn't already attached/locked into a review
+      // Only allow attaching appointment media that still belongs to this booking,
+      // is not already attached to another review, and is still private booking media.
+      // Preserve current review behavior: only PRO-uploaded appointment media can be attached.
       const attachables = attachedMediaIds.length
         ? await tx.mediaAsset.findMany({
             where: {
@@ -180,12 +244,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
               professionalId: booking.professionalId,
               uploadedByRole: Role.PRO,
               reviewId: null,
+              reviewLocked: false,
+              visibility: MediaVisibility.PRO_CLIENT,
+              mediaType: { in: [MediaType.IMAGE, MediaType.VIDEO] },
             },
             select: { id: true },
           })
         : []
 
-      if (attachedMediaIds.length && attachables.length !== attachedMediaIds.length) {
+      if (
+        attachedMediaIds.length > 0 &&
+        attachables.length !== attachedMediaIds.length
+      ) {
         throw new Error('ATTACH_INVALID')
       }
 
@@ -201,8 +271,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         select: { id: true },
       })
 
-      // Attach selected appointment media -> becomes PUBLIC because it is now in a review
-      if (attachables.length) {
+      if (attachables.length > 0) {
         await tx.mediaAsset.updateMany({
           where: { id: { in: attachables.map((a) => a.id) } },
           data: {
@@ -215,37 +284,31 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         })
       }
 
-      // Client-uploaded media -> create as PUBLIC review media (pointers are canonical)
-      if (resolvedClientMedia.length) {
+      if (resolvedClientMedia.length > 0) {
         await tx.mediaAsset.createMany({
           data: resolvedClientMedia.map((m) => ({
             professionalId: booking.professionalId,
             bookingId: booking.id,
             reviewId: review.id,
-
             mediaType: m.mediaType,
-
             visibility: REVIEW_MEDIA_VISIBILITY,
             uploadedByUserId: user.id,
             uploadedByRole: Role.CLIENT,
-
             isFeaturedInPortfolio: false,
             isEligibleForLooks: false,
             reviewLocked: true,
-
             storageBucket: m.storageBucket,
             storagePath: m.storagePath,
             thumbBucket: m.thumbBucket,
             thumbPath: m.thumbPath,
-
             url: m.url,
             thumbUrl: m.thumbUrl,
-            caption: null,
+            caption: m.caption,
           })),
         })
       }
 
-      const full = await tx.review.findUnique({
+      return tx.review.findUnique({
         where: { id: review.id },
         include: {
           mediaAssets: {
@@ -259,32 +322,31 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
               isFeaturedInPortfolio: true,
               isEligibleForLooks: true,
               reviewLocked: true,
-
-              // canonical pointers
               storageBucket: true,
               storagePath: true,
               thumbBucket: true,
               thumbPath: true,
-
-              // legacy (may be null by design)
               url: true,
               thumbUrl: true,
             },
           },
         },
       })
-
-      return full
     })
 
-    if (!fullReview) return jsonFail(500, 'Internal server error')
+    if (!fullReview) return jsonFail(500, 'Internal server error.')
     return jsonOk({ review: fullReview }, 201)
   } catch (e: unknown) {
     const message =
-      e && typeof e === 'object' && 'message' in e ? String((e as { message?: unknown }).message || '') : ''
+      e && typeof e === 'object' && 'message' in e
+        ? String((e as { message?: unknown }).message || '')
+        : ''
 
     if (message === 'ATTACH_INVALID') {
-      return jsonFail(400, 'One or more selected images are not available to attach.')
+      return jsonFail(
+        400,
+        'One or more selected appointment media items are not available to attach.',
+      )
     }
 
     if (message === 'MEDIA_POINTERS_REQUIRED') {
@@ -295,6 +357,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
 
     console.error('POST /api/client/bookings/[id]/review error', e)
-    return jsonFail(500, 'Internal server error')
+    return jsonFail(500, 'Internal server error.')
   }
 }
