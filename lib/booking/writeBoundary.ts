@@ -881,6 +881,29 @@ const FINAL_REVIEW_BOOKING_SELECT = {
       sortOrder: true,
     },
   },
+    aftercareSummary: {
+    select: {
+      id: true,
+      notes: true,
+      rebookMode: true,
+      rebookedFor: true,
+      rebookWindowStart: true,
+      rebookWindowEnd: true,
+      draftSavedAt: true,
+      sentToClientAt: true,
+      lastEditedAt: true,
+      version: true,
+      publicToken: true,
+      recommendedProducts: {
+        select: {
+          productId: true,
+          externalName: true,
+          externalUrl: true,
+          note: true,
+        },
+      },
+    },
+  },
 } satisfies Prisma.BookingSelect
 
 type FinalReviewBookingRecord = Prisma.BookingGetPayload<{
@@ -1837,6 +1860,123 @@ function assertValidFinalReviewLineItems(
       throw bookingError('INVALID_SERVICE_ITEMS', {
         message: 'Every final review line item needs a valid non-negative price.',
         userMessage: 'Each item needs a valid price.',
+      })
+    }
+  }
+}
+
+function assertValidRecommendedProducts(
+  products: RecommendedProductInput[],
+): void {
+  for (const product of products) {
+    const hasInternal =
+      typeof product.productId === 'string' && product.productId.trim().length > 0
+    const hasExternalName =
+      typeof product.externalName === 'string' &&
+      product.externalName.trim().length > 0
+    const hasExternalUrl =
+      typeof product.externalUrl === 'string' &&
+      product.externalUrl.trim().length > 0
+
+    if (hasInternal && (hasExternalName || hasExternalUrl)) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Recommended product cannot contain both productId and external link fields.',
+        userMessage:
+          'Pick either an internal product or an external link for each recommendation.',
+      })
+    }
+
+    if (!hasInternal && (!hasExternalName || !hasExternalUrl)) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'External recommended products require both externalName and externalUrl.',
+        userMessage:
+          'External recommendations need both a name and a link.',
+      })
+    }
+  }
+}
+
+function assertValidFinalReviewRebookFields(args: {
+  rebookMode: AftercareRebookMode | null
+  rebookedFor: Date | null
+  rebookWindowStart: Date | null
+  rebookWindowEnd: Date | null
+}): void {
+  const {
+    rebookMode,
+    rebookedFor,
+    rebookWindowStart,
+    rebookWindowEnd,
+  } = args
+
+  if (rebookMode == null) {
+    if (rebookedFor || rebookWindowStart || rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Rebook fields were provided without a rebookMode.',
+        userMessage: 'Choose a rebook option before saving rebook details.',
+      })
+    }
+    return
+  }
+
+  if (rebookMode === AftercareRebookMode.NONE) {
+    if (rebookedFor || rebookWindowStart || rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Rebook details must be empty when rebookMode is NONE.',
+        userMessage:
+          'Clear rebook dates if no follow-up booking is being recommended.',
+      })
+    }
+    return
+  }
+
+  if (rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
+    if (!rebookedFor) {
+      throw bookingError('FORBIDDEN', {
+        message: 'rebookedFor is required for BOOKED_NEXT_APPOINTMENT.',
+        userMessage: 'Add the next appointment date.',
+      })
+    }
+
+    if (rebookWindowStart || rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Recommended window fields are not allowed for BOOKED_NEXT_APPOINTMENT.',
+        userMessage:
+          'Use either a booked appointment date or a recommended window, not both.',
+      })
+    }
+
+    return
+  }
+
+  if (rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
+    if (!rebookWindowStart || !rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookWindowStart and rebookWindowEnd are required for RECOMMENDED_WINDOW.',
+        userMessage: 'Add both a recommended start and end date.',
+      })
+    }
+
+    if (rebookedFor) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookedFor is not allowed for RECOMMENDED_WINDOW.',
+        userMessage:
+          'Use either a booked appointment date or a recommended window, not both.',
+      })
+    }
+
+    if (rebookWindowStart.getTime() > rebookWindowEnd.getTime()) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookWindowStart must be before or equal to rebookWindowEnd.',
+        userMessage:
+          'The recommended rebook window start must be before the end.',
       })
     }
   }
@@ -3454,6 +3594,11 @@ async function performLockedConfirmBookingFinalReview(args: {
   professionalId: string
   finalLineItems: ConfirmBookingFinalReviewLineItemInput[]
   expectedSubtotal?: Prisma.Decimal | string | number | null
+  recommendedProducts?: RecommendedProductInput[]
+  rebookMode?: AftercareRebookMode | null
+  rebookedFor?: Date | null
+  rebookWindowStart?: Date | null
+  rebookWindowEnd?: Date | null
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<ConfirmBookingFinalReviewResult> {
@@ -3485,14 +3630,100 @@ async function performLockedConfirmBookingFinalReview(args: {
     })
   }
 
-  if ((booking.sessionStep ?? SessionStep.NONE) !== SessionStep.FINISH_REVIEW) {
+  const currentStep = booking.sessionStep ?? SessionStep.NONE
+
+  if (
+    currentStep !== SessionStep.FINISH_REVIEW &&
+    currentStep !== SessionStep.AFTER_PHOTOS
+  ) {
     throw bookingError('STEP_MISMATCH', {
-      message: `Final review is only allowed in FINISH_REVIEW. Current step: ${booking.sessionStep ?? SessionStep.NONE}.`,
-      userMessage: 'You can only confirm final review from the Finish Review step.',
+      message: `Final review is only allowed in FINISH_REVIEW or as an idempotent retry from AFTER_PHOTOS. Current step: ${currentStep}.`,
+      userMessage:
+        'You can only confirm final review from the Finish Review step.',
     })
   }
 
   assertValidFinalReviewLineItems(args.finalLineItems)
+
+  const recommendedProducts = args.recommendedProducts ?? []
+  const rebookMode = args.rebookMode ?? AftercareRebookMode.NONE
+  const rebookedFor = args.rebookedFor ?? null
+  const rebookWindowStart = args.rebookWindowStart ?? null
+  const rebookWindowEnd = args.rebookWindowEnd ?? null
+
+  assertValidRecommendedProducts(recommendedProducts)
+  assertValidFinalReviewRebookFields({
+    rebookMode,
+    rebookedFor,
+    rebookWindowStart,
+    rebookWindowEnd,
+  })
+
+  const normalizedIncomingItemsForComparison =
+    normalizeFinalReviewLineItemsForComparison(args.finalLineItems)
+
+  const existingItemsForComparison =
+    buildExistingFinalReviewItemsForComparison(booking.serviceItems)
+
+  const normalizedIncomingProductsForComparison =
+    normalizeRecommendedProductsForComparison(recommendedProducts)
+
+  const existingProductsForComparison =
+    buildExistingRecommendedProductsForComparison(
+      booking.aftercareSummary?.recommendedProducts,
+    )
+
+  const existingRebookMode =
+    booking.aftercareSummary?.rebookMode ?? AftercareRebookMode.NONE
+
+  const existingRebookedFor = normalizeDateCmp(
+    booking.aftercareSummary?.rebookedFor,
+  )
+  const incomingRebookedFor = normalizeDateCmp(rebookedFor)
+
+  const existingRebookWindowStart = normalizeDateCmp(
+    booking.aftercareSummary?.rebookWindowStart,
+  )
+  const incomingRebookWindowStart = normalizeDateCmp(rebookWindowStart)
+
+  const existingRebookWindowEnd = normalizeDateCmp(
+    booking.aftercareSummary?.rebookWindowEnd,
+  )
+  const incomingRebookWindowEnd = normalizeDateCmp(rebookWindowEnd)
+
+  const itemsUnchanged =
+    JSON.stringify(normalizedIncomingItemsForComparison) ===
+    JSON.stringify(existingItemsForComparison)
+
+  const productsUnchanged =
+    JSON.stringify(normalizedIncomingProductsForComparison) ===
+    JSON.stringify(existingProductsForComparison)
+
+  const rebookUnchanged =
+    existingRebookMode === rebookMode &&
+    existingRebookedFor === incomingRebookedFor &&
+    existingRebookWindowStart === incomingRebookWindowStart &&
+    existingRebookWindowEnd === incomingRebookWindowEnd
+
+  if (
+    itemsUnchanged &&
+    productsUnchanged &&
+    rebookUnchanged &&
+    booking.sessionStep === SessionStep.AFTER_PHOTOS
+  ) {
+    return {
+      booking: {
+        id: booking.id,
+        status: booking.status,
+        sessionStep: booking.sessionStep ?? SessionStep.NONE,
+        serviceId: booking.serviceId,
+        offeringId: booking.offeringId,
+        subtotalSnapshot: booking.subtotalSnapshot,
+        totalDurationMinutes: booking.totalDurationMinutes ?? 0,
+      },
+      meta: buildMeta(false),
+    }
+  }
 
   const normalizedItems = [...args.finalLineItems]
     .map((item, index) => {
@@ -3594,6 +3825,88 @@ async function performLockedConfirmBookingFinalReview(args: {
     bookingId: booking.id,
     nextServiceSubtotal: computedSubtotal,
   })
+
+  const tokenToUse =
+    booking.aftercareSummary?.publicToken ?? newPublicToken()
+  const now = new Date()
+  const nextVersion = (booking.aftercareSummary?.version ?? 0) + 1
+
+  const aftercare = await args.tx.aftercareSummary.upsert({
+    where: { bookingId: booking.id },
+    create: {
+      bookingId: booking.id,
+      publicToken: tokenToUse,
+      notes: booking.aftercareSummary?.notes ?? null,
+      rebookMode,
+      rebookedFor,
+      rebookWindowStart,
+      rebookWindowEnd,
+      draftSavedAt: now,
+      sentToClientAt: booking.aftercareSummary?.sentToClientAt ?? null,
+      lastEditedAt: now,
+      version: 1,
+    },
+    update: {
+      publicToken: tokenToUse,
+      notes: booking.aftercareSummary?.notes ?? null,
+      rebookMode,
+      rebookedFor,
+      rebookWindowStart,
+      rebookWindowEnd,
+      draftSavedAt: now,
+      sentToClientAt: booking.aftercareSummary?.sentToClientAt ?? null,
+      lastEditedAt: now,
+      version: nextVersion,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  await args.tx.productRecommendation.deleteMany({
+    where: { aftercareSummaryId: aftercare.id },
+  })
+
+  const internalProductIds = Array.from(
+    new Set(
+      recommendedProducts
+        .map((product) => product.productId)
+        .filter(
+          (value): value is string =>
+            typeof value === 'string' && value.trim().length > 0,
+        ),
+    ),
+  )
+
+  if (internalProductIds.length > 0) {
+    const validProducts = await args.tx.product.findMany({
+      where: {
+        id: { in: internalProductIds },
+        isActive: true,
+      },
+      select: { id: true },
+      take: internalProductIds.length,
+    })
+
+    if (validProducts.length !== internalProductIds.length) {
+      throw bookingError('FORBIDDEN', {
+        message: 'One or more recommended products are invalid.',
+        userMessage: 'One or more selected products are no longer available.',
+      })
+    }
+  }
+
+  if (recommendedProducts.length > 0) {
+    await args.tx.productRecommendation.createMany({
+      data: recommendedProducts.map((product) => ({
+        aftercareSummaryId: aftercare.id,
+        productId: product.productId,
+        externalName: product.externalName,
+        externalUrl: product.externalUrl,
+        note: product.note,
+      })),
+    })
+  }
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -3946,12 +4259,7 @@ async function performLockedUploadProBookingMedia(args: {
     args.phase === MediaPhase.AFTER &&
     booking.sessionStep === SessionStep.AFTER_PHOTOS
   ) {
-    await args.tx.booking.update({
-      where: { id: booking.id },
-      data: { sessionStep: SessionStep.DONE },
-      select: { id: true } satisfies Prisma.BookingSelect,
-    })
-    advancedTo = SessionStep.DONE
+    advancedTo = null
   }
 
   return {
@@ -7329,6 +7637,11 @@ export async function confirmBookingFinalReview(
         professionalId: args.professionalId,
         finalLineItems: args.finalLineItems,
         expectedSubtotal: args.expectedSubtotal ?? null,
+        recommendedProducts: args.recommendedProducts ?? [],
+        rebookMode: args.rebookMode ?? AftercareRebookMode.NONE,
+        rebookedFor: args.rebookedFor ?? null,
+        rebookWindowStart: args.rebookWindowStart ?? null,
+        rebookWindowEnd: args.rebookWindowEnd ?? null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),

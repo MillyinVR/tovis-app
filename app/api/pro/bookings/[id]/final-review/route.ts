@@ -24,18 +24,38 @@ type FinalReviewLineItemInput = {
   sortOrder?: number | string
 }
 
+type FinalReviewRecommendedProductInput = {
+  name?: string
+  url?: string
+  note?: string | null
+}
+
 type FinalReviewRequestBody = {
   finalLineItems?: FinalReviewLineItemInput[]
   expectedSubtotal?: string | number | null
-  recommendedProducts?: {
-    name?: string
-    url?: string
-    note?: string | null
-  }[]
+  recommendedProducts?: FinalReviewRecommendedProductInput[]
   rebookMode?: AftercareRebookMode | string | null
   rebookedFor?: string | null
   rebookWindowStart?: string | null
   rebookWindowEnd?: string | null
+}
+
+type NormalizedFinalLineItem = {
+  bookingServiceItemId?: string | null
+  serviceId: string
+  offeringId: string | null
+  itemType: BookingServiceItemType
+  price: string | number
+  durationMinutes: number
+  notes?: string | null
+  sortOrder: number
+}
+
+type NormalizedRecommendedProduct = {
+  productId: null
+  externalName: string
+  externalUrl: string
+  note: string | null
 }
 
 function jsonOk(body: unknown, status = 200) {
@@ -63,15 +83,18 @@ function asNullableTrimmedString(value: unknown): string | null {
 
 function asFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
+
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value)
     return Number.isFinite(parsed) ? parsed : null
   }
+
   return null
 }
 
 function asNullableDate(value: unknown): Date | null {
   if (typeof value !== 'string' || !value.trim()) return null
+
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
 }
@@ -86,18 +109,7 @@ function parseItemType(value: unknown): BookingServiceItemType {
   return BookingServiceItemType.BASE
 }
 
-function normalizeFinalLineItems(
-  value: unknown,
-): {
-  bookingServiceItemId?: string | null
-  serviceId: string
-  offeringId: string | null
-  itemType: BookingServiceItemType
-  price: string | number
-  durationMinutes: number
-  notes?: string | null
-  sortOrder: number
-}[] {
+function normalizeFinalLineItems(value: unknown): NormalizedFinalLineItem[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw bookingError('INVALID_SERVICE_ITEMS', {
       message: 'finalLineItems is required.',
@@ -146,11 +158,7 @@ function normalizeFinalLineItems(
 
 function normalizeRecommendedProducts(
   value: unknown,
-): {
-  name: string
-  url: string
-  note: string | null
-}[] {
+): NormalizedRecommendedProduct[] {
   if (!Array.isArray(value)) return []
 
   return value
@@ -161,18 +169,20 @@ function normalizeRecommendedProducts(
         note?: unknown
       }
 
-      const name = asTrimmedString(row.name)
-      const url = asTrimmedString(row.url)
+      const externalName = asTrimmedString(row.name)
+      const externalUrl = asTrimmedString(row.url)
       const note = asNullableTrimmedString(row.note)
 
-      if (!name || !url) return null
+      if (!externalName || !externalUrl) return null
 
-      return { name, url, note }
+      return {
+        productId: null,
+        externalName,
+        externalUrl,
+        note,
+      }
     })
-    .filter(
-      (row): row is { name: string; url: string; note: string | null } =>
-        Boolean(row),
-    )
+    .filter((row): row is NormalizedRecommendedProduct => Boolean(row))
 }
 
 function parseRebookMode(value: unknown): AftercareRebookMode | null {
@@ -197,6 +207,91 @@ function parseRebookMode(value: unknown): AftercareRebookMode | null {
   })
 }
 
+function validateRebookFields(args: {
+  rebookMode: AftercareRebookMode | null
+  rebookedFor: Date | null
+  rebookWindowStart: Date | null
+  rebookWindowEnd: Date | null
+}): void {
+  const {
+    rebookMode,
+    rebookedFor,
+    rebookWindowStart,
+    rebookWindowEnd,
+  } = args
+
+  if (rebookMode == null) {
+    if (rebookedFor || rebookWindowStart || rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Rebook dates were provided without a valid rebookMode.',
+        userMessage: 'Choose a rebook option before saving rebook details.',
+      })
+    }
+    return
+  }
+
+  if (rebookMode === AftercareRebookMode.NONE) {
+    if (rebookedFor || rebookWindowStart || rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Rebook details must be empty when rebookMode is NONE.',
+        userMessage:
+          'Clear rebook dates if no follow-up booking is being recommended.',
+      })
+    }
+    return
+  }
+
+  if (rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
+    if (!rebookedFor) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookedFor is required for BOOKED_NEXT_APPOINTMENT.',
+        userMessage: 'Add the next appointment date.',
+      })
+    }
+
+    if (rebookWindowStart || rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Recommended window fields are not allowed for BOOKED_NEXT_APPOINTMENT.',
+        userMessage:
+          'Use either a booked appointment date or a recommended window, not both.',
+      })
+    }
+
+    return
+  }
+
+  if (rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
+    if (!rebookWindowStart || !rebookWindowEnd) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookWindowStart and rebookWindowEnd are required for RECOMMENDED_WINDOW.',
+        userMessage: 'Add both a recommended start and end date.',
+      })
+    }
+
+    if (rebookedFor) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookedFor is not allowed for RECOMMENDED_WINDOW.',
+        userMessage:
+          'Use either a booked appointment date or a recommended window, not both.',
+      })
+    }
+
+    if (rebookWindowStart.getTime() > rebookWindowEnd.getTime()) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'rebookWindowStart must be before or equal to rebookWindowEnd.',
+        userMessage:
+          'The recommended rebook window start must be before the end.',
+      })
+    }
+  }
+}
+
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const { id } = await ctx.params
@@ -214,7 +309,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return jsonFail('UNAUTHORIZED', 401)
     }
 
-    const body = (await req.json().catch(() => null)) as FinalReviewRequestBody | null
+    const body = (await req.json().catch(() => null)) as
+      | FinalReviewRequestBody
+      | null
+
     if (!body) {
       return jsonFail('INVALID_BODY', 400)
     }
@@ -232,11 +330,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const rebookWindowStart = asNullableDate(body.rebookWindowStart)
     const rebookWindowEnd = asNullableDate(body.rebookWindowEnd)
 
- const result = await confirmBookingFinalReview({
-    bookingId,
-    professionalId,
-    finalLineItems,
-    expectedSubtotal,
+    validateRebookFields({
+      rebookMode,
+      rebookedFor,
+      rebookWindowStart,
+      rebookWindowEnd,
+    })
+
+    const result = await confirmBookingFinalReview({
+      bookingId,
+      professionalId,
+      finalLineItems,
+      expectedSubtotal,
+      recommendedProducts,
+      rebookMode,
+      rebookedFor,
+      rebookWindowStart,
+      rebookWindowEnd,
     })
 
     return jsonOk({
