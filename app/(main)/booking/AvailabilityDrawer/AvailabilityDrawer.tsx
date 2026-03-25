@@ -338,6 +338,7 @@ export default function AvailabilityDrawer(props: {
   const [selectedDayYMD, setSelectedDayYMD] = useState<string | null>(null)
   const [period, setPeriod] = useState<Period>('AFTERNOON')
   const [otherProsRequested, setOtherProsRequested] = useState(false)
+  const [slotRetryKey, setSlotRetryKey] = useState(0)
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
@@ -377,6 +378,7 @@ export default function AvailabilityDrawer(props: {
     hasMoreDays,
     loadMore,
     setError,
+    refresh,
   } = useAvailability(
     open,
     context,
@@ -496,6 +498,7 @@ export default function AvailabilityDrawer(props: {
     selectedClientAddressId,
     debug,
     holding,
+    retryKey: slotRetryKey,
     setError,
   })
 
@@ -990,12 +993,45 @@ export default function AvailabilityDrawer(props: {
           style={{ paddingBottom: STICKY_CTA_H + 14 }}
         >
           {shouldShowLoading ? (
-            <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-              Loading availability…
+            <div className="tovis-glass-soft rounded-card p-4">
+              {/* Shimmer skeleton matching the summary card layout */}
+              <div className="mb-4 flex items-center gap-3">
+                <div className="avail-skeleton h-12 w-12 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <div className="avail-skeleton h-3 w-1/2 rounded-full" />
+                  <div className="avail-skeleton h-3 w-1/3 rounded-full" />
+                </div>
+              </div>
+              <div className="avail-skeleton mb-3 h-10 rounded-2xl" />
+              <div className="mb-3 flex gap-2">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl" />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="avail-skeleton h-10 w-16 rounded-full" />
+                ))}
+              </div>
             </div>
           ) : displayError ? (
-            <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-toneDanger">
-              {displayError}
+            <div className="tovis-glass-soft rounded-card p-4">
+              <div className="mb-3 text-sm font-semibold text-toneDanger">{displayError}</div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (summary) {
+                    setError(null)
+                    clearDaySlotCache()
+                    setSlotRetryKey((k) => k + 1)
+                  } else {
+                    refresh()
+                  }
+                }}
+                className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10"
+              >
+                Try again
+              </button>
             </div>
           ) : waitingForMobileAddress ? (
             <>
@@ -1089,14 +1125,29 @@ export default function AvailabilityDrawer(props: {
               ) : null}
 
               {loadingMore ? (
-                <div className="mb-3 text-xs font-semibold text-textSecondary">
-                  Loading more days…
+                <div className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
+                  <div className="avail-skeleton mb-3 h-3 w-24 rounded-full" />
+                  <div className="flex gap-2 overflow-hidden">
+                    {[0, 1, 2, 3].map((i) => (
+                      <div key={i} className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl" />
+                    ))}
+                  </div>
                 </div>
               ) : null}
 
               {loadingPrimarySlots ? (
-                <div className="mb-3 text-xs font-semibold text-textSecondary">
-                  Loading times…
+                <div className="tovis-glass-soft mb-3 rounded-card p-4">
+                  <div className="avail-skeleton mb-4 h-3 w-28 rounded-full" />
+                  <div className="mb-3 grid grid-cols-3 gap-2">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="avail-skeleton h-10 rounded-full" />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                      <div key={i} className="avail-skeleton h-10 w-[62px] rounded-full" />
+                    ))}
+                  </div>
                 </div>
               ) : null}
 

@@ -157,6 +157,8 @@ export type AvailabilitySummaryOk = ApiOk<{
   }
 
   availableDays: AvailabilityDaySummary[]
+  /** Slots for the first available day — embedded to avoid a second round-trip on drawer open */
+  firstDaySlots?: string[]
   otherPros: AvailabilityOtherPro[]
   waitlistSupported: boolean
 
