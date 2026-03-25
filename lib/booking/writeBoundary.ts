@@ -1300,6 +1300,20 @@ function normalizeDateCmp(value: Date | null | undefined): string | null {
   return value ? new Date(value).toISOString() : null
 }
 
+function buildSessionAuditSnapshot(args: {
+  status: BookingStatus
+  startedAt: Date | null | undefined
+  finishedAt: Date | null | undefined
+  sessionStep: SessionStep | null | undefined
+}) {
+  return {
+    status: args.status,
+    startedAt: normalizeDateCmp(args.startedAt),
+    finishedAt: normalizeDateCmp(args.finishedAt),
+    sessionStep: args.sessionStep ?? SessionStep.NONE,
+  }
+}
+
 function normalizeFinalReviewLineItemsForComparison(
   items: ConfirmBookingFinalReviewLineItemInput[],
 ) {
@@ -3790,6 +3804,57 @@ async function performLockedFinishBookingSession(args: {
     } satisfies Prisma.BookingSelect,
   })
 
+  const oldSessionState = buildSessionAuditSnapshot({
+    status: booking.status,
+    startedAt: booking.startedAt,
+    finishedAt: booking.finishedAt,
+    sessionStep: step,
+  })
+
+  const newSessionState = buildSessionAuditSnapshot({
+    status: updated.status,
+    startedAt: updated.startedAt,
+    finishedAt: updated.finishedAt,
+    sessionStep: updated.sessionStep,
+  })
+
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: BookingCloseoutAuditAction.SESSION_FINISHED,
+    route: 'lib/booking/writeBoundary.ts:finishBookingSession',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: oldSessionState,
+    newValue: newSessionState,
+    metadata: {
+      previousStep: step,
+      nextStep: updated.sessionStep ?? SessionStep.NONE,
+      afterCount,
+    },
+  })
+
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: BookingCloseoutAuditAction.SESSION_STEP_CHANGED,
+    route: 'lib/booking/writeBoundary.ts:finishBookingSession',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      sessionStep: step,
+    },
+    newValue: {
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+    },
+    metadata: {
+      trigger: 'finish_booking_session',
+      afterCount,
+    },
+  })
+
   return {
     booking: {
       id: updated.id,
@@ -4246,16 +4311,46 @@ async function performLockedTransitionSessionStep(args: {
     }
   }
 
+  const from = booking.sessionStep ?? SessionStep.NONE
+
   if (booking.status === BookingStatus.PENDING) {
     if (
       args.nextStep !== SessionStep.CONSULTATION &&
       args.nextStep !== SessionStep.NONE
     ) {
-      await args.tx.booking.update({
+      const forced = await args.tx.booking.update({
         where: { id: booking.id },
         data: { sessionStep: SessionStep.CONSULTATION },
-        select: { id: true } satisfies Prisma.BookingSelect,
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          finishedAt: true,
+          sessionStep: true,
+        } satisfies Prisma.BookingSelect,
       })
+
+      if (from !== (forced.sessionStep ?? SessionStep.NONE)) {
+        await createBookingCloseoutAuditLog({
+          tx: args.tx,
+          bookingId: booking.id,
+          professionalId: args.professionalId,
+          action: BookingCloseoutAuditAction.SESSION_STEP_CHANGED,
+          route: 'lib/booking/writeBoundary.ts:transitionSessionStep',
+          requestId: args.requestId,
+          idempotencyKey: args.idempotencyKey,
+          oldValue: {
+            sessionStep: from,
+          },
+          newValue: {
+            sessionStep: forced.sessionStep ?? SessionStep.NONE,
+          },
+          metadata: {
+            trigger: 'forced_reset_pending_booking',
+            requestedStep: args.nextStep,
+          },
+        })
+      }
 
       return {
         ok: false,
@@ -4266,8 +4361,6 @@ async function performLockedTransitionSessionStep(args: {
       }
     }
   }
-
-  const from = booking.sessionStep ?? SessionStep.NONE
 
   if (from === args.nextStep) {
     return {
@@ -4308,11 +4401,40 @@ async function performLockedTransitionSessionStep(args: {
     requiresApprovedConsultForStep(args.nextStep) &&
     approval !== 'APPROVED'
   ) {
-    await args.tx.booking.update({
+    const forced = await args.tx.booking.update({
       where: { id: booking.id },
       data: { sessionStep: SessionStep.CONSULTATION },
-      select: { id: true } satisfies Prisma.BookingSelect,
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        sessionStep: true,
+      } satisfies Prisma.BookingSelect,
     })
+
+    if (from !== (forced.sessionStep ?? SessionStep.NONE)) {
+      await createBookingCloseoutAuditLog({
+        tx: args.tx,
+        bookingId: booking.id,
+        professionalId: args.professionalId,
+        action: BookingCloseoutAuditAction.SESSION_STEP_CHANGED,
+        route: 'lib/booking/writeBoundary.ts:transitionSessionStep',
+        requestId: args.requestId,
+        idempotencyKey: args.idempotencyKey,
+        oldValue: {
+          sessionStep: from,
+        },
+        newValue: {
+          sessionStep: forced.sessionStep ?? SessionStep.NONE,
+        },
+        metadata: {
+          trigger: 'forced_reset_consultation_required',
+          requestedStep: args.nextStep,
+          approvalStatus: approval ?? null,
+        },
+      })
+    }
 
     return {
       ok: false,
@@ -4395,9 +4517,65 @@ async function performLockedTransitionSessionStep(args: {
     },
     select: {
       id: true,
+      status: true,
       sessionStep: true,
       startedAt: true,
+      finishedAt: true,
     } satisfies Prisma.BookingSelect,
+  })
+
+    const oldSessionState = buildSessionAuditSnapshot({
+    status: booking.status,
+    startedAt: booking.startedAt,
+    finishedAt: booking.finishedAt,
+    sessionStep: from,
+  })
+
+  const newSessionState = buildSessionAuditSnapshot({
+    status: updated.status,
+    startedAt: updated.startedAt,
+    finishedAt: updated.finishedAt,
+    sessionStep: updated.sessionStep,
+  })
+
+  if (shouldSetStartedAt && !booking.startedAt && updated.startedAt) {
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+      action: BookingCloseoutAuditAction.SESSION_STARTED,
+      route: 'lib/booking/writeBoundary.ts:transitionSessionStep',
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: oldSessionState,
+      newValue: newSessionState,
+      metadata: {
+        trigger: 'implicit_start_from_session_step_transition',
+        previousStep: from,
+        nextStep: updated.sessionStep ?? SessionStep.NONE,
+      },
+    })
+  }
+
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: BookingCloseoutAuditAction.SESSION_STEP_CHANGED,
+    route: 'lib/booking/writeBoundary.ts:transitionSessionStep',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      sessionStep: from,
+    },
+    newValue: {
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+    },
+    metadata: {
+      previousStep: from,
+      nextStep: updated.sessionStep ?? SessionStep.NONE,
+      implicitStart: shouldSetStartedAt && !booking.startedAt,
+    },
   })
 
   return {

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
+  txBookingCloseoutAuditLogCreate: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -44,6 +45,9 @@ const tx = {
   booking: {
     findUnique: mocks.txBookingFindUnique,
     update: mocks.txBookingUpdate,
+  },
+  bookingCloseoutAuditLog: {
+    create: mocks.txBookingCloseoutAuditLogCreate,
   },
 }
 

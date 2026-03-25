@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import {
+  BookingCloseoutAuditAction,
   BookingServiceItemType,
   BookingStatus,
   ClientNotificationType,
@@ -11,7 +12,10 @@ import {
   SessionStep,
 } from '@prisma/client'
 import { transitionSessionStepInTransaction } from '@/lib/booking/writeBoundary'
-
+import {
+  areAuditValuesEqual,
+  createBookingCloseoutAuditLog,
+} from '@/lib/booking/closeoutAudit'
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -152,6 +156,29 @@ function normalizeDecimalText(value: Prisma.Decimal | null | undefined): string 
   return value ? value.toFixed(2) : null
 }
 
+function readHeaderValue(req: Request, name: string): string | null {
+  const value = req.headers.get(name)
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function buildConsultationProposalAuditSnapshot(args: {
+  status: ConsultationApprovalStatus | null | undefined
+  proposedServicesJson: unknown
+  proposedTotal: Prisma.Decimal | null | undefined
+  notes: string | null | undefined
+  sessionStep: SessionStep | null | undefined
+}) {
+  return {
+    status: args.status ?? null,
+    proposedServicesJson: stableJson(args.proposedServicesJson),
+    proposedTotal: normalizeDecimalText(args.proposedTotal),
+    notes: args.notes ?? null,
+    sessionStep: args.sessionStep ?? SessionStep.NONE,
+  }
+}
+
 function parseProposalPayload(raw: unknown): ParsedProposalPayload | null {
   if (!isRecord(raw)) return null
   if (!Array.isArray(raw.items)) return null
@@ -237,6 +264,9 @@ export async function POST(req: Request, ctx: Ctx) {
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
+
+    const requestId = readHeaderValue(req, 'x-request-id')
+    const idempotencyKey = readHeaderValue(req, 'idempotency-key')
 
     const body: unknown = await req.json().catch(() => null)
     if (!isRecord(body)) {
@@ -521,6 +551,42 @@ export async function POST(req: Request, ctx: Ctx) {
           bookingId: booking.id,
         },
       })
+
+            const oldProposalState = buildConsultationProposalAuditSnapshot({
+        status: existingApproval?.status,
+        proposedServicesJson: existingApproval?.proposedServicesJson ?? null,
+        proposedTotal: existingApproval?.proposedTotal,
+        notes: existingApproval?.notes ?? null,
+        sessionStep: booking.sessionStep,
+      })
+
+      const newProposalState = buildConsultationProposalAuditSnapshot({
+        status: approval.status,
+        proposedServicesJson: proposal.proposedServicesJson,
+        proposedTotal: approval.proposedTotal,
+        notes,
+        sessionStep: stepRes.booking.sessionStep,
+      })
+
+      if (!areAuditValuesEqual(oldProposalState, newProposalState)) {
+        await createBookingCloseoutAuditLog({
+          tx,
+          bookingId: booking.id,
+          professionalId: proId,
+          action: BookingCloseoutAuditAction.CONSULTATION_PROPOSAL_SENT,
+          route: 'app/api/pro/bookings/[id]/consultation-proposal/route.ts',
+          requestId,
+          idempotencyKey,
+          oldValue: oldProposalState,
+          newValue: newProposalState,
+          metadata: {
+            proposalItemCount: proposal.items.length,
+            previousStep: booking.sessionStep ?? SessionStep.NONE,
+            nextStep: stepRes.booking.sessionStep,
+            replacedExistingProposal: Boolean(existingApproval?.id),
+          },
+        })
+      }
 
       return {
         ok: true,

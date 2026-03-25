@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   txBookingServiceItemCreateMany: vi.fn(),
 
   txConsultationApprovalUpdate: vi.fn(),
+  txBookingCloseoutAuditLogCreate: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -76,6 +77,9 @@ const tx = {
   },
   consultationApproval: {
     update: mocks.txConsultationApprovalUpdate,
+  },
+  bookingCloseoutAuditLog: {
+    create: mocks.txBookingCloseoutAuditLogCreate,
   },
 }
 
