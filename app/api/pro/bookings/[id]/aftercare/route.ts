@@ -554,6 +554,11 @@ export async function POST(req: Request, ctx: Ctx) {
         ? clientTimeZoneRaw
         : null
 
+    const version =
+      typeof rawBody.version === 'number' && Number.isFinite(rawBody.version)
+        ? rawBody.version
+        : null
+
     const result = await upsertBookingAftercare({
       bookingId,
       professionalId: auth.professionalId,
@@ -568,6 +573,7 @@ export async function POST(req: Request, ctx: Ctx) {
       productReminderDaysAfter,
       recommendedProducts: productsParsed.value,
       sendToClient,
+      version,
     })
 
     return jsonOk(
