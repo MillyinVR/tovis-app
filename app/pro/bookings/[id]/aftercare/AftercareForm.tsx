@@ -569,16 +569,45 @@ export default function AftercareForm({
     const rebookISO = isoFromDatetimeLocalInTimeZone(rebookAt, tz)
     const windowStartISO = isoFromDatetimeLocalInTimeZone(windowStart, tz)
     const windowEndISO = isoFromDatetimeLocalInTimeZone(windowEnd, tz)
+    const now = Date.now()
 
-    if (rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !rebookISO) {
-      return 'Pick a recommended next visit date, or change rebook mode to “None”.'
+    if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
+      if (!rebookISO) {
+        return 'Pick a recommended next visit date, or change rebook mode to “None”.'
+      }
+
+      const rebookDate = new Date(rebookISO)
+      if (
+        Number.isNaN(rebookDate.getTime()) ||
+        rebookDate.getTime() <= now
+      ) {
+        return 'Recommended next visit must be in the future.'
+      }
     }
 
     if (rebookMode === 'RECOMMENDED_WINDOW') {
       if (!windowStartISO || !windowEndISO) {
         return 'Pick both a start and end for the recommended booking window.'
       }
-      if (new Date(windowEndISO) <= new Date(windowStartISO)) {
+
+      const windowStartDate = new Date(windowStartISO)
+      const windowEndDate = new Date(windowEndISO)
+
+      if (
+        Number.isNaN(windowStartDate.getTime()) ||
+        Number.isNaN(windowEndDate.getTime())
+      ) {
+        return 'Window dates are invalid.'
+      }
+
+      if (
+        windowStartDate.getTime() <= now ||
+        windowEndDate.getTime() <= now
+      ) {
+        return 'Recommended booking window must be in the future.'
+      }
+
+      if (windowEndDate <= windowStartDate) {
         return 'Window end must be after window start.'
       }
     }
@@ -589,16 +618,8 @@ export default function AftercareForm({
       return 'Fix product links/names before continuing.'
     }
 
-    if (sendToClient) {
-      const hasNotes = Boolean(notes.trim())
-      const hasAfter = afterMedia.length > 0
-      const hasAnyProduct = products.some(
-        (p) => p.name.trim() || p.url.trim() || pickString(p.note).trim(),
-      )
-
-      if (!hasNotes && !hasAfter && !hasAnyProduct) {
-        return 'Add notes, after photos, or at least one product before sending to the client.'
-      }
+    if (sendToClient && !notes.trim()) {
+      return 'Add aftercare notes before sending to the client.'
     }
 
     return null

@@ -403,6 +403,7 @@ type UpsertBookingAftercareArgs = {
   productReminderDaysAfter: number
   recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
+  version: number | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -7190,6 +7191,7 @@ async function performLockedUpsertBookingAftercare(args: {
   productReminderDaysAfter: number
   recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
+  version: number | null
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UpsertBookingAftercareResult> {
@@ -7234,6 +7236,27 @@ async function performLockedUpsertBookingAftercare(args: {
   })
 
   const existingAftercare = booking.aftercareSummary
+
+    const incomingVersion =
+    typeof args.version === 'number' && Number.isFinite(args.version)
+      ? Math.trunc(args.version)
+      : null
+
+  if (existingAftercare) {
+    if (incomingVersion == null) {
+      throw bookingError('STALE_VERSION', {
+        message: 'Aftercare version is required for updates.',
+        userMessage: 'This aftercare draft is out of date. Refresh and try again.',
+      })
+    }
+
+    if (incomingVersion !== existingAftercare.version) {
+      throw bookingError('STALE_VERSION', {
+        message: `Aftercare version mismatch. Expected ${existingAftercare.version}, received ${incomingVersion}.`,
+        userMessage: 'This aftercare draft is out of date. Refresh and try again.',
+      })
+    }
+  }
 
 const existingAftercareComparable = existingAftercare
   ? {
@@ -8724,7 +8747,7 @@ export async function upsertBookingAftercare(
   return withLockedProfessionalTransaction(
     args.professionalId,
     async ({ tx }) =>
-      performLockedUpsertBookingAftercare({
+        performLockedUpsertBookingAftercare({
         tx,
         bookingId: args.bookingId,
         professionalId: args.professionalId,
@@ -8739,6 +8762,7 @@ export async function upsertBookingAftercare(
         productReminderDaysAfter: args.productReminderDaysAfter,
         recommendedProducts: args.recommendedProducts,
         sendToClient: args.sendToClient,
+        version: args.version,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),

@@ -116,18 +116,12 @@ export async function DELETE(_req: NextRequest, context: { params: Promise<{ id:
     if (!review) return jsonFail(404, 'Review not found.')
     if (review.clientId !== clientId) return jsonFail(403, 'Forbidden.')
 
-    const lockedCount = await prisma.mediaAsset.count({
-      where: {
-        reviewId: review.id,
-        OR: [{ isFeaturedInPortfolio: true }, { isEligibleForLooks: true }],
-      },
+    const mediaCount = await prisma.mediaAsset.count({
+      where: { reviewId: review.id },
     })
 
-    if (lockedCount > 0) {
-      return jsonFail(
-        409,
-        `You can’t delete this review because ${lockedCount} media item(s) are used in portfolio/Looks.`,
-      )
+    if (mediaCount > 0) {
+      return jsonFail(409, 'Reviews with media cannot be deleted.')
     }
 
     await prisma.$transaction(async (tx) => {

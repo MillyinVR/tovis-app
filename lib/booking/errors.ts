@@ -62,6 +62,7 @@ export type BookingErrorCode =
   | "AFTERCARE_NOT_COMPLETED"
   | "AFTERCARE_CLIENT_MISMATCH"
   | "AFTERCARE_OFFERING_MISMATCH"
+  | "STALE_VERSION"
   | "INTERNAL_ERROR";
 
 export type BookingErrorUiAction =
@@ -545,6 +546,13 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Aftercare token does not match the requested offering.",
     userMessage: "That aftercare link does not match this service.",
+  },
+  STALE_VERSION: {
+    httpStatus: 409,
+    retryable: true,
+    uiAction: "REFRESH_AVAILABILITY",
+    message: "Aftercare version is stale.",
+    userMessage: "This aftercare draft is out of date. Refresh and try again.",
   },
 
   INTERNAL_ERROR: {

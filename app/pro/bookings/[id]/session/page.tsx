@@ -646,6 +646,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
                       ? 'pointer-events-none cursor-not-allowed opacity-60'
                       : '',
                   ].join(' ')}
+                  disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
                   aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
                 >
                   Complete session (requires finalized aftercare)
