@@ -1,3 +1,5 @@
+// app/client/bookings/[id]/page.tsx 
+
 import type { ReactNode } from 'react'
 import { notFound, redirect } from 'next/navigation'
 
@@ -15,6 +17,7 @@ import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ReviewSection from './ReviewSection'
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
+import ClientCheckoutCard from './ClientCheckoutCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -1294,89 +1297,82 @@ export default async function ClientBookingPage(props: {
                   </div>
 
                   <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">
-                      Payment &amp; checkout
-                    </div>
+  <div className="text-[12px] font-black text-textPrimary">
+    Payment &amp; checkout
+  </div>
 
-                    <div className="mt-3 grid gap-1">
-                      <SummaryRow
-                        label="Checkout status"
-                        value={checkoutStatusLabel || COPY.common.notProvided}
-                      />
-                      {selectedPaymentMethodLabel ? (
-                        <SummaryRow
-                          label="Payment method"
-                          value={selectedPaymentMethodLabel}
-                        />
-                      ) : null}
-                      {collectionTimingLabel ? (
-                        <SummaryRow
-                          label="Collection timing"
-                          value={collectionTimingLabel}
-                        />
-                      ) : null}
-                      <SummaryRow
-                        label="Services subtotal"
-                        value={serviceSubtotalLabel || COPY.common.notProvided}
-                      />
-                      {productSubtotalLabel ? (
-                        <SummaryRow
-                          label="Products subtotal"
-                          value={productSubtotalLabel}
-                        />
-                      ) : null}
-                      {discountLabel ? (
-                        <SummaryRow label="Discount" value={discountLabel} />
-                      ) : null}
-                      {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
-                      {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
-                      <SummaryRow label="Final total" value={finalTotalLabel} />
-                      {paymentAuthorizedLabel ? (
-                        <SummaryRow
-                          label="Authorized"
-                          value={paymentAuthorizedLabel}
-                        />
-                      ) : null}
-                      {paymentCollectedLabel ? (
-                        <SummaryRow
-                          label="Collected"
-                          value={paymentCollectedLabel}
-                        />
-                      ) : null}
-                    </div>
+  <div className="mt-3 grid gap-1">
+    <SummaryRow
+      label="Checkout status"
+      value={checkoutStatusLabel || COPY.common.notProvided}
+    />
+    {selectedPaymentMethodLabel ? (
+      <SummaryRow
+        label="Payment method"
+        value={selectedPaymentMethodLabel}
+      />
+    ) : null}
+    {collectionTimingLabel ? (
+      <SummaryRow
+        label="Collection timing"
+        value={collectionTimingLabel}
+      />
+    ) : null}
+    <SummaryRow
+      label="Services subtotal"
+      value={serviceSubtotalLabel || COPY.common.notProvided}
+    />
+    {productSubtotalLabel ? (
+      <SummaryRow
+        label="Products subtotal"
+        value={productSubtotalLabel}
+      />
+    ) : null}
+    {discountLabel ? (
+      <SummaryRow label="Discount" value={discountLabel} />
+    ) : null}
+    {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
+    {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
+    <SummaryRow label="Final total" value={finalTotalLabel} />
+    {paymentAuthorizedLabel ? (
+      <SummaryRow
+        label="Authorized"
+        value={paymentAuthorizedLabel}
+      />
+    ) : null}
+    {paymentCollectedLabel ? (
+      <SummaryRow
+        label="Collected"
+        value={paymentCollectedLabel}
+      />
+    ) : null}
+  </div>
 
-                    {acceptedMethods.length > 0 ? (
-                      <div className="mt-4">
-                        <div className="text-[11px] font-black text-textSecondary">
-                          Accepted methods
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {acceptedMethods.map((method) => (
-                            <span
-                              key={method.key}
-                              className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textPrimary"
-                              title={method.handle ?? undefined}
-                            >
-                              {method.label}
-                              {method.handle ? ` · ${method.handle}` : ''}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+  {paymentSettings?.paymentNote ? (
+    <div className="mt-3 text-[12px] font-semibold text-textSecondary">
+      {paymentSettings.paymentNote}
+    </div>
+  ) : null}
 
-                    {paymentSettings?.paymentNote ? (
-                      <div className="mt-3 text-[12px] font-semibold text-textSecondary">
-                        {paymentSettings.paymentNote}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-3 text-[12px] font-semibold text-textSecondary">
-                      Tip applies to services only. Product purchases are shown
-                      separately from aftercare recommendations and must stay tied
-                      to this booking’s checkout flow.
-                    </div>
-                  </div>
+  <div className="mt-4">
+    <ClientCheckoutCard
+      bookingId={booking.id}
+      checkoutStatus={booking.checkout.checkoutStatus}
+      paymentCollectedAt={booking.checkout.paymentCollectedAt}
+      selectedPaymentMethod={booking.checkout.selectedPaymentMethod}
+      serviceSubtotalSnapshot={booking.checkout.serviceSubtotalSnapshot}
+      productSubtotalSnapshot={booking.checkout.productSubtotalSnapshot}
+      tipAmount={booking.checkout.tipAmount}
+      taxAmount={booking.checkout.taxAmount}
+      discountAmount={booking.checkout.discountAmount}
+      totalAmount={booking.checkout.totalAmount}
+      acceptedMethods={acceptedMethods}
+      tipsEnabled={paymentSettings?.tipsEnabled ?? true}
+      allowCustomTip={paymentSettings?.allowCustomTip ?? true}
+      tipSuggestions={paymentSettings?.tipSuggestions ?? true}
+    />
+  </div>
+</div>
 
                   {!reviewCloseoutEligible ? (
                     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">

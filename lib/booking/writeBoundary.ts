@@ -339,6 +339,18 @@ type UpdateBookingCheckoutArgs = {
   idempotencyKey?: string | null
 }
 
+type UpdateClientBookingCheckoutArgs = {
+  bookingId: string
+  clientId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  selectedPaymentMethod?: PaymentMethod | null
+  checkoutStatus?: BookingCheckoutStatus | null
+  markPaymentAuthorized?: boolean
+  markPaymentCollected?: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
 type UpsertClientBookingCheckoutProductsArgs = {
   bookingId: string
   clientId: string
@@ -1153,6 +1165,42 @@ type BookingCheckoutRecord = Prisma.BookingGetPayload<{
   select: typeof BOOKING_CHECKOUT_SELECT
 }>
 
+const CLIENT_BOOKING_CHECKOUT_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  sessionStep: true,
+  finishedAt: true,
+  subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
+  productSales: {
+    select: {
+      unitPrice: true,
+      quantity: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type ClientBookingCheckoutRecord = Prisma.BookingGetPayload<{
+  select: typeof CLIENT_BOOKING_CHECKOUT_SELECT
+}>
+
 const CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT = {
   id: true,
   clientId: true,
@@ -1697,6 +1745,43 @@ function assertClientCanEditBookingCheckoutProducts(
     throw bookingError('FORBIDDEN', {
       message: 'Product checkout requires finalized aftercare.',
       userMessage: 'Products can only be selected after aftercare is finalized.',
+    })
+  }
+}
+
+function assertClientCanUpdateBookingCheckout(
+  booking: ClientBookingCheckoutRecord,
+  clientId: string,
+): void {
+  if (booking.clientId !== clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  if (!booking.aftercareSummary?.id || !booking.aftercareSummary.sentToClientAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Client checkout requires finalized aftercare.',
+      userMessage: 'Checkout becomes available after aftercare is finalized.',
+    })
+  }
+
+  if (booking.paymentCollectedAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Payment has already been confirmed for this booking.',
+      userMessage: 'This checkout is already finished.',
+    })
+  }
+
+  if (
+    booking.checkoutStatus === BookingCheckoutStatus.PAID ||
+    booking.checkoutStatus === BookingCheckoutStatus.WAIVED
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Checkout is already closed.',
+      userMessage: 'This checkout is already finished.',
     })
   }
 }
@@ -7237,6 +7322,144 @@ async function performLockedUpdateBookingCheckout(args: {
   }
 }
 
+async function performLockedUpdateClientBookingCheckout(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  clientId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  selectedPaymentMethod?: PaymentMethod | null
+  checkoutStatus?: BookingCheckoutStatus | null
+  markPaymentAuthorized?: boolean
+  markPaymentCollected?: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
+}): Promise<UpdateBookingCheckoutResult> {
+  const booking: ClientBookingCheckoutRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: CLIENT_BOOKING_CHECKOUT_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  assertClientCanUpdateBookingCheckout(booking, args.clientId)
+
+  const nextTipAmount =
+    args.tipAmount === undefined
+      ? undefined
+      : normalizePositiveMoneyDecimal(args.tipAmount) ?? zeroMoney()
+
+  const shouldSetAuthorizedAt = args.markPaymentAuthorized === true
+  const shouldSetCollectedAt = args.markPaymentCollected === true
+
+  if (shouldSetCollectedAt && args.selectedPaymentMethod === undefined && !booking.selectedPaymentMethod) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Payment method is required before confirming payment.',
+      userMessage: 'Choose a payment method before confirming payment.',
+    })
+  }
+
+  const nextCheckoutStatus =
+    shouldSetCollectedAt
+      ? (args.checkoutStatus ?? BookingCheckoutStatus.PAID)
+      : (args.checkoutStatus ?? booking.checkoutStatus)
+
+  const rollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextTipAmount,
+  })
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+      subtotalSnapshot: rollup.subtotalSnapshot,
+      tipAmount: rollup.tipAmount,
+      taxAmount: rollup.taxAmount,
+      discountAmount: rollup.discountAmount,
+      totalAmount: rollup.totalAmount,
+      ...(args.selectedPaymentMethod !== undefined
+        ? { selectedPaymentMethod: args.selectedPaymentMethod }
+        : {}),
+      ...(args.checkoutStatus != null
+        ? { checkoutStatus: args.checkoutStatus }
+        : {}),
+      ...(shouldSetAuthorizedAt
+        ? { paymentAuthorizedAt: booking.paymentAuthorizedAt ?? args.now }
+        : {}),
+      ...(shouldSetCollectedAt
+        ? {
+            paymentAuthorizedAt: booking.paymentAuthorizedAt ?? args.now,
+            paymentCollectedAt: booking.paymentCollectedAt ?? args.now,
+            checkoutStatus: args.checkoutStatus ?? BookingCheckoutStatus.PAID,
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      checkoutStatus: true,
+      selectedPaymentMethod: true,
+      serviceSubtotalSnapshot: true,
+      productSubtotalSnapshot: true,
+      subtotalSnapshot: true,
+      tipAmount: true,
+      taxAmount: true,
+      discountAmount: true,
+      totalAmount: true,
+      paymentAuthorizedAt: true,
+      paymentCollectedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  const shouldCompleteBooking = isReviewEligibleCloseout({
+    bookingStatus: booking.status,
+    finishedAt: booking.finishedAt,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  if (
+    shouldCompleteBooking &&
+    (booking.status !== BookingStatus.COMPLETED ||
+      booking.sessionStep !== SessionStep.DONE ||
+      !booking.finishedAt)
+  ) {
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: booking.finishedAt ?? args.now,
+      },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+  }
+
+  return {
+    booking: {
+      id: updated.id,
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      paymentAuthorizedAt: updated.paymentAuthorizedAt,
+      paymentCollectedAt: updated.paymentCollectedAt,
+    },
+    meta: buildMeta(true),
+  }
+}
+
 async function performLockedUpsertClientBookingCheckoutProducts(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -7895,6 +8118,32 @@ export async function updateBookingCheckout(
         idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
+}
+
+export async function updateClientBookingCheckout(
+  args: UpdateClientBookingCheckoutArgs,
+): Promise<UpdateBookingCheckoutResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx, now }) =>
+      performLockedUpdateClientBookingCheckout({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        tipAmount: args.tipAmount,
+        selectedPaymentMethod: args.selectedPaymentMethod,
+        checkoutStatus: args.checkoutStatus,
+        markPaymentAuthorized: args.markPaymentAuthorized,
+        markPaymentCollected: args.markPaymentCollected,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  })
 }
 
 export async function upsertClientBookingCheckoutProducts(
