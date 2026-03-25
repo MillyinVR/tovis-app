@@ -2010,6 +2010,7 @@ export async function GET(req: Request) {
 
       const availableDays: Array<{ date: string; slotCount: number }> = []
       let firstErrorCode: BookingErrorCode | null = null
+      let firstDaySlots: string[] = []
 
       for (const row of dayResults) {
         if (!row.result.ok) {
@@ -2022,6 +2023,11 @@ export async function GET(req: Request) {
             date: ymdToString(row.ymd),
             slotCount: row.result.slots.length,
           })
+          if (firstDaySlots.length === 0) {
+            // Embed the first available day's slots in the summary to eliminate the
+            // second network round-trip when the drawer opens.
+            firstDaySlots = row.result.slots.slice()
+          }
         }
       }
 
@@ -2065,6 +2071,7 @@ export async function GET(req: Request) {
         },
 
         availableDays,
+        firstDaySlots,
         otherPros,
         waitlistSupported: true,
         offering: offeringPayload,

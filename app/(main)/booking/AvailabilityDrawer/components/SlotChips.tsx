@@ -106,7 +106,10 @@ export default function SlotChips({
               <button
                 key={iso}
                 type="button"
-                onClick={() => onPick(pro.id, offeringId, iso)}
+                onClick={() => {
+                  if (typeof navigator !== 'undefined') navigator.vibrate?.(10)
+                  onPick(pro.id, offeringId, iso)
+                }}
                 disabled={disabled}
                 className={[
                   'h-10 rounded-full border px-3 text-[13px] font-black transition',

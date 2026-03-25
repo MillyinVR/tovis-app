@@ -10,7 +10,7 @@ import type {
 
 import { safeJson } from '../utils/safeJson'
 
-const DAY_SLOT_CACHE_TTL_MS = 30_000
+const DAY_SLOT_CACHE_TTL_MS = 60_000
 
 type DaySlotCacheEntry = {
   slots: string[]
@@ -118,6 +118,7 @@ export function useDaySlots(args: {
   selectedClientAddressId: string | null
   debug: boolean
   holding: boolean
+  retryKey: number
   setError: (value: string | null) => void
 }) {
   const {
@@ -129,6 +130,7 @@ export function useDaySlots(args: {
     selectedClientAddressId,
     debug,
     holding,
+    retryKey,
     setError,
   } = args
 
@@ -210,7 +212,6 @@ export function useDaySlots(args: {
 
       const res = await fetch(`/api/availability/day?${qs.toString()}`, {
         method: 'GET',
-        cache: 'no-store',
       })
 
       const raw = await safeJson(res)
@@ -246,6 +247,38 @@ export function useDaySlots(args: {
     [debug, effectiveServiceId, selectedClientAddressId, setError],
   )
 
+  // Keep a stable ref to the latest fetchDaySlots so effects don't re-fire just
+  // because the callback reference changed (e.g. when `debug` toggles).
+  const fetchDaySlotsRef = useRef(fetchDaySlots)
+  fetchDaySlotsRef.current = fetchDaySlots
+
+  // Seed the client cache with the first-day slots that are embedded in the
+  // summary response. This eliminates the second network round-trip: by the
+  // time the primary-slots effect runs for the first available day, the cache
+  // already has the answer and no fetch is needed.
+  useEffect(() => {
+    if (!summary?.firstDaySlots?.length) return
+    const firstDate = summary.availableDays[0]?.date
+    if (!firstDate || !primaryId || !primaryLocationId || !effectiveServiceId) return
+
+    const cacheKey = buildDaySlotCacheKey({
+      proId: primaryId,
+      ymd: firstDate,
+      locationType: activeLocationType,
+      locationId: primaryLocationId,
+      serviceId: effectiveServiceId,
+      clientAddressId: activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
+    })
+
+    // Only seed if the entry is missing or stale so we don't overwrite fresher data.
+    if (!isFreshDaySlotCacheEntry(daySlotCacheRef.current[cacheKey])) {
+      daySlotCacheRef.current[cacheKey] = {
+        slots: summary.firstDaySlots.slice(),
+        cachedAt: Date.now(),
+      }
+    }
+  }, [summary, primaryId, primaryLocationId, effectiveServiceId, activeLocationType, selectedClientAddressId])
+
   const loadOtherSlots = useCallback(
     async (options?: { forceRefresh?: boolean }) => {
       if (!open || !selectedDayYMD) return
@@ -265,7 +298,7 @@ export function useDaySlots(args: {
       try {
         const otherResults = await Promise.all(
           currentOthers.map(async (pro) => {
-            const slots = await fetchDaySlots({
+            const slots = await fetchDaySlotsRef.current({
               proId: pro.id,
               ymd: selectedDayYMD,
               locationType: activeLocationType,
@@ -299,7 +332,6 @@ export function useDaySlots(args: {
       open,
       selectedDayYMD,
       effectiveServiceId,
-      fetchDaySlots,
       activeLocationType,
     ],
   )
@@ -338,7 +370,7 @@ export function useDaySlots(args: {
 
         setLoadingPrimarySlots(true)
 
-        const primaryDaySlots = await fetchDaySlots({
+        const primaryDaySlots = await fetchDaySlotsRef.current({
           proId: currentPrimaryId,
           ymd: currentDayYMD,
           locationType: activeLocationType,
@@ -372,7 +404,7 @@ export function useDaySlots(args: {
     primaryLocationId,
     selectedDayYMD,
     activeLocationType,
-    fetchDaySlots,
+    retryKey,
     holding,
     setError,
   ])

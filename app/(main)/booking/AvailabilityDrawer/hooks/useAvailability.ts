@@ -329,6 +329,8 @@ export function useAvailability(
     loadInitial,
   ])
 
+  const refresh = useCallback(() => void loadInitial(false), [loadInitial])
+
   return {
     loading,
     loadingMore,
@@ -339,5 +341,6 @@ export function useAvailability(
     loadMore,
     setError,
     setData,
+    refresh,
   }
 }

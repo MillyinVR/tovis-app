@@ -42,7 +42,7 @@ export type AvailabilityPrefetchArgs = {
   signal?: AbortSignal
 }
 
-const CACHE_TTL_MS = 45_000
+const CACHE_TTL_MS = 90_000
 const MAX_CACHE_ENTRIES = 200
 
 const summaryWindowCache = new Map<string, CacheEntry>()
@@ -283,7 +283,6 @@ export async function fetchAvailabilitySummaryWindow(
     promise = (async (): Promise<SummaryOk> => {
       const res = await fetch(`/api/availability/day?${qs.toString()}`, {
         method: 'GET',
-        cache: 'no-store',
         headers: { Accept: 'application/json' },
         signal: args.signal,
       })

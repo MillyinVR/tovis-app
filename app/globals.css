@@ -248,3 +248,20 @@ body::after {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
+
+/* ===== Skeleton shimmer for loading states ===== */
+@keyframes avail-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+.avail-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(255 255 255 / 0.04) 25%,
+    rgb(255 255 255 / 0.13) 50%,
+    rgb(255 255 255 / 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: avail-shimmer 1.4s ease-in-out infinite;
+}

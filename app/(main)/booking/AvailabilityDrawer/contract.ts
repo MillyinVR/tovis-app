@@ -316,6 +316,11 @@ export function parseAvailabilitySummaryResponse(
 
   const debug = pickSummaryDebug(x.debug)
 
+  let firstDaySlots: string[] | undefined
+  if (Array.isArray(x.firstDaySlots) && x.firstDaySlots.every((s) => typeof s === 'string')) {
+    firstDaySlots = (x.firstDaySlots as string[]).slice()
+  }
+
   return {
     ok: true,
     mode: 'SUMMARY',
@@ -345,6 +350,7 @@ export function parseAvailabilitySummaryResponse(
       locationId: primaryProBase.locationId,
     },
     availableDays,
+    ...(firstDaySlots !== undefined ? { firstDaySlots } : {}),
     otherPros,
     waitlistSupported,
     offering,
