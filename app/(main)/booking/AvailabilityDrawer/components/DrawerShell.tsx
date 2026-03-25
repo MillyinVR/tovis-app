@@ -2,6 +2,7 @@
 'use client'
 
 import { createPortal } from 'react-dom'
+import { useEffect, useState } from 'react'
 import { SHEET_MAX_W, SHEET_SIDE_PAD } from '../constants'
 
 export default function DrawerShell({
@@ -17,8 +18,34 @@ export default function DrawerShell({
   children: React.ReactNode
   footer: React.ReactNode
 }) {
-  if (!open) return null
-  if (typeof document === 'undefined') return null
+  const [mounted, setMounted] = useState(false)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      // Trigger slide-up on the next frame so the initial off-screen style
+      // is painted first, giving the browser something to transition from.
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => {
+        setMounted(true)
+        raf2 = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => {
+        cancelAnimationFrame(raf1)
+        cancelAnimationFrame(raf2)
+      }
+    } else {
+      // Start exit transition then unmount after it completes.
+      const t0 = setTimeout(() => setVisible(false), 0)
+      const t1 = setTimeout(() => setMounted(false), 350)
+      return () => {
+        clearTimeout(t0)
+        clearTimeout(t1)
+      }
+    }
+  }, [open])
+
+  if (!mounted || typeof document === 'undefined') return null
 
   const overlayRootStyle: React.CSSProperties = {
     position: 'fixed',
@@ -33,6 +60,8 @@ export default function DrawerShell({
     background: 'rgba(0,0,0,0.68)',
     backdropFilter: 'blur(4px)',
     WebkitBackdropFilter: 'blur(4px)',
+    opacity: visible ? 1 : 0,
+    transition: 'opacity 220ms ease-out',
   }
 
   // ✅ Use dynamic footer space (measured by FooterShell) so we never overlap the nav footer.
@@ -41,7 +70,12 @@ export default function DrawerShell({
   const sheetWrapStyle: React.CSSProperties = {
     position: 'absolute',
     left: '50%',
-    transform: 'translateX(-50%)',
+    transform: visible
+      ? 'translateX(-50%) translateY(0)'
+      : 'translateX(-50%) translateY(100%)',
+    opacity: visible ? 1 : 0,
+    transition:
+      'transform 320ms cubic-bezier(0.32, 0.72, 0, 1), opacity 200ms ease-out 80ms',
     bottom: bottomOffset,
     width: `min(${SHEET_MAX_W}px, calc(100vw - ${SHEET_SIDE_PAD * 2}px))`,
     height: `calc(100dvh - ${bottomOffset} - 14px)`,
