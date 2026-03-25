@@ -90,6 +90,14 @@ export function useAvailability(
     Boolean(serviceId) &&
     (!requiresClientAddress || Boolean(normalizedClientAddressId))
 
+  const ctxProfessionalId = context.professionalId
+  const ctxServiceId = context.serviceId
+  const ctxMediaId = context.mediaId
+  const ctxViewerLat = context.viewerLat
+  const ctxViewerLng = context.viewerLng
+  const ctxViewerRadiusMiles = context.viewerRadiusMiles
+  const ctxViewerPlaceId = context.viewerPlaceId
+
   const initialPrefetchArgs = useMemo(
     () =>
       buildAvailabilityPrefetchArgsFromContext({
@@ -101,7 +109,13 @@ export function useAvailability(
         startDate: null,
       }),
     [
-      context,
+      ctxProfessionalId,
+      ctxServiceId,
+      ctxMediaId,
+      ctxViewerLat,
+      ctxViewerLng,
+      ctxViewerRadiusMiles,
+      ctxViewerPlaceId,
       locationType,
       normalizedClientAddressId,
       requiresClientAddress,
