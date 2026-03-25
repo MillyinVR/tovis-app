@@ -639,18 +639,18 @@ export default async function ProBookingSessionPage(props: PageProps) {
             <div className="mt-4">
               <form action={completeSession}>
                 <button
-                  type="submit"
-                  className={[
-                    primaryBtnClass,
-                    !(hasAfterPhoto && hasFinalizedAftercare)
-                      ? 'pointer-events-none cursor-not-allowed opacity-60'
-                      : '',
-                  ].join(' ')}
-                  disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
-                  aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
-                >
-                  Complete session (requires finalized aftercare)
-                </button>
+                      type="submit"
+                      className={[
+                        primaryBtnClass,
+                        !(hasAfterPhoto && hasFinalizedAftercare)
+                          ? 'pointer-events-none cursor-not-allowed opacity-60'
+                          : '',
+                      ].join(' ')}
+                      disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
+                      aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
+                    >
+                      Complete session (requires finalized aftercare)
+                    </button>
               </form>
             </div>
           </Card>
