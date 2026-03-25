@@ -57,6 +57,10 @@ type TxOk = {
   }
   sessionStep: SessionStep
   proposedCents: number
+  meta: {
+    mutated: boolean
+    noOp: boolean
+  }
 }
 
 type TxResult = TxFail | TxOk
@@ -140,6 +144,14 @@ function buildProposalJson(items: ParsedProposalItem[]): Prisma.InputJsonValue {
   }
 }
 
+function stableJson(value: unknown): string {
+  return JSON.stringify(value ?? null)
+}
+
+function normalizeDecimalText(value: Prisma.Decimal | null | undefined): string | null {
+  return value ? value.toFixed(2) : null
+}
+
 function parseProposalPayload(raw: unknown): ParsedProposalPayload | null {
   if (!isRecord(raw)) return null
   if (!Array.isArray(raw.items)) return null
@@ -197,6 +209,12 @@ function parseProposalPayload(raw: unknown): ParsedProposalPayload | null {
 
   items.sort((a, b) => a.sortOrder - b.sortOrder)
 
+  const baseCount = items.filter(
+    (item) => item.itemType === BookingServiceItemType.BASE,
+  ).length
+
+  if (baseCount !== 1) return null
+
   return {
     items,
     proposedServicesJson: buildProposalJson(items),
@@ -229,7 +247,7 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!proposal) {
       return jsonFail(
         400,
-        'Invalid proposed services. Each line item needs service, type, price, and duration.',
+        'Invalid proposed services. Include exactly one base service, and each line item needs service, type, price, and duration.',
       )
     }
 
@@ -242,6 +260,7 @@ export async function POST(req: Request, ctx: Ctx) {
       (sum, item) => sum + item.priceCents,
       0,
     )
+
     if (computedCents !== proposedCents) {
       return jsonFail(400, 'Proposal total must equal the sum of the line items.')
     }
@@ -270,21 +289,35 @@ export async function POST(req: Request, ctx: Ctx) {
             },
             take: 500,
           },
+          consultationApproval: {
+            select: {
+              id: true,
+              status: true,
+              proposedServicesJson: true,
+              proposedTotal: true,
+              notes: true,
+              updatedAt: true,
+            },
+          },
         },
       })
 
       if (!booking) {
         return { ok: false, status: 404, error: 'Booking not found.' }
       }
+
       if (booking.professionalId !== proId) {
         return { ok: false, status: 403, error: 'Forbidden.' }
       }
+
       if (booking.status === BookingStatus.CANCELLED) {
         return { ok: false, status: 409, error: 'This booking is cancelled.' }
       }
+
       if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
         return { ok: false, status: 409, error: 'This booking is finalized.' }
       }
+
       if (!booking.startedAt) {
         return {
           ok: false,
@@ -292,6 +325,7 @@ export async function POST(req: Request, ctx: Ctx) {
           error: 'Start the appointment before sending a consultation proposal.',
         }
       }
+
       if (!canProSendProposal(booking.sessionStep ?? null)) {
         return {
           ok: false,
@@ -310,7 +344,10 @@ export async function POST(req: Request, ctx: Ctx) {
           id: true,
           serviceId: true,
           addOns: {
-            where: { isActive: true, addOnService: { isActive: true } },
+            where: {
+              isActive: true,
+              addOnService: { isActive: true, isAddOnEligible: true },
+            },
             select: {
               addOnServiceId: true,
             },
@@ -321,10 +358,6 @@ export async function POST(req: Request, ctx: Ctx) {
 
       const baseOfferingById = new Map(
         activeOfferings.map((offering) => [offering.id, offering.serviceId]),
-      )
-
-      const allowedBaseServiceIds = new Set(
-        activeOfferings.map((offering) => offering.serviceId),
       )
 
       const allowedAddOnServiceIds = new Set(
@@ -343,7 +376,8 @@ export async function POST(req: Request, ctx: Ctx) {
           return {
             ok: false,
             status: 400,
-            error: 'Proposal references a booking service item that does not belong to this booking.',
+            error:
+              'Proposal references a booking service item that does not belong to this booking.',
           }
         }
 
@@ -377,21 +411,49 @@ export async function POST(req: Request, ctx: Ctx) {
             return {
               ok: false,
               status: 400,
-              error: 'Proposal includes an add-on service that is not active for this pro.',
+              error:
+                'Proposal includes an add-on service that is not active for this pro.',
             }
           }
 
-          if (
-            item.offeringId &&
-            !baseOfferingById.has(item.offeringId) &&
-            !allowedBaseServiceIds.has(item.serviceId)
-          ) {
+          if (item.offeringId && !baseOfferingById.has(item.offeringId)) {
             return {
               ok: false,
               status: 400,
-              error: 'Proposal includes an invalid offering reference on an add-on.',
+              error: 'Proposal includes an invalid parent offering reference on an add-on.',
             }
           }
+        }
+      }
+
+      const existingApproval = booking.consultationApproval
+      const sameProposal =
+        existingApproval?.status === ConsultationApprovalStatus.PENDING &&
+        stableJson(existingApproval.proposedServicesJson) ===
+          stableJson(proposal.proposedServicesJson) &&
+        normalizeDecimalText(existingApproval.proposedTotal) ===
+          normalizeDecimalText(proposedTotal) &&
+        (existingApproval.notes ?? null) === notes
+
+      if (
+        sameProposal &&
+        (booking.sessionStep ?? SessionStep.NONE) ===
+          SessionStep.CONSULTATION_PENDING_CLIENT
+      ) {
+        return {
+          ok: true,
+          approval: {
+            id: existingApproval.id,
+            status: existingApproval.status,
+            proposedTotal: existingApproval.proposedTotal,
+            updatedAt: existingApproval.updatedAt,
+          },
+          sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+          proposedCents,
+          meta: {
+            mutated: false,
+            noOp: true,
+          },
         }
       }
 
@@ -439,26 +501,36 @@ export async function POST(req: Request, ctx: Ctx) {
         }
       }
 
-      try {
-        await tx.clientNotification.create({
-          data: {
-            clientId: booking.clientId,
-            type: ClientNotificationType.BOOKING,
-            title: 'Consultation proposal ready',
-            body: 'Your professional sent an updated service total for approval.',
-            bookingId: booking.id,
-            dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
-          },
-        })
-      } catch (err: unknown) {
-        console.error('Client notification failed (consultation proposal):', err)
-      }
+      await tx.clientNotification.upsert({
+        where: {
+          dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
+        },
+        create: {
+          clientId: booking.clientId,
+          type: ClientNotificationType.BOOKING,
+          title: 'Consultation proposal ready',
+          body: 'Your professional sent an updated service total for approval.',
+          bookingId: booking.id,
+          dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
+        },
+        update: {
+          clientId: booking.clientId,
+          type: ClientNotificationType.BOOKING,
+          title: 'Consultation proposal ready',
+          body: 'Your professional sent an updated service total for approval.',
+          bookingId: booking.id,
+        },
+      })
 
       return {
         ok: true,
         approval,
         sessionStep: stepRes.booking.sessionStep,
         proposedCents,
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       }
     })
 
@@ -475,6 +547,7 @@ export async function POST(req: Request, ctx: Ctx) {
         approval: txResult.approval,
         sessionStep: txResult.sessionStep,
         proposedCents: txResult.proposedCents,
+        meta: txResult.meta,
       },
       200,
     )

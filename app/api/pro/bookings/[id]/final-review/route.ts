@@ -1,43 +1,53 @@
 // app/api/pro/bookings/[id]/final-review/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import {
+  jsonFail,
+  jsonOk,
+  pickString,
+  requirePro,
+} from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
+import {
+  getBookingFailPayload,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
 import {
   AftercareRebookMode,
   BookingServiceItemType,
 } from '@prisma/client'
 
-import { getCurrentUser } from '@/lib/currentUser'
-import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
-import { bookingError } from '@/lib/booking/errors'
+export const dynamic = 'force-dynamic'
 
-type RouteContext = {
-  params: Promise<{ id: string }>
+type Ctx = {
+  params: { id: string } | Promise<{ id: string }>
 }
 
 type FinalReviewLineItemInput = {
-  bookingServiceItemId?: string | null
-  serviceId?: string
-  offeringId?: string | null
-  itemType?: BookingServiceItemType | string
-  price?: string | number
-  durationMinutes?: number | string
-  notes?: string | null
-  sortOrder?: number | string
+  bookingServiceItemId?: unknown
+  serviceId?: unknown
+  offeringId?: unknown
+  itemType?: unknown
+  price?: unknown
+  durationMinutes?: unknown
+  notes?: unknown
+  sortOrder?: unknown
 }
 
 type FinalReviewRecommendedProductInput = {
-  name?: string
-  url?: string
-  note?: string | null
+  name?: unknown
+  url?: unknown
+  note?: unknown
 }
 
 type FinalReviewRequestBody = {
-  finalLineItems?: FinalReviewLineItemInput[]
-  expectedSubtotal?: string | number | null
-  recommendedProducts?: FinalReviewRecommendedProductInput[]
-  rebookMode?: AftercareRebookMode | string | null
-  rebookedFor?: string | null
-  rebookWindowStart?: string | null
-  rebookWindowEnd?: string | null
+  finalLineItems?: unknown
+  expectedSubtotal?: unknown
+  recommendedProducts?: unknown
+  rebookMode?: unknown
+  rebookedFor?: unknown
+  rebookWindowStart?: unknown
+  rebookWindowEnd?: unknown
 }
 
 type NormalizedFinalLineItem = {
@@ -58,18 +68,15 @@ type NormalizedRecommendedProduct = {
   note: string | null
 }
 
-function jsonOk(body: unknown, status = 200) {
-  return NextResponse.json(body, { status })
-}
-
-function jsonFail(error: string, status = 400) {
-  return NextResponse.json(
-    {
-      ok: false,
-      error,
-    },
-    { status },
-  )
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+) {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function asTrimmedString(value: unknown): string {
@@ -77,12 +84,14 @@ function asTrimmedString(value: unknown): string {
 }
 
 function asNullableTrimmedString(value: unknown): string | null {
-  const v = asTrimmedString(value)
-  return v ? v : null
+  const trimmed = asTrimmedString(value)
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function asFiniteNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
 
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value)
@@ -99,90 +108,34 @@ function asNullableDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function parseItemType(value: unknown): BookingServiceItemType {
+function parseItemType(value: unknown): BookingServiceItemType | null {
   const raw = asTrimmedString(value).toUpperCase()
+
+  if (raw === BookingServiceItemType.BASE) {
+    return BookingServiceItemType.BASE
+  }
 
   if (raw === BookingServiceItemType.ADD_ON) {
     return BookingServiceItemType.ADD_ON
   }
 
-  return BookingServiceItemType.BASE
+  return null
 }
 
-function normalizeFinalLineItems(value: unknown): NormalizedFinalLineItem[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw bookingError('INVALID_SERVICE_ITEMS', {
-      message: 'finalLineItems is required.',
-      userMessage: 'Add at least one final service item.',
-    })
+function parsePriceInput(value: unknown): string | number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
   }
 
-  return value.map((raw, index) => {
-    const row = (raw ?? {}) as FinalReviewLineItemInput
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
 
-    const serviceId = asTrimmedString(row.serviceId)
-    if (!serviceId) {
-      throw bookingError('INVALID_SERVICE_ITEMS', {
-        message: `finalLineItems[${index}].serviceId is required.`,
-        userMessage: 'Each final service item must include a service.',
-      })
-    }
+    const parsed = Number(trimmed)
+    return Number.isFinite(parsed) ? trimmed : null
+  }
 
-    const priceRaw =
-      typeof row.price === 'string' || typeof row.price === 'number'
-        ? row.price
-        : ''
-
-    const durationMinutes = asFiniteNumber(row.durationMinutes)
-    if (durationMinutes == null) {
-      throw bookingError('INVALID_SERVICE_ITEMS', {
-        message: `finalLineItems[${index}].durationMinutes is invalid.`,
-        userMessage: 'Each final service item must include a valid duration.',
-      })
-    }
-
-    const sortOrder = asFiniteNumber(row.sortOrder)
-
-    return {
-      bookingServiceItemId: asNullableTrimmedString(row.bookingServiceItemId),
-      serviceId,
-      offeringId: asNullableTrimmedString(row.offeringId),
-      itemType: parseItemType(row.itemType),
-      price: priceRaw,
-      durationMinutes,
-      notes: asNullableTrimmedString(row.notes),
-      sortOrder: sortOrder == null ? index : Math.trunc(sortOrder),
-    }
-  })
-}
-
-function normalizeRecommendedProducts(
-  value: unknown,
-): NormalizedRecommendedProduct[] {
-  if (!Array.isArray(value)) return []
-
-  return value
-    .map((raw) => {
-      const row = (raw ?? {}) as {
-        name?: unknown
-        url?: unknown
-        note?: unknown
-      }
-
-      const externalName = asTrimmedString(row.name)
-      const externalUrl = asTrimmedString(row.url)
-      const note = asNullableTrimmedString(row.note)
-
-      if (!externalName || !externalUrl) return null
-
-      return {
-        productId: null,
-        externalName,
-        externalUrl,
-        note,
-      }
-    })
-    .filter((row): row is NormalizedRecommendedProduct => Boolean(row))
+  return null
 }
 
 function parseRebookMode(value: unknown): AftercareRebookMode | null {
@@ -201,141 +154,148 @@ function parseRebookMode(value: unknown): AftercareRebookMode | null {
     return AftercareRebookMode.RECOMMENDED_WINDOW
   }
 
-  throw bookingError('FORBIDDEN', {
-    message: `Invalid rebookMode: ${raw}`,
-    userMessage: 'Rebook choice is invalid.',
-  })
+  return null
 }
 
-function validateRebookFields(args: {
-  rebookMode: AftercareRebookMode | null
-  rebookedFor: Date | null
-  rebookWindowStart: Date | null
-  rebookWindowEnd: Date | null
-}): void {
-  const {
-    rebookMode,
-    rebookedFor,
-    rebookWindowStart,
-    rebookWindowEnd,
-  } = args
-
-  if (rebookMode == null) {
-    if (rebookedFor || rebookWindowStart || rebookWindowEnd) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'Rebook dates were provided without a valid rebookMode.',
-        userMessage: 'Choose a rebook option before saving rebook details.',
-      })
-    }
-    return
+function normalizeFinalLineItems(value: unknown): NormalizedFinalLineItem[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null
   }
 
-  if (rebookMode === AftercareRebookMode.NONE) {
-    if (rebookedFor || rebookWindowStart || rebookWindowEnd) {
-      throw bookingError('FORBIDDEN', {
-        message: 'Rebook details must be empty when rebookMode is NONE.',
-        userMessage:
-          'Clear rebook dates if no follow-up booking is being recommended.',
-      })
-    }
-    return
+  const normalized: NormalizedFinalLineItem[] = []
+
+  for (let index = 0; index < value.length; index += 1) {
+    const raw = value[index]
+    if (!isRecord(raw)) return null
+
+    const row = raw as FinalReviewLineItemInput
+
+    const serviceId = asTrimmedString(row.serviceId)
+    if (!serviceId) return null
+
+    const itemType = parseItemType(row.itemType)
+    if (!itemType) return null
+
+    const price = parsePriceInput(row.price)
+    if (price == null) return null
+
+    const durationMinutes = asFiniteNumber(row.durationMinutes)
+    if (durationMinutes == null) return null
+
+    const sortOrderRaw = asFiniteNumber(row.sortOrder)
+    const sortOrder =
+      sortOrderRaw == null ? index : Math.max(0, Math.trunc(sortOrderRaw))
+
+    normalized.push({
+      bookingServiceItemId: asNullableTrimmedString(row.bookingServiceItemId),
+      serviceId,
+      offeringId: asNullableTrimmedString(row.offeringId),
+      itemType,
+      price,
+      durationMinutes: Math.trunc(durationMinutes),
+      notes: asNullableTrimmedString(row.notes),
+      sortOrder,
+    })
   }
 
-  if (rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
-    if (!rebookedFor) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'rebookedFor is required for BOOKED_NEXT_APPOINTMENT.',
-        userMessage: 'Add the next appointment date.',
-      })
-    }
-
-    if (rebookWindowStart || rebookWindowEnd) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'Recommended window fields are not allowed for BOOKED_NEXT_APPOINTMENT.',
-        userMessage:
-          'Use either a booked appointment date or a recommended window, not both.',
-      })
-    }
-
-    return
-  }
-
-  if (rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
-    if (!rebookWindowStart || !rebookWindowEnd) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'rebookWindowStart and rebookWindowEnd are required for RECOMMENDED_WINDOW.',
-        userMessage: 'Add both a recommended start and end date.',
-      })
-    }
-
-    if (rebookedFor) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'rebookedFor is not allowed for RECOMMENDED_WINDOW.',
-        userMessage:
-          'Use either a booked appointment date or a recommended window, not both.',
-      })
-    }
-
-    if (rebookWindowStart.getTime() > rebookWindowEnd.getTime()) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'rebookWindowStart must be before or equal to rebookWindowEnd.',
-        userMessage:
-          'The recommended rebook window start must be before the end.',
-      })
-    }
-  }
+  return normalized
 }
 
-export async function POST(req: NextRequest, ctx: RouteContext) {
+function normalizeRecommendedProducts(
+  value: unknown,
+): NormalizedRecommendedProduct[] {
+  if (!Array.isArray(value)) return []
+
+  const normalized: NormalizedRecommendedProduct[] = []
+
+  for (const raw of value) {
+    if (!isRecord(raw)) continue
+
+    const row = raw as FinalReviewRecommendedProductInput
+    const externalName = asTrimmedString(row.name)
+    const externalUrl = asTrimmedString(row.url)
+    const note = asNullableTrimmedString(row.note)
+
+    if (!externalName || !externalUrl) continue
+
+    normalized.push({
+      productId: null,
+      externalName,
+      externalUrl,
+      note,
+    })
+  }
+
+  return normalized
+}
+
+export async function POST(req: Request, ctx: Ctx) {
   try {
-    const { id } = await ctx.params
-    const bookingId = String(id ?? '').trim()
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+
+    const professionalId = auth.professionalId
+
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
 
     if (!bookingId) {
-      return jsonFail('BOOKING_ID_REQUIRED', 400)
+      return jsonFail(400, 'Missing booking id.')
     }
 
-    const user = await getCurrentUser().catch(() => null)
-    const professionalId =
-      user?.role === 'PRO' ? user.professionalProfile?.id ?? null : null
-
-    if (!professionalId) {
-      return jsonFail('UNAUTHORIZED', 401)
+    const rawBody: unknown = await req.json().catch(() => null)
+    if (!isRecord(rawBody)) {
+      return jsonFail(400, 'Invalid request body.')
     }
 
-    const body = (await req.json().catch(() => null)) as
-      | FinalReviewRequestBody
-      | null
-
-    if (!body) {
-      return jsonFail('INVALID_BODY', 400)
-    }
+    const body = rawBody as FinalReviewRequestBody
 
     const finalLineItems = normalizeFinalLineItems(body.finalLineItems)
+    if (!finalLineItems) {
+      return jsonFail(
+        400,
+        'Invalid finalLineItems. Each item needs serviceId, itemType, price, and durationMinutes.',
+      )
+    }
+
     const expectedSubtotal =
-      body.expectedSubtotal == null ? null : body.expectedSubtotal
+      typeof body.expectedSubtotal === 'string' ||
+      typeof body.expectedSubtotal === 'number' ||
+      body.expectedSubtotal == null
+        ? body.expectedSubtotal
+        : null
 
     const recommendedProducts = normalizeRecommendedProducts(
       body.recommendedProducts,
     )
 
     const rebookMode = parseRebookMode(body.rebookMode)
-    const rebookedFor = asNullableDate(body.rebookedFor)
-    const rebookWindowStart = asNullableDate(body.rebookWindowStart)
-    const rebookWindowEnd = asNullableDate(body.rebookWindowEnd)
+    if (body.rebookMode != null && rebookMode == null) {
+      return jsonFail(400, 'Invalid rebookMode.')
+    }
 
-    validateRebookFields({
-      rebookMode,
-      rebookedFor,
-      rebookWindowStart,
-      rebookWindowEnd,
-    })
+    const rebookedFor = asNullableDate(body.rebookedFor)
+    if (body.rebookedFor != null && body.rebookedFor !== '' && !rebookedFor) {
+      return jsonFail(400, 'Invalid rebookedFor date.')
+    }
+
+    const rebookWindowStart = asNullableDate(body.rebookWindowStart)
+    if (
+      body.rebookWindowStart != null &&
+      body.rebookWindowStart !== '' &&
+      !rebookWindowStart
+    ) {
+      return jsonFail(400, 'Invalid rebookWindowStart date.')
+    }
+
+    const rebookWindowEnd = asNullableDate(body.rebookWindowEnd)
+    if (
+      body.rebookWindowEnd != null &&
+      body.rebookWindowEnd !== '' &&
+      !rebookWindowEnd
+    ) {
+      return jsonFail(400, 'Invalid rebookWindowEnd date.')
+    }
 
     const result = await confirmBookingFinalReview({
       bookingId,
@@ -349,27 +309,33 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       rebookWindowEnd,
     })
 
-    return jsonOk({
-      ok: true,
-      booking: {
-        id: result.booking.id,
-        status: result.booking.status,
-        sessionStep: result.booking.sessionStep,
-        serviceId: result.booking.serviceId,
-        offeringId: result.booking.offeringId,
-        subtotalSnapshot:
-          result.booking.subtotalSnapshot == null
-            ? null
-            : String(result.booking.subtotalSnapshot),
-        totalDurationMinutes: result.booking.totalDurationMinutes,
+    return jsonOk(
+      {
+        booking: {
+          id: result.booking.id,
+          status: result.booking.status,
+          sessionStep: result.booking.sessionStep,
+          serviceId: result.booking.serviceId,
+          offeringId: result.booking.offeringId,
+          subtotalSnapshot:
+            result.booking.subtotalSnapshot == null
+              ? null
+              : String(result.booking.subtotalSnapshot),
+          totalDurationMinutes: result.booking.totalDurationMinutes,
+        },
+        meta: result.meta,
       },
-    })
-  } catch (error) {
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : 'Request failed.'
+      200,
+    )
+  } catch (error: unknown) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
 
-    return jsonFail(message, 400)
+    console.error('POST /api/pro/bookings/[id]/final-review error', error)
+    return jsonFail(500, 'Internal server error')
   }
 }

@@ -69,7 +69,10 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
-function compareStrings(a: string | null | undefined, b: string | null | undefined) {
+function compareStrings(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): number {
   const aa = (a ?? '').toLowerCase()
   const bb = (b ?? '').toLowerCase()
   if (aa < bb) return -1
@@ -125,27 +128,28 @@ export async function GET(_req: Request, ctx: Ctx) {
         service: {
           select: {
             name: true,
-            isAddOnEligible: true,
             category: { select: { name: true } },
           },
         },
         addOns: {
-          where: { isActive: true },
+          where: {
+            isActive: true,
+            addOnService: {
+              isActive: true,
+              isAddOnEligible: true,
+            },
+          },
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           select: {
-            id: true,
             isRecommended: true,
             priceOverride: true,
             durationOverrideMinutes: true,
-            addOnServiceId: true,
             addOnService: {
               select: {
                 id: true,
                 name: true,
                 defaultDurationMinutes: true,
                 minPrice: true,
-                isActive: true,
-                isAddOnEligible: true,
                 category: { select: { name: true } },
               },
             },
@@ -170,7 +174,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         categoryName: offering.service?.category?.name ?? null,
         defaultPrice: defaultPriceNum == null ? null : round2(defaultPriceNum),
         defaultDurationMinutes: defaultDuration,
-        itemType: BookingServiceItemType.BASE,
+        itemType: 'BASE',
       }
     })
 
@@ -179,7 +183,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     for (const offering of offerings) {
       for (const link of offering.addOns) {
         const addOnService = link.addOnService
-        if (!addOnService?.isActive) continue
+        if (!addOnService) continue
 
         const defaultPriceRaw = link.priceOverride ?? addOnService.minPrice ?? null
         const defaultPriceNum = decimalToNumber(defaultPriceRaw)
@@ -195,7 +199,7 @@ export async function GET(_req: Request, ctx: Ctx) {
           defaultPrice: defaultPriceNum == null ? null : round2(defaultPriceNum),
           defaultDurationMinutes: defaultDuration,
           isRecommended: Boolean(link.isRecommended),
-          itemType: BookingServiceItemType.ADD_ON,
+          itemType: 'ADD_ON',
         })
       }
     }
@@ -223,13 +227,15 @@ export async function GET(_req: Request, ctx: Ctx) {
       return compareStrings(a.serviceId, b.serviceId)
     })
 
-    const existingBookingItems: ExistingBookingItemDTO[] = booking.serviceItems.map((item) => ({
-      bookingServiceItemId: item.id,
-      serviceId: item.serviceId,
-      offeringId: item.offeringId,
-      itemType: item.itemType,
-      parentItemId: item.parentItemId,
-    }))
+    const existingBookingItems: ExistingBookingItemDTO[] = booking.serviceItems.map(
+      (item) => ({
+        bookingServiceItemId: item.id,
+        serviceId: item.serviceId,
+        offeringId: item.offeringId,
+        itemType: item.itemType,
+        parentItemId: item.parentItemId,
+      }),
+    )
 
     return jsonOk(
       {

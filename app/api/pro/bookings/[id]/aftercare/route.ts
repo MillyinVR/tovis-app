@@ -1,10 +1,10 @@
 // app/api/pro/bookings/[id]/aftercare/route.ts
-import type { NextRequest } from 'next/server'
 import { AftercareRebookMode } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
-import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
   getBookingFailPayload,
   isBookingError,
@@ -13,6 +13,10 @@ import {
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
+
+type Ctx = {
+  params: { id: string } | Promise<{ id: string }>
+}
 
 type NormalizedRecommendedProduct =
   | {
@@ -32,27 +36,21 @@ type ProductsParse =
   | { ok: true; value: NormalizedRecommendedProduct[] }
   | { ok: false; error: string }
 
-const AFTERCARE_REBOOK_MODE = {
-  NONE: 'NONE',
-  BOOKED_NEXT_APPOINTMENT: 'BOOKED_NEXT_APPOINTMENT',
-  RECOMMENDED_WINDOW: 'RECOMMENDED_WINDOW',
-} as const satisfies Record<string, AftercareRebookMode>
-
 type NormalizedRebook =
   | {
-      mode: typeof AFTERCARE_REBOOK_MODE.NONE
+      rebookMode: typeof AftercareRebookMode.NONE
       rebookedFor: null
       rebookWindowStart: null
       rebookWindowEnd: null
     }
   | {
-      mode: typeof AFTERCARE_REBOOK_MODE.BOOKED_NEXT_APPOINTMENT
+      rebookMode: typeof AftercareRebookMode.BOOKED_NEXT_APPOINTMENT
       rebookedFor: Date
       rebookWindowStart: null
       rebookWindowEnd: null
     }
   | {
-      mode: typeof AFTERCARE_REBOOK_MODE.RECOMMENDED_WINDOW
+      rebookMode: typeof AftercareRebookMode.RECOMMENDED_WINDOW
       rebookedFor: null
       rebookWindowStart: Date
       rebookWindowEnd: Date
@@ -65,24 +63,20 @@ const PRODUCT_NAME_MAX = 80
 const PRODUCT_NOTE_MAX = 140
 const PRODUCT_URL_MAX = 2048
 
-function trimmedString(x: unknown): string | null {
-  return typeof x === 'string' && x.trim() ? x.trim() : null
+function trimmedString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function toBool(x: unknown): boolean {
-  return x === true || x === 'true' || x === 1 || x === '1'
+function toBool(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1'
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function toInt(x: unknown, fallback: number): number {
+function toInt(value: unknown, fallback: number): number {
   const n =
-    typeof x === 'number'
-      ? x
-      : typeof x === 'string'
-        ? Number.parseInt(x.trim(), 10)
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number.parseInt(value.trim(), 10)
         : Number.NaN
 
   return Number.isFinite(n) ? n : fallback
@@ -92,21 +86,37 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
 }
 
-function parseOptionalISODate(x: unknown): Date | null | 'invalid' {
-  if (x === null || x === undefined || x === '') return null
-  if (typeof x !== 'string') return 'invalid'
+function parseOptionalISODate(value: unknown): Date | null | 'invalid' {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value !== 'string') return 'invalid'
 
-  const d = new Date(x)
-  if (Number.isNaN(d.getTime())) return 'invalid'
-  return d
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? 'invalid' : d
 }
 
-function isAftercareRebookMode(x: unknown): x is AftercareRebookMode {
-  return (
-    x === AFTERCARE_REBOOK_MODE.NONE ||
-    x === AFTERCARE_REBOOK_MODE.BOOKED_NEXT_APPOINTMENT ||
-    x === AFTERCARE_REBOOK_MODE.RECOMMENDED_WINDOW
-  )
+function parseRequestedRebookMode(
+  value: unknown,
+):
+  | { ok: true; value: AftercareRebookMode }
+  | { ok: false; error: string } {
+  const raw = trimmedString(value)
+  if (!raw) {
+    return { ok: true, value: AftercareRebookMode.NONE }
+  }
+
+  if (raw === AftercareRebookMode.NONE) {
+    return { ok: true, value: AftercareRebookMode.NONE }
+  }
+
+  if (raw === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
+    return { ok: true, value: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT }
+  }
+
+  if (raw === AftercareRebookMode.RECOMMENDED_WINDOW) {
+    return { ok: true, value: AftercareRebookMode.RECOMMENDED_WINDOW }
+  }
+
+  return { ok: false, error: 'Invalid rebookMode.' }
 }
 
 function isValidHttpUrl(raw: string): boolean {
@@ -135,7 +145,7 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
   const out: NormalizedRecommendedProduct[] = []
 
   for (const row of input) {
-    if (!isObject(row)) {
+    if (!isRecord(row)) {
       return {
         ok: false,
         error: 'Each recommended product must be an object.',
@@ -254,7 +264,26 @@ function normalizeRebookFields(args: {
     return { ok: false, error: 'Invalid rebookWindowEnd date.' }
   }
 
-  if (requestedMode === AFTERCARE_REBOOK_MODE.BOOKED_NEXT_APPOINTMENT) {
+  if (requestedMode === AftercareRebookMode.NONE) {
+    if (rebookedForParsed || windowStartParsed || windowEndParsed) {
+      return {
+        ok: false,
+        error: 'Rebook dates are not allowed when rebookMode is NONE.',
+      }
+    }
+
+    return {
+      ok: true,
+      value: {
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+      },
+    }
+  }
+
+  if (requestedMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
     if (!rebookedForParsed) {
       return {
         ok: false,
@@ -262,10 +291,18 @@ function normalizeRebookFields(args: {
       }
     }
 
+    if (windowStartParsed || windowEndParsed) {
+      return {
+        ok: false,
+        error:
+          'BOOKED_NEXT_APPOINTMENT does not allow rebookWindowStart/rebookWindowEnd.',
+      }
+    }
+
     return {
       ok: true,
       value: {
-        mode: AFTERCARE_REBOOK_MODE.BOOKED_NEXT_APPOINTMENT,
+        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
         rebookedFor: rebookedForParsed,
         rebookWindowStart: null,
         rebookWindowEnd: null,
@@ -273,40 +310,35 @@ function normalizeRebookFields(args: {
     }
   }
 
-  if (requestedMode === AFTERCARE_REBOOK_MODE.RECOMMENDED_WINDOW) {
-    if (!windowStartParsed || !windowEndParsed) {
-      return {
-        ok: false,
-        error:
-          'RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.',
-      }
-    }
-
-    if (windowEndParsed <= windowStartParsed) {
-      return {
-        ok: false,
-        error: 'rebookWindowEnd must be after rebookWindowStart.',
-      }
-    }
-
+  if (!windowStartParsed || !windowEndParsed) {
     return {
-      ok: true,
-      value: {
-        mode: AFTERCARE_REBOOK_MODE.RECOMMENDED_WINDOW,
-        rebookedFor: null,
-        rebookWindowStart: windowStartParsed,
-        rebookWindowEnd: windowEndParsed,
-      },
+      ok: false,
+      error:
+        'RECOMMENDED_WINDOW requires rebookWindowStart and rebookWindowEnd.',
+    }
+  }
+
+  if (rebookedForParsed) {
+    return {
+      ok: false,
+      error: 'RECOMMENDED_WINDOW does not allow rebookedFor.',
+    }
+  }
+
+  if (windowEndParsed <= windowStartParsed) {
+    return {
+      ok: false,
+      error: 'rebookWindowEnd must be after rebookWindowStart.',
     }
   }
 
   return {
     ok: true,
     value: {
-      mode: AFTERCARE_REBOOK_MODE.NONE,
+      rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
       rebookedFor: null,
-      rebookWindowStart: null,
-      rebookWindowEnd: null,
+      rebookWindowStart: windowStartParsed,
+      rebookWindowEnd: windowEndParsed,
     },
   }
 }
@@ -326,16 +358,13 @@ function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
 
-export async function GET(
-  _req: NextRequest,
-  props: { params: Promise<{ id: string }> },
-) {
+export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id } = await props.params
-    const bookingId = trimmedString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
 
     if (!bookingId) {
       return jsonFail(400, 'Missing booking id.')
@@ -387,7 +416,10 @@ export async function GET(
       },
     })
 
-    if (!booking) return jsonFail(404, 'Booking not found.')
+    if (!booking) {
+      return jsonFail(404, 'Booking not found.')
+    }
+
     if (booking.professionalId !== auth.professionalId) {
       return jsonFail(403, 'Forbidden.')
     }
@@ -446,99 +478,95 @@ export async function GET(
       },
       200,
     )
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('GET /api/pro/bookings/[id]/aftercare error', error)
     return jsonFail(500, 'Internal server error.')
   }
 }
 
-export async function POST(
-  req: NextRequest,
-  props: { params: Promise<{ id: string }> },
-) {
+export async function POST(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id } = await props.params
-    const bookingId = trimmedString(id)
+    const params = await Promise.resolve(ctx.params)
+    const bookingId = pickString(params?.id)
 
     if (!bookingId) {
       return jsonFail(400, 'Missing booking id.')
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body: Record<string, unknown> = isObject(rawBody) ? rawBody : {}
+    const rawBody: unknown = await req.json().catch(() => null)
+    if (!isRecord(rawBody)) {
+      return jsonFail(400, 'Invalid request body.')
+    }
 
     const notes =
-      typeof body.notes === 'string'
-        ? body.notes.trim().slice(0, NOTES_MAX)
+      typeof rawBody.notes === 'string'
+        ? rawBody.notes.trim().slice(0, NOTES_MAX)
         : ''
 
-    const sendToClient = toBool(body.sendToClient)
+    const sendToClient = toBool(rawBody.sendToClient)
 
-    const productsParsed = normalizeRecommendedProducts(body.recommendedProducts)
+    const productsParsed = normalizeRecommendedProducts(
+      rawBody.recommendedProducts,
+    )
     if (!productsParsed.ok) {
       return jsonFail(400, productsParsed.error)
     }
-    const products = productsParsed.value
 
-    const requestedMode = isAftercareRebookMode(body.rebookMode)
-      ? body.rebookMode
-      : AFTERCARE_REBOOK_MODE.NONE
+    const requestedModeResult = parseRequestedRebookMode(rawBody.rebookMode)
+    if (!requestedModeResult.ok) {
+      return jsonFail(400, requestedModeResult.error)
+    }
 
     const normalizedRebook = normalizeRebookFields({
-      requestedMode,
-      rebookedForParsed: parseOptionalISODate(body.rebookedFor),
-      windowStartParsed: parseOptionalISODate(body.rebookWindowStart),
-      windowEndParsed: parseOptionalISODate(body.rebookWindowEnd),
+      requestedMode: requestedModeResult.value,
+      rebookedForParsed: parseOptionalISODate(rawBody.rebookedFor),
+      windowStartParsed: parseOptionalISODate(rawBody.rebookWindowStart),
+      windowEndParsed: parseOptionalISODate(rawBody.rebookWindowEnd),
     })
 
     if (!normalizedRebook.ok) {
       return jsonFail(400, normalizedRebook.error)
     }
 
-    const {
-      mode: normalizedMode,
-      rebookedFor,
-      rebookWindowStart,
-      rebookWindowEnd,
-    } = normalizedRebook.value
-
-    const createRebookReminder = toBool(body.createRebookReminder)
-    const createProductReminder = toBool(body.createProductReminder)
+    const createRebookReminder = toBool(rawBody.createRebookReminder)
+    const createProductReminder = toBool(rawBody.createProductReminder)
 
     const rebookReminderDaysBefore = clamp(
-      toInt(body.rebookReminderDaysBefore, 2),
+      toInt(rawBody.rebookReminderDaysBefore, 2),
       1,
       30,
     )
 
     const productReminderDaysAfter = clamp(
-      toInt(body.productReminderDaysAfter, 7),
+      toInt(rawBody.productReminderDaysAfter, 7),
       1,
       180,
     )
 
-    const clientTz =
-      typeof body.timeZone === 'string' ? body.timeZone.trim() : ''
+    const clientTimeZoneRaw =
+      typeof rawBody.timeZone === 'string' ? rawBody.timeZone.trim() : ''
 
     const clientTimeZoneReceived =
-      clientTz && isValidIanaTimeZone(clientTz) ? clientTz : null
+      clientTimeZoneRaw && isValidIanaTimeZone(clientTimeZoneRaw)
+        ? clientTimeZoneRaw
+        : null
 
     const result = await upsertBookingAftercare({
       bookingId,
       professionalId: auth.professionalId,
       notes: notes || null,
-      rebookMode: normalizedMode,
-      rebookedFor,
-      rebookWindowStart,
-      rebookWindowEnd,
+      rebookMode: normalizedRebook.value.rebookMode,
+      rebookedFor: normalizedRebook.value.rebookedFor,
+      rebookWindowStart: normalizedRebook.value.rebookWindowStart,
+      rebookWindowEnd: normalizedRebook.value.rebookWindowEnd,
       createRebookReminder,
       rebookReminderDaysBefore,
       createProductReminder,
       productReminderDaysAfter,
-      recommendedProducts: products,
+      recommendedProducts: productsParsed.value,
       sendToClient,
     })
 

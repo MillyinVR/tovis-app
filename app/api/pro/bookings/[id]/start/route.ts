@@ -30,7 +30,24 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-export async function POST(_request: Request, ctx: Ctx) {
+function readRequestMeta(request: Request): {
+  requestId: string | null
+  idempotencyKey: string | null
+} {
+  const requestId =
+    pickString(request.headers.get('x-request-id')) ??
+    pickString(request.headers.get('request-id')) ??
+    null
+
+  const idempotencyKey =
+    pickString(request.headers.get('idempotency-key')) ??
+    pickString(request.headers.get('x-idempotency-key')) ??
+    null
+
+  return { requestId, idempotencyKey }
+}
+
+export async function POST(request: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -43,9 +60,13 @@ export async function POST(_request: Request, ctx: Ctx) {
       return jsonFail(400, 'Missing booking id.')
     }
 
+    const { requestId, idempotencyKey } = readRequestMeta(request)
+
     const result = await startBookingSession({
       bookingId,
       professionalId: proId,
+      requestId,
+      idempotencyKey,
     })
 
     return jsonOk(

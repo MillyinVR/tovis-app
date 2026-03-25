@@ -118,6 +118,8 @@ type ApproveConsultationMaterializationArgs = {
   clientId: string
   professionalId: string
   now: Date
+  requestId?: string | null
+  idempotencyKey?: string | null
 }
 
 type ApproveConsultationMaterializationResult = {
@@ -780,6 +782,11 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
   clientId: true,
   professionalId: true,
   locationType: true,
+  serviceId: true,
+  offeringId: true,
+  subtotalSnapshot: true,
+  totalDurationMinutes: true,
+  consultationConfirmedAt: true,
   consultationApproval: {
     select: {
       id: true,
@@ -787,6 +794,8 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
       proposedServicesJson: true,
       proposedTotal: true,
       notes: true,
+      approvedAt: true,
+      rejectedAt: true,
     },
   },
 } satisfies Prisma.BookingSelect
@@ -1402,6 +1411,127 @@ function buildExistingCheckoutSelectionForComparison(
         `${b.recommendationId}:${b.productId}`,
       ),
     )
+}
+
+function buildCheckoutAuditSnapshot(args: {
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  selectedPaymentMethod: PaymentMethod | null | undefined
+  serviceSubtotalSnapshot: Prisma.Decimal | null | undefined
+  productSubtotalSnapshot: Prisma.Decimal | null | undefined
+  subtotalSnapshot: Prisma.Decimal | null | undefined
+  tipAmount: Prisma.Decimal | null | undefined
+  taxAmount: Prisma.Decimal | null | undefined
+  discountAmount: Prisma.Decimal | null | undefined
+  totalAmount: Prisma.Decimal | null | undefined
+  paymentAuthorizedAt: Date | null | undefined
+  paymentCollectedAt: Date | null | undefined
+}) {
+  return {
+    checkoutStatus: args.checkoutStatus ?? null,
+    selectedPaymentMethod: args.selectedPaymentMethod ?? null,
+    serviceSubtotalSnapshot: normalizeDecimalCmp(args.serviceSubtotalSnapshot),
+    productSubtotalSnapshot: normalizeDecimalCmp(args.productSubtotalSnapshot),
+    subtotalSnapshot: normalizeDecimalCmp(args.subtotalSnapshot),
+    tipAmount: normalizeDecimalCmp(args.tipAmount),
+    taxAmount: normalizeDecimalCmp(args.taxAmount),
+    discountAmount: normalizeDecimalCmp(args.discountAmount),
+    totalAmount: normalizeDecimalCmp(args.totalAmount),
+    paymentAuthorizedAt: normalizeDateCmp(args.paymentAuthorizedAt),
+    paymentCollectedAt: normalizeDateCmp(args.paymentCollectedAt),
+  }
+}
+
+async function createCheckoutAuditLogs(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  route: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+  oldState: ReturnType<typeof buildCheckoutAuditSnapshot>
+  newState: ReturnType<typeof buildCheckoutAuditSnapshot>
+}): Promise<void> {
+  if (!areAuditValuesEqual(args.oldState, args.newState)) {
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      action: BookingCloseoutAuditAction.CHECKOUT_UPDATED,
+      route: args.route,
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: args.oldState,
+      newValue: args.newState,
+    })
+  }
+
+  if (args.oldState.selectedPaymentMethod !== args.newState.selectedPaymentMethod) {
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      action: BookingCloseoutAuditAction.PAYMENT_METHOD_UPDATED,
+      route: args.route,
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: {
+        selectedPaymentMethod: args.oldState.selectedPaymentMethod,
+      },
+      newValue: {
+        selectedPaymentMethod: args.newState.selectedPaymentMethod,
+      },
+    })
+  }
+
+  if (
+    args.oldState.paymentAuthorizedAt !== args.newState.paymentAuthorizedAt &&
+    args.newState.paymentAuthorizedAt
+  ) {
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      action: BookingCloseoutAuditAction.PAYMENT_AUTHORIZED,
+      route: args.route,
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: {
+        paymentAuthorizedAt: args.oldState.paymentAuthorizedAt,
+        checkoutStatus: args.oldState.checkoutStatus,
+        totalAmount: args.oldState.totalAmount,
+      },
+      newValue: {
+        paymentAuthorizedAt: args.newState.paymentAuthorizedAt,
+        checkoutStatus: args.newState.checkoutStatus,
+        totalAmount: args.newState.totalAmount,
+      },
+    })
+  }
+
+  if (
+    args.oldState.paymentCollectedAt !== args.newState.paymentCollectedAt &&
+    args.newState.paymentCollectedAt
+  ) {
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      action: BookingCloseoutAuditAction.PAYMENT_COLLECTED,
+      route: args.route,
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: {
+        paymentCollectedAt: args.oldState.paymentCollectedAt,
+        checkoutStatus: args.oldState.checkoutStatus,
+        totalAmount: args.oldState.totalAmount,
+      },
+      newValue: {
+        paymentCollectedAt: args.newState.paymentCollectedAt,
+        checkoutStatus: args.newState.checkoutStatus,
+        totalAmount: args.newState.totalAmount,
+      },
+    })
+  }
 }
 
 async function bumpProfessionalScheduleVersion(
@@ -4020,6 +4150,48 @@ async function performLockedConfirmBookingFinalReview(args: {
     } satisfies Prisma.BookingSelect,
   })
 
+  const oldFinalReviewState = {
+  sessionStep: booking.sessionStep ?? SessionStep.NONE,
+  serviceId: booking.serviceId,
+  offeringId: booking.offeringId,
+  subtotalSnapshot: normalizeDecimalCmp(booking.subtotalSnapshot),
+  totalDurationMinutes: booking.totalDurationMinutes ?? 0,
+  finalLineItems: existingItemsForComparison,
+  recommendedProducts: existingProductsForComparison,
+  rebookMode: existingRebookMode,
+  rebookedFor: existingRebookedFor,
+  rebookWindowStart: existingRebookWindowStart,
+  rebookWindowEnd: existingRebookWindowEnd,
+}
+
+const newFinalReviewState = {
+  sessionStep: updated.sessionStep ?? SessionStep.NONE,
+  serviceId: updated.serviceId,
+  offeringId: updated.offeringId,
+  subtotalSnapshot: normalizeDecimalCmp(updated.subtotalSnapshot),
+  totalDurationMinutes: updated.totalDurationMinutes ?? 0,
+  finalLineItems: normalizedIncomingItemsForComparison,
+  recommendedProducts: normalizedIncomingProductsForComparison,
+  rebookMode,
+  rebookedFor: incomingRebookedFor,
+  rebookWindowStart: incomingRebookWindowStart,
+  rebookWindowEnd: incomingRebookWindowEnd,
+}
+
+if (!areAuditValuesEqual(oldFinalReviewState, newFinalReviewState)) {
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: BookingCloseoutAuditAction.FINAL_REVIEW_CONFIRMED,
+    route: 'lib/booking/writeBoundary.ts:confirmBookingFinalReview',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: oldFinalReviewState,
+    newValue: newFinalReviewState,
+  })
+}
+
   return {
     booking: {
       id: updated.id,
@@ -4829,13 +5001,9 @@ function parseConsultationProposedItems(
   })
 }
 
-async function performLockedApproveConsultationMaterialization(args: {
-  tx: Prisma.TransactionClient
-  bookingId: string
-  clientId: string
-  professionalId: string
-  now: Date
-}): Promise<ApproveConsultationMaterializationResult> {
+async function performLockedApproveConsultationMaterialization(
+  args: ApproveConsultationMaterializationArgs,
+): Promise<ApproveConsultationMaterializationResult> {
   const booking = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
     select: APPROVE_CONSULTATION_BOOKING_SELECT,
@@ -5032,6 +5200,49 @@ const offeringIds = Array.from(
       rejectedAt: true,
     },
   })
+
+await createBookingCloseoutAuditLog({
+  tx: args.tx,
+  bookingId: booking.id,
+  professionalId: args.professionalId,
+  action: BookingCloseoutAuditAction.CONSULTATION_APPROVED,
+  route: 'lib/booking/writeBoundary.ts:approveConsultationAndMaterializeBooking',
+  requestId: args.requestId,
+  idempotencyKey: args.idempotencyKey,
+  oldValue: {
+    consultationApproval: {
+      status: approval.status,
+      approvedAt: normalizeDateCmp(approval.approvedAt),
+      rejectedAt: normalizeDateCmp(approval.rejectedAt),
+      proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+    },
+    booking: {
+      serviceId: booking.serviceId,
+      offeringId: booking.offeringId,
+      subtotalSnapshot: normalizeDecimalCmp(booking.subtotalSnapshot),
+      totalDurationMinutes: booking.totalDurationMinutes ?? 0,
+      consultationConfirmedAt: normalizeDateCmp(booking.consultationConfirmedAt),
+    },
+  },
+  newValue: {
+    consultationApproval: {
+      status: updatedApproval.status,
+      approvedAt: normalizeDateCmp(updatedApproval.approvedAt),
+      rejectedAt: normalizeDateCmp(updatedApproval.rejectedAt),
+      proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+    },
+    booking: {
+      serviceId: updatedBooking.serviceId,
+      offeringId: updatedBooking.offeringId,
+      subtotalSnapshot: normalizeDecimalCmp(updatedBooking.subtotalSnapshot),
+      totalDurationMinutes: updatedBooking.totalDurationMinutes ?? 0,
+      consultationConfirmedAt: normalizeDateCmp(updatedBooking.consultationConfirmedAt),
+    },
+  },
+  metadata: {
+    proposalItemCount: proposedItems.length,
+  },
+})
 
   return {
     booking: updatedBooking,
@@ -6844,7 +7055,73 @@ async function performLockedUpsertBookingAftercare(args: {
     professionalTimeZone: booking.professional?.timeZone,
   })
 
-    const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
+  const existingAftercare = booking.aftercareSummary
+
+const existingAftercareComparable = existingAftercare
+  ? {
+      notes: normalizeReason(existingAftercare.notes),
+      rebookMode: existingAftercare.rebookMode,
+      rebookedFor: normalizeDateCmp(existingAftercare.rebookedFor),
+      rebookWindowStart: normalizeDateCmp(existingAftercare.rebookWindowStart),
+      rebookWindowEnd: normalizeDateCmp(existingAftercare.rebookWindowEnd),
+      recommendedProducts: buildExistingRecommendedProductsForComparison(
+        existingAftercare.recommendedProducts,
+      ),
+      sentToClient: Boolean(existingAftercare.sentToClientAt),
+    }
+  : null
+
+const incomingAftercareComparable = {
+  notes: normalizeReason(args.notes),
+  rebookMode: args.rebookMode,
+  rebookedFor: normalizeDateCmp(args.rebookedFor),
+  rebookWindowStart: normalizeDateCmp(args.rebookWindowStart),
+  rebookWindowEnd: normalizeDateCmp(args.rebookWindowEnd),
+  recommendedProducts: normalizeRecommendedProductsForComparison(
+    args.recommendedProducts,
+  ),
+  sentToClient: args.sendToClient
+    ? true
+    : Boolean(existingAftercare?.sentToClientAt),
+}
+
+if (
+  existingAftercare &&
+  !args.createRebookReminder &&
+  !args.createProductReminder &&
+  areAuditValuesEqual(existingAftercareComparable, incomingAftercareComparable)
+) {
+  return {
+    aftercare: {
+      id: existingAftercare.id,
+      publicToken: existingAftercare.publicToken,
+      rebookMode: existingAftercare.rebookMode,
+      rebookedFor: existingAftercare.rebookedFor,
+      rebookWindowStart: existingAftercare.rebookWindowStart,
+      rebookWindowEnd: existingAftercare.rebookWindowEnd,
+      draftSavedAt: existingAftercare.draftSavedAt,
+      sentToClientAt: existingAftercare.sentToClientAt,
+      lastEditedAt: existingAftercare.lastEditedAt,
+      version: existingAftercare.version,
+    },
+    remindersTouched: 0,
+    clientNotified: false,
+    bookingFinished: false,
+    booking:
+      booking.status === BookingStatus.COMPLETED || booking.finishedAt
+        ? {
+            status: booking.status,
+            sessionStep: booking.sessionStep ?? SessionStep.NONE,
+            finishedAt: booking.finishedAt,
+          }
+        : null,
+    timeZoneUsed,
+    meta: buildMeta(false),
+  }
+}
+
+
+  const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
   const now = new Date()
   const nextVersion = (booking.aftercareSummary?.version ?? 0) + 1
 
@@ -7149,6 +7426,60 @@ if (args.sendToClient) {
   }
 }
 
+const oldAftercareState = {
+  notes: normalizeReason(booking.aftercareSummary?.notes),
+  rebookMode: booking.aftercareSummary?.rebookMode ?? AftercareRebookMode.NONE,
+  rebookedFor: normalizeDateCmp(booking.aftercareSummary?.rebookedFor),
+  rebookWindowStart: normalizeDateCmp(
+    booking.aftercareSummary?.rebookWindowStart,
+  ),
+  rebookWindowEnd: normalizeDateCmp(
+    booking.aftercareSummary?.rebookWindowEnd,
+  ),
+  draftSavedAt: normalizeDateCmp(booking.aftercareSummary?.draftSavedAt),
+  sentToClientAt: normalizeDateCmp(booking.aftercareSummary?.sentToClientAt),
+  version: booking.aftercareSummary?.version ?? 0,
+  recommendedProducts: buildExistingRecommendedProductsForComparison(
+    booking.aftercareSummary?.recommendedProducts,
+  ),
+}
+
+const newAftercareState = {
+  notes: normalizeReason(args.notes),
+  rebookMode: aftercare.rebookMode,
+  rebookedFor: normalizeDateCmp(aftercare.rebookedFor),
+  rebookWindowStart: normalizeDateCmp(aftercare.rebookWindowStart),
+  rebookWindowEnd: normalizeDateCmp(aftercare.rebookWindowEnd),
+  draftSavedAt: normalizeDateCmp(aftercare.draftSavedAt),
+  sentToClientAt: normalizeDateCmp(aftercare.sentToClientAt),
+  version: aftercare.version,
+  recommendedProducts: normalizeRecommendedProductsForComparison(
+    args.recommendedProducts,
+  ),
+}
+
+if (!areAuditValuesEqual(oldAftercareState, newAftercareState)) {
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: args.sendToClient
+      ? BookingCloseoutAuditAction.AFTERCARE_FINALIZED
+      : BookingCloseoutAuditAction.AFTERCARE_DRAFT_SAVED,
+    route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: oldAftercareState,
+    newValue: newAftercareState,
+    metadata: {
+      remindersTouched,
+      clientNotified,
+      bookingFinished,
+      timeZoneUsed,
+    },
+  })
+}
+
 return {
     aftercare: {
       id: aftercare.id,
@@ -7234,6 +7565,61 @@ async function performLockedUpdateBookingCheckout(args: {
       ? (args.checkoutStatus ?? BookingCheckoutStatus.PAID)
       : (args.checkoutStatus ?? booking.checkoutStatus)
 
+const oldCheckoutState = buildCheckoutAuditSnapshot({
+  checkoutStatus: booking.checkoutStatus,
+  selectedPaymentMethod: booking.selectedPaymentMethod,
+  serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+  productSubtotalSnapshot: booking.productSubtotalSnapshot,
+  subtotalSnapshot: booking.subtotalSnapshot,
+  tipAmount: booking.tipAmount,
+  taxAmount: booking.taxAmount,
+  discountAmount: booking.discountAmount,
+  totalAmount: booking.totalAmount,
+  paymentAuthorizedAt: booking.paymentAuthorizedAt,
+  paymentCollectedAt: booking.paymentCollectedAt,
+})
+
+const nextCheckoutState = buildCheckoutAuditSnapshot({
+  checkoutStatus: nextCheckoutStatus,
+  selectedPaymentMethod:
+    args.selectedPaymentMethod !== undefined
+      ? args.selectedPaymentMethod
+      : booking.selectedPaymentMethod,
+  serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+  productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+  subtotalSnapshot: rollup.subtotalSnapshot,
+  tipAmount: rollup.tipAmount,
+  taxAmount: rollup.taxAmount,
+  discountAmount: rollup.discountAmount,
+  totalAmount: rollup.totalAmount,
+  paymentAuthorizedAt: shouldSetAuthorizedAt
+    ? booking.paymentAuthorizedAt ?? args.now
+    : booking.paymentAuthorizedAt,
+  paymentCollectedAt: shouldSetCollectedAt
+    ? booking.paymentCollectedAt ?? args.now
+    : booking.paymentCollectedAt,
+})
+
+if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
+  return {
+    booking: {
+      id: booking.id,
+      checkoutStatus: booking.checkoutStatus,
+      selectedPaymentMethod: booking.selectedPaymentMethod,
+      serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: booking.productSubtotalSnapshot,
+      subtotalSnapshot: booking.subtotalSnapshot,
+      tipAmount: booking.tipAmount,
+      taxAmount: booking.taxAmount,
+      discountAmount: booking.discountAmount,
+      totalAmount: booking.totalAmount,
+      paymentAuthorizedAt: booking.paymentAuthorizedAt,
+      paymentCollectedAt: booking.paymentCollectedAt,
+    },
+    meta: buildMeta(false),
+  }
+}
+
   const shouldCompleteBooking = isReviewEligibleCloseout({
   bookingStatus: booking.status,
   finishedAt: booking.finishedAt,
@@ -7302,6 +7688,29 @@ async function performLockedUpdateBookingCheckout(args: {
       select: { id: true } satisfies Prisma.BookingSelect,
     })
   }
+
+await createCheckoutAuditLogs({
+  tx: args.tx,
+  bookingId: booking.id,
+  professionalId: args.professionalId,
+  route: 'lib/booking/writeBoundary.ts:updateBookingCheckout',
+  requestId: args.requestId,
+  idempotencyKey: args.idempotencyKey,
+  oldState: oldCheckoutState,
+  newState: buildCheckoutAuditSnapshot({
+    checkoutStatus: updated.checkoutStatus,
+    selectedPaymentMethod: updated.selectedPaymentMethod,
+    serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: updated.productSubtotalSnapshot,
+    subtotalSnapshot: updated.subtotalSnapshot,
+    tipAmount: updated.tipAmount,
+    taxAmount: updated.taxAmount,
+    discountAmount: updated.discountAmount,
+    totalAmount: updated.totalAmount,
+    paymentAuthorizedAt: updated.paymentAuthorizedAt,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  }),
+})
 
   return {
     booking: {
@@ -7373,6 +7782,63 @@ async function performLockedUpdateClientBookingCheckout(args: {
     nextTipAmount,
   })
 
+  const oldCheckoutState = buildCheckoutAuditSnapshot({
+  checkoutStatus: booking.checkoutStatus,
+  selectedPaymentMethod: booking.selectedPaymentMethod,
+  serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+  productSubtotalSnapshot: booking.productSubtotalSnapshot,
+  subtotalSnapshot: booking.subtotalSnapshot,
+  tipAmount: booking.tipAmount,
+  taxAmount: booking.taxAmount,
+  discountAmount: booking.discountAmount,
+  totalAmount: booking.totalAmount,
+  paymentAuthorizedAt: booking.paymentAuthorizedAt,
+  paymentCollectedAt: booking.paymentCollectedAt,
+})
+
+const nextCheckoutState = buildCheckoutAuditSnapshot({
+  checkoutStatus: nextCheckoutStatus,
+  selectedPaymentMethod:
+    args.selectedPaymentMethod !== undefined
+      ? args.selectedPaymentMethod
+      : booking.selectedPaymentMethod,
+  serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+  productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+  subtotalSnapshot: rollup.subtotalSnapshot,
+  tipAmount: rollup.tipAmount,
+  taxAmount: rollup.taxAmount,
+  discountAmount: rollup.discountAmount,
+  totalAmount: rollup.totalAmount,
+  paymentAuthorizedAt: shouldSetCollectedAt
+    ? booking.paymentAuthorizedAt ?? args.now
+    : shouldSetAuthorizedAt
+      ? booking.paymentAuthorizedAt ?? args.now
+      : booking.paymentAuthorizedAt,
+  paymentCollectedAt: shouldSetCollectedAt
+    ? booking.paymentCollectedAt ?? args.now
+    : booking.paymentCollectedAt,
+})
+
+if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
+  return {
+    booking: {
+      id: booking.id,
+      checkoutStatus: booking.checkoutStatus,
+      selectedPaymentMethod: booking.selectedPaymentMethod,
+      serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: booking.productSubtotalSnapshot,
+      subtotalSnapshot: booking.subtotalSnapshot,
+      tipAmount: booking.tipAmount,
+      taxAmount: booking.taxAmount,
+      discountAmount: booking.discountAmount,
+      totalAmount: booking.totalAmount,
+      paymentAuthorizedAt: booking.paymentAuthorizedAt,
+      paymentCollectedAt: booking.paymentCollectedAt,
+    },
+    meta: buildMeta(false),
+  }
+}
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
@@ -7440,6 +7906,29 @@ async function performLockedUpdateClientBookingCheckout(args: {
       select: { id: true } satisfies Prisma.BookingSelect,
     })
   }
+
+  await createCheckoutAuditLogs({
+  tx: args.tx,
+  bookingId: booking.id,
+  professionalId: booking.professionalId,
+  route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout',
+  requestId: args.requestId,
+  idempotencyKey: args.idempotencyKey,
+  oldState: oldCheckoutState,
+  newState: buildCheckoutAuditSnapshot({
+    checkoutStatus: updated.checkoutStatus,
+    selectedPaymentMethod: updated.selectedPaymentMethod,
+    serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: updated.productSubtotalSnapshot,
+    subtotalSnapshot: updated.subtotalSnapshot,
+    tipAmount: updated.tipAmount,
+    taxAmount: updated.taxAmount,
+    discountAmount: updated.discountAmount,
+    totalAmount: updated.totalAmount,
+    paymentAuthorizedAt: updated.paymentAuthorizedAt,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  }),
+})
 
   return {
     booking: {
@@ -7544,6 +8033,38 @@ async function performLockedUpsertClientBookingCheckoutProducts(args: {
 
   const productById = new Map(products.map((product) => [product.id, product]))
 
+  const existingSelection = buildExistingCheckoutSelectionForComparison(
+    booking.checkoutProductItems,
+  )
+
+  const incomingSelection = normalizeCheckoutSelectionForComparison(args.items)
+
+  if (areAuditValuesEqual(existingSelection, incomingSelection)) {
+    return {
+      booking: {
+        id: booking.id,
+        checkoutStatus: booking.checkoutStatus,
+        serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+        productSubtotalSnapshot: booking.productSubtotalSnapshot,
+        subtotalSnapshot: booking.subtotalSnapshot,
+        tipAmount: booking.tipAmount,
+        taxAmount: booking.taxAmount,
+        discountAmount: booking.discountAmount,
+        totalAmount: booking.totalAmount,
+        paymentAuthorizedAt: booking.paymentAuthorizedAt,
+        paymentCollectedAt: booking.paymentCollectedAt,
+      },
+      selectedProducts: booking.checkoutProductItems.map((item) => ({
+        recommendationId: item.recommendationId,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        lineTotal: item.unitPrice.mul(item.quantity),
+      })),
+      meta: buildMeta(false),
+    }
+  }
+
   const normalizedSelectedProducts = args.items.map((item) => {
     const product = productById.get(item.productId)
 
@@ -7631,6 +8152,28 @@ async function performLockedUpsertClientBookingCheckoutProducts(args: {
       paymentCollectedAt: true,
     } satisfies Prisma.BookingSelect,
   })
+
+  await createBookingCloseoutAuditLog({
+  tx: args.tx,
+  bookingId: booking.id,
+  professionalId: booking.professionalId,
+  action: BookingCloseoutAuditAction.CHECKOUT_PRODUCTS_UPDATED,
+  route: 'lib/booking/writeBoundary.ts:upsertClientBookingCheckoutProducts',
+  requestId: args.requestId,
+  idempotencyKey: args.idempotencyKey,
+  oldValue: {
+    selectedProducts: existingSelection,
+    productSubtotalSnapshot: normalizeDecimalCmp(booking.productSubtotalSnapshot),
+    totalAmount: normalizeDecimalCmp(booking.totalAmount),
+    checkoutStatus: booking.checkoutStatus,
+  },
+  newValue: {
+    selectedProducts: incomingSelection,
+    productSubtotalSnapshot: normalizeDecimalCmp(updated.productSubtotalSnapshot),
+    totalAmount: normalizeDecimalCmp(updated.totalAmount),
+    checkoutStatus: updated.checkoutStatus,
+  },
+})
 
   return {
     booking: {
@@ -7892,6 +8435,8 @@ export async function approveConsultationAndMaterializeBooking(args: {
   bookingId: string
   clientId: string
   professionalId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<ApproveConsultationMaterializationResult> {
   return withLockedClientOwnedBookingTransaction({
     bookingId: args.bookingId,
@@ -7903,6 +8448,8 @@ export async function approveConsultationAndMaterializeBooking(args: {
         clientId: args.clientId,
         professionalId: args.professionalId,
         now,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   })
 }
