@@ -42,7 +42,7 @@ export type AvailabilityPrefetchArgs = {
   signal?: AbortSignal
 }
 
-const CACHE_TTL_MS = 90_000
+const CACHE_TTL_MS = 180_000
 const MAX_CACHE_ENTRIES = 200
 
 const summaryWindowCache = new Map<string, CacheEntry>()
