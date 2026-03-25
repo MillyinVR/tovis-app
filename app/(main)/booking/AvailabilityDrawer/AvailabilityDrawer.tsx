@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import type {
@@ -47,6 +47,43 @@ const MOBILE_ADDRESS_REQUIRED_MESSAGE =
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
+
+// Module-level cache for Intl.DateTimeFormat instances keyed by locale+options.
+// Intl formatters are expensive to construct; reusing them avoids creating a new
+// object on every call to fmtInTz / fmtSelectedLine / hourInTz / ymdInTz /
+// buildDayScrollerModel.
+const _dtfCache = new Map<string, Intl.DateTimeFormat>()
+
+// Known option keys used across all callers in this file, in a fixed order so
+// the serialization is deterministic and cheap (no JSON.stringify).
+const _DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
+  'timeZone',
+  'weekday',
+  'month',
+  'day',
+  'year',
+  'hour',
+  'minute',
+  'hour12',
+]
+
+function _getDtf(
+  locale: string | undefined,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  // Build a compact, deterministic key from known option properties.
+  const parts: string[] = [locale ?? '']
+  for (const prop of _DTF_KEY_PROPS) {
+    parts.push(String(options[prop] ?? ''))
+  }
+  const key = parts.join('|')
+  let fmt = _dtfCache.get(key)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(locale, options)
+    _dtfCache.set(key, fmt)
+  }
+  return fmt
+}
 
 type ConfirmHoldSelection = {
   holdId: string
@@ -173,7 +210,7 @@ function fmtInTz(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
 
-  return new Intl.DateTimeFormat(undefined, {
+  return _getDtf(undefined, {
     timeZone: tz,
     weekday: 'short',
     month: 'short',
@@ -188,7 +225,7 @@ function fmtSelectedLine(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
 
-  return new Intl.DateTimeFormat(undefined, {
+  return _getDtf(undefined, {
     timeZone: tz,
     weekday: 'long',
     month: 'long',
@@ -204,7 +241,7 @@ function hourInTz(isoUtc: string, timeZone: string): number | null {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return null
 
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = _getDtf('en-US', {
     timeZone: tz,
     hour: '2-digit',
     hour12: false,
@@ -219,7 +256,7 @@ function ymdInTz(timeZone: string): string | null {
   const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date()
 
-  const parts = new Intl.DateTimeFormat('en-CA', {
+  const parts = _getDtf('en-CA', {
     timeZone: tz,
     year: 'numeric',
     month: '2-digit',
@@ -294,12 +331,12 @@ function buildDayScrollerModel(
       // fail-soft for display only
     }
 
-    const top = new Intl.DateTimeFormat(undefined, {
+    const top = _getDtf(undefined, {
       timeZone: appointmentTz,
       weekday: 'short',
     }).format(anchor)
 
-    const bottom = new Intl.DateTimeFormat(undefined, {
+    const bottom = _getDtf(undefined, {
       timeZone: appointmentTz,
       day: '2-digit',
     }).format(anchor)
@@ -315,6 +352,33 @@ function fallbackAllowedMode(args: {
   if (args.mobile && !args.salon) return 'MOBILE'
   return 'SALON'
 }
+
+// Static shimmer skeleton shown while the summary data is loading.
+// Wrapped in React.memo so it never re-renders — its content never changes.
+const AvailabilityDrawerSkeleton = React.memo(function AvailabilityDrawerSkeleton() {
+  return (
+    <div className="tovis-glass-soft rounded-card p-4">
+      <div className="mb-4 flex items-center gap-3">
+        <div className="avail-skeleton h-12 w-12 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <div className="avail-skeleton h-3 w-1/2 rounded-full" />
+          <div className="avail-skeleton h-3 w-1/3 rounded-full" />
+        </div>
+      </div>
+      <div className="avail-skeleton mb-3 h-10 rounded-2xl" />
+      <div className="mb-3 flex gap-2">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl" />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="avail-skeleton h-10 w-16 rounded-full" />
+        ))}
+      </div>
+    </div>
+  )
+})
 
 export default function AvailabilityDrawer(props: {
   open: boolean
@@ -464,22 +528,32 @@ export default function AvailabilityDrawer(props: {
     if (!summary) return map
 
     map[summary.primaryPro.id] = summary.locationId
-    for (const p of others) {
+    for (const p of summary.otherPros) {
       map[p.id] = p.locationId
     }
 
     return map
-  }, [summary, others])
+  }, [summary])
 
   const daysKey = useMemo(() => {
     if (!days.length) return ''
     return days.map((d) => `${d.date}:${d.slotCount}`).join('|')
   }, [days])
 
-  const dayScrollerDays = useMemo(
-    () => buildDayScrollerModel(days, appointmentTz),
-    [days, daysKey, appointmentTz],
-  )
+  const dayScrollerDays = useMemo(() => {
+    // Reconstruct days from the stable daysKey string so this memo only
+    // recalculates when the actual data changes, not on every render where
+    // `days` (summary?.availableDays ?? EMPTY_DAYS) gets a new array reference.
+    if (!daysKey) return []
+    const reconstructedDays = daysKey.split('|').map((entry) => {
+      const colonIdx = entry.lastIndexOf(':')
+      return {
+        date: entry.slice(0, colonIdx),
+        slotCount: Number(entry.slice(colonIdx + 1)),
+      }
+    })
+    return buildDayScrollerModel(reconstructedDays, appointmentTz)
+  }, [daysKey, appointmentTz])
 
   const {
     primarySlots,
@@ -993,27 +1067,7 @@ export default function AvailabilityDrawer(props: {
           style={{ paddingBottom: STICKY_CTA_H + 14 }}
         >
           {shouldShowLoading ? (
-            <div className="tovis-glass-soft rounded-card p-4">
-              {/* Shimmer skeleton matching the summary card layout */}
-              <div className="mb-4 flex items-center gap-3">
-                <div className="avail-skeleton h-12 w-12 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <div className="avail-skeleton h-3 w-1/2 rounded-full" />
-                  <div className="avail-skeleton h-3 w-1/3 rounded-full" />
-                </div>
-              </div>
-              <div className="avail-skeleton mb-3 h-10 rounded-2xl" />
-              <div className="mb-3 flex gap-2">
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <div key={i} className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl" />
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {[0, 1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="avail-skeleton h-10 w-16 rounded-full" />
-                ))}
-              </div>
-            </div>
+            <AvailabilityDrawerSkeleton />
           ) : displayError ? (
             <div className="tovis-glass-soft rounded-card p-4">
               <div className="mb-3 text-sm font-semibold text-toneDanger">{displayError}</div>

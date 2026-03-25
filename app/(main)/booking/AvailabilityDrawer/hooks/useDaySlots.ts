@@ -133,7 +133,6 @@ export function useDaySlots(args: {
     retryKey,
     setError,
   } = args
-
   const [primarySlots, setPrimarySlots] = useState<string[]>([])
   const [otherSlots, setOtherSlots] = useState<Record<string, string[]>>({})
   const [loadingPrimarySlots, setLoadingPrimarySlots] = useState(false)
@@ -407,6 +406,46 @@ export function useDaySlots(args: {
     retryKey,
     holding,
     setError,
+  ])
+
+  // Speculatively prefetch the next 2 visible days after the selected day so
+  // slots are already cached by the time the user taps them.
+  useEffect(() => {
+    if (!open || !primaryId || !primaryLocationId || !selectedDayYMD) return
+    if (!effectiveServiceId) return
+
+    const availableDays = summary?.availableDays ?? []
+    if (!availableDays.length) return
+
+    const selectedIdx = availableDays.findIndex((d) => d.date === selectedDayYMD)
+    if (selectedIdx < 0) return
+
+    const prefetchCount = 2
+    const nextDays = availableDays.slice(selectedIdx + 1, selectedIdx + 1 + prefetchCount)
+    if (!nextDays.length) return
+
+    const proId = primaryId
+    const locationId = primaryLocationId
+
+    for (const day of nextDays) {
+      // isPrimary: false → failures are silently swallowed instead of calling
+      // setError, which is the desired behavior for background prefetch requests.
+      void fetchDaySlotsRef.current({
+        proId,
+        ymd: day.date,
+        locationType: activeLocationType,
+        locationId,
+        isPrimary: false,
+      }).catch(() => {})
+    }
+  }, [
+    open,
+    primaryId,
+    primaryLocationId,
+    selectedDayYMD,
+    activeLocationType,
+    effectiveServiceId,
+    summary,
   ])
 
   return {

@@ -265,7 +265,7 @@ describe('useAvailability', () => {
 
     first.unmount()
 
-    nowMs += 45_001
+    nowMs += 180_001
 
     const refreshGate = deferred<Response>()
     mocks.fetch.mockReturnValueOnce(refreshGate.promise)
