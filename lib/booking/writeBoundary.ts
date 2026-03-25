@@ -2,6 +2,7 @@
 import {
   AftercareRebookMode,
   BookingCheckoutStatus,
+  BookingCloseoutAuditAction,
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
@@ -76,7 +77,6 @@ import {
   buildNormalizedBookingItemsFromRequestedOfferings,
   computeBookingItemLikeTotals,
   snapToStepMinutes,
-  sumDecimal,
 } from '@/lib/booking/serviceItems'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 import { moneyToFixed2String } from '@/lib/money'
@@ -88,6 +88,10 @@ import {
 import crypto from 'node:crypto'
 import { buildBookingOverrideAuditRows } from '@/lib/booking/overrideAudit'
 import { assertCanUseBookingOverride } from '@/lib/booking/overrideAuthorization'
+import {
+  areAuditValuesEqual,
+  createBookingCloseoutAuditLog,
+} from '@/lib/booking/closeoutAudit'
 
 type MutationMeta = {
   mutated: boolean
@@ -288,6 +292,105 @@ type CreateProBookingResult = {
 type StartBookingSessionArgs = {
   bookingId: string
   professionalId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type FinishBookingSessionArgs = {
+  bookingId: string
+  professionalId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type ConfirmBookingFinalReviewArgs = {
+  bookingId: string
+  professionalId: string
+  finalLineItems: ConfirmBookingFinalReviewLineItemInput[]
+  expectedSubtotal?: Prisma.Decimal | string | number | null
+  recommendedProducts?: RecommendedProductInput[]
+  rebookMode?: AftercareRebookMode | null
+  rebookedFor?: Date | null
+  rebookWindowStart?: Date | null
+  rebookWindowEnd?: Date | null
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type TransitionSessionStepArgs = {
+  bookingId: string
+  professionalId: string
+  nextStep: SessionStep
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type UpdateBookingCheckoutArgs = {
+  bookingId: string
+  professionalId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  taxAmount?: Prisma.Decimal | string | number | null
+  discountAmount?: Prisma.Decimal | string | number | null
+  selectedPaymentMethod?: PaymentMethod | null
+  checkoutStatus?: BookingCheckoutStatus | null
+  markPaymentAuthorized?: boolean
+  markPaymentCollected?: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type UpsertClientBookingCheckoutProductsArgs = {
+  bookingId: string
+  clientId: string
+  items: ClientCheckoutProductSelectionInput[]
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type CreateRebookedBookingFromCompletedBookingArgs = {
+  bookingId: string
+  professionalId: string
+  scheduledFor: Date
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type CreateClientRebookedBookingFromAftercareArgs = {
+  aftercareId: string
+  bookingId: string
+  clientId: string
+  scheduledFor: Date
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type PerformLockedCreateRebookedBookingArgs = {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+  scheduledFor: Date
+  initialStatus: BookingStatus
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type UpsertBookingAftercareArgs = {
+  bookingId: string
+  professionalId: string
+  notes: string | null
+  rebookMode: AftercareRebookMode
+  rebookedFor: Date | null
+  rebookWindowStart: Date | null
+  rebookWindowEnd: Date | null
+  createRebookReminder: boolean
+  rebookReminderDaysBefore: number
+  createProductReminder: boolean
+  productReminderDaysAfter: number
+  recommendedProducts: RecommendedProductInput[]
+  sendToClient: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
 }
 
 
@@ -300,11 +403,6 @@ type StartBookingSessionResult = {
     sessionStep: SessionStep
   }
   meta: MutationMeta
-}
-
-type FinishBookingSessionArgs = {
-  bookingId: string
-  professionalId: string
 }
 
 type FinishBookingSessionResult = {
@@ -344,21 +442,6 @@ type RecommendedProductInput =
       note: string | null
     }
     
-    
-type ConfirmBookingFinalReviewArgs = {
-  bookingId: string
-  professionalId: string
-  finalLineItems: ConfirmBookingFinalReviewLineItemInput[]
-  expectedSubtotal?: Prisma.Decimal | string | number | null
-
-  // Step 4 needs these, but they should only be persisted here
-  // if schema already has a safe draft location.
-  recommendedProducts?: RecommendedProductInput[]
-  rebookMode?: AftercareRebookMode | null
-  rebookedFor?: Date | null
-  rebookWindowStart?: Date | null
-  rebookWindowEnd?: Date | null
-}
 
 type ConfirmBookingFinalReviewResult = {
   booking: {
@@ -371,12 +454,6 @@ type ConfirmBookingFinalReviewResult = {
     totalDurationMinutes: number
   }
   meta: MutationMeta
-}
-
-type TransitionSessionStepArgs = {
-  bookingId: string
-  professionalId: string
-  nextStep: SessionStep
 }
 
 type TransitionSessionStepResult =
@@ -452,17 +529,6 @@ type UpdateBookingLastMinuteDiscountResult = {
   meta: MutationMeta
 }
 
-type UpdateBookingCheckoutArgs = {
-  bookingId: string
-  professionalId: string
-  tipAmount?: Prisma.Decimal | string | number | null
-  taxAmount?: Prisma.Decimal | string | number | null
-  discountAmount?: Prisma.Decimal | string | number | null
-  selectedPaymentMethod?: PaymentMethod | null
-  checkoutStatus?: BookingCheckoutStatus | null
-  markPaymentAuthorized?: boolean
-  markPaymentCollected?: boolean
-}
 
 type UpdateBookingCheckoutResult = {
   booking: {
@@ -506,11 +572,6 @@ type AssertClientBookingReviewEligibilityResult = {
   meta: MutationMeta
 }
 
-type UpsertClientBookingCheckoutProductsArgs = {
-  bookingId: string
-  clientId: string
-  items: ClientCheckoutProductSelectionInput[]
-}
 
 type UpsertClientBookingCheckoutProductsResult = {
   booking: {
@@ -536,12 +597,6 @@ type UpsertClientBookingCheckoutProductsResult = {
   meta: MutationMeta
 }
 
-type CreateRebookedBookingFromCompletedBookingArgs = {
-  bookingId: string
-  professionalId: string
-  scheduledFor: Date
-}
-
 type CreateRebookedBookingFromCompletedBookingResult = {
   booking: {
     id: string
@@ -556,39 +611,9 @@ type CreateRebookedBookingFromCompletedBookingResult = {
   meta: MutationMeta
 }
 
-type CreateClientRebookedBookingFromAftercareArgs = {
-  aftercareId: string
-  bookingId: string
-  clientId: string
-  scheduledFor: Date
-}
 
 type CreateClientRebookedBookingFromAftercareResult =
   CreateRebookedBookingFromCompletedBookingResult
-
-type PerformLockedCreateRebookedBookingArgs = {
-  tx: Prisma.TransactionClient
-  now: Date
-  bookingId: string
-  professionalId: string
-  scheduledFor: Date
-  initialStatus: BookingStatus
-}
-type UpsertBookingAftercareArgs = {
-  bookingId: string
-  professionalId: string
-  notes: string | null
-  rebookMode: AftercareRebookMode
-  rebookedFor: Date | null
-  rebookWindowStart: Date | null
-  rebookWindowEnd: Date | null
-  createRebookReminder: boolean
-  rebookReminderDaysBefore: number
-  createProductReminder: boolean
-  productReminderDaysAfter: number
-  recommendedProducts: RecommendedProductInput[]
-  sendToClient: boolean
-}
 
 type UpsertBookingAftercareResult = {
   aftercare: {
@@ -1040,10 +1065,23 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
     select: {
       id: true,
       publicToken: true,
+      notes: true,
+      rebookMode: true,
+      rebookedFor: true,
+      rebookWindowStart: true,
+      rebookWindowEnd: true,
       draftSavedAt: true,
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
+      recommendedProducts: {
+        select: {
+          productId: true,
+          externalName: true,
+          externalUrl: true,
+          note: true,
+        },
+      },
     },
   },
   professional: {
@@ -1170,6 +1208,129 @@ function buildMeta(mutated: boolean): MutationMeta {
     mutated,
     noOp: !mutated,
   }
+}
+
+function normalizeDecimalCmp(
+  value: Prisma.Decimal | null | undefined,
+): string | null {
+  return value ? value.toFixed(2) : null
+}
+
+function normalizeDateCmp(value: Date | null | undefined): string | null {
+  return value ? new Date(value).toISOString() : null
+}
+
+function normalizeFinalReviewLineItemsForComparison(
+  items: ConfirmBookingFinalReviewLineItemInput[],
+) {
+  return [...items]
+    .map((item, index) => {
+      const price = normalizePositiveMoneyDecimal(item.price)
+      const duration = normalizePositiveDurationMinutes(item.durationMinutes)
+
+      if (!price || duration == null) {
+        throw bookingError('INVALID_SERVICE_ITEMS')
+      }
+
+      return {
+        serviceId: item.serviceId.trim(),
+        offeringId: item.offeringId?.trim() || null,
+        itemType: item.itemType,
+        priceSnapshot: price.toFixed(2),
+        durationMinutesSnapshot: duration,
+        notes: normalizeReason(item.notes),
+        sortOrder: Number.isFinite(item.sortOrder)
+          ? Math.max(0, Math.trunc(item.sortOrder))
+          : index,
+      }
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+function buildExistingFinalReviewItemsForComparison(
+  items: FinalReviewBookingRecord['serviceItems'],
+) {
+  return items
+    .map((item) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId ?? null,
+      itemType: item.itemType,
+      priceSnapshot: normalizeDecimalCmp(item.priceSnapshot),
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      notes: normalizeReason(item.notes),
+      sortOrder: item.sortOrder,
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+function normalizeRecommendedProductsForComparison(
+  products: RecommendedProductInput[],
+) {
+  return [...products]
+    .map((product) => ({
+      productId: product.productId?.trim() || null,
+      externalName: product.externalName?.trim() || null,
+      externalUrl: product.externalUrl?.trim() || null,
+      note: normalizeReason(product.note),
+    }))
+    .sort((a, b) =>
+      JSON.stringify(a).localeCompare(JSON.stringify(b)),
+    )
+}
+
+function buildExistingRecommendedProductsForComparison(
+  products:
+    | Array<{
+        productId: string | null
+        externalName: string | null
+        externalUrl: string | null
+        note: string | null
+      }>
+    | null
+    | undefined,
+) {
+  return [...(products ?? [])]
+    .map((product) => ({
+      productId: product.productId ?? null,
+      externalName: product.externalName ?? null,
+      externalUrl: product.externalUrl ?? null,
+      note: normalizeReason(product.note),
+    }))
+    .sort((a, b) =>
+      JSON.stringify(a).localeCompare(JSON.stringify(b)),
+    )
+}
+
+function normalizeCheckoutSelectionForComparison(
+  items: ClientCheckoutProductSelectionInput[],
+) {
+  return [...items]
+    .map((item) => ({
+      recommendationId: item.recommendationId,
+      productId: item.productId,
+      quantity: Math.max(1, Math.trunc(item.quantity)),
+    }))
+    .sort((a, b) =>
+      `${a.recommendationId}:${a.productId}`.localeCompare(
+        `${b.recommendationId}:${b.productId}`,
+      ),
+    )
+}
+
+function buildExistingCheckoutSelectionForComparison(
+  items: ClientCheckoutProductsBookingRecord['checkoutProductItems'],
+) {
+  return [...items]
+    .map((item) => ({
+      recommendationId: item.recommendationId,
+      productId: item.productId,
+      quantity: item.quantity,
+    }))
+    .sort((a, b) =>
+      `${a.recommendationId}:${a.productId}`.localeCompare(
+        `${b.recommendationId}:${b.productId}`,
+      ),
+    )
 }
 
 async function bumpProfessionalScheduleVersion(
@@ -3029,6 +3190,8 @@ async function performLockedStartBookingSession(args: {
   now: Date
   bookingId: string
   professionalId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<StartBookingSessionResult> {
   const booking: StartBookingRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -3092,6 +3255,31 @@ async function performLockedStartBookingSession(args: {
       } satisfies Prisma.BookingSelect,
     })
 
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: healed.id,
+      professionalId: args.professionalId,
+      action: BookingCloseoutAuditAction.SESSION_STEP_CHANGED,
+      route: 'lib/booking/writeBoundary.ts:startBookingSession',
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: {
+        startedAt: normalizeDateCmp(booking.startedAt),
+        finishedAt: normalizeDateCmp(booking.finishedAt),
+        sessionStep: booking.sessionStep ?? SessionStep.NONE,
+        status: booking.status,
+      },
+      newValue: {
+        startedAt: normalizeDateCmp(healed.startedAt),
+        finishedAt: normalizeDateCmp(healed.finishedAt),
+        sessionStep: healed.sessionStep ?? SessionStep.NONE,
+        status: healed.status,
+      },
+      metadata: {
+        trigger: 'heal_missing_session_step',
+      },
+    })
+
     return {
       booking: {
         id: healed.id,
@@ -3128,6 +3316,28 @@ async function performLockedStartBookingSession(args: {
     } satisfies Prisma.BookingSelect,
   })
 
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: updated.id,
+    professionalId: args.professionalId,
+    action: BookingCloseoutAuditAction.SESSION_STARTED,
+    route: 'lib/booking/writeBoundary.ts:startBookingSession',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      startedAt: normalizeDateCmp(booking.startedAt),
+      finishedAt: normalizeDateCmp(booking.finishedAt),
+      sessionStep: booking.sessionStep ?? SessionStep.NONE,
+      status: booking.status,
+    },
+    newValue: {
+      startedAt: normalizeDateCmp(updated.startedAt),
+      finishedAt: normalizeDateCmp(updated.finishedAt),
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+      status: updated.status,
+    },
+  })
+
   return {
     booking: {
       id: updated.id,
@@ -3138,13 +3348,15 @@ async function performLockedStartBookingSession(args: {
     },
     meta: buildMeta(true),
   }
-} 
+}
 
 
 async function performLockedFinishBookingSession(args: {
   tx: Prisma.TransactionClient
   bookingId: string
   professionalId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<FinishBookingSessionResult> {
   const booking: FinishBookingRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -3242,6 +3454,8 @@ async function performLockedConfirmBookingFinalReview(args: {
   professionalId: string
   finalLineItems: ConfirmBookingFinalReviewLineItemInput[]
   expectedSubtotal?: Prisma.Decimal | string | number | null
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<ConfirmBookingFinalReviewResult> {
   const booking: FinalReviewBookingRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -3427,6 +3641,8 @@ async function performLockedTransitionSessionStep(args: {
   bookingId: string
   professionalId: string
   nextStep: SessionStep
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<TransitionSessionStepResult> {
   const booking: TransitionBookingRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -3482,6 +3698,18 @@ async function performLockedTransitionSessionStep(args: {
   }
 
   const from = booking.sessionStep ?? SessionStep.NONE
+
+  if (from === args.nextStep) {
+    return {
+      ok: true,
+      booking: {
+        id: booking.id,
+        sessionStep: from,
+        startedAt: booking.startedAt,
+      },
+      meta: buildMeta(false),
+    }
+  }
 
   if (!isAllowedSessionTransition(from, args.nextStep)) {
     return {
@@ -5237,6 +5465,52 @@ async function performLockedCreateRebookedBooking(
     throw bookingError('BAD_LOCATION')
   }
 
+    const existingRebook = await args.tx.booking.findFirst({
+    where: {
+      rebookOfBookingId: source.id,
+      clientId: source.clientId,
+      professionalId: source.professionalId,
+      scheduledFor: requestedStart,
+    },
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  if (existingRebook) {
+    const existingAftercare = await args.tx.aftercareSummary.findUnique({
+      where: { bookingId: source.id },
+      select: {
+        id: true,
+        rebookMode: true,
+        rebookedFor: true,
+      } satisfies Prisma.AftercareSummarySelect,
+    })
+
+    if (!existingAftercare) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message: 'Existing rebook found but source aftercare is missing.',
+        userMessage: 'We found the next appointment, but aftercare is incomplete.',
+      })
+    }
+
+    return {
+      booking: {
+        id: existingRebook.id,
+        status: existingRebook.status,
+        scheduledFor: existingRebook.scheduledFor,
+      },
+      aftercare: {
+        id: existingAftercare.id,
+        rebookMode: existingAftercare.rebookMode,
+        rebookedFor: existingAftercare.rebookedFor,
+      },
+      meta: buildMeta(false),
+    }
+  }
+
   const items = source.serviceItems ?? []
   const primary = items[0] ?? null
 
@@ -5468,30 +5742,51 @@ async function performLockedCreateRebookedBooking(
     })
   }
 
-const aftercare = await args.tx.aftercareSummary.upsert({
-  where: { bookingId: source.id },
-  create: {
-    bookingId: source.id,
-    publicToken: newPublicToken(),
-    rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-    rebookedFor: requestedStart,
-    rebookWindowStart: null,
-    rebookWindowEnd: null,
-  },
-  update: {
-    rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-    rebookedFor: requestedStart,
-    rebookWindowStart: null,
-    rebookWindowEnd: null,
-  },
-  select: {
-    id: true,
-    rebookMode: true,
-    rebookedFor: true,
-  },
-})
+  const aftercare = await args.tx.aftercareSummary.upsert({
+    where: { bookingId: source.id },
+    create: {
+      bookingId: source.id,
+      publicToken: newPublicToken(),
+      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+      rebookedFor: requestedStart,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+    },
+    update: {
+      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+      rebookedFor: requestedStart,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+    },
+    select: {
+      id: true,
+      rebookMode: true,
+      rebookedFor: true,
+    },
+  })
 
-    await bumpProfessionalScheduleVersion(source.professionalId)
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: source.id,
+    professionalId: source.professionalId,
+    action: BookingCloseoutAuditAction.REBOOK_CREATED,
+    route: 'lib/booking/writeBoundary.ts:createRebookedBooking',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      rebookMode: null,
+      rebookedFor: null,
+    },
+    newValue: {
+      rebookMode: aftercare.rebookMode,
+      rebookedFor: normalizeDateCmp(aftercare.rebookedFor),
+      createdBookingId: createdBooking.id,
+      createdBookingStatus: createdBooking.status,
+      createdBookingScheduledFor: normalizeDateCmp(createdBooking.scheduledFor),
+    },
+  })
+
+  await bumpProfessionalScheduleVersion(source.professionalId)
 
   return {
     booking: {
@@ -5510,6 +5805,8 @@ async function performLockedCreateRebookedBookingFromCompletedBooking(args: {
   bookingId: string
   professionalId: string
   scheduledFor: Date
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<CreateRebookedBookingFromCompletedBookingResult> {
   return performLockedCreateRebookedBooking({
     tx: args.tx,
@@ -5518,6 +5815,8 @@ async function performLockedCreateRebookedBookingFromCompletedBooking(args: {
     professionalId: args.professionalId,
     scheduledFor: args.scheduledFor,
     initialStatus: BookingStatus.ACCEPTED,
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
   })
 }
 
@@ -6095,6 +6394,8 @@ async function performLockedUpsertBookingAftercare(args: {
   productReminderDaysAfter: number
   recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<UpsertBookingAftercareResult> {
   const booking: AftercareUpsertBookingRecord | null =
     await args.tx.booking.findUnique({
@@ -6475,6 +6776,8 @@ async function performLockedUpdateBookingCheckout(args: {
   checkoutStatus?: BookingCheckoutStatus | null
   markPaymentAuthorized?: boolean
   markPaymentCollected?: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<UpdateBookingCheckoutResult> {
   const booking: BookingCheckoutRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -6617,6 +6920,8 @@ async function performLockedUpsertClientBookingCheckoutProducts(args: {
   bookingId: string
   clientId: string
   items: ClientCheckoutProductSelectionInput[]
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<UpsertClientBookingCheckoutProductsResult> {
   const booking: ClientCheckoutProductsBookingRecord | null =
     await args.tx.booking.findUnique({
@@ -6970,6 +7275,8 @@ export async function startBookingSession(
         now,
         bookingId: args.bookingId,
         professionalId: args.professionalId,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -6987,6 +7294,8 @@ export async function finishBookingSession(
         tx,
         bookingId: args.bookingId,
         professionalId: args.professionalId,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -7006,6 +7315,8 @@ export async function confirmBookingFinalReview(
         professionalId: args.professionalId,
         finalLineItems: args.finalLineItems,
         expectedSubtotal: args.expectedSubtotal ?? null,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -7022,6 +7333,8 @@ export async function transitionSessionStepInTransaction(
     bookingId: args.bookingId,
     professionalId: args.professionalId,
     nextStep: args.nextStep,
+    requestId: args.requestId ?? null,
+    idempotencyKey: args.idempotencyKey ?? null,
   })
 }
 
@@ -7068,6 +7381,8 @@ export async function transitionSessionStep(
         bookingId: args.bookingId,
         professionalId: args.professionalId,
         nextStep: args.nextStep,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -7149,6 +7464,8 @@ export async function upsertBookingAftercare(
         productReminderDaysAfter: args.productReminderDaysAfter,
         recommendedProducts: args.recommendedProducts,
         sendToClient: args.sendToClient,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -7247,6 +7564,8 @@ export async function updateBookingCheckout(
         checkoutStatus: args.checkoutStatus,
         markPaymentAuthorized: args.markPaymentAuthorized,
         markPaymentCollected: args.markPaymentCollected,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -7266,6 +7585,8 @@ export async function upsertClientBookingCheckoutProducts(
         bookingId: args.bookingId,
         clientId: args.clientId,
         items: args.items,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   })
 }
@@ -7459,9 +7780,12 @@ export async function createRebookedBookingFromCompletedBooking(
         bookingId: args.bookingId,
         professionalId: args.professionalId,
         scheduledFor: args.scheduledFor,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
+
 export async function createClientRebookedBookingFromAftercare(
   args: CreateClientRebookedBookingFromAftercareArgs,
 ): Promise<CreateClientRebookedBookingFromAftercareResult> {

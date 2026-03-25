@@ -1,44 +1,33 @@
 // app/api/pro/calendar/route.ts
-import { prisma } from '@/lib/prisma'
+import { Prisma, BookingStatus, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { clampInt } from '@/lib/pick'
-import {
-  isValidIanaTimeZone,
-  sanitizeTimeZone,
-  startOfDayUtcInTimeZone,
-} from '@/lib/timeZone'
-import { addMinutes } from '@/lib/booking/conflicts'
-import {
-  resolveAppointmentSchedulingContext,
-  type TimeZoneTruthSource,
-} from '@/lib/booking/timeZoneTruth'
-import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import { addMinutes } from '@/lib/booking/conflicts'
+import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
+import {
+  resolveAppointmentSchedulingContext,
+  type TimeZoneTruthSource,
+} from '@/lib/booking/timeZoneTruth'
+import { clampInt } from '@/lib/pick'
+import { prisma } from '@/lib/prisma'
+import {
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  startOfDayUtcInTimeZone,
+} from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
-
-type BookingStatus =
-  | 'PENDING'
-  | 'ACCEPTED'
-  | 'COMPLETED'
-  | 'CANCELLED'
-  | 'WAITLIST'
-
-type ServiceLocationType = 'SALON' | 'MOBILE'
-type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
-
-type EventStatus = BookingStatus | 'UNKNOWN' | 'BLOCKED'
-type BookingEventStatus = Exclude<EventStatus, 'BLOCKED'>
 
 type CalendarServiceItem = {
   id: string
   name: string | null
   durationMinutes: number
-  price: unknown | null
+  price: Prisma.Decimal | number | string | null | unknown
   sortOrder: number
 }
 
@@ -49,8 +38,8 @@ type BookingEvent = {
   endsAt: string
   title: string
   clientName: string
-  status: BookingEventStatus
-  locationType: ServiceLocationType | string
+  status: BookingStatus
+  locationType: ServiceLocationType | null
   locationId: string
   durationMinutes: number
   timeZone: string
@@ -83,6 +72,100 @@ type BlockEvent = {
 
 type CalendarEvent = BookingEvent | BlockEvent
 
+type CalendarStats = {
+  todaysBookings: number
+  availableHours: number | null
+  pendingRequests: number
+  blockedHours: number
+}
+
+const professionalProfileSelect = {
+  id: true,
+  timeZone: true,
+  autoAcceptBookings: true,
+} satisfies Prisma.ProfessionalProfileSelect
+
+const professionalLocationSelect = {
+  id: true,
+  type: true,
+  isPrimary: true,
+  timeZone: true,
+  createdAt: true,
+} satisfies Prisma.ProfessionalLocationSelect
+
+const bookingSelect = {
+  id: true,
+  scheduledFor: true,
+  status: true,
+  totalDurationMinutes: true,
+  bufferMinutes: true,
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  client: {
+    select: {
+      firstName: true,
+      lastName: true,
+      user: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  },
+  service: {
+    select: {
+      name: true,
+    },
+  },
+  location: {
+    select: {
+      id: true,
+      timeZone: true,
+    },
+  },
+  serviceItems: {
+    select: {
+      id: true,
+      sortOrder: true,
+      durationMinutesSnapshot: true,
+      priceSnapshot: true,
+      service: {
+        select: {
+          name: true,
+        },
+      },
+    },
+    orderBy: {
+      sortOrder: 'asc',
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+const calendarBlockSelect = {
+  id: true,
+  startsAt: true,
+  endsAt: true,
+  note: true,
+  locationId: true,
+} satisfies Prisma.CalendarBlockSelect
+
+type ProfessionalProfileRow = Prisma.ProfessionalProfileGetPayload<{
+  select: typeof professionalProfileSelect
+}>
+
+type ProfessionalLocationRow = Prisma.ProfessionalLocationGetPayload<{
+  select: typeof professionalLocationSelect
+}>
+
+type BookingRow = Prisma.BookingGetPayload<{
+  select: typeof bookingSelect
+}>
+
+type CalendarBlockRow = Prisma.CalendarBlockGetPayload<{
+  select: typeof calendarBlockSelect
+}>
+
 function addDaysUtc(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
@@ -92,7 +175,7 @@ function hoursRounded(minutes: number): number {
   return Math.round(hours * 2) / 2
 }
 
-function toDateOrNull(value: unknown): Date | null {
+function toDateOrNull(value: string | null): Date | null {
   const raw = typeof value === 'string' ? value.trim() : ''
   if (!raw) return null
 
@@ -100,68 +183,220 @@ function toDateOrNull(value: unknown): Date | null {
   return Number.isFinite(parsed.getTime()) ? parsed : null
 }
 
-function normalizeBookingStatus(status: unknown): BookingEventStatus {
-  const raw = typeof status === 'string' ? status.trim().toUpperCase() : ''
-
-  if (
-    raw === 'PENDING' ||
-    raw === 'ACCEPTED' ||
-    raw === 'COMPLETED' ||
-    raw === 'CANCELLED' ||
-    raw === 'WAITLIST'
-  ) {
-    return raw
-  }
-
-  return 'UNKNOWN'
+function supportsSalon(type: ProfessionalLocationType): boolean {
+  return type === ProfessionalLocationType.SALON || type === ProfessionalLocationType.SUITE
 }
 
-function normalizeServiceLocationType(value: unknown): ServiceLocationType | string {
-  const raw = typeof value === 'string' ? value.trim().toUpperCase() : ''
-
-  if (raw === 'SALON' || raw === 'MOBILE') {
-    return raw
-  }
-
-  return typeof value === 'string' ? value : ''
+function supportsMobile(type: ProfessionalLocationType): boolean {
+  return type === ProfessionalLocationType.MOBILE_BASE
 }
 
-function normalizeProfessionalLocationType(
-  value: unknown,
-): ProfessionalLocationType | string {
-  const raw = typeof value === 'string' ? value.trim().toUpperCase() : ''
-
-  if (raw === 'SALON' || raw === 'SUITE' || raw === 'MOBILE_BASE') {
-    return raw
-  }
-
-  return typeof value === 'string' ? value : ''
+function safeDurationMinutes(value: number | null | undefined): number {
+  return clampInt(value, DEFAULT_DURATION_MINUTES, 15, MAX_SLOT_DURATION_MINUTES)
 }
 
-function locationSupportsSalon(type: unknown): boolean {
-  const normalized = normalizeProfessionalLocationType(type)
-  return normalized === 'SALON' || normalized === 'SUITE'
-}
-
-function locationSupportsMobile(type: unknown): boolean {
-  return normalizeProfessionalLocationType(type) === 'MOBILE_BASE'
-}
-
-function safeDurationMinutes(value: unknown): number {
-  return clampInt(
-    value,
-    DEFAULT_DURATION_MINUTES,
-    15,
-    MAX_SLOT_DURATION_MINUTES,
-  )
-}
-
-function safeBufferMinutes(value: unknown): number {
+function safeBufferMinutes(value: number | null | undefined): number {
   return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
 }
 
 function safeEventTimeZone(value: string): string {
-  return isValidIanaTimeZone(value) ? sanitizeTimeZone(value, 'UTC') : 'UTC'
+  const sanitized = sanitizeTimeZone(value, 'UTC')
+  return isValidIanaTimeZone(sanitized) ? sanitized : 'UTC'
+}
+
+function getViewportTimeZone(args: {
+  selectedLocation: ProfessionalLocationRow
+  profile: ProfessionalProfileRow
+}): {
+  viewportTimeZone: string
+  selectedLocationTimeZoneRaw: string | null
+  selectedLocationTimeZoneValid: boolean
+  needsTimeZoneSetup: boolean
+} {
+  const selectedLocationTimeZoneRaw =
+    typeof args.selectedLocation.timeZone === 'string' && args.selectedLocation.timeZone.trim()
+      ? args.selectedLocation.timeZone.trim()
+      : null
+
+  const profileTimeZoneRaw =
+    typeof args.profile.timeZone === 'string' && args.profile.timeZone.trim()
+      ? args.profile.timeZone.trim()
+      : null
+
+  const selectedLocationTimeZoneValid = Boolean(
+    selectedLocationTimeZoneRaw && isValidIanaTimeZone(selectedLocationTimeZoneRaw),
+  )
+  const profileTimeZoneValid = Boolean(profileTimeZoneRaw && isValidIanaTimeZone(profileTimeZoneRaw))
+
+  const viewportTimeZone = sanitizeTimeZone(
+    selectedLocationTimeZoneValid
+      ? selectedLocationTimeZoneRaw
+      : profileTimeZoneValid
+        ? profileTimeZoneRaw
+        : 'UTC',
+    'UTC',
+  )
+
+  return {
+    viewportTimeZone,
+    selectedLocationTimeZoneRaw,
+    selectedLocationTimeZoneValid,
+    needsTimeZoneSetup: !selectedLocationTimeZoneValid && !profileTimeZoneValid,
+  }
+}
+
+function getSelectedLocation(args: {
+  locations: ProfessionalLocationRow[]
+  requestedLocationId: string
+}): { ok: true; location: ProfessionalLocationRow } | { ok: false; status: number; message: string } {
+  const { locations, requestedLocationId } = args
+
+  if (!locations.length) {
+    return { ok: false, status: 409, message: 'Add a bookable location to use the calendar.' }
+  }
+
+  if (requestedLocationId) {
+    const requested = locations.find((location) => location.id === requestedLocationId)
+    if (!requested) {
+      return { ok: false, status: 404, message: 'Selected location not found.' }
+    }
+    return { ok: true, location: requested }
+  }
+
+  const selected =
+    locations.find((location) => location.isPrimary) ??
+    locations[0]
+
+  if (!selected) {
+    return { ok: false, status: 409, message: 'Add a bookable location to use the calendar.' }
+  }
+
+  return { ok: true, location: selected }
+}
+
+function getClientName(booking: BookingRow): string {
+  const firstName = booking.client?.firstName?.trim() ?? ''
+  const lastName = booking.client?.lastName?.trim() ?? ''
+  const email = booking.client?.user?.email?.trim() ?? ''
+
+  if (firstName || lastName) {
+    return `${firstName} ${lastName}`.trim()
+  }
+
+  return email || 'Client'
+}
+
+function getServiceName(booking: BookingRow): string {
+  const firstItemName = booking.serviceItems[0]?.service?.name?.trim() ?? ''
+  const bookingServiceName = booking.service?.name?.trim() ?? ''
+  return firstItemName || bookingServiceName || 'Appointment'
+}
+
+function toCalendarServiceItems(booking: BookingRow): CalendarServiceItem[] {
+  return booking.serviceItems.map((item) => ({
+    id: item.id,
+    name: item.service?.name?.trim() || null,
+    durationMinutes: clampInt(item.durationMinutesSnapshot, 0, 0, MAX_SLOT_DURATION_MINUTES),
+    price: item.priceSnapshot ?? null,
+    sortOrder: item.sortOrder ?? 0,
+  }))
+}
+
+async function toBookingEvent(args: {
+  booking: BookingRow
+  professionalId: string
+  professionalTimeZone: string | null
+  viewportTimeZone: string
+}): Promise<BookingEvent | null> {
+  const { booking, professionalId, professionalTimeZone, viewportTimeZone } = args
+
+  if (!booking.locationId) return null
+
+  const start = new Date(booking.scheduledFor)
+  if (!Number.isFinite(start.getTime())) return null
+
+  const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
+  const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
+  const end = addMinutes(start, durationMinutes + bufferMinutes)
+
+  const schedulingContextResult = await resolveAppointmentSchedulingContext({
+    bookingLocationTimeZone: booking.locationTimeZone,
+    location: booking.location
+      ? {
+          id: booking.location.id,
+          timeZone: booking.location.timeZone,
+        }
+      : null,
+    locationId: booking.locationId,
+    professionalId,
+    professionalTimeZone,
+    fallback: 'UTC',
+    requireValid: false,
+  })
+
+  const appointmentTimeZone = schedulingContextResult.ok
+    ? safeEventTimeZone(schedulingContextResult.context.appointmentTimeZone)
+    : 'UTC'
+
+  const timeZoneSource: TimeZoneTruthSource = schedulingContextResult.ok
+    ? schedulingContextResult.context.timeZoneSource
+    : 'FALLBACK'
+
+  const localDateKey = utcDateToLocalYmd(start, appointmentTimeZone)
+  const viewLocalDateKey = utcDateToLocalYmd(start, viewportTimeZone)
+  const serviceName = getServiceName(booking)
+
+  return {
+    id: booking.id,
+    kind: 'BOOKING',
+    startsAt: start.toISOString(),
+    endsAt: end.toISOString(),
+    title: serviceName,
+    clientName: getClientName(booking),
+    status: booking.status,
+    locationType: booking.locationType,
+    locationId: booking.locationId,
+    durationMinutes,
+    timeZone: appointmentTimeZone,
+    timeZoneSource,
+    localDateKey,
+    viewLocalDateKey,
+    details: {
+      serviceName,
+      bufferMinutes,
+      serviceItems: toCalendarServiceItems(booking),
+    },
+  }
+}
+
+function toBlockEvent(block: CalendarBlockRow, viewportTimeZone: string): BlockEvent | null {
+  const start = new Date(block.startsAt)
+  const end = new Date(block.endsAt)
+
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    return null
+  }
+
+  const title = block.note?.trim() ? block.note.trim() : 'Blocked time'
+
+  return {
+    id: `block:${block.id}`,
+    blockId: block.id,
+    kind: 'BLOCK',
+    startsAt: start.toISOString(),
+    endsAt: end.toISOString(),
+    title,
+    clientName: 'Personal',
+    status: 'BLOCKED',
+    note: block.note ?? null,
+    locationType: null,
+    locationId: block.locationId ?? null,
+    durationMinutes: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000)),
+    localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
+    details: {
+      note: block.note ?? null,
+    },
+  }
 }
 
 export async function GET(req: Request) {
@@ -175,11 +410,7 @@ export async function GET(req: Request) {
 
     const proProfile = await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
-      select: {
-        id: true,
-        timeZone: true,
-        autoAcceptBookings: true,
-      },
+      select: professionalProfileSelect,
     })
 
     if (!proProfile) {
@@ -191,84 +422,48 @@ export async function GET(req: Request) {
         professionalId,
         isBookable: true,
       },
-      select: {
-        id: true,
-        type: true,
-        isPrimary: true,
-        timeZone: true,
-      },
+      select: professionalLocationSelect,
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
       take: 50,
     })
 
-    if (!locations.length) {
-      return jsonFail(409, 'Add a bookable location to use the calendar.')
+    const selectedLocationResult = getSelectedLocation({
+      locations,
+      requestedLocationId,
+    })
+
+    if (!selectedLocationResult.ok) {
+      return jsonFail(selectedLocationResult.status, selectedLocationResult.message)
     }
 
-    const explicitlyRequestedLocation = requestedLocationId
-      ? locations.find((location) => location.id === requestedLocationId) ?? null
-      : null
+    const selectedLocation = selectedLocationResult.location
 
-    if (requestedLocationId && !explicitlyRequestedLocation) {
-      return jsonFail(404, 'Selected location not found.')
-    }
+    const canSalon = locations.some((location) => supportsSalon(location.type))
+    const canMobile = locations.some((location) => supportsMobile(location.type))
 
-    const selectedLocation =
-      explicitlyRequestedLocation ??
-      locations.find((location) => location.isPrimary) ??
-      locations[0] ??
-      null
-
-    if (!selectedLocation) {
-      return jsonFail(409, 'Add a bookable location to use the calendar.')
-    }
-
-    const canSalon = locations.some((location) => locationSupportsSalon(location.type))
-    const canMobile = locations.some((location) => locationSupportsMobile(location.type))
-
-    const locationTimeZoneRaw =
-      typeof selectedLocation.timeZone === 'string'
-        ? selectedLocation.timeZone.trim()
-        : ''
-
-    const profileTimeZoneRaw =
-      typeof proProfile.timeZone === 'string'
-        ? proProfile.timeZone.trim()
-        : ''
-
-    const selectedLocationTimeZoneValid = isValidIanaTimeZone(locationTimeZoneRaw)
-    const profileTimeZoneValid = isValidIanaTimeZone(profileTimeZoneRaw)
-
-    // Viewport timezone is for the grid, date range defaults, and selected-location view.
-    const viewportTimeZone = sanitizeTimeZone(
-      selectedLocationTimeZoneValid
-        ? locationTimeZoneRaw
-        : profileTimeZoneValid
-          ? profileTimeZoneRaw
-          : 'UTC',
-      'UTC',
-    )
-
-    const needsTimeZoneSetup =
-      !selectedLocationTimeZoneValid && !profileTimeZoneValid
+    const {
+      viewportTimeZone,
+      selectedLocationTimeZoneRaw,
+      selectedLocationTimeZoneValid,
+      needsTimeZoneSetup,
+    } = getViewportTimeZone({
+      selectedLocation,
+      profile: proProfile,
+    })
 
     const now = new Date()
     const defaultFrom = startOfDayUtcInTimeZone(now, viewportTimeZone)
     const defaultToExclusive = addDaysUtc(defaultFrom, 90)
 
     const from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
-    const requestedToExclusive =
-      toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
+    const requestedToExclusive = toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
 
     if (requestedToExclusive.getTime() <= from.getTime()) {
       return jsonFail(400, '`to` must be after `from`.')
     }
 
     const maxSpanDays = 370
-    const maxToExclusive = new Date(
-      from.getTime() + maxSpanDays * 24 * 60 * 60_000,
-    )
-
+    const maxToExclusive = addDaysUtc(from, maxSpanDays)
     const effectiveToExclusive =
       requestedToExclusive.getTime() > maxToExclusive.getTime()
         ? maxToExclusive
@@ -277,50 +472,22 @@ export async function GET(req: Request) {
     const bookings = await prisma.booking.findMany({
       where: {
         professionalId,
-        scheduledFor: { gte: from, lt: effectiveToExclusive },
-        NOT: { status: 'CANCELLED' },
-      },
-      select: {
-        id: true,
-        scheduledFor: true,
-        status: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-        locationType: true,
-        locationId: true,
-        locationTimeZone: true,
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            user: { select: { email: true } },
-          },
+        locationId: selectedLocation.id,
+        scheduledFor: {
+          gte: from,
+          lt: effectiveToExclusive,
         },
-        service: {
-          select: { name: true },
-        },
-        location: {
-          select: {
-            id: true,
-            timeZone: true,
-          },
-        },
-        serviceItems: {
-          select: {
-            id: true,
-            sortOrder: true,
-            durationMinutesSnapshot: true,
-            priceSnapshot: true,
-            service: { select: { name: true } },
-          },
-          orderBy: { sortOrder: 'asc' },
+        NOT: {
+          status: BookingStatus.CANCELLED,
         },
       },
-      orderBy: { scheduledFor: 'asc' },
+      select: bookingSelect,
+      orderBy: {
+        scheduledFor: 'asc',
+      },
       take: 1200,
     })
 
-    // Blocks remain viewport-scoped to selected location/global.
     const blocks = await prisma.calendarBlock.findMany({
       where: {
         professionalId,
@@ -328,165 +495,49 @@ export async function GET(req: Request) {
         endsAt: { gt: from },
         OR: [{ locationId: selectedLocation.id }, { locationId: null }],
       },
-      select: {
-        id: true,
-        startsAt: true,
-        endsAt: true,
-        note: true,
-        locationId: true,
+      select: calendarBlockSelect,
+      orderBy: {
+        startsAt: 'asc',
       },
-      orderBy: { startsAt: 'asc' },
       take: 1200,
     })
 
-    const bookingEventsNested = await Promise.all(
-      bookings.map(async (booking): Promise<BookingEvent[]> => {
-        if (!booking.locationId) return []
-
-        const start = new Date(booking.scheduledFor)
-        if (!Number.isFinite(start.getTime())) return []
-
-        const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
-        const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
-        const end = addMinutes(start, durationMinutes + bufferMinutes)
-
-        const firstItemName =
-          booking.serviceItems.length > 0
-            ? String(booking.serviceItems[0]?.service?.name || '').trim()
-            : ''
-
-        const serviceName =
-          firstItemName ||
-          String(booking.service?.name || '').trim() ||
-          'Appointment'
-
-        const firstName = String(booking.client?.firstName || '').trim()
-        const lastName = String(booking.client?.lastName || '').trim()
-        const email = String(booking.client?.user?.email || '').trim()
-
-        const clientName =
-          firstName || lastName
-            ? `${firstName} ${lastName}`.trim()
-            : email || 'Client'
-
-        const serviceItems: CalendarServiceItem[] = booking.serviceItems.map((item) => ({
-          id: String(item.id),
-          name: String(item.service?.name || '').trim() || null,
-          durationMinutes: clampInt(
-            item.durationMinutesSnapshot,
-            0,
-            0,
-            MAX_SLOT_DURATION_MINUTES,
-          ),
-          price: item.priceSnapshot ?? null,
-          sortOrder: Number(item.sortOrder ?? 0),
-        }))
-
-        const schedulingContextResult = await resolveAppointmentSchedulingContext({
-          bookingLocationTimeZone: booking.locationTimeZone,
-          location: booking.location
-            ? {
-                id: booking.location.id,
-                timeZone: booking.location.timeZone,
-              }
-            : null,
-          locationId: booking.locationId ?? null,
+    const bookingEventsMaybe = await Promise.all(
+      bookings.map((booking) =>
+        toBookingEvent({
+          booking,
           professionalId,
           professionalTimeZone: proProfile.timeZone,
-          fallback: 'UTC',
-          requireValid: false,
-        })
-
-        const appointmentTimeZone = schedulingContextResult.ok
-          ? safeEventTimeZone(schedulingContextResult.context.appointmentTimeZone)
-          : 'UTC'
-
-        const appointmentTimeZoneSource: TimeZoneTruthSource =
-          schedulingContextResult.ok
-            ? schedulingContextResult.context.timeZoneSource
-            : 'FALLBACK'
-
-        const localDateKey = utcDateToLocalYmd(start, appointmentTimeZone)
-        const viewLocalDateKey = utcDateToLocalYmd(start, viewportTimeZone)
-
-        return [
-          {
-            id: String(booking.id),
-            kind: 'BOOKING' as const,
-            startsAt: start.toISOString(),
-            endsAt: end.toISOString(),
-            title: serviceName,
-            clientName,
-            status: normalizeBookingStatus(booking.status),
-            locationType: normalizeServiceLocationType(booking.locationType),
-            locationId: booking.locationId,
-            durationMinutes,
-            timeZone: appointmentTimeZone,
-            timeZoneSource: appointmentTimeZoneSource,
-            localDateKey,
-            viewLocalDateKey,
-            details: {
-              serviceName,
-              bufferMinutes,
-              serviceItems,
-            },
-          },
-        ]
-      }),
+          viewportTimeZone,
+        }),
+      ),
     )
 
-    const bookingEvents: BookingEvent[] = bookingEventsNested.flat()
+    const bookingEvents = bookingEventsMaybe.filter(
+      (event): event is BookingEvent => event !== null,
+    )
 
-    const blockEvents: BlockEvent[] = blocks.map((block) => {
-      const start = new Date(block.startsAt)
-      const end = new Date(block.endsAt)
-      const title = block.note?.trim() ? block.note.trim() : 'Blocked time'
-
-      return {
-        id: `block:${String(block.id)}`,
-        blockId: String(block.id),
-        kind: 'BLOCK',
-        startsAt: start.toISOString(),
-        endsAt: end.toISOString(),
-        title,
-        clientName: 'Personal',
-        status: 'BLOCKED',
-        note: block.note ?? null,
-        locationType: null,
-        locationId: block.locationId ?? null,
-        durationMinutes: Math.max(
-          0,
-          Math.round((end.getTime() - start.getTime()) / 60_000),
-        ),
-        localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
-        details: {
-          note: block.note ?? null,
-        },
-      }
-    })
+    const blockEvents = blocks
+      .map((block) => toBlockEvent(block, viewportTimeZone))
+      .filter((event): event is BlockEvent => event !== null)
 
     const events: CalendarEvent[] = [...bookingEvents, ...blockEvents].sort(
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     )
 
-    // Viewport-today: explicit selected-location/view based stats.
     const viewportTodayKey = utcDateToLocalYmd(now, viewportTimeZone)
 
     const todaysBookingsEvents = bookingEvents.filter(
       (event) =>
         event.viewLocalDateKey === viewportTodayKey &&
-        (event.status === 'ACCEPTED' || event.status === 'COMPLETED'),
+        (event.status === BookingStatus.ACCEPTED ||
+          event.status === BookingStatus.COMPLETED),
     )
 
     const pendingRequestEvents = bookingEvents.filter(
       (event) =>
-        event.status === 'PENDING' &&
+        event.status === BookingStatus.PENDING &&
         new Date(event.startsAt).getTime() >= now.getTime(),
-    )
-
-    const waitlistTodayEvents = bookingEvents.filter(
-      (event) =>
-        event.viewLocalDateKey === viewportTodayKey && event.status === 'WAITLIST',
     )
 
     const blockedTodayEvents = blockEvents.filter(
@@ -498,9 +549,9 @@ export async function GET(req: Request) {
       0,
     )
 
-    const stats = {
+    const stats: CalendarStats = {
       todaysBookings: todaysBookingsEvents.length,
-      availableHours: null as number | null,
+      availableHours: null,
       pendingRequests: pendingRequestEvents.length,
       blockedHours: blockedMinutesToday ? hoursRounded(blockedMinutesToday) : 0,
     }
@@ -509,8 +560,8 @@ export async function GET(req: Request) {
       {
         location: {
           id: selectedLocation.id,
-          type: normalizeProfessionalLocationType(selectedLocation.type),
-          timeZone: locationTimeZoneRaw || null,
+          type: selectedLocation.type,
+          timeZone: selectedLocationTimeZoneRaw,
           timeZoneValid: selectedLocationTimeZoneValid,
         },
         timeZone: viewportTimeZone,
@@ -524,7 +575,7 @@ export async function GET(req: Request) {
         management: {
           todaysBookings: todaysBookingsEvents,
           pendingRequests: pendingRequestEvents,
-          waitlistToday: waitlistTodayEvents,
+          waitlistToday: [],
           blockedToday: blockedTodayEvents,
         },
       },

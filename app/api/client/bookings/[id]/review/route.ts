@@ -1,7 +1,12 @@
 // app/api/client/bookings/[id]/review/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { MediaType, MediaVisibility, Role } from '@prisma/client'
+import {
+  BookingCloseoutAuditAction,
+  MediaType,
+  MediaVisibility,
+  Role,
+} from '@prisma/client'
 import {
   requireClient,
   pickString,
@@ -12,6 +17,10 @@ import {
 } from '@/app/api/_utils'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
 import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
+import {
+  createBookingCloseoutAuditLog,
+  normalizeIdempotencyKey,
+} from '@/lib/booking/closeoutAudit'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +35,7 @@ type CreateReviewBody = {
   body?: unknown
   media?: unknown
   attachedMediaIds?: unknown
+  idempotencyKey?: unknown
 }
 
 type IncomingMediaItem = {
@@ -129,6 +139,11 @@ export async function POST(
 
     const body = (await req.json().catch(() => ({}))) as CreateReviewBody
 
+    const requestId = normalizeIdempotencyKey(req.headers.get('x-request-id'))
+    const idempotencyKey = normalizeIdempotencyKey(
+      req.headers.get('x-idempotency-key') ?? pickString(body.idempotencyKey),
+    )
+    
     const rating = parseRating1to5(body.rating)
     if (!rating) {
       return jsonFail(400, 'Rating must be an integer from 1–5.')
@@ -178,7 +193,50 @@ export async function POST(
       }
     })
 
-    const fullReview = await prisma.$transaction(async (tx) => {
+        const reviewResult = await prisma.$transaction(async (tx) => {
+      if (idempotencyKey) {
+        const existingByKey = await tx.review.findFirst({
+          where: {
+            bookingId: eligibility.booking.id,
+            clientId,
+            idempotencyKey,
+          },
+          select: { id: true },
+        })
+
+        if (existingByKey) {
+          const review = await tx.review.findUnique({
+            where: { id: existingByKey.id },
+            include: {
+              mediaAssets: {
+                orderBy: { createdAt: 'desc' },
+                select: {
+                  id: true,
+                  mediaType: true,
+                  createdAt: true,
+                  visibility: true,
+                  uploadedByRole: true,
+                  isFeaturedInPortfolio: true,
+                  isEligibleForLooks: true,
+                  reviewLocked: true,
+                  storageBucket: true,
+                  storagePath: true,
+                  thumbBucket: true,
+                  thumbPath: true,
+                  url: true,
+                  thumbUrl: true,
+                },
+              },
+            },
+          })
+
+          return {
+            created: false,
+            review,
+          }
+        }
+      }
+
       const existing = await tx.review.findFirst({
         where: {
           bookingId: eligibility.booking.id,
@@ -222,6 +280,8 @@ export async function POST(
           rating,
           headline: headline || null,
           body: reviewBody || null,
+          idempotencyKey,
+          requestId,
         },
         select: { id: true },
       })
@@ -265,7 +325,27 @@ export async function POST(
         })
       }
 
-      return tx.review.findUnique({
+      await createBookingCloseoutAuditLog({
+        tx,
+        bookingId: eligibility.booking.id,
+        professionalId: eligibility.booking.professionalId,
+        actorUserId: user.id,
+        action: BookingCloseoutAuditAction.REVIEW_CREATED,
+        route: 'app/api/client/bookings/[id]/review/route.ts:POST',
+        requestId,
+        idempotencyKey,
+        oldValue: null,
+        newValue: {
+          reviewId: review.id,
+          rating,
+          headline: headline || null,
+          body: reviewBody || null,
+          attachedAppointmentMediaIds: attachedMediaIds,
+          clientUploadedMediaCount: resolvedClientMedia.length,
+        },
+      })
+
+      const fullReview = await tx.review.findUnique({
         where: { id: review.id },
         include: {
           mediaAssets: {
@@ -289,13 +369,22 @@ export async function POST(
           },
         },
       })
+
+      return {
+        created: true,
+        review: fullReview,
+      }
     })
 
-    if (!fullReview) {
+    if (!reviewResult.review) {
+      
       return jsonFail(500, 'Internal server error.')
     }
 
-    return jsonOk({ review: fullReview }, 201)
+    return jsonOk(
+      { review: reviewResult.review },
+      reviewResult.created ? 201 : 200,
+    )
   } catch (error: unknown) {
     const message =
       error && typeof error === 'object' && 'message' in error

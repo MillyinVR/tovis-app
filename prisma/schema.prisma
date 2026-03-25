@@ -274,6 +274,19 @@ enum PaymentMethod {
   APPLE_CASH
 }
 
+enum BookingCloseoutAuditAction {
+  SESSION_STARTED
+  SESSION_FINISHED
+  SESSION_STEP_CHANGED
+  FINAL_REVIEW_CONFIRMED
+  AFTERCARE_DRAFT_SAVED
+  AFTERCARE_FINALIZED
+  CHECKOUT_UPDATED
+  CHECKOUT_PRODUCTS_UPDATED
+  REBOOK_CREATED
+  REVIEW_CREATED
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -380,6 +393,8 @@ model User {
   bookingOverridePermissionsGranted BookingOverridePermission[] @relation("BookingOverridePermissionGrantedBy")
   bookingOverridePermissionsRevoked BookingOverridePermission[] @relation("BookingOverridePermissionRevokedBy")
   bookingOverridePermissionsAsActor BookingOverridePermission[] @relation("BookingOverridePermissionActor")
+
+  bookingCloseoutAuditLogs BookingCloseoutAuditLog[] @relation("BookingCloseoutActor")
 
   // NFC attribution events
   attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
@@ -553,6 +568,7 @@ model ProfessionalProfile {
   adminPermissions           AdminPermission[]
   adminActionLogs            AdminActionLog[]            @relation("ProfessionalLogs")
   bookingOverrideAuditLogs   BookingOverrideAuditLog[]
+  bookingCloseoutAuditLogs   BookingCloseoutAuditLog[]
   bookingOverridePermissions BookingOverridePermission[] @relation("BookingOverridePermissionProfessional")
   productSales               ProductSale[]
   nfcCards                   NfcCard[]
@@ -1067,6 +1083,7 @@ model Booking {
 
   notifications     Notification[]
   overrideAuditLogs BookingOverrideAuditLog[]
+  closeoutAuditLogs BookingCloseoutAuditLog[]
 
   sessionStep           SessionStep      @default(NONE)
   reminderMinutesBefore Int?             @default(1440)
@@ -1123,6 +1140,37 @@ model BookingOverrideAuditLog {
   @@index([actorUserId, createdAt])
   @@index([rule, createdAt])
   @@index([action, createdAt])
+}
+
+model BookingCloseoutAuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  bookingId      String
+  professionalId String
+  actorUserId    String?
+
+  action BookingCloseoutAuditAction
+
+  route          String
+  requestId      String?
+  idempotencyKey String?
+
+  oldValue Json?
+  newValue Json?
+
+  metadata Json?
+
+  booking      Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  actorUser    User?               @relation("BookingCloseoutActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@unique([bookingId, action, idempotencyKey])
+  @@index([bookingId, createdAt])
+  @@index([professionalId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+  @@index([requestId])
 }
 
 model BookingOverridePermission {
@@ -1392,6 +1440,9 @@ model Review {
   body           String?
   createdAt      DateTime @default(now())
 
+  idempotencyKey String?
+  requestId      String?
+
   client       ClientProfile       @relation(fields: [clientId], references: [id])
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
   booking      Booking?            @relation(fields: [bookingId], references: [id])
@@ -1402,8 +1453,10 @@ model Review {
   helpfulCount  Int             @default(0)
   helpfulVotes  ReviewHelpful[]
 
+  @@unique([bookingId, idempotencyKey])
   @@index([professionalId, createdAt])
   @@index([clientId, createdAt])
+  @@index([bookingId, createdAt])
 }
 
 model ClientAllergy {
