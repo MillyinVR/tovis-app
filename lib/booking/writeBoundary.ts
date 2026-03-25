@@ -4401,6 +4401,41 @@ function isJsonObjectRecord(
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function parseConsultationProposedItems(
+  value: Prisma.JsonValue,
+): ConsultationProposedServiceItem[] {
+  if (!isJsonObjectRecord(value)) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  const rawItems = value.items
+
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  return rawItems.map((row, index) => {
+    if (!isJsonObjectRecord(row)) {
+      throw bookingError('INVALID_SERVICE_ITEMS')
+    }
+
+    const offeringId =
+      typeof row.offeringId === 'string' ? row.offeringId.trim() : ''
+
+    if (!offeringId) {
+      throw bookingError('INVALID_SERVICE_ITEMS')
+    }
+
+    return {
+      offeringId,
+      sortOrder:
+        typeof row.sortOrder === 'number' && Number.isFinite(row.sortOrder)
+          ? row.sortOrder
+          : index,
+    }
+  })
+}
+
 async function performLockedApproveConsultationMaterialization(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -4440,30 +4475,9 @@ async function performLockedApproveConsultationMaterialization(args: {
     })
   }
 
-  const proposed = approval.proposedServicesJson
-
-  if (!Array.isArray(proposed) || proposed.length === 0) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  const proposedItems: ConsultationProposedServiceItem[] = proposed.map((row, index) => {
-  if (!isJsonObjectRecord(row)) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  const offeringId =
-    typeof row.offeringId === 'string' ? row.offeringId.trim() : ''
-
-  if (!offeringId) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  return {
-    offeringId,
-    sortOrder:
-      typeof row.sortOrder === 'number' ? row.sortOrder : index,
-  }
-})
+  const proposedItems = parseConsultationProposedItems(
+    approval.proposedServicesJson,
+  )
 
 const offeringIds = Array.from(
   new Set(proposedItems.map((item) => item.offeringId)),
