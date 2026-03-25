@@ -98,6 +98,11 @@ export function useAvailability(
   const ctxViewerRadiusMiles = context.viewerRadiusMiles
   const ctxViewerPlaceId = context.viewerPlaceId
 
+  // Keep a ref so loadMore can always see the latest context without being
+  // recreated on every parent render that produces a new context object ref.
+  const contextRef = useRef(context)
+  contextRef.current = context
+
   const initialPrefetchArgs = useMemo(
     () =>
       buildAvailabilityPrefetchArgsFromContext({
@@ -209,7 +214,7 @@ export function useAvailability(
 
     try {
       const nextArgs = buildAvailabilityPrefetchArgsFromContext({
-        context,
+        context: contextRef.current,
         locationType,
         clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
         includeOtherPros: false,
@@ -245,7 +250,6 @@ export function useAvailability(
       setLoadingMore(false)
     }
   }, [
-    context,
     data,
     loading,
     refreshing,
