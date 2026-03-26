@@ -1,51 +1,51 @@
 // app/api/availability/day/route.ts
-import { prisma } from '@/lib/prisma'
-import {
-  Prisma,
-  ProfessionalLocationType,
-  ServiceLocationType,
-} from '@prisma/client'
-import { pickString } from '@/app/api/_utils/pick'
+
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
-import { clampInt } from '@/lib/pick'
-import { getRedis } from '@/lib/redis'
-import { createHash } from 'crypto'
-import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
+import { parseAvailabilityRequest } from '@/lib/availability/http/parseAvailabilityRequest'
 import {
-  dateTimeLocalToUtcDate,
-  getUtcBoundsForLocalDate,
-  utcDateToLocalParts,
-} from '@/lib/booking/dateTime'
-import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+  buildDayCacheKey,
+  buildSummaryCacheKey,
+  cacheGetJson,
+  cacheSetJson,
+} from '@/lib/availability/data/cache'
 import {
-  addMinutes,
-  normalizeToMinute,
-  type BusyInterval,
-} from '@/lib/booking/conflicts'
-import { loadBusyIntervalsForWindow } from '@/lib/booking/conflictQueries'
+  buildSummaryYMDs,
+  parseSummaryWindowDays,
+  parseYYYYMMDD,
+  resolveSummaryWindowStart,
+  ymdSerial,
+  ymdToString,
+} from '@/lib/availability/core/summaryWindow'
 import {
-  normalizeLocationType,
-  normalizeStepMinutes,
-  pickEffectiveLocationType,
-  resolveValidatedBookingContext,
-  type OfferingSchedulingSnapshot,
-} from '@/lib/booking/locationContext'
-import { decimalToNumber } from '@/lib/booking/snapshots'
+  computeDayBoundsUtc,
+  computeDaySlotsFast,
+  localSlotToUtcOrNull,
+} from '@/lib/availability/core/dayComputation'
+import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import {
-  DEFAULT_DURATION_MINUTES,
-  MAX_BUFFER_MINUTES,
-  MAX_SLOT_DURATION_MINUTES,
-} from '@/lib/booking/constants'
-import { canShowSlot } from '@/lib/booking/policies/showSlotPolicy'
+  loadOtherProsNearbyCached,
+  type OtherProRow,
+} from '@/lib/availability/data/otherPros'
+import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
+import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import {
   getScheduleConfigVersion,
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
 import {
+  MAX_BUFFER_MINUTES,
+  MAX_SLOT_DURATION_MINUTES,
+} from '@/lib/booking/constants'
+import { addMinutes } from '@/lib/booking/conflicts'
+import { utcDateToLocalParts } from '@/lib/booking/dateTime'
+import {
   getBookingFailPayload,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { normalizeStepMinutes } from '@/lib/booking/locationContext'
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,139 +55,6 @@ const OCCUPANCY_WINDOW_PADDING_MINUTES =
 
 const TTL_DAY_SECONDS = 120
 const TTL_SUMMARY_SECONDS = 120
-const TTL_BUSY_SECONDS = 60
-const TTL_OTHER_PROS_SECONDS = 600
-const TTL_PLACEMENT_SECONDS = 300
-
-const DEFAULT_SUMMARY_WINDOW_DAYS = 7
-const MAX_SUMMARY_WINDOW_DAYS = 21
-
-const LOCATION_SELECT = {
-  id: true,
-  type: true,
-  isPrimary: true,
-  isBookable: true,
-  timeZone: true,
-  workingHours: true,
-  bufferMinutes: true,
-  stepMinutes: true,
-  advanceNoticeMinutes: true,
-  maxDaysAhead: true,
-  lat: true,
-  lng: true,
-  city: true,
-  formattedAddress: true,
-  createdAt: true,
-} satisfies Prisma.ProfessionalLocationSelect
-
-type AvailabilityLocation = Prisma.ProfessionalLocationGetPayload<{
-  select: typeof LOCATION_SELECT
-}>
-
-type AvailabilityTimeZoneSource =
-  | 'BOOKING_SNAPSHOT'
-  | 'HOLD_SNAPSHOT'
-  | 'LOCATION'
-  | 'PROFESSIONAL'
-  | 'FALLBACK'
-
-type OtherProRow = {
-  id: string
-  businessName: string | null
-  avatarUrl: string | null
-  location: string | null
-  offeringId: string
-  timeZone: string
-  locationId: string
-  distanceMiles: number
-}
-
-type AvailabilityPlacementErrorCode =
-  | 'LOCATION_NOT_FOUND'
-  | 'CLIENT_SERVICE_ADDRESS_REQUIRED'
-  | 'SALON_LOCATION_ADDRESS_REQUIRED'
-  | 'TIMEZONE_REQUIRED'
-  | 'WORKING_HOURS_REQUIRED'
-  | 'WORKING_HOURS_INVALID'
-  | 'MODE_NOT_SUPPORTED'
-  | 'DURATION_REQUIRED'
-  | 'PRICE_REQUIRED'
-  | 'COORDINATES_REQUIRED'
-  | 'NO_SCHEDULING_READY_LOCATION'
-
-type AvailabilityPlacementResult =
-  | {
-      ok: true
-      location: AvailabilityLocation
-      locationId: string
-      locationType: ServiceLocationType
-      timeZone: string
-      timeZoneSource: AvailabilityTimeZoneSource
-      workingHours: unknown
-      stepMinutes: number
-      leadTimeMinutes: number
-      locationBufferMinutes: number
-      maxAdvanceDays: number
-      durationMinutes: number
-      priceStartingAt: number
-      formattedAddress: string | null
-      lat: number | undefined
-      lng: number | undefined
-    }
-  | {
-      ok: false
-      code: AvailabilityPlacementErrorCode
-    }
-
-type CachedPlacement = {
-  locationId: string
-  locationType: ServiceLocationType
-  timeZone: string
-  timeZoneSource: AvailabilityTimeZoneSource
-  workingHours: unknown
-  stepMinutes: number
-  leadTimeMinutes: number
-  locationBufferMinutes: number
-  maxAdvanceDays: number
-  durationMinutes: number
-  priceStartingAt: number
-  formattedAddress: string | null
-  lat: number | undefined
-  lng: number | undefined
-  proBusinessName: string | null
-  proAvatarUrl: string | null
-  proLocation: string | null
-  serviceName: string | null
-  serviceCategory: string | null
-  offeringId: string
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonDurationMinutes: number | null
-  mobileDurationMinutes: number | null
-  salonPriceStartingAt: string | null
-  mobilePriceStartingAt: string | null
-  locationCity: string | null
-}
-
-type DayComputationResult =
-  | {
-      ok: true
-      slots: string[]
-      dayStartUtc: Date
-      dayEndExclusiveUtc: Date
-      debug?: unknown
-    }
-  | {
-      ok: false
-      code: 'WORKING_HOURS_REQUIRED' | 'WORKING_HOURS_INVALID'
-      dayStartUtc: Date
-      dayEndExclusiveUtc: Date
-      debug?: unknown
-    }
-
-type LocalMinuteCandidateIndex = Map<number, Date[]>
-
-const redis = getRedis()
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -209,1362 +76,29 @@ function toInt(value: string | null, fallback: number): number {
   return Number.isFinite(n) ? Math.trunc(n) : fallback
 }
 
-function clampFloat(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(Math.max(value, min), max)
-}
-
-function normalizeAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function roundCoordForCache(value: number | null): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  return Math.round(value * 1000) / 1000
-}
-
-function parseYYYYMMDD(value: unknown) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim())
-  if (!m) return null
-
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-
-  if (
-    !Number.isFinite(year) ||
-    !Number.isFinite(month) ||
-    !Number.isFinite(day)
-  ) {
-    return null
-  }
-
-  if (month < 1 || month > 12) return null
-  if (day < 1 || day > 31) return null
-
-  return { year, month, day }
-}
-
-function addDaysToYMD(
-  year: number,
-  month: number,
-  day: number,
-  daysToAdd: number,
-) {
-  const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-  }
-}
-
-function ymdSerial(ymd: { year: number; month: number; day: number }): number {
-  return Math.floor(
-    Date.UTC(ymd.year, ymd.month - 1, ymd.day, 12, 0, 0, 0) / 86_400_000,
-  )
-}
-
-function ymdToString(ymd: { year: number; month: number; day: number }): string {
-  const mm = String(ymd.month).padStart(2, '0')
-  const dd = String(ymd.day).padStart(2, '0')
-  return `${ymd.year}-${mm}-${dd}`
-}
-
-function computeDayBoundsUtc(
-  dateYMD: { year: number; month: number; day: number },
-  timeZoneRaw: string,
-) {
-  const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC')
-  const ymd = ymdToString(dateYMD)
-  const { startUtc, endUtc } = getUtcBoundsForLocalDate(ymd, timeZone)
-
-  return {
-    timeZone,
-    dayStartUtc: startUtc,
-    dayEndExclusiveUtc: endUtc,
-  }
-}
-
-function buildLocalDateTimeString(args: {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-}) {
-  const mm = String(args.month).padStart(2, '0')
-  const dd = String(args.day).padStart(2, '0')
-  const hh = String(args.hour).padStart(2, '0')
-  const min = String(args.minute).padStart(2, '0')
-  return `${args.year}-${mm}-${dd}T${hh}:${min}:00`
-}
-
-function localSlotToUtcOrNull(args: {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  timeZone: string
-}): Date | null {
-  const localValue = buildLocalDateTimeString(args)
-
-  try {
-    const utc = normalizeToMinute(
-      dateTimeLocalToUtcDate(localValue, args.timeZone),
-    )
-
-    const roundTrip = utcDateToLocalParts(utc, args.timeZone)
-    const matches =
-      roundTrip.year === args.year &&
-      roundTrip.month === args.month &&
-      roundTrip.day === args.day &&
-      roundTrip.hour === args.hour &&
-      roundTrip.minute === args.minute
-
-    return matches ? utc : null
-  } catch {
-    return null
-  }
-}
-
-function stableHash(input: unknown): string {
-  return createHash('sha256')
-    .update(JSON.stringify(input))
-    .digest('hex')
-    .slice(0, 24)
-}
-
-async function cacheGetJson<T>(key: string): Promise<T | null> {
-  if (!redis) return null
-
-  try {
-    const raw = await redis.get<string>(key)
-    if (!raw) return null
-    return JSON.parse(raw) as T
-  } catch {
-    return null
-  }
-}
-
-async function cacheSetJson(
-  key: string,
-  value: unknown,
-  ttlSeconds: number,
-): Promise<void> {
-  if (!redis) return
-
-  try {
-    await redis.set(key, JSON.stringify(value), { ex: ttlSeconds })
-  } catch {
-    // fail-open
-  }
-}
-
-function buildPlacementCacheKey(args: {
-  professionalId: string
-  serviceId: string
-  locationType: string | null
-  locationId: string | null
-  clientAddressId: string | null
-  scheduleConfigVersion: number
-}): string {
-  return [
-    'avail:placement:v2',
-    args.professionalId,
-    args.serviceId,
-    args.locationType ?? 'AUTO',
-    args.locationId ?? 'AUTO',
-    args.clientAddressId ?? 'none',
-    String(args.scheduleConfigVersion),
-  ].join(':')
-}
-
-function parseCachedPlacement(raw: unknown): CachedPlacement | null {
-  if (!isRecord(raw)) return null
-
-  const locationId = pickString(raw.locationId)
-  const locationTypeRaw = pickString(raw.locationType)
-  const timeZone = pickString(raw.timeZone)
-  const offeringId = pickString(raw.offeringId)
-
-  if (!locationId || !locationTypeRaw || !timeZone || !offeringId) {
-    return null
-  }
-
-  const locationType = normalizeLocationType(locationTypeRaw)
-  if (!locationType) return null
-
-  const timeZoneSource = normalizeAvailabilityTimeZoneSource(raw.timeZoneSource)
-  if (!timeZoneSource) return null
-
-  if (typeof raw.stepMinutes !== 'number') return null
-  if (typeof raw.durationMinutes !== 'number') return null
-  if (typeof raw.leadTimeMinutes !== 'number') return null
-  if (typeof raw.locationBufferMinutes !== 'number') return null
-  if (typeof raw.maxAdvanceDays !== 'number') return null
-  if (typeof raw.priceStartingAt !== 'number') return null
-  if (typeof raw.offersInSalon !== 'boolean') return null
-  if (typeof raw.offersMobile !== 'boolean') return null
-
-  const lat =
-    typeof raw.lat === 'number' && Number.isFinite(raw.lat)
-      ? raw.lat
-      : undefined
-  const lng =
-    typeof raw.lng === 'number' && Number.isFinite(raw.lng)
-      ? raw.lng
-      : undefined
-
-  const salonDurationMinutes =
-    typeof raw.salonDurationMinutes === 'number'
-      ? raw.salonDurationMinutes
-      : raw.salonDurationMinutes == null
-        ? null
-        : null
-
-  const mobileDurationMinutes =
-    typeof raw.mobileDurationMinutes === 'number'
-      ? raw.mobileDurationMinutes
-      : raw.mobileDurationMinutes == null
-        ? null
-        : null
-
-  return {
-    locationId,
-    locationType,
-    timeZone,
-    timeZoneSource,
-    workingHours: raw.workingHours,
-    stepMinutes: raw.stepMinutes,
-    leadTimeMinutes: raw.leadTimeMinutes,
-    locationBufferMinutes: raw.locationBufferMinutes,
-    maxAdvanceDays: raw.maxAdvanceDays,
-    durationMinutes: raw.durationMinutes,
-    priceStartingAt: raw.priceStartingAt,
-    formattedAddress: normalizeAddress(raw.formattedAddress),
-    lat,
-    lng,
-    proBusinessName: pickString(raw.proBusinessName) ?? null,
-    proAvatarUrl: pickString(raw.proAvatarUrl) ?? null,
-    proLocation: pickString(raw.proLocation) ?? null,
-    serviceName: pickString(raw.serviceName) ?? null,
-    serviceCategory: pickString(raw.serviceCategory) ?? null,
-    offeringId,
-    offersInSalon: raw.offersInSalon,
-    offersMobile: raw.offersMobile,
-    salonDurationMinutes,
-    mobileDurationMinutes,
-    salonPriceStartingAt: pickString(raw.salonPriceStartingAt) ?? null,
-    mobilePriceStartingAt: pickString(raw.mobilePriceStartingAt) ?? null,
-    locationCity: pickString(raw.locationCity) ?? null,
-  }
-}
-
-function allowedProfessionalTypes(
-  locationType: ServiceLocationType,
-): ProfessionalLocationType[] {
-  return locationType === ServiceLocationType.MOBILE
-    ? [ProfessionalLocationType.MOBILE_BASE]
-    : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
-}
-
-function locationTypeForLocation(
-  location: Pick<AvailabilityLocation, 'type'>,
-): ServiceLocationType {
-  return location.type === ProfessionalLocationType.MOBILE_BASE
-    ? ServiceLocationType.MOBILE
-    : ServiceLocationType.SALON
-}
-
-function buildOfferingSnapshot(offering: {
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonDurationMinutes: number | null
-  mobileDurationMinutes: number | null
-  salonPriceStartingAt: Prisma.Decimal | null
-  mobilePriceStartingAt: Prisma.Decimal | null
-}): OfferingSchedulingSnapshot {
-  return {
-    offersInSalon: Boolean(offering.offersInSalon),
-    offersMobile: Boolean(offering.offersMobile),
-    salonDurationMinutes: offering.salonDurationMinutes ?? null,
-    mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
-    salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
-    mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
-  }
-}
-
-function normalizeAvailabilityTimeZoneSource(
-  value: unknown,
-): AvailabilityTimeZoneSource | null {
-  return value === 'BOOKING_SNAPSHOT' ||
-    value === 'HOLD_SNAPSHOT' ||
-    value === 'LOCATION' ||
-    value === 'PROFESSIONAL' ||
-    value === 'FALLBACK'
-    ? value
-    : null
-}
-
-function resolvePlacementTimeZoneSource(args: {
-  contextTimeZone: string
-  contextTimeZoneSource?: unknown
-  locationTimeZone?: unknown
-  professionalTimeZone?: unknown
-  fallbackTimeZone?: string
-}): AvailabilityTimeZoneSource {
-  const explicit = normalizeAvailabilityTimeZoneSource(
-    args.contextTimeZoneSource,
-  )
-  if (explicit) return explicit
-
-  const contextTimeZone = sanitizeTimeZone(args.contextTimeZone, 'UTC')
-
-  const locationTimeZone =
-    typeof args.locationTimeZone === 'string' &&
-    isValidIanaTimeZone(args.locationTimeZone)
-      ? sanitizeTimeZone(args.locationTimeZone, 'UTC')
-      : null
-  if (locationTimeZone && locationTimeZone === contextTimeZone) {
-    return 'LOCATION'
-  }
-
-  const professionalTimeZone =
-    typeof args.professionalTimeZone === 'string' &&
-    isValidIanaTimeZone(args.professionalTimeZone)
-      ? sanitizeTimeZone(args.professionalTimeZone, 'UTC')
-      : null
-  if (professionalTimeZone && professionalTimeZone === contextTimeZone) {
-    return 'PROFESSIONAL'
-  }
-
-  const fallbackTimeZone = sanitizeTimeZone(
-    args.fallbackTimeZone ?? 'UTC',
-    'UTC',
-  )
-  if (fallbackTimeZone === contextTimeZone) {
-    return 'FALLBACK'
-  }
-
-  return 'FALLBACK'
-}
-
-async function validateAvailabilityPlacement(args: {
-  professionalId: string
-  requestedLocationId: string | null
-  locationType: ServiceLocationType
-  offering: OfferingSchedulingSnapshot
-  clientAddressId: string | null
-  allowFallback: boolean
-  professionalTimeZone: string | null
-}): Promise<AvailabilityPlacementResult> {
-  const validated = await resolveValidatedBookingContext({
-    professionalId: args.professionalId,
-    requestedLocationId: args.requestedLocationId,
-    locationType: args.locationType,
-    professionalTimeZone: args.professionalTimeZone,
-    fallbackTimeZone:
-      typeof args.professionalTimeZone === 'string' &&
-      isValidIanaTimeZone(args.professionalTimeZone)
-        ? sanitizeTimeZone(args.professionalTimeZone, 'UTC')
-        : 'UTC',
-    requireValidTimeZone: true,
-    allowFallback: args.allowFallback,
-    requireCoordinates: false,
-    offering: args.offering,
-  })
-
-  if (!validated.ok) {
-    return {
-      ok: false,
-      code: validated.error,
-    }
-  }
-
-  const context = validated.context
-  const formattedAddress = normalizeAddress(context.formattedAddress)
-
-  if (
-    args.locationType === ServiceLocationType.MOBILE &&
-    !args.clientAddressId
-  ) {
-    return {
-      ok: false,
-      code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
-    }
-  }
-
-  if (
-    args.locationType === ServiceLocationType.SALON &&
-    !formattedAddress
-  ) {
-    return {
-      ok: false,
-      code: 'SALON_LOCATION_ADDRESS_REQUIRED',
-    }
-  }
-
-  const timeZoneSource = resolvePlacementTimeZoneSource({
-    contextTimeZone: context.timeZone,
-    contextTimeZoneSource: (context as Record<string, unknown>).timeZoneSource,
-    locationTimeZone: context.location?.timeZone,
-    professionalTimeZone: args.professionalTimeZone,
-    fallbackTimeZone:
-      typeof args.professionalTimeZone === 'string' &&
-      isValidIanaTimeZone(args.professionalTimeZone)
-        ? sanitizeTimeZone(args.professionalTimeZone, 'UTC')
-        : 'UTC',
-  })
-
-  return {
-    ok: true,
-    location: context.location,
-    locationId: context.locationId,
-    locationType: args.locationType,
-    timeZone: context.timeZone,
-    timeZoneSource,
-    workingHours: context.workingHours,
-    stepMinutes: context.stepMinutes,
-    leadTimeMinutes: context.advanceNoticeMinutes,
-    locationBufferMinutes: context.bufferMinutes,
-    maxAdvanceDays: context.maxDaysAhead,
-    durationMinutes: validated.durationMinutes,
-    priceStartingAt: validated.priceStartingAt,
-    formattedAddress,
-    lat: context.lat,
-    lng: context.lng,
-  }
-}
-
-async function resolveAvailabilityPlacement(args: {
-  professionalId: string
-  offering: OfferingSchedulingSnapshot
-  requestedLocationType: ServiceLocationType | null
-  requestedLocationId: string | null
-  clientAddressId: string | null
-  professionalTimeZone: string | null
-}): Promise<AvailabilityPlacementResult> {
-  const professionalId = args.professionalId.trim()
-  const requestedLocationId = args.requestedLocationId?.trim() || null
-
-  if (!professionalId) {
-    return {
-      ok: false,
-      code: 'NO_SCHEDULING_READY_LOCATION',
-    }
-  }
-
-  if (args.requestedLocationType) {
-    const effectiveLocationType =
-      pickEffectiveLocationType({
-        requested: args.requestedLocationType,
-        offersInSalon: args.offering.offersInSalon,
-        offersMobile: args.offering.offersMobile,
-      }) ?? null
-
-    if (!effectiveLocationType) {
-      return {
-        ok: false,
-        code: 'MODE_NOT_SUPPORTED',
-      }
-    }
-
-    return validateAvailabilityPlacement({
-      professionalId,
-      requestedLocationId,
-      locationType: effectiveLocationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      allowFallback: !requestedLocationId,
-      professionalTimeZone: args.professionalTimeZone,
-    })
-  }
-
-  if (requestedLocationId) {
-    const requested = await prisma.professionalLocation.findFirst({
-      where: {
-        id: requestedLocationId,
-        professionalId,
-        isBookable: true,
-      },
-      select: LOCATION_SELECT,
-    })
-
-    if (!requested?.id) {
-      return {
-        ok: false,
-        code: 'LOCATION_NOT_FOUND',
-      }
-    }
-
-    const locationType = locationTypeForLocation(requested)
-
-    return validateAvailabilityPlacement({
-      professionalId,
-      requestedLocationId,
-      locationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      allowFallback: false,
-      professionalTimeZone: args.professionalTimeZone,
-    })
-  }
-
-  const allowedTypes: ProfessionalLocationType[] = []
-
-  if (args.offering.offersInSalon) {
-    allowedTypes.push(
-      ProfessionalLocationType.SALON,
-      ProfessionalLocationType.SUITE,
-    )
-  }
-
-  if (args.offering.offersMobile) {
-    allowedTypes.push(ProfessionalLocationType.MOBILE_BASE)
-  }
-
-  if (!allowedTypes.length) {
-    return {
-      ok: false,
-      code: 'MODE_NOT_SUPPORTED',
-    }
-  }
-
-  const candidates = await prisma.professionalLocation.findMany({
-    where: {
-      professionalId,
-      isBookable: true,
-      type: { in: allowedTypes },
-    },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: LOCATION_SELECT,
-    take: 50,
-  })
-
-  const attempts = await Promise.all(
-    candidates.map(async (candidate) => {
-      const locationType = locationTypeForLocation(candidate)
-      return validateAvailabilityPlacement({
-        professionalId,
-        requestedLocationId: candidate.id,
-        locationType,
-        offering: args.offering,
-        clientAddressId: args.clientAddressId,
-        allowFallback: false,
-        professionalTimeZone: args.professionalTimeZone,
-      })
-    }),
-  )
-
-  for (const attempt of attempts) {
-    if (attempt.ok) return attempt
-  }
-
-  const firstMeaningfulError = attempts.find(
-    (a) => !a.ok && a.code !== 'LOCATION_NOT_FOUND',
-  )
-
-  return (
-    firstMeaningfulError ?? {
-      ok: false,
-      code: 'NO_SCHEDULING_READY_LOCATION',
-    }
-  )
-}
-
-function parseCachedBusyIntervals(value: unknown): BusyInterval[] | null {
-  if (!isRecord(value) || !Array.isArray(value.busy)) return null
-
-  const intervals: BusyInterval[] = []
-
-  for (const row of value.busy) {
-    if (!isRecord(row)) continue
-
-    const startRaw = pickString(row.start)
-    const endRaw = pickString(row.end)
-    if (!startRaw || !endRaw) continue
-
-    const start = new Date(startRaw)
-    const end = new Date(endRaw)
-
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
-      continue
-    }
-
-    if (end.getTime() <= start.getTime()) continue
-
-    intervals.push({ start, end })
-  }
-
-  return intervals
-}
-
-async function loadBusyIntervals(args: {
-  professionalId: string
-  locationId: string | null
-  windowStartUtc: Date
-  windowEndUtc: Date
-  nowUtc: Date
-  fallbackDurationMinutes: number
-  locationBufferMinutes: number
-  scheduleVersion: number
-  cache?: { enabled: boolean }
-}): Promise<BusyInterval[]> {
-  const cacheEnabled = Boolean(args.cache?.enabled)
-
-  if (!cacheEnabled || !redis) {
-    return loadBusyIntervalsForWindow({
-      professionalId: args.professionalId,
-      locationId: args.locationId,
-      windowStartUtc: args.windowStartUtc,
-      windowEndUtc: args.windowEndUtc,
-      nowUtc: args.nowUtc,
-      fallbackDurationMinutes: args.fallbackDurationMinutes,
-      defaultBufferMinutes: args.locationBufferMinutes,
-    })
-  }
-
-    const key = [
-    'avail:busy:v7',
-    args.professionalId,
-    args.locationId ?? 'GLOBAL',
-    args.windowStartUtc.toISOString(),
-    args.windowEndUtc.toISOString(),
-    String(args.locationBufferMinutes ?? ''),
-    String(args.fallbackDurationMinutes ?? ''),
-    String(args.scheduleVersion),
-  ].join(':')
-
-  const hit = await cacheGetJson<unknown>(key)
-  const parsedHit = parseCachedBusyIntervals(hit)
-  if (parsedHit) {
-    return parsedHit
-  }
-
-  const busy = await loadBusyIntervalsForWindow({
-    professionalId: args.professionalId,
-    locationId: args.locationId,
-    windowStartUtc: args.windowStartUtc,
-    windowEndUtc: args.windowEndUtc,
-    nowUtc: args.nowUtc,
-    fallbackDurationMinutes: args.fallbackDurationMinutes,
-    defaultBufferMinutes: args.locationBufferMinutes,
-  })
-
-  void cacheSetJson(
-    key,
-    {
-      busy: busy.map((b) => ({
-        start: b.start.toISOString(),
-        end: b.end.toISOString(),
-      })),
-    },
-    TTL_BUSY_SECONDS,
-  )
-
-  return busy
-}
-
-function buildLocalMinuteCandidateIndex(args: {
-  dateYMD: { year: number; month: number; day: number }
-  timeZone: string
-  dayStartUtc: Date
-  dayEndExclusiveUtc: Date
-}): LocalMinuteCandidateIndex {
-  const { dateYMD, timeZone, dayStartUtc, dayEndExclusiveUtc } = args
-
-  const requestedSerial = ymdSerial(dateYMD)
-  const index: LocalMinuteCandidateIndex = new Map()
-
-  const scanEndUtc = addMinutes(dayEndExclusiveUtc, 24 * 60)
-
-  for (
-    let cursor = new Date(dayStartUtc.getTime());
-    cursor.getTime() < scanEndUtc.getTime();
-    cursor = addMinutes(cursor, 1)
-  ) {
-    const utc = normalizeToMinute(cursor)
-    const parts = utcDateToLocalParts(utc, timeZone)
-
-    const localSerial = ymdSerial({
-      year: parts.year,
-      month: parts.month,
-      day: parts.day,
-    })
-
-    const dayOffset = localSerial - requestedSerial
-    if (dayOffset !== 0 && dayOffset !== 1) continue
-
-    const localMinuteOffset = dayOffset * 1440 + parts.hour * 60 + parts.minute
-    const existing = index.get(localMinuteOffset)
-
-    if (existing) {
-      const last = existing[existing.length - 1]
-      if (!last || last.getTime() !== utc.getTime()) {
-        existing.push(utc)
-      }
-    } else {
-      index.set(localMinuteOffset, [utc])
-    }
-  }
-
-  return index
-}
-
-async function computeDaySlotsFast(args: {
-  dateYMD: { year: number; month: number; day: number }
-  durationMinutes: number
-  stepMinutes: number
-  timeZone: string
-  workingHours: unknown | null
-  leadTimeMinutes: number
-  locationBufferMinutes: number
-  maxAdvanceDays: number
-  busy: BusyInterval[]
-  debug?: boolean
-}): Promise<DayComputationResult> {
-  const {
-    dateYMD,
-    durationMinutes,
-    stepMinutes,
-    timeZone: tzIn,
-    workingHours,
-    leadTimeMinutes,
-    locationBufferMinutes,
-    maxAdvanceDays,
-    busy,
-    debug,
-  } = args
-
-  const { timeZone, dayStartUtc, dayEndExclusiveUtc } = computeDayBoundsUtc(
-    dateYMD,
-    tzIn,
-  )
-  const nowUtc = new Date()
-
-  const dayAnchorUtc =
-    localSlotToUtcOrNull({
-      year: dateYMD.year,
-      month: dateYMD.month,
-      day: dateYMD.day,
-      hour: 12,
-      minute: 0,
-      timeZone,
-    }) ?? new Date(dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
-
-  const window = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
-
-  if (!window.ok) {
-    if (window.reason === 'MISSING') {
-      return {
-        ok: false,
-        code: 'WORKING_HOURS_REQUIRED',
-        dayStartUtc,
-        dayEndExclusiveUtc,
-        debug: debug ? { timeZone, reason: 'no-workingHours' } : undefined,
-      }
-    }
-
-    if (window.reason === 'DISABLED') {
-      return {
-        ok: true,
-        slots: [],
-        dayStartUtc,
-        dayEndExclusiveUtc,
-        debug: debug ? { timeZone, reason: 'disabled-day' } : undefined,
-      }
-    }
-
-    return {
-      ok: false,
-      code: 'WORKING_HOURS_INVALID',
-      dayStartUtc,
-      dayEndExclusiveUtc,
-      debug: debug
-        ? { timeZone, reason: 'misconfigured-workingHours' }
-        : undefined,
-    }
-  }
-
-  const step = normalizeStepMinutes(stepMinutes, 30)
-  const dur = clampInt(
-    Number(durationMinutes || DEFAULT_DURATION_MINUTES),
-    15,
-    MAX_SLOT_DURATION_MINUTES,
-  )
-  const buf = clampInt(
-    Number(locationBufferMinutes ?? 0) || 0,
-    0,
-    MAX_BUFFER_MINUTES,
-  )
-  const normalizedLeadTimeMinutes = clampInt(
-    Number(leadTimeMinutes ?? 0) || 0,
-    0,
-    MAX_LEAD_MINUTES,
-  )
-
-  const rawSlots: string[] = []
-  const skippedDstWallTimes: string[] = []
-
-  const candidateIndex = buildLocalMinuteCandidateIndex({
-    dateYMD,
-    timeZone,
-    dayStartUtc,
-    dayEndExclusiveUtc,
-  })
-
-  for (
-    let minute = window.startMinutes;
-    minute + dur + buf <= window.endMinutes;
-    minute += step
-  ) {
-    const normalizedMinute = minute % 1440
-    const dayOffset = Math.floor(minute / 1440)
-
-    const hh = Math.floor(normalizedMinute / 60)
-    const mm = normalizedMinute % 60
-
-    const slotStartUtcCandidates = candidateIndex.get(minute) ?? []
-
-    if (slotStartUtcCandidates.length === 0) {
-      if (debug) {
-        skippedDstWallTimes.push(
-          `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
-        )
-      }
-      continue
-    }
-
-    for (const slotStartUtc of slotStartUtcCandidates) {
-      const slotDecision = canShowSlot({
-        startUtc: slotStartUtc,
-        nowUtc,
-        durationMinutes: dur,
-        bufferMinutes: buf,
-        workingHours,
-        timeZone,
-        stepMinutes: step,
-        advanceNoticeMinutes: normalizedLeadTimeMinutes,
-        maxDaysAhead: maxAdvanceDays,
-        busy,
-        fallbackTimeZone: 'UTC',
-      })
-
-      if (!slotDecision.ok) continue
-
-      rawSlots.push(slotDecision.value.startUtc.toISOString())
-    }
-  }
-
-  const slots = [...new Set(rawSlots)].sort()
-
-  return {
-    ok: true,
-    slots,
-    dayStartUtc,
-    dayEndExclusiveUtc,
-    debug: debug
-      ? {
-          timeZone,
-          dayKey: window.key,
-          spansMidnight: window.spansMidnight,
-          windowStartMinutes: window.startMinutes,
-          windowEndMinutes: window.endMinutes,
-          skippedDstWallTimes,
-        }
-      : undefined,
-  }
-}
-
-function toDecimal(n: number): Prisma.Decimal {
-  return new Prisma.Decimal(String(n))
-}
-
-function haversineMiles(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const R = 3958.7613
-  const toRad = (d: number) => (d * Math.PI) / 180
-
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-
-  const sin1 = Math.sin(dLat / 2)
-  const sin2 = Math.sin(dLng / 2)
-
-  const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
-}
-
-function boundsForRadiusMiles(
-  centerLat: number,
-  centerLng: number,
-  radiusMiles: number,
-) {
-  const latDelta = radiusMiles / 69
-  const cos = Math.max(0.2, Math.cos((centerLat * Math.PI) / 180))
-  const lngDelta = radiusMiles / (69 * cos)
-
-  return {
-    minLat: clampFloat(centerLat - latDelta, -90, 90),
-    maxLat: clampFloat(centerLat + latDelta, -90, 90),
-    minLng: clampFloat(centerLng - lngDelta, -180, 180),
-    maxLng: clampFloat(centerLng + lngDelta, -180, 180),
-  }
-}
-
-function parseFloatParam(v: string | null): number | null {
-  if (!v) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
-
-function parseCommaIds(v: string | null): string[] {
-  if (!v) return []
-
-  return v
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 25)
-}
-
-function parseSummaryWindowDays(
-  value: string | null,
-  maxAdvanceDays: number,
-): number {
-  const fallback = Math.min(
-    DEFAULT_SUMMARY_WINDOW_DAYS,
-    Math.max(1, maxAdvanceDays),
-  )
-  const parsed = toInt(value, fallback)
-  return clampInt(
-    parsed,
-    1,
-    Math.min(MAX_SUMMARY_WINDOW_DAYS, Math.max(1, maxAdvanceDays)),
-  )
-}
-
-function resolveSummaryWindowStart(args: {
-  startDateStr: string | null
-  todayYMD: { year: number; month: number; day: number }
-  maxAdvanceDays: number
-}) {
-  const parsedStart = args.startDateStr ? parseYYYYMMDD(args.startDateStr) : null
-  if (!parsedStart) {
-    return {
-      ok: true as const,
-      startYMD: args.todayYMD,
-      startDateStr: ymdToString(args.todayYMD),
-      startDayOffset: 0,
-    }
-  }
-
-  const offset = ymdSerial(parsedStart) - ymdSerial(args.todayYMD)
-  if (offset < 0) {
-    return {
-      ok: false as const,
-      error: 'startDate cannot be in the past.',
-    }
-  }
-
-  if (offset > args.maxAdvanceDays) {
-    return {
-      ok: false as const,
-      error: `You can book up to ${args.maxAdvanceDays} days in advance.`,
-    }
-  }
-
-  return {
-    ok: true as const,
-    startYMD: parsedStart,
-    startDateStr: ymdToString(parsedStart),
-    startDayOffset: offset,
-  }
-}
-
-function buildSummaryYMDs(args: {
-  startYMD: { year: number; month: number; day: number }
-  startDayOffset: number
-  requestedDays: number
-  maxAdvanceDays: number
-}) {
-  const remainingDays = args.maxAdvanceDays - args.startDayOffset + 1
-  const windowDays = clampInt(args.requestedDays, 1, Math.max(1, remainingDays))
-
-  const ymds = Array.from({ length: windowDays }, (_, i) =>
-    addDaysToYMD(args.startYMD.year, args.startYMD.month, args.startYMD.day, i),
-  )
-
-  const endYMD = ymds[ymds.length - 1] ?? args.startYMD
-  const nextOffset = args.startDayOffset + windowDays
-  const hasMoreDays = nextOffset <= args.maxAdvanceDays
-  const nextStartYMD = hasMoreDays
-    ? addDaysToYMD(
-        args.startYMD.year,
-        args.startYMD.month,
-        args.startYMD.day,
-        windowDays,
-      )
-    : null
-
-  return {
-    ymds,
-    windowDays,
-    endYMD,
-    hasMoreDays,
-    nextStartYMD,
-  }
-}
-
-async function loadOtherProsNearby(args: {
-  centerLat: number
-  centerLng: number
-  radiusMiles: number
-  serviceId: string
-  locationType: ServiceLocationType
-  excludeProfessionalId: string
-  limit: number
-}): Promise<OtherProRow[]> {
-  const {
-    centerLat,
-    centerLng,
-    radiusMiles,
-    serviceId,
-    locationType,
-    excludeProfessionalId,
-    limit,
-  } = args
-
-  const bounds = boundsForRadiusMiles(centerLat, centerLng, radiusMiles)
-  const allowedTypes = allowedProfessionalTypes(locationType)
-
-  const candidateLocs = await prisma.professionalLocation.findMany({
-    where: {
-      isBookable: true,
-      professionalId: { not: excludeProfessionalId },
-      type: { in: allowedTypes },
-      timeZone: { not: null },
-      workingHours: { not: Prisma.JsonNull },
-      lat: {
-        not: null,
-        gte: toDecimal(bounds.minLat),
-        lte: toDecimal(bounds.maxLat),
-      },
-      lng: {
-        not: null,
-        gte: toDecimal(bounds.minLng),
-        lte: toDecimal(bounds.maxLng),
-      },
-    },
-    select: {
-      id: true,
-      professionalId: true,
-      type: true,
-      timeZone: true,
-      workingHours: true,
-      lat: true,
-      lng: true,
-      city: true,
-      formattedAddress: true,
-      isPrimary: true,
-      createdAt: true,
-    },
-    take: 800,
-  })
-
-  const center = { lat: centerLat, lng: centerLng }
-
-  const bestByPro = new Map<
-    string,
-    {
-      locationId: string
-      timeZone: string
-      distanceMiles: number
-      isPrimary: boolean
-      createdAt: Date
-      city: string | null
-      formattedAddress: string | null
-    }
-  >()
-
-  for (const location of candidateLocs) {
-    const lat = decimalToNumber(location.lat)
-    const lng = decimalToNumber(location.lng)
-    if (lat == null || lng == null) continue
-
-    const tz =
-      typeof location.timeZone === 'string' ? location.timeZone.trim() : ''
-    if (!tz || !isValidIanaTimeZone(tz)) continue
-
-    if (!location.workingHours || !isRecord(location.workingHours)) continue
-
-    if (
-      locationType === ServiceLocationType.SALON &&
-      !normalizeAddress(location.formattedAddress)
-    ) {
-      continue
-    }
-
-    const distanceMiles = haversineMiles(center, { lat, lng })
-    if (distanceMiles > radiusMiles) continue
-
-    const prev = bestByPro.get(location.professionalId)
-    if (!prev) {
-      bestByPro.set(location.professionalId, {
-        locationId: location.id,
-        timeZone: tz,
-        distanceMiles,
-        isPrimary: Boolean(location.isPrimary),
-        createdAt: location.createdAt,
-        city: location.city ?? null,
-        formattedAddress: normalizeAddress(location.formattedAddress),
-      })
-      continue
-    }
-
-    const better =
-      distanceMiles < prev.distanceMiles ||
-      (Math.abs(distanceMiles - prev.distanceMiles) < 1e-9 &&
-        Boolean(location.isPrimary) &&
-        !prev.isPrimary) ||
-      (Math.abs(distanceMiles - prev.distanceMiles) < 1e-9 &&
-        Boolean(location.isPrimary) === prev.isPrimary &&
-        location.createdAt < prev.createdAt)
-
-    if (better) {
-      bestByPro.set(location.professionalId, {
-        locationId: location.id,
-        timeZone: tz,
-        distanceMiles,
-        isPrimary: Boolean(location.isPrimary),
-        createdAt: location.createdAt,
-        city: location.city ?? null,
-        formattedAddress: normalizeAddress(location.formattedAddress),
-      })
-    }
-  }
-
-  const proIds = Array.from(bestByPro.keys())
-  if (!proIds.length) return []
-
-  const offeringRows = await prisma.professionalServiceOffering.findMany({
-    where: {
-      professionalId: { in: proIds },
-      serviceId,
-      isActive: true,
-      ...(locationType === ServiceLocationType.MOBILE
-        ? {
-            offersMobile: true,
-            mobilePriceStartingAt: { not: null },
-            mobileDurationMinutes: { not: null },
-          }
-        : {
-            offersInSalon: true,
-            salonPriceStartingAt: { not: null },
-            salonDurationMinutes: { not: null },
-          }),
-    },
-    select: {
-      id: true,
-      professionalId: true,
-      professional: {
-        select: {
-          id: true,
-          businessName: true,
-          avatarUrl: true,
-          location: true,
-        },
-      },
-    },
-    take: 2000,
-  })
-
-  const offeringByPro = new Map<
-    string,
-    {
-      offeringId: string
-      businessName: string | null
-      avatarUrl: string | null
-      proLocation: string | null
-    }
-  >()
-
-  for (const offering of offeringRows) {
-    offeringByPro.set(offering.professionalId, {
-      offeringId: offering.id,
-      businessName: offering.professional.businessName ?? null,
-      avatarUrl: offering.professional.avatarUrl ?? null,
-      proLocation: offering.professional.location ?? null,
-    })
-  }
-
-  const out: OtherProRow[] = []
-
-  for (const proId of proIds) {
-    const best = bestByPro.get(proId)
-    const offering = offeringByPro.get(proId)
-    if (!best || !offering) continue
-
-    const locationLabel =
-      (offering.proLocation && offering.proLocation.trim()) ||
-      (best.city && best.city.trim()) ||
-      (best.formattedAddress && best.formattedAddress.trim()) ||
-      null
-
-    out.push({
-      id: proId,
-      businessName: offering.businessName,
-      avatarUrl: offering.avatarUrl,
-      location: locationLabel,
-      offeringId: offering.offeringId,
-      timeZone: best.timeZone,
-      locationId: best.locationId,
-      distanceMiles: Math.round(best.distanceMiles * 10) / 10,
-    })
-  }
-
-  out.sort((a, b) => a.distanceMiles - b.distanceMiles)
-  return out.slice(0, Math.max(0, limit))
-}
-
-async function loadOtherProsNearbyCached(args: {
-  centerLat: number
-  centerLng: number
-  radiusMiles: number
-  serviceId: string
-  locationType: ServiceLocationType
-  excludeProfessionalId: string
-  limit: number
-  cacheEnabled: boolean
-}): Promise<OtherProRow[]> {
-  if (!args.cacheEnabled || !redis) {
-    return loadOtherProsNearby({
-      centerLat: args.centerLat,
-      centerLng: args.centerLng,
-      radiusMiles: args.radiusMiles,
-      serviceId: args.serviceId,
-      locationType: args.locationType,
-      excludeProfessionalId: args.excludeProfessionalId,
-      limit: args.limit,
-    })
-  }
-
-  const key = [
-    'avail:otherPros:v1',
-    args.serviceId,
-    args.locationType,
-    args.excludeProfessionalId,
-    String(Math.round(args.centerLat * 1000) / 1000),
-    String(Math.round(args.centerLng * 1000) / 1000),
-    String(Math.round(args.radiusMiles * 10) / 10),
-    String(args.limit),
-  ].join(':')
-
-  const hit = await cacheGetJson<unknown>(key)
-  if (Array.isArray(hit)) {
-    const parsed: OtherProRow[] = []
-
-    for (const row of hit) {
-      if (!isRecord(row)) continue
-
-      const id = pickString(row.id)
-      const offeringId = pickString(row.offeringId)
-      const timeZone = pickString(row.timeZone)
-      const locationId = pickString(row.locationId)
-      const distanceMilesRaw =
-        typeof row.distanceMiles === 'number' ? row.distanceMiles : Number.NaN
-
-      if (
-        !id ||
-        !offeringId ||
-        !timeZone ||
-        !locationId ||
-        !Number.isFinite(distanceMilesRaw)
-      ) {
-        continue
-      }
-
-      parsed.push({
-        id,
-        businessName: pickString(row.businessName) ?? null,
-        avatarUrl: pickString(row.avatarUrl) ?? null,
-        location: pickString(row.location) ?? null,
-        offeringId,
-        timeZone,
-        locationId,
-        distanceMiles: distanceMilesRaw,
-      })
-    }
-
-    if (parsed.length > 0) {
-      return parsed
-    }
-  }
-
-  const fresh = await loadOtherProsNearby({
-    centerLat: args.centerLat,
-    centerLng: args.centerLng,
-    radiusMiles: args.radiusMiles,
-    serviceId: args.serviceId,
-    locationType: args.locationType,
-    excludeProfessionalId: args.excludeProfessionalId,
-    limit: args.limit,
-  })
-
-  void cacheSetJson(key, fresh, TTL_OTHER_PROS_SECONDS)
-
-  return fresh
-}
-
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
+    const {
+      professionalId,
+      serviceId,
+      mediaId,
+      clientAddressId,
+      requestedLocationType,
+      requestedLocationId,
+      dateStr,
+      startDateStr,
+      requestedSummaryDaysRaw,
+      addOnIds,
+      debug,
+      includeOtherPros,
+      stepRaw,
+      leadRaw,
+      viewerLat,
+      viewerLng,
+      radiusMiles,
+    } = parseAvailabilityRequest(req)
 
-    const professionalId = pickString(searchParams.get('professionalId'))
-    const serviceId = pickString(searchParams.get('serviceId'))
-    const mediaId = pickString(searchParams.get('mediaId'))
-    const clientAddressId = pickString(searchParams.get('clientAddressId'))
-
-    const requestedLocationType = normalizeLocationType(
-      searchParams.get('locationType'),
-    )
-    const requestedLocationId = pickString(searchParams.get('locationId'))
-    const dateStr = pickString(searchParams.get('date'))
-
-    const startDateStr = pickString(searchParams.get('startDate'))
-    const requestedSummaryDaysRaw = pickString(searchParams.get('days'))
-
-    const addOnIds = parseCommaIds(searchParams.get('addOnIds')).sort()
-    const debug = pickString(searchParams.get('debug')) === '1'
-
-    const includeOtherPros =
-      pickString(searchParams.get('includeOtherPros')) !== '0'
-
-    const stepRaw =
-      pickString(searchParams.get('stepMinutes')) ||
-      pickString(searchParams.get('step'))
-
-    const leadRaw =
-      pickString(searchParams.get('leadMinutes')) ||
-      pickString(searchParams.get('leadTimeMinutes')) ||
-      pickString(searchParams.get('lead')) ||
-      null
-
-    const viewerLat = parseFloatParam(searchParams.get('viewerLat'))
-    const viewerLng = parseFloatParam(searchParams.get('viewerLng'))
-    const roundedViewerLat = roundCoordForCache(viewerLat)
-    const roundedViewerLng = roundCoordForCache(viewerLng)
-
-    const radiusMilesRaw = parseFloatParam(searchParams.get('radiusMiles'))
-    const radiusMiles = clampFloat(radiusMilesRaw ?? 15, 5, 50)
-
-        if (!professionalId || !serviceId) {
+    if (!professionalId || !serviceId) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
     }
 
@@ -1573,209 +107,50 @@ export async function GET(req: Request) {
       getScheduleConfigVersion(professionalId),
     ])
 
-    const placementCacheKey = debug
-      ? null
-      : buildPlacementCacheKey({
-          professionalId,
-          serviceId,
-          locationType: requestedLocationType,
-          locationId: requestedLocationId,
-          clientAddressId,
-          scheduleConfigVersion,
-        })
+    const baseContext = await loadAvailabilityOfferingContext({
+      professionalId,
+      serviceId,
+      requestedLocationType,
+      requestedLocationId,
+      clientAddressId,
+      scheduleConfigVersion,
+      cacheEnabled: !debug,
+    })
 
-    const cachedPlacement = placementCacheKey
-      ? parseCachedPlacement(await cacheGetJson(placementCacheKey))
-      : null
-
-    let locationId: string
-    let effectiveLocationType: ServiceLocationType
-    let timeZone: string
-    let timeZoneSource: AvailabilityTimeZoneSource
-    let workingHours: unknown
-    let defaultStepMinutes: number
-    let defaultLead: number
-    let locationBufferMinutes: number
-    let maxAdvanceDays: number
-    let durationMinutes: number
-    let placementLat: number | undefined
-    let placementLng: number | undefined
-
-    let proBusinessName: string | null
-    let proAvatarUrl: string | null
-    let proLocation: string | null
-    let serviceName: string | null
-    let serviceCategoryName: string | null
-    let offeringDbId: string
-    let offeringPayload: {
-      id: string
-      offersInSalon: boolean
-      offersMobile: boolean
-      salonDurationMinutes: number | null
-      mobileDurationMinutes: number | null
-      salonPriceStartingAt: unknown
-      mobilePriceStartingAt: unknown
-    }
-
-    if (cachedPlacement) {
-      locationId = cachedPlacement.locationId
-      effectiveLocationType = cachedPlacement.locationType
-      timeZone = cachedPlacement.timeZone
-      timeZoneSource = cachedPlacement.timeZoneSource
-      workingHours = cachedPlacement.workingHours
-      defaultStepMinutes = cachedPlacement.stepMinutes
-      defaultLead = cachedPlacement.leadTimeMinutes
-      locationBufferMinutes = cachedPlacement.locationBufferMinutes
-      maxAdvanceDays = cachedPlacement.maxAdvanceDays
-      durationMinutes = cachedPlacement.durationMinutes
-      placementLat = cachedPlacement.lat
-      placementLng = cachedPlacement.lng
-
-      proBusinessName = cachedPlacement.proBusinessName
-      proAvatarUrl = cachedPlacement.proAvatarUrl
-      proLocation = cachedPlacement.proLocation
-      serviceName = cachedPlacement.serviceName
-      serviceCategoryName = cachedPlacement.serviceCategory
-      offeringDbId = cachedPlacement.offeringId
-
-      offeringPayload = {
-        id: cachedPlacement.offeringId,
-        offersInSalon: cachedPlacement.offersInSalon,
-        offersMobile: cachedPlacement.offersMobile,
-        salonDurationMinutes: cachedPlacement.salonDurationMinutes,
-        mobileDurationMinutes: cachedPlacement.mobileDurationMinutes,
-        salonPriceStartingAt: cachedPlacement.salonPriceStartingAt,
-        mobilePriceStartingAt: cachedPlacement.mobilePriceStartingAt,
-      }
-    } else {
-      const [pro, service, offering] = await Promise.all([
-        prisma.professionalProfile.findUnique({
-          where: { id: professionalId },
-          select: {
-            id: true,
-            businessName: true,
-            avatarUrl: true,
-            location: true,
-            timeZone: true,
-          },
-        }),
-        prisma.service.findUnique({
-          where: { id: serviceId },
-          select: {
-            id: true,
-            name: true,
-            category: { select: { name: true } },
-          },
-        }),
-        prisma.professionalServiceOffering.findFirst({
-          where: {
-            professionalId,
-            serviceId,
-            isActive: true,
-          },
-          select: {
-            id: true,
-            offersInSalon: true,
-            offersMobile: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-            salonPriceStartingAt: true,
-            mobilePriceStartingAt: true,
-          },
-        }),
-      ])
-
-      if (!pro) return jsonFail(404, 'Professional not found')
-      if (!service) return jsonFail(404, 'Service not found')
-      if (!offering) return bookingJsonFail('OFFERING_NOT_FOUND')
-
-      const offeringSnapshot = buildOfferingSnapshot(offering)
-
-      const placement = await resolveAvailabilityPlacement({
-        professionalId,
-        offering: offeringSnapshot,
-        requestedLocationType,
-        requestedLocationId,
-        clientAddressId,
-        professionalTimeZone: pro.timeZone ?? null,
-      })
-
-      if (!placement.ok) {
-        return bookingJsonFail(placement.code)
-      }
-
-      locationId = placement.locationId
-      effectiveLocationType = placement.locationType
-      timeZone = placement.timeZone
-      timeZoneSource = placement.timeZoneSource
-      workingHours = placement.workingHours
-      defaultStepMinutes = placement.stepMinutes
-      defaultLead = placement.leadTimeMinutes
-      locationBufferMinutes = placement.locationBufferMinutes
-      maxAdvanceDays = placement.maxAdvanceDays
-      durationMinutes = placement.durationMinutes
-      placementLat = placement.lat
-      placementLng = placement.lng
-
-      proBusinessName = pro.businessName ?? null
-      proAvatarUrl = pro.avatarUrl ?? null
-      proLocation = pro.location ?? null
-      serviceName = service.name
-      serviceCategoryName = service.category?.name ?? null
-      offeringDbId = offering.id
-
-      offeringPayload = {
-        id: offering.id,
-        offersInSalon: Boolean(offering.offersInSalon),
-        offersMobile: Boolean(offering.offersMobile),
-        salonDurationMinutes: offering.salonDurationMinutes ?? null,
-        mobileDurationMinutes: offering.mobileDurationMinutes ?? null,
-        salonPriceStartingAt: offering.salonPriceStartingAt ?? null,
-        mobilePriceStartingAt: offering.mobilePriceStartingAt ?? null,
-      }
-
-      if (placementCacheKey) {
-        void cacheSetJson(
-          placementCacheKey,
-          {
-            locationId,
-            locationType: effectiveLocationType,
-            timeZone,
-            timeZoneSource,
-            workingHours,
-            stepMinutes: defaultStepMinutes,
-            leadTimeMinutes: defaultLead,
-            locationBufferMinutes,
-            maxAdvanceDays,
-            durationMinutes,
-            priceStartingAt: placement.priceStartingAt,
-            formattedAddress: placement.formattedAddress,
-            lat: placementLat,
-            lng: placementLng,
-            proBusinessName,
-            proAvatarUrl,
-            proLocation,
-            serviceName,
-            serviceCategory: serviceCategoryName,
-            offeringId: offeringDbId,
-            offersInSalon: offeringPayload.offersInSalon,
-            offersMobile: offeringPayload.offersMobile,
-            salonDurationMinutes: offeringPayload.salonDurationMinutes,
-            mobileDurationMinutes: offeringPayload.mobileDurationMinutes,
-            salonPriceStartingAt:
-              offeringPayload.salonPriceStartingAt != null
-                ? String(offeringPayload.salonPriceStartingAt)
-                : null,
-            mobilePriceStartingAt:
-              offeringPayload.mobilePriceStartingAt != null
-                ? String(offeringPayload.mobilePriceStartingAt)
-                : null,
-            locationCity: placement.location.city ?? null,
-          } satisfies CachedPlacement,
-          TTL_PLACEMENT_SECONDS,
+    if (!baseContext.ok) {
+      if (baseContext.kind === 'NOT_FOUND') {
+        return jsonFail(
+          404,
+          baseContext.entity === 'PROFESSIONAL'
+            ? 'Professional not found'
+            : 'Service not found',
         )
       }
+
+      return bookingJsonFail(baseContext.code)
     }
+
+    let {
+      locationId,
+      effectiveLocationType,
+      timeZone,
+      timeZoneSource,
+      workingHours,
+      defaultStepMinutes,
+      defaultLead,
+      locationBufferMinutes,
+      maxAdvanceDays,
+      durationMinutes,
+      placementLat,
+      placementLng,
+      proBusinessName,
+      proAvatarUrl,
+      proLocation,
+      serviceName,
+      serviceCategoryName,
+      offeringDbId,
+      offeringPayload,
+    } = baseContext.value
 
     const stepMinutes =
       debug && stepRaw
@@ -1787,76 +162,21 @@ export async function GET(req: Request) {
         ? clampInt(toInt(leadRaw, defaultLead), 0, MAX_LEAD_MINUTES)
         : defaultLead
 
-    if (addOnIds.length) {
-      const addOnLinks = await prisma.offeringAddOn.findMany({
-        where: {
-          id: { in: addOnIds },
-          offeringId: offeringDbId,
-          isActive: true,
-          OR: [{ locationType: null }, { locationType: effectiveLocationType }],
-          addOnService: {
-            isActive: true,
-            isAddOnEligible: true,
-          },
-        },
-        select: {
-          id: true,
-          addOnServiceId: true,
-          durationOverrideMinutes: true,
-          addOnService: {
-            select: { defaultDurationMinutes: true },
-          },
-        },
-        take: 50,
+    const addOnResult = await resolveDurationWithAddOns({
+      professionalId,
+      offeringId: offeringDbId,
+      addOnIds,
+      locationType: effectiveLocationType,
+      baseDurationMinutes: durationMinutes,
+    })
+
+    if (!addOnResult.ok) {
+      return bookingJsonFail(addOnResult.code, {
+        userMessage: 'One or more add-ons are invalid for this offering.',
       })
-
-      if (addOnLinks.length !== addOnIds.length) {
-        return bookingJsonFail('ADDONS_INVALID', {
-          userMessage: 'One or more add-ons are invalid for this offering.',
-        })
-      }
-
-      const addOnServiceIds = addOnLinks.map((x) => x.addOnServiceId)
-
-      const proAddOnOfferings = await prisma.professionalServiceOffering.findMany(
-        {
-          where: {
-            professionalId,
-            isActive: true,
-            serviceId: { in: addOnServiceIds },
-          },
-          select: {
-            serviceId: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-          },
-          take: 200,
-        },
-      )
-
-      const byServiceId = new Map(proAddOnOfferings.map((o) => [o.serviceId, o]))
-
-      const addOnDurationTotal = addOnLinks.reduce((sum, link) => {
-        const proOffering = byServiceId.get(link.addOnServiceId) ?? null
-
-        const raw =
-          link.durationOverrideMinutes ??
-          (effectiveLocationType === ServiceLocationType.MOBILE
-            ? proOffering?.mobileDurationMinutes
-            : proOffering?.salonDurationMinutes) ??
-          link.addOnService.defaultDurationMinutes ??
-          0
-
-        const duration = Number(raw || 0)
-        return sum + (Number.isFinite(duration) && duration > 0 ? duration : 0)
-      }, 0)
-
-      durationMinutes = clampInt(
-        durationMinutes + addOnDurationTotal,
-        15,
-        MAX_SLOT_DURATION_MINUTES,
-      )
     }
+
+    durationMinutes = addOnResult.durationMinutes
 
     const nowUtc = new Date()
     const nowParts = utcDateToLocalParts(nowUtc, timeZone)
@@ -1895,40 +215,39 @@ export async function GET(req: Request) {
         ? ymdToString(summaryWindow.nextStartYMD)
         : null
 
-            const cacheKey = debug
+      const summaryCacheKey = debug
         ? null
-        : [
-            'avail:summary:v9',
+        : buildSummaryCacheKey({
             professionalId,
             serviceId,
             locationId,
-            effectiveLocationType,
+            locationType: effectiveLocationType,
             timeZone,
             windowStartDate,
             windowEndDate,
-            String(summaryWindow.windowDays),
-            String(stepMinutes),
-            String(leadTimeMinutes),
-            String(locationBufferMinutes),
-            String(maxAdvanceDays),
-            String(includeOtherPros ? 1 : 0),
-            String(scheduleVersion),
-            String(scheduleConfigVersion),
-            stableHash({
-              addOnIds,
-              viewerLat: roundedViewerLat,
-              viewerLng: roundedViewerLng,
-              radiusMiles,
-              clientAddressId:
-                effectiveLocationType === ServiceLocationType.MOBILE
-                  ? clientAddressId
-                  : null,
-            }),
-          ].join(':')
+            windowDays: summaryWindow.windowDays,
+            stepMinutes,
+            leadTimeMinutes,
+            locationBufferMinutes,
+            maxAdvanceDays,
+            includeOtherPros,
+            scheduleVersion,
+            scheduleConfigVersion,
+            addOnIds,
+            viewerLat,
+            viewerLng,
+            radiusMiles,
+            clientAddressId,
+          })
 
-      if (cacheKey) {
-        const hit = await cacheGetJson<unknown>(cacheKey)
-        if (hit && isRecord(hit) && hit.ok === true && hit.mode === 'SUMMARY') {
+      if (summaryCacheKey) {
+        const hit = await cacheGetJson<unknown>(summaryCacheKey)
+        if (
+          hit &&
+          isRecord(hit) &&
+          hit.ok === true &&
+          hit.mode === 'SUMMARY'
+        ) {
           return jsonOk({
             ...(hit as Record<string, unknown>),
             mediaId: mediaId || null,
@@ -1952,13 +271,10 @@ export async function GET(req: Request) {
         OCCUPANCY_WINDOW_PADDING_MINUTES,
       )
 
-      const fallbackLat = placementLat
-      const fallbackLng = placementLng
       const hasViewer =
         typeof viewerLat === 'number' && typeof viewerLng === 'number'
-
-      const centerLat = hasViewer ? viewerLat : fallbackLat
-      const centerLng = hasViewer ? viewerLng : fallbackLng
+      const centerLat = hasViewer ? viewerLat : placementLat
+      const centerLng = hasViewer ? viewerLng : placementLng
 
       const [busy, otherPros] = await Promise.all([
         loadBusyIntervals({
@@ -2001,10 +317,7 @@ export async function GET(req: Request) {
             debug: false,
           })
 
-          return {
-            ymd,
-            result,
-          }
+          return { ymd, result }
         }),
       )
 
@@ -2023,9 +336,8 @@ export async function GET(req: Request) {
             date: ymdToString(row.ymd),
             slotCount: row.result.slots.length,
           })
+
           if (firstDaySlots.length === 0) {
-            // Embed the first available day's slots in the summary to eliminate the
-            // second network round-trip when the drawer opens.
             firstDaySlots = row.result.slots.slice()
           }
         }
@@ -2089,7 +401,7 @@ export async function GET(req: Request) {
                 usedViewerCenter: Boolean(hasViewer),
                 addOnIds,
                 clientAddressId:
-                  effectiveLocationType === ServiceLocationType.MOBILE
+                  effectiveLocationType === 'MOBILE'
                     ? clientAddressId || null
                     : null,
                 requestedSummaryDays,
@@ -2098,9 +410,9 @@ export async function GET(req: Request) {
           : {}),
       }
 
-      if (cacheKey) {
+      if (summaryCacheKey) {
         void cacheSetJson(
-          cacheKey,
+          summaryCacheKey,
           { ...payload, mediaId: null },
           TTL_SUMMARY_SECONDS,
         )
@@ -2126,30 +438,24 @@ export async function GET(req: Request) {
       )
     }
 
-        const dayCacheKey = debug
+    const dayCacheKey = debug
       ? null
-      : [
-          'avail:day:v7',
+      : buildDayCacheKey({
           professionalId,
           serviceId,
           locationId,
-          effectiveLocationType,
+          locationType: effectiveLocationType,
           dateStr,
           timeZone,
-          String(stepMinutes),
-          String(leadTimeMinutes),
-          String(locationBufferMinutes),
-          String(scheduleVersion),
-          String(scheduleConfigVersion),
-          stableHash({
-            addOnIds,
-            durationMinutes,
-            clientAddressId:
-              effectiveLocationType === ServiceLocationType.MOBILE
-                ? clientAddressId
-                : null,
-          }),
-        ].join(':')
+          stepMinutes,
+          leadTimeMinutes,
+          locationBufferMinutes,
+          scheduleVersion,
+          scheduleConfigVersion,
+          addOnIds,
+          durationMinutes,
+          clientAddressId,
+        })
 
     if (dayCacheKey) {
       const hit = await cacheGetJson<unknown>(dayCacheKey)
@@ -2170,7 +476,11 @@ export async function GET(req: Request) {
         timeZone,
       }) ?? new Date(bounds.dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
 
-    const windowForLoad = getWorkingWindowForDay(dayAnchorUtc, workingHours, timeZone)
+    const windowForLoad = getWorkingWindowForDay(
+      dayAnchorUtc,
+      workingHours,
+      timeZone,
+    )
 
     const windowStartUtc = addMinutes(
       bounds.dayStartUtc,
@@ -2249,7 +559,7 @@ export async function GET(req: Request) {
             debug: result.debug,
             addOnIds,
             clientAddressId:
-              effectiveLocationType === ServiceLocationType.MOBILE
+              effectiveLocationType === 'MOBILE'
                 ? clientAddressId || null
                 : null,
           }
