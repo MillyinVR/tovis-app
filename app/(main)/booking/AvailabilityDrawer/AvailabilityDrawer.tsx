@@ -108,6 +108,51 @@ type ParsedBookingApiError = {
   developerMessage: string | null
 }
 
+type AvailabilityTelemetryEventName =
+  | 'availability_drawer_opened'
+  | 'availability_summary_loaded'
+  | 'availability_day_slots_loaded'
+  | 'availability_hold_requested'
+  | 'availability_hold_succeeded'
+  | 'availability_continue_clicked'
+
+type AvailabilityTelemetryPayload = {
+  professionalId?: string | null
+  serviceId?: string | null
+  offeringId?: string | null
+  selectedDayYMD?: string | null
+  slotISO?: string | null
+  locationType?: ServiceLocationType | null
+  bookingSource?: BookingSource
+  hasOtherPros?: boolean
+  dayCount?: number
+  slotCount?: number
+}
+
+declare global {
+  interface Window {
+    __tovisAvailabilityTrack?: (
+      eventName: AvailabilityTelemetryEventName,
+      payload: AvailabilityTelemetryPayload,
+    ) => void
+  }
+}
+
+function trackAvailabilityEvent(
+  eventName: AvailabilityTelemetryEventName,
+  payload: AvailabilityTelemetryPayload,
+): void {
+  if (typeof window === 'undefined') return
+
+  window.dispatchEvent(
+    new CustomEvent('tovis:availability', {
+      detail: { eventName, payload },
+    }),
+  )
+
+  window.__tovisAvailabilityTrack?.(eventName, payload)
+}
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
@@ -376,6 +421,26 @@ const AvailabilityDrawerSkeleton = React.memo(function AvailabilityDrawerSkeleto
   )
 })
 
+function InlineRetryCard(props: {
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
+      <div className="mb-3 text-sm font-semibold text-toneDanger">
+        {props.message}
+      </div>
+      <button
+        type="button"
+        onClick={props.onRetry}
+        className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10"
+      >
+        Try again
+      </button>
+    </div>
+  )
+}
+
 export default function AvailabilityDrawer(props: {
   open: boolean
   onClose: () => void
@@ -402,6 +467,10 @@ export default function AvailabilityDrawer(props: {
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const holdStatusRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
+
+  const drawerOpenedTrackedRef = useRef(false)
+  const summaryLoadedTrackedRef = useRef(false)
+  const lastDaySlotsTrackedKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     setViewerTz(getViewerTimeZoneClient())
@@ -603,6 +672,12 @@ export default function AvailabilityDrawer(props: {
     [setError],
   )
 
+  const retryDaySlots = useCallback(() => {
+    setError(null)
+    clearDaySlotCache()
+    setSlotRetryKey((k) => k + 1)
+  }, [setError, clearDaySlotCache])
+
   const resetForLocationModeChange = useCallback(
     async (next: ServiceLocationType) => {
       if (next === activeLocationType) return
@@ -651,6 +726,101 @@ export default function AvailabilityDrawer(props: {
     if (loading || loadingMore || refreshing) return
     void loadMore()
   }, [hasMoreDays, loadMore, loading, loadingMore, refreshing])
+
+  useEffect(() => {
+    if (!open) {
+      drawerOpenedTrackedRef.current = false
+      summaryLoadedTrackedRef.current = false
+      lastDaySlotsTrackedKeyRef.current = null
+      return
+    }
+
+    if (drawerOpenedTrackedRef.current) return
+
+    drawerOpenedTrackedRef.current = true
+    summaryLoadedTrackedRef.current = false
+    lastDaySlotsTrackedKeyRef.current = null
+
+    trackAvailabilityEvent('availability_drawer_opened', {
+      professionalId: context.professionalId ?? null,
+      serviceId: context.serviceId ?? null,
+      offeringId: context.offeringId ?? null,
+      bookingSource,
+    })
+  }, [
+    open,
+    context.professionalId,
+    context.serviceId,
+    context.offeringId,
+    bookingSource,
+  ])
+
+  useEffect(() => {
+    if (!open) return
+    if (!summary || !primary) return
+    if (summaryLoadedTrackedRef.current) return
+
+    summaryLoadedTrackedRef.current = true
+
+    trackAvailabilityEvent('availability_summary_loaded', {
+      professionalId: primary.id,
+      serviceId: effectiveServiceId,
+      offeringId: summary.offering?.id ?? context.offeringId ?? null,
+      locationType: activeLocationType,
+      bookingSource,
+      hasOtherPros,
+      dayCount: days.length,
+    })
+  }, [
+    open,
+    summary,
+    primary,
+    effectiveServiceId,
+    context.offeringId,
+    activeLocationType,
+    bookingSource,
+    hasOtherPros,
+    days.length,
+  ])
+
+  useEffect(() => {
+    if (!open) return
+    if (!summary || !primary) return
+    if (!selectedDayYMD) return
+    if (loadingPrimarySlots) return
+
+    const daySlotsEventKey = [
+      selectedDayYMD,
+      activeLocationType,
+      slotRetryKey,
+      primarySlots.length,
+    ].join('|')
+
+    if (lastDaySlotsTrackedKeyRef.current === daySlotsEventKey) return
+    lastDaySlotsTrackedKeyRef.current = daySlotsEventKey
+
+    trackAvailabilityEvent('availability_day_slots_loaded', {
+      professionalId: primary.id,
+      serviceId: effectiveServiceId,
+      offeringId: resolvedOfferingId,
+      selectedDayYMD,
+      locationType: activeLocationType,
+      bookingSource,
+      slotCount: primarySlots.length,
+    })
+  }, [
+    open,
+    summary,
+    primary,
+    selectedDayYMD,
+    loadingPrimarySlots,
+    activeLocationType,
+    bookingSource,
+    effectiveServiceId,
+    resolvedOfferingId,
+    slotRetryKey,
+    primarySlots.length,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -896,6 +1066,16 @@ export default function AvailabilityDrawer(props: {
     setSelected(null)
     setHoldUntil(null)
 
+    trackAvailabilityEvent('availability_hold_requested', {
+      professionalId: proId,
+      serviceId: effectiveServiceId,
+      offeringId: effOfferingId,
+      selectedDayYMD,
+      slotISO,
+      locationType: activeLocationType,
+      bookingSource,
+    })
+
     setHolding(true)
     try {
       const res = await fetch('/api/holds', {
@@ -944,6 +1124,16 @@ export default function AvailabilityDrawer(props: {
       if (parsed.locationType) {
         setLocationType(parsed.locationType)
       }
+
+      trackAvailabilityEvent('availability_hold_succeeded', {
+        professionalId: proId,
+        serviceId: effectiveServiceId,
+        offeringId: effOfferingId,
+        selectedDayYMD,
+        slotISO: parsed.scheduledForISO,
+        locationType: parsed.locationType ?? activeLocationType,
+        bookingSource,
+      })
     } catch (e: unknown) {
       setError(
         e instanceof Error
@@ -966,6 +1156,16 @@ export default function AvailabilityDrawer(props: {
       bookingSource,
       mediaId: context.mediaId ?? null,
     }
+
+    trackAvailabilityEvent('availability_continue_clicked', {
+      professionalId: context.professionalId ?? null,
+      serviceId: effectiveServiceId,
+      offeringId: selected.offeringId,
+      selectedDayYMD,
+      slotISO: selected.slotISO,
+      locationType: activeLocationType,
+      bookingSource,
+    })
 
     if (onConfirmHold) {
       try {
@@ -1019,8 +1219,12 @@ export default function AvailabilityDrawer(props: {
     loading && !canRenderSummary && !waitingForMobileAddress
   const backgroundRefreshing = refreshing
   const daySlotsLoading = loadingPrimarySlots
+
+  const blockingError = !canRenderSummary ? displayError : null
+  const inlineError = canRenderSummary ? displayError : null
+
   const shouldShowEmpty =
-    !displayError &&
+    !blockingError &&
     !summaryDaysLoading &&
     !canRenderSummary &&
     !waitingForMobileAddress
@@ -1091,27 +1295,13 @@ export default function AvailabilityDrawer(props: {
         >
           {summaryDaysLoading ? (
             <AvailabilityDrawerSkeleton />
-          ) : displayError ? (
-            <div className="tovis-glass-soft rounded-card p-4">
-              <div className="mb-3 text-sm font-semibold text-toneDanger">
-                {displayError}
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (summary) {
-                    setError(null)
-                    clearDaySlotCache()
-                    setSlotRetryKey((k) => k + 1)
-                  } else {
-                    refresh()
-                  }
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10"
-              >
-                Try again
-              </button>
-            </div>
+          ) : blockingError ? (
+            <InlineRetryCard
+              message={blockingError}
+              onRetry={() => {
+                refresh()
+              }}
+            />
           ) : waitingForMobileAddress ? (
             <>
               <AppointmentTypeToggle
@@ -1218,6 +1408,13 @@ export default function AvailabilityDrawer(props: {
                     ))}
                   </div>
                 </div>
+              ) : null}
+
+              {inlineError ? (
+                <InlineRetryCard
+                  message={inlineError}
+                  onRetry={retryDaySlots}
+                />
               ) : null}
 
               {daySlotsLoading ? (
