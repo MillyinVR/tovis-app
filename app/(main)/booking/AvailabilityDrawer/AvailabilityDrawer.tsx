@@ -405,6 +405,7 @@ export default function AvailabilityDrawer(props: {
   const [slotRetryKey, setSlotRetryKey] = useState(0)
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
+  const holdStatusRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -414,6 +415,18 @@ export default function AvailabilityDrawer(props: {
   useEffect(() => {
     selectedHoldIdRef.current = selected?.holdId ?? null
   }, [selected?.holdId])
+
+  useEffect(() => {
+    if (!open) return
+    if (!selected?.holdId) return
+
+    window.requestAnimationFrame(() => {
+      holdStatusRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      })
+    })
+  }, [open, selected?.holdId])
 
   const requestedMobileAddressGate = locationType === 'MOBILE'
 
@@ -980,6 +993,8 @@ export default function AvailabilityDrawer(props: {
     ? fmtSelectedLine(selected.slotISO, appointmentTz)
     : null
 
+  const continueLabel = onConfirmHold ? 'Continue' : 'Continue to add-ons'
+
   if (!open) return null
 
   const waitingForMobileAddress =
@@ -1059,6 +1074,7 @@ export default function AvailabilityDrawer(props: {
             loading={holding}
             onContinue={onContinue}
             selectedLine={selectedLine}
+            continueLabel={continueLabel}
           />
         }
       >
@@ -1220,6 +1236,60 @@ export default function AvailabilityDrawer(props: {
                   void onPickSlot(proId, offeringId, slotISO)
                 }}
               />
+
+                            {holding ? (
+                <div
+                  ref={holdStatusRef}
+                  className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
+                >
+                  <div className="text-sm font-black text-textPrimary">
+                    Holding your time...
+                  </div>
+                  <div className="mt-1 text-[13px] font-semibold text-textSecondary">
+                    Please wait while we reserve this slot.
+                  </div>
+                </div>
+              ) : selected?.holdId && selectedLine ? (
+                <div
+                  ref={holdStatusRef}
+                  className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
+                >
+                  <div className="text-sm font-black text-textPrimary">
+                    Your time is held
+                  </div>
+
+                  <div className="mt-1 text-[13px] font-semibold text-textSecondary">
+                    Time held:{' '}
+                    <span className="font-black text-textPrimary">
+                      {selectedLine}
+                    </span>
+                  </div>
+
+                  {holdLabel ? (
+                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                      Continue before{' '}
+                      <span
+                        className={[
+                          'font-black',
+                          holdUrgent ? 'text-toneDanger' : 'text-textPrimary',
+                        ].join(' ')}
+                      >
+                        {holdLabel}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onContinue()
+                    }}
+                    className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-full border border-white/10 bg-accentPrimary px-4 text-[14px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+                  >
+                    {continueLabel}
+                  </button>
+                </div>
+              ) : null}
 
               {hasOtherPros && !otherProsRequested ? (
                 <div className="mb-3">
