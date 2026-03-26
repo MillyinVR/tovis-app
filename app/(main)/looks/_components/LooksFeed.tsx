@@ -19,12 +19,6 @@ import {
   viewerLocationToDrawerContextFields,
   type ViewerLocation,
 } from '@/lib/viewerLocation'
-import {
-  buildAvailabilityPrefetchArgsFromContext,
-  prefetchAvailabilitySummary,
-} from '../../booking/AvailabilityDrawer/utils/availabilityPrefetch'
-import { INITIAL_WINDOW_DAYS } from '../../booking/AvailabilityDrawer/utils/availabilityWindow'
-import { useDefaultMobileAddress } from '../../booking/AvailabilityDrawer/hooks/useDefaultMobileAddress'
 
 const ALL_TAB: UiCategory = { name: 'The Looks', slug: 'all' }
 const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
@@ -32,7 +26,6 @@ const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
 const FEED_LIMIT = 24
 const FEED_CACHE_TTL_MS = 15_000
 const UPDATING_DELAY_MS = 250
-const AVAILABILITY_PREFETCH_DELAY_MS = 200
 
 type FeedCacheEntry = { items: FeedItem[]; expiresAt: number }
 
@@ -194,8 +187,6 @@ export default function LooksFeed() {
   const feedCacheRef = useRef(new Map<string, FeedCacheEntry>())
   const abortRef = useRef<AbortController | null>(null)
   const updatingTimerRef = useRef<number | null>(null)
-  const availabilityPrefetchTimerRef = useRef<number | null>(null)
-  const availabilityPrefetchAbortRef = useRef<AbortController | null>(null)
 
   const likeInFlight = useRef<Record<string, boolean>>({})
   const lastTapRef = useRef<Record<string, number>>({})
@@ -212,10 +203,6 @@ export default function LooksFeed() {
     setViewerLoc(loadViewerLocation())
     return subscribeViewerLocation(setViewerLoc)
   }, [])
-
-  const {
-    defaultAddressId,
-  } = useDefaultMobileAddress(true)
 
   const redirectToLogin = useCallback(
     (reason: string) => {
@@ -386,86 +373,6 @@ export default function LooksFeed() {
     slides.forEach((s) => io.observe(s))
     return () => io.disconnect()
   }, [items.length])
-
-  useEffect(() => {
-    if (availabilityPrefetchTimerRef.current) {
-      window.clearTimeout(availabilityPrefetchTimerRef.current)
-      availabilityPrefetchTimerRef.current = null
-    }
-
-    availabilityPrefetchAbortRef.current?.abort()
-    availabilityPrefetchAbortRef.current = null
-
-    const activeItem = items[activeIndex]
-    if (!activeItem) return
-
-    const activeContext = buildAvailabilityDrawerContext(activeItem, viewerLoc)
-    if (!activeContext) return
-
-    const controller = new AbortController()
-    availabilityPrefetchAbortRef.current = controller
-
-    availabilityPrefetchTimerRef.current = window.setTimeout(() => {
-      const prefetchForContext = (ctx: AvailabilityDrawerContext | null) => {
-        if (!ctx) return
-
-        const salonArgs = buildAvailabilityPrefetchArgsFromContext({
-          context: ctx,
-          locationType: 'SALON',
-          includeOtherPros: false,
-          days: INITIAL_WINDOW_DAYS,
-          startDate: null,
-        })
-
-        if (salonArgs) {
-          void prefetchAvailabilitySummary({
-            ...salonArgs,
-            signal: controller.signal,
-          })
-        }
-
-        if (defaultAddressId) {
-          const mobileArgs = buildAvailabilityPrefetchArgsFromContext({
-            context: ctx,
-            locationType: 'MOBILE',
-            clientAddressId: defaultAddressId,
-            includeOtherPros: false,
-            days: INITIAL_WINDOW_DAYS,
-            startDate: null,
-          })
-
-          if (mobileArgs) {
-            void prefetchAvailabilitySummary({
-              ...mobileArgs,
-              signal: controller.signal,
-            })
-          }
-        }
-      }
-
-      prefetchForContext(activeContext)
-
-      const nextItem = items[activeIndex + 1]
-      const nextContext = nextItem
-        ? buildAvailabilityDrawerContext(nextItem, viewerLoc)
-        : null
-
-      prefetchForContext(nextContext)
-    }, AVAILABILITY_PREFETCH_DELAY_MS)
-
-    return () => {
-      if (availabilityPrefetchTimerRef.current) {
-        window.clearTimeout(availabilityPrefetchTimerRef.current)
-        availabilityPrefetchTimerRef.current = null
-      }
-
-      controller.abort()
-
-      if (availabilityPrefetchAbortRef.current === controller) {
-        availabilityPrefetchAbortRef.current = null
-      }
-    }
-  }, [items, activeIndex, viewerLoc, defaultAddressId])
 
   const toggleLike = useCallback(
     async (mediaId: string) => {
