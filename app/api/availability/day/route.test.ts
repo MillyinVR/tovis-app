@@ -63,9 +63,21 @@ const WORKING_HOURS = {
   sat: { enabled: true, start: '09:00', end: '12:00' },
 }
 
+type MockLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
+
+type MockLocation = ReturnType<typeof makeLocation>
+
+type MockLocationWhere = {
+  id?: string
+  isBookable?: boolean
+  type?: {
+    in?: MockLocationType[]
+  }
+}
+
 function makeLocation(args: {
   id: string
-  type: 'SALON' | 'SUITE' | 'MOBILE_BASE'
+  type: MockLocationType
   isPrimary?: boolean
   timeZone?: string | null
   workingHours?: typeof WORKING_HOURS
@@ -73,6 +85,8 @@ function makeLocation(args: {
   stepMinutes?: number
   advanceNoticeMinutes?: number
   maxDaysAhead?: number
+  formattedAddress?: string | null
+  createdAt?: Date
 }) {
   return {
     id: args.id,
@@ -89,8 +103,12 @@ function makeLocation(args: {
     lng: null,
     city: null,
     formattedAddress:
-      args.type === 'MOBILE_BASE' ? null : '123 Main St, Test City, CA 90001',
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      args.formattedAddress === undefined
+        ? args.type === 'MOBILE_BASE'
+          ? null
+          : '123 Main St, Test City, CA 90001'
+        : args.formattedAddress,
+    createdAt: args.createdAt ?? new Date('2026-01-01T00:00:00.000Z'),
   }
 }
 
@@ -185,6 +203,108 @@ const mobileLocation = makeLocation({
   type: 'MOBILE_BASE',
 })
 
+let locationCatalog: MockLocation[] = []
+
+function setLocationCatalog(locations: MockLocation[]) {
+  locationCatalog = locations.slice()
+}
+
+function filterLocations(where?: MockLocationWhere): MockLocation[] {
+  let rows = locationCatalog.slice()
+
+  if (where?.id) {
+    rows = rows.filter((location) => location.id === where.id)
+  }
+
+  if (where?.isBookable === true) {
+    rows = rows.filter((location) => location.isBookable)
+  }
+
+  const allowedTypes = where?.type?.in
+  if (allowedTypes?.length) {
+    rows = rows.filter((location) => allowedTypes.includes(location.type))
+  }
+
+  return rows
+}
+
+function sortLocations(rows: MockLocation[]): MockLocation[] {
+  return rows.slice().sort((a, b) => {
+    if (a.isPrimary !== b.isPrimary) {
+      return Number(b.isPrimary) - Number(a.isPrimary)
+    }
+
+    const createdAtDiff = a.createdAt.getTime() - b.createdAt.getTime()
+    if (createdAtDiff !== 0) {
+      return createdAtDiff
+    }
+
+    return a.id.localeCompare(b.id)
+  })
+}
+
+function installLocationMocks() {
+  mocks.professionalLocationFindFirst.mockImplementation(
+    async (args: { where?: MockLocationWhere }) => {
+      const matches = sortLocations(filterLocations(args.where))
+      return matches[0] ?? null
+    },
+  )
+
+  mocks.professionalLocationFindMany.mockImplementation(
+    async (args: { where?: MockLocationWhere; take?: number }) => {
+      const matches = sortLocations(filterLocations(args.where))
+      return typeof args.take === 'number' ? matches.slice(0, args.take) : matches
+    },
+  )
+}
+
+function installBaseMocks(args?: {
+  proTimeZone?: string
+  offering?: Partial<{
+    offersInSalon: boolean
+    offersMobile: boolean
+    salonDurationMinutes: number | null
+    mobileDurationMinutes: number | null
+    salonPriceStartingAt: string | null
+    mobilePriceStartingAt: string | null
+  }>
+  locations?: MockLocation[]
+}) {
+  mocks.professionalProfileFindUnique.mockResolvedValue({
+    id: 'pro-1',
+    businessName: 'Test Pro',
+    avatarUrl: null,
+    location: null,
+    timeZone: args?.proTimeZone ?? 'UTC',
+  })
+
+  mocks.serviceFindUnique.mockResolvedValue({
+    id: 'service-1',
+    name: 'Haircut',
+    category: { name: 'Hair' },
+  })
+
+  mocks.professionalServiceOfferingFindFirst.mockResolvedValue({
+    id: 'offering-1',
+    offersInSalon: args?.offering?.offersInSalon ?? true,
+    offersMobile: args?.offering?.offersMobile ?? true,
+    salonDurationMinutes: args?.offering?.salonDurationMinutes ?? 60,
+    mobileDurationMinutes: args?.offering?.mobileDurationMinutes ?? 60,
+    salonPriceStartingAt: args?.offering?.salonPriceStartingAt ?? '50.00',
+    mobilePriceStartingAt: args?.offering?.mobilePriceStartingAt ?? '70.00',
+  })
+
+  mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
+  mocks.offeringAddOnFindMany.mockResolvedValue([])
+  mocks.bookingFindMany.mockResolvedValue([])
+  mocks.bookingHoldFindMany.mockResolvedValue([])
+  mocks.calendarBlockFindMany.mockResolvedValue([])
+
+  setLocationCatalog(args?.locations ?? [salonLocation, mobileLocation])
+  installLocationMocks()
+}
+
 async function getAvailability(params: Record<string, string>) {
   const search = new URLSearchParams(params)
   const req = new Request(
@@ -227,46 +347,7 @@ function localYmdInTz(isoUtc: string, timeZone: string): string {
 describe('GET /api/availability/day', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-
-    mocks.professionalProfileFindUnique.mockResolvedValue({
-      id: 'pro-1',
-      businessName: 'Test Pro',
-      avatarUrl: null,
-      location: null,
-      timeZone: 'UTC',
-    })
-
-    mocks.serviceFindUnique.mockResolvedValue({
-      id: 'service-1',
-      name: 'Haircut',
-      category: { name: 'Hair' },
-    })
-
-    mocks.professionalServiceOfferingFindFirst.mockResolvedValue({
-      id: 'offering-1',
-      offersInSalon: true,
-      offersMobile: true,
-      salonDurationMinutes: 60,
-      mobileDurationMinutes: 60,
-      salonPriceStartingAt: '50.00',
-      mobilePriceStartingAt: '70.00',
-    })
-
-    mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
-    mocks.offeringAddOnFindMany.mockResolvedValue([])
-    mocks.bookingFindMany.mockResolvedValue([])
-    mocks.bookingHoldFindMany.mockResolvedValue([])
-    mocks.calendarBlockFindMany.mockResolvedValue([])
-    mocks.professionalLocationFindMany.mockResolvedValue([])
-
-    mocks.professionalLocationFindFirst.mockImplementation(
-      async (args: { where?: { id?: string } }) => {
-        const id = args.where?.id
-        if (id === salonLocation.id) return salonLocation
-        if (id === mobileLocation.id) return mobileLocation
-        return null
-      },
-    )
+    installBaseMocks()
   })
 
   it('shows salon slots when the client picked salon', async () => {
@@ -383,7 +464,7 @@ describe('GET /api/availability/day', () => {
     })
 
     mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: { id?: string } }) => {
+      async (args: { where?: MockLocationWhere }) => {
         const id = args.where?.id
         if (id === legacySalonLocation.id) return legacySalonLocation
         return null
@@ -409,42 +490,146 @@ describe('GET /api/availability/day', () => {
   })
 })
 
+describe('GET /api/availability/day phase 2 placement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    installBaseMocks()
+  })
+
+  it('defaults day availability to salon when both modes are supported, even if mobile is primary', async () => {
+    installBaseMocks({
+      locations: [
+        makeLocation({
+          id: 'mobile-primary-1',
+          type: 'MOBILE_BASE',
+          isPrimary: true,
+        }),
+        makeLocation({
+          id: 'salon-secondary-1',
+          type: 'SALON',
+          isPrimary: false,
+        }),
+      ],
+    })
+
+    const response = await getAvailability({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+      date: DAY,
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.locationType).toBe('SALON')
+    expect(body.locationId).toBe('salon-secondary-1')
+    expect(body.slots).toContain(SLOT_09)
+  })
+
+  it('defaults summary availability to salon on first load when salon is supported', async () => {
+    installBaseMocks({
+      locations: [
+        makeLocation({
+          id: 'mobile-primary-1',
+          type: 'MOBILE_BASE',
+          isPrimary: true,
+        }),
+        makeLocation({
+          id: 'salon-secondary-1',
+          type: 'SALON',
+          isPrimary: false,
+        }),
+      ],
+    })
+
+    const response = await getAvailability({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.mode).toBe('SUMMARY')
+    expect(body.locationType).toBe('SALON')
+    expect(body.locationId).toBe('salon-secondary-1')
+  })
+
+  it('falls back to mobile on initial load only when salon placement is invalid', async () => {
+    installBaseMocks({
+      locations: [
+        makeLocation({
+          id: 'salon-invalid-1',
+          type: 'SALON',
+          isPrimary: true,
+          formattedAddress: null,
+        }),
+        makeLocation({
+          id: 'mobile-valid-1',
+          type: 'MOBILE_BASE',
+          isPrimary: false,
+        }),
+      ],
+    })
+
+    const response = await getAvailability({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+      clientAddressId: 'addr-1',
+      date: DAY,
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.locationType).toBe('MOBILE')
+    expect(body.locationId).toBe('mobile-valid-1')
+  })
+
+  it('does not silently switch an explicit mobile request to salon', async () => {
+    installBaseMocks({
+      locations: [
+        makeLocation({
+          id: 'salon-only-1',
+          type: 'SALON',
+          isPrimary: true,
+        }),
+      ],
+    })
+
+    const response = await getAvailability({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+      locationType: 'MOBILE',
+      clientAddressId: 'addr-1',
+      date: DAY,
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.ok).toBe(false)
+    expect(body.code).toBe('LOCATION_NOT_FOUND')
+  })
+})
+
 describe('GET /api/availability/day parity regressions', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
     vi.clearAllMocks()
 
-    mocks.professionalProfileFindUnique.mockResolvedValue({
-      id: 'pro-1',
-      businessName: 'Parity Pro',
-      avatarUrl: null,
-      location: null,
-      timeZone: 'UTC',
+    installBaseMocks({
+      offering: {
+        offersInSalon: true,
+        offersMobile: false,
+        salonDurationMinutes: 15,
+        mobileDurationMinutes: null,
+        salonPriceStartingAt: '50.00',
+        mobilePriceStartingAt: null,
+      },
+      locations: [],
     })
-
-    mocks.serviceFindUnique.mockResolvedValue({
-      id: 'service-1',
-      name: 'Haircut',
-      category: { name: 'Hair' },
-    })
-
-    mocks.professionalServiceOfferingFindFirst.mockResolvedValue({
-      id: 'offering-1',
-      offersInSalon: true,
-      offersMobile: false,
-      salonDurationMinutes: 15,
-      mobileDurationMinutes: null,
-      salonPriceStartingAt: '50.00',
-      mobilePriceStartingAt: null,
-    })
-
-    mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
-    mocks.offeringAddOnFindMany.mockResolvedValue([])
-    mocks.bookingFindMany.mockResolvedValue([])
-    mocks.bookingHoldFindMany.mockResolvedValue([])
-    mocks.calendarBlockFindMany.mockResolvedValue([])
-    mocks.professionalLocationFindMany.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -471,7 +656,7 @@ describe('GET /api/availability/day parity regressions', () => {
     })
 
     mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: { id?: string } }) => {
+      async (args: { where?: MockLocationWhere }) => {
         if (args.where?.id === 'step-salon-1') return stepAnchoredLocation
         return null
       },
@@ -521,7 +706,7 @@ describe('GET /api/availability/day parity regressions', () => {
     })
 
     mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: { id?: string } }) => {
+      async (args: { where?: MockLocationWhere }) => {
         if (args.where?.id === 'horizon-salon-1') return horizonLocation
         return null
       },
@@ -553,39 +738,21 @@ describe('GET /api/availability/day DST behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
-    mocks.professionalProfileFindUnique.mockResolvedValue({
-      id: 'pro-1',
-      businessName: 'DST Pro',
-      avatarUrl: null,
-      location: null,
-      timeZone: 'America/New_York',
+    installBaseMocks({
+      proTimeZone: 'America/New_York',
+      offering: {
+        offersInSalon: true,
+        offersMobile: false,
+        salonDurationMinutes: 60,
+        mobileDurationMinutes: null,
+        salonPriceStartingAt: '50.00',
+        mobilePriceStartingAt: null,
+      },
+      locations: [],
     })
-
-    mocks.serviceFindUnique.mockResolvedValue({
-      id: 'service-1',
-      name: 'Haircut',
-      category: { name: 'Hair' },
-    })
-
-    mocks.professionalServiceOfferingFindFirst.mockResolvedValue({
-      id: 'offering-1',
-      offersInSalon: true,
-      offersMobile: false,
-      salonDurationMinutes: 60,
-      mobileDurationMinutes: null,
-      salonPriceStartingAt: '50.00',
-      mobilePriceStartingAt: null,
-    })
-
-    mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
-    mocks.offeringAddOnFindMany.mockResolvedValue([])
-    mocks.bookingFindMany.mockResolvedValue([])
-    mocks.bookingHoldFindMany.mockResolvedValue([])
-    mocks.calendarBlockFindMany.mockResolvedValue([])
-    mocks.professionalLocationFindMany.mockResolvedValue([])
 
     mocks.professionalLocationFindFirst.mockImplementation(
-      async (args: { where?: { id?: string } }) => {
+      async (args: { where?: MockLocationWhere }) => {
         if (args.where?.id !== 'dst-salon-1') return null
         return makeDstLocation()
       },
@@ -668,7 +835,7 @@ describe('GET /api/availability/day DST behavior', () => {
     })
 
     mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: { id?: string } }) => {
+      async (args: { where?: MockLocationWhere }) => {
         if (args.where?.id !== 'dst-salon-1') return null
 
         return makeDstLocation({

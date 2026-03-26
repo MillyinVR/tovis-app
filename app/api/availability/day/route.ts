@@ -1,13 +1,22 @@
 // app/api/availability/day/route.ts
 
+import { ServiceLocationType } from '@prisma/client'
+
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { parseAvailabilityRequest } from '@/lib/availability/http/parseAvailabilityRequest'
 import {
   buildDayCacheKey,
   buildSummaryCacheKey,
   cacheGetJson,
   cacheSetJson,
 } from '@/lib/availability/data/cache'
+import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
+import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
+import { loadOtherProsNearbyCached, type OtherProRow } from '@/lib/availability/data/otherPros'
+import {
+  computeDayBoundsUtc,
+  computeDaySlotsFast,
+  localSlotToUtcOrNull,
+} from '@/lib/availability/core/dayComputation'
 import {
   buildSummaryYMDs,
   parseSummaryWindowDays,
@@ -16,18 +25,8 @@ import {
   ymdSerial,
   ymdToString,
 } from '@/lib/availability/core/summaryWindow'
-import {
-  computeDayBoundsUtc,
-  computeDaySlotsFast,
-  localSlotToUtcOrNull,
-} from '@/lib/availability/core/dayComputation'
-import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
-import {
-  loadOtherProsNearbyCached,
-  type OtherProRow,
-} from '@/lib/availability/data/otherPros'
-import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
+import { parseAvailabilityRequest } from '@/lib/availability/http/parseAvailabilityRequest'
 import {
   getScheduleConfigVersion,
   getScheduleVersion,
@@ -43,9 +42,9 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
-import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,8 +71,25 @@ function bookingJsonFail(
 }
 
 function toInt(value: string | null, fallback: number): number {
-  const n = Number(value)
-  return Number.isFinite(n) ? Math.trunc(n) : fallback
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
+}
+
+function resolveDebugClientAddressId(args: {
+  locationType: ServiceLocationType
+  clientAddressId: string | null
+}): string | null {
+  return args.locationType === ServiceLocationType.MOBILE
+    ? args.clientAddressId
+    : null
+}
+
+function isSummaryCacheHit(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && value.ok === true && value.mode === 'SUMMARY'
+}
+
+function isDayCacheHit(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && value.ok === true && value.mode === 'DAY'
 }
 
 export async function GET(req: Request) {
@@ -151,6 +167,11 @@ export async function GET(req: Request) {
       offeringDbId,
       offeringPayload,
     } = baseContext.value
+
+    const resolvedClientAddressId = resolveDebugClientAddressId({
+      locationType: effectiveLocationType,
+      clientAddressId,
+    })
 
     const stepMinutes =
       debug && stepRaw
@@ -237,19 +258,14 @@ export async function GET(req: Request) {
             viewerLat,
             viewerLng,
             radiusMiles,
-            clientAddressId,
+            clientAddressId: resolvedClientAddressId,
           })
 
       if (summaryCacheKey) {
         const hit = await cacheGetJson<unknown>(summaryCacheKey)
-        if (
-          hit &&
-          isRecord(hit) &&
-          hit.ok === true &&
-          hit.mode === 'SUMMARY'
-        ) {
+        if (isSummaryCacheHit(hit)) {
           return jsonOk({
-            ...(hit as Record<string, unknown>),
+            ...hit,
             mediaId: mediaId || null,
           })
         }
@@ -400,10 +416,7 @@ export async function GET(req: Request) {
                     : null,
                 usedViewerCenter: Boolean(hasViewer),
                 addOnIds,
-                clientAddressId:
-                  effectiveLocationType === 'MOBILE'
-                    ? clientAddressId || null
-                    : null,
+                clientAddressId: resolvedClientAddressId,
                 requestedSummaryDays,
               },
             }
@@ -454,12 +467,12 @@ export async function GET(req: Request) {
           scheduleConfigVersion,
           addOnIds,
           durationMinutes,
-          clientAddressId,
+          clientAddressId: resolvedClientAddressId,
         })
 
     if (dayCacheKey) {
       const hit = await cacheGetJson<unknown>(dayCacheKey)
-      if (hit && isRecord(hit) && hit.ok === true && hit.mode === 'DAY') {
+      if (isDayCacheHit(hit)) {
         return jsonOk(hit)
       }
     }
@@ -558,10 +571,7 @@ export async function GET(req: Request) {
         ? {
             debug: result.debug,
             addOnIds,
-            clientAddressId:
-              effectiveLocationType === 'MOBILE'
-                ? clientAddressId || null
-                : null,
+            clientAddressId: resolvedClientAddressId,
           }
         : {}),
     }

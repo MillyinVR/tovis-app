@@ -83,6 +83,11 @@ export type AvailabilityPlacementResult =
       code: AvailabilityPlacementErrorCode
     }
 
+type AvailabilityPlacementFailure = Extract<
+  AvailabilityPlacementResult,
+  { ok: false }
+>
+
 export type CachedPlacement = {
   locationId: string
   locationType: ServiceLocationType
@@ -114,7 +119,7 @@ export type CachedPlacement = {
 }
 
 function normalizeAddress(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 export function parseCachedPlacement(raw: unknown): CachedPlacement | null {
@@ -283,6 +288,53 @@ function locationTypeForLocation(
     : ServiceLocationType.SALON
 }
 
+function professionalLocationTypesForLocationType(
+  locationType: ServiceLocationType,
+): ProfessionalLocationType[] {
+  return locationType === ServiceLocationType.MOBILE
+    ? [ProfessionalLocationType.MOBILE_BASE]
+    : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
+}
+
+/**
+ * Enterprise-safe default:
+ * - first-load placement prefers salon/suite when salon is supported
+ * - mobile is only considered after salon/suite is unavailable or invalid
+ */
+function buildInitialPlacementOrder(
+  offering: OfferingSchedulingSnapshot,
+): ServiceLocationType[] {
+  const order: ServiceLocationType[] = []
+
+  if (offering.offersInSalon) {
+    order.push(ServiceLocationType.SALON)
+  }
+
+  if (offering.offersMobile) {
+    order.push(ServiceLocationType.MOBILE)
+  }
+
+  return order
+}
+
+async function loadPlacementCandidatesForLocationType(args: {
+  professionalId: string
+  locationType: ServiceLocationType
+}): Promise<AvailabilityLocation[]> {
+  return prisma.professionalLocation.findMany({
+    where: {
+      professionalId: args.professionalId,
+      isBookable: true,
+      type: {
+        in: professionalLocationTypesForLocationType(args.locationType),
+      },
+    },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    select: LOCATION_SELECT,
+    take: 50,
+  })
+}
+
 async function validateAvailabilityPlacement(args: {
   professionalId: string
   requestedLocationId: string | null
@@ -342,8 +394,8 @@ async function validateAvailabilityPlacement(args: {
 
   const timeZoneSource = resolvePlacementTimeZoneSource({
     contextTimeZone: context.timeZone,
-    contextTimeZoneSource: (context as Record<string, unknown>).timeZoneSource,
-    locationTimeZone: context.location?.timeZone,
+    contextTimeZoneSource: context.timeZoneSource,
+    locationTimeZone: context.location.timeZone,
     professionalTimeZone: args.professionalTimeZone,
     fallbackTimeZone,
   })
@@ -366,6 +418,55 @@ async function validateAvailabilityPlacement(args: {
     lat: context.lat,
     lng: context.lng,
   }
+}
+
+async function resolveInitialPlacementForLocationType(args: {
+  professionalId: string
+  locationType: ServiceLocationType
+  offering: OfferingSchedulingSnapshot
+  clientAddressId: string | null
+  professionalTimeZone: string | null
+}): Promise<AvailabilityPlacementResult> {
+  const candidates = await loadPlacementCandidatesForLocationType({
+    professionalId: args.professionalId,
+    locationType: args.locationType,
+  })
+
+  if (!candidates.length) {
+    return {
+      ok: false,
+      code: 'LOCATION_NOT_FOUND',
+    }
+  }
+
+  let firstMeaningfulError: AvailabilityPlacementFailure | null = null
+
+  for (const candidate of candidates) {
+    const attempt = await validateAvailabilityPlacement({
+      professionalId: args.professionalId,
+      requestedLocationId: candidate.id,
+      locationType: args.locationType,
+      offering: args.offering,
+      clientAddressId: args.clientAddressId,
+      allowFallback: false,
+      professionalTimeZone: args.professionalTimeZone,
+    })
+
+    if (attempt.ok) {
+      return attempt
+    }
+
+    if (attempt.code !== 'LOCATION_NOT_FOUND' && firstMeaningfulError == null) {
+      firstMeaningfulError = attempt
+    }
+  }
+
+  return (
+    firstMeaningfulError ?? {
+      ok: false,
+      code: 'NO_SCHEDULING_READY_LOCATION',
+    }
+  )
 }
 
 export async function resolveAvailabilityPlacement(args: {
@@ -442,60 +543,34 @@ export async function resolveAvailabilityPlacement(args: {
     })
   }
 
-  const allowedTypes: ProfessionalLocationType[] = []
+  const placementOrder = buildInitialPlacementOrder(args.offering)
 
-  if (args.offering.offersInSalon) {
-    allowedTypes.push(
-      ProfessionalLocationType.SALON,
-      ProfessionalLocationType.SUITE,
-    )
-  }
-
-  if (args.offering.offersMobile) {
-    allowedTypes.push(ProfessionalLocationType.MOBILE_BASE)
-  }
-
-  if (!allowedTypes.length) {
+  if (!placementOrder.length) {
     return {
       ok: false,
       code: 'MODE_NOT_SUPPORTED',
     }
   }
 
-  const candidates = await prisma.professionalLocation.findMany({
-    where: {
+  let firstMeaningfulError: AvailabilityPlacementFailure | null = null
+
+  for (const locationType of placementOrder) {
+    const attempt = await resolveInitialPlacementForLocationType({
       professionalId,
-      isBookable: true,
-      type: { in: allowedTypes },
-    },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: LOCATION_SELECT,
-    take: 50,
-  })
+      locationType,
+      offering: args.offering,
+      clientAddressId: args.clientAddressId,
+      professionalTimeZone: args.professionalTimeZone,
+    })
 
-  const attempts = await Promise.all(
-    candidates.map(async (candidate) => {
-      const locationType = locationTypeForLocation(candidate)
+    if (attempt.ok) {
+      return attempt
+    }
 
-      return validateAvailabilityPlacement({
-        professionalId,
-        requestedLocationId: candidate.id,
-        locationType,
-        offering: args.offering,
-        clientAddressId: args.clientAddressId,
-        allowFallback: false,
-        professionalTimeZone: args.professionalTimeZone,
-      })
-    }),
-  )
-
-  for (const attempt of attempts) {
-    if (attempt.ok) return attempt
+    if (attempt.code !== 'LOCATION_NOT_FOUND' && firstMeaningfulError == null) {
+      firstMeaningfulError = attempt
+    }
   }
-
-  const firstMeaningfulError = attempts.find(
-    (attempt) => !attempt.ok && attempt.code !== 'LOCATION_NOT_FOUND',
-  )
 
   return (
     firstMeaningfulError ?? {

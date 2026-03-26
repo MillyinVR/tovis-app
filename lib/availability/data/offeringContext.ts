@@ -1,6 +1,6 @@
 // lib/availability/data/offeringContext.ts
 
-import { ServiceLocationType } from '@prisma/client'
+import { Prisma, ServiceLocationType } from '@prisma/client'
 
 import {
   buildPlacementCacheKey,
@@ -11,6 +11,7 @@ import {
   buildOfferingSnapshot,
   parseCachedPlacement,
   resolveAvailabilityPlacement,
+  type AvailabilityPlacementResult,
   type AvailabilityTimeZoneSource,
   type CachedPlacement,
 } from '@/lib/availability/core/placement'
@@ -18,6 +19,7 @@ import { type BookingErrorCode } from '@/lib/booking/errors'
 import { prisma } from '@/lib/prisma'
 
 const TTL_PLACEMENT_SECONDS = 300
+const AVAILABILITY_PLACEMENT_CACHE_VERSION = 'phase2'
 
 export type AvailabilityOfferingPayload = {
   id: string
@@ -68,6 +70,55 @@ export type LoadAvailabilityOfferingContextResult =
       kind: 'BOOKING'
       code: BookingErrorCode
     }
+
+type FreshAvailabilitySource = {
+  pro: {
+    businessName: string | null
+    avatarUrl: string | null
+    location: string | null
+    timeZone: string | null
+  }
+  service: {
+    name: string
+    category: {
+      name: string
+    } | null
+  }
+  offering: {
+    id: string
+    offersInSalon: boolean
+    offersMobile: boolean
+    salonDurationMinutes: number | null
+    mobileDurationMinutes: number | null
+    salonPriceStartingAt: Prisma.Decimal | null
+    mobilePriceStartingAt: Prisma.Decimal | null
+  }
+}
+
+type ResolvedAvailabilityPlacement = Extract<
+  Awaited<ReturnType<typeof resolveAvailabilityPlacement>>,
+  { ok: true }
+>
+
+function buildVersionedPlacementCacheKey(args: {
+  professionalId: string
+  serviceId: string
+  requestedLocationType: ServiceLocationType | null
+  requestedLocationId: string | null
+  clientAddressId: string | null
+  scheduleConfigVersion: number
+}): string {
+  const baseKey = buildPlacementCacheKey({
+    professionalId: args.professionalId,
+    serviceId: args.serviceId,
+    locationType: args.requestedLocationType,
+    locationId: args.requestedLocationId,
+    clientAddressId: args.clientAddressId,
+    scheduleConfigVersion: args.scheduleConfigVersion,
+  })
+
+  return `${baseKey}:placement:${AVAILABILITY_PLACEMENT_CACHE_VERSION}`
+}
 
 function buildOfferingPayloadFromCachedPlacement(
   cachedPlacement: CachedPlacement,
@@ -131,36 +182,9 @@ function buildContextFromCachedPlacement(
   }
 }
 
-type FreshAvailabilitySource = {
-  pro: {
-    businessName: string | null
-    avatarUrl: string | null
-    location: string | null
-    timeZone: string | null
-  }
-  service: {
-    name: string
-    category: {
-      name: string
-    } | null
-  }
-  offering: {
-    id: string
-    offersInSalon: boolean
-    offersMobile: boolean
-    salonDurationMinutes: number | null
-    mobileDurationMinutes: number | null
-    salonPriceStartingAt: unknown
-    mobilePriceStartingAt: unknown
-  }
-}
-
 function buildContextFromFreshAvailability(args: {
   source: FreshAvailabilitySource
-  placement: Extract<
-    Awaited<ReturnType<typeof resolveAvailabilityPlacement>>,
-    { ok: true }
-  >
+  placement: ResolvedAvailabilityPlacement
 }): AvailabilityOfferingContext {
   const { source, placement } = args
 
@@ -234,39 +258,19 @@ function buildCachedPlacementValue(args: {
   }
 }
 
-export async function loadAvailabilityOfferingContext(args: {
+async function loadFreshAvailabilitySource(args: {
   professionalId: string
   serviceId: string
-  requestedLocationType: ServiceLocationType | null
-  requestedLocationId: string | null
-  clientAddressId: string | null
-  scheduleConfigVersion: number
-  cacheEnabled: boolean
-}): Promise<LoadAvailabilityOfferingContextResult> {
-  const placementCacheKey = args.cacheEnabled
-    ? buildPlacementCacheKey({
-        professionalId: args.professionalId,
-        serviceId: args.serviceId,
-        locationType: args.requestedLocationType,
-        locationId: args.requestedLocationId,
-        clientAddressId: args.clientAddressId,
-        scheduleConfigVersion: args.scheduleConfigVersion,
-      })
-    : null
-
-  if (placementCacheKey) {
-    const cachedPlacement = parseCachedPlacement(
-      await cacheGetJson<unknown>(placementCacheKey),
-    )
-
-    if (cachedPlacement) {
-      return {
-        ok: true,
-        value: buildContextFromCachedPlacement(cachedPlacement),
-      }
+}): Promise<
+  | {
+      ok: true
+      value: FreshAvailabilitySource
     }
-  }
-
+  | {
+      ok: false
+      result: LoadAvailabilityOfferingContextResult
+    }
+> {
   const [pro, service, offering] = await Promise.all([
     prisma.professionalProfile.findUnique({
       where: { id: args.professionalId },
@@ -307,34 +311,97 @@ export async function loadAvailabilityOfferingContext(args: {
   if (!pro) {
     return {
       ok: false,
-      kind: 'NOT_FOUND',
-      entity: 'PROFESSIONAL',
+      result: {
+        ok: false,
+        kind: 'NOT_FOUND',
+        entity: 'PROFESSIONAL',
+      },
     }
   }
 
   if (!service) {
     return {
       ok: false,
-      kind: 'NOT_FOUND',
-      entity: 'SERVICE',
+      result: {
+        ok: false,
+        kind: 'NOT_FOUND',
+        entity: 'SERVICE',
+      },
     }
   }
 
   if (!offering) {
     return {
       ok: false,
-      kind: 'BOOKING',
-      code: 'OFFERING_NOT_FOUND',
+      result: {
+        ok: false,
+        kind: 'BOOKING',
+        code: 'OFFERING_NOT_FOUND',
+      },
     }
   }
 
+  return {
+    ok: true,
+    value: {
+      pro,
+      service,
+      offering,
+    },
+  }
+}
+
+export async function loadAvailabilityOfferingContext(args: {
+  professionalId: string
+  serviceId: string
+  requestedLocationType: ServiceLocationType | null
+  requestedLocationId: string | null
+  clientAddressId: string | null
+  scheduleConfigVersion: number
+  cacheEnabled: boolean
+}): Promise<LoadAvailabilityOfferingContextResult> {
+  const placementCacheKey = args.cacheEnabled
+    ? buildVersionedPlacementCacheKey({
+        professionalId: args.professionalId,
+        serviceId: args.serviceId,
+        requestedLocationType: args.requestedLocationType,
+        requestedLocationId: args.requestedLocationId,
+        clientAddressId: args.clientAddressId,
+        scheduleConfigVersion: args.scheduleConfigVersion,
+      })
+    : null
+
+  if (placementCacheKey) {
+    const cachedPlacement = parseCachedPlacement(
+      await cacheGetJson<unknown>(placementCacheKey),
+    )
+
+    if (cachedPlacement) {
+      return {
+        ok: true,
+        value: buildContextFromCachedPlacement(cachedPlacement),
+      }
+    }
+  }
+
+  const sourceResult = await loadFreshAvailabilitySource({
+    professionalId: args.professionalId,
+    serviceId: args.serviceId,
+  })
+
+  if (!sourceResult.ok) {
+    return sourceResult.result
+  }
+
+  const source = sourceResult.value
+
   const placement = await resolveAvailabilityPlacement({
     professionalId: args.professionalId,
-    offering: buildOfferingSnapshot(offering),
+    offering: buildOfferingSnapshot(source.offering),
     requestedLocationType: args.requestedLocationType,
     requestedLocationId: args.requestedLocationId,
     clientAddressId: args.clientAddressId,
-    professionalTimeZone: pro.timeZone ?? null,
+    professionalTimeZone: source.pro.timeZone ?? null,
   })
 
   if (!placement.ok) {
@@ -346,7 +413,7 @@ export async function loadAvailabilityOfferingContext(args: {
   }
 
   const value = buildContextFromFreshAvailability({
-    source: { pro, service, offering },
+    source,
     placement,
   })
 
