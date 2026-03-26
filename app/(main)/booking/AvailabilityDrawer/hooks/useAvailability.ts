@@ -1,4 +1,4 @@
-// app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.ts 
+// app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.ts
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -29,6 +29,8 @@ type SummaryOk = Extract<
   { ok: true; mode: 'SUMMARY' }
 >
 
+type LoadMode = 'blocking' | 'background'
+
 function mergeSummaryData(
   current: SummaryOk | null,
   incoming: SummaryOk,
@@ -37,6 +39,7 @@ function mergeSummaryData(
 
   return {
     ...current,
+    ...incoming,
     availableDays: mergeAvailableDays(
       current.availableDays,
       incoming.availableDays,
@@ -46,9 +49,20 @@ function mergeSummaryData(
     nextStartDate: incoming.nextStartDate,
     hasMoreDays: incoming.hasMoreDays,
     otherPros:
-      current.otherPros.length > 0 ? current.otherPros : incoming.otherPros,
+      incoming.otherPros.length > 0 ? incoming.otherPros : current.otherPros,
     debug: incoming.debug ?? current.debug,
   }
+}
+
+function readCachedSummaryWindow(
+  key: string | null,
+  allowStale: boolean,
+): SummaryOk | null {
+  if (!key) return null
+
+  return allowStale
+    ? getAnyCachedAvailabilitySummaryWindow(key)
+    : getCachedAvailabilitySummaryWindow(key)
 }
 
 export function useAvailability(
@@ -66,6 +80,9 @@ export function useAvailability(
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<SummaryOk | null>(null)
+
+  const dataRef = useRef<SummaryOk | null>(null)
+  dataRef.current = data
 
   const proId = useMemo(
     () => String(context.professionalId || '').trim(),
@@ -98,18 +115,16 @@ export function useAvailability(
   const ctxViewerRadiusMiles = context.viewerRadiusMiles
   const ctxViewerPlaceId = context.viewerPlaceId
 
-  // Keep a ref so loadMore can always see the latest context without being
-  // recreated on every parent render that produces a new context object ref.
   const contextRef = useRef(context)
   contextRef.current = context
 
-  const initialPrefetchArgs = useMemo(
+  const primaryPrefetchArgs = useMemo(
     () =>
       buildAvailabilityPrefetchArgsFromContext({
         context,
         locationType,
         clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
-        includeOtherPros,
+        includeOtherPros: false,
         days: INITIAL_WINDOW_DAYS,
         startDate: null,
       }),
@@ -124,33 +139,128 @@ export function useAvailability(
       locationType,
       normalizedClientAddressId,
       requiresClientAddress,
-      includeOtherPros,
     ],
   )
 
-  const initialWindowKey = useMemo(() => {
-    if (!initialPrefetchArgs) return null
+  const primaryWindowKey = useMemo(() => {
+    if (!primaryPrefetchArgs) return null
 
     return buildAvailabilitySummaryPrefetchKey({
-      professionalId: initialPrefetchArgs.professionalId,
-      serviceId: initialPrefetchArgs.serviceId,
-      locationType: initialPrefetchArgs.locationType,
-      mediaId: initialPrefetchArgs.mediaId,
-      clientAddressId: initialPrefetchArgs.clientAddressId,
-      viewer: initialPrefetchArgs.viewer,
+      professionalId: primaryPrefetchArgs.professionalId,
+      serviceId: primaryPrefetchArgs.serviceId,
+      locationType: primaryPrefetchArgs.locationType,
+      mediaId: primaryPrefetchArgs.mediaId,
+      clientAddressId: primaryPrefetchArgs.clientAddressId,
+      viewer: primaryPrefetchArgs.viewer,
       startDate: null,
       days: INITIAL_WINDOW_DAYS,
-      includeOtherPros,
+      includeOtherPros: false,
     })
-  }, [initialPrefetchArgs, includeOtherPros])
+  }, [primaryPrefetchArgs])
+
+  const fullPrefetchArgs = useMemo(() => {
+    if (!includeOtherPros) return null
+
+    return buildAvailabilityPrefetchArgsFromContext({
+      context,
+      locationType,
+      clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
+      includeOtherPros: true,
+      days: INITIAL_WINDOW_DAYS,
+      startDate: null,
+    })
+  }, [
+    ctxProfessionalId,
+    ctxServiceId,
+    ctxMediaId,
+    ctxViewerLat,
+    ctxViewerLng,
+    ctxViewerRadiusMiles,
+    ctxViewerPlaceId,
+    locationType,
+    normalizedClientAddressId,
+    requiresClientAddress,
+    includeOtherPros,
+  ])
+
+  const fullWindowKey = useMemo(() => {
+    if (!includeOtherPros || !fullPrefetchArgs) return null
+
+    return buildAvailabilitySummaryPrefetchKey({
+      professionalId: fullPrefetchArgs.professionalId,
+      serviceId: fullPrefetchArgs.serviceId,
+      locationType: fullPrefetchArgs.locationType,
+      mediaId: fullPrefetchArgs.mediaId,
+      clientAddressId: fullPrefetchArgs.clientAddressId,
+      viewer: fullPrefetchArgs.viewer,
+      startDate: null,
+      days: INITIAL_WINDOW_DAYS,
+      includeOtherPros: true,
+    })
+  }, [fullPrefetchArgs, includeOtherPros])
+
+  const handleAvailabilityError = useCallback(
+    (message: string, preserveVisibleData: boolean) => {
+      if (message === 'Unauthorized.') {
+        redirectToLogin(router, 'availability')
+
+        if (!preserveVisibleData) {
+          setData(null)
+          setError('Please log in to view availability.')
+        }
+
+        return
+      }
+
+      if (!preserveVisibleData) {
+        setError(message)
+      }
+    },
+    [router],
+  )
+
+  const loadOtherProsOnly = useCallback(async () => {
+    if (!includeOtherPros || !fullPrefetchArgs) return
+
+    const seq = ++requestSeqRef.current
+
+    setLoading(false)
+    setRefreshing(true)
+
+    try {
+      const fullPage = await fetchAvailabilitySummaryWindow({
+        ...fullPrefetchArgs,
+        startDate: null,
+        days: INITIAL_WINDOW_DAYS,
+        includeOtherPros: true,
+      })
+
+      if (seq !== requestSeqRef.current) return
+
+      setData((current) => mergeSummaryData(current, fullPage))
+      setError(null)
+    } catch (e: unknown) {
+      if (seq !== requestSeqRef.current) return
+
+      const message =
+        e instanceof Error ? e.message : 'Failed to load availability.'
+
+      handleAvailabilityError(message, true)
+    } finally {
+      if (seq === requestSeqRef.current) {
+        setRefreshing(false)
+      }
+    }
+  }, [fullPrefetchArgs, includeOtherPros, handleAvailabilityError])
 
   const loadInitial = useCallback(
-    async (keepExistingData: boolean) => {
+    async (mode: LoadMode) => {
       const seq = ++requestSeqRef.current
+      const preserveVisibleData = mode === 'background'
 
-      if (keepExistingData) {
-        setRefreshing(true)
+      if (preserveVisibleData) {
         setLoading(false)
+        setRefreshing(true)
       } else {
         setLoading(true)
         setRefreshing(false)
@@ -159,27 +269,40 @@ export function useAvailability(
       setError(null)
 
       try {
-        if (!initialPrefetchArgs) {
+        if (!primaryPrefetchArgs) {
           throw new Error('Missing availability context.')
         }
 
-        if (keepExistingData && initialWindowKey) {
-          const stale = getAnyCachedAvailabilitySummaryWindow(initialWindowKey)
-          if (stale && seq === requestSeqRef.current) {
-            setData(stale)
-          }
-        }
-
-        const firstPage = await fetchAvailabilitySummaryWindow({
-          ...initialPrefetchArgs,
+        const primaryPage = await fetchAvailabilitySummaryWindow({
+          ...primaryPrefetchArgs,
           startDate: null,
           days: INITIAL_WINDOW_DAYS,
-          includeOtherPros,
+          includeOtherPros: false,
         })
 
         if (seq !== requestSeqRef.current) return
 
-        setData(firstPage)
+        setData((current) => mergeSummaryData(current, primaryPage))
+        setError(null)
+        setLoading(false)
+
+        if (!includeOtherPros || !fullPrefetchArgs) {
+          setRefreshing(false)
+          return
+        }
+
+        setRefreshing(true)
+
+        const fullPage = await fetchAvailabilitySummaryWindow({
+          ...fullPrefetchArgs,
+          startDate: null,
+          days: INITIAL_WINDOW_DAYS,
+          includeOtherPros: true,
+        })
+
+        if (seq !== requestSeqRef.current) return
+
+        setData((current) => mergeSummaryData(current, fullPage))
         setError(null)
       } catch (e: unknown) {
         if (seq !== requestSeqRef.current) return
@@ -187,14 +310,7 @@ export function useAvailability(
         const message =
           e instanceof Error ? e.message : 'Failed to load availability.'
 
-        if (message === 'Unauthorized.') {
-          redirectToLogin(router, 'availability')
-          setError('Please log in to view availability.')
-          setData(null)
-          return
-        }
-
-        setError(message)
+        handleAvailabilityError(message, preserveVisibleData)
       } finally {
         if (seq === requestSeqRef.current) {
           setLoading(false)
@@ -202,7 +318,12 @@ export function useAvailability(
         }
       }
     },
-    [initialPrefetchArgs, initialWindowKey, includeOtherPros, router],
+    [
+      primaryPrefetchArgs,
+      includeOtherPros,
+      fullPrefetchArgs,
+      handleAvailabilityError,
+    ],
   )
 
   const loadMore = useCallback(async () => {
@@ -210,7 +331,6 @@ export function useAvailability(
     if (loading || refreshing || loadingMore) return
 
     setLoadingMore(true)
-    setError(null)
 
     try {
       const nextArgs = buildAvailabilityPrefetchArgsFromContext({
@@ -238,14 +358,7 @@ export function useAvailability(
       const message =
         e instanceof Error ? e.message : 'Failed to load more availability.'
 
-      if (message === 'Unauthorized.') {
-        redirectToLogin(router, 'availability')
-        setError('Please log in to view availability.')
-        setData(null)
-        return
-      }
-
-      setError(message)
+      handleAvailabilityError(message, true)
     } finally {
       setLoadingMore(false)
     }
@@ -257,7 +370,7 @@ export function useAvailability(
     locationType,
     requiresClientAddress,
     normalizedClientAddressId,
-    router,
+    handleAvailabilityError,
   ])
 
   useEffect(() => {
@@ -304,7 +417,7 @@ export function useAvailability(
       return
     }
 
-    if (!initialWindowKey) {
+    if (!primaryWindowKey) {
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(false)
@@ -313,9 +426,9 @@ export function useAvailability(
       return
     }
 
-    const fresh = getCachedAvailabilitySummaryWindow(initialWindowKey)
-    if (fresh) {
-      setData(fresh)
+    const freshFull = readCachedSummaryWindow(fullWindowKey, false)
+    if (freshFull) {
+      setData(freshFull)
       setError(null)
       setLoading(false)
       setLoadingMore(false)
@@ -323,31 +436,62 @@ export function useAvailability(
       return
     }
 
-    const stale = getAnyCachedAvailabilitySummaryWindow(initialWindowKey)
-    if (stale) {
-      setData(stale)
+    const freshPrimary = readCachedSummaryWindow(primaryWindowKey, false)
+    if (freshPrimary) {
+      setData(freshPrimary)
+      setError(null)
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
+
+      if (includeOtherPros) {
+        void loadOtherProsOnly()
+      }
+
+      return
+    }
+
+    const staleFull = readCachedSummaryWindow(fullWindowKey, true)
+    if (staleFull) {
+      setData(staleFull)
       setError(null)
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(true)
-      void loadInitial(true)
+      void loadInitial('background')
+      return
+    }
+
+    const stalePrimary = readCachedSummaryWindow(primaryWindowKey, true)
+    if (stalePrimary) {
+      setData(stalePrimary)
+      setError(null)
+      setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(true)
+      void loadInitial('background')
       return
     }
 
     setData(null)
     setError(null)
     setLoadingMore(false)
-    void loadInitial(false)
+    void loadInitial('blocking')
   }, [
     open,
     proId,
     serviceId,
     canFetch,
-    initialWindowKey,
+    primaryWindowKey,
+    fullWindowKey,
+    includeOtherPros,
     loadInitial,
+    loadOtherProsOnly,
   ])
 
-  const refresh = useCallback(() => void loadInitial(false), [loadInitial])
+  const refresh = useCallback(() => {
+    void loadInitial(dataRef.current ? 'background' : 'blocking')
+  }, [loadInitial])
 
   return {
     loading,

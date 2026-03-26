@@ -1,4 +1,4 @@
-// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx 
+// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
 
 'use client'
 
@@ -48,14 +48,8 @@ type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
 
-// Module-level cache for Intl.DateTimeFormat instances keyed by locale+options.
-// Intl formatters are expensive to construct; reusing them avoids creating a new
-// object on every call to fmtInTz / fmtSelectedLine / hourInTz / ymdInTz /
-// buildDayScrollerModel.
 const _dtfCache = new Map<string, Intl.DateTimeFormat>()
 
-// Known option keys used across all callers in this file, in a fixed order so
-// the serialization is deterministic and cheap (no JSON.stringify).
 const _DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
   'timeZone',
   'weekday',
@@ -71,17 +65,18 @@ function _getDtf(
   locale: string | undefined,
   options: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormat {
-  // Build a compact, deterministic key from known option properties.
   const parts: string[] = [locale ?? '']
   for (const prop of _DTF_KEY_PROPS) {
     parts.push(String(options[prop] ?? ''))
   }
   const key = parts.join('|')
+
   let fmt = _dtfCache.get(key)
   if (!fmt) {
     fmt = new Intl.DateTimeFormat(locale, options)
     _dtfCache.set(key, fmt)
   }
+
   return fmt
 }
 
@@ -93,6 +88,7 @@ type ConfirmHoldSelection = {
   bookingSource: BookingSource
   mediaId: string | null
 }
+
 type BookingErrorUiAction =
   | 'REFRESH_AVAILABILITY'
   | 'PICK_NEW_SLOT'
@@ -128,8 +124,7 @@ function parseBookingApiError(
   const code =
     typeof raw.code === 'string' && raw.code.trim() ? raw.code.trim() : null
 
-  const retryable =
-    typeof raw.retryable === 'boolean' ? raw.retryable : null
+  const retryable = typeof raw.retryable === 'boolean' ? raw.retryable : null
 
   const uiAction =
     raw.uiAction === 'REFRESH_AVAILABILITY' ||
@@ -328,7 +323,7 @@ function buildDayScrollerModel(
         dateTimeLocalToUtcIso(`${d.date}T12:00:00`, appointmentTz),
       )
     } catch {
-      // fail-soft for display only
+      // display-only fallback
     }
 
     const top = _getDtf(undefined, {
@@ -353,8 +348,6 @@ function fallbackAllowedMode(args: {
   return 'SALON'
 }
 
-// Static shimmer skeleton shown while the summary data is loading.
-// Wrapped in React.memo so it never re-renders — its content never changes.
 const AvailabilityDrawerSkeleton = React.memo(function AvailabilityDrawerSkeleton() {
   return (
     <div className="tovis-glass-soft rounded-card p-4">
@@ -368,7 +361,10 @@ const AvailabilityDrawerSkeleton = React.memo(function AvailabilityDrawerSkeleto
       <div className="avail-skeleton mb-3 h-10 rounded-2xl" />
       <div className="mb-3 flex gap-2">
         {[0, 1, 2, 3, 4].map((i) => (
-          <div key={i} className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl" />
+          <div
+            key={i}
+            className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl"
+          />
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
@@ -386,7 +382,6 @@ export default function AvailabilityDrawer(props: {
   context: DrawerContext
   onConfirmHold?: (selection: ConfirmHoldSelection) => void | Promise<void>
 }) {
-
   const { open, onClose, context, onConfirmHold } = props
 
   const router = useRouter()
@@ -554,10 +549,8 @@ export default function AvailabilityDrawer(props: {
   }, [days])
 
   const dayScrollerDays = useMemo(() => {
-    // Reconstruct days from the stable daysKey string so this memo only
-    // recalculates when the actual data changes, not on every render where
-    // `days` (summary?.availableDays ?? EMPTY_DAYS) gets a new array reference.
     if (!daysKey) return []
+
     const reconstructedDays = daysKey.split('|').map((entry) => {
       const colonIdx = entry.lastIndexOf(':')
       return {
@@ -565,6 +558,7 @@ export default function AvailabilityDrawer(props: {
         slotCount: Number(entry.slice(colonIdx + 1)),
       }
     })
+
     return buildDayScrollerModel(reconstructedDays, appointmentTz)
   }, [daysKey, appointmentTz])
 
@@ -652,7 +646,7 @@ export default function AvailabilityDrawer(props: {
     [open, summary, selectedDayYMD, hasOtherPros, loadOtherSlots],
   )
 
-    const maybeLoadMoreDays = useCallback(() => {
+  const maybeLoadMoreDays = useCallback(() => {
     if (!hasMoreDays) return
     if (loading || loadingMore || refreshing) return
     void loadMore()
@@ -663,6 +657,7 @@ export default function AvailabilityDrawer(props: {
     if (!summary) return
     if (!selectedDayYMD) return
     if (!hasMoreDays) return
+    if (loadingPrimarySlots) return
 
     const selectedIndex = days.findIndex((d) => d.date === selectedDayYMD)
     if (
@@ -673,7 +668,15 @@ export default function AvailabilityDrawer(props: {
     ) {
       maybeLoadMoreDays()
     }
-  }, [open, summary, selectedDayYMD, hasMoreDays, days, maybeLoadMoreDays])
+  }, [
+    open,
+    summary,
+    selectedDayYMD,
+    hasMoreDays,
+    loadingPrimarySlots,
+    days,
+    maybeLoadMoreDays,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -776,22 +779,28 @@ export default function AvailabilityDrawer(props: {
   useEffect(() => {
     if (!open) return
 
-    const fallback = ymdInTz(appointmentTz)
-    const first = days[0]?.date ?? null
+    const todayInAppointmentTz = ymdInTz(appointmentTz)
+    const todayExists = todayInAppointmentTz
+      ? days.some((d) => d.date === todayInAppointmentTz)
+      : false
+    const firstAvailable = days[0]?.date ?? null
+    const preferredDay =
+      (todayExists ? todayInAppointmentTz : null) ??
+      firstAvailable ??
+      todayInAppointmentTz
 
-    setSelectedDayYMD((cur) => {
-      const nextBase = first ?? fallback
-      if (!nextBase) return cur ?? null
-      if (!cur) return nextBase
+    setSelectedDayYMD((current) => {
+      if (!preferredDay) return current ?? null
+      if (!current) return preferredDay
 
       if (days.length > 0) {
-        const exists = days.some((d) => d.date === cur)
-        return exists ? cur : nextBase
+        const currentStillExists = days.some((d) => d.date === current)
+        return currentStillExists ? current : preferredDay
       }
 
-      return cur
+      return current
     })
-  }, [open, appointmentTz, daysKey, days])
+  }, [open, appointmentTz, days])
 
   useEffect(() => {
     if (!open) return
@@ -915,10 +924,7 @@ export default function AvailabilityDrawer(props: {
       if (!res.ok) {
         const parsedError = parseBookingApiError(raw, res.status)
         throw new Error(
-          getBookingUiMessage(
-            parsedError,
-            `Hold failed (${res.status}).`,
-          ),
+          getBookingUiMessage(parsedError, `Hold failed (${res.status}).`),
         )
       }
 
@@ -950,44 +956,43 @@ export default function AvailabilityDrawer(props: {
   }
 
   async function onContinue() {
-  if (!selected?.holdId || !selected?.offeringId || holding) return
+    if (!selected?.holdId || !selected?.offeringId || holding) return
 
-  const payload: ConfirmHoldSelection = {
-    holdId: selected.holdId,
-    offeringId: selected.offeringId,
-    locationType: activeLocationType,
-    slotISO: selected.slotISO,
-    bookingSource,
-    mediaId: context.mediaId ?? null,
-  }
-
-  if (onConfirmHold) {
-    try {
-      await onConfirmHold(payload)
-      // Do not delete the hold here; the caller/route consumes it on success.
-      onClose()
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : 'Could not continue with that time.',
-      )
+    const payload: ConfirmHoldSelection = {
+      holdId: selected.holdId,
+      offeringId: selected.offeringId,
+      locationType: activeLocationType,
+      slotISO: selected.slotISO,
+      bookingSource,
+      mediaId: context.mediaId ?? null,
     }
-    return
+
+    if (onConfirmHold) {
+      try {
+        await onConfirmHold(payload)
+        onClose()
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : 'Could not continue with that time.',
+        )
+      }
+      return
+    }
+
+    const qs = new URLSearchParams({
+      holdId: payload.holdId,
+      offeringId: payload.offeringId,
+      locationType: payload.locationType,
+      source: payload.bookingSource,
+    })
+
+    if (payload.mediaId) {
+      qs.set('mediaId', payload.mediaId)
+    }
+
+    onClose()
+    router.push(`/booking/add-ons?${qs.toString()}`)
   }
-
-  const qs = new URLSearchParams({
-    holdId: payload.holdId,
-    offeringId: payload.offeringId,
-    locationType: payload.locationType,
-    source: payload.bookingSource,
-  })
-
-  if (payload.mediaId) {
-    qs.set('mediaId', payload.mediaId)
-  }
-
-  onClose()
-  router.push(`/booking/add-ons?${qs.toString()}`)
-}
 
   const selectedLine = selected?.slotISO
     ? fmtSelectedLine(selected.slotISO, appointmentTz)
@@ -1010,11 +1015,13 @@ export default function AvailabilityDrawer(props: {
       : availabilityError
 
   const canRenderSummary = Boolean(summary && primary)
-  const shouldShowLoading =
+  const summaryDaysLoading =
     loading && !canRenderSummary && !waitingForMobileAddress
+  const backgroundRefreshing = refreshing
+  const daySlotsLoading = loadingPrimarySlots
   const shouldShowEmpty =
     !displayError &&
-    !shouldShowLoading &&
+    !summaryDaysLoading &&
     !canRenderSummary &&
     !waitingForMobileAddress
 
@@ -1082,11 +1089,13 @@ export default function AvailabilityDrawer(props: {
           className="looksNoScrollbar overflow-y-auto px-4 pb-4"
           style={{ paddingBottom: STICKY_CTA_H + 14 }}
         >
-          {shouldShowLoading ? (
+          {summaryDaysLoading ? (
             <AvailabilityDrawerSkeleton />
           ) : displayError ? (
             <div className="tovis-glass-soft rounded-card p-4">
-              <div className="mb-3 text-sm font-semibold text-toneDanger">{displayError}</div>
+              <div className="mb-3 text-sm font-semibold text-toneDanger">
+                {displayError}
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -1162,9 +1171,9 @@ export default function AvailabilityDrawer(props: {
                 }}
               />
 
-              {refreshing ? (
+              {backgroundRefreshing ? (
                 <div className="mb-3 text-xs font-semibold text-textSecondary">
-                  Refreshing availability…
+                  Updating availability in the background…
                 </div>
               ) : null}
 
@@ -1196,17 +1205,26 @@ export default function AvailabilityDrawer(props: {
 
               {loadingMore ? (
                 <div className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
+                  <div className="mb-3 text-xs font-semibold text-textSecondary">
+                    Loading more days…
+                  </div>
                   <div className="avail-skeleton mb-3 h-3 w-24 rounded-full" />
                   <div className="flex gap-2 overflow-hidden">
                     {[0, 1, 2, 3].map((i) => (
-                      <div key={i} className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl" />
+                      <div
+                        key={i}
+                        className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl"
+                      />
                     ))}
                   </div>
                 </div>
               ) : null}
 
-              {loadingPrimarySlots ? (
+              {daySlotsLoading ? (
                 <div className="tovis-glass-soft mb-3 rounded-card p-4">
+                  <div className="mb-3 text-xs font-semibold text-textSecondary">
+                    Loading times…
+                  </div>
                   <div className="avail-skeleton mb-4 h-3 w-28 rounded-full" />
                   <div className="mb-3 grid grid-cols-3 gap-2">
                     {[0, 1, 2].map((i) => (
@@ -1215,7 +1233,10 @@ export default function AvailabilityDrawer(props: {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-                      <div key={i} className="avail-skeleton h-10 w-[62px] rounded-full" />
+                      <div
+                        key={i}
+                        className="avail-skeleton h-10 w-[62px] rounded-full"
+                      />
                     ))}
                   </div>
                 </div>
@@ -1237,7 +1258,7 @@ export default function AvailabilityDrawer(props: {
                 }}
               />
 
-                            {holding ? (
+              {holding ? (
                 <div
                   ref={holdStatusRef}
                   className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"

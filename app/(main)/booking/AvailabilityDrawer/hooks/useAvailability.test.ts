@@ -36,6 +36,7 @@ type HookProps = {
   context: DrawerContext
   locationType: ServiceLocationType | null
   clientAddressId: string | null
+  includeOtherPros: boolean
 }
 
 function makeSummary(overrides?: Record<string, unknown>) {
@@ -56,6 +57,11 @@ function makeSummary(overrides?: Record<string, unknown>) {
     adjacencyBufferMinutes: 15,
     maxDaysAhead: 30,
     durationMinutes: 60,
+    windowStartDate: '2026-03-11',
+    windowEndDate: '2026-03-12',
+    nextStartDate: null,
+    hasMoreDays: false,
+    firstDaySlots: ['2026-03-11T17:00:00.000Z'],
     primaryPro: {
       id: 'pro_1',
       businessName: 'Test Pro',
@@ -106,6 +112,7 @@ function makeHookProps(overrides?: Partial<HookProps>): HookProps {
     context: makeContext(),
     locationType: 'SALON',
     clientAddressId: null,
+    includeOtherPros: false,
     ...overrides,
   }
 }
@@ -169,7 +176,7 @@ describe('useAvailability', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads availability on first uncached fetch', async () => {
+  it('loads primary availability on first uncached fetch', async () => {
     const summary = makeSummary()
     const fetchGate = deferred<Response>()
 
@@ -177,8 +184,20 @@ describe('useAvailability', () => {
 
     const { useAvailability } = await import('./useAvailability')
 
-    const { result } = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const { result } = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
     expect(result.current.loading).toBe(true)
@@ -201,15 +220,27 @@ describe('useAvailability', () => {
     expect(result.current.data).toEqual(summary)
   })
 
-  it('returns cached data immediately within TTL without refetching', async () => {
+  it('returns cached primary data immediately within TTL without refetching', async () => {
     const summary = makeSummary()
 
     mocks.fetch.mockResolvedValueOnce(makeResponse(summary))
 
     const { useAvailability } = await import('./useAvailability')
 
-    const first = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const first = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
     await waitFor(() => {
@@ -221,8 +252,20 @@ describe('useAvailability', () => {
 
     first.unmount()
 
-    const second = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const second = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
     await waitFor(() => {
@@ -234,7 +277,7 @@ describe('useAvailability', () => {
     expect(second.result.current.data).toEqual(summary)
   })
 
-  it('returns stale cached data and refreshes in the background after TTL', async () => {
+  it('returns stale cached data and refreshes in the background after TTL without blanking', async () => {
     const nowSpy = vi.spyOn(Date, 'now')
     let nowMs = new Date('2026-03-10T12:00:00.000Z').getTime()
     nowSpy.mockImplementation(() => nowMs)
@@ -251,8 +294,20 @@ describe('useAvailability', () => {
 
     const { useAvailability } = await import('./useAvailability')
 
-    const first = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const first = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
     await waitFor(() => {
@@ -270,8 +325,20 @@ describe('useAvailability', () => {
     const refreshGate = deferred<Response>()
     mocks.fetch.mockReturnValueOnce(refreshGate.promise)
 
-    const second = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const second = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
     await waitFor(() => {
@@ -295,7 +362,95 @@ describe('useAvailability', () => {
     expect(second.result.current.data).toEqual(freshSummary)
   })
 
-  it('dedupes concurrent in-flight requests for the same key', async () => {
+  it('renders cached primary data first and loads other pros in the background', async () => {
+    const primaryOnlySummary = makeSummary({
+      otherPros: [],
+    })
+
+    const fullSummary = makeSummary({
+      otherPros: [
+        {
+          id: 'pro_2',
+          businessName: 'Nearby Pro',
+          avatarUrl: null,
+          location: 'Los Angeles',
+          offeringId: 'offering_1',
+          isCreator: false,
+          timeZone: 'America/Los_Angeles',
+          locationId: 'loc_2',
+        },
+      ],
+    })
+
+    mocks.fetch.mockResolvedValueOnce(makeResponse(primaryOnlySummary))
+
+    const { useAvailability } = await import('./useAvailability')
+
+    const seed = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
+    )
+
+    await waitFor(() => {
+      expect(seed.result.current.loading).toBe(false)
+    })
+
+    expect(seed.result.current.data).toEqual(primaryOnlySummary)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+
+    seed.unmount()
+
+    const fullFetchGate = deferred<Response>()
+    mocks.fetch.mockReturnValueOnce(fullFetchGate.promise)
+
+    const second = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: true,
+        }),
+      },
+    )
+
+    await waitFor(() => {
+      expect(second.result.current.data).toEqual(primaryOnlySummary)
+      expect(second.result.current.loading).toBe(false)
+      expect(second.result.current.refreshing).toBe(true)
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      fullFetchGate.resolve(makeResponse(fullSummary))
+      await flushMicrotasks(5)
+    })
+
+    await waitFor(() => {
+      expect(second.result.current.refreshing).toBe(false)
+    })
+
+    expect(second.result.current.data).toEqual(fullSummary)
+  })
+
+  it('dedupes concurrent in-flight primary requests for the same key', async () => {
     const summary = makeSummary()
     const fetchGate = deferred<Response>()
 
@@ -303,12 +458,36 @@ describe('useAvailability', () => {
 
     const { useAvailability } = await import('./useAvailability')
 
-    const first = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const first = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
-    const second = renderHook(() =>
-      useAvailability(true, makeContext(), 'SALON', null),
+    const second = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
     )
 
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
@@ -337,6 +516,7 @@ describe('useAvailability', () => {
           props.context,
           props.locationType,
           props.clientAddressId,
+          props.includeOtherPros,
         ),
       {
         initialProps: makeHookProps({
@@ -344,6 +524,7 @@ describe('useAvailability', () => {
           context: makeContext(),
           locationType: 'MOBILE',
           clientAddressId: null,
+          includeOtherPros: false,
         }),
       },
     )
@@ -366,6 +547,7 @@ describe('useAvailability', () => {
         context: makeContext(),
         locationType: 'MOBILE',
         clientAddressId: 'addr_1',
+        includeOtherPros: false,
       }),
     )
 
@@ -378,35 +560,42 @@ describe('useAvailability', () => {
   })
 
   it('redirects on 401 and surfaces the login message', async () => {
-  clearAvailabilitySummaryPrefetchCache()
+    mocks.fetch.mockResolvedValue(makeResponse({ error: 'Unauthorized.' }, 401))
+    mocks.safeJson.mockResolvedValue({
+      error: 'Unauthorized.',
+    })
 
-  mocks.fetch.mockResolvedValue(
-    makeResponse({ error: 'Unauthorized.' }, 401),
-  )
+    const { useAvailability } = await import('./useAvailability')
 
-  mocks.safeJson.mockResolvedValue({
-    error: 'Unauthorized.',
+    const { result } = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    await waitFor(() => {
+      expect(mocks.redirectToLogin).toHaveBeenCalled()
+    })
+
+    expect(mocks.redirectToLogin).toHaveBeenCalledWith(
+      expect.anything(),
+      'availability',
+    )
+    expect(result.current.error).toBe('Please log in to view availability.')
+    expect(result.current.data).toBeNull()
   })
-
-  const { useAvailability } = await import('./useAvailability')
-
-  const { result } = renderHook(() =>
-    useAvailability(true, makeContext(), 'SALON', null),
-  )
-
-  await waitFor(() => {
-    expect(result.current.loading).toBe(false)
-  })
-
-  await waitFor(() => {
-    expect(mocks.redirectToLogin).toHaveBeenCalled()
-  })
-
-  expect(mocks.redirectToLogin).toHaveBeenCalledWith(
-    expect.anything(),
-    'availability',
-  )
-  expect(result.current.error).toBe('Please log in to view availability.')
-  expect(result.current.data).toBeNull()
-})
 })
