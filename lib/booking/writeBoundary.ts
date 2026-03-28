@@ -3057,6 +3057,53 @@ function logHoldConflict(args: {
   })
 }
 
+function logHoldCreateInternalError(args: {
+  error: unknown
+  clientId: string
+  offeringId: string
+  professionalId: string
+  requestedStart: Date
+  locationType: ServiceLocationType
+  requestedLocationId: string | null
+  resolvedLocationId: string
+  resolvedTimeZone: string
+  clientAddressId: string | null
+  selectedClientAddressId: string | null
+  durationMinutes: number
+  bufferMinutes: number
+  salonLocationAddress: unknown
+  clientServiceAddress: unknown
+  holdCreateData: Prisma.BookingHoldUncheckedCreateInput
+}): void {
+  const serializedError =
+    args.error instanceof Error
+      ? {
+          name: args.error.name,
+          message: args.error.message,
+          stack: args.error.stack,
+        }
+      : args.error
+
+  console.error('performLockedCreateHold internal error', {
+    error: serializedError,
+    clientId: args.clientId,
+    offeringId: args.offeringId,
+    professionalId: args.professionalId,
+    requestedStart: args.requestedStart.toISOString(),
+    locationType: args.locationType,
+    requestedLocationId: args.requestedLocationId,
+    resolvedLocationId: args.resolvedLocationId,
+    resolvedTimeZone: args.resolvedTimeZone,
+    clientAddressId: args.clientAddressId,
+    selectedClientAddressId: args.selectedClientAddressId,
+    durationMinutes: args.durationMinutes,
+    bufferMinutes: args.bufferMinutes,
+    salonLocationAddress: args.salonLocationAddress,
+    clientServiceAddress: args.clientServiceAddress,
+    holdCreateData: args.holdCreateData,
+  })
+}
+
 function logFinalizePolicyFailure(args: {
   professionalId: string
   locationId: string
@@ -4704,7 +4751,6 @@ async function performLockedUploadProBookingMedia(args: {
     meta: buildMeta(true),
   }
 }
-
 async function performLockedCreateHold(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -4832,36 +4878,38 @@ async function performLockedCreateHold(args: {
       ? buildAddressSnapshot(clientServiceAddress) ?? Prisma.JsonNull
       : Prisma.JsonNull
 
+  const holdCreateData = {
+    offeringId: offering.id,
+    professionalId: offering.professionalId,
+    clientId,
+    scheduledFor: requestedStart,
+    expiresAt,
+    locationType,
+    locationId: locationContext.locationId,
+    locationTimeZone: locationContext.timeZone,
+
+    locationAddressSnapshot: locationAddressSnapshotInput,
+    locationLatSnapshot: locationContext.lat,
+    locationLngSnapshot: locationContext.lng,
+
+    clientAddressId:
+      locationType === ServiceLocationType.MOBILE && selectedClientAddress
+        ? selectedClientAddress.id
+        : null,
+    clientAddressSnapshot: clientAddressSnapshotInput,
+    clientAddressLatSnapshot:
+      locationType === ServiceLocationType.MOBILE && selectedClientAddress
+        ? decimalToNumber(selectedClientAddress.lat)
+        : null,
+    clientAddressLngSnapshot:
+      locationType === ServiceLocationType.MOBILE && selectedClientAddress
+        ? decimalToNumber(selectedClientAddress.lng)
+        : null,
+  } satisfies Prisma.BookingHoldUncheckedCreateInput
+
   try {
     const hold: CreateHoldRecord = await tx.bookingHold.create({
-      data: {
-        offeringId: offering.id,
-        professionalId: offering.professionalId,
-        clientId,
-        scheduledFor: requestedStart,
-        expiresAt,
-        locationType,
-        locationId: locationContext.locationId,
-        locationTimeZone: locationContext.timeZone,
-
-        locationAddressSnapshot: locationAddressSnapshotInput,
-        locationLatSnapshot: locationContext.lat,
-        locationLngSnapshot: locationContext.lng,
-
-        clientAddressId:
-          locationType === ServiceLocationType.MOBILE && selectedClientAddress
-            ? selectedClientAddress.id
-            : null,
-        clientAddressSnapshot: clientAddressSnapshotInput,
-        clientAddressLatSnapshot:
-          locationType === ServiceLocationType.MOBILE && selectedClientAddress
-            ? decimalToNumber(selectedClientAddress.lat)
-            : null,
-        clientAddressLngSnapshot:
-          locationType === ServiceLocationType.MOBILE && selectedClientAddress
-            ? decimalToNumber(selectedClientAddress.lng)
-            : null,
-      },
+      data: holdCreateData,
       select: CREATE_HOLD_SELECT,
     })
 
@@ -4902,6 +4950,25 @@ async function performLockedCreateHold(args: {
 
       throw bookingError('TIME_HELD')
     }
+
+    logHoldCreateInternalError({
+      error,
+      clientId,
+      offeringId: offering.id,
+      professionalId: offering.professionalId,
+      requestedStart,
+      locationType,
+      requestedLocationId,
+      resolvedLocationId: locationContext.locationId,
+      resolvedTimeZone: locationContext.timeZone,
+      clientAddressId,
+      selectedClientAddressId: selectedClientAddress?.id ?? null,
+      durationMinutes,
+      bufferMinutes: locationContext.bufferMinutes,
+      salonLocationAddress,
+      clientServiceAddress,
+      holdCreateData,
+    })
 
     throw error
   }

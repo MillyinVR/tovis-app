@@ -1,4 +1,3 @@
-// lib/booking/scheduleTransaction.ts
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
@@ -8,18 +7,27 @@ export type LockedScheduleContext = {
   now: Date
 }
 
+const SCHEDULE_TX_MAX_WAIT_MS = 10_000
+const SCHEDULE_TX_TIMEOUT_MS = 20_000
+
 export async function withLockedProfessionalTransaction<T>(
   professionalId: string,
   run: (ctx: LockedScheduleContext) => Promise<T>,
 ): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    await lockProfessionalSchedule(tx, professionalId)
+  return prisma.$transaction(
+    async (tx) => {
+      await lockProfessionalSchedule(tx, professionalId)
 
-    return run({
-      tx,
-      now: new Date(),
-    })
-  })
+      return run({
+        tx,
+        now: new Date(),
+      })
+    },
+    {
+      maxWait: SCHEDULE_TX_MAX_WAIT_MS,
+      timeout: SCHEDULE_TX_TIMEOUT_MS,
+    },
+  )
 }
 
 export async function lockClientOwnedBookingSchedule(args: {
@@ -64,17 +72,23 @@ export async function withLockedClientOwnedBookingTransaction<T>(args: {
     professionalId: string
   }) => Promise<T>
 }): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    const { professionalId, now } = await lockClientOwnedBookingSchedule({
-      tx,
-      bookingId: args.bookingId,
-      clientId: args.clientId,
-    })
+  return prisma.$transaction(
+    async (tx) => {
+      const { professionalId, now } = await lockClientOwnedBookingSchedule({
+        tx,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+      })
 
-    return args.run({
-      tx,
-      now,
-      professionalId,
-    })
-  })
+      return args.run({
+        tx,
+        now,
+        professionalId,
+      })
+    },
+    {
+      maxWait: SCHEDULE_TX_MAX_WAIT_MS,
+      timeout: SCHEDULE_TX_TIMEOUT_MS,
+    },
+  )
 }

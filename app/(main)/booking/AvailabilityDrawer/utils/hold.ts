@@ -16,16 +16,14 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
   return null
 }
 
-/**
- * Parses POST /api/holds response:
- * jsonOk({ hold: { id, scheduledFor, expiresAt, locationType, ... } }, status)
- */
 export function parseHoldResponse(data: unknown): HoldParsed {
   if (!isRecord(data) || data.ok !== true) {
     throw new Error('Hold response malformed.')
   }
 
-  const holdRaw = (data as Record<string, unknown>).hold
+  const payload = isRecord(data.data) ? data.data : data
+  const holdRaw = payload.hold
+
   if (!isRecord(holdRaw)) {
     throw new Error('Hold response missing hold.')
   }
@@ -53,7 +51,10 @@ export async function deleteHoldById(holdId: string) {
   const id = (holdId || '').trim()
   if (!id) return
   try {
-    await fetch(`/api/holds/${encodeURIComponent(id)}`, { method: 'DELETE', cache: 'no-store' })
+    await fetch(`/api/holds/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+    })
   } catch {
     // intentionally swallow; delete is best-effort
   }

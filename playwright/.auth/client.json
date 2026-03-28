@@ -1,0 +1,15 @@
+{
+  "cookies": [
+    {
+      "name": "tovis_token",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbW11YTFvejcwMDAwaWUwNHg3OHh0dDU1Iiwicm9sZSI6IkNMSUVOVCIsImlhdCI6MTc3NDY4NzMxMCwiZXhwIjoxNzc1MjkyMTEwfQ.Eob0Ayp0Z9Kr3Ihy4okLVYrXwMKhmyYw0fxzAWlrHWQ",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": 1775292110.072932,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

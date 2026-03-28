@@ -333,7 +333,10 @@ export default function AddOnsClient({
           No add-ons for this service right now. You’re good to go.
         </div>
       ) : addOns.length ? (
-        <div className="mt-4 grid gap-3">
+        <div
+          data-testid="booking-add-ons-list"
+          className="mt-4 grid gap-3"
+        >
           {grouped.map(({ group, items }) => (
             <div key={group} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
               <div className="text-[12px] font-black text-textSecondary">{group}</div>
@@ -432,15 +435,22 @@ export default function AddOnsClient({
         <div className="mx-auto max-w-180 px-4 py-3">
           <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3">
             <button
+              data-testid="booking-add-ons-continue-button"
               type="button"
               onClick={() => void finalize()}
-              disabled={submitting || !holdId || !offeringId || (holdSecondsLeft != null && holdSecondsLeft <= 0)}
+              disabled={
+                submitting ||
+                !holdId ||
+                !offeringId ||
+                (holdSecondsLeft != null && holdSecondsLeft <= 0)
+              }
               className="flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-accentPrimary text-[14px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-70"
             >
               {submitting ? 'Booking…' : 'Complete booking'}
             </button>
 
             <button
+              data-testid="booking-add-ons-skip-button"
               type="button"
               onClick={() => router.back()}
               disabled={submitting}
