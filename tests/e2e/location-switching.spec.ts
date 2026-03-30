@@ -62,7 +62,7 @@ function slotButtons(page: Page): Locator {
 }
 
 function holdBanner(page: Page): Locator {
-  return availabilityDialog(page).getByText(/\d{2}:\d{2}/).first()
+  return availabilityDialog(page).getByTestId('availability-hold-banner')
 }
 
 async function gotoProfessionalServicesPage(
@@ -100,10 +100,7 @@ async function expectHoldCreated(page: Page): Promise<void> {
 }
 
 async function expectHoldClearedAfterLocationSwitch(page: Page): Promise<void> {
-  const banner = holdBanner(page)
-  if (await banner.count()) {
-    await expect(banner).toBeHidden({ timeout: 10_000 })
-  }
+  await expect(holdBanner(page)).toBeHidden({ timeout: 10_000 })
   await expectContinueDisabled(page)
 }
 
@@ -171,8 +168,19 @@ test.describe('location switching browser flow', () => {
     expect(salonHoldResponse.status(), salonHoldBody).toBe(201)
     await expectHoldCreated(page)
 
+    const salonHoldDeletePromise = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('/api/holds') &&
+        resp.request().method() === 'DELETE',
+      { timeout: 15_000 },
+    ).catch(() => {
+      // DELETE is best-effort — if no hold existed (e.g. TIME_IN_PAST),
+      // no DELETE fires. Don't block the test.
+    })
     await switchToMobile(page)
+    await salonHoldDeletePromise
     await expectHoldClearedAfterLocationSwitch(page)
+
 
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)

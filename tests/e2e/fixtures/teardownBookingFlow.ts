@@ -157,10 +157,10 @@ export async function teardownBookingFlow({
     },
   })
 
-  if (clientAddressId) {
+  if (clientId) {
     await prisma.clientAddress.deleteMany({
       where: {
-        id: clientAddressId,
+        clientId: clientId,
       },
     })
   }

@@ -660,7 +660,7 @@ export default function AvailabilityDrawer(props: {
 
   const hardResetUi = useCallback(
     async (args?: { deleteHold?: boolean }) => {
-      const holdId = selectedHoldIdRef.current
+      const holdId = selectedHoldIdRef.current ?? selected?.holdId ?? null
 
       if (args?.deleteHold && holdId) {
         void deleteHoldById(holdId).catch(() => {})
@@ -1470,6 +1470,7 @@ export default function AvailabilityDrawer(props: {
               ) : selected?.holdId && selectedLine ? (
                 <div
                   ref={holdStatusRef}
+                  data-testid="availability-hold-banner"
                   className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
                 >
                   <div className="text-sm font-black text-textPrimary">

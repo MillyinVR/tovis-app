@@ -20,7 +20,7 @@
           - generic [ref=e21]: Beauty professional • San Diego, CA
           - generic [ref=e22]:
             - link "Message" [ref=e23] [cursor=pointer]:
-              - /url: /messages/start?contextType=PRO_PROFILE&contextId=cmndmr619002mtz6o9y1ml9fs
+              - /url: /messages/start?contextType=PRO_PROFILE&contextId=cmnducja90034tzskbrds3c3f
             - generic [ref=e24]: "Time zone: America/Los_Angeles"
         - generic [ref=e25]:
           - generic [ref=e26]:
@@ -34,11 +34,11 @@
             - generic [ref=e34]: Favorites
       - navigation [ref=e35]:
         - link "Portfolio" [ref=e36] [cursor=pointer]:
-          - /url: /professionals/cmndmr619002mtz6o9y1ml9fs
+          - /url: /professionals/cmnducja90034tzskbrds3c3f
         - link "Services" [ref=e37] [cursor=pointer]:
-          - /url: /professionals/cmndmr619002mtz6o9y1ml9fs?tab=services
+          - /url: /professionals/cmnducja90034tzskbrds3c3f?tab=services
         - link "Reviews" [ref=e38] [cursor=pointer]:
-          - /url: /professionals/cmndmr619002mtz6o9y1ml9fs?tab=reviews
+          - /url: /professionals/cmnducja90034tzskbrds3c3f?tab=reviews
       - generic [ref=e39]:
         - generic [ref=e40]: Services
         - button "Book E2E Base Offering" [ref=e42] [cursor=pointer]:
@@ -82,21 +82,21 @@
       - generic [ref=e95]:
         - generic [ref=e96]:
           - generic [ref=e97]: Availability
-          - generic [ref=e98]: Pick a time. We hold it for you.09:36
+          - generic [ref=e98]: Pick a time. We hold it for you.09:33
         - button "Close" [ref=e99]: ✕
       - generic [ref=e100]:
         - generic [ref=e104]:
           - generic [ref=e105]:
             - link "E2E Test Pro" [ref=e106] [cursor=pointer]:
-              - /url: /professionals/cmndmr619002mtz6o9y1ml9fs
+              - /url: /professionals/cmnducja90034tzskbrds3c3f
             - generic [ref=e107]: ⭐ Creator
           - generic [ref=e108]: San Diego, CA
           - generic [ref=e109]: Times in America/Los_Angeles
           - generic [ref=e110]: Matched to this service
         - generic [ref=e113]:
           - generic [ref=e114]: You’re booking
-          - generic [ref=e115]: e2e_1774901882548_owxpnr Base Service
-          - generic [ref=e116]: e2e_1774901882548_owxpnr Category
+          - generic [ref=e115]: e2e_1774914636660_wp1ohn Base Service
+          - generic [ref=e116]: e2e_1774914636660_wp1ohn Category
           - generic [ref=e117]:
             - generic [ref=e118]:
               - text: ⏱
@@ -122,60 +122,70 @@
             - generic [ref=e137]: In-salon
             - generic [ref=e138]: You’re booking at the pro’s location. Pricing and available times are shown for in-salon service.
           - generic [ref=e139]: You won’t be charged until the pro confirms.
-        - generic [ref=e140]:
-          - generic [ref=e141]: Choose a day
-          - generic [ref=e142]:
-            - button "Mon 30" [pressed] [ref=e143]:
-              - generic [ref=e144]: Mon
-              - generic [ref=e145]: "30"
-            - button "Tue 31" [ref=e146]:
-              - generic [ref=e147]: Tue
-              - generic [ref=e148]: "31"
-            - button "Wed 01" [ref=e149]:
-              - generic [ref=e150]: Wed
-              - generic [ref=e151]: "01"
-            - button "Thu 02" [ref=e152]:
-              - generic [ref=e153]: Thu
-              - generic [ref=e154]: "02"
-            - button "Fri 03" [ref=e155]:
-              - generic [ref=e156]: Fri
-              - generic [ref=e157]: "03"
-            - button "Sat 04" [ref=e158]:
-              - generic [ref=e159]: Sat
-              - generic [ref=e160]: "04"
-            - button "Sun 05" [ref=e161]:
-              - generic [ref=e162]: Sun
-              - generic [ref=e163]: "05"
-        - generic [ref=e164]:
-          - generic [ref=e166]:
-            - generic [ref=e167]: Available times
-            - generic [ref=e168]: Pick a time. We’ll hold it.
-          - generic [ref=e169]:
-            - button "Morning" [disabled] [ref=e170]
-            - button "Afternoon" [ref=e171] [cursor=pointer]
-            - button "Evening" [ref=e172] [cursor=pointer]
-          - generic [ref=e173]:
-            - button "Mon 2:45 PM" [ref=e174] [cursor=pointer]
-            - button "Mon 3:00 PM" [ref=e175] [cursor=pointer]
-            - button "Mon 3:15 PM" [ref=e176] [cursor=pointer]
-            - button "Mon 3:30 PM" [ref=e177] [cursor=pointer]
-            - button "Mon 3:45 PM" [ref=e178] [cursor=pointer]
-            - button "Mon 4:00 PM" [ref=e179] [cursor=pointer]
-            - button "Mon 4:15 PM" [ref=e180] [cursor=pointer]
-            - button "Mon 4:30 PM" [ref=e181] [cursor=pointer]
-            - button "Mon 4:45 PM" [ref=e182] [cursor=pointer]
-        - generic [ref=e183]:
-          - generic [ref=e184]: Your time is held
-          - generic [ref=e185]: "Time held: Monday, March 30, 2026 at 1:30 PM"
-          - generic [ref=e186]: Continue before 09:36
-          - button "Continue to add-ons" [ref=e187]
-        - generic [ref=e188]:
-          - generic [ref=e190]:
-            - generic [ref=e191]: Waitlist
-            - generic [ref=e192]: Can’t make these times? We’ll ping you.
-          - button "Join waitlist" [ref=e193]
-      - generic [ref=e196]:
-        - generic [ref=e197]: "Time held: Monday, March 30, 2026 at 1:30 PM"
-        - button "Continue to add-ons" [ref=e198]
-        - generic [ref=e199]: No charge yet. The pro confirms next.
+        - generic [ref=e140]: Updating availability in the background…
+        - generic [ref=e141]:
+          - generic [ref=e142]: Choose a day
+          - generic [ref=e143]:
+            - button "Mon 30" [pressed] [ref=e144]:
+              - generic [ref=e145]: Mon
+              - generic [ref=e146]: "30"
+            - button "Tue 31" [ref=e147]:
+              - generic [ref=e148]: Tue
+              - generic [ref=e149]: "31"
+            - button "Wed 01" [ref=e150]:
+              - generic [ref=e151]: Wed
+              - generic [ref=e152]: "01"
+            - button "Thu 02" [ref=e153]:
+              - generic [ref=e154]: Thu
+              - generic [ref=e155]: "02"
+            - button "Fri 03" [ref=e156]:
+              - generic [ref=e157]: Fri
+              - generic [ref=e158]: "03"
+            - button "Sat 04" [ref=e159]:
+              - generic [ref=e160]: Sat
+              - generic [ref=e161]: "04"
+            - button "Sun 05" [ref=e162]:
+              - generic [ref=e163]: Sun
+              - generic [ref=e164]: "05"
+        - generic [ref=e165]:
+          - generic [ref=e167]:
+            - generic [ref=e168]: Available times
+            - generic [ref=e169]: Pick a time. We’ll hold it.
+          - generic [ref=e170]:
+            - button "Morning" [disabled] [ref=e171]
+            - button "Afternoon" [disabled] [ref=e172]
+            - button "Evening" [ref=e173] [cursor=pointer]
+          - generic [ref=e174]:
+            - button "Mon 6:15 PM" [ref=e175] [cursor=pointer]
+            - button "Mon 6:30 PM" [ref=e176] [cursor=pointer]
+            - button "Mon 6:45 PM" [ref=e177] [cursor=pointer]
+            - button "Mon 7:00 PM" [ref=e178] [cursor=pointer]
+            - button "Mon 7:15 PM" [ref=e179] [cursor=pointer]
+            - button "Mon 7:30 PM" [ref=e180] [cursor=pointer]
+            - button "Mon 7:45 PM" [ref=e181] [cursor=pointer]
+            - button "Mon 8:00 PM" [ref=e182] [cursor=pointer]
+            - button "Mon 8:15 PM" [ref=e183] [cursor=pointer]
+            - button "Mon 8:30 PM" [ref=e184] [cursor=pointer]
+            - button "Mon 8:45 PM" [ref=e185] [cursor=pointer]
+            - button "Mon 9:00 PM" [ref=e186] [cursor=pointer]
+            - button "Mon 9:15 PM" [ref=e187] [cursor=pointer]
+            - button "Mon 9:30 PM" [ref=e188] [cursor=pointer]
+            - button "Mon 9:45 PM" [ref=e189] [cursor=pointer]
+            - button "Mon 10:00 PM" [ref=e190] [cursor=pointer]
+            - button "Mon 10:15 PM" [ref=e191] [cursor=pointer]
+            - button "Mon 10:30 PM" [ref=e192] [cursor=pointer]
+        - generic [ref=e193]:
+          - generic [ref=e194]: Your time is held
+          - generic [ref=e195]: "Time held: Monday, March 30, 2026 at 5:00 PM"
+          - generic [ref=e196]: Continue before 09:33
+          - button "Continue to add-ons" [ref=e197]
+        - generic [ref=e198]:
+          - generic [ref=e200]:
+            - generic [ref=e201]: Waitlist
+            - generic [ref=e202]: Can’t make these times? We’ll ping you.
+          - button "Join waitlist" [ref=e203]
+      - generic [ref=e206]:
+        - generic [ref=e207]: "Time held: Monday, March 30, 2026 at 5:00 PM"
+        - button "Continue to add-ons" [ref=e208]
+        - generic [ref=e209]: No charge yet. The pro confirms next.
 ```
