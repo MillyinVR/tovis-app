@@ -1,0 +1,125 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - link "← Back to Looks" [ref=e7] [cursor=pointer]:
+            - /url: /looks
+          - generic [ref=e8]:
+            - button "Share" [ref=e10]:
+              - generic [ref=e11]: ↗
+              - generic [ref=e12]: Share
+            - button "0" [ref=e14] [cursor=pointer]:
+              - generic [ref=e15]: ♡
+              - generic [ref=e16]: "0"
+        - generic [ref=e19]:
+          - generic [ref=e20]: E2E Test Pro
+          - generic [ref=e21]: Beauty professional • San Diego, CA
+          - generic [ref=e22]:
+            - link "Message" [ref=e23] [cursor=pointer]:
+              - /url: /messages/start?contextType=PRO_PROFILE&contextId=cmndn6if80002tzjkqq17x8dx
+            - generic [ref=e24]: "Time zone: America/Los_Angeles"
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - generic [ref=e27]: –
+            - generic [ref=e28]: Rating
+          - generic [ref=e29]:
+            - generic [ref=e30]: "0"
+            - generic [ref=e31]: Reviews
+          - generic [ref=e32]:
+            - generic [ref=e33]: "0"
+            - generic [ref=e34]: Favorites
+      - navigation [ref=e35]:
+        - link "Portfolio" [ref=e36] [cursor=pointer]:
+          - /url: /professionals/cmndn6if80002tzjkqq17x8dx
+        - link "Services" [ref=e37] [cursor=pointer]:
+          - /url: /professionals/cmndn6if80002tzjkqq17x8dx?tab=services
+        - link "Reviews" [ref=e38] [cursor=pointer]:
+          - /url: /professionals/cmndn6if80002tzjkqq17x8dx?tab=reviews
+      - generic [ref=e39]:
+        - generic [ref=e40]: Services
+        - button "Book E2E Base Offering" [ref=e42] [cursor=pointer]:
+          - generic [ref=e45]:
+            - generic [ref=e46]: E2E Base Offering
+            - generic [ref=e47]: Seeded offering for browser E2E.
+            - generic [ref=e48]:
+              - generic [ref=e49]: "Salon: $100 • 60 min"
+              - generic [ref=e50]: "Mobile: $120 • 75 min"
+          - generic [ref=e51]:
+            - generic [ref=e53]:
+              - text: Book
+              - generic [ref=e54]: →
+            - button "Save service" [ref=e55]: Save
+    - generic [ref=e59]:
+      - link "Home" [ref=e60] [cursor=pointer]:
+        - /url: /client
+        - generic [ref=e61]: 🏠
+        - generic [ref=e62]: Home
+      - link "Search" [ref=e64] [cursor=pointer]:
+        - /url: /search
+        - generic [ref=e65]: 🗺️
+        - generic [ref=e66]: Search
+      - link "Looks" [ref=e69] [cursor=pointer]:
+        - /url: /looks
+        - generic [ref=e70]: Looks
+      - link "Messages" [ref=e71] [cursor=pointer]:
+        - /url: /messages
+        - generic [ref=e72]: 💬
+        - generic [ref=e73]: Messages
+      - link "Bookings" [ref=e75] [cursor=pointer]:
+        - /url: /client/bookings
+        - generic [ref=e76]: 🗓️
+        - generic [ref=e77]: Bookings
+  - button "Open Next.js Dev Tools" [ref=e84] [cursor=pointer]:
+    - img [ref=e85]
+  - alert [ref=e88]
+  - generic [ref=e89]:
+    - button "Close availability" [ref=e90]
+    - dialog [ref=e91]:
+      - generic [ref=e95]:
+        - generic [ref=e96]:
+          - generic [ref=e97]: Availability
+          - generic [ref=e98]: Pick a time. We hold it for you.
+        - button "Close" [ref=e99]: ✕
+      - generic [ref=e100]:
+        - generic [ref=e101]:
+          - generic [ref=e102]: Appointment type
+          - generic [ref=e103]: Availability and pricing update based on the selected appointment type.
+          - generic "Appointment type" [ref=e104]:
+            - button "In-salon" [ref=e105] [cursor=pointer]
+            - button "Mobile" [pressed] [ref=e106] [cursor=pointer]
+          - generic [ref=e107]:
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - generic [ref=e110]: Appointment type
+                - generic [ref=e111]: Mobile appointment
+              - generic [ref=e113]: Comes to you
+            - generic [ref=e114]: Mobile
+            - generic [ref=e115]: The pro comes to you. Pricing and available times are shown for mobile service.
+          - generic [ref=e116]: You won’t be charged until the pro confirms.
+        - generic [ref=e117]:
+          - generic [ref=e118]:
+            - generic [ref=e119]:
+              - generic [ref=e120]: Mobile service address
+              - generic [ref=e121]: Choose where the pro should come for this appointment.
+            - button "Add address" [ref=e122]
+          - generic [ref=e123]:
+            - button "E2E e2e_1774899571918_3wy05l e2e_1774899571918_3wy05l Client Ave, San Diego, CA 92101" [pressed] [ref=e124] [cursor=pointer]:
+              - generic [ref=e125]:
+                - generic [ref=e126]:
+                  - generic [ref=e127]: E2E e2e_1774899571918_3wy05l
+                  - generic [ref=e128]: e2e_1774899571918_3wy05l Client Ave, San Diego, CA 92101
+                - generic [ref=e130]: •
+            - button "E2E e2e_1774901663703_0hsc3o e2e_1774901663703_0hsc3o Client Ave, San Diego, CA 92101" [ref=e131] [cursor=pointer]:
+              - generic [ref=e132]:
+                - generic [ref=e133]:
+                  - generic [ref=e134]: E2E e2e_1774901663703_0hsc3o
+                  - generic [ref=e135]: e2e_1774901663703_0hsc3o Client Ave, San Diego, CA 92101
+                - generic [ref=e137]: •
+      - generic [ref=e140]:
+        - button "Continue to add-ons" [disabled] [ref=e141]
+        - generic [ref=e142]: No charge yet. The pro confirms next.
+```

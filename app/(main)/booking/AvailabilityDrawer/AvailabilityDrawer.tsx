@@ -464,6 +464,7 @@ export default function AvailabilityDrawer(props: {
   const [period, setPeriod] = useState<Period>('AFTERNOON')
   const [otherProsRequested, setOtherProsRequested] = useState(false)
   const [slotRetryKey, setSlotRetryKey] = useState(0)
+  const [holdError, setHoldError] = useState<string | null>(null)
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const holdStatusRef = useRef<HTMLDivElement | null>(null)
@@ -662,13 +663,14 @@ export default function AvailabilityDrawer(props: {
       const holdId = selectedHoldIdRef.current
 
       if (args?.deleteHold && holdId) {
-        await deleteHoldById(holdId).catch(() => {})
+        void deleteHoldById(holdId).catch(() => {})
       }
 
       setSelected(null)
       setHoldUntil(null)
       setHolding(false)
       setError(null)
+      setHoldError(null)
     },
     [setError],
   )
@@ -884,10 +886,9 @@ export default function AvailabilityDrawer(props: {
     if (!open) return
     if (!mobileAddressGateRequested) return
 
-    void hardResetUi({ deleteHold: true })
-    setError(null)
-
     if (!selectedClientAddressId) {
+      void hardResetUi({ deleteHold: true })
+      setError(null)
       setOtherProsRequested(false)
       clearDaySlots()
     }
@@ -1001,7 +1002,7 @@ export default function AvailabilityDrawer(props: {
     if (!holdExpired) return
     setHoldUntil(null)
     setSelected(null)
-    setError('That hold expired. Please pick a new slot.')
+    setHoldError('That hold expired. Please pick a new slot.')
   }, [holdExpired, setError])
 
   useEffect(() => {
@@ -1046,11 +1047,7 @@ export default function AvailabilityDrawer(props: {
     const effOfferingId = offeringId || resolvedOfferingId
     if (!effOfferingId || holding) return
 
-    const locationId = locationIdByPro[proId]
-    if (!locationId) {
-      setError('Missing booking location for that pro. Please try again.')
-      return
-    }
+    const locationId = locationIdByPro[proId] ?? null
 
     if (activeLocationType === 'MOBILE' && !selectedClientAddressId) {
       setError('Choose a mobile service address before selecting a time.')
@@ -1058,6 +1055,7 @@ export default function AvailabilityDrawer(props: {
     }
 
     setError(null)
+    setHoldError(null)
 
     const existingHoldId = selectedHoldIdRef.current
     if (existingHoldId) {
@@ -1089,7 +1087,7 @@ export default function AvailabilityDrawer(props: {
           offeringId: effOfferingId,
           scheduledFor: slotISO,
           locationType: activeLocationType,
-          locationId,
+          ...(locationId ? { locationId } : {}),
           clientAddressId:
             activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
         }),
@@ -1136,7 +1134,7 @@ export default function AvailabilityDrawer(props: {
         bookingSource,
       })
     } catch (e: unknown) {
-      setError(
+      setHoldError(
         e instanceof Error
           ? e.message
           : 'Failed to hold that time. Try another slot.',
@@ -1191,6 +1189,10 @@ export default function AvailabilityDrawer(props: {
       qs.set('mediaId', payload.mediaId)
     }
 
+    if (activeLocationType === 'MOBILE' && selectedClientAddressId) {
+      qs.set('clientAddressId', selectedClientAddressId)
+    }
+
     onClose()
     router.push(`/booking/add-ons?${qs.toString()}`)
   }
@@ -1209,15 +1211,18 @@ export default function AvailabilityDrawer(props: {
     !selectedClientAddressId &&
     !loadingMobileAddresses
 
-  const displayError =
-    waitingForMobileAddress &&
-    availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
-      ? null
-      : availabilityError
+  const showMobileAddressSelector =
+    open && mobileAddressGateRequested
+
+  const displayError = (() => {
+    if (holdError) return holdError
+    if (waitingForMobileAddress && availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE) return null
+    return availabilityError
+  })()
 
   const canRenderSummary = Boolean(summary && primary)
   const summaryDaysLoading =
-    loading && !canRenderSummary && !waitingForMobileAddress
+    loading && !canRenderSummary && !showMobileAddressSelector
   const backgroundRefreshing = refreshing
   const daySlotsLoading = loadingPrimarySlots
 
@@ -1228,7 +1233,7 @@ export default function AvailabilityDrawer(props: {
     !blockingError &&
     !summaryDaysLoading &&
     !canRenderSummary &&
-    !waitingForMobileAddress
+    !showMobileAddressSelector
 
   return (
     <>
@@ -1294,19 +1299,10 @@ export default function AvailabilityDrawer(props: {
           className="looksNoScrollbar overflow-y-auto px-4 pb-4"
           style={{ paddingBottom: STICKY_CTA_H + 14 }}
         >
-          {summaryDaysLoading ? (
-            <AvailabilityDrawerSkeleton />
-          ) : blockingError ? (
-            <InlineRetryCard
-              message={blockingError}
-              onRetry={() => {
-                refresh()
-              }}
-            />
-          ) : waitingForMobileAddress ? (
+          {showMobileAddressSelector ? (
             <>
               <AppointmentTypeToggle
-                value="MOBILE"
+                value={activeLocationType}
                 disabled={holding}
                 allowed={allowed}
                 offering={offering}
@@ -1314,7 +1310,6 @@ export default function AvailabilityDrawer(props: {
                   void resetForLocationModeChange(t)
                 }}
               />
-
               <MobileAddressSelector
                 value={selectedClientAddressId}
                 options={mobileAddresses}
@@ -1324,16 +1319,30 @@ export default function AvailabilityDrawer(props: {
                 onChange={setSelectedClientAddressId}
                 onAddAddress={() => setAddressCreateOpen(true)}
               />
-
-              <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
-                Choose a service address to see mobile times.
-              </div>
+              {waitingForMobileAddress ? (
+                <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+                  Choose a service address to see mobile times.
+                </div>
+              ) : null}
             </>
+          ) : null}
+
+          {showMobileAddressSelector ? null : summaryDaysLoading ? (
+            <AvailabilityDrawerSkeleton />
+          ) : blockingError ? (
+            <InlineRetryCard
+              message={blockingError}
+              onRetry={() => {
+                refresh()
+              }}
+            />
           ) : shouldShowEmpty ? (
             <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
               No availability found.
             </div>
-          ) : summary && primary ? (
+          ) : null}
+
+          {summary && primary ? (
             <>
               <ProCard
                 pro={primary}
@@ -1352,32 +1361,22 @@ export default function AvailabilityDrawer(props: {
                 locationType={activeLocationType}
               />
 
-              <AppointmentTypeToggle
-                value={activeLocationType}
-                disabled={holding}
-                allowed={allowed}
-                offering={offering}
-                onChange={(t) => {
-                  void resetForLocationModeChange(t)
-                }}
-              />
+              {!showMobileAddressSelector ? (
+                <AppointmentTypeToggle
+                  value={activeLocationType}
+                  disabled={holding}
+                  allowed={allowed}
+                  offering={offering}
+                  onChange={(t) => {
+                    void resetForLocationModeChange(t)
+                  }}
+                />
+              ) : null}
 
               {backgroundRefreshing ? (
                 <div className="mb-3 text-xs font-semibold text-textSecondary">
                   Updating availability in the background…
                 </div>
-              ) : null}
-
-              {activeLocationType === 'MOBILE' ? (
-                <MobileAddressSelector
-                  value={selectedClientAddressId}
-                  options={mobileAddresses}
-                  loading={loadingMobileAddresses}
-                  error={mobileAddressesError}
-                  disabled={holding}
-                  onChange={setSelectedClientAddressId}
-                  onAddAddress={() => setAddressCreateOpen(true)}
-                />
               ) : null}
 
               {dayScrollerDays.length ? (

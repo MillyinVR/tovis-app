@@ -145,6 +145,12 @@ export async function teardownBookingFlow({
     },
   })
 
+  await prisma.bookingHold.deleteMany({
+    where: {
+      offeringId: offeringId,
+    },
+  })
+
   await prisma.professionalServiceOffering.deleteMany({
     where: {
       id: offeringId,

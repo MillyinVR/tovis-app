@@ -98,13 +98,13 @@ function coord(value: string): Prisma.Decimal {
 
 function workingHoursJson(): Prisma.InputJsonValue {
   return {
-    mon: { enabled: true, start: '09:00', end: '18:00' },
-    tue: { enabled: true, start: '09:00', end: '18:00' },
-    wed: { enabled: true, start: '09:00', end: '18:00' },
-    thu: { enabled: true, start: '09:00', end: '18:00' },
-    fri: { enabled: true, start: '09:00', end: '18:00' },
-    sat: { enabled: true, start: '09:00', end: '18:00' },
-    sun: { enabled: true, start: '09:00', end: '18:00' },
+    mon: { enabled: true, start: '00:00', end: '23:59' },
+    tue: { enabled: true, start: '00:00', end: '23:59' },
+    wed: { enabled: true, start: '00:00', end: '23:59' },
+    thu: { enabled: true, start: '00:00', end: '23:59' },
+    fri: { enabled: true, start: '00:00', end: '23:59' },
+    sat: { enabled: true, start: '00:00', end: '23:59' },
+    sun: { enabled: true, start: '00:00', end: '23:59' },
   }
 }
 
@@ -345,6 +345,10 @@ export async function seedBookingFlow(
       offersInSalon: true,
       offersMobile: true,
     },
+  })
+
+  await prisma.professionalServiceOffering.findUniqueOrThrow({
+    where: { id: offering.id },
   })
 
   const offeringAddOn = addOnService

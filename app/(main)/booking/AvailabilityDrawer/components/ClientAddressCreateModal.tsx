@@ -361,6 +361,7 @@ export default function ClientAddressCreateModal(props: Props) {
           role="dialog"
           aria-modal="true"
           aria-label="Add mobile service address"
+          data-testid="mobile-address-create-modal"
         >
           <div className="flex items-start justify-between gap-3">
             <div>

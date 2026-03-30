@@ -8552,7 +8552,7 @@ async function withLockedClientOwnedHoldTransaction<T>(args: {
       now: new Date(),
       hold: lockedHold,
     })
-  })
+  }, { timeout: 30_000, maxWait: 10_000 })
 }
 
 /**

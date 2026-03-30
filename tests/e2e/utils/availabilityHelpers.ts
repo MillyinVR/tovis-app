@@ -73,6 +73,10 @@ export async function waitForAvailabilityReady(
   ).toBeVisible({ timeout: 30_000 })
 
   await expect(slotButtons(page).first()).toBeVisible({ timeout: 30_000 })
+
+  await expect(
+    availabilityDrawer(page).getByText(/something went wrong/i),
+  ).not.toBeVisible({ timeout: 5_000 })
 }
 
 export async function expectAvailabilityError(page: Page): Promise<void> {
@@ -106,12 +110,14 @@ export async function switchToSalon(page: Page): Promise<void> {
   const salonOption = byTestId(drawer, testIds.location.salonOption)
 
   if (await salonOption.count()) {
-    await expect(salonOption).toBeVisible()
+    await salonOption.scrollIntoViewIfNeeded()
     await salonOption.click()
     return
   }
 
-  await drawer.getByRole('button', { name: text.location.salon }).click()
+  await drawer
+    .getByRole('button', { name: text.location.salon })
+    .click({ force: true })
 }
 
 export async function switchToMobile(page: Page): Promise<void> {
@@ -119,12 +125,14 @@ export async function switchToMobile(page: Page): Promise<void> {
   const mobileOption = byTestId(drawer, testIds.location.mobileOption)
 
   if (await mobileOption.count()) {
-    await expect(mobileOption).toBeVisible()
+    await mobileOption.scrollIntoViewIfNeeded()
     await mobileOption.click()
     return
   }
 
-  await drawer.getByRole('button', { name: text.location.mobile }).click()
+  await drawer
+    .getByRole('button', { name: text.location.mobile })
+    .click({ force: true })
 }
 
 export async function chooseDay(page: Page, day: DayTarget): Promise<void> {

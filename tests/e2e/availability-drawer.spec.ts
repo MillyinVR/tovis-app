@@ -95,9 +95,27 @@ async function waitForAvailabilityReady(page: Page): Promise<void> {
 }
 
 async function chooseFirstVisibleTimeSlot(page: Page): Promise<void> {
-  const firstSlot = slotButtons(page).first()
-  await expect(firstSlot).toBeVisible()
-  await firstSlot.click()
+  const slots = slotButtons(page)
+  await expect(slots.first()).toBeVisible({ timeout: 10_000 })
+  const allSlots = await slots.all()
+  for (const slot of allSlots) {
+    const name = await slot.getAttribute('aria-label') ?? await slot.textContent() ?? ''
+    const match = name.match(/(\d{1,2}(?::\d{2})?\s?(?:AM|PM))/i)
+    if (!match) continue
+    const slotTime = new Date()
+    const [hours, minutesPart] = match[1].replace(/\s/g, '').split(':')
+    const isPM = match[1].toUpperCase().includes('PM')
+    let h = parseInt(hours, 10)
+    const m = minutesPart ? parseInt(minutesPart.replace(/[AP]M/i, ''), 10) : 0
+    if (isPM && h !== 12) h += 12
+    if (!isPM && h === 12) h = 0
+    slotTime.setHours(h, m, 0, 0)
+    if (slotTime.getTime() > Date.now() + 30_000) {
+      await slot.click()
+      return
+    }
+  }
+  throw new Error('No future time slot found in availability drawer')
 }
 
 async function selectSalonModeIfVisible(page: Page): Promise<void> {

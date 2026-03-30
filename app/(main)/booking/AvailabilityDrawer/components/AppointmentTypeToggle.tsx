@@ -120,6 +120,7 @@ export default function AppointmentTypeToggle({
               <button
                 key={mode}
                 type="button"
+                data-testid={`booking-location-${mode.toLowerCase()}`}
                 onClick={() => {
                   if (isDisabled) return
                   if (selected) return

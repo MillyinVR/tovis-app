@@ -71,7 +71,7 @@ export default function MobileAddressSelector(props: Props) {
       {!loading && !error && !hasOptions ? (
         <div data-testid="mobile-address-empty-state" className="mt-3 rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3">
           <div className="text-[12px] font-black text-textPrimary">
-            No saved mobile addresses yet
+            No saved addresses yet
           </div>
           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
             Add one now so the pro knows where to come.

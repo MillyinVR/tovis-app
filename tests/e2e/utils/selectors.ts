@@ -47,7 +47,7 @@ export const testIds = {
 
 export const text = {
   availability: {
-    heading: /availability/i,
+    heading: /^availability$/i,
     retry: /retry/i,
     continue: /^continue$/i,
     expired: /expired|time ran out|hold expired/i,

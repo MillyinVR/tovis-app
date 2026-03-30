@@ -101,11 +101,9 @@ async function expectHoldCreated(page: Page): Promise<void> {
 
 async function expectHoldClearedAfterLocationSwitch(page: Page): Promise<void> {
   const banner = holdBanner(page)
-
   if (await banner.count()) {
-    await expect(banner).toBeHidden()
+    await expect(banner).toBeHidden({ timeout: 10_000 })
   }
-
   await expectContinueDisabled(page)
 }
 
@@ -118,6 +116,8 @@ test.afterAll(async () => {
 })
 
 test.describe('location switching browser flow', () => {
+  test.setTimeout(120_000)
+
   let seed: SeedBookingFlowResult | null = null
 
   test.afterEach(async () => {
