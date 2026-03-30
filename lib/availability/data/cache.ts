@@ -109,7 +109,10 @@ export async function cacheGetJson<T>(key: string): Promise<T | null> {
   if (!redis) return null
 
   try {
-    const raw = await redis.get<string>(key)
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 5_000),
+    )
+    const raw = await Promise.race([redis.get<string>(key), timeout])
     if (!raw) return null
     return JSON.parse(raw) as T
   } catch {

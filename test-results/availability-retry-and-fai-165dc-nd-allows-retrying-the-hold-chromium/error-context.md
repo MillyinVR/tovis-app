@@ -1,0 +1,183 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - link "← Back to Looks" [ref=e7] [cursor=pointer]:
+            - /url: /looks
+          - generic [ref=e8]:
+            - button "Share" [ref=e10]:
+              - generic [ref=e11]: ↗
+              - generic [ref=e12]: Share
+            - button "0" [ref=e14] [cursor=pointer]:
+              - generic [ref=e15]: ♡
+              - generic [ref=e16]: "0"
+        - generic [ref=e19]:
+          - generic [ref=e20]: E2E Test Pro
+          - generic [ref=e21]: Beauty professional • San Diego, CA
+          - generic [ref=e22]:
+            - link "Message" [ref=e23] [cursor=pointer]:
+              - /url: /messages/start?contextType=PRO_PROFILE&contextId=cmnctztn6002mtzrgdk74y29e
+            - generic [ref=e24]: "Time zone: America/Los_Angeles"
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - generic [ref=e27]: –
+            - generic [ref=e28]: Rating
+          - generic [ref=e29]:
+            - generic [ref=e30]: "0"
+            - generic [ref=e31]: Reviews
+          - generic [ref=e32]:
+            - generic [ref=e33]: "0"
+            - generic [ref=e34]: Favorites
+      - navigation [ref=e35]:
+        - link "Portfolio" [ref=e36] [cursor=pointer]:
+          - /url: /professionals/cmnctztn6002mtzrgdk74y29e
+        - link "Services" [ref=e37] [cursor=pointer]:
+          - /url: /professionals/cmnctztn6002mtzrgdk74y29e?tab=services
+        - link "Reviews" [ref=e38] [cursor=pointer]:
+          - /url: /professionals/cmnctztn6002mtzrgdk74y29e?tab=reviews
+      - generic [ref=e39]:
+        - generic [ref=e40]: Services
+        - button "Book E2E Base Offering" [ref=e42] [cursor=pointer]:
+          - generic [ref=e45]:
+            - generic [ref=e46]: E2E Base Offering
+            - generic [ref=e47]: Seeded offering for browser E2E.
+            - generic [ref=e48]:
+              - generic [ref=e49]: "Salon: $100 • 60 min"
+              - generic [ref=e50]: "Mobile: $120 • 75 min"
+          - generic [ref=e51]:
+            - generic [ref=e53]:
+              - text: Book
+              - generic [ref=e54]: →
+            - button "Save service" [ref=e55]: Save
+    - generic [ref=e59]:
+      - link "Home" [ref=e60] [cursor=pointer]:
+        - /url: /client
+        - generic [ref=e61]: 🏠
+        - generic [ref=e62]: Home
+      - link "Search" [ref=e64] [cursor=pointer]:
+        - /url: /search
+        - generic [ref=e65]: 🗺️
+        - generic [ref=e66]: Search
+      - link "Looks" [ref=e69] [cursor=pointer]:
+        - /url: /looks
+        - generic [ref=e70]: Looks
+      - link "Messages" [ref=e71] [cursor=pointer]:
+        - /url: /messages
+        - generic [ref=e72]: 💬
+        - generic [ref=e73]: Messages
+      - link "Bookings" [ref=e75] [cursor=pointer]:
+        - /url: /client/bookings
+        - generic [ref=e76]: 🗓️
+        - generic [ref=e77]: Bookings
+  - button "Open Next.js Dev Tools" [ref=e84] [cursor=pointer]:
+    - img [ref=e85]
+  - alert [ref=e88]
+  - generic [ref=e89]:
+    - button "Close availability" [ref=e90]
+    - dialog [ref=e91]:
+      - generic [ref=e95]:
+        - generic [ref=e96]:
+          - generic [ref=e97]: Availability
+          - generic [ref=e98]: Pick a time. We hold it for you.
+        - button "Close" [ref=e99]: ✕
+      - generic [ref=e100]:
+        - generic [ref=e104]:
+          - generic [ref=e105]:
+            - link "E2E Test Pro" [ref=e106] [cursor=pointer]:
+              - /url: /professionals/cmnctztn6002mtzrgdk74y29e
+            - generic [ref=e107]: ⭐ Creator
+          - generic [ref=e108]: San Diego, CA
+          - generic [ref=e109]: Times in America/Los_Angeles
+          - generic [ref=e110]: Matched to this service
+        - generic [ref=e113]:
+          - generic [ref=e114]: You’re booking
+          - generic [ref=e115]: e2e_1774853577467_vmvxsb Base Service
+          - generic [ref=e116]: e2e_1774853577467_vmvxsb Category
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - text: ⏱
+              - generic [ref=e119]: 1h
+            - generic [ref=e120]:
+              - text: Starting at
+              - generic [ref=e121]: $100.00
+            - generic [ref=e122]: 🏠 In-salon
+        - generic [ref=e123]:
+          - generic [ref=e124]: Appointment type
+          - generic [ref=e125]: Availability and pricing update based on the selected appointment type.
+          - generic "Appointment type" [ref=e126]:
+            - button "In-salon" [pressed] [ref=e127] [cursor=pointer]
+            - button "Mobile" [ref=e128] [cursor=pointer]
+          - generic [ref=e129]:
+            - generic [ref=e130]:
+              - generic [ref=e131]:
+                - generic [ref=e132]: Appointment type
+                - generic [ref=e133]: In-salon appointment
+              - generic [ref=e134]:
+                - generic [ref=e135]: At the studio
+                - generic [ref=e136]: From 100
+            - generic [ref=e137]: In-salon
+            - generic [ref=e138]: You’re booking at the pro’s location. Pricing and available times are shown for in-salon service.
+          - generic [ref=e139]: You won’t be charged until the pro confirms.
+        - generic [ref=e140]:
+          - generic [ref=e141]: Choose a day
+          - generic [ref=e142]:
+            - button "Mon 30" [pressed] [ref=e143]:
+              - generic [ref=e144]: Mon
+              - generic [ref=e145]: "30"
+            - button "Tue 31" [ref=e146]:
+              - generic [ref=e147]: Tue
+              - generic [ref=e148]: "31"
+            - button "Wed 01" [ref=e149]:
+              - generic [ref=e150]: Wed
+              - generic [ref=e151]: "01"
+            - button "Thu 02" [ref=e152]:
+              - generic [ref=e153]: Thu
+              - generic [ref=e154]: "02"
+            - button "Fri 03" [ref=e155]:
+              - generic [ref=e156]: Fri
+              - generic [ref=e157]: "03"
+            - button "Sat 04" [ref=e158]:
+              - generic [ref=e159]: Sat
+              - generic [ref=e160]: "04"
+        - generic [ref=e161]:
+          - generic [ref=e163]:
+            - generic [ref=e164]: Available times
+            - generic [ref=e165]: Pick a time. We’ll hold it.
+          - generic [ref=e166]:
+            - button "Morning" [ref=e167] [cursor=pointer]
+            - button "Afternoon" [ref=e168] [cursor=pointer]
+            - button "Evening" [disabled] [ref=e169]
+          - generic [ref=e170]:
+            - button "Mon 12:00 PM" [ref=e171] [cursor=pointer]
+            - button "Mon 12:15 PM" [ref=e172] [cursor=pointer]
+            - button "Mon 12:30 PM" [ref=e173] [cursor=pointer]
+            - button "Mon 12:45 PM" [ref=e174] [cursor=pointer]
+            - button "Mon 1:00 PM" [ref=e175] [cursor=pointer]
+            - button "Mon 1:15 PM" [ref=e176] [cursor=pointer]
+            - button "Mon 1:30 PM" [ref=e177] [cursor=pointer]
+            - button "Mon 1:45 PM" [ref=e178] [cursor=pointer]
+            - button "Mon 2:00 PM" [ref=e179] [cursor=pointer]
+            - button "Mon 2:15 PM" [ref=e180] [cursor=pointer]
+            - button "Mon 2:30 PM" [ref=e181] [cursor=pointer]
+            - button "Mon 2:45 PM" [ref=e182] [cursor=pointer]
+            - button "Mon 3:00 PM" [ref=e183] [cursor=pointer]
+            - button "Mon 3:15 PM" [ref=e184] [cursor=pointer]
+            - button "Mon 3:30 PM" [ref=e185] [cursor=pointer]
+            - button "Mon 3:45 PM" [ref=e186] [cursor=pointer]
+            - button "Mon 4:00 PM" [ref=e187] [cursor=pointer]
+            - button "Mon 4:15 PM" [ref=e188] [cursor=pointer]
+            - button "Mon 4:30 PM" [ref=e189] [cursor=pointer]
+            - button "Mon 4:45 PM" [ref=e190] [cursor=pointer]
+        - generic [ref=e191]:
+          - generic [ref=e193]:
+            - generic [ref=e194]: Waitlist
+            - generic [ref=e195]: Can’t make these times? We’ll ping you.
+          - button "Join waitlist" [ref=e196]
+      - generic [ref=e199]:
+        - button "Continue to add-ons" [disabled] [ref=e200]
+        - generic [ref=e201]: No charge yet. The pro confirms next.
+```

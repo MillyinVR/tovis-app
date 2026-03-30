@@ -426,16 +426,17 @@ function InlineRetryCard(props: {
   onRetry: () => void
 }) {
   return (
-    <div className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
+    <div data-testid="availability-error" className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
       <div className="mb-3 text-sm font-semibold text-toneDanger">
         {props.message}
       </div>
       <button
         type="button"
+        data-testid="availability-retry-button"
         onClick={props.onRetry}
         className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10"
       >
-        Try again
+        Retry
       </button>
     </div>
   )

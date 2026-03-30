@@ -28,7 +28,7 @@ export default function MobileAddressSelector(props: Props) {
   const hasOptions = options.length > 0
 
   return (
-    <div className="tovis-glass-soft mb-3 rounded-card p-4">
+    <div data-testid="mobile-address-section" className="tovis-glass-soft mb-3 rounded-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[13px] font-black text-textPrimary">
@@ -41,6 +41,7 @@ export default function MobileAddressSelector(props: Props) {
 
         <button
           type="button"
+          data-testid="mobile-address-add-button"
           onClick={onAddAddress}
           disabled={isDisabled}
           className={[
@@ -68,7 +69,7 @@ export default function MobileAddressSelector(props: Props) {
       ) : null}
 
       {!loading && !error && !hasOptions ? (
-        <div className="mt-3 rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3">
+        <div data-testid="mobile-address-empty-state" className="mt-3 rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3">
           <div className="text-[12px] font-black text-textPrimary">
             No saved mobile addresses yet
           </div>
@@ -102,6 +103,7 @@ export default function MobileAddressSelector(props: Props) {
               <button
                 key={address.id}
                 type="button"
+                data-testid={`mobile-address-option-${address.id}`}
                 onClick={() => {
                   if (isDisabled) return
                   if (active) return

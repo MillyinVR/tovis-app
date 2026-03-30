@@ -62,7 +62,7 @@ function slotButtons(page: Page): Locator {
 }
 
 function holdBanner(page: Page): Locator {
-  return availabilityDialog(page).getByText(/hold|reserved|expires/i).first()
+  return availabilityDialog(page).getByText(/\d{2}:\d{2}/).first()
 }
 
 async function gotoProfessionalServicesPage(

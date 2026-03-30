@@ -95,6 +95,7 @@ export default function DrawerShell({
         style={sheetWrapStyle}
         role="dialog"
         aria-modal="true"
+        data-testid="availability-drawer"
         onClick={(e) => e.stopPropagation()}
       >
         {header}

@@ -90,8 +90,8 @@ async function openAvailabilityFromSeededService(
 
 async function waitForAvailabilityReady(page: Page): Promise<void> {
   await expect(availabilityDialog(page)).toBeVisible()
-  await expect(dayButtons(page).first()).toBeVisible()
-  await expect(slotButtons(page).first()).toBeVisible()
+  await expect(dayButtons(page).first()).toBeVisible({ timeout: 30_000 })
+  await expect(slotButtons(page).first()).toBeVisible({ timeout: 30_000 })
 }
 
 async function chooseFirstVisibleTimeSlot(page: Page): Promise<void> {

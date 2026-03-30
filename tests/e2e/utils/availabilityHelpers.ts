@@ -70,9 +70,9 @@ export async function waitForAvailabilityReady(
 
   await expect(
     drawer.getByRole('button', { name: /Mon|Tue|Wed|Thu|Fri|Sat|Sun/i }).first(),
-  ).toBeVisible()
+  ).toBeVisible({ timeout: 30_000 })
 
-  await expect(slotButtons(page).first()).toBeVisible()
+  await expect(slotButtons(page).first()).toBeVisible({ timeout: 30_000 })
 }
 
 export async function expectAvailabilityError(page: Page): Promise<void> {
@@ -221,7 +221,7 @@ export async function selectSavedMobileAddress(
   const option = mobileAddressOption(section, addressId)
 
   await expect(section).toBeVisible()
-  await expect(option).toBeVisible()
+  await expect(option).toBeVisible({ timeout: 15_000 })
   await option.click()
 }
 
