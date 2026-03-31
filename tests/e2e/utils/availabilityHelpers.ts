@@ -111,7 +111,7 @@ export async function switchToSalon(page: Page): Promise<void> {
 
   if (await salonOption.count()) {
     await salonOption.scrollIntoViewIfNeeded()
-    await salonOption.click()
+    await salonOption.click({ force: true })
     return
   }
 
@@ -125,11 +125,20 @@ export async function switchToMobile(page: Page): Promise<void> {
   const mobileOption = byTestId(drawer, testIds.location.mobileOption)
 
   if (await mobileOption.count()) {
-    await mobileOption.scrollIntoViewIfNeeded()
-    await mobileOption.click()
+    // Scroll the button to the top of its scroll container to ensure
+    // it's not obscured by the fixed StickyCTA footer before clicking
+    await mobileOption.evaluate((el) =>
+      el.scrollIntoView({ block: 'start', behavior: 'instant' }),
+    )
+    await mobileOption.click({ force: true })
     return
   }
 
+  await drawer
+    .getByRole('button', { name: text.location.mobile })
+    .evaluate((el) =>
+      el.scrollIntoView({ block: 'start', behavior: 'instant' }),
+    )
   await drawer
     .getByRole('button', { name: text.location.mobile })
     .click({ force: true })

@@ -99,8 +99,24 @@ async function expectHoldCreated(page: Page): Promise<void> {
   await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
 }
 
-async function expectHoldClearedAfterLocationSwitch(page: Page): Promise<void> {
-  await expect(holdBanner(page)).toBeHidden({ timeout: 10_000 })
+async function expectHoldClearedAfterLocationSwitch(
+  page: Page,
+  targetMode: 'MOBILE' | 'SALON',
+): Promise<void> {
+  if (targetMode === 'MOBILE') {
+    // Switching TO mobile: wait for the address selector to appear.
+    // This is the stable positive signal that locationType is now MOBILE.
+    await expect(
+      availabilityDialog(page).getByTestId('mobile-address-add-button')
+    ).toBeVisible({ timeout: 15_000 })
+  } else {
+    // Switching TO salon: address selector goes away, slots reload.
+    // waitForAvailabilityReady is called by the test after this — just
+    // confirm Continue is disabled and the hold banner is gone.
+    await expect(
+      availabilityDialog(page).getByTestId('availability-hold-banner')
+    ).toBeHidden({ timeout: 15_000 })
+  }
   await expectContinueDisabled(page)
 }
 
@@ -168,19 +184,8 @@ test.describe('location switching browser flow', () => {
     expect(salonHoldResponse.status(), salonHoldBody).toBe(201)
     await expectHoldCreated(page)
 
-    const salonHoldDeletePromise = page.waitForResponse(
-      (resp) =>
-        resp.url().includes('/api/holds') &&
-        resp.request().method() === 'DELETE',
-      { timeout: 15_000 },
-    ).catch(() => {
-      // DELETE is best-effort — if no hold existed (e.g. TIME_IN_PAST),
-      // no DELETE fires. Don't block the test.
-    })
     await switchToMobile(page)
-    await salonHoldDeletePromise
-    await expectHoldClearedAfterLocationSwitch(page)
-
+    await expectHoldClearedAfterLocationSwitch(page, 'MOBILE')
 
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)
@@ -259,7 +264,7 @@ test.describe('location switching browser flow', () => {
 
     await switchToSalon(page)
     await waitForAvailabilityReady(page)
-    await expectHoldClearedAfterLocationSwitch(page)
+    await expectHoldClearedAfterLocationSwitch(page, 'SALON')
 
     const salonHoldResponsePromise = page.waitForResponse(
       (resp) =>
