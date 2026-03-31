@@ -1301,15 +1301,17 @@ export default function AvailabilityDrawer(props: {
         >
           {showMobileAddressSelector ? (
             <>
-              <AppointmentTypeToggle
-                value={activeLocationType}
-                disabled={holding}
-                allowed={allowed}
-                offering={offering}
-                onChange={(t) => {
-                  void resetForLocationModeChange(t)
-                }}
-              />
+              <div className="relative z-30">
+                <AppointmentTypeToggle
+                  value={activeLocationType}
+                  disabled={holding}
+                  allowed={allowed}
+                  offering={offering}
+                  onChange={(t) => {
+                    void resetForLocationModeChange(t)
+                  }}
+                />
+              </div>
               <MobileAddressSelector
                 value={selectedClientAddressId}
                 options={mobileAddresses}
@@ -1362,15 +1364,17 @@ export default function AvailabilityDrawer(props: {
               />
 
               {!showMobileAddressSelector ? (
-                <AppointmentTypeToggle
-                  value={activeLocationType}
-                  disabled={holding}
-                  allowed={allowed}
-                  offering={offering}
-                  onChange={(t) => {
-                    void resetForLocationModeChange(t)
-                  }}
-                />
+                <div className="relative z-30">
+                  <AppointmentTypeToggle
+                    value={activeLocationType}
+                    disabled={holding}
+                    allowed={allowed}
+                    offering={offering}
+                    onChange={(t) => {
+                      void resetForLocationModeChange(t)
+                    }}
+                  />
+                </div>
               ) : null}
 
               {backgroundRefreshing ? (

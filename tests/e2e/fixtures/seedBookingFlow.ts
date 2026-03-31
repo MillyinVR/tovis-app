@@ -288,7 +288,7 @@ export async function seedBookingFlow(
       workingHours: workingHoursJson(),
       bufferMinutes: 15,
       stepMinutes: 15,
-      advanceNoticeMinutes: 0,
+      advanceNoticeMinutes: 120,
       maxDaysAhead: 30,
     },
     select: {
@@ -316,7 +316,7 @@ export async function seedBookingFlow(
           workingHours: workingHoursJson(),
           bufferMinutes: 15,
           stepMinutes: 15,
-          advanceNoticeMinutes: 0,
+          advanceNoticeMinutes: 120,
           maxDaysAhead: 30,
         },
         select: {

@@ -254,6 +254,10 @@ test.describe('availability retry and failure browser flow', () => {
     await expect(holdExpiredMessage(page)).toBeVisible()
     await expect(continueButton(page)).toBeDisabled()
 
+    // Wait for slots to be interactable before setting up the retry interceptor.
+    // This ensures the UI has fully settled into error state before we click again.
+    await expect(slotButtons(page).first()).toBeVisible({ timeout: 15_000 })
+
     const retryIndex = (await slotButtons(page).count()) > 1 ? 1 : 0
 
     const retryHoldResponsePromise = page.waitForResponse(
