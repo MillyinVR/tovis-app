@@ -33,7 +33,11 @@ export function getSupabaseAdmin(): SupabaseClient {
   if (_admin) return _admin
 
   // URL is safe to read on server; NEXT_PUBLIC is fine here because we’re not leaking it.
-  const url = mustGetEnv('NEXT_PUBLIC_SUPABASE_URL')
+const url =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+  process.env.SUPABASE_URL?.trim()
+
+if (!url) throw new Error('Missing env var: NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL)')
   const key = getServiceRoleKey()
 
   _admin = createClient(url, key, {
