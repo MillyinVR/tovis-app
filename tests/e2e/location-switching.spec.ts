@@ -65,6 +65,14 @@ function holdBanner(page: Page): Locator {
   return availabilityDialog(page).getByTestId('availability-hold-banner')
 }
 
+function mobileAddressSection(page: Page): Locator {
+  return availabilityDialog(page).getByTestId('mobile-address-section')
+}
+
+function mobileAddressAddButton(page: Page): Locator {
+  return availabilityDialog(page).getByTestId('mobile-address-add-button')
+}
+
 async function gotoProfessionalServicesPage(
   page: Page,
   seed: SeedBookingFlowResult,
@@ -89,35 +97,77 @@ async function openAvailabilityFromSeededService(
   ).toBeVisible()
 }
 
-async function chooseFirstVisibleTimeSlot(page: Page): Promise<void> {
-  const firstSlot = slotButtons(page).first()
-  await expect(firstSlot).toBeVisible()
-  await firstSlot.click()
+async function chooseFirstEnabledTimeSlot(page: Page): Promise<void> {
+  const slots = slotButtons(page)
+  const count = await slots.count()
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = slots.nth(index)
+
+    if (!(await slot.isVisible())) continue
+    if (!(await slot.isEnabled())) continue
+
+    await slot.click()
+    return
+  }
+
+  throw new Error('No enabled time slot found in availability drawer')
+}
+
+async function createHoldFromFirstEnabledSlot(page: Page): Promise<{
+  status: number
+  body: string
+}> {
+  const [holdResponse] = await Promise.all([
+    page.waitForResponse(
+      (resp) =>
+        resp.url().includes('/api/holds') &&
+        resp.request().method() === 'POST',
+      { timeout: 30_000 },
+    ),
+    chooseFirstEnabledTimeSlot(page),
+  ])
+
+  return {
+    status: holdResponse.status(),
+    body: await holdResponse.text(),
+  }
 }
 
 async function expectHoldCreated(page: Page): Promise<void> {
   await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
 }
 
+async function waitForLocationToggleReady(page: Page): Promise<void> {
+  await waitForAvailabilityReady(page)
+
+  const drawer = availabilityDialog(page)
+
+  await expect(
+    drawer.getByTestId('booking-location-salon'),
+  ).toBeVisible({ timeout: 15_000 })
+
+  await expect(
+    drawer.getByTestId('booking-location-mobile'),
+  ).toBeVisible({ timeout: 15_000 })
+}
+
 async function expectHoldClearedAfterLocationSwitch(
   page: Page,
   targetMode: 'MOBILE' | 'SALON',
 ): Promise<void> {
-  if (targetMode === 'MOBILE') {
-    // Switching TO mobile: wait for the address selector to appear.
-    // This is the stable positive signal that locationType is now MOBILE.
-    await expect(
-      availabilityDialog(page).getByTestId('mobile-address-add-button')
-    ).toBeVisible({ timeout: 15_000 })
-  } else {
-    // Switching TO salon: address selector goes away, slots reload.
-    // waitForAvailabilityReady is called by the test after this — just
-    // confirm Continue is disabled and the hold banner is gone.
-    await expect(
-      availabilityDialog(page).getByTestId('availability-hold-banner')
-    ).toBeHidden({ timeout: 15_000 })
-  }
+  await expect(holdBanner(page)).toBeHidden({ timeout: 15_000 })
   await expectContinueDisabled(page)
+
+  if (targetMode === 'MOBILE') {
+    await expect(mobileAddressSection(page)).toBeVisible({ timeout: 15_000 })
+    await expect(mobileAddressAddButton(page)).toBeVisible({ timeout: 15_000 })
+    return
+  }
+
+  await expect(mobileAddressSection(page)).toHaveCount(0, {
+    timeout: 15_000,
+  })
 }
 
 test.beforeAll(async () => {
@@ -164,25 +214,16 @@ test.describe('location switching browser flow', () => {
 
     await gotoProfessionalServicesPage(page, seed)
     await openAvailabilityFromSeededService(page, seed)
-
     await waitForAvailabilityReady(page)
 
-    const salonHoldResponsePromise = page.waitForResponse(
-      (resp) =>
-        resp.url().includes('/api/holds') &&
-        resp.request().method() === 'POST',
-    )
+    const salonHold = await createHoldFromFirstEnabledSlot(page)
 
-    await chooseFirstVisibleTimeSlot(page)
+    console.log('salon hold status', salonHold.status)
+    console.log('salon hold body', salonHold.body)
 
-    const salonHoldResponse = await salonHoldResponsePromise
-    const salonHoldBody = await salonHoldResponse.text()
-
-    console.log('salon hold status', salonHoldResponse.status())
-    console.log('salon hold body', salonHoldBody)
-
-    expect(salonHoldResponse.status(), salonHoldBody).toBe(201)
+    expect(salonHold.status, salonHold.body).toBe(201)
     await expectHoldCreated(page)
+    await waitForLocationToggleReady(page)
 
     await switchToMobile(page)
     await expectHoldClearedAfterLocationSwitch(page, 'MOBILE')
@@ -190,21 +231,12 @@ test.describe('location switching browser flow', () => {
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)
 
-    const mobileHoldResponsePromise = page.waitForResponse(
-      (resp) =>
-        resp.url().includes('/api/holds') &&
-        resp.request().method() === 'POST',
-    )
+    const mobileHold = await createHoldFromFirstEnabledSlot(page)
 
-    await chooseFirstVisibleTimeSlot(page)
+    console.log('mobile hold status', mobileHold.status)
+    console.log('mobile hold body', mobileHold.body)
 
-    const mobileHoldResponse = await mobileHoldResponsePromise
-    const mobileHoldBody = await mobileHoldResponse.text()
-
-    console.log('mobile hold status', mobileHoldResponse.status())
-    console.log('mobile hold body', mobileHoldBody)
-
-    expect(mobileHoldResponse.status(), mobileHoldBody).toBe(201)
+    expect(mobileHold.status, mobileHold.body).toBe(201)
     await expectHoldCreated(page)
 
     await continueToAddOns(page)
@@ -241,46 +273,30 @@ test.describe('location switching browser flow', () => {
     await gotoProfessionalServicesPage(page, seed)
     await openAvailabilityFromSeededService(page, seed)
     await waitForAvailabilityReady(page)
+
     await switchToMobile(page)
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)
 
-    const mobileHoldResponsePromise = page.waitForResponse(
-      (resp) =>
-        resp.url().includes('/api/holds') &&
-        resp.request().method() === 'POST',
-    )
+    const mobileHold = await createHoldFromFirstEnabledSlot(page)
 
-    await chooseFirstVisibleTimeSlot(page)
+    console.log('mobile hold status', mobileHold.status)
+    console.log('mobile hold body', mobileHold.body)
 
-    const mobileHoldResponse = await mobileHoldResponsePromise
-    const mobileHoldBody = await mobileHoldResponse.text()
-
-    console.log('mobile hold status', mobileHoldResponse.status())
-    console.log('mobile hold body', mobileHoldBody)
-
-    expect(mobileHoldResponse.status(), mobileHoldBody).toBe(201)
+    expect(mobileHold.status, mobileHold.body).toBe(201)
     await expectHoldCreated(page)
+    await waitForLocationToggleReady(page)
 
     await switchToSalon(page)
-    await waitForAvailabilityReady(page)
     await expectHoldClearedAfterLocationSwitch(page, 'SALON')
+    await waitForAvailabilityReady(page)
 
-    const salonHoldResponsePromise = page.waitForResponse(
-      (resp) =>
-        resp.url().includes('/api/holds') &&
-        resp.request().method() === 'POST',
-    )
+    const salonHold = await createHoldFromFirstEnabledSlot(page)
 
-    await chooseFirstVisibleTimeSlot(page)
+    console.log('salon hold status', salonHold.status)
+    console.log('salon hold body', salonHold.body)
 
-    const salonHoldResponse = await salonHoldResponsePromise
-    const salonHoldBody = await salonHoldResponse.text()
-
-    console.log('salon hold status', salonHoldResponse.status())
-    console.log('salon hold body', salonHoldBody)
-
-    expect(salonHoldResponse.status(), salonHoldBody).toBe(201)
+    expect(salonHold.status, salonHold.body).toBe(201)
     await expectHoldCreated(page)
 
     await continueToAddOns(page)

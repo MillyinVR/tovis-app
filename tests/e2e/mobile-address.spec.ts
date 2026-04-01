@@ -80,10 +80,33 @@ async function openAvailabilityFromSeededService(
   ).toBeVisible()
 }
 
-async function chooseFirstVisibleTimeSlot(page: Page): Promise<void> {
-  const firstSlot = slotButtons(page).first()
-  await expect(firstSlot).toBeVisible()
-  await firstSlot.click()
+async function waitForLocationToggleReady(page: Page): Promise<void> {
+  const dialog = availabilityDialog(page)
+
+  await expect(
+    dialog.getByTestId('booking-location-salon'),
+  ).toBeVisible({ timeout: 15_000 })
+
+  await expect(
+    dialog.getByTestId('booking-location-mobile'),
+  ).toBeVisible({ timeout: 15_000 })
+}
+
+async function chooseFirstEnabledTimeSlot(page: Page): Promise<void> {
+  const slots = slotButtons(page)
+  const count = await slots.count()
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = slots.nth(index)
+
+    if (!(await slot.isVisible())) continue
+    if (!(await slot.isEnabled())) continue
+
+    await slot.click()
+    return
+  }
+
+  throw new Error('No enabled time slot found in availability drawer')
 }
 
 test.beforeAll(async () => {
@@ -128,20 +151,22 @@ test.describe('mobile availability browser flow', () => {
 
     await gotoProfessionalServicesPage(page, seed)
     await openAvailabilityFromSeededService(page, seed)
+    await waitForLocationToggleReady(page)
 
     await switchToMobile(page)
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)
 
-    const holdResponsePromise = page.waitForResponse(
-      (resp) =>
-        resp.url().includes('/api/holds') &&
-        resp.request().method() === 'POST',
-    )
+    const [holdResponse] = await Promise.all([
+      page.waitForResponse(
+        (resp) =>
+          resp.url().includes('/api/holds') &&
+          resp.request().method() === 'POST',
+        { timeout: 30_000 },
+      ),
+      chooseFirstEnabledTimeSlot(page),
+    ])
 
-    await chooseFirstVisibleTimeSlot(page)
-
-    const holdResponse = await holdResponsePromise
     const holdBody = await holdResponse.text()
 
     console.log('mobile hold status', holdResponse.status())
@@ -189,6 +214,7 @@ test.describe('mobile availability browser flow', () => {
 
     await gotoProfessionalServicesPage(page, seed)
     await openAvailabilityFromSeededService(page, seed)
+    await waitForLocationToggleReady(page)
 
     await switchToMobile(page)
     await expectMobileAddressRequired(page)

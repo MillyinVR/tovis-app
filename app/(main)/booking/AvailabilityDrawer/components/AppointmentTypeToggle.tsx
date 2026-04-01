@@ -1,10 +1,11 @@
+// app/(main)/booking/AvailabilityDrawer/components/AppointmentTypeToggle.tsx
 'use client'
 
-import type { ServiceLocationType, AvailabilityOffering } from '../types'
+import type { AvailabilityOffering, ServiceLocationType } from '../types'
 
 type Props = {
   value: ServiceLocationType
-  onChange: (v: ServiceLocationType) => void
+  onChange: (value: ServiceLocationType) => void
   disabled?: boolean
   allowed?: {
     salon: boolean
@@ -13,35 +14,45 @@ type Props = {
   offering?: AvailabilityOffering
 }
 
-function moneyLabel(v: unknown) {
-  if (typeof v === 'number' && Number.isFinite(v)) return `$${v.toFixed(0)}`
-  if (typeof v === 'string' && v.trim()) return v.trim()
-  return null
-}
-
-function fromPriceForMode(
-  offering: AvailabilityOffering | undefined,
-  mode: ServiceLocationType,
-) {
-  if (!offering) return null
-  const raw =
-    mode === 'MOBILE'
-      ? offering.mobilePriceStartingAt
-      : offering.salonPriceStartingAt
-  return moneyLabel(raw)
-}
-
-function getModeCopy(
-  mode: ServiceLocationType,
-  offering?: AvailabilityOffering,
-): {
+type ModeCopy = {
   label: string
   eyebrow: string
   title: string
   subtitle: string
   from: string | null
   badge?: string
-} {
+}
+
+function moneyLabel(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `$${value.toFixed(0)}`
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+
+  return null
+}
+
+function fromPriceForMode(
+  offering: AvailabilityOffering | undefined,
+  mode: ServiceLocationType,
+): string | null {
+  if (!offering) return null
+
+  const raw =
+    mode === 'MOBILE'
+      ? offering.mobilePriceStartingAt
+      : offering.salonPriceStartingAt
+
+  return moneyLabel(raw)
+}
+
+function getModeCopy(
+  mode: ServiceLocationType,
+  offering?: AvailabilityOffering,
+): ModeCopy {
   if (mode === 'MOBILE') {
     return {
       label: 'Mobile',
@@ -65,14 +76,20 @@ function getModeCopy(
   }
 }
 
-function modeButtonLabel(mode: ServiceLocationType) {
+function modeButtonLabel(mode: ServiceLocationType): string {
   return mode === 'MOBILE' ? 'Mobile' : 'In-salon'
+}
+
+function modeTestId(mode: ServiceLocationType): string {
+  return mode === 'MOBILE'
+    ? 'booking-location-mobile'
+    : 'booking-location-salon'
 }
 
 export default function AppointmentTypeToggle({
   value,
   onChange,
-  disabled,
+  disabled = false,
   allowed,
   offering,
 }: Props) {
@@ -82,16 +99,13 @@ export default function AppointmentTypeToggle({
   if (!canSalon && !canMobile) return null
 
   const modes: ServiceLocationType[] = []
-
   if (canSalon) modes.push('SALON')
   if (canMobile) modes.push('MOBILE')
 
-  const isSingle = modes.length === 1
-  const effective =
-    isSingle || !modes.includes(value) ? modes[0] : value
-
-  const isDisabled = Boolean(disabled)
-  const active = getModeCopy(effective, offering)
+  const isSingleMode = modes.length === 1
+  const effectiveValue =
+    isSingleMode || !modes.includes(value) ? modes[0] : value
+  const active = getModeCopy(effectiveValue, offering)
 
   return (
     <div className="tovis-glass-soft mb-3 rounded-card p-4">
@@ -100,12 +114,12 @@ export default function AppointmentTypeToggle({
       </div>
 
       <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-        {isSingle
+        {isSingleMode
           ? 'This service is only available in one appointment type.'
           : 'Availability and pricing update based on the selected appointment type.'}
       </div>
 
-      {!isSingle ? (
+      {!isSingleMode ? (
         <div
           className={[
             'mt-3 grid gap-2',
@@ -114,26 +128,26 @@ export default function AppointmentTypeToggle({
           aria-label="Appointment type"
         >
           {modes.map((mode) => {
-            const selected = effective === mode
+            const selected = effectiveValue === mode
 
             return (
               <button
                 key={mode}
                 type="button"
-                data-testid={`booking-location-${mode.toLowerCase()}`}
+                data-testid={modeTestId(mode)}
+                aria-pressed={selected}
+                disabled={disabled}
                 onClick={() => {
-                  if (isDisabled) return
+                  if (disabled) return
                   if (selected) return
                   onChange(mode)
                 }}
-                disabled={isDisabled}
-                aria-pressed={selected}
                 className={[
                   'h-11 rounded-full border px-4 text-[13px] font-black transition',
                   selected
                     ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
                     : 'border-white/10 bg-bgPrimary/30 text-textPrimary hover:bg-white/10',
-                  isDisabled
+                  disabled
                     ? 'cursor-not-allowed opacity-60 hover:bg-bgPrimary/30'
                     : 'cursor-pointer',
                 ].join(' ')}
@@ -148,7 +162,7 @@ export default function AppointmentTypeToggle({
       <div
         className={[
           'mt-3 rounded-card border p-4 transition',
-          isSingle
+          isSingleMode
             ? 'border-white/10 bg-bgPrimary/35'
             : 'border-accentPrimary/25 bg-accentPrimary text-bgPrimary',
         ].join(' ')}
@@ -158,7 +172,7 @@ export default function AppointmentTypeToggle({
             <div
               className={[
                 'text-[11px] font-black uppercase tracking-[0.08em]',
-                isSingle ? 'text-textSecondary' : 'text-bgPrimary/80',
+                isSingleMode ? 'text-textSecondary' : 'text-bgPrimary/80',
               ].join(' ')}
             >
               {active.eyebrow}
@@ -167,7 +181,7 @@ export default function AppointmentTypeToggle({
             <div
               className={[
                 'mt-1 text-[16px] font-black',
-                isSingle ? 'text-textPrimary' : 'text-bgPrimary',
+                isSingleMode ? 'text-textPrimary' : 'text-bgPrimary',
               ].join(' ')}
             >
               {active.title}
@@ -179,7 +193,7 @@ export default function AppointmentTypeToggle({
               <span
                 className={[
                   'rounded-full border px-2.5 py-1 text-[10px] font-black',
-                  isSingle
+                  isSingleMode
                     ? 'border-white/10 bg-bgPrimary/35 text-textPrimary'
                     : 'border-bgPrimary/20 bg-bgPrimary/12 text-bgPrimary',
                 ].join(' ')}
@@ -192,7 +206,7 @@ export default function AppointmentTypeToggle({
               <span
                 className={[
                   'rounded-full border px-2.5 py-1 text-[10px] font-black',
-                  isSingle
+                  isSingleMode
                     ? 'border-white/10 bg-bgPrimary/35 text-textPrimary'
                     : 'border-bgPrimary/20 bg-bgPrimary/12 text-bgPrimary',
                 ].join(' ')}
@@ -206,7 +220,7 @@ export default function AppointmentTypeToggle({
         <div
           className={[
             'mt-3 inline-flex rounded-full border px-3 py-1.5 text-[12px] font-black',
-            isSingle
+            isSingleMode
               ? 'border-white/10 bg-white/5 text-textPrimary'
               : 'border-bgPrimary/20 bg-bgPrimary/12 text-bgPrimary',
           ].join(' ')}
@@ -217,7 +231,7 @@ export default function AppointmentTypeToggle({
         <div
           className={[
             'mt-3 text-[13px] font-semibold leading-5',
-            isSingle ? 'text-textSecondary' : 'text-bgPrimary/90',
+            isSingleMode ? 'text-textSecondary' : 'text-bgPrimary/90',
           ].join(' ')}
         >
           {active.subtitle}

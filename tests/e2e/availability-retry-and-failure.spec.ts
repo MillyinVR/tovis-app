@@ -264,6 +264,7 @@ test.describe('availability retry and failure browser flow', () => {
       (resp) =>
         resp.url().includes('/api/holds') &&
         resp.request().method() === 'POST',
+      { timeout: 30_000 },
     )
 
     await chooseSlotByIndex(page, retryIndex)

@@ -28,6 +28,32 @@ function continueButton(scope: Scope): Locator {
     .first()
 }
 
+function salonFallbackButton(scope: Scope): Locator {
+  return scope
+    .getByRole('button', {
+      name: /^(?:in-salon|salon)$/i,
+    })
+    .first()
+}
+
+function mobileFallbackButton(scope: Scope): Locator {
+  return scope
+    .getByRole('button', {
+      name: /^mobile$/i,
+    })
+    .first()
+}
+
+async function waitForMobileAddressLoadingToFinish(
+  section: Locator,
+): Promise<void> {
+  const loadingText = section.getByText(/loading saved addresses/i)
+
+  if (await loadingText.count()) {
+    await expect(loadingText).toBeHidden({ timeout: 15_000 })
+  }
+}
+
 export async function openAvailabilityDrawer(page: Page): Promise<Locator> {
   await byTestId(page, testIds.availability.openTrigger).click()
   const drawer = availabilityDrawer(page)
@@ -75,7 +101,7 @@ export async function waitForAvailabilityReady(
   await expect(slotButtons(page).first()).toBeVisible({ timeout: 30_000 })
 
   await expect(
-    availabilityDrawer(page).getByText(/something went wrong/i),
+    drawer.getByText(/something went wrong/i),
   ).not.toBeVisible({ timeout: 5_000 })
 }
 
@@ -107,43 +133,36 @@ export async function retryAvailability(page: Page): Promise<void> {
 
 export async function switchToSalon(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
-  const salonOption = byTestId(drawer, testIds.location.salonOption)
+  const salonOption = byTestId(drawer, testIds.location.salonOption).first()
+  const fallback = salonFallbackButton(drawer)
 
   if (await salonOption.count()) {
+    await expect(salonOption).toBeVisible({ timeout: 15_000 })
     await salonOption.scrollIntoViewIfNeeded()
     await salonOption.click({ force: true })
     return
   }
 
-  await drawer
-    .getByRole('button', { name: text.location.salon })
-    .click({ force: true })
+  await expect(fallback).toBeVisible({ timeout: 15_000 })
+  await fallback.scrollIntoViewIfNeeded()
+  await fallback.click({ force: true })
 }
 
 export async function switchToMobile(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
-  const mobileOption = byTestId(drawer, testIds.location.mobileOption)
-
-  await expect(
-    mobileOption.or(drawer.getByRole('button', { name: text.location.mobile })).first()
-  ).toBeAttached({ timeout: 15_000 })
+  const mobileOption = byTestId(drawer, testIds.location.mobileOption).first()
+  const fallback = mobileFallbackButton(drawer)
 
   if (await mobileOption.count()) {
-    await mobileOption.evaluate((el) =>
-      el.scrollIntoView({ block: 'start', behavior: 'instant' }),
-    )
+    await expect(mobileOption).toBeVisible({ timeout: 15_000 })
+    await mobileOption.scrollIntoViewIfNeeded()
     await mobileOption.click({ force: true })
     return
   }
 
-  await drawer
-    .getByRole('button', { name: text.location.mobile })
-    .evaluate((el) =>
-      el.scrollIntoView({ block: 'start', behavior: 'instant' }),
-    )
-  await drawer
-    .getByRole('button', { name: text.location.mobile })
-    .click({ force: true })
+  await expect(fallback).toBeVisible({ timeout: 15_000 })
+  await fallback.scrollIntoViewIfNeeded()
+  await fallback.click({ force: true })
 }
 
 export async function chooseDay(page: Page, day: DayTarget): Promise<void> {
@@ -240,6 +259,7 @@ export async function selectSavedMobileAddress(
   const option = mobileAddressOption(section, addressId)
 
   await expect(section).toBeVisible()
+  await waitForMobileAddressLoadingToFinish(section)
   await expect(option).toBeVisible({ timeout: 15_000 })
   await option.click()
 }
@@ -247,22 +267,34 @@ export async function selectSavedMobileAddress(
 export async function expectMobileAddressRequired(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
   const section = byTestId(drawer, testIds.mobileAddress.section)
+  const emptyState = byTestId(section, testIds.mobileAddress.emptyState)
+  const addButton = byTestId(section, testIds.mobileAddress.addButton)
+  const noSavedAddressText = section.getByText(
+    text.mobileAddress.noSavedAddress,
+  )
 
   await expect(section).toBeVisible()
-  await expect(
-    byTestId(section, testIds.mobileAddress.emptyState),
-  ).toBeVisible()
-  await expect(
-    section.getByText(text.mobileAddress.noSavedAddress),
-  ).toBeVisible()
+  await waitForMobileAddressLoadingToFinish(section)
+
+  if (await emptyState.count()) {
+    await expect(emptyState).toBeVisible()
+  }
+
+  await expect(noSavedAddressText).toBeVisible({ timeout: 15_000 })
+  await expect(addButton).toBeVisible()
+  await expect(addButton).toBeEnabled()
   await expectContinueDisabled(page)
 }
 
 export async function openAddMobileAddressModal(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
   const section = byTestId(drawer, testIds.mobileAddress.section)
+  const addButton = byTestId(section, testIds.mobileAddress.addButton)
 
   await expect(section).toBeVisible()
-  await byTestId(section, testIds.mobileAddress.addButton).click()
+  await waitForMobileAddressLoadingToFinish(section)
+  await expect(addButton).toBeVisible()
+  await expect(addButton).toBeEnabled()
+  await addButton.click()
   await expect(byTestId(page, testIds.mobileAddress.modal)).toBeVisible()
 }
