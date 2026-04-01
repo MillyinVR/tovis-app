@@ -75,6 +75,8 @@ jobs:
       - name: Push Prisma schema
         run: npx prisma db push --skip-generate
 
+      - name: Seed test data
+        run: npm run seed
       - name: Run browser E2E
         run: npm run test:e2e:ci
 

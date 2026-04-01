@@ -142,9 +142,9 @@ async function main() {
   // 0) Create test users so you can login
   // -----------------------------
   const proEmail = 'pro@test.com'
-  const proPassword = 'Password123!'
+  const proPassword = 'Password123'
   const clientEmail = 'client@test.com'
-  const clientPassword = 'Password123!'
+  const clientPassword = 'Password123'
 
   // Admin credentials (override in .env if you want)
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@test.com'
