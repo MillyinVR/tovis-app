@@ -240,7 +240,7 @@ test.describe('location switching browser flow', () => {
 
     await gotoProfessionalServicesPage(page, seed)
     await openAvailabilityFromSeededService(page, seed)
-
+    await waitForAvailabilityReady(page)
     await switchToMobile(page)
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)

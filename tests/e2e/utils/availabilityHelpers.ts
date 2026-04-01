@@ -124,18 +124,26 @@ export async function switchToMobile(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
   const mobileOption = byTestId(drawer, testIds.location.mobileOption)
 
-  const target = (await mobileOption.count())
-    ? mobileOption
-    : drawer.getByRole('button', { name: text.location.mobile })
+  await expect(
+    mobileOption.or(drawer.getByRole('button', { name: text.location.mobile })).first()
+  ).toBeAttached({ timeout: 15_000 })
 
-  // Scroll the scroll container to the top so the toggle is
-  // fully clear of the fixed StickyCTA footer before clicking
-  await drawer.evaluate((el) => {
-    const scroller = el.querySelector('.looksNoScrollbar')
-    if (scroller) scroller.scrollTop = 0
-  })
+  if (await mobileOption.count()) {
+    await mobileOption.evaluate((el) =>
+      el.scrollIntoView({ block: 'start', behavior: 'instant' }),
+    )
+    await mobileOption.click({ force: true })
+    return
+  }
 
-  await target.click({ force: true })
+  await drawer
+    .getByRole('button', { name: text.location.mobile })
+    .evaluate((el) =>
+      el.scrollIntoView({ block: 'start', behavior: 'instant' }),
+    )
+  await drawer
+    .getByRole('button', { name: text.location.mobile })
+    .click({ force: true })
 }
 
 export async function chooseDay(page: Page, day: DayTarget): Promise<void> {
