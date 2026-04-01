@@ -53,7 +53,7 @@ jobs:
       TWILIO_ACCOUNT_SID: test-twilio-sid
       TWILIO_AUTH_TOKEN: test-twilio-token
       TWILIO_VERIFY_SERVICE_SID: test-twilio-verify-service-sid
-      TWILIO_PHONE_NUMBER: +15555550123
+      TWILIO_FROM_NUMBER: +15555550123
 
     steps:
       - name: Check out repository

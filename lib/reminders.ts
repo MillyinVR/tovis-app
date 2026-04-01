@@ -1,23 +1,69 @@
-import twilio from 'twilio'
+import twilio, { type Twilio } from 'twilio'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { markBookingRemindersSent } from '@/lib/booking/writeBoundary'
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID
-const authToken = process.env.TWILIO_AUTH_TOKEN
-const fromNumber = process.env.TWILIO_FROM_NUMBER
+type TwilioConfig = {
+  accountSid: string
+  authToken: string
+  fromNumber: string
+}
 
-const twilioClient = accountSid && authToken ? twilio(accountSid, authToken) : null
+function getTwilioConfig(): TwilioConfig | null {
+  const accountSid = (process.env.TWILIO_ACCOUNT_SID ?? '').trim()
+  const authToken = (process.env.TWILIO_AUTH_TOKEN ?? '').trim()
+  const fromNumber = (
+    process.env.TWILIO_FROM_NUMBER ??
+    process.env.TWILIO_PHONE_NUMBER ??
+    ''
+  ).trim()
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return null
+  }
+
+  // Twilio constructor validates SID format. In CI/test we do not want
+  // fake placeholder values to crash app build at import/startup time.
+  if (!accountSid.startsWith('AC')) {
+    console.warn(
+      '[reminders] Twilio disabled: TWILIO_ACCOUNT_SID is present but invalid for runtime use.',
+    )
+    return null
+  }
+
+  return {
+    accountSid,
+    authToken,
+    fromNumber,
+  }
+}
+
+function getTwilioClient(): { client: Twilio; fromNumber: string } | null {
+  const config = getTwilioConfig()
+  if (!config) return null
+
+  return {
+    client: twilio(config.accountSid, config.authToken),
+    fromNumber: config.fromNumber,
+  }
+}
 
 export async function sendSmsReminder(to: string, body: string) {
-  if (!twilioClient || !fromNumber) {
-    console.warn('[reminders] Twilio not configured, would have sent SMS to', to, '->', body)
+  const runtime = getTwilioClient()
+
+  if (!runtime) {
+    console.warn(
+      '[reminders] Twilio not configured, would have sent SMS to',
+      to,
+      '->',
+      body,
+    )
     return
   }
 
-  await twilioClient.messages.create({
+  await runtime.client.messages.create({
     to,
-    from: fromNumber,
+    from: runtime.fromNumber,
     body,
   })
 }
