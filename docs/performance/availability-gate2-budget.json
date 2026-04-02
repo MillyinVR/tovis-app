@@ -1,0 +1,81 @@
+{
+  "gate": 2,
+  "name": "availability-performance-budget",
+  "scope": "availability-flow-only",
+  "status": "draft",
+  "release_gate": "p95",
+  "escalation_threshold": "p99",
+  "metrics": {
+    "drawer_open_to_first_usable_ms": {
+      "start_event": "booking_cta_or_availability_drawer_open_trigger",
+      "stop_event": "drawer_visible_and_first_day_visible_and_first_time_slot_visible_and_blocking_loading_gone",
+      "budgets_ms": {
+        "p50": 700,
+        "p95": 1500,
+        "p99": 2500
+      }
+    },
+    "day_switch_to_times_visible_ms": {
+      "start_event": "different_day_button_click_inside_availability_drawer",
+      "stop_event": "updated_slot_list_for_selected_day_visible_and_ready",
+      "budgets_ms": {
+        "p50": 400,
+        "p95": 900,
+        "p99": 1500
+      }
+    },
+    "hold_request_latency_ms": {
+      "start_event": "post_api_holds_request_start_after_slot_selection",
+      "stop_event": "post_api_holds_http_response_received",
+      "budgets_ms": {
+        "p50": 300,
+        "p95": 800,
+        "p99": 1500
+      }
+    },
+    "continue_to_add_ons_ms": {
+      "start_event": "continue_button_click",
+      "stop_event": "add_ons_heading_or_canonical_page_test_id_visible_and_ready",
+      "budgets_ms": {
+        "p50": 500,
+        "p95": 1200,
+        "p99": 2000
+      }
+    },
+    "background_refresh_ms": {
+      "start_event": "background_refresh_begins_while_stale_availability_data_remains_visible",
+      "stop_event": "refreshed_availability_data_applied_and_refresh_indicator_gone",
+      "budgets_ms": {
+        "p50": 800,
+        "p95": 1800,
+        "p99": 3000
+      }
+    }
+  },
+  "test_conditions": {
+    "environments": [
+      "ci-desktop",
+      "ci-mobile"
+    ],
+    "device_profiles": [
+      "Desktop Chrome",
+      "Pixel 7 emulation"
+    ],
+    "cache_states": {
+      "cold": "relevant_availability_cache_cleared_before_scenario",
+      "warm_background_refresh": "stale_cached_summary_present_before_refresh_scenario"
+    },
+    "network": "default_ci_network_unless_explicitly_labeled_otherwise",
+    "cpu": "default_ci_cpu_unless_explicitly_labeled_otherwise",
+    "sample_size": {
+      "minimum_per_metric_per_environment_for_pr_gating": 30,
+      "preferred_per_metric_per_environment_for_nightly": 100
+    }
+  },
+  "required_artifacts": [
+    "artifacts/perf/availability/raw-desktop.json",
+    "artifacts/perf/availability/raw-mobile.json",
+    "artifacts/perf/availability/summary.json",
+    "artifacts/perf/availability/summary.md"
+  ]
+}

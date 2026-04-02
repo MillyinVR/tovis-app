@@ -1,5 +1,4 @@
 // app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
-
 'use client'
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -39,6 +38,11 @@ import { useMobileAddresses } from './hooks/useMobileAddresses'
 import { shouldPrefetchForSelectedIndex } from './utils/availabilityWindow'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { dateTimeLocalToUtcIso } from '@/lib/bookingDateTimeClient'
+import {
+  startAvailabilityMetric,
+  endAvailabilityMetric,
+  cancelAvailabilityMetric,
+} from './perf/availabilityPerf'
 
 const FALLBACK_TZ = 'UTC' as const
 const MOBILE_ADDRESS_REQUIRED_MESSAGE =
@@ -49,6 +53,21 @@ type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
 
 const _dtfCache = new Map<string, Intl.DateTimeFormat>()
+
+function buildDaySwitchMetricKey(dayYMD: string) {
+  return `day-switch:${dayYMD}`
+}
+
+function buildHoldRequestMetricKey(args: {
+  offeringId: string
+  slotISO: string
+}) {
+  return `hold:${args.offeringId}:${args.slotISO}`
+}
+
+function buildContinueMetricKey(holdId: string) {
+  return `continue:${holdId}`
+}
 
 const _DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
   'timeZone',
@@ -208,7 +227,9 @@ function getBookingUiMessage(
     case 'CLIENT_SERVICE_ADDRESS_REQUIRED':
     case 'CLIENT_SERVICE_ADDRESS_INVALID':
     case 'HOLD_MISSING_CLIENT_ADDRESS':
-      return parsed.message ?? 'Choose a mobile service address before continuing.'
+      return (
+        parsed.message ?? 'Choose a mobile service address before continuing.'
+      )
 
     case 'HOLD_EXPIRED':
       return parsed.message ?? 'That hold expired. Please pick a new slot.'
@@ -364,9 +385,7 @@ function buildDayScrollerModel(
     let anchor = new Date(`${d.date}T12:00:00.000Z`)
 
     try {
-      anchor = new Date(
-        dateTimeLocalToUtcIso(`${d.date}T12:00:00`, appointmentTz),
-      )
+      anchor = new Date(dateTimeLocalToUtcIso(`${d.date}T12:00:00`, appointmentTz))
     } catch {
       // display-only fallback
     }
@@ -426,7 +445,10 @@ function InlineRetryCard(props: {
   onRetry: () => void
 }) {
   return (
-    <div data-testid="availability-error" className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
+    <div
+      data-testid="availability-error"
+      className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
+    >
       <div className="mb-3 text-sm font-semibold text-toneDanger">
         {props.message}
       </div>
@@ -469,6 +491,7 @@ export default function AvailabilityDrawer(props: {
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const holdStatusRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
+  const pendingDaySwitchMetricKeyRef = useRef<string | null>(null)
 
   const drawerOpenedTrackedRef = useRef(false)
   const summaryLoadedTrackedRef = useRef(false)
@@ -732,6 +755,20 @@ export default function AvailabilityDrawer(props: {
 
   useEffect(() => {
     if (!open) {
+      cancelAvailabilityMetric({
+        metric: 'drawer_open_to_first_usable_ms',
+        reason: 'drawer_closed',
+      })
+
+      if (pendingDaySwitchMetricKeyRef.current) {
+        cancelAvailabilityMetric({
+          metric: 'day_switch_to_times_visible_ms',
+          key: pendingDaySwitchMetricKeyRef.current,
+          reason: 'drawer_closed',
+        })
+        pendingDaySwitchMetricKeyRef.current = null
+      }
+
       drawerOpenedTrackedRef.current = false
       summaryLoadedTrackedRef.current = false
       lastDaySlotsTrackedKeyRef.current = null
@@ -743,6 +780,17 @@ export default function AvailabilityDrawer(props: {
     drawerOpenedTrackedRef.current = true
     summaryLoadedTrackedRef.current = false
     lastDaySlotsTrackedKeyRef.current = null
+
+    startAvailabilityMetric({
+      metric: 'drawer_open_to_first_usable_ms',
+      meta: {
+        professionalId: context.professionalId ?? null,
+        serviceId: context.serviceId ?? null,
+        offeringId: context.offeringId ?? null,
+        bookingSource,
+        locationType: activeLocationType,
+      },
+    })
 
     trackAvailabilityEvent('availability_drawer_opened', {
       professionalId: context.professionalId ?? null,
@@ -756,6 +804,7 @@ export default function AvailabilityDrawer(props: {
     context.serviceId,
     context.offeringId,
     bookingSource,
+    activeLocationType,
   ])
 
   useEffect(() => {
@@ -811,6 +860,25 @@ export default function AvailabilityDrawer(props: {
       bookingSource,
       slotCount: primarySlots.length,
     })
+
+    const daySwitchMetricKey = buildDaySwitchMetricKey(selectedDayYMD)
+
+    endAvailabilityMetric({
+      metric: 'day_switch_to_times_visible_ms',
+      key: daySwitchMetricKey,
+      meta: {
+        selectedDayYMD,
+        locationType: activeLocationType,
+        serviceId: effectiveServiceId,
+        offeringId: resolvedOfferingId,
+        bookingSource,
+        slotCount: primarySlots.length,
+      },
+    })
+
+    if (pendingDaySwitchMetricKeyRef.current === daySwitchMetricKey) {
+      pendingDaySwitchMetricKeyRef.current = null
+    }
   }, [
     open,
     summary,
@@ -1003,7 +1071,7 @@ export default function AvailabilityDrawer(props: {
     setHoldUntil(null)
     setSelected(null)
     setHoldError('That hold expired. Please pick a new slot.')
-  }, [holdExpired, setError])
+  }, [holdExpired])
 
   useEffect(() => {
     if (!open) return
@@ -1035,6 +1103,78 @@ export default function AvailabilityDrawer(props: {
     setOtherProsRequested(false)
   }, [open, selectedDayYMD, activeLocationType, selectedClientAddressId])
 
+  const waitingForMobileAddress =
+    open &&
+    mobileAddressGateRequested &&
+    !selectedClientAddressId &&
+    !loadingMobileAddresses
+
+  const showMobileAddressSelector = open && mobileAddressGateRequested
+
+  const displayError = (() => {
+    if (holdError) return holdError
+    if (
+      waitingForMobileAddress &&
+      availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
+    ) {
+      return null
+    }
+    return availabilityError
+  })()
+
+  const canRenderSummary = Boolean(summary && primary)
+  const summaryDaysLoading =
+    loading && !canRenderSummary && !showMobileAddressSelector
+  const backgroundRefreshing = refreshing
+  const daySlotsLoading = loadingPrimarySlots
+
+  const blockingError = !canRenderSummary ? displayError : null
+  const inlineError = canRenderSummary ? displayError : null
+
+  const shouldShowEmpty =
+    !blockingError &&
+    !summaryDaysLoading &&
+    !canRenderSummary &&
+    !showMobileAddressSelector
+
+  useEffect(() => {
+    if (!open) return
+    if (!canRenderSummary) return
+    if (summaryDaysLoading) return
+    if (!selectedDayYMD) return
+    if (!dayScrollerDays.length) return
+    if (daySlotsLoading) return
+    if (primarySlots.length === 0) return
+
+    endAvailabilityMetric({
+      metric: 'drawer_open_to_first_usable_ms',
+      meta: {
+        professionalId: primary?.id ?? null,
+        serviceId: effectiveServiceId,
+        offeringId: resolvedOfferingId,
+        selectedDayYMD,
+        locationType: activeLocationType,
+        bookingSource,
+        slotCount: primarySlots.length,
+        dayCount: days.length,
+      },
+    })
+  }, [
+    open,
+    canRenderSummary,
+    summaryDaysLoading,
+    selectedDayYMD,
+    dayScrollerDays.length,
+    daySlotsLoading,
+    primary?.id,
+    effectiveServiceId,
+    resolvedOfferingId,
+    activeLocationType,
+    bookingSource,
+    primarySlots.length,
+    days.length,
+  ])
+
   function scrollToOtherPros() {
     requestOtherPros({ scroll: true })
   }
@@ -1046,6 +1186,13 @@ export default function AvailabilityDrawer(props: {
   ) {
     const effOfferingId = offeringId || resolvedOfferingId
     if (!effOfferingId || holding) return
+
+    const holdMetricKey = buildHoldRequestMetricKey({
+      offeringId: effOfferingId,
+      slotISO,
+    })
+
+    let holdMetricFinished = false
 
     const locationId = locationIdByPro[proId] ?? null
 
@@ -1065,6 +1212,20 @@ export default function AvailabilityDrawer(props: {
     setSelected(null)
     setHoldUntil(null)
 
+    startAvailabilityMetric({
+      metric: 'hold_request_latency_ms',
+      key: holdMetricKey,
+      meta: {
+        professionalId: proId,
+        serviceId: effectiveServiceId,
+        offeringId: effOfferingId,
+        selectedDayYMD,
+        slotISO,
+        locationType: activeLocationType,
+        bookingSource,
+      },
+    })
+
     trackAvailabilityEvent('availability_hold_requested', {
       professionalId: proId,
       serviceId: effectiveServiceId,
@@ -1076,6 +1237,7 @@ export default function AvailabilityDrawer(props: {
     })
 
     setHolding(true)
+
     try {
       const res = await fetch('/api/holds', {
         method: 'POST',
@@ -1092,6 +1254,23 @@ export default function AvailabilityDrawer(props: {
             activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
         }),
       })
+
+      endAvailabilityMetric({
+        metric: 'hold_request_latency_ms',
+        key: holdMetricKey,
+        meta: {
+          professionalId: proId,
+          serviceId: effectiveServiceId,
+          offeringId: effOfferingId,
+          selectedDayYMD,
+          slotISO,
+          locationType: activeLocationType,
+          bookingSource,
+          statusCode: res.status,
+          ok: res.ok,
+        },
+      })
+      holdMetricFinished = true
 
       const raw = await safeJson(res)
 
@@ -1134,6 +1313,24 @@ export default function AvailabilityDrawer(props: {
         bookingSource,
       })
     } catch (e: unknown) {
+      if (!holdMetricFinished) {
+        endAvailabilityMetric({
+          metric: 'hold_request_latency_ms',
+          key: holdMetricKey,
+          meta: {
+            professionalId: proId,
+            serviceId: effectiveServiceId,
+            offeringId: effOfferingId,
+            selectedDayYMD,
+            slotISO,
+            locationType: activeLocationType,
+            bookingSource,
+            outcome: 'network_error',
+          },
+        })
+        holdMetricFinished = true
+      }
+
       setHoldError(
         e instanceof Error
           ? e.message
@@ -1178,6 +1375,23 @@ export default function AvailabilityDrawer(props: {
       return
     }
 
+    const continueMetricKey = buildContinueMetricKey(payload.holdId)
+
+    startAvailabilityMetric({
+      metric: 'continue_to_add_ons_ms',
+      key: continueMetricKey,
+      meta: {
+        professionalId: context.professionalId ?? null,
+        serviceId: effectiveServiceId,
+        offeringId: payload.offeringId,
+        selectedDayYMD,
+        slotISO: payload.slotISO,
+        locationType: payload.locationType,
+        bookingSource: payload.bookingSource,
+        holdId: payload.holdId,
+      },
+    })
+
     const qs = new URLSearchParams({
       holdId: payload.holdId,
       offeringId: payload.offeringId,
@@ -1204,36 +1418,6 @@ export default function AvailabilityDrawer(props: {
   const continueLabel = onConfirmHold ? 'Continue' : 'Continue to add-ons'
 
   if (!open) return null
-
-  const waitingForMobileAddress =
-    open &&
-    mobileAddressGateRequested &&
-    !selectedClientAddressId &&
-    !loadingMobileAddresses
-
-  const showMobileAddressSelector =
-    open && mobileAddressGateRequested
-
-  const displayError = (() => {
-    if (holdError) return holdError
-    if (waitingForMobileAddress && availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE) return null
-    return availabilityError
-  })()
-
-  const canRenderSummary = Boolean(summary && primary)
-  const summaryDaysLoading =
-    loading && !canRenderSummary && !showMobileAddressSelector
-  const backgroundRefreshing = refreshing
-  const daySlotsLoading = loadingPrimarySlots
-
-  const blockingError = !canRenderSummary ? displayError : null
-  const inlineError = canRenderSummary ? displayError : null
-
-  const shouldShowEmpty =
-    !blockingError &&
-    !summaryDaysLoading &&
-    !canRenderSummary &&
-    !showMobileAddressSelector
 
   return (
     <>
@@ -1388,6 +1572,29 @@ export default function AvailabilityDrawer(props: {
                   days={dayScrollerDays}
                   selectedYMD={selectedDayYMD}
                   onSelect={(ymd) => {
+                    if (pendingDaySwitchMetricKeyRef.current) {
+                      cancelAvailabilityMetric({
+                        metric: 'day_switch_to_times_visible_ms',
+                        key: pendingDaySwitchMetricKeyRef.current,
+                        reason: 'superseded',
+                      })
+                    }
+
+                    const nextMetricKey = buildDaySwitchMetricKey(ymd)
+                    pendingDaySwitchMetricKeyRef.current = nextMetricKey
+
+                    startAvailabilityMetric({
+                      metric: 'day_switch_to_times_visible_ms',
+                      key: nextMetricKey,
+                      meta: {
+                        previousDayYMD: selectedDayYMD,
+                        nextDayYMD: ymd,
+                        locationType: activeLocationType,
+                        serviceId: effectiveServiceId,
+                        bookingSource,
+                      },
+                    })
+
                     void hardResetUi({ deleteHold: true })
                     setSelectedDayYMD(ymd)
                   }}

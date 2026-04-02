@@ -4,11 +4,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
+import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
+
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 
 type AddOnDTO = {
-  id: string // OfferingAddOn.id ✅
+  id: string // OfferingAddOn.id
   serviceId: string
   title: string
   group: string | null
@@ -26,8 +28,6 @@ type Props = {
   mediaId: string | null
   addOns: AddOnDTO[]
   initialError?: string | null
-
-  // ✅ server-hydrated selection
   initialSelectedIds?: string[]
 }
 
@@ -49,6 +49,7 @@ function parseCommaIds(raw: string | null, max: number): string[] {
   if (!raw) return []
   const out: string[] = []
   const seen = new Set<string>()
+
   for (const part of raw.split(',')) {
     const s = part.trim()
     if (!s) continue
@@ -57,19 +58,29 @@ function parseCommaIds(raw: string | null, max: number): string[] {
     out.push(s)
     if (out.length >= max) break
   }
+
   return out
 }
 
 function buildRecommendedMap(addOns: AddOnDTO[]): Record<string, boolean> {
   const next: Record<string, boolean> = {}
-  for (const a of addOns) if (a.isRecommended) next[a.id] = true
+  for (const a of addOns) {
+    if (a.isRecommended) next[a.id] = true
+  }
   return next
 }
 
-function buildSelectedMapFromIds(addOns: AddOnDTO[], ids: string[]): Record<string, boolean> {
+function buildSelectedMapFromIds(
+  addOns: AddOnDTO[],
+  ids: string[],
+): Record<string, boolean> {
   const allowed = new Set(addOns.map((a) => a.id))
   const next: Record<string, boolean> = {}
-  for (const id of ids) if (allowed.has(id)) next[id] = true
+
+  for (const id of ids) {
+    if (allowed.has(id)) next[id] = true
+  }
+
   return next
 }
 
@@ -79,6 +90,10 @@ function selectedIdsFromMap(selected: Record<string, boolean>): string[] {
 
 function keyFromIds(ids: string[]) {
   return ids.slice().sort().join(',')
+}
+
+function buildContinueMetricKey(holdId: string) {
+  return `continue:${holdId}`
 }
 
 export default function AddOnsClient({
@@ -96,6 +111,7 @@ export default function AddOnsClient({
   const searchParams = useSearchParams()
 
   const searchStr = searchParams.toString()
+
   const urlHasAddOnIds = useMemo(() => {
     return Boolean(searchParams.get('addOnIds')?.trim())
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,12 +119,9 @@ export default function AddOnsClient({
 
   const [error, setError] = useState<string | null>(initialError ?? null)
   const [submitting, setSubmitting] = useState(false)
-
-  // Track whether user interacted (prevents URL “pollution” on initial load)
   const [touched, setTouched] = useState(false)
-
-  // Optional hold countdown (fixed cleanup)
   const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null)
+
   useEffect(() => {
     if (!holdId) {
       setHoldSecondsLeft(null)
@@ -120,12 +133,19 @@ export default function AddOnsClient({
 
     ;(async () => {
       try {
-        const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, { cache: 'no-store' })
+        const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, {
+          cache: 'no-store',
+        })
         const body = await res.json().catch(() => ({}))
+
         if (cancelled) return
         if (!res.ok || !body?.ok) return
 
-        const expiresAt = typeof body?.hold?.expiresAt === 'string' ? new Date(body.hold.expiresAt) : null
+        const expiresAt =
+          typeof body?.hold?.expiresAt === 'string'
+            ? new Date(body.hold.expiresAt)
+            : null
+
         if (!expiresAt || Number.isNaN(expiresAt.getTime())) return
 
         const tick = () => {
@@ -156,16 +176,18 @@ export default function AddOnsClient({
   }, [searchStr])
 
   const initialSelectedMap = useMemo(() => {
-    if (Array.isArray(initialSelectedIds) && initialSelectedIds.length) {
+    if (Array.isArray(initialSelectedIds) && initialSelectedIds.length > 0) {
       return buildSelectedMapFromIds(addOns, initialSelectedIds)
     }
-    if (urlSelectedIds.length) return buildSelectedMapFromIds(addOns, urlSelectedIds)
+    if (urlSelectedIds.length > 0) {
+      return buildSelectedMapFromIds(addOns, urlSelectedIds)
+    }
     return recommendedMap
   }, [addOns, initialSelectedIds, urlSelectedIds, recommendedMap])
 
-  const [selected, setSelected] = useState<Record<string, boolean>>(initialSelectedMap)
+  const [selected, setSelected] =
+    useState<Record<string, boolean>>(initialSelectedMap)
 
-  // Re-hydrate if server re-renders (or addOns list changes)
   useEffect(() => {
     setSelected((cur) => {
       const curKey = keyFromIds(selectedIdsFromMap(cur))
@@ -177,16 +199,17 @@ export default function AddOnsClient({
   const selectedIds = useMemo(() => selectedIdsFromMap(selected), [selected])
   const selectedKey = useMemo(() => keyFromIds(selectedIds), [selectedIds])
 
-  // Keep URL in sync ONLY after user interaction, or if URL already had addOnIds
   useEffect(() => {
     if (!pathname) return
     if (!touched && !urlHasAddOnIds) return
 
-    const currentKey = keyFromIds(parseCommaIds(searchParams.get('addOnIds'), 50))
+    const currentKey = keyFromIds(
+      parseCommaIds(searchParams.get('addOnIds'), 50),
+    )
     if (currentKey === selectedKey) return
 
     const qs = new URLSearchParams(searchParams.toString())
-    if (selectedIds.length) qs.set('addOnIds', selectedKey)
+    if (selectedIds.length > 0) qs.set('addOnIds', selectedKey)
     else qs.delete('addOnIds')
 
     const nextHref = qs.toString() ? `${pathname}?${qs.toString()}` : pathname
@@ -197,22 +220,26 @@ export default function AddOnsClient({
   const totals = useMemo(() => {
     let centsLike = 0
     let minutes = 0
+
     for (const a of addOns) {
       if (!selected[a.id]) continue
       const price = Number(a.price ?? 0)
       if (Number.isFinite(price)) centsLike += Math.round(price * 100)
       minutes += Number(a.minutes ?? 0) || 0
     }
+
     return { extraPrice: centsLike / 100, extraMinutes: minutes }
   }, [addOns, selected])
 
   const grouped = useMemo(() => {
     const m = new Map<string, AddOnDTO[]>()
+
     for (const a of addOns) {
       const key = (a.group || 'Add-ons').trim()
       if (!m.has(key)) m.set(key, [])
       m.get(key)!.push(a)
     }
+
     return Array.from(m.entries()).map(([group, items]) => ({
       group,
       items: items.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
@@ -224,7 +251,9 @@ export default function AddOnsClient({
       setError('Missing hold/offering. Please go back and pick a time again.')
       return
     }
+
     if (submitting) return
+
     if (holdSecondsLeft != null && holdSecondsLeft <= 0) {
       setError('That hold expired. Please go back and pick another time.')
       return
@@ -250,7 +279,6 @@ export default function AddOnsClient({
       const body = await res.json().catch(() => ({}))
 
       if (res.status === 401) {
-        // ✅ preserve selection through login redirect (always)
         const fromQs = new URLSearchParams({
           holdId,
           offeringId,
@@ -259,7 +287,7 @@ export default function AddOnsClient({
         })
 
         if (mediaId) fromQs.set('mediaId', mediaId)
-        if (selectedIds.length) fromQs.set('addOnIds', selectedKey)
+        if (selectedIds.length > 0) fromQs.set('addOnIds', selectedKey)
 
         const from = `/booking/add-ons?${fromQs.toString()}`
         router.push(`/login?from=${encodeURIComponent(from)}&reason=finalize`)
@@ -271,7 +299,9 @@ export default function AddOnsClient({
         return
       }
 
-      const bookingId = typeof body?.booking?.id === 'string' ? body.booking.id : null
+      const bookingId =
+        typeof body?.booking?.id === 'string' ? body.booking.id : null
+
       if (!bookingId) {
         setError('Booking created but missing id. Please check your dashboard.')
         return
@@ -279,7 +309,11 @@ export default function AddOnsClient({
 
       router.push(`/booking/${encodeURIComponent(bookingId)}`)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Network error completing booking.')
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Network error completing booking.',
+      )
     } finally {
       setSubmitting(false)
     }
@@ -294,11 +328,40 @@ export default function AddOnsClient({
           : `Hold: ${Math.ceil(holdSecondsLeft / 60)}m`
       : null
 
+  useEffect(() => {
+    if (!holdId) return
+
+    const continueMetricKey = buildContinueMetricKey(holdId)
+    let raf = 0
+
+    raf = window.requestAnimationFrame(() => {
+      endAvailabilityMetric({
+        metric: 'continue_to_add_ons_ms',
+        key: continueMetricKey,
+        meta: {
+          holdId,
+          offeringId,
+          locationType,
+          bookingSource: source,
+          mediaId,
+          addOnCount: addOns.length,
+          readyTarget: 'booking-add-ons-continue-button',
+        },
+      })
+    })
+
+    return () => {
+      window.cancelAnimationFrame(raf)
+    }
+  }, [holdId, offeringId, locationType, source, mediaId, addOns.length])
+
   return (
     <main className="mx-auto max-w-180 px-4 pb-28 pt-10 text-textPrimary">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[12px] font-black text-textSecondary">Review & customize</div>
+          <div className="text-[12px] font-black text-textSecondary">
+            Review & customize
+          </div>
           <h1 className="mt-1 text-[26px] font-black">Add-ons</h1>
 
           <div className="mt-2 text-[12px] font-semibold text-textSecondary">
@@ -307,7 +370,9 @@ export default function AddOnsClient({
               <span
                 className={[
                   'ml-2 font-black',
-                  holdSecondsLeft != null && holdSecondsLeft < 60 ? 'text-toneDanger' : 'text-textPrimary',
+                  holdSecondsLeft != null && holdSecondsLeft < 60
+                    ? 'text-toneDanger'
+                    : 'text-textPrimary',
                 ].join(' ')}
               >
                 {holdLabel}
@@ -326,20 +391,26 @@ export default function AddOnsClient({
         </button>
       </div>
 
-      {error ? <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-toneDanger">{error}</div> : null}
+      {error ? (
+        <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-toneDanger">
+          {error}
+        </div>
+      ) : null}
 
       {!error && addOns.length === 0 ? (
         <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-textSecondary">
           No add-ons for this service right now. You’re good to go.
         </div>
       ) : addOns.length ? (
-        <div
-          data-testid="booking-add-ons-list"
-          className="mt-4 grid gap-3"
-        >
+        <div data-testid="booking-add-ons-list" className="mt-4 grid gap-3">
           {grouped.map(({ group, items }) => (
-            <div key={group} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-              <div className="text-[12px] font-black text-textSecondary">{group}</div>
+            <div
+              key={group}
+              className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
+            >
+              <div className="text-[12px] font-black text-textSecondary">
+                {group}
+              </div>
 
               <div className="mt-3 grid gap-2">
                 {items.map((a) => {
@@ -358,13 +429,17 @@ export default function AddOnsClient({
                       className={[
                         'rounded-card border px-4 py-3 text-left transition',
                         'border-white/10',
-                        active ? 'bg-accentPrimary text-bgPrimary' : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+                        active
+                          ? 'bg-accentPrimary text-bgPrimary'
+                          : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
                       ].join(' ')}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <div className="truncate text-[13px] font-black">{a.title}</div>
+                            <div className="truncate text-[13px] font-black">
+                              {a.title}
+                            </div>
                             {a.isRecommended ? (
                               <span
                                 className={[
@@ -379,7 +454,14 @@ export default function AddOnsClient({
                             ) : null}
                           </div>
 
-                          <div className={['mt-2 text-[11px] font-semibold', active ? 'text-bgPrimary/90' : 'text-textSecondary'].join(' ')}>
+                          <div
+                            className={[
+                              'mt-2 text-[11px] font-semibold',
+                              active
+                                ? 'text-bgPrimary/90'
+                                : 'text-textSecondary',
+                            ].join(' ')}
+                          >
                             {mins ? `+${mins}` : null}
                             {mins ? ' · ' : null}
                             From {price}
@@ -410,17 +492,26 @@ export default function AddOnsClient({
           <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3 text-[12px] font-semibold text-textSecondary">
             {selectedIds.length ? (
               <>
-                Add-ons: <span className="font-black text-textPrimary">{selectedIds.length}</span>
+                Add-ons:{' '}
+                <span className="font-black text-textPrimary">
+                  {selectedIds.length}
+                </span>
                 {totals.extraMinutes ? (
                   <span>
                     {' '}
-                    · Time <span className="font-black text-textPrimary">+{totals.extraMinutes} min</span>
+                    · Time{' '}
+                    <span className="font-black text-textPrimary">
+                      +{totals.extraMinutes} min
+                    </span>
                   </span>
                 ) : null}
                 {totals.extraPrice ? (
                   <span>
                     {' '}
-                    · Est. <span className="font-black text-textPrimary">+${totals.extraPrice.toFixed(0)}</span>
+                    · Est.{' '}
+                    <span className="font-black text-textPrimary">
+                      +${totals.extraPrice.toFixed(0)}
+                    </span>
                   </span>
                 ) : null}
               </>

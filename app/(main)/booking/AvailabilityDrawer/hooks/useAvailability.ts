@@ -23,6 +23,11 @@ import {
   getAnyCachedAvailabilitySummaryWindow,
   getCachedAvailabilitySummaryWindow,
 } from '../utils/availabilityPrefetch'
+import {
+  startAvailabilityMetric,
+  endAvailabilityMetric,
+  cancelAvailabilityMetric,
+} from '../perf/availabilityPerf'
 
 type SummaryOk = Extract<
   AvailabilitySummaryResponse,
@@ -30,6 +35,13 @@ type SummaryOk = Extract<
 >
 
 type LoadMode = 'blocking' | 'background'
+
+type BackgroundRefreshMeta = {
+  refreshKind: 'initial-background' | 'other-pros-only'
+  cacheState: 'cached-primary' | 'cached-full' | 'visible-primary'
+}
+
+const BACKGROUND_REFRESH_METRIC_KEY = 'background-refresh'
 
 function mergeSummaryData(
   current: SummaryOk | null,
@@ -227,6 +239,19 @@ export function useAvailability(
     setLoading(false)
     setRefreshing(true)
 
+    startAvailabilityMetric({
+      metric: 'background_refresh_ms',
+      key: BACKGROUND_REFRESH_METRIC_KEY,
+      meta: {
+        professionalId: proId,
+        serviceId,
+        locationType: locationType ?? null,
+        includeOtherPros,
+        refreshKind: 'other-pros-only',
+        cacheState: 'visible-primary',
+      },
+    })
+
     try {
       const fullPage = await fetchAvailabilitySummaryWindow({
         ...fullPrefetchArgs,
@@ -235,15 +260,50 @@ export function useAvailability(
         includeOtherPros: true,
       })
 
-      if (seq !== requestSeqRef.current) return
+      if (seq !== requestSeqRef.current) {
+        cancelAvailabilityMetric({
+          metric: 'background_refresh_ms',
+          key: BACKGROUND_REFRESH_METRIC_KEY,
+          reason: 'superseded',
+        })
+        return
+      }
 
       setData((current) => mergeSummaryData(current, fullPage))
       setError(null)
+
+      endAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        meta: {
+          professionalId: proId,
+          serviceId,
+          locationType: locationType ?? null,
+          includeOtherPros,
+          refreshKind: 'other-pros-only',
+          cacheState: 'visible-primary',
+          dayCount: fullPage.availableDays.length,
+          hasOtherPros: fullPage.otherPros.length > 0,
+        },
+      })
     } catch (e: unknown) {
-      if (seq !== requestSeqRef.current) return
+      if (seq !== requestSeqRef.current) {
+        cancelAvailabilityMetric({
+          metric: 'background_refresh_ms',
+          key: BACKGROUND_REFRESH_METRIC_KEY,
+          reason: 'superseded',
+        })
+        return
+      }
 
       const message =
         e instanceof Error ? e.message : 'Failed to load availability.'
+
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: message,
+      })
 
       handleAvailabilityError(message, true)
     } finally {
@@ -251,16 +311,36 @@ export function useAvailability(
         setRefreshing(false)
       }
     }
-  }, [fullPrefetchArgs, includeOtherPros, handleAvailabilityError])
+  }, [
+    fullPrefetchArgs,
+    includeOtherPros,
+    handleAvailabilityError,
+    proId,
+    serviceId,
+    locationType,
+  ])
 
   const loadInitial = useCallback(
-    async (mode: LoadMode) => {
+    async (mode: LoadMode, backgroundMeta?: BackgroundRefreshMeta) => {
       const seq = ++requestSeqRef.current
       const preserveVisibleData = mode === 'background'
 
       if (preserveVisibleData) {
         setLoading(false)
         setRefreshing(true)
+
+        startAvailabilityMetric({
+          metric: 'background_refresh_ms',
+          key: BACKGROUND_REFRESH_METRIC_KEY,
+          meta: {
+            professionalId: proId,
+            serviceId,
+            locationType: locationType ?? null,
+            includeOtherPros,
+            refreshKind: backgroundMeta?.refreshKind ?? 'initial-background',
+            cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
+          },
+        })
       } else {
         setLoading(true)
         setRefreshing(false)
@@ -280,13 +360,40 @@ export function useAvailability(
           includeOtherPros: false,
         })
 
-        if (seq !== requestSeqRef.current) return
+        if (seq !== requestSeqRef.current) {
+          if (preserveVisibleData) {
+            cancelAvailabilityMetric({
+              metric: 'background_refresh_ms',
+              key: BACKGROUND_REFRESH_METRIC_KEY,
+              reason: 'superseded',
+            })
+          }
+          return
+        }
 
         setData((current) => mergeSummaryData(current, primaryPage))
         setError(null)
         setLoading(false)
 
         if (!includeOtherPros || !fullPrefetchArgs) {
+          if (preserveVisibleData) {
+            endAvailabilityMetric({
+              metric: 'background_refresh_ms',
+              key: BACKGROUND_REFRESH_METRIC_KEY,
+              meta: {
+                professionalId: proId,
+                serviceId,
+                locationType: locationType ?? null,
+                includeOtherPros,
+                refreshKind:
+                  backgroundMeta?.refreshKind ?? 'initial-background',
+                cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
+                dayCount: primaryPage.availableDays.length,
+                hasOtherPros: false,
+              },
+            })
+          }
+
           setRefreshing(false)
           return
         }
@@ -300,15 +407,58 @@ export function useAvailability(
           includeOtherPros: true,
         })
 
-        if (seq !== requestSeqRef.current) return
+        if (seq !== requestSeqRef.current) {
+          if (preserveVisibleData) {
+            cancelAvailabilityMetric({
+              metric: 'background_refresh_ms',
+              key: BACKGROUND_REFRESH_METRIC_KEY,
+              reason: 'superseded',
+            })
+          }
+          return
+        }
 
         setData((current) => mergeSummaryData(current, fullPage))
         setError(null)
+
+        if (preserveVisibleData) {
+          endAvailabilityMetric({
+            metric: 'background_refresh_ms',
+            key: BACKGROUND_REFRESH_METRIC_KEY,
+            meta: {
+              professionalId: proId,
+              serviceId,
+              locationType: locationType ?? null,
+              includeOtherPros,
+              refreshKind: backgroundMeta?.refreshKind ?? 'initial-background',
+              cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
+              dayCount: fullPage.availableDays.length,
+              hasOtherPros: fullPage.otherPros.length > 0,
+            },
+          })
+        }
       } catch (e: unknown) {
-        if (seq !== requestSeqRef.current) return
+        if (seq !== requestSeqRef.current) {
+          if (preserveVisibleData) {
+            cancelAvailabilityMetric({
+              metric: 'background_refresh_ms',
+              key: BACKGROUND_REFRESH_METRIC_KEY,
+              reason: 'superseded',
+            })
+          }
+          return
+        }
 
         const message =
           e instanceof Error ? e.message : 'Failed to load availability.'
+
+        if (preserveVisibleData) {
+          cancelAvailabilityMetric({
+            metric: 'background_refresh_ms',
+            key: BACKGROUND_REFRESH_METRIC_KEY,
+            reason: message,
+          })
+        }
 
         handleAvailabilityError(message, preserveVisibleData)
       } finally {
@@ -323,6 +473,9 @@ export function useAvailability(
       includeOtherPros,
       fullPrefetchArgs,
       handleAvailabilityError,
+      proId,
+      serviceId,
+      locationType,
     ],
   )
 
@@ -376,11 +529,21 @@ export function useAvailability(
   useEffect(() => {
     return () => {
       requestSeqRef.current += 1
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: 'unmount',
+      })
     }
   }, [])
 
   useEffect(() => {
     if (!open) {
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: 'drawer_closed',
+      })
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(false)
@@ -389,6 +552,11 @@ export function useAvailability(
     }
 
     if (!proId) {
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: 'missing_professional',
+      })
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(false)
@@ -398,6 +566,11 @@ export function useAvailability(
     }
 
     if (!serviceId) {
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: 'missing_service',
+      })
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(false)
@@ -409,6 +582,11 @@ export function useAvailability(
     }
 
     if (!canFetch) {
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: 'cannot_fetch',
+      })
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(false)
@@ -418,6 +596,11 @@ export function useAvailability(
     }
 
     if (!primaryWindowKey) {
+      cancelAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        reason: 'missing_context',
+      })
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(false)
@@ -458,7 +641,10 @@ export function useAvailability(
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(true)
-      void loadInitial('background')
+      void loadInitial('background', {
+        refreshKind: 'initial-background',
+        cacheState: 'cached-full',
+      })
       return
     }
 
@@ -469,7 +655,10 @@ export function useAvailability(
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(true)
-      void loadInitial('background')
+      void loadInitial('background', {
+        refreshKind: 'initial-background',
+        cacheState: 'cached-primary',
+      })
       return
     }
 
@@ -490,7 +679,18 @@ export function useAvailability(
   ])
 
   const refresh = useCallback(() => {
-    void loadInitial(dataRef.current ? 'background' : 'blocking')
+    const current = dataRef.current
+
+    void loadInitial(
+      current ? 'background' : 'blocking',
+      current
+        ? {
+            refreshKind: 'initial-background',
+            cacheState:
+              current.otherPros.length > 0 ? 'cached-full' : 'cached-primary',
+          }
+        : undefined,
+    )
   }, [loadInitial])
 
   return {

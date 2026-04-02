@@ -1,0 +1,89 @@
+{
+  "gate": 2,
+  "suite": "availability",
+  "status": "draft-baseline-template",
+  "approvedFromCommitSha": "REPLACE_WITH_APPROVED_COMMIT_SHA",
+  "approvedAt": "REPLACE_WITH_APPROVED_ISO_TIMESTAMP",
+  "budgetSource": "docs/performance/availability-gate2-budget.json",
+  "notes": [
+    "Replace this template after the first approved clean main-branch perf run.",
+    "Do not auto-update this file on every CI run.",
+    "Background refresh should not be baselined until the stale-cache perf setup is implemented."
+  ],
+  "environments": {
+    "desktop": {
+      "deviceProfile": "Desktop Chrome",
+      "sampleCountRequirement": 30,
+      "metrics": {
+        "drawer_open_to_first_usable_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "day_switch_to_times_visible_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "hold_request_latency_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "continue_to_add_ons_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "background_refresh_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "status": "pending-stale-cache-setup"
+        }
+      }
+    },
+    "mobile": {
+      "deviceProfile": "Pixel 7 emulation",
+      "sampleCountRequirement": 30,
+      "metrics": {
+        "drawer_open_to_first_usable_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "day_switch_to_times_visible_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "hold_request_latency_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "continue_to_add_ons_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
+        },
+        "background_refresh_ms": {
+          "count": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "status": "pending-stale-cache-setup"
+        }
+      }
+    }
+  }
+}
