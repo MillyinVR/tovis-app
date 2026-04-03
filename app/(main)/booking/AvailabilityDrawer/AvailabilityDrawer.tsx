@@ -496,6 +496,7 @@ export default function AvailabilityDrawer(props: {
   const drawerOpenedTrackedRef = useRef(false)
   const summaryLoadedTrackedRef = useRef(false)
   const lastDaySlotsTrackedKeyRef = useRef<string | null>(null)
+  const openedOnceRef = useRef(false)
 
   useEffect(() => {
     setViewerTz(getViewerTimeZoneClient())
@@ -653,24 +654,11 @@ export default function AvailabilityDrawer(props: {
     return map
   }, [summary])
 
-  const daysKey = useMemo(() => {
-    if (!days.length) return ''
-    return days.map((d) => `${d.date}:${d.slotCount}`).join('|')
-  }, [days])
-
   const dayScrollerDays = useMemo(() => {
-    if (!daysKey) return []
+    if (!days.length) return []
+    return buildDayScrollerModel(days, appointmentTz)
+  }, [days, appointmentTz])
 
-    const reconstructedDays = daysKey.split('|').map((entry) => {
-      const colonIdx = entry.lastIndexOf(':')
-      return {
-        date: entry.slice(0, colonIdx),
-        slotCount: Number(entry.slice(colonIdx + 1)),
-      }
-    })
-
-    return buildDayScrollerModel(reconstructedDays, appointmentTz)
-  }, [daysKey, appointmentTz])
 
   const {
   primarySlots,
@@ -692,6 +680,11 @@ export default function AvailabilityDrawer(props: {
   retryKey: slotRetryKey,
   setError,
 })
+
+  const otherProsWithSlots = useMemo(
+    () => others.map((p) => ({ ...p, slots: otherSlots[p.id] ?? [] })),
+    [others, otherSlots],
+  )
 
   const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
   const hasOtherPros = others.length > 0
@@ -751,7 +744,7 @@ export default function AvailabilityDrawer(props: {
         })
       }
     },
-    [open, summary, selectedDayYMD, hasOtherPros, loadOtherSlots],
+    [open, summary, selectedDayYMD, hasOtherPros],
   )
 
   const maybeLoadMoreDays = useCallback(() => {
@@ -1001,15 +994,21 @@ export default function AvailabilityDrawer(props: {
   ])
 
   useEffect(() => {
-  if (!open) return
+    if (!open) {
+      openedOnceRef.current = false
+      return
+    }
 
-  setSelectedDayYMD(null)
-  setPeriod('AFTERNOON')
-  setOtherProsRequested(false)
-  clearDaySlots()
+    if (openedOnceRef.current) return
+    openedOnceRef.current = true
 
-  void hardResetUi({ deleteHold: true })
-}, [open, clearDaySlots, hardResetUi])
+    setSelectedDayYMD(null)
+    setPeriod('AFTERNOON')
+    setOtherProsRequested(false)
+    clearDaySlots()
+
+    void hardResetUi({ deleteHold: true })
+  }, [open, clearDaySlots, hardResetUi])
 
   useEffect(() => {
     if (!open) return
@@ -1794,12 +1793,9 @@ export default function AvailabilityDrawer(props: {
                 noPrimarySlots={noPrimarySlots}
               />
 
-              {shouldRenderOtherPros ? (
+                            {shouldRenderOtherPros ? (
                 <OtherPros
-                  others={others.map((p) => ({
-                    ...p,
-                    slots: otherSlots[p.id] ?? [],
-                  }))}
+                  others={otherProsWithSlots}
                   effectiveServiceId={effectiveServiceId}
                   viewerTz={viewerTz}
                   appointmentTz={appointmentTz}

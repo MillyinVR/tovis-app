@@ -1,6 +1,7 @@
+// app/(main)/booking/AvailabilityDrawer/components/SlotChips.tsx
 'use client'
 
-import { useMemo } from 'react'
+import { memo, useCallback, useMemo, useRef } from 'react'
 
 import type { ProCard, SelectedHold } from '../types'
 import {
@@ -10,16 +11,6 @@ import {
 } from '@/lib/bookingTime'
 
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
-
-function periodOfHour(hour: number): Period {
-  if (hour < 12) return 'MORNING'
-  if (hour < 17) return 'AFTERNOON'
-  return 'EVENING'
-}
-
-function slotChipTestId(slotISO: string): string {
-  return `availability-slot-${slotISO}`
-}
 
 type SlotChipsProps = {
   pro: ProCard
@@ -32,6 +23,125 @@ type SlotChipsProps = {
   onPick: (proId: string, offeringId: string | null, slotISO: string) => void
 }
 
+type PeriodOption = {
+  key: Period
+  label: string
+}
+
+type PeriodButtonProps = {
+  nextPeriod: Period
+  label: string
+  active: boolean
+  disabled: boolean
+  onSelectPeriod: (period: Period) => void
+}
+
+type SlotButtonProps = {
+  proId: string
+  offeringId: string | null
+  slotISO: string
+  appointmentTz: string
+  isSelected: boolean
+  disabled: boolean
+  onPickSlot: (proId: string, offeringId: string | null, slotISO: string) => void
+}
+
+const PERIOD_OPTIONS: PeriodOption[] = [
+  { key: 'MORNING', label: 'Morning' },
+  { key: 'AFTERNOON', label: 'Afternoon' },
+  { key: 'EVENING', label: 'Evening' },
+]
+
+function periodOfHour(hour: number): Period {
+  if (hour < 12) return 'MORNING'
+  if (hour < 17) return 'AFTERNOON'
+  return 'EVENING'
+}
+
+function slotChipTestId(slotISO: string): string {
+  return `availability-slot-${slotISO}`
+}
+
+const PeriodButton = memo(function PeriodButton({
+  nextPeriod,
+  label,
+  active,
+  disabled,
+  onSelectPeriod,
+}: PeriodButtonProps) {
+  return (
+    <button
+      data-testid={`availability-period-${nextPeriod.toLowerCase()}`}
+      type="button"
+      aria-pressed={active}
+      onClick={() => {
+        if (disabled || active) return
+        onSelectPeriod(nextPeriod)
+      }}
+      disabled={disabled}
+      className={[
+        'h-10 rounded-full border text-[12px] font-black transition',
+        'border-white/10',
+        active
+          ? 'bg-accentPrimary text-bgPrimary'
+          : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+        disabled
+          ? 'cursor-not-allowed opacity-40 hover:bg-bgPrimary/35'
+          : 'cursor-pointer',
+      ].join(' ')}
+      title={disabled ? 'No times in this period' : ''}
+    >
+      {label}
+    </button>
+  )
+})
+
+const SlotButton = memo(function SlotButton({
+  proId,
+  offeringId,
+  slotISO,
+  appointmentTz,
+  isSelected,
+  disabled,
+  onPickSlot,
+}: SlotButtonProps) {
+  const title = useMemo(
+    () => formatSlotFullLabel(slotISO, appointmentTz),
+    [slotISO, appointmentTz],
+  )
+
+  const label = useMemo(
+    () => formatSlotLabel(slotISO, appointmentTz),
+    [slotISO, appointmentTz],
+  )
+
+  return (
+    <button
+      data-testid={slotChipTestId(slotISO)}
+      type="button"
+      onClick={() => {
+        if (disabled) return
+        if (typeof navigator !== 'undefined') {
+          navigator.vibrate?.(10)
+        }
+        onPickSlot(proId, offeringId, slotISO)
+      }}
+      disabled={disabled}
+      className={[
+        'h-10 rounded-full border px-3 text-[13px] font-black transition',
+        'border-white/10',
+        isSelected
+          ? 'bg-accentPrimary text-bgPrimary'
+          : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+      ].join(' ')}
+      title={title}
+    >
+      {label}
+    </button>
+  )
+})
+
 export default function SlotChips({
   pro,
   appointmentTz,
@@ -42,6 +152,12 @@ export default function SlotChips({
   slotsForDay,
   onPick,
 }: SlotChipsProps) {
+  const onSelectPeriodRef = useRef(onSelectPeriod)
+  const onPickRef = useRef(onPick)
+
+  onSelectPeriodRef.current = onSelectPeriod
+  onPickRef.current = onPick
+
   const allSlots = Array.isArray(slotsForDay) ? slotsForDay : []
 
   const slotsByPeriod = useMemo<Record<Period, string[]>>(() => {
@@ -60,14 +176,28 @@ export default function SlotChips({
     return grouped
   }, [allSlots, appointmentTz])
 
-  const periodDisabled = {
-    MORNING: slotsByPeriod.MORNING.length === 0,
-    AFTERNOON: slotsByPeriod.AFTERNOON.length === 0,
-    EVENING: slotsByPeriod.EVENING.length === 0,
-  } as const
+  const periodDisabled = useMemo(
+    () => ({
+      MORNING: slotsByPeriod.MORNING.length === 0,
+      AFTERNOON: slotsByPeriod.AFTERNOON.length === 0,
+      EVENING: slotsByPeriod.EVENING.length === 0,
+    }),
+    [slotsByPeriod],
+  )
 
   const visibleSlots = slotsByPeriod[period]
   const offeringId = pro.offeringId ?? null
+
+  const handleSelectPeriod = useCallback((nextPeriod: Period) => {
+    onSelectPeriodRef.current(nextPeriod)
+  }, [])
+
+  const handlePickSlot = useCallback(
+    (proId: string, nextOfferingId: string | null, slotISO: string) => {
+      onPickRef.current(proId, nextOfferingId, slotISO)
+    },
+    [],
+  )
 
   return (
     <div
@@ -92,41 +222,16 @@ export default function SlotChips({
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-2">
-        {(['MORNING', 'AFTERNOON', 'EVENING'] as const).map((nextPeriod) => {
-          const active = period === nextPeriod
-          const disabled = periodDisabled[nextPeriod]
-
-          return (
-            <button
-              key={nextPeriod}
-              data-testid={`availability-period-${nextPeriod.toLowerCase()}`}
-              type="button"
-              aria-pressed={active}
-              onClick={() => {
-                if (disabled || active) return
-                onSelectPeriod(nextPeriod)
-              }}
-              disabled={disabled}
-              className={[
-                'h-10 rounded-full border text-[12px] font-black transition',
-                'border-white/10',
-                active
-                  ? 'bg-accentPrimary text-bgPrimary'
-                  : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
-                disabled
-                  ? 'cursor-not-allowed opacity-40 hover:bg-bgPrimary/35'
-                  : 'cursor-pointer',
-              ].join(' ')}
-              title={disabled ? 'No times in this period' : ''}
-            >
-              {nextPeriod === 'MORNING'
-                ? 'Morning'
-                : nextPeriod === 'AFTERNOON'
-                  ? 'Afternoon'
-                  : 'Evening'}
-            </button>
-          )
-        })}
+        {PERIOD_OPTIONS.map(({ key, label }) => (
+          <PeriodButton
+            key={key}
+            nextPeriod={key}
+            label={label}
+            active={period === key}
+            disabled={periodDisabled[key]}
+            onSelectPeriod={handleSelectPeriod}
+          />
+        ))}
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -137,30 +242,16 @@ export default function SlotChips({
             const disabled = !offeringId || holding
 
             return (
-              <button
+              <SlotButton
                 key={slotISO}
-                data-testid={slotChipTestId(slotISO)}
-                type="button"
-                onClick={() => {
-                  if (disabled) return
-                  if (typeof navigator !== 'undefined') {
-                    navigator.vibrate?.(10)
-                  }
-                  onPick(pro.id, offeringId, slotISO)
-                }}
+                proId={pro.id}
+                offeringId={offeringId}
+                slotISO={slotISO}
+                appointmentTz={appointmentTz}
+                isSelected={isSelected}
                 disabled={disabled}
-                className={[
-                  'h-10 rounded-full border px-3 text-[13px] font-black transition',
-                  'border-white/10',
-                  isSelected
-                    ? 'bg-accentPrimary text-bgPrimary'
-                    : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
-                  disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-                ].join(' ')}
-                title={formatSlotFullLabel(slotISO, appointmentTz)}
-              >
-                {formatSlotLabel(slotISO, appointmentTz)}
-              </button>
+                onPickSlot={handlePickSlot}
+              />
             )
           })
         ) : (
