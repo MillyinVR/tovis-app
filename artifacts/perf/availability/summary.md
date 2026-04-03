@@ -1,6 +1,6 @@
 # Gate 2 Availability Performance Summary
 
-Generated at: 2026-04-02T19:57:10.172Z
+Generated at: 2026-04-03T05:27:04.857Z
 Budget source: docs/performance/availability-gate2-budget.json
 
 ## Desktop

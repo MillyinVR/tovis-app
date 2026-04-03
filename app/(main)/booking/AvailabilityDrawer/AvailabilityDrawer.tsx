@@ -48,6 +48,12 @@ const FALLBACK_TZ = 'UTC' as const
 const MOBILE_ADDRESS_REQUIRED_MESSAGE =
   'Select a saved service address before viewing mobile availability.'
 
+const AVAILABILITY_REFRESH_BUTTON_TEST_ID = 'availability-refresh-button'
+const AVAILABILITY_BACKGROUND_STATUS_TEST_ID =
+  'availability-background-status'
+const AVAILABILITY_HOLD_CONTINUE_BUTTON_TEST_ID =
+  'availability-hold-continue-button'
+
 type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
@@ -711,6 +717,11 @@ export default function AvailabilityDrawer(props: {
   setError(null)
   setSlotRetryKey((k) => k + 1)
 }, [setError])
+
+  const handleManualRefresh = useCallback(() => {
+    setHoldError(null)
+    refresh()
+  }, [refresh])
 
   const resetForLocationModeChange = useCallback(
   async (next: ServiceLocationType) => {
@@ -1483,6 +1494,7 @@ export default function AvailabilityDrawer(props: {
 
                 <button
                   type="button"
+                  data-testid="availability-close-button"
                   onClick={() => {
                     void hardResetUi({ deleteHold: true })
                     onClose()
@@ -1588,11 +1600,27 @@ export default function AvailabilityDrawer(props: {
                 </div>
               ) : null}
 
-              {backgroundRefreshing ? (
-                <div className="mb-3 text-xs font-semibold text-textSecondary">
-                  Updating availability in the background…
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div
+                  data-testid={AVAILABILITY_BACKGROUND_STATUS_TEST_ID}
+                  aria-live="polite"
+                  className="text-xs font-semibold text-textSecondary"
+                >
+                  {backgroundRefreshing
+                    ? 'Updating availability in the background…'
+                    : 'Times update automatically.'}
                 </div>
-              ) : null}
+
+                <button
+                  type="button"
+                  data-testid={AVAILABILITY_REFRESH_BUTTON_TEST_ID}
+                  onClick={handleManualRefresh}
+                  disabled={holding || backgroundRefreshing || summaryDaysLoading}
+                  className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Refresh times
+                </button>
+              </div>
 
               {dayScrollerDays.length ? (
                 <DayScroller
@@ -1738,6 +1766,7 @@ export default function AvailabilityDrawer(props: {
 
                   <button
                     type="button"
+                    data-testid={AVAILABILITY_HOLD_CONTINUE_BUTTON_TEST_ID}
                     onClick={() => {
                       void onContinue()
                     }}

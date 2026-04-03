@@ -4,98 +4,51 @@
   "environment": "desktop",
   "deviceProfile": "chromium",
   "projectName": "chromium",
-  "collectedAt": "2026-04-02T19:53:19.485Z",
-  "sampleTargetPerScenario": 2,
+  "collectedAt": "2026-04-03T06:09:42.187Z",
+  "sampleTargetPerScenario": 1,
   "bookingUrl": "http://127.0.0.1:3000/looks",
   "samples": [
     {
       "scenario": "drawer-open",
       "metric": "drawer_open_to_first_usable_ms",
-      "durationMs": 7998,
+      "durationMs": 6835.9000000003725,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
         "bookingSource": "DISCOVERY",
         "locationType": "SALON",
-        "selectedDayYMD": "2026-04-02",
-        "slotCount": 5,
-        "dayCount": 5
-      }
-    },
-    {
-      "scenario": "drawer-open",
-      "metric": "drawer_open_to_first_usable_ms",
-      "durationMs": 6763.899999991059,
-      "meta": {
-        "professionalId": "cmmu9zguw0001jr04dmid46j3",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "bookingSource": "DISCOVERY",
-        "locationType": "SALON",
-        "selectedDayYMD": "2026-04-02",
-        "slotCount": 5,
-        "dayCount": 5
+        "selectedDayYMD": "2026-04-03",
+        "slotCount": 14,
+        "dayCount": 4
       }
     },
     {
       "scenario": "day-switch",
       "metric": "day_switch_to_times_visible_ms",
-      "durationMs": 12.299999997019768,
+      "durationMs": 8.600000000558794,
       "meta": {
-        "previousDayYMD": "2026-04-02",
-        "nextDayYMD": "2026-04-03",
+        "previousDayYMD": "2026-04-03",
+        "nextDayYMD": "2026-04-06",
         "locationType": "SALON",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "bookingSource": "DISCOVERY",
-        "selectedDayYMD": "2026-04-03",
+        "selectedDayYMD": "2026-04-06",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "slotCount": 5,
-        "requestedDayLabel": "Fri03"
-      }
-    },
-    {
-      "scenario": "day-switch",
-      "metric": "day_switch_to_times_visible_ms",
-      "durationMs": 12.700000002980232,
-      "meta": {
-        "previousDayYMD": "2026-04-02",
-        "nextDayYMD": "2026-04-03",
-        "locationType": "SALON",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "bookingSource": "DISCOVERY",
-        "selectedDayYMD": "2026-04-03",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "slotCount": 5,
-        "requestedDayLabel": "Fri03"
+        "slotCount": 14,
+        "requestedDayLabel": "Mon06"
       }
     },
     {
       "scenario": "hold-request",
       "metric": "hold_request_latency_ms",
-      "durationMs": 8410.59999999404,
+      "durationMs": 1529.7999999998137,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "selectedDayYMD": "2026-04-02",
-        "slotISO": "2026-04-02T20:30:00.000Z",
-        "locationType": "SALON",
-        "bookingSource": "DISCOVERY",
-        "statusCode": 201,
-        "ok": true
-      }
-    },
-    {
-      "scenario": "hold-request",
-      "metric": "hold_request_latency_ms",
-      "durationMs": 8326.09999999404,
-      "meta": {
-        "professionalId": "cmmu9zguw0001jr04dmid46j3",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "selectedDayYMD": "2026-04-02",
-        "slotISO": "2026-04-02T22:00:00.000Z",
+        "selectedDayYMD": "2026-04-03",
+        "slotISO": "2026-04-03T19:30:00.000Z",
         "locationType": "SALON",
         "bookingSource": "DISCOVERY",
         "statusCode": 201,
@@ -105,31 +58,34 @@
     {
       "scenario": "continue-to-add-ons",
       "metric": "continue_to_add_ons_ms",
-      "invalid": true,
-      "invalidReason": "Could not find enabled drawer continue button. Set PERF_DRAWER_CONTINUE_SELECTOR if needed."
-    },
-    {
-      "scenario": "continue-to-add-ons",
-      "metric": "continue_to_add_ons_ms",
-      "invalid": true,
-      "invalidReason": "Could not find enabled drawer continue button. Set PERF_DRAWER_CONTINUE_SELECTOR if needed."
-    },
-    {
-      "scenario": "background-refresh",
-      "metric": "background_refresh_ms",
-      "invalid": true,
-      "invalidReason": "background_refresh_setup_missing",
+      "durationMs": 1901.8999999994412,
       "meta": {
-        "note": "This scenario needs a project-specific stale-cache setup hook before it can be measured reliably."
+        "professionalId": "cmmu9zguw0001jr04dmid46j3",
+        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
+        "offeringId": "cmnhaui65001stzk45vtya1ub",
+        "selectedDayYMD": "2026-04-03",
+        "slotISO": "2026-04-03T21:00:00.000Z",
+        "locationType": "SALON",
+        "bookingSource": "DISCOVERY",
+        "holdId": "cmnii76q90005tzd4e5u17447",
+        "mediaId": "cmnhauj9q001ytzk4e6sl0m2x",
+        "addOnCount": 0,
+        "readyTarget": "booking-add-ons-continue-button"
       }
     },
     {
       "scenario": "background-refresh",
       "metric": "background_refresh_ms",
-      "invalid": true,
-      "invalidReason": "background_refresh_setup_missing",
+      "durationMs": 5.599999999627471,
       "meta": {
-        "note": "This scenario needs a project-specific stale-cache setup hook before it can be measured reliably."
+        "professionalId": "cmmu9zguw0001jr04dmid46j3",
+        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
+        "locationType": null,
+        "includeOtherPros": true,
+        "refreshKind": "initial-background",
+        "cacheState": "cached-primary",
+        "dayCount": 4,
+        "hasOtherPros": false
       }
     }
   ]

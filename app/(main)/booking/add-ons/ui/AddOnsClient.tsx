@@ -1,20 +1,20 @@
-// app/(main)/booking/add-ons/ui/AddOnsClient.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
-
-type ServiceLocationType = 'SALON' | 'MOBILE'
-type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
+import type {
+  BookingSource,
+  ServiceLocationType,
+} from '../../AvailabilityDrawer/types'
 
 type AddOnDTO = {
-  id: string // OfferingAddOn.id
+  id: string
   serviceId: string
   title: string
   group: string | null
-  price: string // "25.00"
+  price: string
   minutes: number
   sortOrder: number
   isRecommended: boolean
@@ -31,42 +31,61 @@ type Props = {
   initialSelectedIds?: string[]
 }
 
-function formatMinutes(min: number) {
-  if (!Number.isFinite(min) || min <= 0) return null
-  if (min < 60) return `${min} min`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m ? `${h}h ${m}m` : `${h}h`
+const MAX_ADD_ON_IDS = 50
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
-function formatMoneyLabel(v: string) {
-  const n = Number(v)
-  if (Number.isFinite(n)) return `$${n.toFixed(0)}`
-  return `$${v}`
+function readString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function formatMinutes(min: number): string | null {
+  if (!Number.isFinite(min) || min <= 0) return null
+  if (min < 60) return `${min} min`
+
+  const hours = Math.floor(min / 60)
+  const minutes = min % 60
+
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`
+}
+
+function formatMoneyLabel(value: string): string {
+  const amount = Number(value)
+  if (Number.isFinite(amount)) return `$${amount.toFixed(0)}`
+  return `$${value}`
 }
 
 function parseCommaIds(raw: string | null, max: number): string[] {
   if (!raw) return []
-  const out: string[] = []
+
+  const result: string[] = []
   const seen = new Set<string>()
 
   for (const part of raw.split(',')) {
-    const s = part.trim()
-    if (!s) continue
-    if (seen.has(s)) continue
-    seen.add(s)
-    out.push(s)
-    if (out.length >= max) break
+    const normalized = part.trim()
+    if (!normalized) continue
+    if (seen.has(normalized)) continue
+
+    seen.add(normalized)
+    result.push(normalized)
+
+    if (result.length >= max) break
   }
 
-  return out
+  return result
 }
 
 function buildRecommendedMap(addOns: AddOnDTO[]): Record<string, boolean> {
   const next: Record<string, boolean> = {}
-  for (const a of addOns) {
-    if (a.isRecommended) next[a.id] = true
+
+  for (const addOn of addOns) {
+    if (addOn.isRecommended) {
+      next[addOn.id] = true
+    }
   }
+
   return next
 }
 
@@ -74,26 +93,53 @@ function buildSelectedMapFromIds(
   addOns: AddOnDTO[],
   ids: string[],
 ): Record<string, boolean> {
-  const allowed = new Set(addOns.map((a) => a.id))
+  const allowedIds = new Set(addOns.map((addOn) => addOn.id))
   const next: Record<string, boolean> = {}
 
   for (const id of ids) {
-    if (allowed.has(id)) next[id] = true
+    if (allowedIds.has(id)) {
+      next[id] = true
+    }
   }
 
   return next
 }
 
 function selectedIdsFromMap(selected: Record<string, boolean>): string[] {
-  return Object.keys(selected).filter((k) => Boolean(selected[k]))
+  return Object.keys(selected).filter((id) => Boolean(selected[id]))
 }
 
-function keyFromIds(ids: string[]) {
+function keyFromIds(ids: string[]): string {
   return ids.slice().sort().join(',')
 }
 
-function buildContinueMetricKey(holdId: string) {
+function buildContinueMetricKey(holdId: string): string {
   return `continue:${holdId}`
+}
+
+function getExpiresAtFromHoldResponse(raw: unknown): Date | null {
+  if (!isRecord(raw)) return null
+  if (raw.ok !== true) return null
+  if (!isRecord(raw.hold)) return null
+
+  const expiresAt = readString(raw.hold.expiresAt)
+  if (!expiresAt) return null
+
+  const parsed = new Date(expiresAt)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function getFinalizeErrorMessage(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  return readString(raw.error)
+}
+
+function getFinalizeBookingId(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  if (raw.ok !== true) return null
+  if (!isRecord(raw.booking)) return null
+
+  return readString(raw.booking.id)
 }
 
 export default function AddOnsClient({
@@ -110,12 +156,19 @@ export default function AddOnsClient({
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  const searchStr = searchParams.toString()
+  const searchString = searchParams.toString()
+
+  const searchParamsSnapshot = useMemo(() => {
+    return new URLSearchParams(searchString)
+  }, [searchString])
+
+  const urlAddOnIdsRaw = useMemo(() => {
+    return searchParamsSnapshot.get('addOnIds')
+  }, [searchParamsSnapshot])
 
   const urlHasAddOnIds = useMemo(() => {
-    return Boolean(searchParams.get('addOnIds')?.trim())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchStr])
+    return Boolean(urlAddOnIdsRaw?.trim())
+  }, [urlAddOnIdsRaw])
 
   const [error, setError] = useState<string | null>(initialError ?? null)
   const [submitting, setSubmitting] = useState(false)
@@ -131,57 +184,60 @@ export default function AddOnsClient({
     let cancelled = false
     let intervalId: number | null = null
 
-    ;(async () => {
+    void (async () => {
       try {
-        const res = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, {
+        const response = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, {
           cache: 'no-store',
         })
-        const body = await res.json().catch(() => ({}))
+
+        const raw: unknown = await response.json().catch(() => null)
 
         if (cancelled) return
-        if (!res.ok || !body?.ok) return
+        if (!response.ok) return
 
-        const expiresAt =
-          typeof body?.hold?.expiresAt === 'string'
-            ? new Date(body.hold.expiresAt)
-            : null
-
-        if (!expiresAt || Number.isNaN(expiresAt.getTime())) return
+        const expiresAt = getExpiresAtFromHoldResponse(raw)
+        if (!expiresAt) return
 
         const tick = () => {
-          const ms = expiresAt.getTime() - Date.now()
-          const sec = Math.max(0, Math.floor(ms / 1000))
-          setHoldSecondsLeft(sec)
+          const millisecondsRemaining = expiresAt.getTime() - Date.now()
+          const secondsRemaining = Math.max(
+            0,
+            Math.floor(millisecondsRemaining / 1000),
+          )
+
+          setHoldSecondsLeft(secondsRemaining)
         }
 
         tick()
         intervalId = window.setInterval(tick, 500)
       } catch {
-        // ignore
+        // ignore timer fetch failures
       }
     })()
 
     return () => {
       cancelled = true
-      if (intervalId != null) window.clearInterval(intervalId)
+      if (intervalId != null) {
+        window.clearInterval(intervalId)
+      }
     }
   }, [holdId])
 
   const recommendedMap = useMemo(() => buildRecommendedMap(addOns), [addOns])
 
   const urlSelectedIds = useMemo(() => {
-    const raw = searchParams.get('addOnIds')
-    return parseCommaIds(raw, 50)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchStr])
+    return parseCommaIds(urlAddOnIdsRaw, MAX_ADD_ON_IDS)
+  }, [urlAddOnIdsRaw])
 
   const initialSelectedMap = useMemo(() => {
     if (Array.isArray(initialSelectedIds) && initialSelectedIds.length > 0) {
       return buildSelectedMapFromIds(addOns, initialSelectedIds)
     }
+
     if (urlSelectedIds.length > 0) {
       return buildSelectedMapFromIds(addOns, urlSelectedIds)
     }
+
     return recommendedMap
   }, [addOns, initialSelectedIds, urlSelectedIds, recommendedMap])
 
@@ -189,10 +245,11 @@ export default function AddOnsClient({
     useState<Record<string, boolean>>(initialSelectedMap)
 
   useEffect(() => {
-    setSelected((cur) => {
-      const curKey = keyFromIds(selectedIdsFromMap(cur))
+    setSelected((current) => {
+      const currentKey = keyFromIds(selectedIdsFromMap(current))
       const nextKey = keyFromIds(selectedIdsFromMap(initialSelectedMap))
-      return curKey === nextKey ? cur : initialSelectedMap
+
+      return currentKey === nextKey ? current : initialSelectedMap
     })
   }, [initialSelectedMap])
 
@@ -204,49 +261,79 @@ export default function AddOnsClient({
     if (!touched && !urlHasAddOnIds) return
 
     const currentKey = keyFromIds(
-      parseCommaIds(searchParams.get('addOnIds'), 50),
+      parseCommaIds(urlAddOnIdsRaw, MAX_ADD_ON_IDS),
     )
+
     if (currentKey === selectedKey) return
 
-    const qs = new URLSearchParams(searchParams.toString())
-    if (selectedIds.length > 0) qs.set('addOnIds', selectedKey)
-    else qs.delete('addOnIds')
+    const nextSearchParams = new URLSearchParams(searchString)
 
-    const nextHref = qs.toString() ? `${pathname}?${qs.toString()}` : pathname
+    if (selectedIds.length > 0) {
+      nextSearchParams.set('addOnIds', selectedKey)
+    } else {
+      nextSearchParams.delete('addOnIds')
+    }
+
+    const nextHref = nextSearchParams.toString()
+      ? `${pathname}?${nextSearchParams.toString()}`
+      : pathname
+
     router.replace(nextHref, { scroll: false })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, selectedKey, selectedIds.length, touched, urlHasAddOnIds])
+  }, [
+    pathname,
+    router,
+    searchString,
+    selectedIds.length,
+    selectedKey,
+    touched,
+    urlAddOnIdsRaw,
+    urlHasAddOnIds,
+  ])
 
   const totals = useMemo(() => {
     let centsLike = 0
     let minutes = 0
 
-    for (const a of addOns) {
-      if (!selected[a.id]) continue
-      const price = Number(a.price ?? 0)
-      if (Number.isFinite(price)) centsLike += Math.round(price * 100)
-      minutes += Number(a.minutes ?? 0) || 0
+    for (const addOn of addOns) {
+      if (!selected[addOn.id]) continue
+
+      const price = Number(addOn.price ?? 0)
+      if (Number.isFinite(price)) {
+        centsLike += Math.round(price * 100)
+      }
+
+      minutes += Number(addOn.minutes ?? 0) || 0
     }
 
-    return { extraPrice: centsLike / 100, extraMinutes: minutes }
+    return {
+      extraPrice: centsLike / 100,
+      extraMinutes: minutes,
+    }
   }, [addOns, selected])
 
   const grouped = useMemo(() => {
-    const m = new Map<string, AddOnDTO[]>()
+    const groups = new Map<string, AddOnDTO[]>()
 
-    for (const a of addOns) {
-      const key = (a.group || 'Add-ons').trim()
-      if (!m.has(key)) m.set(key, [])
-      m.get(key)!.push(a)
+    for (const addOn of addOns) {
+      const groupKey = (addOn.group || 'Add-ons').trim()
+      const existing = groups.get(groupKey)
+
+      if (existing) {
+        existing.push(addOn)
+      } else {
+        groups.set(groupKey, [addOn])
+      }
     }
 
-    return Array.from(m.entries()).map(([group, items]) => ({
+    return Array.from(groups.entries()).map(([group, items]) => ({
       group,
-      items: items.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+      items: items.sort((left, right) => {
+        return (left.sortOrder ?? 0) - (right.sortOrder ?? 0)
+      }),
     }))
   }, [addOns])
 
-  async function finalize() {
+  async function finalize(): Promise<void> {
     if (!holdId || !offeringId) {
       setError('Missing hold/offering. Please go back and pick a time again.')
       return
@@ -263,7 +350,7 @@ export default function AddOnsClient({
     setError(null)
 
     try {
-      const res = await fetch('/api/bookings/finalize', {
+      const response = await fetch('/api/bookings/finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -276,42 +363,50 @@ export default function AddOnsClient({
         }),
       })
 
-      const body = await res.json().catch(() => ({}))
+      const raw: unknown = await response.json().catch(() => null)
 
-      if (res.status === 401) {
-        const fromQs = new URLSearchParams({
+      if (response.status === 401) {
+        const fromQuery = new URLSearchParams({
           holdId,
           offeringId,
           locationType,
           source,
         })
 
-        if (mediaId) fromQs.set('mediaId', mediaId)
-        if (selectedIds.length > 0) fromQs.set('addOnIds', selectedKey)
+        if (mediaId) {
+          fromQuery.set('mediaId', mediaId)
+        }
 
-        const from = `/booking/add-ons?${fromQs.toString()}`
+        if (selectedIds.length > 0) {
+          fromQuery.set('addOnIds', selectedKey)
+        }
+
+        const from = `/booking/add-ons?${fromQuery.toString()}`
         router.push(`/login?from=${encodeURIComponent(from)}&reason=finalize`)
         return
       }
 
-      if (!res.ok || !body?.ok) {
-        setError(body?.error || 'Could not complete booking. Please try again.')
-        return
-      }
+      const bookingId = getFinalizeBookingId(raw)
 
-      const bookingId =
-        typeof body?.booking?.id === 'string' ? body.booking.id : null
+      if (!response.ok || !bookingId) {
+        const apiError = getFinalizeErrorMessage(raw)
 
-      if (!bookingId) {
-        setError('Booking created but missing id. Please check your dashboard.')
+        if (response.ok && !bookingId) {
+          setError(
+            'Booking created but missing id. Please check your dashboard.',
+          )
+          return
+        }
+
+        setError(apiError || 'Could not complete booking. Please try again.')
         return
       }
 
       router.push(`/booking/${encodeURIComponent(bookingId)}`)
-    } catch (e: unknown) {
+    } catch (error: unknown) {
       setError(
-        e instanceof Error
-          ? e.message
+        error instanceof Error
+          ? error.message
           : 'Network error completing booking.',
       )
     } finally {
@@ -332,9 +427,9 @@ export default function AddOnsClient({
     if (!holdId) return
 
     const continueMetricKey = buildContinueMetricKey(holdId)
-    let raf = 0
+    let rafId = 0
 
-    raf = window.requestAnimationFrame(() => {
+    rafId = window.requestAnimationFrame(() => {
       endAvailabilityMetric({
         metric: 'continue_to_add_ons_ms',
         key: continueMetricKey,
@@ -351,7 +446,7 @@ export default function AddOnsClient({
     })
 
     return () => {
-      window.cancelAnimationFrame(raf)
+      window.cancelAnimationFrame(rafId)
     }
   }, [holdId, offeringId, locationType, source, mediaId, addOns.length])
 
@@ -413,18 +508,21 @@ export default function AddOnsClient({
               </div>
 
               <div className="mt-3 grid gap-2">
-                {items.map((a) => {
-                  const active = Boolean(selected[a.id])
-                  const mins = formatMinutes(a.minutes)
-                  const price = formatMoneyLabel(a.price)
+                {items.map((addOn) => {
+                  const active = Boolean(selected[addOn.id])
+                  const minutesLabel = formatMinutes(addOn.minutes)
+                  const priceLabel = formatMoneyLabel(addOn.price)
 
                   return (
                     <button
-                      key={a.id}
+                      key={addOn.id}
                       type="button"
                       onClick={() => {
                         setTouched(true)
-                        setSelected((prev) => ({ ...prev, [a.id]: !prev[a.id] }))
+                        setSelected((previous) => ({
+                          ...previous,
+                          [addOn.id]: !previous[addOn.id],
+                        }))
                       }}
                       className={[
                         'rounded-card border px-4 py-3 text-left transition',
@@ -438,9 +536,10 @@ export default function AddOnsClient({
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <div className="truncate text-[13px] font-black">
-                              {a.title}
+                              {addOn.title}
                             </div>
-                            {a.isRecommended ? (
+
+                            {addOn.isRecommended ? (
                               <span
                                 className={[
                                   'rounded-full border px-2 py-1 text-[10px] font-black',
@@ -457,14 +556,12 @@ export default function AddOnsClient({
                           <div
                             className={[
                               'mt-2 text-[11px] font-semibold',
-                              active
-                                ? 'text-bgPrimary/90'
-                                : 'text-textSecondary',
+                              active ? 'text-bgPrimary/90' : 'text-textSecondary',
                             ].join(' ')}
                           >
-                            {mins ? `+${mins}` : null}
-                            {mins ? ' · ' : null}
-                            From {price}
+                            {minutesLabel ? `+${minutesLabel}` : null}
+                            {minutesLabel ? ' · ' : null}
+                            From {priceLabel}
                           </div>
                         </div>
 

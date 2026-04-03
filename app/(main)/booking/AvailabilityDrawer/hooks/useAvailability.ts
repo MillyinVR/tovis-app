@@ -41,6 +41,15 @@ type BackgroundRefreshMeta = {
   cacheState: 'cached-primary' | 'cached-full' | 'visible-primary'
 }
 
+type BackgroundRefreshMetricMeta = BackgroundRefreshMeta & {
+  professionalId: string
+  serviceId: string
+  locationType: ServiceLocationType | null
+  includeOtherPros: boolean
+  dayCount?: number
+  hasOtherPros?: boolean
+}
+
 const BACKGROUND_REFRESH_METRIC_KEY = 'background-refresh'
 
 function mergeSummaryData(
@@ -75,6 +84,31 @@ function readCachedSummaryWindow(
   return allowStale
     ? getAnyCachedAvailabilitySummaryWindow(key)
     : getCachedAvailabilitySummaryWindow(key)
+}
+
+function buildBackgroundRefreshMetricMeta(
+  base: {
+    professionalId: string
+    serviceId: string
+    locationType: ServiceLocationType | null
+    includeOtherPros: boolean
+  },
+  refreshMeta: BackgroundRefreshMeta,
+  extras?: {
+    dayCount?: number
+    hasOtherPros?: boolean
+  },
+): BackgroundRefreshMetricMeta {
+  return {
+    professionalId: base.professionalId,
+    serviceId: base.serviceId,
+    locationType: base.locationType,
+    includeOtherPros: base.includeOtherPros,
+    refreshKind: refreshMeta.refreshKind,
+    cacheState: refreshMeta.cacheState,
+    dayCount: extras?.dayCount,
+    hasOtherPros: extras?.hasOtherPros,
+  }
 }
 
 export function useAvailability(
@@ -129,6 +163,90 @@ export function useAvailability(
 
   const contextRef = useRef(context)
   contextRef.current = context
+
+  const backgroundMetricBase = useMemo(
+    () => ({
+      professionalId: proId,
+      serviceId,
+      locationType: locationType ?? null,
+      includeOtherPros,
+    }),
+    [proId, serviceId, locationType, includeOtherPros],
+  )
+
+  const clearLoadingFlags = useCallback(() => {
+    setLoading(false)
+    setLoadingMore(false)
+    setRefreshing(false)
+  }, [])
+
+  const cancelBackgroundRefresh = useCallback((reason: string) => {
+    cancelAvailabilityMetric({
+      metric: 'background_refresh_ms',
+      key: BACKGROUND_REFRESH_METRIC_KEY,
+      reason,
+    })
+  }, [])
+
+  const invalidateActiveRequest = useCallback(
+    (reason: string) => {
+      requestSeqRef.current += 1
+      cancelBackgroundRefresh(reason)
+    },
+    [cancelBackgroundRefresh],
+  )
+
+  const startBackgroundRefresh = useCallback(
+    (meta: BackgroundRefreshMeta) => {
+      startAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        meta: buildBackgroundRefreshMetricMeta(backgroundMetricBase, meta),
+      })
+    },
+    [backgroundMetricBase],
+  )
+
+  const completeBackgroundRefresh = useCallback(
+    (
+      meta: BackgroundRefreshMeta,
+      extras: {
+        dayCount: number
+        hasOtherPros: boolean
+      },
+    ) => {
+      endAvailabilityMetric({
+        metric: 'background_refresh_ms',
+        key: BACKGROUND_REFRESH_METRIC_KEY,
+        meta: buildBackgroundRefreshMetricMeta(
+          backgroundMetricBase,
+          meta,
+          extras,
+        ),
+      })
+    },
+    [backgroundMetricBase],
+  )
+
+  const handleAvailabilityError = useCallback(
+    (message: string, preserveVisibleData: boolean) => {
+      if (message === 'Unauthorized.') {
+        redirectToLogin(router, 'availability')
+
+        if (!preserveVisibleData) {
+          setData(null)
+          setError('Please log in to view availability.')
+        }
+
+        return
+      }
+
+      if (!preserveVisibleData) {
+        setError(message)
+      }
+    },
+    [router],
+  )
 
   const primaryPrefetchArgs = useMemo(
     () =>
@@ -215,46 +333,19 @@ export function useAvailability(
     })
   }, [fullPrefetchArgs, includeOtherPros])
 
-  const handleAvailabilityError = useCallback(
-    (message: string, preserveVisibleData: boolean) => {
-      if (message === 'Unauthorized.') {
-        redirectToLogin(router, 'availability')
-
-        if (!preserveVisibleData) {
-          setData(null)
-          setError('Please log in to view availability.')
-        }
-
-        return
-      }
-
-      if (!preserveVisibleData) {
-        setError(message)
-      }
-    },
-    [router],
-  )
-
   const loadOtherProsOnly = useCallback(async () => {
     if (!includeOtherPros || !fullPrefetchArgs) return
 
     const seq = ++requestSeqRef.current
+    const refreshMeta: BackgroundRefreshMeta = {
+      refreshKind: 'other-pros-only',
+      cacheState: 'visible-primary',
+    }
 
     setLoading(false)
     setRefreshing(true)
 
-    startAvailabilityMetric({
-      metric: 'background_refresh_ms',
-      key: BACKGROUND_REFRESH_METRIC_KEY,
-      meta: {
-        professionalId: proId,
-        serviceId,
-        locationType: locationType ?? null,
-        includeOtherPros,
-        refreshKind: 'other-pros-only',
-        cacheState: 'visible-primary',
-      },
-    })
+    startBackgroundRefresh(refreshMeta)
 
     try {
       const fullPage = await fetchAvailabilitySummaryWindow({
@@ -265,50 +356,27 @@ export function useAvailability(
       })
 
       if (seq !== requestSeqRef.current) {
-        cancelAvailabilityMetric({
-          metric: 'background_refresh_ms',
-          key: BACKGROUND_REFRESH_METRIC_KEY,
-          reason: 'superseded',
-        })
+        cancelBackgroundRefresh('superseded')
         return
       }
 
       setData((current) => mergeSummaryData(current, fullPage))
       setError(null)
 
-      endAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        meta: {
-          professionalId: proId,
-          serviceId,
-          locationType: locationType ?? null,
-          includeOtherPros,
-          refreshKind: 'other-pros-only',
-          cacheState: 'visible-primary',
-          dayCount: fullPage.availableDays.length,
-          hasOtherPros: fullPage.otherPros.length > 0,
-        },
+      completeBackgroundRefresh(refreshMeta, {
+        dayCount: fullPage.availableDays.length,
+        hasOtherPros: fullPage.otherPros.length > 0,
       })
     } catch (e: unknown) {
       if (seq !== requestSeqRef.current) {
-        cancelAvailabilityMetric({
-          metric: 'background_refresh_ms',
-          key: BACKGROUND_REFRESH_METRIC_KEY,
-          reason: 'superseded',
-        })
+        cancelBackgroundRefresh('superseded')
         return
       }
 
       const message =
         e instanceof Error ? e.message : 'Failed to load availability.'
 
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: message,
-      })
-
+      cancelBackgroundRefresh(message)
       handleAvailabilityError(message, true)
     } finally {
       if (seq === requestSeqRef.current) {
@@ -316,12 +384,12 @@ export function useAvailability(
       }
     }
   }, [
-    fullPrefetchArgs,
     includeOtherPros,
+    fullPrefetchArgs,
+    startBackgroundRefresh,
+    completeBackgroundRefresh,
+    cancelBackgroundRefresh,
     handleAvailabilityError,
-    proId,
-    serviceId,
-    locationType,
   ])
 
   const loadInitial = useCallback(
@@ -334,21 +402,14 @@ export function useAvailability(
         : primaryPrefetchArgs
 
       if (preserveVisibleData) {
+        const refreshMeta: BackgroundRefreshMeta = {
+          refreshKind: backgroundMeta?.refreshKind ?? 'initial-background',
+          cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
+        }
+
         setLoading(false)
         setRefreshing(true)
-
-        startAvailabilityMetric({
-          metric: 'background_refresh_ms',
-          key: BACKGROUND_REFRESH_METRIC_KEY,
-          meta: {
-            professionalId: proId,
-            serviceId,
-            locationType: locationType ?? null,
-            includeOtherPros,
-            refreshKind: backgroundMeta?.refreshKind ?? 'initial-background',
-            cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
-          },
-        })
+        startBackgroundRefresh(refreshMeta)
       } else {
         setLoading(true)
         setRefreshing(false)
@@ -370,11 +431,7 @@ export function useAvailability(
 
         if (seq !== requestSeqRef.current) {
           if (preserveVisibleData) {
-            cancelAvailabilityMetric({
-              metric: 'background_refresh_ms',
-              key: BACKGROUND_REFRESH_METRIC_KEY,
-              reason: 'superseded',
-            })
+            cancelBackgroundRefresh('superseded')
           }
           return
         }
@@ -383,29 +440,21 @@ export function useAvailability(
         setError(null)
 
         if (preserveVisibleData) {
-          endAvailabilityMetric({
-            metric: 'background_refresh_ms',
-            key: BACKGROUND_REFRESH_METRIC_KEY,
-            meta: {
-              professionalId: proId,
-              serviceId,
-              locationType: locationType ?? null,
-              includeOtherPros,
+          completeBackgroundRefresh(
+            {
               refreshKind: backgroundMeta?.refreshKind ?? 'initial-background',
               cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
+            },
+            {
               dayCount: initialPage.availableDays.length,
               hasOtherPros: initialPage.otherPros.length > 0,
             },
-          })
+          )
         }
       } catch (e: unknown) {
         if (seq !== requestSeqRef.current) {
           if (preserveVisibleData) {
-            cancelAvailabilityMetric({
-              metric: 'background_refresh_ms',
-              key: BACKGROUND_REFRESH_METRIC_KEY,
-              reason: 'superseded',
-            })
+            cancelBackgroundRefresh('superseded')
           }
           return
         }
@@ -414,11 +463,7 @@ export function useAvailability(
           e instanceof Error ? e.message : 'Failed to load availability.'
 
         if (preserveVisibleData) {
-          cancelAvailabilityMetric({
-            metric: 'background_refresh_ms',
-            key: BACKGROUND_REFRESH_METRIC_KEY,
-            reason: message,
-          })
+          cancelBackgroundRefresh(message)
         }
 
         handleAvailabilityError(message, preserveVisibleData)
@@ -430,13 +475,13 @@ export function useAvailability(
       }
     },
     [
-      primaryPrefetchArgs,
       includeOtherPros,
       fullPrefetchArgs,
+      primaryPrefetchArgs,
+      startBackgroundRefresh,
+      completeBackgroundRefresh,
+      cancelBackgroundRefresh,
       handleAvailabilityError,
-      proId,
-      serviceId,
-      locationType,
     ],
   )
 
@@ -491,52 +536,29 @@ export function useAvailability(
 
   useEffect(() => {
     return () => {
-      requestSeqRef.current += 1
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: 'unmount',
-      })
+      invalidateActiveRequest('unmount')
     }
-  }, [])
+  }, [invalidateActiveRequest])
 
   useEffect(() => {
     if (!open) {
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: 'drawer_closed',
-      })
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      invalidateActiveRequest('drawer_closed')
+      clearLoadingFlags()
       setError(null)
       return
     }
 
     if (!proId) {
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: 'missing_professional',
-      })
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      invalidateActiveRequest('missing_professional')
+      clearLoadingFlags()
       setData(null)
       setError('Missing professional. Please try again.')
       return
     }
 
     if (!serviceId) {
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: 'missing_service',
-      })
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      invalidateActiveRequest('missing_service')
+      clearLoadingFlags()
       setData(null)
       setError(
         'No service is linked yet. Ask the pro to attach a service to this look.',
@@ -545,28 +567,16 @@ export function useAvailability(
     }
 
     if (!canFetch) {
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: 'cannot_fetch',
-      })
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      invalidateActiveRequest('cannot_fetch')
+      clearLoadingFlags()
       setData(null)
       setError(null)
       return
     }
 
     if (!primaryWindowKey) {
-      cancelAvailabilityMetric({
-        metric: 'background_refresh_ms',
-        key: BACKGROUND_REFRESH_METRIC_KEY,
-        reason: 'missing_context',
-      })
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      invalidateActiveRequest('missing_context')
+      clearLoadingFlags()
       setData(null)
       setError('Missing availability context.')
       return
@@ -574,21 +584,19 @@ export function useAvailability(
 
     const freshFull = readCachedSummaryWindow(fullWindowKey, false)
     if (freshFull) {
+      invalidateActiveRequest('fresh_full_cache')
       setData(freshFull)
       setError(null)
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      clearLoadingFlags()
       return
     }
 
     const freshPrimary = readCachedSummaryWindow(primaryWindowKey, false)
     if (freshPrimary) {
+      invalidateActiveRequest('fresh_primary_cache')
       setData(freshPrimary)
       setError(null)
-      setLoading(false)
-      setLoadingMore(false)
-      setRefreshing(false)
+      clearLoadingFlags()
 
       if (includeOtherPros) {
         void loadOtherProsOnly()
@@ -604,6 +612,7 @@ export function useAvailability(
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(true)
+
       void loadInitial('background', {
         refreshKind: 'initial-background',
         cacheState: 'cached-full',
@@ -618,6 +627,7 @@ export function useAvailability(
       setLoading(false)
       setLoadingMore(false)
       setRefreshing(true)
+
       void loadInitial('background', {
         refreshKind: 'initial-background',
         cacheState: 'cached-primary',
@@ -639,6 +649,8 @@ export function useAvailability(
     includeOtherPros,
     loadInitial,
     loadOtherProsOnly,
+    clearLoadingFlags,
+    invalidateActiveRequest,
   ])
 
   const refresh = useCallback(() => {

@@ -1,7 +1,7 @@
 {
   "gate": 2,
   "suite": "availability",
-  "generatedAt": "2026-04-02T19:57:10.172Z",
+  "generatedAt": "2026-04-03T05:27:04.857Z",
   "budgetSource": "docs/performance/availability-gate2-budget.json",
   "artifacts": {
     "rawDesktop": "artifacts/perf/availability/raw-desktop.json",
@@ -155,7 +155,7 @@
   },
   "budgetCheck": {
     "passed": false,
-    "checkedAt": "2026-04-02T19:57:21.000Z",
+    "checkedAt": "2026-04-03T05:27:06.931Z",
     "requiredSampleCount": 30,
     "failures": [
       "[FAIL] desktop drawer_open_to_first_usable_ms sample_count=2 required=30",
