@@ -1017,30 +1017,36 @@ export default function AvailabilityDrawer(props: {
   ])
 
   useEffect(() => {
-    if (!open) return
+  if (!open) return
 
-    const todayInAppointmentTz = ymdInTz(appointmentTz)
-    const todayExists = todayInAppointmentTz
-      ? days.some((d) => d.date === todayInAppointmentTz)
-      : false
-    const firstAvailable = days[0]?.date ?? null
-    const preferredDay =
-      (todayExists ? todayInAppointmentTz : null) ??
-      firstAvailable ??
-      todayInAppointmentTz
+  const preferredDay =
+    summary?.initialSelectedDay?.date ??
+    (() => {
+      const todayInAppointmentTz = ymdInTz(appointmentTz)
+      const todayExists = todayInAppointmentTz
+        ? days.some((d) => d.date === todayInAppointmentTz)
+        : false
+      const firstAvailable = days[0]?.date ?? null
 
-    setSelectedDayYMD((current) => {
-      if (!preferredDay) return current ?? null
-      if (!current) return preferredDay
+      return (
+        (todayExists ? todayInAppointmentTz : null) ??
+        firstAvailable ??
+        todayInAppointmentTz
+      )
+    })()
 
-      if (days.length > 0) {
-        const currentStillExists = days.some((d) => d.date === current)
-        return currentStillExists ? current : preferredDay
-      }
+  setSelectedDayYMD((current) => {
+    if (!preferredDay) return current ?? null
+    if (!current) return preferredDay
 
-      return current
-    })
-  }, [open, appointmentTz, days])
+    if (days.length > 0) {
+      const currentStillExists = days.some((d) => d.date === current)
+      return currentStillExists ? current : preferredDay
+    }
+
+    return current
+  })
+}, [open, summary?.initialSelectedDay?.date, appointmentTz, days])
 
   useEffect(() => {
     if (!open) return

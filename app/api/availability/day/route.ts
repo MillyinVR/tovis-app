@@ -92,6 +92,35 @@ function isDayCacheHit(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && value.ok === true && value.mode === 'DAY'
 }
 
+type SummarySeededDay = {
+  date: string
+  slots: string[]
+}
+
+function resolveInitialSelectedDay(args: {
+  availableDaySlots: SummarySeededDay[]
+  todayDate: string
+}): SummarySeededDay | null {
+  const todayMatch = args.availableDaySlots.find(
+    (day) => day.date === args.todayDate,
+  )
+
+  if (todayMatch) {
+    return {
+      date: todayMatch.date,
+      slots: todayMatch.slots.slice(),
+    }
+  }
+
+  const firstAvailable = args.availableDaySlots[0]
+  if (!firstAvailable) return null
+
+  return {
+    date: firstAvailable.date,
+    slots: firstAvailable.slots.slice(),
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const {
@@ -338,26 +367,37 @@ export async function GET(req: Request) {
       )
 
       const availableDays: Array<{ date: string; slotCount: number }> = []
-      let firstErrorCode: BookingErrorCode | null = null
-      let firstDaySlots: string[] = []
+const availableDaySlots: SummarySeededDay[] = []
+let firstErrorCode: BookingErrorCode | null = null
 
-      for (const row of dayResults) {
-        if (!row.result.ok) {
-          firstErrorCode = firstErrorCode ?? row.result.code
-          continue
-        }
+for (const row of dayResults) {
+  if (!row.result.ok) {
+    firstErrorCode = firstErrorCode ?? row.result.code
+    continue
+  }
 
-        if (row.result.slots.length > 0) {
-          availableDays.push({
-            date: ymdToString(row.ymd),
-            slotCount: row.result.slots.length,
-          })
+  if (row.result.slots.length > 0) {
+    const date = ymdToString(row.ymd)
+    const slots = row.result.slots.slice()
 
-          if (firstDaySlots.length === 0) {
-            firstDaySlots = row.result.slots.slice()
-          }
-        }
-      }
+    availableDays.push({
+      date,
+      slotCount: slots.length,
+    })
+
+    availableDaySlots.push({
+      date,
+      slots,
+    })
+  }
+}
+
+const initialSelectedDay = resolveInitialSelectedDay({
+  availableDaySlots,
+  todayDate: ymdToString(todayYMD),
+})
+
+const firstDaySlots = availableDaySlots[0]?.slots.slice() ?? []
 
       const payload = {
         ok: true,
@@ -399,6 +439,7 @@ export async function GET(req: Request) {
         },
 
         availableDays,
+        initialSelectedDay,
         firstDaySlots,
         otherPros,
         waitlistSupported: true,

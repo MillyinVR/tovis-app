@@ -135,7 +135,9 @@ export function useAvailability(
       buildAvailabilityPrefetchArgsFromContext({
         context,
         locationType,
-        clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
+        clientAddressId: requiresClientAddress
+          ? normalizedClientAddressId
+          : null,
         includeOtherPros: false,
         days: INITIAL_WINDOW_DAYS,
         startDate: null,
@@ -176,7 +178,9 @@ export function useAvailability(
     return buildAvailabilityPrefetchArgsFromContext({
       context,
       locationType,
-      clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
+      clientAddressId: requiresClientAddress
+        ? normalizedClientAddressId
+        : null,
       includeOtherPros: true,
       days: INITIAL_WINDOW_DAYS,
       startDate: null,
@@ -324,6 +328,10 @@ export function useAvailability(
     async (mode: LoadMode, backgroundMeta?: BackgroundRefreshMeta) => {
       const seq = ++requestSeqRef.current
       const preserveVisibleData = mode === 'background'
+      const shouldLoadFullSummary = includeOtherPros && Boolean(fullPrefetchArgs)
+      const initialArgs = shouldLoadFullSummary
+        ? fullPrefetchArgs
+        : primaryPrefetchArgs
 
       if (preserveVisibleData) {
         setLoading(false)
@@ -349,15 +357,15 @@ export function useAvailability(
       setError(null)
 
       try {
-        if (!primaryPrefetchArgs) {
+        if (!initialArgs) {
           throw new Error('Missing availability context.')
         }
 
-        const primaryPage = await fetchAvailabilitySummaryWindow({
-          ...primaryPrefetchArgs,
+        const initialPage = await fetchAvailabilitySummaryWindow({
+          ...initialArgs,
           startDate: null,
           days: INITIAL_WINDOW_DAYS,
-          includeOtherPros: false,
+          includeOtherPros: shouldLoadFullSummary,
         })
 
         if (seq !== requestSeqRef.current) {
@@ -371,54 +379,7 @@ export function useAvailability(
           return
         }
 
-        setData((current) => mergeSummaryData(current, primaryPage))
-        setError(null)
-        setLoading(false)
-
-        if (!includeOtherPros || !fullPrefetchArgs) {
-          if (preserveVisibleData) {
-            endAvailabilityMetric({
-              metric: 'background_refresh_ms',
-              key: BACKGROUND_REFRESH_METRIC_KEY,
-              meta: {
-                professionalId: proId,
-                serviceId,
-                locationType: locationType ?? null,
-                includeOtherPros,
-                refreshKind:
-                  backgroundMeta?.refreshKind ?? 'initial-background',
-                cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
-                dayCount: primaryPage.availableDays.length,
-                hasOtherPros: false,
-              },
-            })
-          }
-
-          setRefreshing(false)
-          return
-        }
-
-        setRefreshing(true)
-
-        const fullPage = await fetchAvailabilitySummaryWindow({
-          ...fullPrefetchArgs,
-          startDate: null,
-          days: INITIAL_WINDOW_DAYS,
-          includeOtherPros: true,
-        })
-
-        if (seq !== requestSeqRef.current) {
-          if (preserveVisibleData) {
-            cancelAvailabilityMetric({
-              metric: 'background_refresh_ms',
-              key: BACKGROUND_REFRESH_METRIC_KEY,
-              reason: 'superseded',
-            })
-          }
-          return
-        }
-
-        setData((current) => mergeSummaryData(current, fullPage))
+        setData((current) => mergeSummaryData(current, initialPage))
         setError(null)
 
         if (preserveVisibleData) {
@@ -432,8 +393,8 @@ export function useAvailability(
               includeOtherPros,
               refreshKind: backgroundMeta?.refreshKind ?? 'initial-background',
               cacheState: backgroundMeta?.cacheState ?? 'cached-primary',
-              dayCount: fullPage.availableDays.length,
-              hasOtherPros: fullPage.otherPros.length > 0,
+              dayCount: initialPage.availableDays.length,
+              hasOtherPros: initialPage.otherPros.length > 0,
             },
           })
         }
@@ -489,7 +450,9 @@ export function useAvailability(
       const nextArgs = buildAvailabilityPrefetchArgsFromContext({
         context: contextRef.current,
         locationType,
-        clientAddressId: requiresClientAddress ? normalizedClientAddressId : null,
+        clientAddressId: requiresClientAddress
+          ? normalizedClientAddressId
+          : null,
         includeOtherPros: false,
         days: NEXT_WINDOW_DAYS,
         startDate: data.nextStartDate,

@@ -285,21 +285,16 @@ export function useDaySlots(args: {
   fetchDaySlotsDetailedRef.current = fetchDaySlotsDetailed
 
   useEffect(() => {
-    if (!summary?.firstDaySlots?.length) return
+    const seededDay = summary?.initialSelectedDay
+    if (!seededDay?.slots.length) return
 
-    const firstDate = summary.availableDays[0]?.date
-    if (
-      !firstDate ||
-      !primaryId ||
-      !primaryLocationId ||
-      !effectiveServiceId
-    ) {
+    if (!primaryId || !primaryLocationId || !effectiveServiceId) {
       return
     }
 
     const cacheKey = buildDaySlotCacheKey({
       proId: primaryId,
-      ymd: firstDate,
+      ymd: seededDay.date,
       locationType: activeLocationType,
       locationId: primaryLocationId,
       serviceId: effectiveServiceId,
@@ -309,7 +304,7 @@ export function useDaySlots(args: {
 
     if (!isFreshDaySlotCacheEntry(daySlotCacheRef.current[cacheKey])) {
       daySlotCacheRef.current[cacheKey] = {
-        slots: summary.firstDaySlots.slice(),
+        slots: seededDay.slots.slice(),
         cachedAt: Date.now(),
       }
     }

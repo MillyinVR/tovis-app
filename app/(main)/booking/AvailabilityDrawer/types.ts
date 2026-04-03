@@ -84,6 +84,11 @@ export type AvailabilityDaySummary = {
   slotCount: number
 }
 
+export type AvailabilityInitialSelectedDay = {
+  date: string
+  slots: string[]
+}
+
 export type ProCard = {
   id: string
   businessName: string | null
@@ -157,8 +162,19 @@ export type AvailabilitySummaryOk = ApiOk<{
   }
 
   availableDays: AvailabilityDaySummary[]
-  /** Slots for the first available day — embedded to avoid a second round-trip on drawer open */
+
+  /**
+   * Explicitly pairs the initially selected day with the slots embedded in summary.
+   * This is the source of truth for drawer-open day selection and preseeded day slots.
+   */
+  initialSelectedDay: AvailabilityInitialSelectedDay | null
+
+  /**
+   * @deprecated Legacy first-available seed.
+   * Keep temporarily for compatibility while all consumers move to initialSelectedDay.
+   */
   firstDaySlots?: string[]
+
   otherPros: AvailabilityOtherPro[]
   waitlistSupported: boolean
 

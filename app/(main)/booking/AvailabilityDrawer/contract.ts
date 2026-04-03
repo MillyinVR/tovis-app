@@ -1,6 +1,7 @@
 // app/(main)/booking/AvailabilityDrawer/contract.ts
 import type {
   AvailabilityDayResponse,
+  AvailabilityInitialSelectedDay,
   AvailabilityOffering,
   AvailabilityOtherPro,
   AvailabilitySummaryResponse,
@@ -28,7 +29,10 @@ function pickBoolean(x: unknown): boolean | null {
 
 function pickServiceLocationType(x: unknown): ServiceLocationType | null {
   const s = pickString(x)?.toUpperCase() ?? ''
-  if (s === 'SALON' || s === 'MOBILE') return s as ServiceLocationType
+
+  if (s === 'SALON') return 'SALON'
+  if (s === 'MOBILE') return 'MOBILE'
+
   return null
 }
 
@@ -51,9 +55,13 @@ function pickOffering(x: unknown): AvailabilityOffering | null {
     x.mobileDurationMinutes == null ? null : pickNumber(x.mobileDurationMinutes)
 
   const salonPriceStartingAt =
-    x.salonPriceStartingAt == null ? null : pickMoneyString(x.salonPriceStartingAt)
+    x.salonPriceStartingAt == null
+      ? null
+      : pickMoneyString(x.salonPriceStartingAt)
   const mobilePriceStartingAt =
-    x.mobilePriceStartingAt == null ? null : pickMoneyString(x.mobilePriceStartingAt)
+    x.mobilePriceStartingAt == null
+      ? null
+      : pickMoneyString(x.mobilePriceStartingAt)
 
   if (x.salonDurationMinutes != null && salonDurationMinutes == null) return null
   if (x.mobileDurationMinutes != null && mobileDurationMinutes == null) return null
@@ -77,13 +85,15 @@ function pickProCardBase(x: unknown): ProCard | null {
   const id = pickString(x.id)
   if (!id) return null
 
-  const businessName = x.businessName == null ? null : pickString(x.businessName)
+  const businessName =
+    x.businessName == null ? null : pickString(x.businessName)
   const avatarUrl = x.avatarUrl == null ? null : pickString(x.avatarUrl)
   const location = x.location == null ? null : pickString(x.location)
   const offeringId = x.offeringId == null ? null : pickString(x.offeringId)
   const timeZone = x.timeZone == null ? null : pickString(x.timeZone)
   const locationId = x.locationId == null ? null : pickString(x.locationId)
-  const distanceMiles = x.distanceMiles == null ? null : pickNumber(x.distanceMiles)
+  const distanceMiles =
+    x.distanceMiles == null ? null : pickNumber(x.distanceMiles)
 
   const isCreator =
     x.isCreator == null ? undefined : pickBoolean(x.isCreator) ?? undefined
@@ -120,7 +130,8 @@ function pickAvailabilityOtherPro(x: unknown): AvailabilityOtherPro | null {
 
   if (!offeringId || !locationId || !timeZone) return null
 
-  const distanceMiles = x.distanceMiles == null ? null : pickNumber(x.distanceMiles)
+  const distanceMiles =
+    x.distanceMiles == null ? null : pickNumber(x.distanceMiles)
   if (x.distanceMiles != null && distanceMiles == null) return null
 
   return {
@@ -131,6 +142,25 @@ function pickAvailabilityOtherPro(x: unknown): AvailabilityOtherPro | null {
     distanceMiles: distanceMiles ?? null,
   }
 }
+
+function pickAvailabilityInitialSelectedDay(
+  x: unknown,
+): AvailabilityInitialSelectedDay | null | undefined {
+  if (x == null) return null
+  if (!isRecord(x)) return undefined
+
+  const date = pickString(x.date)
+  const slotsRaw = x.slots
+
+  if (!date || !Array.isArray(slotsRaw)) return undefined
+  if (!slotsRaw.every((slot) => typeof slot === 'string')) return undefined
+
+  return {
+    date,
+    slots: slotsRaw.slice(),
+  }
+}
+
 function pickSummaryDebug(x: unknown):
   | {
       emptyReason?: string | null
@@ -177,7 +207,9 @@ function pickSummaryDebug(x: unknown):
       : undefined
 
   const clientAddressId =
-    x.clientAddressId == null ? undefined : pickString(x.clientAddressId) ?? undefined
+    x.clientAddressId == null
+      ? undefined
+      : pickString(x.clientAddressId) ?? undefined
 
   let center:
     | {
@@ -317,9 +349,24 @@ export function parseAvailabilitySummaryResponse(
   const debug = pickSummaryDebug(x.debug)
 
   let firstDaySlots: string[] | undefined
-  if (Array.isArray(x.firstDaySlots) && x.firstDaySlots.every((s) => typeof s === 'string')) {
-    firstDaySlots = (x.firstDaySlots as string[]).slice()
+  if (Array.isArray(x.firstDaySlots)) {
+    if (!x.firstDaySlots.every((s) => typeof s === 'string')) return null
+    firstDaySlots = x.firstDaySlots.slice()
   }
+
+  const parsedInitialSelectedDay = pickAvailabilityInitialSelectedDay(
+    x.initialSelectedDay,
+  )
+  if (parsedInitialSelectedDay === undefined) return null
+
+  const initialSelectedDay =
+    parsedInitialSelectedDay ??
+    (firstDaySlots?.length && availableDays[0]
+      ? {
+          date: availableDays[0].date,
+          slots: firstDaySlots.slice(),
+        }
+      : null)
 
   return {
     ok: true,
@@ -350,6 +397,7 @@ export function parseAvailabilitySummaryResponse(
       locationId: primaryProBase.locationId,
     },
     availableDays,
+    initialSelectedDay,
     ...(firstDaySlots !== undefined ? { firstDaySlots } : {}),
     otherPros,
     waitlistSupported,
