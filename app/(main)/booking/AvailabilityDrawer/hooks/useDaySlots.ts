@@ -40,6 +40,12 @@ type FetchDaySlotsResult = {
   error: string | null
 }
 
+type InvalidateDaySlotCacheParams = {
+  selectedDayYMD: string | null
+  locationType: ServiceLocationType
+  clientAddressId: string | null
+}
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
@@ -122,6 +128,31 @@ function getFreshDaySlotCacheValue(
   return entry.slots.slice()
 }
 
+function invalidateMatchingDaySlotCacheEntries(args: {
+  cache: Record<string, DaySlotCacheEntry>
+  ymd: string
+  locationType: ServiceLocationType
+  serviceId: string
+  clientAddressId: string | null
+}) {
+  const expectedClientAddressId =
+    args.locationType === 'MOBILE' ? (args.clientAddressId ?? 'none') : 'none'
+
+  for (const key of Object.keys(args.cache)) {
+    const parts = key.split('|')
+    if (parts.length !== 6) continue
+
+    const [, serviceId, ymd, locationType, , clientAddressId] = parts
+
+    if (serviceId !== args.serviceId) continue
+    if (ymd !== args.ymd) continue
+    if (locationType !== args.locationType) continue
+    if (clientAddressId !== expectedClientAddressId) continue
+
+    delete args.cache[key]
+  }
+}
+
 function getOtherProsFromSummary(
   summary: DaySlotsSummary | null,
 ): OtherProRef[] {
@@ -183,9 +214,21 @@ export function useDaySlots(args: {
     setLoadingOtherSlots(false)
   }, [])
 
-  const clearDaySlotCache = useCallback(() => {
-    daySlotCacheRef.current = {}
-  }, [])
+const invalidateDaySlotCache = useCallback(
+  (params: InvalidateDaySlotCacheParams) => {
+    if (!effectiveServiceId) return
+    if (!params.selectedDayYMD) return
+
+    invalidateMatchingDaySlotCacheEntries({
+      cache: daySlotCacheRef.current,
+      ymd: params.selectedDayYMD,
+      locationType: params.locationType,
+      serviceId: effectiveServiceId,
+      clientAddressId: params.clientAddressId,
+    })
+  },
+  [effectiveServiceId],
+)
 
   const fetchDaySlotsDetailed = useCallback(
     async (params: FetchDaySlotsParams): Promise<FetchDaySlotsResult> => {
@@ -566,14 +609,14 @@ export function useDaySlots(args: {
     summary,
   ])
 
-  return {
-    primarySlots,
-    otherSlots,
-    loadingPrimarySlots,
-    loadingOtherSlots,
-    clearDaySlots,
-    clearDaySlotCache,
-    fetchDaySlots,
-    loadOtherSlots,
-  }
+return {
+  primarySlots,
+  otherSlots,
+  loadingPrimarySlots,
+  loadingOtherSlots,
+  clearDaySlots,
+  invalidateDaySlotCache,
+  fetchDaySlots,
+  loadOtherSlots,
+}
 }

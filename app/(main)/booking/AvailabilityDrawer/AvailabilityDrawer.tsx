@@ -528,7 +528,6 @@ export default function AvailabilityDrawer(props: {
     addressCreateOpen,
     setAddressCreateOpen,
     handleAddressSaved,
-    resetMobileAddressState,
   } = useMobileAddresses({
     open,
     mobileAddressGateRequested: requestedMobileAddressGate,
@@ -558,7 +557,7 @@ export default function AvailabilityDrawer(props: {
   const others = summary?.otherPros ?? []
   const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
-
+  const previousResetContextKeyRef = useRef<string | null>(null)
   const forcedMobileOnlyGate =
     !summary && availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
 
@@ -582,6 +581,23 @@ export default function AvailabilityDrawer(props: {
       mobile: Boolean(FALLBACK_OFFERING.offersMobile),
     }
   }, [summary?.offering, forcedMobileOnlyGate])
+
+
+  const resetContextKey = useMemo(() => {
+  return [
+    context.mediaId ?? '',
+    context.professionalId ?? '',
+    context.serviceId ?? '',
+    context.offeringId ?? '',
+    context.source ?? '',
+  ].join('|')
+}, [
+  context.mediaId,
+  context.professionalId,
+  context.serviceId,
+  context.offeringId,
+  context.source,
+])
 
   const mobileAddressGateRequested =
     locationType === 'MOBILE' ||
@@ -657,25 +673,25 @@ export default function AvailabilityDrawer(props: {
   }, [daysKey, appointmentTz])
 
   const {
-    primarySlots,
-    otherSlots,
-    loadingPrimarySlots,
-    loadingOtherSlots,
-    clearDaySlots,
-    clearDaySlotCache,
-    loadOtherSlots,
-  } = useDaySlots({
-    open,
-    summary,
-    selectedDayYMD,
-    activeLocationType,
-    effectiveServiceId,
-    selectedClientAddressId,
-    debug,
-    holding,
-    retryKey: slotRetryKey,
-    setError,
-  })
+  primarySlots,
+  otherSlots,
+  loadingPrimarySlots,
+  loadingOtherSlots,
+  clearDaySlots,
+  invalidateDaySlotCache,
+  loadOtherSlots,
+} = useDaySlots({
+  open,
+  summary,
+  selectedDayYMD,
+  activeLocationType,
+  effectiveServiceId,
+  selectedClientAddressId,
+  debug,
+  holding,
+  retryKey: slotRetryKey,
+  setError,
+})
 
   const noPrimarySlots = Boolean(primary && primarySlots.length === 0)
   const hasOtherPros = others.length > 0
@@ -699,31 +715,23 @@ export default function AvailabilityDrawer(props: {
   )
 
   const retryDaySlots = useCallback(() => {
-    setError(null)
-    clearDaySlotCache()
-    setSlotRetryKey((k) => k + 1)
-  }, [setError, clearDaySlotCache])
+  setError(null)
+  setSlotRetryKey((k) => k + 1)
+}, [setError])
 
   const resetForLocationModeChange = useCallback(
-    async (next: ServiceLocationType) => {
-      if (next === activeLocationType) return
+  async (next: ServiceLocationType) => {
+    if (next === activeLocationType) return
 
-      await hardResetUi({ deleteHold: true })
-      setLocationType(next)
-      setSelectedDayYMD(null)
-      setOtherProsRequested(false)
-      clearDaySlots()
-      clearDaySlotCache()
-      setError(null)
-    },
-    [
-      activeLocationType,
-      hardResetUi,
-      clearDaySlots,
-      clearDaySlotCache,
-      setError,
-    ],
-  )
+    await hardResetUi({ deleteHold: true })
+    setLocationType(next)
+    setSelectedDayYMD(null)
+    setOtherProsRequested(false)
+    clearDaySlots()
+    setError(null)
+  },
+  [activeLocationType, hardResetUi, clearDaySlots, setError],
+)
 
   const requestOtherPros = useCallback(
     (options?: { scroll?: boolean; forceRefresh?: boolean }) => {
@@ -752,6 +760,30 @@ export default function AvailabilityDrawer(props: {
     if (loading || loadingMore || refreshing) return
     void loadMore()
   }, [hasMoreDays, loadMore, loading, loadingMore, refreshing])
+
+
+    useEffect(() => {
+    if (!open) {
+      previousResetContextKeyRef.current = null
+      return
+    }
+
+    if (previousResetContextKeyRef.current === null) {
+      previousResetContextKeyRef.current = resetContextKey
+      return
+    }
+
+    if (previousResetContextKeyRef.current === resetContextKey) return
+
+    previousResetContextKeyRef.current = resetContextKey
+
+    setSelectedDayYMD(null)
+    setPeriod('AFTERNOON')
+    setOtherProsRequested(false)
+    clearDaySlots()
+
+    void hardResetUi({ deleteHold: true })
+  }, [open, resetContextKey, clearDaySlots, hardResetUi])
 
   useEffect(() => {
     if (!open) {
@@ -970,28 +1002,15 @@ export default function AvailabilityDrawer(props: {
   ])
 
   useEffect(() => {
-    if (!open) return
+  if (!open) return
 
-    setSelectedDayYMD(null)
-    setPeriod('AFTERNOON')
-    setOtherProsRequested(false)
-    clearDaySlots()
-    clearDaySlotCache()
-    resetMobileAddressState()
+  setSelectedDayYMD(null)
+  setPeriod('AFTERNOON')
+  setOtherProsRequested(false)
+  clearDaySlots()
 
-    void hardResetUi({ deleteHold: true })
-  }, [
-    open,
-    context.mediaId,
-    context.professionalId,
-    context.serviceId,
-    context.offeringId,
-    context.source,
-    clearDaySlots,
-    clearDaySlotCache,
-    resetMobileAddressState,
-    hardResetUi,
-  ])
+  void hardResetUi({ deleteHold: true })
+}, [open, clearDaySlots, hardResetUi])
 
   useEffect(() => {
     if (!open) return
@@ -1294,7 +1313,11 @@ export default function AvailabilityDrawer(props: {
 
       const parsed = parseHoldResponse(raw)
 
-      clearDaySlotCache()
+      invalidateDaySlotCache({
+        selectedDayYMD,
+        locationType: activeLocationType,
+        clientAddressId: selectedClientAddressId,
+      })
 
       setSelected({
         proId,
