@@ -195,6 +195,7 @@ export function useDaySlots(args: {
   const [loadingOtherSlots, setLoadingOtherSlots] = useState(false)
 
   const daySlotCacheRef = useRef<Record<string, DaySlotCacheEntry>>({})
+  const backgroundPrefetchInFlightRef = useRef<Set<string>>(new Set())
   const primarySlotsRequestIdRef = useRef(0)
   const otherSlotsRequestIdRef = useRef(0)
   const previousRetryKeyRef = useRef(retryKey)
@@ -214,21 +215,21 @@ export function useDaySlots(args: {
     setLoadingOtherSlots(false)
   }, [])
 
-const invalidateDaySlotCache = useCallback(
-  (params: InvalidateDaySlotCacheParams) => {
-    if (!effectiveServiceId) return
-    if (!params.selectedDayYMD) return
+  const invalidateDaySlotCache = useCallback(
+    (params: InvalidateDaySlotCacheParams) => {
+      if (!effectiveServiceId) return
+      if (!params.selectedDayYMD) return
 
-    invalidateMatchingDaySlotCacheEntries({
-      cache: daySlotCacheRef.current,
-      ymd: params.selectedDayYMD,
-      locationType: params.locationType,
-      serviceId: effectiveServiceId,
-      clientAddressId: params.clientAddressId,
-    })
-  },
-  [effectiveServiceId],
-)
+      invalidateMatchingDaySlotCacheEntries({
+        cache: daySlotCacheRef.current,
+        ymd: params.selectedDayYMD,
+        locationType: params.locationType,
+        serviceId: effectiveServiceId,
+        clientAddressId: params.clientAddressId,
+      })
+    },
+    [effectiveServiceId],
+  )
 
   const fetchDaySlotsDetailed = useCallback(
     async (params: FetchDaySlotsParams): Promise<FetchDaySlotsResult> => {
@@ -583,22 +584,39 @@ const invalidateDaySlotCache = useCallback(
     const selectedIdx = availableDays.findIndex((d) => d.date === selectedDayYMD)
     if (selectedIdx < 0) return
 
-    const nextDays = availableDays.slice(selectedIdx + 1, selectedIdx + 3)
-    if (!nextDays.length) return
+    const nextDay = availableDays[selectedIdx + 1]
+    if (!nextDay) return
 
-    const proId = primaryId
-    const locationId = primaryLocationId
+    pruneExpiredDaySlotCache(daySlotCacheRef.current)
 
-    for (const day of nextDays) {
-      void fetchDaySlotsRef
-        .current({
-          proId,
-          ymd: day.date,
-          locationType: activeLocationType,
-          locationId,
-        })
-        .catch(() => {})
-    }
+    const cacheKey = buildDaySlotCacheKey({
+      proId: primaryId,
+      ymd: nextDay.date,
+      locationType: activeLocationType,
+      locationId: primaryLocationId,
+      serviceId: effectiveServiceId,
+      clientAddressId:
+        activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
+    })
+
+    const cachedSlots = getFreshDaySlotCacheValue(daySlotCacheRef.current, cacheKey)
+    if (cachedSlots) return
+
+    if (backgroundPrefetchInFlightRef.current.has(cacheKey)) return
+
+    backgroundPrefetchInFlightRef.current.add(cacheKey)
+
+    void fetchDaySlotsRef
+      .current({
+        proId: primaryId,
+        ymd: nextDay.date,
+        locationType: activeLocationType,
+        locationId: primaryLocationId,
+      })
+      .catch(() => {})
+      .finally(() => {
+        backgroundPrefetchInFlightRef.current.delete(cacheKey)
+      })
   }, [
     open,
     primaryId,
@@ -606,17 +624,18 @@ const invalidateDaySlotCache = useCallback(
     selectedDayYMD,
     activeLocationType,
     effectiveServiceId,
+    selectedClientAddressId,
     summary,
   ])
 
-return {
-  primarySlots,
-  otherSlots,
-  loadingPrimarySlots,
-  loadingOtherSlots,
-  clearDaySlots,
-  invalidateDaySlotCache,
-  fetchDaySlots,
-  loadOtherSlots,
-}
+  return {
+    primarySlots,
+    otherSlots,
+    loadingPrimarySlots,
+    loadingOtherSlots,
+    clearDaySlots,
+    invalidateDaySlotCache,
+    fetchDaySlots,
+    loadOtherSlots,
+  }
 }
