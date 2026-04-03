@@ -11,6 +11,7 @@ import type {
 import { safeJson } from '../utils/safeJson'
 
 const DAY_SLOT_CACHE_TTL_MS = 60_000
+const OTHER_PRO_FETCH_CONCURRENCY = 3
 
 type DaySlotCacheEntry = {
   slots: string[]
@@ -45,6 +46,17 @@ type InvalidateDaySlotCacheParams = {
   locationType: ServiceLocationType
   clientAddressId: string | null
 }
+
+type OtherProLoadResult =
+  | {
+      id: string
+      slots: string[]
+      failed: false
+    }
+  | {
+      id: string
+      failed: true
+    }
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
@@ -162,6 +174,29 @@ function getOtherProsFromSummary(
     id: pro.id,
     locationId: pro.locationId,
   }))
+}
+
+async function mapWithConcurrencyLimit<TItem, TResult>(
+  items: readonly TItem[],
+  concurrency: number,
+  worker: (item: TItem) => Promise<TResult>,
+): Promise<TResult[]> {
+  if (items.length === 0) return []
+
+  const queue = items.map((item, index) => ({ item, index }))
+  const results: TResult[] = []
+  const workerCount = Math.max(1, Math.min(concurrency, queue.length))
+
+  async function runWorker() {
+    while (queue.length > 0) {
+      const next = queue.shift()
+      if (!next) return
+      results[next.index] = await worker(next.item)
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
+  return results
 }
 
 export function useDaySlots(args: {
@@ -417,18 +452,31 @@ export function useDaySlots(args: {
       setLoadingOtherSlots(true)
 
       try {
-        const otherResults = await Promise.all(
-          prosToFetch.map(async (pro) => {
-            const slots = await fetchDaySlotsRef.current({
-              proId: pro.id,
-              ymd: selectedDayYMD,
-              locationType: activeLocationType,
-              locationId: pro.locationId,
-              forceRefresh: options?.forceRefresh,
-            })
+        const otherResults = await mapWithConcurrencyLimit(
+          prosToFetch,
+          OTHER_PRO_FETCH_CONCURRENCY,
+          async (pro): Promise<OtherProLoadResult> => {
+            try {
+              const result = await fetchDaySlotsDetailedRef.current({
+                proId: pro.id,
+                ymd: selectedDayYMD,
+                locationType: activeLocationType,
+                locationId: pro.locationId,
+                forceRefresh: options?.forceRefresh,
+              })
 
-            return { id: pro.id, slots }
-          }),
+              return {
+                id: pro.id,
+                slots: result.slots,
+                failed: false,
+              }
+            } catch {
+              return {
+                id: pro.id,
+                failed: true,
+              }
+            }
+          },
         )
 
         if (otherSlotsRequestIdRef.current !== requestId) return
@@ -437,8 +485,9 @@ export function useDaySlots(args: {
           ...nextCachedOtherSlots,
         }
 
-        for (const { id, slots } of otherResults) {
-          nextOtherSlots[id] = slots
+        for (const result of otherResults) {
+          if (result.failed) continue
+          nextOtherSlots[result.id] = result.slots
         }
 
         setOtherSlots(nextOtherSlots)
@@ -599,7 +648,10 @@ export function useDaySlots(args: {
         activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
     })
 
-    const cachedSlots = getFreshDaySlotCacheValue(daySlotCacheRef.current, cacheKey)
+    const cachedSlots = getFreshDaySlotCacheValue(
+      daySlotCacheRef.current,
+      cacheKey,
+    )
     if (cachedSlots) return
 
     if (backgroundPrefetchInFlightRef.current.has(cacheKey)) return

@@ -734,14 +734,13 @@ export default function AvailabilityDrawer(props: {
 )
 
   const requestOtherPros = useCallback(
-    (options?: { scroll?: boolean; forceRefresh?: boolean }) => {
+    (options?: { scroll?: boolean }) => {
       if (!open) return
       if (!summary) return
       if (!selectedDayYMD) return
       if (!hasOtherPros) return
 
       setOtherProsRequested(true)
-      void loadOtherSlots({ forceRefresh: options?.forceRefresh })
 
       if (options?.scroll) {
         window.requestAnimationFrame(() => {
