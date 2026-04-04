@@ -1,4 +1,3 @@
-// app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.ts
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -396,10 +395,15 @@ export function useAvailability(
     async (mode: LoadMode, backgroundMeta?: BackgroundRefreshMeta) => {
       const seq = ++requestSeqRef.current
       const preserveVisibleData = mode === 'background'
-      const shouldLoadFullSummary = includeOtherPros && Boolean(fullPrefetchArgs)
+      const shouldLoadFullSummary =
+        mode === 'background' && includeOtherPros && Boolean(fullPrefetchArgs)
+      const shouldFollowWithOtherPros =
+        mode === 'blocking' && includeOtherPros && Boolean(fullPrefetchArgs)
       const initialArgs = shouldLoadFullSummary
         ? fullPrefetchArgs
         : primaryPrefetchArgs
+
+      let shouldLoadOtherProsAfterBlocking = false
 
       if (preserveVisibleData) {
         const refreshMeta: BackgroundRefreshMeta = {
@@ -450,6 +454,8 @@ export function useAvailability(
               hasOtherPros: initialPage.otherPros.length > 0,
             },
           )
+        } else if (shouldFollowWithOtherPros) {
+          shouldLoadOtherProsAfterBlocking = true
         }
       } catch (e: unknown) {
         if (seq !== requestSeqRef.current) {
@@ -473,6 +479,10 @@ export function useAvailability(
           setRefreshing(false)
         }
       }
+
+      if (shouldLoadOtherProsAfterBlocking && seq === requestSeqRef.current) {
+        void loadOtherProsOnly()
+      }
     },
     [
       includeOtherPros,
@@ -482,6 +492,7 @@ export function useAvailability(
       completeBackgroundRefresh,
       cancelBackgroundRefresh,
       handleAvailabilityError,
+      loadOtherProsOnly,
     ],
   )
 
