@@ -54,6 +54,8 @@ const OCCUPANCY_WINDOW_PADDING_MINUTES =
 
 const TTL_BOOTSTRAP_SECONDS = 120
 
+type TimerMap = Record<string, number>
+
 type SummarySeededDay = {
   date: string
   slots: string[]
@@ -73,6 +75,49 @@ type AvailabilityBootstrapRequestPayload = {
   clientAddressId: string | null
   addOnIds: string[]
   durationMinutes: number
+}
+
+function markTimer(timers: TimerMap, label: string): void {
+  timers[label] = performance.now()
+}
+
+function markInstantSection(timers: TimerMap, name: string): void {
+  const now = performance.now()
+  timers[`${name}:start`] = now
+  timers[`${name}:end`] = now
+}
+
+function measureMs(
+  timers: TimerMap,
+  startLabel: string,
+  endLabel: string,
+): number {
+  const start = timers[startLabel]
+  const end = timers[endLabel]
+
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0
+  return Math.max(0, end - start)
+}
+
+function buildServerTimingHeader(timers: TimerMap): string {
+  const parts: Array<[string, number]> = [
+    ['versions', measureMs(timers, 'versions:start', 'versions:end')],
+    ['context', measureMs(timers, 'context:start', 'context:end')],
+    ['addons', measureMs(timers, 'addons:start', 'addons:end')],
+    ['busy', measureMs(timers, 'busy:start', 'busy:end')],
+    ['otherpros', measureMs(timers, 'otherpros:start', 'otherpros:end')],
+    ['slots', measureMs(timers, 'slots:start', 'slots:end')],
+    ['total', measureMs(timers, 'total:start', 'total:end')],
+  ]
+
+  return parts
+    .map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`)
+    .join(', ')
+}
+
+function withServerTiming(response: Response, timers: TimerMap): Response {
+  response.headers.set('Server-Timing', buildServerTimingHeader(timers))
+  return response
 }
 
 function bookingJsonFail(
@@ -219,7 +264,10 @@ function resolveSelectedDay(args: {
   todaySelectedDay: SummarySeededDay | null
   firstAvailableSelectedDay: SummarySeededDay | null
 }): SummarySeededDay | null {
-  const todayExists = args.availableDays.some((day) => day.date === args.todayDate)
+  const todayExists = args.availableDays.some(
+    (day) => day.date === args.todayDate,
+  )
+
   if (todayExists && args.todaySelectedDay) {
     return {
       date: args.todaySelectedDay.date,
@@ -255,14 +303,18 @@ function deriveSelectedDayFromCachedBootstrap(args: {
   if (
     legacyInitialSelectedDay &&
     legacyInitialSelectedDay.slots.length > 0 &&
-    args.availableDays.some((day) => day.date === legacyInitialSelectedDay.date)
+    args.availableDays.some(
+      (day) => day.date === legacyInitialSelectedDay.date,
+    )
   ) {
     return legacyInitialSelectedDay
   }
 
   const firstDaySlots = pickStringArray(args.cached.firstDaySlots)
   if (firstDaySlots && firstDaySlots.length > 0) {
-    const todayDay = args.availableDays.find((day) => day.date === args.todayDate)
+    const todayDay = args.availableDays.find(
+      (day) => day.date === args.todayDate,
+    )
     const fallbackDay = todayDay ?? args.availableDays[0]
 
     if (fallbackDay) {
@@ -331,6 +383,9 @@ function normalizeBootstrapCacheHit(args: {
 }
 
 export async function GET(req: Request) {
+  const timers: TimerMap = {}
+  markTimer(timers, 'total:start')
+
   try {
     const {
       professionalId,
@@ -363,11 +418,14 @@ export async function GET(req: Request) {
       )
     }
 
+    markTimer(timers, 'versions:start')
     const [scheduleVersion, scheduleConfigVersion] = await Promise.all([
       getScheduleVersion(professionalId),
       getScheduleConfigVersion(professionalId),
     ])
+    markTimer(timers, 'versions:end')
 
+    markTimer(timers, 'context:start')
     const baseContext = await loadAvailabilityOfferingContext({
       professionalId,
       serviceId,
@@ -377,6 +435,7 @@ export async function GET(req: Request) {
       scheduleConfigVersion,
       cacheEnabled: !debug,
     })
+    markTimer(timers, 'context:end')
 
     if (!baseContext.ok) {
       if (baseContext.kind === 'NOT_FOUND') {
@@ -490,7 +549,7 @@ export async function GET(req: Request) {
           clientAddressId: resolvedClientAddressId,
         })
 
-        if (summaryCacheKey) {
+    if (summaryCacheKey) {
       const hit = await cacheGetJson<unknown>(summaryCacheKey)
 
       if (isBootstrapCacheHit(hit)) {
@@ -528,20 +587,30 @@ export async function GET(req: Request) {
             radiusMiles,
           })
 
-          return jsonOk(
-            normalizeBootstrapCacheHit({
-              cached: hit,
-              mediaId: mediaId || null,
-              request,
-              availabilityVersion,
-              generatedAt,
-              todayDate,
-            }),
+          markInstantSection(timers, 'addons')
+          markInstantSection(timers, 'busy')
+          markInstantSection(timers, 'otherpros')
+          markInstantSection(timers, 'slots')
+          markTimer(timers, 'total:end')
+
+          return withServerTiming(
+            jsonOk(
+              normalizeBootstrapCacheHit({
+                cached: hit,
+                mediaId: mediaId || null,
+                request,
+                availabilityVersion,
+                generatedAt,
+                todayDate,
+              }),
+            ),
+            timers,
           )
         }
       }
     }
 
+    markTimer(timers, 'addons:start')
     const addOnResult = await resolveRequestedDurationMinutes({
       professionalId,
       offeringId: offeringDbId,
@@ -557,6 +626,7 @@ export async function GET(req: Request) {
     }
 
     durationMinutes = addOnResult.durationMinutes
+    markTimer(timers, 'addons:end')
 
     const ymds = summaryWindow.ymds
     const firstBounds = computeDayBoundsUtc(ymds[0] ?? todayYMD, timeZone)
@@ -579,8 +649,9 @@ export async function GET(req: Request) {
     const centerLat = hasViewer ? viewerLat : placementLat
     const centerLng = hasViewer ? viewerLng : placementLng
 
-    const [busy, otherPros] = await Promise.all([
-      loadBusyIntervals({
+    const busyPromise = (async () => {
+      markTimer(timers, 'busy:start')
+      const result = await loadBusyIntervals({
         professionalId,
         locationId,
         windowStartUtc,
@@ -590,21 +661,35 @@ export async function GET(req: Request) {
         locationBufferMinutes,
         scheduleVersion,
         cache: { enabled: !debug },
-      }),
-      includeOtherPros && centerLat != null && centerLng != null
-        ? loadOtherProsNearbyCached({
-            centerLat,
-            centerLng,
-            radiusMiles,
-            serviceId,
-            locationType: effectiveLocationType,
-            excludeProfessionalId: professionalId,
-            limit: 6,
-            cacheEnabled: !debug,
-          })
-        : Promise.resolve([] as OtherProRow[]),
-    ])
+      })
+      markTimer(timers, 'busy:end')
+      return result
+    })()
 
+    const otherProsPromise = (async () => {
+      markTimer(timers, 'otherpros:start')
+
+      const result =
+        includeOtherPros && centerLat != null && centerLng != null
+          ? await loadOtherProsNearbyCached({
+              centerLat,
+              centerLng,
+              radiusMiles,
+              serviceId,
+              locationType: effectiveLocationType,
+              excludeProfessionalId: professionalId,
+              limit: 6,
+              cacheEnabled: !debug,
+            })
+          : ([] as OtherProRow[])
+
+      markTimer(timers, 'otherpros:end')
+      return result
+    })()
+
+    const [busy, otherPros] = await Promise.all([busyPromise, otherProsPromise])
+
+    markTimer(timers, 'slots:start')
     const dayResults = await Promise.all(
       ymds.map(async (ymd) => {
         const result = await computeDaySlotsFast({
@@ -623,6 +708,7 @@ export async function GET(req: Request) {
         return { ymd, result }
       }),
     )
+    markTimer(timers, 'slots:end')
 
     const availableDays: SummaryAvailableDay[] = []
     let todaySelectedDay: SummarySeededDay | null = null
@@ -774,7 +860,8 @@ export async function GET(req: Request) {
       )
     }
 
-    return jsonOk(payload)
+    markTimer(timers, 'total:end')
+    return withServerTiming(jsonOk(payload), timers)
   } catch (err: unknown) {
     console.error('GET /api/availability/bootstrap error', err)
     return bookingJsonFail('INTERNAL_ERROR', {

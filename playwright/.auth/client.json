@@ -2,10 +2,10 @@
   "cookies": [
     {
       "name": "tovis_token",
-      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbW11YTFvejcwMDAwaWUwNHg3OHh0dDU1Iiwicm9sZSI6IkNMSUVOVCIsImlhdCI6MTc3NTM4ODE2MCwiZXhwIjoxNzc1OTkyOTYwfQ.akadeEt0ssCIegsMa7JM_jrcyy9uApkAZ6YgZbdiiQA",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbW11YTFvejcwMDAwaWUwNHg3OHh0dDU1Iiwicm9sZSI6IkNMSUVOVCIsImlhdCI6MTc3NTQxNDk4MSwiZXhwIjoxNzc2MDE5NzgxfQ.Etz6V3iUy1K8gh9k7dlsDkR2yjvsoNdrDwpw2ciXsKQ",
       "domain": "localhost",
       "path": "/",
-      "expires": 1775992960.02376,
+      "expires": 1776019781.720925,
       "httpOnly": true,
       "secure": false,
       "sameSite": "Lax"

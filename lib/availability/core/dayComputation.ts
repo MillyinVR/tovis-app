@@ -10,6 +10,7 @@ import {
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import {
   addMinutes,
+  mergeBusyIntervals,
   normalizeToMinute,
   type BusyInterval,
 } from '@/lib/booking/conflicts'
@@ -20,13 +21,22 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { canShowSlot } from '@/lib/booking/policies/showSlotPolicy'
-import {
-  type YMD,
-  ymdSerial,
-  ymdToString,
-} from '@/lib/availability/core/summaryWindow'
+import { type YMD, ymdToString } from '@/lib/availability/core/summaryWindow'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
+
+const AMBIGUOUS_LOCAL_TIME_PROBE_MINUTES = [
+  -180,
+  -120,
+  -90,
+  -60,
+  -30,
+  30,
+  60,
+  90,
+  120,
+  180,
+] as const
 
 export type DayComputationResult =
   | {
@@ -44,7 +54,15 @@ export type DayComputationResult =
       debug?: unknown
     }
 
-type LocalMinuteCandidateIndex = Map<number, Date[]>
+type LocalWallTime = {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+}
+
+type LocalMinuteCandidateCache = Map<number, Date[]>
 
 export function computeDayBoundsUtc(dateYMD: YMD, timeZoneRaw: string) {
   const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC')
@@ -102,50 +120,166 @@ export function localSlotToUtcOrNull(args: {
   }
 }
 
-function buildLocalMinuteCandidateIndex(args: {
+function shiftYmd(dateYMD: YMD, dayOffset: number): YMD {
+  const shifted = new Date(
+    Date.UTC(dateYMD.year, dateYMD.month - 1, dateYMD.day + dayOffset),
+  )
+
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  }
+}
+
+function normalizeMinuteOffset(minuteOffset: number): {
+  dayOffset: number
+  minuteOfDay: number
+} {
+  const dayOffset = Math.floor(minuteOffset / 1440)
+  const minuteOfDay = ((minuteOffset % 1440) + 1440) % 1440
+
+  return {
+    dayOffset,
+    minuteOfDay,
+  }
+}
+
+function localWallTimeForMinuteOffset(args: {
   dateYMD: YMD
+  minuteOffset: number
+}): LocalWallTime {
+  const { dayOffset, minuteOfDay } = normalizeMinuteOffset(args.minuteOffset)
+  const shifted = shiftYmd(args.dateYMD, dayOffset)
+
+  return {
+    year: shifted.year,
+    month: shifted.month,
+    day: shifted.day,
+    hour: Math.floor(minuteOfDay / 60),
+    minute: minuteOfDay % 60,
+  }
+}
+
+function formatSkippedWallTime(minuteOffset: number): string {
+  const { dayOffset, minuteOfDay } = normalizeMinuteOffset(minuteOffset)
+  const hour = Math.floor(minuteOfDay / 60)
+  const minute = minuteOfDay % 60
+
+  return `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+function matchesLocalWallTime(
+  utc: Date,
+  target: LocalWallTime,
+  timeZone: string,
+): boolean {
+  const parts = utcDateToLocalParts(utc, timeZone)
+
+  return (
+    parts.year === target.year &&
+    parts.month === target.month &&
+    parts.day === target.day &&
+    parts.hour === target.hour &&
+    parts.minute === target.minute
+  )
+}
+
+function uniqueSortedDates(values: Date[]): Date[] {
+  const seen = new Set<number>()
+  const unique: Date[] = []
+
+  for (const value of values) {
+    const normalized = normalizeToMinute(value)
+    const key = normalized.getTime()
+
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(normalized)
+  }
+
+  unique.sort((a, b) => a.getTime() - b.getTime())
+  return unique
+}
+
+function buildUtcCandidatesForLocalMinute(args: {
+  dateYMD: YMD
+  minuteOffset: number
   timeZone: string
-  dayStartUtc: Date
-  dayEndExclusiveUtc: Date
-}): LocalMinuteCandidateIndex {
-  const { dateYMD, timeZone, dayStartUtc, dayEndExclusiveUtc } = args
+}): Date[] {
+  const target = localWallTimeForMinuteOffset({
+    dateYMD: args.dateYMD,
+    minuteOffset: args.minuteOffset,
+  })
 
-  const requestedSerial = ymdSerial(dateYMD)
-  const index: LocalMinuteCandidateIndex = new Map()
+  const primary = localSlotToUtcOrNull({
+    year: target.year,
+    month: target.month,
+    day: target.day,
+    hour: target.hour,
+    minute: target.minute,
+    timeZone: args.timeZone,
+  })
 
-  const scanEndUtc = addMinutes(dayEndExclusiveUtc, 24 * 60)
+  if (!primary) {
+    return []
+  }
 
-  for (
-    let cursor = new Date(dayStartUtc.getTime());
-    cursor.getTime() < scanEndUtc.getTime();
-    cursor = addMinutes(cursor, 1)
-  ) {
-    const utc = normalizeToMinute(cursor)
-    const parts = utcDateToLocalParts(utc, timeZone)
+  const candidates: Date[] = [primary]
 
-    const localSerial = ymdSerial({
-      year: parts.year,
-      month: parts.month,
-      day: parts.day,
-    })
+  for (const delta of AMBIGUOUS_LOCAL_TIME_PROBE_MINUTES) {
+    const probe = normalizeToMinute(addMinutes(primary, delta))
 
-    const dayOffset = localSerial - requestedSerial
-    if (dayOffset !== 0 && dayOffset !== 1) continue
-
-    const localMinuteOffset = dayOffset * 1440 + parts.hour * 60 + parts.minute
-    const existing = index.get(localMinuteOffset)
-
-    if (existing) {
-      const last = existing[existing.length - 1]
-      if (!last || last.getTime() !== utc.getTime()) {
-        existing.push(utc)
-      }
-    } else {
-      index.set(localMinuteOffset, [utc])
+    if (matchesLocalWallTime(probe, target, args.timeZone)) {
+      candidates.push(probe)
     }
   }
 
-  return index
+  return uniqueSortedDates(candidates)
+}
+
+function getCachedUtcCandidatesForLocalMinute(args: {
+  cache: LocalMinuteCandidateCache
+  dateYMD: YMD
+  minuteOffset: number
+  timeZone: string
+}): Date[] {
+  const cached = args.cache.get(args.minuteOffset)
+  if (cached) return cached
+
+  const computed = buildUtcCandidatesForLocalMinute({
+    dateYMD: args.dateYMD,
+    minuteOffset: args.minuteOffset,
+    timeZone: args.timeZone,
+  })
+
+  args.cache.set(args.minuteOffset, computed)
+  return computed
+}
+
+function buildRelevantBusyIntervals(args: {
+  busy: BusyInterval[]
+  dayStartUtc: Date
+  dayEndExclusiveUtc: Date
+  durationMinutes: number
+  bufferMinutes: number
+}): BusyInterval[] {
+  const relevantWindowStart = addMinutes(
+    args.dayStartUtc,
+    -(args.durationMinutes + args.bufferMinutes),
+  )
+  const relevantWindowEnd = addMinutes(
+    args.dayEndExclusiveUtc,
+    args.durationMinutes + args.bufferMinutes,
+  )
+
+  const relevant = args.busy.filter(
+    (interval) =>
+      interval.end.getTime() > relevantWindowStart.getTime() &&
+      interval.start.getTime() < relevantWindowEnd.getTime(),
+  )
+
+  return mergeBusyIntervals(relevant)
 }
 
 export async function computeDaySlotsFast(args: {
@@ -243,11 +377,13 @@ export async function computeDaySlotsFast(args: {
   const rawSlots: string[] = []
   const skippedDstWallTimes: string[] = []
 
-  const candidateIndex = buildLocalMinuteCandidateIndex({
-    dateYMD,
-    timeZone,
+  const candidateCache: LocalMinuteCandidateCache = new Map()
+  const relevantBusy = buildRelevantBusyIntervals({
+    busy,
     dayStartUtc,
     dayEndExclusiveUtc,
+    durationMinutes: duration,
+    bufferMinutes: buffer,
   })
 
   for (
@@ -255,19 +391,16 @@ export async function computeDaySlotsFast(args: {
     minute + duration + buffer <= window.endMinutes;
     minute += step
   ) {
-    const normalizedMinute = minute % 1440
-    const dayOffset = Math.floor(minute / 1440)
-
-    const hour = Math.floor(normalizedMinute / 60)
-    const minuteOfHour = normalizedMinute % 60
-
-    const slotStartUtcCandidates = candidateIndex.get(minute) ?? []
+    const slotStartUtcCandidates = getCachedUtcCandidatesForLocalMinute({
+      cache: candidateCache,
+      dateYMD,
+      minuteOffset: minute,
+      timeZone,
+    })
 
     if (slotStartUtcCandidates.length === 0) {
       if (debug) {
-        skippedDstWallTimes.push(
-          `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hour).padStart(2, '0')}:${String(minuteOfHour).padStart(2, '0')}`,
-        )
+        skippedDstWallTimes.push(formatSkippedWallTime(minute))
       }
       continue
     }
@@ -283,7 +416,7 @@ export async function computeDaySlotsFast(args: {
         stepMinutes: step,
         advanceNoticeMinutes: normalizedLeadTimeMinutes,
         maxDaysAhead: maxAdvanceDays,
-        busy,
+        busy: relevantBusy,
         fallbackTimeZone: 'UTC',
       })
 
