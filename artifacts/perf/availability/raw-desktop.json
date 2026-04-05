@@ -4,14 +4,14 @@
   "environment": "desktop",
   "deviceProfile": "chromium",
   "projectName": "chromium",
-  "collectedAt": "2026-04-05T18:51:17.857Z",
+  "collectedAt": "2026-04-05T21:29:54.239Z",
   "sampleTargetPerScenario": 1,
   "bookingUrl": "http://localhost:3000/looks",
   "samples": [
     {
       "scenario": "drawer-open",
       "metric": "drawer_open_to_first_usable_ms",
-      "durationMs": 2193.199999988079,
+      "durationMs": 2636.300000011921,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
@@ -20,35 +20,35 @@
         "locationType": "SALON",
         "selectedDayYMD": "2026-04-05",
         "slotCount": 0,
-        "dayCount": 5
+        "dayCount": 4
       }
     },
     {
       "scenario": "day-switch",
       "metric": "day_switch_to_times_visible_ms",
-      "durationMs": 11.700000017881393,
+      "durationMs": 11.800000011920929,
       "meta": {
-        "previousDayYMD": "2026-04-06",
-        "nextDayYMD": "2026-04-07",
+        "previousDayYMD": "2026-04-07",
+        "nextDayYMD": "2026-04-08",
         "locationType": "SALON",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "bookingSource": "DISCOVERY",
-        "selectedDayYMD": "2026-04-07",
+        "selectedDayYMD": "2026-04-08",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "slotCount": 1,
-        "requestedDayLabel": "Tue07"
+        "slotCount": 9,
+        "requestedDayLabel": "Wed08"
       }
     },
     {
       "scenario": "hold-request",
       "metric": "hold_request_latency_ms",
-      "durationMs": 1746.0999999940395,
+      "durationMs": 1946.7000000178814,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "selectedDayYMD": "2026-04-10",
-        "slotISO": "2026-04-10T18:00:00.000Z",
+        "selectedDayYMD": "2026-04-08",
+        "slotISO": "2026-04-08T21:00:00.000Z",
         "locationType": "SALON",
         "bookingSource": "DISCOVERY",
         "statusCode": 201,
@@ -58,24 +58,25 @@
     {
       "scenario": "continue-to-add-ons",
       "metric": "continue_to_add_ons_ms",
-      "invalid": true,
-      "invalidReason": "hold_request_status_409",
+      "durationMs": 3807.5,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "selectedDayYMD": "2026-04-10",
-        "slotISO": "2026-04-10T16:00:00.000Z",
+        "selectedDayYMD": "2026-04-08",
+        "slotISO": "2026-04-08T19:30:00.000Z",
         "locationType": "SALON",
         "bookingSource": "DISCOVERY",
-        "statusCode": 409,
-        "ok": false
+        "holdId": "cmnm9yc5b002htz5wkqd1811d",
+        "mediaId": "cmnhauj9q001ytzk4e6sl0m2x",
+        "addOnCount": 0,
+        "readyTarget": "booking-add-ons-continue-button"
       }
     },
     {
       "scenario": "background-refresh",
       "metric": "background_refresh_ms",
-      "durationMs": 6.4000000059604645,
+      "durationMs": 9.700000017881393,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
@@ -83,9 +84,9 @@
         "includeOtherPros": false,
         "refreshKind": "initial-background",
         "cacheState": "cached-primary",
-        "dayCount": 5,
+        "dayCount": 4,
         "hasOtherPros": false,
-        "availabilityVersion": "av:3b96b0b5ad995df22233451e"
+        "availabilityVersion": "av:d27a2cf6038f7f8a923a89d6"
       }
     }
   ]

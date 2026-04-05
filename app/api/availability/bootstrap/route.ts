@@ -87,6 +87,17 @@ function markInstantSection(timers: TimerMap, name: string): void {
   timers[`${name}:end`] = now
 }
 
+function recordMeasuredSection(
+  timers: TimerMap,
+  name: string,
+  durationMs: number,
+): void {
+  const now = performance.now()
+  const safeDuration = Math.max(0, durationMs)
+  timers[`${name}:start`] = now - safeDuration
+  timers[`${name}:end`] = now
+}
+
 function measureMs(
   timers: TimerMap,
   startLabel: string,
@@ -103,6 +114,94 @@ function buildServerTimingHeader(timers: TimerMap): string {
   const parts: Array<[string, number]> = [
     ['versions', measureMs(timers, 'versions:start', 'versions:end')],
     ['context', measureMs(timers, 'context:start', 'context:end')],
+    [
+      'placement_cache_get',
+      measureMs(
+        timers,
+        'offering:placement_cache_get:start',
+        'offering:placement_cache_get:end',
+      ),
+    ],
+    [
+      'fresh_source',
+      measureMs(
+        timers,
+        'offering:fresh_source:start',
+        'offering:fresh_source:end',
+      ),
+    ],
+    [
+      'placement_resolve',
+      measureMs(
+        timers,
+        'offering:placement_resolve:start',
+        'offering:placement_resolve:end',
+      ),
+    ],
+    [
+      'placement_cache_set',
+      measureMs(
+        timers,
+        'offering:placement_cache_set:start',
+        'offering:placement_cache_set:end',
+      ),
+    ],
+    [
+      'placement_requested_location_load',
+      measureMs(
+        timers,
+        'offering:placement_requested_location_load:start',
+        'offering:placement_requested_location_load:end',
+      ),
+    ],
+    [
+      'placement_candidate_list_load',
+      measureMs(
+        timers,
+        'offering:placement_candidate_list_load:start',
+        'offering:placement_candidate_list_load:end',
+      ),
+    ],
+    [
+      'placement_candidate_validation',
+      measureMs(
+        timers,
+        'offering:placement_candidate_validation:start',
+        'offering:placement_candidate_validation:end',
+      ),
+    ],
+    [
+      'placement_location_context_pick_location',
+      measureMs(
+        timers,
+        'offering:placement_location_context_pick_location:start',
+        'offering:placement_location_context_pick_location:end',
+      ),
+    ],
+    [
+      'placement_location_context_timezone_resolve',
+      measureMs(
+        timers,
+        'offering:placement_location_context_timezone_resolve:start',
+        'offering:placement_location_context_timezone_resolve:end',
+      ),
+    ],
+    [
+      'placement_location_context_context_validation',
+      measureMs(
+        timers,
+        'offering:placement_location_context_context_validation:start',
+        'offering:placement_location_context_context_validation:end',
+      ),
+    ],
+    [
+      'placement_location_context_offering_validation',
+      measureMs(
+        timers,
+        'offering:placement_location_context_offering_validation:start',
+        'offering:placement_location_context_offering_validation:end',
+      ),
+    ],
     ['addons', measureMs(timers, 'addons:start', 'addons:end')],
     ['busy', measureMs(timers, 'busy:start', 'busy:end')],
     ['otherpros', measureMs(timers, 'otherpros:start', 'otherpros:end')],
@@ -434,6 +533,9 @@ export async function GET(req: Request) {
       clientAddressId,
       scheduleConfigVersion,
       cacheEnabled: !debug,
+      onTiming: (label, durationMs) => {
+        recordMeasuredSection(timers, `offering:${label}`, durationMs)
+      },
     })
     markTimer(timers, 'context:end')
 

@@ -87,13 +87,40 @@ export type CheckSlotReadinessArgs = {
 }
 
 const DEFAULT_FALLBACK_TIME_ZONE = 'UTC'
-
 const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 type WorkingHoursGuardCode =
   | 'WORKING_HOURS_REQUIRED'
   | 'WORKING_HOURS_INVALID'
   | 'OUTSIDE_WORKING_HOURS'
+
+type PreparedStepAlignmentArgs = {
+  startUtc: Date
+  workingHours: unknown
+  timeZone: string
+  stepMinutes: number
+}
+
+type ResolvedWorkingWindow =
+  | {
+      ok: true
+      startUtc: Date
+      timeZone: string
+      stepMinutes: number
+      windowStartMinutes: number
+      windowEndMinutes: number
+      startOffset: number
+    }
+  | {
+      ok: false
+      code: SlotReadinessCode
+      timeZone: string
+      stepMinutes: number
+      meta?: Record<string, unknown>
+    }
+
+const LOCAL_DATE_TIME_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
+const LOCAL_DATE_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
 
 function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
   return `${WORKING_HOURS_ERROR_PREFIX}${code}`
@@ -150,7 +177,10 @@ function normalizeMaxDaysAhead(value: unknown): number {
   return clampInt(Math.trunc(parsed), 1, MAX_DAYS_AHEAD)
 }
 
-function localMinutesSinceMidnight(date: Date, timeZone: string): number {
+function getLocalDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = LOCAL_DATE_TIME_FORMATTER_CACHE.get(timeZone)
+  if (cached) return cached
+
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
@@ -161,14 +191,14 @@ function localMinutesSinceMidnight(date: Date, timeZone: string): number {
     hour12: false,
   })
 
-  const parts = formatter.formatToParts(date)
-  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0')
-  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0')
-
-  return hour * 60 + minute
+  LOCAL_DATE_TIME_FORMATTER_CACHE.set(timeZone, formatter)
+  return formatter
 }
 
-function localDaySerial(date: Date, timeZone: string): number {
+function getLocalDateFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = LOCAL_DATE_FORMATTER_CACHE.get(timeZone)
+  if (cached) return cached
+
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
@@ -176,10 +206,30 @@ function localDaySerial(date: Date, timeZone: string): number {
     day: '2-digit',
   })
 
-  const parts = formatter.formatToParts(date)
-  const year = Number(parts.find((p) => p.type === 'year')?.value ?? '0')
-  const month = Number(parts.find((p) => p.type === 'month')?.value ?? '0')
-  const day = Number(parts.find((p) => p.type === 'day')?.value ?? '0')
+  LOCAL_DATE_FORMATTER_CACHE.set(timeZone, formatter)
+  return formatter
+}
+
+function readPartNumber(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+): number {
+  return Number(parts.find((part) => part.type === type)?.value ?? '0')
+}
+
+function localMinutesSinceMidnight(date: Date, timeZone: string): number {
+  const parts = getLocalDateTimeFormatter(timeZone).formatToParts(date)
+  const hour = readPartNumber(parts, 'hour')
+  const minute = readPartNumber(parts, 'minute')
+
+  return hour * 60 + minute
+}
+
+function localDaySerial(date: Date, timeZone: string): number {
+  const parts = getLocalDateFormatter(timeZone).formatToParts(date)
+  const year = readPartNumber(parts, 'year')
+  const month = readPartNumber(parts, 'month')
+  const day = readPartNumber(parts, 'day')
 
   return Math.floor(
     Date.UTC(year, month - 1, day, 12, 0, 0, 0) / 86_400_000,
@@ -207,6 +257,125 @@ function offsetFromWindowStartDay(args: {
   return dayDelta * 1440 + localMinutesSinceMidnight(targetUtc, timeZone)
 }
 
+function resolveWorkingWindowForPreparedArgs(
+  args: PreparedStepAlignmentArgs,
+): ResolvedWorkingWindow {
+  const window = getWorkingWindowForDay(args.startUtc, args.workingHours, args.timeZone)
+
+  if (!window.ok) {
+    if (window.reason === 'MISSING') {
+      return {
+        ok: false,
+        code: 'WORKING_HOURS_REQUIRED',
+        timeZone: args.timeZone,
+        stepMinutes: args.stepMinutes,
+        meta: {
+          reason: 'missing-working-hours',
+        },
+      }
+    }
+
+    if (window.reason === 'DISABLED') {
+      return {
+        ok: false,
+        code: 'OUTSIDE_WORKING_HOURS',
+        timeZone: args.timeZone,
+        stepMinutes: args.stepMinutes,
+        meta: {
+          reason: 'disabled-day',
+        },
+      }
+    }
+
+    return {
+      ok: false,
+      code: 'WORKING_HOURS_INVALID',
+      timeZone: args.timeZone,
+      stepMinutes: args.stepMinutes,
+      meta: {
+        reason: 'misconfigured-working-hours',
+      },
+    }
+  }
+
+  const startOffset = offsetFromWindowStartDay({
+    targetUtc: args.startUtc,
+    windowDayUtc: args.startUtc,
+    timeZone: args.timeZone,
+  })
+
+  return {
+    ok: true,
+    startUtc: args.startUtc,
+    timeZone: args.timeZone,
+    stepMinutes: args.stepMinutes,
+    windowStartMinutes: window.startMinutes,
+    windowEndMinutes: window.endMinutes,
+    startOffset,
+  }
+}
+
+function validateWorkingWindowStep(
+  resolved: ResolvedWorkingWindow,
+):
+  | { ok: true; timeZone: string; windowStartMinutes: number }
+  | {
+      ok: false
+      code: SlotReadinessCode
+      timeZone: string
+      meta?: Record<string, unknown>
+    } {
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      code: resolved.code,
+      timeZone: resolved.timeZone,
+      meta: resolved.meta,
+    }
+  }
+
+  if (resolved.startOffset < resolved.windowStartMinutes) {
+    return {
+      ok: false,
+      code: 'STEP_MISMATCH',
+      timeZone: resolved.timeZone,
+      meta: {
+        reason: 'before-window-start',
+        startOffset: resolved.startOffset,
+        windowStartMinutes: resolved.windowStartMinutes,
+        windowEndMinutes: resolved.windowEndMinutes,
+        stepMinutes: resolved.stepMinutes,
+      },
+    }
+  }
+
+  const diff = resolved.startOffset - resolved.windowStartMinutes
+  const mod = diff % resolved.stepMinutes
+  const normalizedMod = mod >= 0 ? mod : mod + resolved.stepMinutes
+
+  if (normalizedMod !== 0) {
+    return {
+      ok: false,
+      code: 'STEP_MISMATCH',
+      timeZone: resolved.timeZone,
+      meta: {
+        reason: 'not-on-working-window-step',
+        startOffset: resolved.startOffset,
+        windowStartMinutes: resolved.windowStartMinutes,
+        windowEndMinutes: resolved.windowEndMinutes,
+        stepMinutes: resolved.stepMinutes,
+        stepRemainder: normalizedMod,
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    timeZone: resolved.timeZone,
+    windowStartMinutes: resolved.windowStartMinutes,
+  }
+}
+
 export function computeRequestedEndUtc(
   args: ComputeRequestedEndArgs,
 ): Date {
@@ -227,8 +396,14 @@ export function computeRequestedEndUtc(
  */
 export function isStartAlignedToWorkingWindowStep(
   args: StepAlignmentArgs,
-): { ok: true; timeZone: string; windowStartMinutes: number }
- | { ok: false; code: SlotReadinessCode; timeZone: string; meta?: Record<string, unknown> } {
+):
+  | { ok: true; timeZone: string; windowStartMinutes: number }
+  | {
+      ok: false
+      code: SlotReadinessCode
+      timeZone: string
+      meta?: Record<string, unknown>
+    } {
   const fallbackTimeZone =
     typeof args.fallbackTimeZone === 'string' && args.fallbackTimeZone.trim()
       ? args.fallbackTimeZone
@@ -236,8 +411,8 @@ export function isStartAlignedToWorkingWindowStep(
 
   const timeZone = sanitizeTimeZone(args.timeZone, fallbackTimeZone)
   const stepMinutes = normalizeStepMinutes(args.stepMinutes, 15)
-
   const startUtc = normalizeToMinute(new Date(args.startUtc))
+
   if (!isValidDate(startUtc)) {
     return {
       ok: false,
@@ -249,92 +424,21 @@ export function isStartAlignedToWorkingWindowStep(
     }
   }
 
-  const window = getWorkingWindowForDay(startUtc, args.workingHours, timeZone)
-
-  if (!window.ok) {
-    if (window.reason === 'MISSING') {
-      return {
-        ok: false,
-        code: 'WORKING_HOURS_REQUIRED',
-        timeZone,
-        meta: {
-          reason: 'missing-working-hours',
-        },
-      }
-    }
-
-    if (window.reason === 'DISABLED') {
-      return {
-        ok: false,
-        code: 'OUTSIDE_WORKING_HOURS',
-        timeZone,
-        meta: {
-          reason: 'disabled-day',
-        },
-      }
-    }
-
-    return {
-      ok: false,
-      code: 'WORKING_HOURS_INVALID',
-      timeZone,
-      meta: {
-        reason: 'misconfigured-working-hours',
-      },
-    }
-  }
-
-  const startOffset = offsetFromWindowStartDay({
-    targetUtc: startUtc,
-    windowDayUtc: startUtc,
+  const resolved = resolveWorkingWindowForPreparedArgs({
+    startUtc,
+    workingHours: args.workingHours,
     timeZone,
+    stepMinutes,
   })
 
-  if (startOffset < window.startMinutes) {
-    return {
-      ok: false,
-      code: 'STEP_MISMATCH',
-      timeZone,
-      meta: {
-        reason: 'before-window-start',
-        startOffset,
-        windowStartMinutes: window.startMinutes,
-        windowEndMinutes: window.endMinutes,
-        stepMinutes,
-      },
-    }
-  }
-
-  const diff = startOffset - window.startMinutes
-  const mod = diff % stepMinutes
-  const normalizedMod = mod >= 0 ? mod : mod + stepMinutes
-
-  if (normalizedMod !== 0) {
-    return {
-      ok: false,
-      code: 'STEP_MISMATCH',
-      timeZone,
-      meta: {
-        reason: 'not-on-working-window-step',
-        startOffset,
-        windowStartMinutes: window.startMinutes,
-        windowEndMinutes: window.endMinutes,
-        stepMinutes,
-        stepRemainder: normalizedMod,
-      },
-    }
-  }
-
-  return {
-    ok: true,
-    timeZone,
-    windowStartMinutes: window.startMinutes,
-  }
+  return validateWorkingWindowStep(resolved)
 }
 
 export function checkAdvanceNotice(
   args: AdvanceNoticeArgs,
-): { ok: true } | { ok: false; code: 'ADVANCE_NOTICE_REQUIRED'; meta: Record<string, unknown> } {
+):
+  | { ok: true }
+  | { ok: false; code: 'ADVANCE_NOTICE_REQUIRED'; meta: Record<string, unknown> } {
   const startUtc = normalizeToMinute(new Date(args.startUtc))
   const nowUtc = new Date(args.nowUtc)
   const advanceNoticeMinutes = normalizeAdvanceNoticeMinutes(
@@ -388,7 +492,9 @@ export function checkAdvanceNotice(
  */
 export function checkMaxDaysAheadExact(
   args: MaxDaysAheadArgs,
-): { ok: true } | { ok: false; code: 'MAX_DAYS_AHEAD_EXCEEDED'; meta: Record<string, unknown> } {
+):
+  | { ok: true }
+  | { ok: false; code: 'MAX_DAYS_AHEAD_EXCEEDED'; meta: Record<string, unknown> } {
   const startUtc = normalizeToMinute(new Date(args.startUtc))
   const nowUtc = new Date(args.nowUtc)
   const maxDaysAhead = normalizeMaxDaysAhead(args.maxDaysAhead)
@@ -446,7 +552,6 @@ export function checkSlotReadiness(
   const durationMinutes = normalizeDurationMinutes(args.durationMinutes)
   const bufferMinutes = normalizeBufferMinutes(args.bufferMinutes)
   const nowUtc = args.nowUtc ? new Date(args.nowUtc) : new Date()
-
   const startUtc = normalizeToMinute(new Date(args.startUtc))
 
   if (!isValidDate(startUtc)) {
@@ -501,13 +606,14 @@ export function checkSlotReadiness(
     }
   }
 
-  const stepCheck = isStartAlignedToWorkingWindowStep({
+  const workingWindow = resolveWorkingWindowForPreparedArgs({
     startUtc,
     workingHours: args.workingHours,
     timeZone,
     stepMinutes,
-    fallbackTimeZone,
   })
+
+  const stepCheck = validateWorkingWindowStep(workingWindow)
 
   if (!stepCheck.ok) {
     return {

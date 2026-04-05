@@ -11,7 +11,7 @@ import {
   buildOfferingSnapshot,
   parseCachedPlacement,
   resolveAvailabilityPlacement,
-  type AvailabilityPlacementResult,
+  type AvailabilityPlacementTimingLabel,
   type AvailabilityTimeZoneSource,
   type CachedPlacement,
 } from '@/lib/availability/core/placement'
@@ -99,6 +99,62 @@ type ResolvedAvailabilityPlacement = Extract<
   Awaited<ReturnType<typeof resolveAvailabilityPlacement>>,
   { ok: true }
 >
+
+export type AvailabilityOfferingContextTimingLabel =
+  | 'placement_cache_get'
+  | 'fresh_source'
+  | 'placement_resolve'
+  | 'placement_cache_set'
+  | 'placement_requested_location_load'
+  | 'placement_candidate_list_load'
+  | 'placement_candidate_validation'
+  | 'placement_location_context_pick_location'
+  | 'placement_location_context_timezone_resolve'
+  | 'placement_location_context_context_validation'
+  | 'placement_location_context_offering_validation'
+
+type LoadAvailabilityOfferingContextTimingFn = (
+  label: AvailabilityOfferingContextTimingLabel,
+  durationMs: number,
+) => void
+
+function nowMs(): number {
+  return performance.now()
+}
+
+async function timed<T>(
+  label: AvailabilityOfferingContextTimingLabel,
+  onTiming: LoadAvailabilityOfferingContextTimingFn | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  const startedAt = nowMs()
+  try {
+    return await work()
+  } finally {
+    onTiming?.(label, Math.max(0, nowMs() - startedAt))
+  }
+}
+
+function mapPlacementTimingLabel(
+  label: AvailabilityPlacementTimingLabel,
+): AvailabilityOfferingContextTimingLabel {
+  switch (label) {
+    case 'requested_location_load':
+      return 'placement_requested_location_load'
+    case 'candidate_list_load':
+      return 'placement_candidate_list_load'
+    case 'candidate_validation':
+      return 'placement_candidate_validation'
+    case 'location_context_pick_location':
+      return 'placement_location_context_pick_location'
+    case 'location_context_timezone_resolve':
+      return 'placement_location_context_timezone_resolve'
+    case 'location_context_context_validation':
+      return 'placement_location_context_context_validation'
+    case 'location_context_offering_validation':
+      return 'placement_location_context_offering_validation'
+  }
+}
 
 function buildVersionedPlacementCacheKey(args: {
   professionalId: string
@@ -271,30 +327,22 @@ async function loadFreshAvailabilitySource(args: {
       result: LoadAvailabilityOfferingContextResult
     }
 > {
-  const [pro, service, offering] = await Promise.all([
+  const [pro, offering] = await Promise.all([
     prisma.professionalProfile.findUnique({
       where: { id: args.professionalId },
       select: {
-        id: true,
         businessName: true,
         avatarUrl: true,
         location: true,
         timeZone: true,
       },
     }),
-    prisma.service.findUnique({
-      where: { id: args.serviceId },
-      select: {
-        id: true,
-        name: true,
-        category: { select: { name: true } },
-      },
-    }),
-    prisma.professionalServiceOffering.findFirst({
+    prisma.professionalServiceOffering.findUnique({
       where: {
-        professionalId: args.professionalId,
-        serviceId: args.serviceId,
-        isActive: true,
+        professionalId_serviceId: {
+          professionalId: args.professionalId,
+          serviceId: args.serviceId,
+        },
       },
       select: {
         id: true,
@@ -304,6 +352,12 @@ async function loadFreshAvailabilitySource(args: {
         mobileDurationMinutes: true,
         salonPriceStartingAt: true,
         mobilePriceStartingAt: true,
+        service: {
+          select: {
+            name: true,
+            category: { select: { name: true } },
+          },
+        },
       },
     }),
   ])
@@ -319,18 +373,23 @@ async function loadFreshAvailabilitySource(args: {
     }
   }
 
-  if (!service) {
-    return {
-      ok: false,
-      result: {
-        ok: false,
-        kind: 'NOT_FOUND',
-        entity: 'SERVICE',
-      },
-    }
-  }
-
   if (!offering) {
+    const serviceExists = await prisma.service.findUnique({
+      where: { id: args.serviceId },
+      select: { id: true },
+    })
+
+    if (!serviceExists) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          kind: 'NOT_FOUND',
+          entity: 'SERVICE',
+        },
+      }
+    }
+
     return {
       ok: false,
       result: {
@@ -345,8 +404,19 @@ async function loadFreshAvailabilitySource(args: {
     ok: true,
     value: {
       pro,
-      service,
-      offering,
+      service: {
+        name: offering.service.name,
+        category: offering.service.category ?? null,
+      },
+      offering: {
+        id: offering.id,
+        offersInSalon: offering.offersInSalon,
+        offersMobile: offering.offersMobile,
+        salonDurationMinutes: offering.salonDurationMinutes,
+        mobileDurationMinutes: offering.mobileDurationMinutes,
+        salonPriceStartingAt: offering.salonPriceStartingAt,
+        mobilePriceStartingAt: offering.mobilePriceStartingAt,
+      },
     },
   }
 }
@@ -359,6 +429,7 @@ export async function loadAvailabilityOfferingContext(args: {
   clientAddressId: string | null
   scheduleConfigVersion: number
   cacheEnabled: boolean
+  onTiming?: LoadAvailabilityOfferingContextTimingFn
 }): Promise<LoadAvailabilityOfferingContextResult> {
   const placementCacheKey = args.cacheEnabled
     ? buildVersionedPlacementCacheKey({
@@ -373,7 +444,9 @@ export async function loadAvailabilityOfferingContext(args: {
 
   if (placementCacheKey) {
     const cachedPlacement = parseCachedPlacement(
-      await cacheGetJson<unknown>(placementCacheKey),
+      await timed('placement_cache_get', args.onTiming, async () =>
+        cacheGetJson<unknown>(placementCacheKey),
+      ),
     )
 
     if (cachedPlacement) {
@@ -384,10 +457,12 @@ export async function loadAvailabilityOfferingContext(args: {
     }
   }
 
-  const sourceResult = await loadFreshAvailabilitySource({
-    professionalId: args.professionalId,
-    serviceId: args.serviceId,
-  })
+  const sourceResult = await timed('fresh_source', args.onTiming, async () =>
+    loadFreshAvailabilitySource({
+      professionalId: args.professionalId,
+      serviceId: args.serviceId,
+    }),
+  )
 
   if (!sourceResult.ok) {
     return sourceResult.result
@@ -395,14 +470,19 @@ export async function loadAvailabilityOfferingContext(args: {
 
   const source = sourceResult.value
 
-  const placement = await resolveAvailabilityPlacement({
-    professionalId: args.professionalId,
-    offering: buildOfferingSnapshot(source.offering),
-    requestedLocationType: args.requestedLocationType,
-    requestedLocationId: args.requestedLocationId,
-    clientAddressId: args.clientAddressId,
-    professionalTimeZone: source.pro.timeZone ?? null,
-  })
+  const placement = await timed('placement_resolve', args.onTiming, async () =>
+    resolveAvailabilityPlacement({
+      professionalId: args.professionalId,
+      offering: buildOfferingSnapshot(source.offering),
+      requestedLocationType: args.requestedLocationType,
+      requestedLocationId: args.requestedLocationId,
+      clientAddressId: args.clientAddressId,
+      professionalTimeZone: source.pro.timeZone ?? null,
+      onTiming: (label, durationMs) => {
+        args.onTiming?.(mapPlacementTimingLabel(label), durationMs)
+      },
+    }),
+  )
 
   if (!placement.ok) {
     return {
@@ -425,10 +505,12 @@ export async function loadAvailabilityOfferingContext(args: {
       locationCity: placement.location.city ?? null,
     })
 
-    void cacheSetJson(
-      placementCacheKey,
-      cachedPlacementValue,
-      TTL_PLACEMENT_SECONDS,
+    void timed('placement_cache_set', args.onTiming, async () =>
+      cacheSetJson(
+        placementCacheKey,
+        cachedPlacementValue,
+        TTL_PLACEMENT_SECONDS,
+      ),
     )
   }
 

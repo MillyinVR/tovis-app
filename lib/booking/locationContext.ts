@@ -47,6 +47,17 @@ export type SchedulingReadinessError =
   | 'PRICE_REQUIRED'
   | 'COORDINATES_REQUIRED'
 
+export type BookingLocationContextTimingLabel =
+  | 'pick_location'
+  | 'timezone_resolve'
+  | 'context_validation'
+  | 'offering_validation'
+
+export type BookingLocationContextTimingFn = (
+  label: BookingLocationContextTimingLabel,
+  durationMs: number,
+) => void
+
 type ResolveBookingLocationContextArgs = {
   tx?: BookingDbClient
   professionalId: string
@@ -58,6 +69,8 @@ type ResolveBookingLocationContextArgs = {
   fallbackTimeZone?: string
   requireValidTimeZone?: boolean
   allowFallback?: boolean
+  preloadedLocation?: BookableLocation | null
+  onTiming?: BookingLocationContextTimingFn
 }
 
 type ResolveBookingLocationContextResult =
@@ -92,6 +105,36 @@ export type ResolveValidatedBookingContextResult =
     }
 
 const ALLOWED_STEP_SET = new Set<number>(ALLOWED_STEP_MINUTES)
+
+function nowMs(): number {
+  return performance.now()
+}
+
+async function timedAsync<T>(
+  label: BookingLocationContextTimingLabel,
+  onTiming: BookingLocationContextTimingFn | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  const startedAt = nowMs()
+  try {
+    return await work()
+  } finally {
+    onTiming?.(label, Math.max(0, nowMs() - startedAt))
+  }
+}
+
+function timedSync<T>(
+  label: BookingLocationContextTimingLabel,
+  onTiming: BookingLocationContextTimingFn | undefined,
+  work: () => T,
+): T {
+  const startedAt = nowMs()
+  try {
+    return work()
+  } finally {
+    onTiming?.(label, Math.max(0, nowMs() - startedAt))
+  }
+}
 
 export function normalizeLocationType(
   value: unknown,
@@ -184,7 +227,9 @@ function hasSchedulingWorkingHours(value: unknown): boolean {
   return normalizeWorkingHours(value) !== null
 }
 
-function normalizeRequestedLocationId(value: string | null | undefined): string | null {
+function normalizeRequestedLocationId(
+  value: string | null | undefined,
+): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
@@ -246,7 +291,11 @@ function buildBookingLocationContext(args: {
     timeZone,
     timeZoneSource,
     stepMinutes: normalizeStepMinutes(location.stepMinutes, 15),
-    bufferMinutes: clampInt(Number(location.bufferMinutes ?? 0), 0, MAX_BUFFER_MINUTES),
+    bufferMinutes: clampInt(
+      Number(location.bufferMinutes ?? 0),
+      0,
+      MAX_BUFFER_MINUTES,
+    ),
     advanceNoticeMinutes: clampInt(
       Number(location.advanceNoticeMinutes ?? 15),
       0,
@@ -407,13 +456,19 @@ export async function resolveBookingLocationContext(
     allowFallback: args.allowFallback ?? true,
   })
 
-  const location = await pickBookableLocation({
-    tx: args.tx,
-    professionalId: args.professionalId,
-    requestedLocationId,
-    locationType: args.locationType,
-    allowFallback: effectiveAllowFallback,
-  })
+  const preloadedLocation = args.preloadedLocation ?? null
+
+  const location =
+    preloadedLocation ??
+    (await timedAsync('pick_location', args.onTiming, async () =>
+      pickBookableLocation({
+        tx: args.tx,
+        professionalId: args.professionalId,
+        requestedLocationId,
+        locationType: args.locationType,
+        allowFallback: effectiveAllowFallback,
+      }),
+    ))
 
   if (!location) {
     return { ok: false, error: 'LOCATION_NOT_FOUND' }
@@ -424,15 +479,17 @@ export async function resolveBookingLocationContext(
     fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',
   })
 
-  const tzResult = await resolveApptTimeZone({
-    bookingLocationTimeZone: args.bookingLocationTimeZone ?? null,
-    holdLocationTimeZone: args.holdLocationTimeZone ?? null,
-    location: { id: location.id, timeZone: location.timeZone },
-    professionalId: args.professionalId,
-    professionalTimeZone: args.professionalTimeZone ?? null,
-    fallback: effectiveFallbackTimeZone,
-    requireValid: args.requireValidTimeZone ?? true,
-  })
+  const tzResult = await timedAsync('timezone_resolve', args.onTiming, async () =>
+    resolveApptTimeZone({
+      bookingLocationTimeZone: args.bookingLocationTimeZone ?? null,
+      holdLocationTimeZone: args.holdLocationTimeZone ?? null,
+      location: { id: location.id, timeZone: location.timeZone },
+      professionalId: args.professionalId,
+      professionalTimeZone: args.professionalTimeZone ?? null,
+      fallback: effectiveFallbackTimeZone,
+      requireValid: args.requireValidTimeZone ?? true,
+    }),
+  )
 
   if (!tzResult.ok) {
     return { ok: false, error: 'TIMEZONE_REQUIRED' }
@@ -468,19 +525,29 @@ export async function resolveValidatedBookingContext(
     return locationContextResult
   }
 
-  const contextValidation = validateBookingLocationContext({
-    context: locationContextResult.context,
-    requireCoordinates: args.requireCoordinates,
-  })
+  const contextValidation = timedSync(
+    'context_validation',
+    args.onTiming,
+    () =>
+      validateBookingLocationContext({
+        context: locationContextResult.context,
+        requireCoordinates: args.requireCoordinates,
+      }),
+  )
 
   if (!contextValidation.ok) {
     return contextValidation
   }
 
-  const offeringValidation = validateOfferingScheduling({
-    offering: args.offering,
-    locationType: args.locationType,
-  })
+  const offeringValidation = timedSync(
+    'offering_validation',
+    args.onTiming,
+    () =>
+      validateOfferingScheduling({
+        offering: args.offering,
+        locationType: args.locationType,
+      }),
+  )
 
   if (!offeringValidation.ok) {
     return offeringValidation

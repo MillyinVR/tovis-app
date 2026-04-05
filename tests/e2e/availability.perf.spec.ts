@@ -64,6 +64,13 @@ type VisibleSlotInspection = {
   inferredSelectedDayYMD: string | null
 }
 
+type SlotCandidate = {
+  button: Locator
+  signature: string
+  slotISO: string | null
+  enabled: boolean
+}
+
 type DaySwitchOutcome =
   | {
       ok: true
@@ -746,6 +753,68 @@ function extractSlotIsoFromSignature(signature: string): string | null {
   return match?.[1] ?? null
 }
 
+function compareSlotCandidatesNewestFirst(
+  left: SlotCandidate,
+  right: SlotCandidate,
+): number {
+  const leftIso = left.slotISO ?? ''
+  const rightIso = right.slotISO ?? ''
+
+  if (leftIso && rightIso) {
+    return rightIso.localeCompare(leftIso)
+  }
+
+  if (leftIso) return -1
+  if (rightIso) return 1
+  return 0
+}
+
+function buildFutureDayVisitOrder(
+  dayButtonCount: number,
+  maxFutureDayAttempts: number,
+): number[] {
+  const maxIndex = Math.min(dayButtonCount - 1, maxFutureDayAttempts)
+  const indexes: number[] = []
+
+  for (let index = maxIndex; index >= 1; index -= 1) {
+    indexes.push(index)
+  }
+
+  return indexes
+}
+
+async function readVisibleSlotCandidates(page: Page): Promise<SlotCandidate[]> {
+  const slotButtons = await findSlotButtons(page)
+  const candidates: SlotCandidate[] = []
+
+  for (const slotButton of slotButtons) {
+    try {
+      if (!(await slotButton.isVisible())) continue
+
+      const enabled = await slotButton.isEnabled()
+      const signature = await slotButton.evaluate((element) => {
+        const htmlElement = element as HTMLElement
+        const dataset = htmlElement.dataset
+        const ariaLabel = htmlElement.getAttribute('aria-label') ?? ''
+        const text = (htmlElement.textContent ?? '').replace(/\s+/g, ' ').trim()
+
+        return `${ariaLabel}|${text}|${JSON.stringify(dataset)}`
+      })
+
+      candidates.push({
+        button: slotButton,
+        signature,
+        slotISO: extractSlotIsoFromSignature(signature),
+        enabled,
+      })
+    } catch {
+      // ignore transient slot read failures
+    }
+  }
+
+  return candidates
+}
+
 function inferSelectedDayYMDFromSignatures(signatures: string[]): string | null {
   const values = Array.from(
     new Set(
@@ -760,26 +829,13 @@ function inferSelectedDayYMDFromSignatures(signatures: string[]): string | null 
 }
 
 async function inspectVisibleSlots(page: Page): Promise<VisibleSlotInspection> {
-  const slotButtons = await findSlotButtons(page)
-  const signatures = await readVisibleSlotButtonSignatures(page)
-
-  let enabledCount = 0
-
-  for (const slotButton of slotButtons) {
-    try {
-      if (!(await slotButton.isVisible())) continue
-      if (await slotButton.isEnabled()) {
-        enabledCount += 1
-      }
-    } catch {
-      // ignore individual button errors
-    }
-  }
+  const candidates = await readVisibleSlotCandidates(page)
+  const signatures = candidates.map((candidate) => candidate.signature)
 
   return {
     signatures,
-    slotCount: slotButtons.length,
-    enabledCount,
+    slotCount: candidates.length,
+    enabledCount: candidates.filter((candidate) => candidate.enabled).length,
     inferredSelectedDayYMD: inferSelectedDayYMDFromSignatures(signatures),
   }
 }
@@ -853,44 +909,43 @@ async function createSuccessfulHold(
     expectedSelectedDayYMD?: string | null
   },
 ): Promise<HoldAttemptOutcome> {
-  const slotButtons = await findSlotButtons(page)
-  const slotSignatures = await readVisibleSlotButtonSignatures(page)
-  if (slotButtons.length === 0) {
-    return { ok: false, reason: 'slot_button_missing' }
+  const candidates = (await readVisibleSlotCandidates(page))
+    .filter((candidate) => candidate.enabled)
+    .filter((candidate) => {
+      if (!options?.expectedSelectedDayYMD) return true
+      if (!candidate.slotISO) return true
+
+      return candidate.slotISO.startsWith(options.expectedSelectedDayYMD)
+    })
+    .sort(compareSlotCandidatesNewestFirst)
+
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      reason: options?.expectedSelectedDayYMD
+        ? 'no_enabled_slots_for_expected_day'
+        : 'slot_button_missing',
+    }
   }
 
   let lastFailureReason = 'hold_not_created'
   let lastFailureMeta: AvailabilityPerfMeta | undefined
 
-  const attemptCount = Math.min(slotButtons.length, MAX_HOLD_ATTEMPTS_PER_SAMPLE)
+  const attemptCount = Math.min(candidates.length, MAX_HOLD_ATTEMPTS_PER_SAMPLE)
 
   for (let index = 0; index < attemptCount; index += 1) {
-    const slotButton = slotButtons[index]
-
-    const slotSignature = slotSignatures[index] ?? null
-    const slotISOFromSignature = slotSignature
-      ? extractSlotIsoFromSignature(slotSignature)
-      : null
-
-    if (
-      options?.expectedSelectedDayYMD &&
-      slotISOFromSignature &&
-      !slotISOFromSignature.startsWith(options.expectedSelectedDayYMD)
-    ) {
-      continue
-    }
+    const candidate = candidates[index]
 
     try {
-      await expect(slotButton).toBeVisible({ timeout: 1_500 })
-      if (!(await slotButton.isEnabled())) {
-        continue
-      }
+      await candidate.button.scrollIntoViewIfNeeded()
+      await expect(candidate.button).toBeVisible({ timeout: 1_500 })
+      await expect(candidate.button).toBeEnabled({ timeout: 1_500 })
     } catch {
       continue
     }
 
     await resetPerfStore(page)
-    await slotButton.click()
+    await candidate.button.click()
 
     const entry = await waitForMetric(
       page,
@@ -961,32 +1016,22 @@ async function createSuccessfulHoldAcrossDays(
     currentSelectedDayYMD?: string | null
   },
 ): Promise<HoldAttemptOutcome> {
-  let activeSelectedDayYMD = options?.currentSelectedDayYMD ?? null
-  let currentInspection = await inspectVisibleSlots(page)
+  const initialInspection = await inspectVisibleSlots(page)
+  const initialSelectedDayYMD =
+    options?.currentSelectedDayYMD ?? initialInspection.inferredSelectedDayYMD
 
-  activeSelectedDayYMD =
-    activeSelectedDayYMD ?? currentInspection.inferredSelectedDayYMD
-
+  let activeSelectedDayYMD = initialSelectedDayYMD
+  let previousSignatures = initialInspection.signatures
   let lastFailureReason = 'no_bookable_slots_on_visible_days'
   let lastFailureMeta: AvailabilityPerfMeta | undefined
-  let previousSignatures = currentInspection.signatures
-
-  if (currentInspection.enabledCount > 0) {
-    const currentAttempt = await createSuccessfulHold(page, {
-      requireReadyUi: options?.requireReadyUi,
-      expectedSelectedDayYMD: activeSelectedDayYMD,
-    })
-
-    if (currentAttempt.ok) return currentAttempt
-
-    lastFailureReason = currentAttempt.reason
-    lastFailureMeta = currentAttempt.meta
-  }
 
   const dayButtons = await findDayButtons(page)
-  const maxFutureIndex = Math.min(dayButtons.length - 1, MAX_FUTURE_DAY_ATTEMPTS)
+  const futureDayIndexes = buildFutureDayVisitOrder(
+    dayButtons.length,
+    MAX_FUTURE_DAY_ATTEMPTS,
+  )
 
-  for (let dayIndex = 1; dayIndex <= maxFutureIndex; dayIndex += 1) {
+  for (const dayIndex of futureDayIndexes) {
     const switched = await switchToDayByIndex(
       page,
       dayIndex,
@@ -1018,6 +1063,39 @@ async function createSuccessfulHoldAcrossDays(
 
     lastFailureReason = holdAttempt.reason
     lastFailureMeta = holdAttempt.meta
+  }
+
+  if (initialInspection.enabledCount > 0) {
+    const switchedBackToCurrent =
+      futureDayIndexes.length > 0
+        ? await switchToDayByIndex(
+            page,
+            0,
+            previousSignatures,
+            initialSelectedDayYMD,
+          )
+        : {
+            ok: true as const,
+            label: 'current',
+            selectedDayYMD: initialSelectedDayYMD,
+            entry: null,
+            inspection: initialInspection,
+          }
+
+    if (switchedBackToCurrent.ok) {
+      const holdAttempt = await createSuccessfulHold(page, {
+        requireReadyUi: options?.requireReadyUi,
+        expectedSelectedDayYMD:
+          switchedBackToCurrent.selectedDayYMD ?? initialSelectedDayYMD,
+      })
+
+      if (holdAttempt.ok) {
+        return holdAttempt
+      }
+
+      lastFailureReason = holdAttempt.reason
+      lastFailureMeta = holdAttempt.meta
+    }
   }
 
   return {

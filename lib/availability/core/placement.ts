@@ -11,6 +11,7 @@ import {
   normalizeLocationType,
   pickEffectiveLocationType,
   resolveValidatedBookingContext,
+  type BookingLocationContextTimingLabel,
   type OfferingSchedulingSnapshot,
 } from '@/lib/booking/locationContext'
 import { isRecord } from '@/lib/guards'
@@ -20,6 +21,7 @@ import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 export const LOCATION_SELECT = {
   id: true,
   type: true,
+  name: true,
   isPrimary: true,
   isBookable: true,
   timeZone: true,
@@ -88,6 +90,25 @@ type AvailabilityPlacementFailure = Extract<
   { ok: false }
 >
 
+export type AvailabilityPlacementTimingLabel =
+  | 'requested_location_load'
+  | 'candidate_list_load'
+  | 'candidate_validation'
+  | 'location_context_pick_location'
+  | 'location_context_timezone_resolve'
+  | 'location_context_context_validation'
+  | 'location_context_offering_validation'
+
+export type AvailabilityPlacementTimingFn = (
+  label: AvailabilityPlacementTimingLabel,
+  durationMs: number,
+) => void
+
+type AvailabilityPlacementTimingTotals = Record<
+  AvailabilityPlacementTimingLabel,
+  number
+>
+
 export type CachedPlacement = {
   locationId: string
   locationType: ServiceLocationType
@@ -116,6 +137,70 @@ export type CachedPlacement = {
   salonPriceStartingAt: string | null
   mobilePriceStartingAt: string | null
   locationCity: string | null
+}
+
+function createPlacementTimingTotals(): AvailabilityPlacementTimingTotals {
+  return {
+    requested_location_load: 0,
+    candidate_list_load: 0,
+    candidate_validation: 0,
+    location_context_pick_location: 0,
+    location_context_timezone_resolve: 0,
+    location_context_context_validation: 0,
+    location_context_offering_validation: 0,
+  }
+}
+
+function mapLocationContextTimingLabel(
+  label: BookingLocationContextTimingLabel,
+): AvailabilityPlacementTimingLabel {
+  switch (label) {
+    case 'pick_location':
+      return 'location_context_pick_location'
+    case 'timezone_resolve':
+      return 'location_context_timezone_resolve'
+    case 'context_validation':
+      return 'location_context_context_validation'
+    case 'offering_validation':
+      return 'location_context_offering_validation'
+  }
+}
+
+async function timedPlacementSection<T>(
+  totals: AvailabilityPlacementTimingTotals,
+  label: AvailabilityPlacementTimingLabel,
+  work: () => Promise<T>,
+): Promise<T> {
+  const startedAt = performance.now()
+  try {
+    return await work()
+  } finally {
+    totals[label] += Math.max(0, performance.now() - startedAt)
+  }
+}
+
+function emitPlacementTiming(
+  totals: AvailabilityPlacementTimingTotals,
+  onTiming?: AvailabilityPlacementTimingFn,
+): void {
+  if (!onTiming) return
+
+  onTiming('requested_location_load', totals.requested_location_load)
+  onTiming('candidate_list_load', totals.candidate_list_load)
+  onTiming('candidate_validation', totals.candidate_validation)
+  onTiming('location_context_pick_location', totals.location_context_pick_location)
+  onTiming(
+    'location_context_timezone_resolve',
+    totals.location_context_timezone_resolve,
+  )
+  onTiming(
+    'location_context_context_validation',
+    totals.location_context_context_validation,
+  )
+  onTiming(
+    'location_context_offering_validation',
+    totals.location_context_offering_validation,
+  )
 }
 
 function normalizeAddress(value: unknown): string | null {
@@ -335,6 +420,28 @@ async function loadPlacementCandidatesForLocationType(args: {
   })
 }
 
+async function loadRequestedPlacementLocation(args: {
+  professionalId: string
+  requestedLocationId: string
+  locationType?: ServiceLocationType | null
+}): Promise<AvailabilityLocation | null> {
+  const typeFilter = args.locationType
+    ? {
+        in: professionalLocationTypesForLocationType(args.locationType),
+      }
+    : undefined
+
+  return prisma.professionalLocation.findFirst({
+    where: {
+      id: args.requestedLocationId,
+      professionalId: args.professionalId,
+      isBookable: true,
+      ...(typeFilter ? { type: typeFilter } : {}),
+    },
+    select: LOCATION_SELECT,
+  })
+}
+
 async function validateAvailabilityPlacement(args: {
   professionalId: string
   requestedLocationId: string | null
@@ -343,6 +450,8 @@ async function validateAvailabilityPlacement(args: {
   clientAddressId: string | null
   allowFallback: boolean
   professionalTimeZone: string | null
+  preloadedLocation?: AvailabilityLocation | null
+  timingTotals: AvailabilityPlacementTimingTotals
 }): Promise<AvailabilityPlacementResult> {
   const fallbackTimeZone =
     typeof args.professionalTimeZone === 'string' &&
@@ -360,6 +469,10 @@ async function validateAvailabilityPlacement(args: {
     allowFallback: args.allowFallback,
     requireCoordinates: false,
     offering: args.offering,
+    preloadedLocation: args.preloadedLocation ?? null,
+    onTiming: (label, durationMs) => {
+      args.timingTotals[mapLocationContextTimingLabel(label)] += durationMs
+    },
   })
 
   if (!validated.ok) {
@@ -426,11 +539,17 @@ async function resolveInitialPlacementForLocationType(args: {
   offering: OfferingSchedulingSnapshot
   clientAddressId: string | null
   professionalTimeZone: string | null
+  timingTotals: AvailabilityPlacementTimingTotals
 }): Promise<AvailabilityPlacementResult> {
-  const candidates = await loadPlacementCandidatesForLocationType({
-    professionalId: args.professionalId,
-    locationType: args.locationType,
-  })
+  const candidates = await timedPlacementSection(
+    args.timingTotals,
+    'candidate_list_load',
+    async () =>
+      loadPlacementCandidatesForLocationType({
+        professionalId: args.professionalId,
+        locationType: args.locationType,
+      }),
+  )
 
   if (!candidates.length) {
     return {
@@ -442,15 +561,22 @@ async function resolveInitialPlacementForLocationType(args: {
   let firstMeaningfulError: AvailabilityPlacementFailure | null = null
 
   for (const candidate of candidates) {
-    const attempt = await validateAvailabilityPlacement({
-      professionalId: args.professionalId,
-      requestedLocationId: candidate.id,
-      locationType: args.locationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      allowFallback: false,
-      professionalTimeZone: args.professionalTimeZone,
-    })
+    const attempt = await timedPlacementSection(
+      args.timingTotals,
+      'candidate_validation',
+      async () =>
+        validateAvailabilityPlacement({
+          professionalId: args.professionalId,
+          requestedLocationId: candidate.id,
+          locationType: args.locationType,
+          offering: args.offering,
+          clientAddressId: args.clientAddressId,
+          allowFallback: false,
+          professionalTimeZone: args.professionalTimeZone,
+          preloadedLocation: candidate,
+          timingTotals: args.timingTotals,
+        }),
+    )
 
     if (attempt.ok) {
       return attempt
@@ -476,106 +602,165 @@ export async function resolveAvailabilityPlacement(args: {
   requestedLocationId: string | null
   clientAddressId: string | null
   professionalTimeZone: string | null
+  onTiming?: AvailabilityPlacementTimingFn
 }): Promise<AvailabilityPlacementResult> {
   const professionalId = args.professionalId.trim()
   const requestedLocationId = args.requestedLocationId?.trim() || null
+  const timingTotals = createPlacementTimingTotals()
 
-  if (!professionalId) {
-    return {
-      ok: false,
-      code: 'NO_SCHEDULING_READY_LOCATION',
+  try {
+    if (!professionalId) {
+      return {
+        ok: false,
+        code: 'NO_SCHEDULING_READY_LOCATION',
+      }
     }
-  }
 
-  if (args.requestedLocationType) {
-    const effectiveLocationType =
-      pickEffectiveLocationType({
-        requested: args.requestedLocationType,
-        offersInSalon: args.offering.offersInSalon,
-        offersMobile: args.offering.offersMobile,
-      }) ?? null
+    if (args.requestedLocationType) {
+      const effectiveLocationType =
+        pickEffectiveLocationType({
+          requested: args.requestedLocationType,
+          offersInSalon: args.offering.offersInSalon,
+          offersMobile: args.offering.offersMobile,
+        }) ?? null
 
-    if (!effectiveLocationType) {
+      if (!effectiveLocationType) {
+        return {
+          ok: false,
+          code: 'MODE_NOT_SUPPORTED',
+        }
+      }
+
+      if (requestedLocationId) {
+        const requested = await timedPlacementSection(
+          timingTotals,
+          'requested_location_load',
+          async () =>
+            loadRequestedPlacementLocation({
+              professionalId,
+              requestedLocationId,
+              locationType: effectiveLocationType,
+            }),
+        )
+
+        if (!requested?.id) {
+          return {
+            ok: false,
+            code: 'LOCATION_NOT_FOUND',
+          }
+        }
+
+        return timedPlacementSection(
+          timingTotals,
+          'candidate_validation',
+          async () =>
+            validateAvailabilityPlacement({
+              professionalId,
+              requestedLocationId,
+              locationType: effectiveLocationType,
+              offering: args.offering,
+              clientAddressId: args.clientAddressId,
+              allowFallback: false,
+              professionalTimeZone: args.professionalTimeZone,
+              preloadedLocation: requested,
+              timingTotals,
+            }),
+        )
+      }
+
+      return timedPlacementSection(
+        timingTotals,
+        'candidate_validation',
+        async () =>
+          validateAvailabilityPlacement({
+            professionalId,
+            requestedLocationId,
+            locationType: effectiveLocationType,
+            offering: args.offering,
+            clientAddressId: args.clientAddressId,
+            allowFallback: true,
+            professionalTimeZone: args.professionalTimeZone,
+            timingTotals,
+          }),
+      )
+    }
+
+    if (requestedLocationId) {
+      const requested = await timedPlacementSection(
+        timingTotals,
+        'requested_location_load',
+        async () =>
+          loadRequestedPlacementLocation({
+            professionalId,
+            requestedLocationId,
+            locationType: null,
+          }),
+      )
+
+      if (!requested?.id) {
+        return {
+          ok: false,
+          code: 'LOCATION_NOT_FOUND',
+        }
+      }
+
+      const locationType = locationTypeForLocation(requested)
+
+      return timedPlacementSection(
+        timingTotals,
+        'candidate_validation',
+        async () =>
+          validateAvailabilityPlacement({
+            professionalId,
+            requestedLocationId,
+            locationType,
+            offering: args.offering,
+            clientAddressId: args.clientAddressId,
+            allowFallback: false,
+            professionalTimeZone: args.professionalTimeZone,
+            preloadedLocation: requested,
+            timingTotals,
+          }),
+      )
+    }
+
+    const placementOrder = buildInitialPlacementOrder(args.offering)
+
+    if (!placementOrder.length) {
       return {
         ok: false,
         code: 'MODE_NOT_SUPPORTED',
       }
     }
 
-    return validateAvailabilityPlacement({
-      professionalId,
-      requestedLocationId,
-      locationType: effectiveLocationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      allowFallback: !requestedLocationId,
-      professionalTimeZone: args.professionalTimeZone,
-    })
-  }
+    let firstMeaningfulError: AvailabilityPlacementFailure | null = null
 
-  if (requestedLocationId) {
-    const requested = await prisma.professionalLocation.findFirst({
-      where: {
-        id: requestedLocationId,
+    for (const locationType of placementOrder) {
+      const attempt = await resolveInitialPlacementForLocationType({
         professionalId,
-        isBookable: true,
-      },
-      select: LOCATION_SELECT,
-    })
+        locationType,
+        offering: args.offering,
+        clientAddressId: args.clientAddressId,
+        professionalTimeZone: args.professionalTimeZone,
+        timingTotals,
+      })
 
-    if (!requested?.id) {
-      return {
-        ok: false,
-        code: 'LOCATION_NOT_FOUND',
+      if (attempt.ok) {
+        return attempt
+      }
+
+      if (attempt.code !== 'LOCATION_NOT_FOUND' && firstMeaningfulError == null) {
+        firstMeaningfulError = attempt
       }
     }
 
-    const locationType = locationTypeForLocation(requested)
-
-    return validateAvailabilityPlacement({
-      professionalId,
-      requestedLocationId,
-      locationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      allowFallback: false,
-      professionalTimeZone: args.professionalTimeZone,
-    })
+    return (
+      firstMeaningfulError ?? {
+        ok: false,
+        code: 'NO_SCHEDULING_READY_LOCATION',
+      }
+    )
+  } finally {
+    emitPlacementTiming(timingTotals, args.onTiming)
   }
-
-  const placementOrder = buildInitialPlacementOrder(args.offering)
-
-  if (!placementOrder.length) {
-    return {
-      ok: false,
-      code: 'MODE_NOT_SUPPORTED',
-    }
-  }
-
-  let firstMeaningfulError: AvailabilityPlacementFailure | null = null
-
-  for (const locationType of placementOrder) {
-    const attempt = await resolveInitialPlacementForLocationType({
-      professionalId,
-      locationType,
-      offering: args.offering,
-      clientAddressId: args.clientAddressId,
-      professionalTimeZone: args.professionalTimeZone,
-    })
-
-    if (attempt.ok) {
-      return attempt
-    }
-
-    if (attempt.code !== 'LOCATION_NOT_FOUND' && firstMeaningfulError == null) {
-      firstMeaningfulError = attempt
-    }
-  }
-
-  return (
-    firstMeaningfulError ?? {
-      ok: false,
-      code: 'NO_SCHEDULING_READY_LOCATION',
-    }
-  )
 }
