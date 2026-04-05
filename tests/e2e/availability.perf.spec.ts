@@ -192,6 +192,14 @@ function readNumberMeta(
   return typeof value === 'number' ? value : null
 }
 
+function readStringMeta(
+  meta: AvailabilityPerfMeta | undefined,
+  key: string,
+): string | null {
+  const value = meta?.[key]
+  return typeof value === 'string' ? value : null
+}
+
 function isSuccessfulHoldEntry(entry: AvailabilityPerfCompletedEntry): boolean {
   return (
     readBooleanMeta(entry.meta, 'ok') === true &&
@@ -375,16 +383,50 @@ async function waitForHoldReady(page: Page): Promise<void> {
   throw new Error('hold_ready_ui_missing')
 }
 
-async function clickDifferentDay(page: Page): Promise<string | null> {
+async function clickDayByIndex(
+  page: Page,
+  targetIndex: number,
+): Promise<string | null> {
   const buttons = await findDayButtons(page)
 
-  if (buttons.length < 2) return null
+  if (buttons.length <= targetIndex) return null
 
-  const target = buttons[1]
+  const target = buttons[targetIndex]
   const label = ((await target.textContent()) ?? '').replace(/\s+/g, ' ').trim()
 
   await target.click()
   return label || 'unknown-day'
+}
+
+async function prepareHoldCandidateDay(
+  page: Page,
+  currentSelectedDayYMD: string | null,
+  targetDayIndex: number,
+): Promise<string | null> {
+  const previousSlotSignatures = await readVisibleSlotButtonSignatures(page)
+  const switchedDayLabel = await clickDayByIndex(page, targetDayIndex)
+
+  if (!switchedDayLabel) {
+    return currentSelectedDayYMD
+  }
+
+  const daySwitchEntry = await waitForMetric(
+    page,
+    PERF_CASES.daySwitch.metric,
+    undefined,
+    10_000,
+  )
+
+  try {
+    await waitForSlotButtonsToRefresh(page, previousSlotSignatures)
+  } catch {
+    // tolerate unchanged signatures
+  }
+
+  return (
+    readStringMeta(daySwitchEntry?.meta, 'selectedDayYMD') ??
+    currentSelectedDayYMD
+  )
 }
 
 async function findSlotButtons(page: Page): Promise<Locator[]> {
@@ -407,12 +449,65 @@ async function findSlotButtons(page: Page): Promise<Locator[]> {
   return Array.from({ length: count }, (_, index) => timeLikeButtons.nth(index))
 }
 
+async function readVisibleSlotButtonSignatures(
+  page: Page,
+): Promise<string[]> {
+  const slotButtons = await findSlotButtons(page)
+  const signatures: string[] = []
+
+  for (const slotButton of slotButtons) {
+    try {
+      if (!(await slotButton.isVisible())) continue
+
+      const signature = await slotButton.evaluate((element) => {
+        const htmlElement = element as HTMLElement
+        const dataset = htmlElement.dataset
+        const ariaLabel = htmlElement.getAttribute('aria-label') ?? ''
+        const text = (htmlElement.textContent ?? '').replace(/\s+/g, ' ').trim()
+
+        return `${ariaLabel}|${text}|${JSON.stringify(dataset)}`
+      })
+
+      signatures.push(signature)
+    } catch {
+      // skip if evaluation fails
+    }
+  }
+
+  return signatures
+}
+
+function extractSlotIsoFromSignature(signature: string): string | null {
+  const match = signature.match(/availability-slot-(\d{4}-\d{2}-\d{2}T[^"]+)/)
+  return match?.[1] ?? null
+}
+
+async function waitForSlotButtonsToRefresh(
+  page: Page,
+  previousSignatures: string[],
+): Promise<void> {
+  const previousKey = previousSignatures.join('|')
+
+  if (!previousKey) return
+
+  await expect
+    .poll(
+      async () => (await readVisibleSlotButtonSignatures(page)).join('|'),
+      { timeout: 10_000 },
+    )
+    .not.toBe(previousKey)
+}
+
+
 async function createSuccessfulHold(
   page: Page,
-  options?: { requireReadyUi?: boolean },
+  options?: {
+    requireReadyUi?: boolean
+    expectedSelectedDayYMD?: string | null
+  },
 ): Promise<HoldAttemptOutcome> {
   const slotButtons = await findSlotButtons(page)
-
+  const slotSignatures = await readVisibleSlotButtonSignatures(page)
   if (slotButtons.length === 0) {
     return { ok: false, reason: 'slot_button_missing' }
   }
@@ -424,6 +519,19 @@ async function createSuccessfulHold(
 
   for (let index = 0; index < attemptCount; index += 1) {
     const slotButton = slotButtons[index]
+
+    const slotSignature = slotSignatures[index] ?? null
+    const slotISOFromSignature = slotSignature
+      ? extractSlotIsoFromSignature(slotSignature)
+      : null
+
+    if (
+      options?.expectedSelectedDayYMD &&
+      slotISOFromSignature &&
+      !slotISOFromSignature.startsWith(options.expectedSelectedDayYMD)
+    ) {
+      continue
+    }
 
     try {
       await expect(slotButton).toBeVisible({ timeout: 1_500 })
@@ -446,6 +554,12 @@ async function createSuccessfulHold(
 
     if (!entry) {
       lastFailureReason = 'missing_perf_metric'
+      continue
+    }
+
+    if (!isEntryForExpectedDay(entry.meta, options?.expectedSelectedDayYMD)) {
+      lastFailureReason = 'hold_request_slot_day_mismatch'
+      lastFailureMeta = entry.meta
       continue
     }
 
@@ -479,6 +593,18 @@ async function createSuccessfulHold(
     reason: lastFailureReason,
     meta: lastFailureMeta,
   }
+}
+
+function isEntryForExpectedDay(
+  meta: AvailabilityPerfMeta | undefined,
+  expectedSelectedDayYMD: string | null | undefined,
+): boolean {
+  if (!expectedSelectedDayYMD) return true
+
+  const slotISO = readStringMeta(meta, 'slotISO')
+  if (!slotISO) return true
+
+  return slotISO.startsWith(expectedSelectedDayYMD)
 }
 
 async function waitForAddOnsReady(page: Page): Promise<void> {
@@ -656,7 +782,7 @@ async function collectDaySwitchSample(page: Page): Promise<RawPerfSample> {
 
     await resetPerfStore(page)
 
-    const dayLabel = await clickDifferentDay(page)
+    const dayLabel = await clickDayByIndex(page, 1)
 
     if (!dayLabel) {
       return toInvalidSample(PERF_CASES.daySwitch, 'insufficient_day_buttons')
@@ -692,7 +818,20 @@ async function collectHoldRequestSample(page: Page): Promise<RawPerfSample> {
       return toInvalidSample(PERF_CASES.holdRequest, 'drawer_not_usable')
     }
 
-    const holdOutcome = await createSuccessfulHold(page)
+    const currentSelectedDayYMD =
+      readStringMeta(usable.meta, 'selectedDayYMD')
+
+    await resetPerfStore(page)
+    const expectedSelectedDayYMD = await prepareHoldCandidateDay(
+      page,
+      currentSelectedDayYMD,
+      3,
+    )
+    await resetPerfStore(page)
+
+    const holdOutcome = await createSuccessfulHold(page, {
+      expectedSelectedDayYMD,
+    })
 
     if (!holdOutcome.ok) {
       return toInvalidSample(
@@ -722,8 +861,20 @@ async function collectContinueSample(page: Page): Promise<RawPerfSample> {
       return toInvalidSample(PERF_CASES.continueToAddOns, 'drawer_not_usable')
     }
 
+    const currentSelectedDayYMD =
+      readStringMeta(usable.meta, 'selectedDayYMD')
+
+    await resetPerfStore(page)
+    const expectedSelectedDayYMD = await prepareHoldCandidateDay(
+      page,
+      currentSelectedDayYMD,
+      4,
+    )
+    await resetPerfStore(page)
+
     const holdOutcome = await createSuccessfulHold(page, {
       requireReadyUi: true,
+      expectedSelectedDayYMD,
     })
 
     if (!holdOutcome.ok) {

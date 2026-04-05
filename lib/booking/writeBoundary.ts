@@ -3104,6 +3104,56 @@ function logHoldCreateInternalError(args: {
   })
 }
 
+function logHoldCreateTiming(args: {
+  outcome:
+    | 'created'
+    | 'policy_conflict'
+    | 'p2002_conflict'
+    | 'internal_error'
+  clientId: string
+  offeringId: string
+  professionalId: string
+  requestedStart: Date
+  locationType: ServiceLocationType
+  requestedLocationId: string | null
+  resolvedLocationId?: string | null
+  resolvedTimeZone?: string | null
+  selectedClientAddressId?: string | null
+  durationMinutes?: number | null
+  bufferMinutes?: number | null
+  totalMs: number
+  clientAddressLoadMs: number
+  validatedContextMs: number
+  holdPolicyMs: number
+  holdInsertMs: number
+  scheduleVersionMs: number
+  meta?: Record<string, unknown>
+}): void {
+  if (process.env.NODE_ENV !== 'test') return
+
+  console.info('performLockedCreateHold timing', {
+    outcome: args.outcome,
+    clientId: args.clientId,
+    offeringId: args.offeringId,
+    professionalId: args.professionalId,
+    requestedStart: args.requestedStart.toISOString(),
+    locationType: args.locationType,
+    requestedLocationId: args.requestedLocationId,
+    resolvedLocationId: args.resolvedLocationId ?? null,
+    resolvedTimeZone: args.resolvedTimeZone ?? null,
+    selectedClientAddressId: args.selectedClientAddressId ?? null,
+    durationMinutes: args.durationMinutes ?? null,
+    bufferMinutes: args.bufferMinutes ?? null,
+    totalMs: args.totalMs,
+    clientAddressLoadMs: args.clientAddressLoadMs,
+    validatedContextMs: args.validatedContextMs,
+    holdPolicyMs: args.holdPolicyMs,
+    holdInsertMs: args.holdInsertMs,
+    scheduleVersionMs: args.scheduleVersionMs,
+    ...(args.meta ?? {}),
+  })
+}
+
 function logFinalizePolicyFailure(args: {
   professionalId: string
   locationId: string
@@ -4772,6 +4822,46 @@ async function performLockedCreateHold(args: {
     clientAddressId,
   } = args
 
+const startedAtMs = Date.now()
+  let afterClientAddressLoadMs = startedAtMs
+  let afterValidatedContextMs = startedAtMs
+  let afterHoldPolicyMs = startedAtMs
+  let afterHoldInsertMs = startedAtMs
+  let afterScheduleVersionMs = startedAtMs
+
+  const buildHoldCreateTiming = (
+    outcome: 'created' | 'policy_conflict' | 'p2002_conflict' | 'internal_error',
+    meta?: Record<string, unknown>,
+  ) => ({
+    outcome,
+    clientId,
+    offeringId: offering.id,
+    professionalId: offering.professionalId,
+    requestedStart,
+    locationType,
+    requestedLocationId,
+    resolvedLocationId: locationContextOrNull?.locationId ?? null,
+    resolvedTimeZone: locationContextOrNull?.timeZone ?? null,
+    selectedClientAddressId: selectedClientAddress?.id ?? null,
+    durationMinutes: durationMinutesOrNull,
+    bufferMinutes: locationContextOrNull?.bufferMinutes ?? null,
+    totalMs: Date.now() - startedAtMs,
+    clientAddressLoadMs: afterClientAddressLoadMs - startedAtMs,
+    validatedContextMs: afterValidatedContextMs - afterClientAddressLoadMs,
+    holdPolicyMs: afterHoldPolicyMs - afterValidatedContextMs,
+    holdInsertMs: afterHoldInsertMs - afterHoldPolicyMs,
+    scheduleVersionMs: afterScheduleVersionMs - afterHoldInsertMs,
+    meta,
+  })
+
+    let locationContextOrNull: {
+    locationId: string
+    timeZone: string
+    bufferMinutes: number
+  } | null = null
+
+  let durationMinutesOrNull: number | null = null
+
   const selectedClientAddress =
     locationType === ServiceLocationType.MOBILE && clientAddressId
       ? await loadClientServiceAddress({
@@ -4780,6 +4870,8 @@ async function performLockedCreateHold(args: {
           clientAddressId,
         })
       : null
+
+      afterClientAddressLoadMs = Date.now()
 
   const clientServiceAddress =
     locationType === ServiceLocationType.MOBILE
@@ -4806,6 +4898,8 @@ async function performLockedCreateHold(args: {
     },
   })
 
+  afterValidatedContextMs = Date.now()
+
   if (!validatedContextResult.ok) {
     mapSchedulingReadinessFailure(validatedContextResult.error)
   }
@@ -4813,6 +4907,8 @@ async function performLockedCreateHold(args: {
   const locationContext = validatedContextResult.context
   const durationMinutes = validatedContextResult.durationMinutes
 
+  locationContextOrNull = locationContext
+  durationMinutesOrNull = durationMinutes
   const salonLocationAddress =
     locationType === ServiceLocationType.SALON
       ? normalizeAddress(locationContext.formattedAddress)
@@ -4839,6 +4935,8 @@ async function performLockedCreateHold(args: {
     clientServiceAddress,
   })
 
+afterHoldPolicyMs = Date.now()
+
   if (!decision.ok) {
     if (decision.logHint) {
       logHoldConflict({
@@ -4854,6 +4952,15 @@ async function performLockedCreateHold(args: {
         meta: decision.logHint.meta,
       })
     }
+
+    afterHoldInsertMs = afterHoldPolicyMs
+    afterScheduleVersionMs = afterHoldPolicyMs
+
+    logHoldCreateTiming(
+      buildHoldCreateTiming('policy_conflict', {
+        decisionCode: decision.code,
+      }),
+    )
 
     throw bookingError(decision.code, {
       message: decision.message,
@@ -4913,7 +5020,13 @@ async function performLockedCreateHold(args: {
       select: CREATE_HOLD_SELECT,
     })
 
+      afterHoldInsertMs = Date.now()
+
     await bumpProfessionalScheduleVersion(offering.professionalId)
+
+    afterScheduleVersionMs = Date.now()
+
+    logHoldCreateTiming(buildHoldCreateTiming('created'))
 
     return {
       hold: {
@@ -4933,6 +5046,15 @@ async function performLockedCreateHold(args: {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
+
+            afterHoldInsertMs = Date.now()
+      afterScheduleVersionMs = afterHoldInsertMs
+
+      logHoldCreateTiming(
+        buildHoldCreateTiming('p2002_conflict', {
+          prismaCode: error.code,
+        }),
+      )
       logHoldConflict({
         professionalId: offering.professionalId,
         locationId: locationContext.locationId,
@@ -4950,6 +5072,11 @@ async function performLockedCreateHold(args: {
 
       throw bookingError('TIME_HELD')
     }
+
+    afterHoldInsertMs = Date.now()
+    afterScheduleVersionMs = afterHoldInsertMs
+
+    logHoldCreateTiming(buildHoldCreateTiming('internal_error'))
 
     logHoldCreateInternalError({
       error,

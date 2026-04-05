@@ -176,6 +176,21 @@ function getOtherProsFromSummary(
   }))
 }
 
+function getSeededPrimarySlotsFromSummary(args: {
+  summary: DaySlotsSummary | null
+  selectedDayYMD: string | null
+}): string[] | null {
+  const initialSelectedDay = args.summary?.initialSelectedDay
+
+  if (!initialSelectedDay) return null
+  if (!args.selectedDayYMD) return null
+  if (initialSelectedDay.date !== args.selectedDayYMD) return null
+  if (!Array.isArray(initialSelectedDay.slots)) return null
+  if (initialSelectedDay.slots.length === 0) return []
+
+  return initialSelectedDay.slots.slice()
+}
+
 async function mapWithConcurrencyLimit<TItem, TResult>(
   items: readonly TItem[],
   concurrency: number,
@@ -533,10 +548,15 @@ export function useDaySlots(args: {
 
     pruneExpiredDaySlotCache(daySlotCacheRef.current)
 
-    const currentDayYMD = selectedDayYMD
-    const currentPrimaryId = primaryId
-    const currentPrimaryLocationId = primaryLocationId
-    const forceRefresh = retryKey !== previousRetryKeyRef.current
+     const currentDayYMD = selectedDayYMD
+      const currentPrimaryId = primaryId
+      const currentPrimaryLocationId = primaryLocationId
+      const seededPrimarySlots = getSeededPrimarySlotsFromSummary({
+        summary,
+        selectedDayYMD: currentDayYMD,
+      })
+
+      const forceRefresh = retryKey !== previousRetryKeyRef.current
     previousRetryKeyRef.current = retryKey
 
     const cacheKey = buildDaySlotCacheKey({
@@ -554,11 +574,25 @@ export function useDaySlots(args: {
         ? getFreshDaySlotCacheValue(daySlotCacheRef.current, cacheKey)
         : null
 
-    if (cachedPrimarySlots) {
+    const immediatePrimarySlots =
+      cachedPrimarySlots ?? (!forceRefresh ? seededPrimarySlots : null)
+
+    if (immediatePrimarySlots) {
+      if (
+        effectiveServiceId &&
+        !cachedPrimarySlots
+      ) {
+        daySlotCacheRef.current[cacheKey] = {
+          slots: immediatePrimarySlots.slice(),
+          cachedAt: Date.now(),
+        }
+      }
+
       if (!holding) {
         setError(null)
       }
-      setPrimarySlots(cachedPrimarySlots)
+
+      setPrimarySlots(immediatePrimarySlots)
       setLoadingPrimarySlots(false)
       return
     }
@@ -612,6 +646,7 @@ export function useDaySlots(args: {
     }
   }, [
     open,
+    summary,
     primaryId,
     primaryLocationId,
     selectedDayYMD,

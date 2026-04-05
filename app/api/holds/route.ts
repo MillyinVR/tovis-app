@@ -85,24 +85,66 @@ function nowMs(): number {
     : Date.now()
 }
 
-function withServerTiming<T extends Response>(response: T, startMs: number): T {
-  const durationMs = Math.max(0, nowMs() - startMs)
-  response.headers.set('Server-Timing', `hold_create;dur=${durationMs.toFixed(1)}`)
+function formatServerTimingMetric(name: string, durationMs: number): string {
+  return `${name};dur=${Math.max(0, durationMs).toFixed(1)}`
+}
+
+function withServerTiming<T extends Response>(
+  response: T,
+  metrics: Array<{ name: string; durationMs: number }>,
+): T {
+  response.headers.set(
+    'Server-Timing',
+    metrics
+      .map((metric) =>
+        formatServerTimingMetric(metric.name, metric.durationMs),
+      )
+      .join(', '),
+  )
   return response
 }
 
 export async function POST(req: NextRequest) {
   const startedAtMs = nowMs()
 
+  let afterAuthAndBodyMs = startedAtMs
+  let afterOfferingLookupMs = startedAtMs
+  let afterCreateHoldMs = startedAtMs
+
+  const buildServerTimingMetrics = () => [
+    {
+      name: 'hold_total',
+      durationMs: nowMs() - startedAtMs,
+    },
+    {
+      name: 'hold_auth_body',
+      durationMs: afterAuthAndBodyMs - startedAtMs,
+    },
+    {
+      name: 'hold_offering_lookup',
+      durationMs: afterOfferingLookupMs - afterAuthAndBodyMs,
+    },
+    {
+      name: 'hold_create',
+      durationMs: afterCreateHoldMs - afterOfferingLookupMs,
+    },
+  ]
+
   try {
-    const auth = await requireClient()
+    const [auth, rawBody] = await Promise.all([
+      requireClient(),
+      req.json().catch(() => ({})),
+    ])
+
+    afterAuthAndBodyMs = nowMs()
+    afterOfferingLookupMs = afterAuthAndBodyMs
+    afterCreateHoldMs = afterAuthAndBodyMs
+
     if (!auth.ok) {
-      return withServerTiming(auth.res, startedAtMs)
+      return withServerTiming(auth.res, buildServerTimingMetrics())
     }
 
     const clientId = auth.clientId
-
-    const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
     const offeringId = pickString(body.offeringId)
@@ -114,7 +156,7 @@ export async function POST(req: NextRequest) {
     if (!offeringId) {
       return withServerTiming(
         bookingJsonFail('OFFERING_ID_REQUIRED'),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
@@ -124,14 +166,14 @@ export async function POST(req: NextRequest) {
           message: 'Scheduled time is required.',
           userMessage: 'Missing scheduled time.',
         }),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
     if (!locationType) {
       return withServerTiming(
         bookingJsonFail('LOCATION_TYPE_REQUIRED'),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
@@ -141,7 +183,7 @@ export async function POST(req: NextRequest) {
     ) {
       return withServerTiming(
         bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED'),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
@@ -149,7 +191,7 @@ export async function POST(req: NextRequest) {
     if (!isValidDate(scheduledForParsed)) {
       return withServerTiming(
         bookingJsonFail('INVALID_SCHEDULED_FOR'),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
@@ -158,7 +200,7 @@ export async function POST(req: NextRequest) {
     if (requestedStart.getTime() < Date.now() + 60_000) {
       return withServerTiming(
         bookingJsonFail('TIME_IN_PAST'),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
@@ -167,10 +209,13 @@ export async function POST(req: NextRequest) {
       select: HOLD_CREATE_OFFERING_SELECT,
     })
 
+    afterOfferingLookupMs = nowMs()
+    afterCreateHoldMs = afterOfferingLookupMs
+
     if (!offering || !offering.isActive) {
       return withServerTiming(
         bookingJsonFail('OFFERING_NOT_FOUND'),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
@@ -183,6 +228,8 @@ export async function POST(req: NextRequest) {
       clientAddressId,
     })
 
+    afterCreateHoldMs = nowMs()
+
     return withServerTiming(
       jsonOk(
         {
@@ -191,23 +238,25 @@ export async function POST(req: NextRequest) {
         },
         201,
       ),
-      startedAtMs,
+      buildServerTimingMetrics(),
     )
   } catch (error: unknown) {
+    afterCreateHoldMs = nowMs()
+
     if (isBookingError(error)) {
       return withServerTiming(
         bookingJsonFail(error.code, {
           message: error.message,
           userMessage: error.userMessage,
         }),
-        startedAtMs,
+        buildServerTimingMetrics(),
       )
     }
 
     console.error('POST /api/holds error', error)
     return withServerTiming(
       bookingJsonFail('INTERNAL_ERROR'),
-      startedAtMs,
+      buildServerTimingMetrics(),
     )
   }
 }

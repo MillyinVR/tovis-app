@@ -1,3 +1,4 @@
+// app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.ts
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -48,6 +49,8 @@ type BackgroundRefreshMetricMeta = BackgroundRefreshMeta & {
   dayCount?: number
   hasOtherPros?: boolean
 }
+
+type SummaryDataVariant = 'primary' | 'full'
 
 const BACKGROUND_REFRESH_METRIC_KEY = 'background-refresh'
 
@@ -128,6 +131,40 @@ export function useAvailability(
 
   const dataRef = useRef<SummaryOk | null>(null)
   dataRef.current = data
+
+const currentDataKeyRef = useRef<string | null>(null)
+  const currentDataVariantRef = useRef<SummaryDataVariant | null>(null)
+
+  const commitSummaryData = useCallback(
+    (
+      nextData: SummaryOk | null,
+      options?: {
+        key?: string | null
+        variant?: SummaryDataVariant | null
+      },
+    ) => {
+      dataRef.current = nextData
+
+      if (options && 'key' in options) {
+        currentDataKeyRef.current = options.key ?? null
+      } else if (!nextData) {
+        currentDataKeyRef.current = null
+      }
+
+      if (options && 'variant' in options) {
+        currentDataVariantRef.current = options.variant ?? null
+      } else if (!nextData) {
+        currentDataVariantRef.current = null
+      }
+
+      setData(nextData)
+    },
+    [],
+  )
+
+  const clearSummaryData = useCallback(() => {
+    commitSummaryData(null, { key: null, variant: null })
+  }, [commitSummaryData])
 
   const proId = useMemo(
     () => String(context.professionalId || '').trim(),
@@ -233,10 +270,9 @@ export function useAvailability(
         redirectToLogin(router, 'availability')
 
         if (!preserveVisibleData) {
-          setData(null)
+          clearSummaryData()
           setError('Please log in to view availability.')
         }
-
         return
       }
 
@@ -244,7 +280,7 @@ export function useAvailability(
         setError(message)
       }
     },
-    [router],
+    [router, clearSummaryData],
   )
 
   const primaryPrefetchArgs = useMemo(
@@ -359,7 +395,12 @@ export function useAvailability(
         return
       }
 
-      setData((current) => mergeSummaryData(current, fullPage))
+      const nextData = mergeSummaryData(dataRef.current, fullPage)
+
+      commitSummaryData(nextData, {
+        key: fullWindowKey,
+        variant: 'full',
+      })
       setError(null)
 
       completeBackgroundRefresh(refreshMeta, {
@@ -382,14 +423,16 @@ export function useAvailability(
         setRefreshing(false)
       }
     }
-  }, [
-    includeOtherPros,
-    fullPrefetchArgs,
-    startBackgroundRefresh,
-    completeBackgroundRefresh,
-    cancelBackgroundRefresh,
-    handleAvailabilityError,
-  ])
+    }, [
+      includeOtherPros,
+      fullPrefetchArgs,
+      fullWindowKey,
+      startBackgroundRefresh,
+      completeBackgroundRefresh,
+      cancelBackgroundRefresh,
+      handleAvailabilityError,
+      commitSummaryData,
+    ])
 
   const loadInitial = useCallback(
     async (mode: LoadMode, backgroundMeta?: BackgroundRefreshMeta) => {
@@ -440,7 +483,12 @@ export function useAvailability(
           return
         }
 
-        setData((current) => mergeSummaryData(current, initialPage))
+        const nextData = mergeSummaryData(dataRef.current, initialPage)
+
+        commitSummaryData(nextData, {
+          key: shouldLoadFullSummary ? fullWindowKey : primaryWindowKey,
+          variant: shouldLoadFullSummary ? 'full' : 'primary',
+        })
         setError(null)
 
         if (preserveVisibleData) {
@@ -487,12 +535,15 @@ export function useAvailability(
     [
       includeOtherPros,
       fullPrefetchArgs,
+      fullWindowKey,
       primaryPrefetchArgs,
+      primaryWindowKey,
       startBackgroundRefresh,
       completeBackgroundRefresh,
       cancelBackgroundRefresh,
       handleAvailabilityError,
       loadOtherProsOnly,
+      commitSummaryData,
     ],
   )
 
@@ -525,7 +576,13 @@ export function useAvailability(
         includeOtherPros: false,
       })
 
-      setData((current) => mergeSummaryData(current, nextPage))
+      const nextData = mergeSummaryData(dataRef.current, nextPage)
+
+      commitSummaryData(nextData, {
+        key: currentDataKeyRef.current,
+        variant: currentDataVariantRef.current,
+      })
+
     } catch (e: unknown) {
       const message =
         e instanceof Error ? e.message : 'Failed to load more availability.'
@@ -543,6 +600,7 @@ export function useAvailability(
     requiresClientAddress,
     normalizedClientAddressId,
     handleAvailabilityError,
+    commitSummaryData,
   ])
 
   useEffect(() => {
@@ -562,7 +620,7 @@ export function useAvailability(
     if (!proId) {
       invalidateActiveRequest('missing_professional')
       clearLoadingFlags()
-      setData(null)
+      clearSummaryData()
       setError('Missing professional. Please try again.')
       return
     }
@@ -570,7 +628,7 @@ export function useAvailability(
     if (!serviceId) {
       invalidateActiveRequest('missing_service')
       clearLoadingFlags()
-      setData(null)
+      clearSummaryData()
       setError(
         'No service is linked yet. Ask the pro to attach a service to this look.',
       )
@@ -580,7 +638,7 @@ export function useAvailability(
     if (!canFetch) {
       invalidateActiveRequest('cannot_fetch')
       clearLoadingFlags()
-      setData(null)
+      clearSummaryData()
       setError(null)
       return
     }
@@ -588,15 +646,49 @@ export function useAvailability(
     if (!primaryWindowKey) {
       invalidateActiveRequest('missing_context')
       clearLoadingFlags()
-      setData(null)
+      clearSummaryData()
       setError('Missing availability context.')
+      return
+    }
+
+    const currentData = dataRef.current
+    const currentDataKey = currentDataKeyRef.current
+    const currentDataVariant = currentDataVariantRef.current
+
+    if (
+      currentData &&
+      currentDataKey &&
+      currentDataVariant === 'full' &&
+      currentDataKey === fullWindowKey
+    ) {
+      setError(null)
+      clearLoadingFlags()
+      return
+    }
+
+    if (
+      currentData &&
+      currentDataKey &&
+      currentDataVariant === 'primary' &&
+      currentDataKey === primaryWindowKey
+    ) {
+      setError(null)
+      clearLoadingFlags()
+
+      if (includeOtherPros) {
+        void loadOtherProsOnly()
+      }
+
       return
     }
 
     const freshFull = readCachedSummaryWindow(fullWindowKey, false)
     if (freshFull) {
       invalidateActiveRequest('fresh_full_cache')
-      setData(freshFull)
+      commitSummaryData(freshFull, {
+        key: fullWindowKey,
+        variant: 'full',
+      })
       setError(null)
       clearLoadingFlags()
       return
@@ -605,7 +697,10 @@ export function useAvailability(
     const freshPrimary = readCachedSummaryWindow(primaryWindowKey, false)
     if (freshPrimary) {
       invalidateActiveRequest('fresh_primary_cache')
-      setData(freshPrimary)
+      commitSummaryData(freshPrimary, {
+        key: primaryWindowKey,
+        variant: 'primary',
+      })
       setError(null)
       clearLoadingFlags()
 
@@ -618,7 +713,10 @@ export function useAvailability(
 
     const staleFull = readCachedSummaryWindow(fullWindowKey, true)
     if (staleFull) {
-      setData(staleFull)
+      commitSummaryData(staleFull, {
+        key: fullWindowKey,
+        variant: 'full',
+      })
       setError(null)
       setLoading(false)
       setLoadingMore(false)
@@ -633,7 +731,10 @@ export function useAvailability(
 
     const stalePrimary = readCachedSummaryWindow(primaryWindowKey, true)
     if (stalePrimary) {
-      setData(stalePrimary)
+      commitSummaryData(stalePrimary, {
+        key: primaryWindowKey,
+        variant: 'primary',
+      })
       setError(null)
       setLoading(false)
       setLoadingMore(false)
@@ -650,7 +751,7 @@ export function useAvailability(
     setError(null)
     setLoadingMore(false)
     void loadInitial('blocking')
-  }, [
+   }, [
     open,
     proId,
     serviceId,
@@ -661,6 +762,7 @@ export function useAvailability(
     loadInitial,
     loadOtherProsOnly,
     clearLoadingFlags,
+    clearSummaryData,
     invalidateActiveRequest,
   ])
 

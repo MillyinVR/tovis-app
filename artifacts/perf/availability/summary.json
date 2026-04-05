@@ -1,7 +1,7 @@
 {
   "gate": 2,
   "suite": "availability",
-  "generatedAt": "2026-04-03T05:27:04.857Z",
+  "generatedAt": "2026-04-05T00:19:36.198Z",
   "budgetSource": "docs/performance/availability-gate2-budget.json",
   "artifacts": {
     "rawDesktop": "artifacts/perf/availability/raw-desktop.json",
@@ -13,193 +13,181 @@
     "desktop": {
       "deviceProfile": "chromium",
       "projectName": "chromium",
-      "totalRawSamples": 10,
-      "invalidSampleCount": 4,
+      "totalRawSamples": 5,
+      "invalidSampleCount": 1,
       "invalidReasons": {
-        "Could not find enabled drawer continue button. Set PERF_DRAWER_CONTINUE_SELECTOR if needed.": 2,
-        "background_refresh_setup_missing": 2
+        "hold_not_created": 1
       },
       "metrics": {
         "drawer_open_to_first_usable_ms": {
-          "count": 2,
+          "count": 1,
           "invalidCount": 0,
           "invalidReasons": {},
-          "min": 6763.899999991059,
-          "max": 7998,
-          "mean": 7380.95,
-          "p50": 6763.899999991059,
-          "p95": 7998,
-          "p99": 7998
+          "min": 7209.9000000059605,
+          "max": 7209.9000000059605,
+          "mean": 7209.9,
+          "p50": 7209.9000000059605,
+          "p95": 7209.9000000059605,
+          "p99": 7209.9000000059605
         },
         "day_switch_to_times_visible_ms": {
-          "count": 2,
+          "count": 1,
           "invalidCount": 0,
           "invalidReasons": {},
-          "min": 12.299999997019768,
-          "max": 12.700000002980232,
-          "mean": 12.5,
-          "p50": 12.299999997019768,
-          "p95": 12.700000002980232,
-          "p99": 12.700000002980232
+          "min": 2.2000000178813934,
+          "max": 2.2000000178813934,
+          "mean": 2.2,
+          "p50": 2.2000000178813934,
+          "p95": 2.2000000178813934,
+          "p99": 2.2000000178813934
         },
         "hold_request_latency_ms": {
-          "count": 2,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 8326.09999999404,
-          "max": 8410.59999999404,
-          "mean": 8368.35,
-          "p50": 8326.09999999404,
-          "p95": 8410.59999999404,
-          "p99": 8410.59999999404
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "hold_not_created": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         },
         "continue_to_add_ons_ms": {
-          "count": 0,
-          "invalidCount": 2,
-          "invalidReasons": {
-            "Could not find enabled drawer continue button. Set PERF_DRAWER_CONTINUE_SELECTOR if needed.": 2
-          },
-          "min": null,
-          "max": null,
-          "mean": null,
-          "p50": null,
-          "p95": null,
-          "p99": null
+          "count": 1,
+          "invalidCount": 0,
+          "invalidReasons": {},
+          "min": 5696.4000000059605,
+          "max": 5696.4000000059605,
+          "mean": 5696.4,
+          "p50": 5696.4000000059605,
+          "p95": 5696.4000000059605,
+          "p99": 5696.4000000059605
         },
         "background_refresh_ms": {
-          "count": 0,
-          "invalidCount": 2,
-          "invalidReasons": {
-            "background_refresh_setup_missing": 2
-          },
-          "min": null,
-          "max": null,
-          "mean": null,
-          "p50": null,
-          "p95": null,
-          "p99": null
+          "count": 1,
+          "invalidCount": 0,
+          "invalidReasons": {},
+          "min": 1.199999988079071,
+          "max": 1.199999988079071,
+          "mean": 1.2,
+          "p50": 1.199999988079071,
+          "p95": 1.199999988079071,
+          "p99": 1.199999988079071
         }
       }
     },
     "mobile": {
       "deviceProfile": "mobile-chrome",
       "projectName": "mobile-chrome",
-      "totalRawSamples": 10,
-      "invalidSampleCount": 4,
-      "invalidReasons": {
-        "Could not find enabled drawer continue button. Set PERF_DRAWER_CONTINUE_SELECTOR if needed.": 2,
-        "background_refresh_setup_missing": 2
-      },
+      "totalRawSamples": 5,
+      "invalidSampleCount": 0,
+      "invalidReasons": {},
       "metrics": {
         "drawer_open_to_first_usable_ms": {
-          "count": 2,
+          "count": 1,
           "invalidCount": 0,
           "invalidReasons": {},
-          "min": 7521.70000000298,
-          "max": 7604.9000000059605,
-          "mean": 7563.3,
-          "p50": 7521.70000000298,
-          "p95": 7604.9000000059605,
-          "p99": 7604.9000000059605
+          "min": 7388.5,
+          "max": 7388.5,
+          "mean": 7388.5,
+          "p50": 7388.5,
+          "p95": 7388.5,
+          "p99": 7388.5
         },
         "day_switch_to_times_visible_ms": {
-          "count": 2,
+          "count": 1,
           "invalidCount": 0,
           "invalidReasons": {},
-          "min": 15,
-          "max": 16.099999994039536,
-          "mean": 15.55,
-          "p50": 15,
-          "p95": 16.099999994039536,
-          "p99": 16.099999994039536
+          "min": 2.199999988079071,
+          "max": 2.199999988079071,
+          "mean": 2.2,
+          "p50": 2.199999988079071,
+          "p95": 2.199999988079071,
+          "p99": 2.199999988079071
         },
         "hold_request_latency_ms": {
-          "count": 2,
+          "count": 1,
           "invalidCount": 0,
           "invalidReasons": {},
-          "min": 5895.899999991059,
-          "max": 12764.60000000894,
-          "mean": 9330.25,
-          "p50": 5895.899999991059,
-          "p95": 12764.60000000894,
-          "p99": 12764.60000000894
+          "min": 11706.799999982119,
+          "max": 11706.799999982119,
+          "mean": 11706.8,
+          "p50": 11706.799999982119,
+          "p95": 11706.799999982119,
+          "p99": 11706.799999982119
         },
         "continue_to_add_ons_ms": {
-          "count": 0,
-          "invalidCount": 2,
-          "invalidReasons": {
-            "Could not find enabled drawer continue button. Set PERF_DRAWER_CONTINUE_SELECTOR if needed.": 2
-          },
-          "min": null,
-          "max": null,
-          "mean": null,
-          "p50": null,
-          "p95": null,
-          "p99": null
+          "count": 1,
+          "invalidCount": 0,
+          "invalidReasons": {},
+          "min": 6141.800000011921,
+          "max": 6141.800000011921,
+          "mean": 6141.8,
+          "p50": 6141.800000011921,
+          "p95": 6141.800000011921,
+          "p99": 6141.800000011921
         },
         "background_refresh_ms": {
-          "count": 0,
-          "invalidCount": 2,
-          "invalidReasons": {
-            "background_refresh_setup_missing": 2
-          },
-          "min": null,
-          "max": null,
-          "mean": null,
-          "p50": null,
-          "p95": null,
-          "p99": null
+          "count": 1,
+          "invalidCount": 0,
+          "invalidReasons": {},
+          "min": 1.0999999940395355,
+          "max": 1.0999999940395355,
+          "mean": 1.1,
+          "p50": 1.0999999940395355,
+          "p95": 1.0999999940395355,
+          "p99": 1.0999999940395355
         }
       }
     }
   },
   "budgetCheck": {
     "passed": false,
-    "checkedAt": "2026-04-03T05:27:06.931Z",
+    "checkedAt": "2026-04-05T00:19:48.467Z",
     "requiredSampleCount": 30,
     "failures": [
-      "[FAIL] desktop drawer_open_to_first_usable_ms sample_count=2 required=30",
-      "[FAIL] desktop drawer_open_to_first_usable_ms p95=7998 budget=1500",
-      "[FAIL] desktop drawer_open_to_first_usable_ms p99=7998 budget=2500",
-      "[FAIL] desktop day_switch_to_times_visible_ms sample_count=2 required=30",
-      "[FAIL] desktop hold_request_latency_ms sample_count=2 required=30",
-      "[FAIL] desktop hold_request_latency_ms p95=8410.59999999404 budget=800",
-      "[FAIL] desktop hold_request_latency_ms p99=8410.59999999404 budget=1500",
-      "[FAIL] desktop continue_to_add_ons_ms sample_count=0 required=30",
-      "[FAIL] desktop continue_to_add_ons_ms p95 missing",
-      "[FAIL] desktop continue_to_add_ons_ms p99 missing",
-      "[FAIL] desktop background_refresh_ms sample_count=0 required=30",
-      "[FAIL] desktop background_refresh_ms p95 missing",
-      "[FAIL] desktop background_refresh_ms p99 missing",
-      "[FAIL] mobile drawer_open_to_first_usable_ms sample_count=2 required=30",
-      "[FAIL] mobile drawer_open_to_first_usable_ms p95=7604.9000000059605 budget=1500",
-      "[FAIL] mobile drawer_open_to_first_usable_ms p99=7604.9000000059605 budget=2500",
-      "[FAIL] mobile day_switch_to_times_visible_ms sample_count=2 required=30",
-      "[FAIL] mobile hold_request_latency_ms sample_count=2 required=30",
-      "[FAIL] mobile hold_request_latency_ms p95=12764.60000000894 budget=800",
-      "[FAIL] mobile hold_request_latency_ms p99=12764.60000000894 budget=1500",
-      "[FAIL] mobile continue_to_add_ons_ms sample_count=0 required=30",
-      "[FAIL] mobile continue_to_add_ons_ms p95 missing",
-      "[FAIL] mobile continue_to_add_ons_ms p99 missing",
-      "[FAIL] mobile background_refresh_ms sample_count=0 required=30",
-      "[FAIL] mobile background_refresh_ms p95 missing",
-      "[FAIL] mobile background_refresh_ms p99 missing"
+      "[FAIL] desktop drawer_open_to_first_usable_ms sample_count=1 required=30",
+      "[FAIL] desktop drawer_open_to_first_usable_ms p95=7209.9000000059605 budget=1500",
+      "[FAIL] desktop drawer_open_to_first_usable_ms p99=7209.9000000059605 budget=2500",
+      "[FAIL] desktop day_switch_to_times_visible_ms sample_count=1 required=30",
+      "[FAIL] desktop hold_request_latency_ms sample_count=0 required=30",
+      "[FAIL] desktop hold_request_latency_ms p95 missing",
+      "[FAIL] desktop hold_request_latency_ms p99 missing",
+      "[FAIL] desktop continue_to_add_ons_ms sample_count=1 required=30",
+      "[FAIL] desktop continue_to_add_ons_ms p95=5696.4000000059605 budget=1200",
+      "[FAIL] desktop continue_to_add_ons_ms p99=5696.4000000059605 budget=2000",
+      "[FAIL] desktop background_refresh_ms sample_count=1 required=30",
+      "[FAIL] mobile drawer_open_to_first_usable_ms sample_count=1 required=30",
+      "[FAIL] mobile drawer_open_to_first_usable_ms p95=7388.5 budget=1500",
+      "[FAIL] mobile drawer_open_to_first_usable_ms p99=7388.5 budget=2500",
+      "[FAIL] mobile day_switch_to_times_visible_ms sample_count=1 required=30",
+      "[FAIL] mobile hold_request_latency_ms sample_count=1 required=30",
+      "[FAIL] mobile hold_request_latency_ms p95=11706.799999982119 budget=800",
+      "[FAIL] mobile hold_request_latency_ms p99=11706.799999982119 budget=1500",
+      "[FAIL] mobile continue_to_add_ons_ms sample_count=1 required=30",
+      "[FAIL] mobile continue_to_add_ons_ms p95=6141.800000011921 budget=1200",
+      "[FAIL] mobile continue_to_add_ons_ms p99=6141.800000011921 budget=2000",
+      "[FAIL] mobile background_refresh_ms sample_count=1 required=30"
     ],
     "warnings": [
-      "[WARN] desktop drawer_open_to_first_usable_ms p50=6763.899999991059 budget=700",
-      "[WARN] desktop hold_request_latency_ms p50=8326.09999999404 budget=300",
-      "[WARN] desktop continue_to_add_ons_ms invalid_count=2",
-      "[WARN] desktop background_refresh_ms invalid_count=2",
-      "[WARN] mobile drawer_open_to_first_usable_ms p50=7521.70000000298 budget=700",
-      "[WARN] mobile hold_request_latency_ms p50=5895.899999991059 budget=300",
-      "[WARN] mobile continue_to_add_ons_ms invalid_count=2",
-      "[WARN] mobile background_refresh_ms invalid_count=2"
+      "[WARN] desktop drawer_open_to_first_usable_ms p50=7209.9000000059605 budget=700",
+      "[WARN] desktop hold_request_latency_ms invalid_count=1",
+      "[WARN] desktop continue_to_add_ons_ms p50=5696.4000000059605 budget=500",
+      "[WARN] mobile drawer_open_to_first_usable_ms p50=7388.5 budget=700",
+      "[WARN] mobile hold_request_latency_ms p50=11706.799999982119 budget=300",
+      "[WARN] mobile continue_to_add_ons_ms p50=6141.800000011921 budget=500"
     ],
     "passes": [
-      "[PASS] desktop day_switch_to_times_visible_ms p95=12.700000002980232 budget=900",
-      "[PASS] desktop day_switch_to_times_visible_ms p99=12.700000002980232 budget=1500",
-      "[PASS] mobile day_switch_to_times_visible_ms p95=16.099999994039536 budget=900",
-      "[PASS] mobile day_switch_to_times_visible_ms p99=16.099999994039536 budget=1500"
+      "[PASS] desktop day_switch_to_times_visible_ms p95=2.2000000178813934 budget=900",
+      "[PASS] desktop day_switch_to_times_visible_ms p99=2.2000000178813934 budget=1500",
+      "[PASS] desktop background_refresh_ms p95=1.199999988079071 budget=1800",
+      "[PASS] desktop background_refresh_ms p99=1.199999988079071 budget=3000",
+      "[PASS] mobile day_switch_to_times_visible_ms p95=2.199999988079071 budget=900",
+      "[PASS] mobile day_switch_to_times_visible_ms p99=2.199999988079071 budget=1500",
+      "[PASS] mobile background_refresh_ms p95=1.0999999940395355 budget=1800",
+      "[PASS] mobile background_refresh_ms p99=1.0999999940395355 budget=3000"
     ]
   }
 }
