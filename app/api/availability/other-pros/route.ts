@@ -1,26 +1,25 @@
 // app/api/availability/other-pros/route.ts
-import { prisma } from '@/lib/prisma'
-import {
-  Prisma,
-  ProfessionalLocationType,
-  ServiceLocationType,
-} from '@prisma/client'
-import { pickString } from '@/app/api/_utils/pick'
+import { createHash } from 'node:crypto'
+
+import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { pickString } from '@/app/api/_utils/pick'
+import { decimalToNumber } from '@/lib/booking/snapshots'
+import {
+  normalizeLocationType,
+  pickEffectiveLocationType,
+  resolveValidatedBookingContext,
+  type OfferingSchedulingSnapshot,
+  type SchedulingReadinessError,
+} from '@/lib/booking/locationContext'
 import { isRecord } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
 import { getRedis } from '@/lib/redis'
 import {
   isValidIanaTimeZone,
   sanitizeTimeZone,
 } from '@/lib/timeZone'
-import {
-  normalizeLocationType,
-  pickEffectiveLocationType,
-  resolveValidatedBookingContext,
-  type SchedulingReadinessError,
-  type OfferingSchedulingSnapshot,
-} from '@/lib/booking/locationContext'
-import { decimalToNumber } from '@/lib/booking/snapshots'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,6 +57,23 @@ type OtherProRow = {
   timeZone: string
   locationId: string
   distanceMiles: number
+}
+
+type OtherProsRequestPayload = {
+  professionalId: string
+  serviceId: string
+  requestedLocationType: ServiceLocationType | null
+  requestedLocationId: string | null
+  effectiveLocationType: ServiceLocationType
+  locationId: string
+  clientAddressId: string | null
+  viewer: {
+    lat: number
+    lng: number
+    radiusMiles: number
+    placeId: string | null
+  } | null
+  limit: number
 }
 
 type AvailabilityPlacementErrorCode =
@@ -98,7 +114,7 @@ function clampFloat(value: number, min: number, max: number): number {
 }
 
 function normalizeAddress(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function parseFloatParam(v: string | null): number | null {
@@ -141,7 +157,7 @@ function buildPlacementCacheKey(args: {
   clientAddressId: string | null
 }): string {
   return [
-    'avail:other-pros:placement:v1',
+    'avail:other-pros:placement:v2',
     args.professionalId,
     args.serviceId,
     args.locationType ?? 'AUTO',
@@ -152,10 +168,39 @@ function buildPlacementCacheKey(args: {
 
 function parseCachedPlacement(raw: unknown): CachedPlacement | null {
   if (!isRecord(raw)) return null
-  if (typeof raw.locationId !== 'string') return null
-  if (typeof raw.locationType !== 'string') return null
-  if (typeof raw.timeZone !== 'string') return null
-  return raw as unknown as CachedPlacement
+
+  const locationId =
+    typeof raw.locationId === 'string' && raw.locationId.trim()
+      ? raw.locationId.trim()
+      : null
+  const locationType =
+    raw.locationType === ServiceLocationType.SALON ||
+    raw.locationType === ServiceLocationType.MOBILE
+      ? raw.locationType
+      : null
+  const timeZone =
+    typeof raw.timeZone === 'string' && raw.timeZone.trim()
+      ? sanitizeTimeZone(raw.timeZone, 'UTC')
+      : null
+
+  if (!locationId || !locationType || !timeZone) return null
+
+  const lat =
+    typeof raw.lat === 'number' && Number.isFinite(raw.lat)
+      ? raw.lat
+      : undefined
+  const lng =
+    typeof raw.lng === 'number' && Number.isFinite(raw.lng)
+      ? raw.lng
+      : undefined
+
+  return {
+    locationId,
+    locationType,
+    timeZone,
+    lat,
+    lng,
+  }
 }
 
 function allowedProfessionalTypes(
@@ -217,6 +262,28 @@ function mapPlacementError(code: AvailabilityPlacementErrorCode): string {
     case 'NO_SCHEDULING_READY_LOCATION':
       return 'No scheduling-ready location found for this service.'
   }
+}
+
+function buildOtherProsVersion(args: {
+  professionalId: string
+  serviceId: string
+  requestedLocationType: ServiceLocationType | null
+  requestedLocationId: string | null
+  effectiveLocationType: ServiceLocationType
+  locationId: string
+  clientAddressId: string | null
+  viewerLat: number | null
+  viewerLng: number | null
+  radiusMiles: number
+  limit: number
+}) {
+  const raw = JSON.stringify({
+    v: 1,
+    ...args,
+  })
+
+  const digest = createHash('sha256').update(raw).digest('hex')
+  return `other-pros:${digest.slice(0, 24)}`
 }
 
 async function validateAvailabilityPlacement(args: {
@@ -407,7 +474,7 @@ async function resolveAvailabilityPlacement(args: {
   }
 
   const firstMeaningfulError = attempts.find(
-    (a) => !a.ok && a.code !== 'LOCATION_NOT_FOUND',
+    (attempt) => !attempt.ok && attempt.code !== 'LOCATION_NOT_FOUND',
   )
 
   return (
@@ -423,8 +490,8 @@ function haversineMiles(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
 ): number {
-  const R = 3958.7613
-  const toRad = (d: number) => (d * Math.PI) / 180
+  const earthRadiusMiles = 3958.7613
+  const toRad = (degrees: number) => (degrees * Math.PI) / 180
 
   const dLat = toRad(b.lat - a.lat)
   const dLng = toRad(b.lng - a.lng)
@@ -435,7 +502,7 @@ function haversineMiles(
   const sin2 = Math.sin(dLng / 2)
 
   const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+  return 2 * earthRadiusMiles * Math.asin(Math.min(1, Math.sqrt(h)))
 }
 
 function boundsForRadiusMiles(
@@ -670,6 +737,46 @@ async function loadOtherProsNearby(args: {
   return out.slice(0, Math.max(0, limit))
 }
 
+function parseCachedOtherProsRows(raw: unknown): OtherProRow[] | null {
+  if (!Array.isArray(raw)) return null
+
+  const parsed: OtherProRow[] = []
+
+  for (const row of raw) {
+    if (!isRecord(row)) return null
+
+    const id = pickString(row.id)
+    const offeringId = pickString(row.offeringId)
+    const timeZone = pickString(row.timeZone)
+    const locationId = pickString(row.locationId)
+    const distanceMilesRaw =
+      typeof row.distanceMiles === 'number' ? row.distanceMiles : Number.NaN
+
+    if (
+      !id ||
+      !offeringId ||
+      !timeZone ||
+      !locationId ||
+      !Number.isFinite(distanceMilesRaw)
+    ) {
+      return null
+    }
+
+    parsed.push({
+      id,
+      businessName: pickString(row.businessName) ?? null,
+      avatarUrl: pickString(row.avatarUrl) ?? null,
+      location: pickString(row.location) ?? null,
+      offeringId,
+      timeZone,
+      locationId,
+      distanceMiles: distanceMilesRaw,
+    })
+  }
+
+  return parsed
+}
+
 async function loadOtherProsNearbyCached(args: {
   centerLat: number
   centerLng: number
@@ -693,7 +800,7 @@ async function loadOtherProsNearbyCached(args: {
   }
 
   const key = [
-    'avail:otherPros:v2',
+    'avail:otherPros:v3',
     args.serviceId,
     args.locationType,
     args.excludeProfessionalId,
@@ -704,44 +811,9 @@ async function loadOtherProsNearbyCached(args: {
   ].join(':')
 
   const hit = await cacheGetJson<unknown>(key)
-  if (Array.isArray(hit)) {
-    const parsed: OtherProRow[] = []
-
-    for (const row of hit) {
-      if (!isRecord(row)) continue
-
-      const id = pickString(row.id)
-      const offeringId = pickString(row.offeringId)
-      const timeZone = pickString(row.timeZone)
-      const locationId = pickString(row.locationId)
-      const distanceMilesRaw =
-        typeof row.distanceMiles === 'number' ? row.distanceMiles : Number.NaN
-
-      if (
-        !id ||
-        !offeringId ||
-        !timeZone ||
-        !locationId ||
-        !Number.isFinite(distanceMilesRaw)
-      ) {
-        continue
-      }
-
-      parsed.push({
-        id,
-        businessName: pickString(row.businessName) ?? null,
-        avatarUrl: pickString(row.avatarUrl) ?? null,
-        location: pickString(row.location) ?? null,
-        offeringId,
-        timeZone,
-        locationId,
-        distanceMiles: distanceMilesRaw,
-      })
-    }
-
-    if (parsed.length > 0) {
-      return parsed
-    }
+  const parsedHit = parseCachedOtherProsRows(hit)
+  if (parsedHit) {
+    return parsedHit
   }
 
   const fresh = await loadOtherProsNearby({
@@ -870,10 +942,48 @@ export async function GET(req: Request) {
     const centerLat = hasViewer ? viewerLat : placementLat
     const centerLng = hasViewer ? viewerLng : placementLng
 
+    const request: OtherProsRequestPayload = {
+      professionalId,
+      serviceId,
+      requestedLocationType,
+      requestedLocationId,
+      effectiveLocationType,
+      locationId,
+      clientAddressId,
+      viewer:
+        hasViewer && viewerLat != null && viewerLng != null
+          ? {
+              lat: viewerLat,
+              lng: viewerLng,
+              radiusMiles,
+              placeId: pickString(searchParams.get('viewerPlaceId')),
+            }
+          : null,
+      limit,
+    }
+
+    const generatedAt = new Date().toISOString()
+    const availabilityVersion = buildOtherProsVersion({
+      professionalId,
+      serviceId,
+      requestedLocationType,
+      requestedLocationId,
+      effectiveLocationType,
+      locationId,
+      clientAddressId,
+      viewerLat,
+      viewerLng,
+      radiusMiles,
+      limit,
+    })
+
     if (centerLat == null || centerLng == null) {
       return jsonOk({
         ok: true,
         mode: 'OTHER_PROS' as const,
+        availabilityVersion,
+        generatedAt,
+        request,
         professionalId,
         serviceId,
         locationType: effectiveLocationType,
@@ -900,6 +1010,9 @@ export async function GET(req: Request) {
     return jsonOk({
       ok: true,
       mode: 'OTHER_PROS' as const,
+      availabilityVersion,
+      generatedAt,
+      request,
       professionalId,
       serviceId,
       locationType: effectiveLocationType,

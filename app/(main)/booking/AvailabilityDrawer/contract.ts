@@ -1,9 +1,14 @@
 // app/(main)/booking/AvailabilityDrawer/contract.ts
 import type {
+  AvailabilityAlternatesResponse,
+  AvailabilityBootstrapResponse,
   AvailabilityDayResponse,
-  AvailabilityInitialSelectedDay,
   AvailabilityOffering,
   AvailabilityOtherPro,
+  AvailabilityPrimaryPro,
+  AvailabilityRequestBase,
+  AvailabilitySelectedDay,
+  AvailabilitySummaryDebug,
   AvailabilitySummaryResponse,
   HoldParsed,
   MoneyString,
@@ -27,6 +32,12 @@ function pickBoolean(x: unknown): boolean | null {
   return typeof x === 'boolean' ? x : null
 }
 
+function pickStringArray(x: unknown): string[] | null {
+  if (!Array.isArray(x)) return null
+  if (!x.every((v) => typeof v === 'string')) return null
+  return x.slice()
+}
+
 function pickServiceLocationType(x: unknown): ServiceLocationType | null {
   const s = pickString(x)?.toUpperCase() ?? ''
 
@@ -38,6 +49,29 @@ function pickServiceLocationType(x: unknown): ServiceLocationType | null {
 
 function pickMoneyString(x: unknown): MoneyString | null {
   return typeof x === 'string' ? x : null
+}
+
+function buildLegacyAvailabilityVersion(
+  parts: Array<string | number | null | undefined>,
+): string {
+  return `legacy-unversioned:${parts.map((part) => String(part ?? '')).join('|')}`
+}
+
+function pickFreshness(
+  x: Record<string, unknown>,
+  fallbackParts: Array<string | number | null | undefined>,
+): { availabilityVersion: string; generatedAt: string } | null {
+  const availabilityVersion = pickString(x.availabilityVersion)
+  const generatedAt = pickString(x.generatedAt)
+
+  if (availabilityVersion && generatedAt) {
+    return { availabilityVersion, generatedAt }
+  }
+
+  return {
+    availabilityVersion: buildLegacyAvailabilityVersion(fallbackParts),
+    generatedAt: '1970-01-01T00:00:00.000Z',
+  }
 }
 
 function pickOffering(x: unknown): AvailabilityOffering | null {
@@ -118,6 +152,28 @@ function pickProCardBase(x: unknown): ProCard | null {
   }
 }
 
+function pickAvailabilityPrimaryPro(
+  x: unknown,
+  fallbackTimeZone: string,
+): AvailabilityPrimaryPro | null {
+  const base = pickProCardBase(x)
+  if (!base || !isRecord(x)) return null
+
+  const offeringId = pickString(x.offeringId)
+  const locationId = pickString(x.locationId)
+  const timeZone = pickString(x.timeZone) ?? fallbackTimeZone
+
+  if (!offeringId || !locationId || !timeZone) return null
+
+  return {
+    ...base,
+    offeringId,
+    locationId,
+    timeZone,
+    isCreator: true,
+  }
+}
+
 function pickAvailabilityOtherPro(x: unknown): AvailabilityOtherPro | null {
   if (!isRecord(x)) return null
 
@@ -143,40 +199,24 @@ function pickAvailabilityOtherPro(x: unknown): AvailabilityOtherPro | null {
   }
 }
 
-function pickAvailabilityInitialSelectedDay(
+function pickAvailabilitySelectedDay(
   x: unknown,
-): AvailabilityInitialSelectedDay | null | undefined {
+): AvailabilitySelectedDay | null | undefined {
   if (x == null) return null
   if (!isRecord(x)) return undefined
 
   const date = pickString(x.date)
-  const slotsRaw = x.slots
+  const slots = pickStringArray(x.slots)
 
-  if (!date || !Array.isArray(slotsRaw)) return undefined
-  if (!slotsRaw.every((slot) => typeof slot === 'string')) return undefined
+  if (!date || !slots) return undefined
 
   return {
     date,
-    slots: slotsRaw.slice(),
+    slots,
   }
 }
 
-function pickSummaryDebug(x: unknown):
-  | {
-      emptyReason?: string | null
-      otherProsCount?: number
-      includeOtherPros?: boolean
-      center?: {
-        lat: number
-        lng: number
-        radiusMiles: number
-      } | null
-      usedViewerCenter?: boolean
-      addOnIds?: string[]
-      clientAddressId?: string | null
-      requestedSummaryDays?: number
-    }
-  | undefined {
+function pickSummaryDebug(x: unknown): AvailabilitySummaryDebug | undefined {
   if (x == null) return undefined
   if (!isRecord(x)) return undefined
 
@@ -201,10 +241,7 @@ function pickSummaryDebug(x: unknown):
       ? undefined
       : pickNumber(x.requestedSummaryDays) ?? undefined
 
-  const addOnIds =
-    Array.isArray(x.addOnIds) && x.addOnIds.every((v) => typeof v === 'string')
-      ? x.addOnIds.slice()
-      : undefined
+  const addOnIds = pickStringArray(x.addOnIds) ?? undefined
 
   const clientAddressId =
     x.clientAddressId == null
@@ -244,9 +281,127 @@ function pickSummaryDebug(x: unknown):
   }
 }
 
-export function parseAvailabilitySummaryResponse(
+function pickAvailabilityRequestBaseFromRecord(
   x: unknown,
-): AvailabilitySummaryResponse | null {
+): AvailabilityRequestBase | null {
+  if (!isRecord(x)) return null
+
+  const professionalId = pickString(x.professionalId)
+  const serviceId = pickString(x.serviceId)
+  const offeringId = x.offeringId == null ? null : pickString(x.offeringId)
+  const locationType = pickServiceLocationType(x.locationType)
+  const locationId = pickString(x.locationId)
+  const clientAddressId =
+    x.clientAddressId == null ? null : pickString(x.clientAddressId)
+  const addOnIds = pickStringArray(x.addOnIds)
+  const durationMinutes = pickNumber(x.durationMinutes)
+
+  if (!professionalId || !serviceId || !locationType || !locationId) return null
+  if (x.offeringId != null && offeringId == null) return null
+  if (x.clientAddressId != null && clientAddressId == null) return null
+  if (!addOnIds || durationMinutes == null) return null
+
+  return {
+    professionalId,
+    serviceId,
+    offeringId,
+    locationType,
+    locationId,
+    clientAddressId,
+    addOnIds,
+    durationMinutes,
+  }
+}
+
+function pickAvailabilityRequestBaseFromLegacyDay(
+  x: Record<string, unknown>,
+  offering: AvailabilityOffering | undefined,
+): AvailabilityRequestBase | null {
+  const professionalId = pickString(x.professionalId)
+  const serviceId = pickString(x.serviceId)
+  const locationType = pickServiceLocationType(x.locationType)
+  const locationId = pickString(x.locationId)
+  const durationMinutes = pickNumber(x.durationMinutes)
+  const addOnIds = x.addOnIds == null ? [] : pickStringArray(x.addOnIds)
+  const clientAddressId =
+    x.clientAddressId == null ? null : pickString(x.clientAddressId)
+
+  if (
+    !professionalId ||
+    !serviceId ||
+    !locationType ||
+    !locationId ||
+    durationMinutes == null
+  ) {
+    return null
+  }
+  if (x.addOnIds != null && addOnIds == null) return null
+  if (x.clientAddressId != null && clientAddressId == null) return null
+
+return {
+  professionalId,
+  serviceId,
+  offeringId: offering?.id ?? null,
+  locationType,
+  locationId,
+  clientAddressId,
+  addOnIds: addOnIds ?? [],
+  durationMinutes,
+}
+}
+
+function pickAlternatesRequestFromRecord(
+  x: unknown,
+): {
+  serviceId: string
+  offeringId: string | null
+  locationType: ServiceLocationType
+  locationId: string
+  clientAddressId: string | null
+  addOnIds: string[]
+  durationMinutes: number
+  date: string
+} | null {
+  if (!isRecord(x)) return null
+
+  const serviceId = pickString(x.serviceId)
+  const offeringId = x.offeringId == null ? null : pickString(x.offeringId)
+  const locationType = pickServiceLocationType(x.locationType)
+  const locationId = pickString(x.locationId)
+  const clientAddressId =
+    x.clientAddressId == null ? null : pickString(x.clientAddressId)
+  const addOnIds = pickStringArray(x.addOnIds)
+  const durationMinutes = pickNumber(x.durationMinutes)
+  const date = pickString(x.date)
+
+  if (
+    !serviceId ||
+    !locationType ||
+    !locationId ||
+    !date ||
+    durationMinutes == null
+  ) {
+    return null
+  }
+  if (x.offeringId != null && offeringId == null) return null
+  if (x.clientAddressId != null && clientAddressId == null) return null
+  if (!addOnIds) return null
+
+  return {
+    serviceId,
+    offeringId,
+    locationType,
+    locationId,
+    clientAddressId,
+    addOnIds,
+    durationMinutes,
+    date,
+  }
+}
+
+export function parseAvailabilityBootstrapResponse(
+  x: unknown,
+): AvailabilityBootstrapResponse | null {
   if (!isRecord(x)) return null
 
   const ok = x.ok
@@ -263,25 +418,20 @@ export function parseAvailabilitySummaryResponse(
   }
 
   if (ok !== true) return null
-  if (x.mode !== 'SUMMARY') return null
+  if (x.mode !== 'BOOTSTRAP') return null
 
   const mediaId = x.mediaId === null ? null : pickString(x.mediaId)
   if (x.mediaId !== null && mediaId == null) return null
 
-  const serviceId = pickString(x.serviceId)
-  const professionalId = pickString(x.professionalId)
   const serviceName = x.serviceName === null ? null : pickString(x.serviceName)
   const serviceCategoryName =
     x.serviceCategoryName === null ? null : pickString(x.serviceCategoryName)
 
-  if (!serviceId || !professionalId) return null
   if (x.serviceName !== null && serviceName == null) return null
   if (x.serviceCategoryName !== null && serviceCategoryName == null) return null
 
-  const locationType = pickServiceLocationType(x.locationType)
-  const locationId = pickString(x.locationId)
   const timeZone = pickString(x.timeZone)
-  if (!locationType || !locationId || !timeZone) return null
+  if (!timeZone) return null
 
   const stepMinutes = pickNumber(x.stepMinutes)
   const leadTimeMinutes = pickNumber(x.leadTimeMinutes)
@@ -289,15 +439,13 @@ export function parseAvailabilitySummaryResponse(
   const adjacencyBufferMinutes =
     pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
   const maxDaysAhead = pickNumber(x.maxDaysAhead)
-  const durationMinutes = pickNumber(x.durationMinutes)
 
   if (
     stepMinutes == null ||
     leadTimeMinutes == null ||
     locationBufferMinutes == null ||
     adjacencyBufferMinutes == null ||
-    maxDaysAhead == null ||
-    durationMinutes == null
+    maxDaysAhead == null
   ) {
     return null
   }
@@ -311,10 +459,8 @@ export function parseAvailabilitySummaryResponse(
   if (!windowStartDate || !windowEndDate || hasMoreDays == null) return null
   if (x.nextStartDate !== null && nextStartDate == null) return null
 
-  const primaryProBase = pickProCardBase(x.primaryPro)
-  if (!primaryProBase) return null
-  if (!primaryProBase.offeringId) return null
-  if (!primaryProBase.locationId) return null
+  const primaryPro = pickAvailabilityPrimaryPro(x.primaryPro, timeZone)
+  if (!primaryPro) return null
 
   const availableDaysRaw = x.availableDays
   if (!Array.isArray(availableDaysRaw)) return null
@@ -335,9 +481,9 @@ export function parseAvailabilitySummaryResponse(
 
   const otherPros: AvailabilityOtherPro[] = []
   for (const row of otherProsRaw) {
-    const op = pickAvailabilityOtherPro(row)
-    if (!op) return null
-    otherPros.push(op)
+    const parsed = pickAvailabilityOtherPro(row)
+    if (!parsed) return null
+    otherPros.push(parsed)
   }
 
   const waitlistSupported = pickBoolean(x.waitlistSupported)
@@ -348,62 +494,67 @@ export function parseAvailabilitySummaryResponse(
 
   const debug = pickSummaryDebug(x.debug)
 
-  let firstDaySlots: string[] | undefined
-  if (Array.isArray(x.firstDaySlots)) {
-    if (!x.firstDaySlots.every((s) => typeof s === 'string')) return null
-    firstDaySlots = x.firstDaySlots.slice()
-  }
+  const selectedDay = pickAvailabilitySelectedDay(x.selectedDay)
+  if (selectedDay === undefined) return null
 
-  const parsedInitialSelectedDay = pickAvailabilityInitialSelectedDay(
-    x.initialSelectedDay,
-  )
-  if (parsedInitialSelectedDay === undefined) return null
+  const request = pickAvailabilityRequestBaseFromRecord(x.request)
+  if (!request) return null
 
-  const initialSelectedDay =
-    parsedInitialSelectedDay ??
-    (firstDaySlots?.length && availableDays[0]
-      ? {
-          date: availableDays[0].date,
-          slots: firstDaySlots.slice(),
-        }
-      : null)
+  const freshness = pickFreshness(x, [
+    'BOOTSTRAP',
+    request.professionalId,
+    request.serviceId,
+    request.offeringId,
+    request.locationType,
+    request.locationId,
+    request.clientAddressId,
+    request.durationMinutes,
+    windowStartDate,
+    windowEndDate,
+  ])
+  if (!freshness) return null
 
   return {
     ok: true,
-    mode: 'SUMMARY',
+    mode: 'BOOTSTRAP',
+    ...freshness,
+    request,
     mediaId: mediaId ?? null,
-    serviceId,
-    professionalId,
     serviceName: serviceName ?? null,
     serviceCategoryName: serviceCategoryName ?? null,
-    locationType,
-    locationId,
+    professionalId: request.professionalId,
+    serviceId: request.serviceId,
+    locationType: request.locationType,
+    locationId: request.locationId,
     timeZone,
     stepMinutes,
     leadTimeMinutes,
     locationBufferMinutes,
     adjacencyBufferMinutes,
     maxDaysAhead,
-    durationMinutes,
+    durationMinutes: request.durationMinutes,
     windowStartDate,
     windowEndDate,
     nextStartDate: nextStartDate ?? null,
     hasMoreDays,
-    primaryPro: {
-      ...primaryProBase,
-      offeringId: primaryProBase.offeringId,
-      isCreator: true as const,
-      timeZone,
-      locationId: primaryProBase.locationId,
-    },
+    primaryPro,
     availableDays,
-    initialSelectedDay,
-    ...(firstDaySlots !== undefined ? { firstDaySlots } : {}),
+    selectedDay,
     otherPros,
     waitlistSupported,
     offering,
     ...(debug !== undefined ? { debug } : {}),
   }
+}
+
+/**
+ * Transitional alias for older imports only.
+ * This no longer accepts legacy SUMMARY transport payloads.
+ */
+export function parseAvailabilitySummaryResponse(
+  x: unknown,
+): AvailabilitySummaryResponse | null {
+  return parseAvailabilityBootstrapResponse(x)
 }
 
 export function parseAvailabilityDayResponse(
@@ -427,16 +578,11 @@ export function parseAvailabilityDayResponse(
   if (ok !== true) return null
   if (x.mode !== 'DAY') return null
 
-  const slotsRaw = x.slots
-  if (!Array.isArray(slotsRaw)) return null
-  if (!slotsRaw.every((s) => typeof s === 'string')) return null
+  const slots = pickStringArray(x.slots)
+  if (!slots) return null
 
-  const professionalId = pickString(x.professionalId)
-  const serviceId = pickString(x.serviceId)
-  const locationType = pickServiceLocationType(x.locationType)
-  const date = pickString(x.date)
-  const locationId = pickString(x.locationId)
   const timeZone = pickString(x.timeZone)
+  if (!timeZone) return null
 
   const stepMinutes = pickNumber(x.stepMinutes)
   const leadTimeMinutes = pickNumber(x.leadTimeMinutes)
@@ -444,24 +590,15 @@ export function parseAvailabilityDayResponse(
   const adjacencyBufferMinutes =
     pickNumber(x.adjacencyBufferMinutes) ?? locationBufferMinutes
   const maxDaysAhead = pickNumber(x.maxDaysAhead)
-
-  const durationMinutes = pickNumber(x.durationMinutes)
   const dayStartUtc = pickString(x.dayStartUtc)
   const dayEndExclusiveUtc = pickString(x.dayEndExclusiveUtc)
 
   if (
-    !professionalId ||
-    !serviceId ||
-    !locationType ||
-    !date ||
-    !locationId ||
-    !timeZone ||
     stepMinutes == null ||
     leadTimeMinutes == null ||
     locationBufferMinutes == null ||
     adjacencyBufferMinutes == null ||
     maxDaysAhead == null ||
-    durationMinutes == null ||
     !dayStartUtc ||
     !dayEndExclusiveUtc
   ) {
@@ -472,38 +609,122 @@ export function parseAvailabilityDayResponse(
     x.offering == null ? undefined : pickOffering(x.offering) ?? undefined
   if (x.offering != null && !offering) return null
 
-  const debug = x.debug
-  const addOnIds =
-    Array.isArray(x.addOnIds) && x.addOnIds.every((v) => typeof v === 'string')
-      ? x.addOnIds.slice()
-      : undefined
-  const clientAddressId =
-    x.clientAddressId == null ? null : pickString(x.clientAddressId)
+  const request =
+    ((): (AvailabilityRequestBase & { date: string }) | null => {
+      if (isRecord(x.request)) {
+        const base = pickAvailabilityRequestBaseFromRecord(x.request)
+        const date = pickString(x.request.date)
+        if (!base || !date) return null
+        return { ...base, date }
+      }
 
-  if (x.clientAddressId != null && clientAddressId == null) return null
+      const base = pickAvailabilityRequestBaseFromLegacyDay(x, offering)
+      const date = pickString(x.date)
+      if (!base || !date) return null
+      return { ...base, date }
+    })()
+
+  if (!request) return null
+
+  const freshness = pickFreshness(x, [
+    'DAY',
+    request.professionalId,
+    request.serviceId,
+    request.offeringId,
+    request.locationType,
+    request.locationId,
+    request.clientAddressId,
+    request.durationMinutes,
+    request.date,
+  ])
+  if (!freshness) return null
+
+  const debug = x.debug
 
   return {
     ok: true,
     mode: 'DAY',
-    professionalId,
-    serviceId,
-    locationType,
-    date,
-    locationId,
+    ...freshness,
+    request,
+    professionalId: request.professionalId,
+    serviceId: request.serviceId,
+    locationType: request.locationType,
+    date: request.date,
+    locationId: request.locationId,
     timeZone,
     stepMinutes,
     leadTimeMinutes,
     locationBufferMinutes,
     adjacencyBufferMinutes,
     maxDaysAhead,
-    durationMinutes,
+    durationMinutes: request.durationMinutes,
     dayStartUtc,
     dayEndExclusiveUtc,
-    slots: slotsRaw.slice(),
-    offering,
+    slots,
+    ...(offering ? { offering } : {}),
     ...(debug !== undefined ? { debug } : {}),
-    ...(addOnIds ? { addOnIds } : {}),
-    ...(clientAddressId !== null ? { clientAddressId } : {}),
+  }
+}
+
+export function parseAvailabilityAlternatesResponse(
+  x: unknown,
+): AvailabilityAlternatesResponse | null {
+  if (!isRecord(x)) return null
+
+  const ok = x.ok
+  if (ok === false) {
+    const error = pickString(x.error)
+    if (!error) return null
+
+    const timeZone =
+      x.timeZone == null ? undefined : pickString(x.timeZone) ?? undefined
+    const locationId =
+      x.locationId == null ? undefined : pickString(x.locationId) ?? undefined
+
+    return { ok: false, error, timeZone, locationId }
+  }
+
+  if (ok !== true) return null
+  if (x.mode !== 'ALTERNATES') return null
+
+  const request = pickAlternatesRequestFromRecord(x.request)
+  const selectedDay = pickString(x.selectedDay)
+  if (!request || !selectedDay) return null
+
+  const alternatesRaw = x.alternates
+  if (!Array.isArray(alternatesRaw)) return null
+
+  const alternates: Array<{ pro: AvailabilityOtherPro; slots: string[] }> = []
+  for (const row of alternatesRaw) {
+    if (!isRecord(row)) return null
+    const pro = pickAvailabilityOtherPro(row.pro)
+    const slots = pickStringArray(row.slots)
+    if (!pro || !slots) return null
+    alternates.push({ pro, slots })
+  }
+
+  const freshness = pickFreshness(x, [
+    'ALTERNATES',
+    request.serviceId,
+    request.offeringId,
+    request.locationType,
+    request.locationId,
+    request.clientAddressId,
+    request.durationMinutes,
+    request.date,
+  ])
+  if (!freshness) return null
+
+  const debug = x.debug
+
+  return {
+    ok: true,
+    mode: 'ALTERNATES',
+    ...freshness,
+    request,
+    selectedDay,
+    alternates,
+    ...(debug !== undefined ? { debug } : {}),
   }
 }
 

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import type {
-  AvailabilitySummaryResponse,
+  AvailabilityBootstrapResponse,
   DrawerContext,
   ServiceLocationType,
 } from '../types'
@@ -24,15 +24,12 @@ import {
   getCachedAvailabilitySummaryWindow,
 } from '../utils/availabilityPrefetch'
 import {
-  startAvailabilityMetric,
-  endAvailabilityMetric,
   cancelAvailabilityMetric,
+  endAvailabilityMetric,
+  startAvailabilityMetric,
 } from '../perf/availabilityPerf'
 
-type SummaryOk = Extract<
-  AvailabilitySummaryResponse,
-  { ok: true; mode: 'SUMMARY' }
->
+type BootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
 
 type LoadMode = 'blocking' | 'background'
 
@@ -48,17 +45,43 @@ type BackgroundRefreshMetricMeta = BackgroundRefreshMeta & {
   includeOtherPros: boolean
   dayCount?: number
   hasOtherPros?: boolean
+  availabilityVersion?: string
 }
 
-type SummaryDataVariant = 'primary' | 'full'
+type BootstrapDataVariant = 'primary' | 'full'
 
 const BACKGROUND_REFRESH_METRIC_KEY = 'background-refresh'
 
-function mergeSummaryData(
-  current: SummaryOk | null,
-  incoming: SummaryOk,
-): SummaryOk {
+function mergeBootstrapRefresh(
+  current: BootstrapOk | null,
+  incoming: BootstrapOk,
+): BootstrapOk {
   if (!current) return incoming
+
+  const preservedSelectedDay =
+    current.selectedDay ?? incoming.selectedDay ?? null
+
+  return {
+    ...incoming,
+    availableDays: mergeAvailableDays(
+      current.availableDays,
+      incoming.availableDays,
+    ),
+    otherPros:
+      incoming.otherPros.length > 0 ? incoming.otherPros : current.otherPros,
+    selectedDay: preservedSelectedDay,
+    debug: incoming.debug ?? current.debug,
+  }
+}
+
+function mergeBootstrapAppend(
+  current: BootstrapOk | null,
+  incoming: BootstrapOk,
+): BootstrapOk {
+  if (!current) return incoming
+
+  const preservedSelectedDay =
+    current.selectedDay ?? incoming.selectedDay ?? null
 
   return {
     ...current,
@@ -73,14 +96,15 @@ function mergeSummaryData(
     hasMoreDays: incoming.hasMoreDays,
     otherPros:
       incoming.otherPros.length > 0 ? incoming.otherPros : current.otherPros,
+    selectedDay: preservedSelectedDay,
     debug: incoming.debug ?? current.debug,
   }
 }
 
-function readCachedSummaryWindow(
+function readCachedBootstrapWindow(
   key: string | null,
   allowStale: boolean,
-): SummaryOk | null {
+): BootstrapOk | null {
   if (!key) return null
 
   return allowStale
@@ -99,6 +123,7 @@ function buildBackgroundRefreshMetricMeta(
   extras?: {
     dayCount?: number
     hasOtherPros?: boolean
+    availabilityVersion?: string
   },
 ): BackgroundRefreshMetricMeta {
   return {
@@ -110,9 +135,18 @@ function buildBackgroundRefreshMetricMeta(
     cacheState: refreshMeta.cacheState,
     dayCount: extras?.dayCount,
     hasOtherPros: extras?.hasOtherPros,
+    availabilityVersion: extras?.availabilityVersion,
   }
 }
 
+/**
+ * Bootstrap hook:
+ * - loads advisory bootstrap data from /api/availability/bootstrap
+ * - manages bootstrap window pagination
+ * - optionally upgrades from primary-only bootstrap to full bootstrap with other pros
+ *
+ * Exact visible day-slot truth is owned by the day-slot path.
+ */
 export function useAvailability(
   open: boolean,
   context: DrawerContext,
@@ -127,20 +161,20 @@ export function useAvailability(
   const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [data, setData] = useState<SummaryOk | null>(null)
+  const [data, setData] = useState<BootstrapOk | null>(null)
 
-  const dataRef = useRef<SummaryOk | null>(null)
+  const dataRef = useRef<BootstrapOk | null>(null)
   dataRef.current = data
 
-const currentDataKeyRef = useRef<string | null>(null)
-  const currentDataVariantRef = useRef<SummaryDataVariant | null>(null)
+  const currentDataKeyRef = useRef<string | null>(null)
+  const currentDataVariantRef = useRef<BootstrapDataVariant | null>(null)
 
-  const commitSummaryData = useCallback(
+  const commitBootstrapData = useCallback(
     (
-      nextData: SummaryOk | null,
+      nextData: BootstrapOk | null,
       options?: {
         key?: string | null
-        variant?: SummaryDataVariant | null
+        variant?: BootstrapDataVariant | null
       },
     ) => {
       dataRef.current = nextData
@@ -162,9 +196,9 @@ const currentDataKeyRef = useRef<string | null>(null)
     [],
   )
 
-  const clearSummaryData = useCallback(() => {
-    commitSummaryData(null, { key: null, variant: null })
-  }, [commitSummaryData])
+  const clearBootstrapData = useCallback(() => {
+    commitBootstrapData(null, { key: null, variant: null })
+  }, [commitBootstrapData])
 
   const proId = useMemo(
     () => String(context.professionalId || '').trim(),
@@ -249,6 +283,7 @@ const currentDataKeyRef = useRef<string | null>(null)
       extras: {
         dayCount: number
         hasOtherPros: boolean
+        availabilityVersion: string
       },
     ) => {
       endAvailabilityMetric({
@@ -270,7 +305,7 @@ const currentDataKeyRef = useRef<string | null>(null)
         redirectToLogin(router, 'availability')
 
         if (!preserveVisibleData) {
-          clearSummaryData()
+          clearBootstrapData()
           setError('Please log in to view availability.')
         }
         return
@@ -280,7 +315,7 @@ const currentDataKeyRef = useRef<string | null>(null)
         setError(message)
       }
     },
-    [router, clearSummaryData],
+    [router, clearBootstrapData],
   )
 
   const primaryPrefetchArgs = useMemo(
@@ -379,7 +414,6 @@ const currentDataKeyRef = useRef<string | null>(null)
 
     setLoading(false)
     setRefreshing(true)
-
     startBackgroundRefresh(refreshMeta)
 
     try {
@@ -395,9 +429,9 @@ const currentDataKeyRef = useRef<string | null>(null)
         return
       }
 
-      const nextData = mergeSummaryData(dataRef.current, fullPage)
+      const nextData = mergeBootstrapRefresh(dataRef.current, fullPage)
 
-      commitSummaryData(nextData, {
+      commitBootstrapData(nextData, {
         key: fullWindowKey,
         variant: 'full',
       })
@@ -406,6 +440,7 @@ const currentDataKeyRef = useRef<string | null>(null)
       completeBackgroundRefresh(refreshMeta, {
         dayCount: fullPage.availableDays.length,
         hasOtherPros: fullPage.otherPros.length > 0,
+        availabilityVersion: fullPage.availabilityVersion,
       })
     } catch (e: unknown) {
       if (seq !== requestSeqRef.current) {
@@ -423,26 +458,26 @@ const currentDataKeyRef = useRef<string | null>(null)
         setRefreshing(false)
       }
     }
-    }, [
-      includeOtherPros,
-      fullPrefetchArgs,
-      fullWindowKey,
-      startBackgroundRefresh,
-      completeBackgroundRefresh,
-      cancelBackgroundRefresh,
-      handleAvailabilityError,
-      commitSummaryData,
-    ])
+  }, [
+    includeOtherPros,
+    fullPrefetchArgs,
+    fullWindowKey,
+    startBackgroundRefresh,
+    completeBackgroundRefresh,
+    cancelBackgroundRefresh,
+    handleAvailabilityError,
+    commitBootstrapData,
+  ])
 
   const loadInitial = useCallback(
     async (mode: LoadMode, backgroundMeta?: BackgroundRefreshMeta) => {
       const seq = ++requestSeqRef.current
       const preserveVisibleData = mode === 'background'
-      const shouldLoadFullSummary =
+      const shouldLoadFullBootstrap =
         mode === 'background' && includeOtherPros && Boolean(fullPrefetchArgs)
       const shouldFollowWithOtherPros =
         mode === 'blocking' && includeOtherPros && Boolean(fullPrefetchArgs)
-      const initialArgs = shouldLoadFullSummary
+      const initialArgs = shouldLoadFullBootstrap
         ? fullPrefetchArgs
         : primaryPrefetchArgs
 
@@ -473,7 +508,7 @@ const currentDataKeyRef = useRef<string | null>(null)
           ...initialArgs,
           startDate: null,
           days: INITIAL_WINDOW_DAYS,
-          includeOtherPros: shouldLoadFullSummary,
+          includeOtherPros: shouldLoadFullBootstrap,
         })
 
         if (seq !== requestSeqRef.current) {
@@ -483,11 +518,11 @@ const currentDataKeyRef = useRef<string | null>(null)
           return
         }
 
-        const nextData = mergeSummaryData(dataRef.current, initialPage)
+        const nextData = mergeBootstrapRefresh(dataRef.current, initialPage)
 
-        commitSummaryData(nextData, {
-          key: shouldLoadFullSummary ? fullWindowKey : primaryWindowKey,
-          variant: shouldLoadFullSummary ? 'full' : 'primary',
+        commitBootstrapData(nextData, {
+          key: shouldLoadFullBootstrap ? fullWindowKey : primaryWindowKey,
+          variant: shouldLoadFullBootstrap ? 'full' : 'primary',
         })
         setError(null)
 
@@ -500,6 +535,7 @@ const currentDataKeyRef = useRef<string | null>(null)
             {
               dayCount: initialPage.availableDays.length,
               hasOtherPros: initialPage.otherPros.length > 0,
+              availabilityVersion: initialPage.availabilityVersion,
             },
           )
         } else if (shouldFollowWithOtherPros) {
@@ -543,7 +579,7 @@ const currentDataKeyRef = useRef<string | null>(null)
       cancelBackgroundRefresh,
       handleAvailabilityError,
       loadOtherProsOnly,
-      commitSummaryData,
+      commitBootstrapData,
     ],
   )
 
@@ -576,13 +612,12 @@ const currentDataKeyRef = useRef<string | null>(null)
         includeOtherPros: false,
       })
 
-      const nextData = mergeSummaryData(dataRef.current, nextPage)
+      const nextData = mergeBootstrapAppend(dataRef.current, nextPage)
 
-      commitSummaryData(nextData, {
+      commitBootstrapData(nextData, {
         key: currentDataKeyRef.current,
         variant: currentDataVariantRef.current,
       })
-
     } catch (e: unknown) {
       const message =
         e instanceof Error ? e.message : 'Failed to load more availability.'
@@ -600,7 +635,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     requiresClientAddress,
     normalizedClientAddressId,
     handleAvailabilityError,
-    commitSummaryData,
+    commitBootstrapData,
   ])
 
   useEffect(() => {
@@ -620,7 +655,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     if (!proId) {
       invalidateActiveRequest('missing_professional')
       clearLoadingFlags()
-      clearSummaryData()
+      clearBootstrapData()
       setError('Missing professional. Please try again.')
       return
     }
@@ -628,7 +663,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     if (!serviceId) {
       invalidateActiveRequest('missing_service')
       clearLoadingFlags()
-      clearSummaryData()
+      clearBootstrapData()
       setError(
         'No service is linked yet. Ask the pro to attach a service to this look.',
       )
@@ -638,7 +673,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     if (!canFetch) {
       invalidateActiveRequest('cannot_fetch')
       clearLoadingFlags()
-      clearSummaryData()
+      clearBootstrapData()
       setError(null)
       return
     }
@@ -646,7 +681,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     if (!primaryWindowKey) {
       invalidateActiveRequest('missing_context')
       clearLoadingFlags()
-      clearSummaryData()
+      clearBootstrapData()
       setError('Missing availability context.')
       return
     }
@@ -682,10 +717,10 @@ const currentDataKeyRef = useRef<string | null>(null)
       return
     }
 
-    const freshFull = readCachedSummaryWindow(fullWindowKey, false)
+    const freshFull = readCachedBootstrapWindow(fullWindowKey, false)
     if (freshFull) {
       invalidateActiveRequest('fresh_full_cache')
-      commitSummaryData(freshFull, {
+      commitBootstrapData(freshFull, {
         key: fullWindowKey,
         variant: 'full',
       })
@@ -694,10 +729,10 @@ const currentDataKeyRef = useRef<string | null>(null)
       return
     }
 
-    const freshPrimary = readCachedSummaryWindow(primaryWindowKey, false)
+    const freshPrimary = readCachedBootstrapWindow(primaryWindowKey, false)
     if (freshPrimary) {
       invalidateActiveRequest('fresh_primary_cache')
-      commitSummaryData(freshPrimary, {
+      commitBootstrapData(freshPrimary, {
         key: primaryWindowKey,
         variant: 'primary',
       })
@@ -711,9 +746,14 @@ const currentDataKeyRef = useRef<string | null>(null)
       return
     }
 
-    const staleFull = readCachedSummaryWindow(fullWindowKey, true)
+    /**
+     * Stale bootstrap cache is acceptable only as advisory data:
+     * day counts, window navigation, and pro cards. Exact visible slot truth
+     * remains owned by the authoritative day-slot path.
+     */
+    const staleFull = readCachedBootstrapWindow(fullWindowKey, true)
     if (staleFull) {
-      commitSummaryData(staleFull, {
+      commitBootstrapData(staleFull, {
         key: fullWindowKey,
         variant: 'full',
       })
@@ -729,9 +769,9 @@ const currentDataKeyRef = useRef<string | null>(null)
       return
     }
 
-    const stalePrimary = readCachedSummaryWindow(primaryWindowKey, true)
+    const stalePrimary = readCachedBootstrapWindow(primaryWindowKey, true)
     if (stalePrimary) {
-      commitSummaryData(stalePrimary, {
+      commitBootstrapData(stalePrimary, {
         key: primaryWindowKey,
         variant: 'primary',
       })
@@ -747,11 +787,11 @@ const currentDataKeyRef = useRef<string | null>(null)
       return
     }
 
-    clearSummaryData()
+    clearBootstrapData()
     setError(null)
     setLoadingMore(false)
     void loadInitial('blocking')
-   }, [
+  }, [
     open,
     proId,
     serviceId,
@@ -762,7 +802,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     loadInitial,
     loadOtherProsOnly,
     clearLoadingFlags,
-    clearSummaryData,
+    clearBootstrapData,
     invalidateActiveRequest,
   ])
 
@@ -790,7 +830,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     hasMoreDays: Boolean(data?.hasMoreDays),
     loadMore,
     setError,
-    setData: commitSummaryData,
+    setData: commitBootstrapData,
     refresh,
   }
 }

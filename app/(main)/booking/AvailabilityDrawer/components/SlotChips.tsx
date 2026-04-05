@@ -62,6 +62,22 @@ function slotChipTestId(slotISO: string): string {
   return `availability-slot-${slotISO}`
 }
 
+function buildEmptyCopy(period: Period, hasAnySlots: boolean): string {
+  if (!hasAnySlots) {
+    return 'No available times for this day.'
+  }
+
+  if (period === 'MORNING') {
+    return 'No morning times for this day.'
+  }
+
+  if (period === 'AFTERNOON') {
+    return 'No afternoon times for this day.'
+  }
+
+  return 'No evening times for this day.'
+}
+
 const PeriodButton = memo(function PeriodButton({
   nextPeriod,
   label,
@@ -136,13 +152,14 @@ const SlotButton = memo(function SlotButton({
         disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
       ].join(' ')}
       title={title}
+      aria-label={title}
     >
       {label}
     </button>
   )
 })
 
-export default function SlotChips({
+function SlotChips({
   pro,
   appointmentTz,
   holding,
@@ -158,7 +175,13 @@ export default function SlotChips({
   onSelectPeriodRef.current = onSelectPeriod
   onPickRef.current = onPick
 
-  const allSlots = Array.isArray(slotsForDay) ? slotsForDay : []
+  const allSlots = useMemo(() => {
+    if (!Array.isArray(slotsForDay)) return []
+    if (slotsForDay.length <= 1) return slotsForDay
+
+    // Keep ordering stable while avoiding accidental duplicate chips.
+    return Array.from(new Set(slotsForDay))
+  }, [slotsForDay])
 
   const slotsByPeriod = useMemo<Record<Period, string[]>>(() => {
     const grouped: Record<Period, string[]> = {
@@ -185,8 +208,11 @@ export default function SlotChips({
     [slotsByPeriod],
   )
 
+  const hasAnySlots = allSlots.length > 0
   const visibleSlots = slotsByPeriod[period]
   const offeringId = pro.offeringId ?? null
+  const disableSlotSelection = !offeringId || holding
+  const emptyCopy = buildEmptyCopy(period, hasAnySlots)
 
   const handleSelectPeriod = useCallback((nextPeriod: Period) => {
     onSelectPeriodRef.current(nextPeriod)
@@ -234,12 +260,14 @@ export default function SlotChips({
         ))}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div
+        className="mt-3 flex flex-wrap gap-2"
+        aria-live="polite"
+      >
         {visibleSlots.length > 0 ? (
           visibleSlots.map((slotISO) => {
             const isSelected =
               selected?.proId === pro.id && selected?.slotISO === slotISO
-            const disabled = !offeringId || holding
 
             return (
               <SlotButton
@@ -249,23 +277,19 @@ export default function SlotChips({
                 slotISO={slotISO}
                 appointmentTz={appointmentTz}
                 isSelected={isSelected}
-                disabled={disabled}
+                disabled={disableSlotSelection}
                 onPickSlot={handlePickSlot}
               />
             )
           })
         ) : (
           <div className="text-[13px] font-semibold text-textSecondary">
-            No{' '}
-            {period === 'MORNING'
-              ? 'morning'
-              : period === 'AFTERNOON'
-                ? 'afternoon'
-                : 'evening'}{' '}
-            times for this day.
+            {emptyCopy}
           </div>
         )}
       </div>
     </div>
   )
 }
+
+export default memo(SlotChips)

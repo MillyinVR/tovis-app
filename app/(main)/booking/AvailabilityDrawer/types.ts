@@ -79,12 +79,44 @@ export type AvailabilityReason =
 
 export type MoneyString = string
 
+/** ---------------------------
+ * Shared availability contract
+ * -------------------------- */
+
+export type AvailabilityFreshness = {
+  /**
+   * Client-visible freshness token for the exact request context.
+   * Exact slots are reusable only when this matches.
+   */
+  availabilityVersion: string
+
+  /**
+   * ISO timestamp for when the payload was generated.
+   */
+  generatedAt: string
+}
+
+export type AvailabilityRequestBase = {
+  professionalId: string
+  serviceId: string
+  offeringId: string | null
+  locationType: ServiceLocationType
+  locationId: string
+  clientAddressId: string | null
+  addOnIds: string[]
+  durationMinutes: number
+}
+
+export type AvailabilityDayRequest = AvailabilityRequestBase & {
+  date: string
+}
+
 export type AvailabilityDaySummary = {
   date: string
   slotCount: number
 }
 
-export type AvailabilityInitialSelectedDay = {
+export type AvailabilitySelectedDay = {
   date: string
   slots: string[]
 }
@@ -94,17 +126,35 @@ export type ProCard = {
   businessName: string | null
   avatarUrl: string | null
   location: string | null
-  offeringId: string | null
+
+  /**
+   * Optional on the generic UI card because primary vs alternate cards
+   * have slightly different guarantees. Use the specialized types below
+   * when availability context must guarantee bookability.
+   */
+  offeringId?: string | null
+
   timeZone?: string | null
   isCreator?: boolean
 
   // bookable location used for availability math
   locationId?: string | null
 
-  // optional, nice for future UI
+  // optional, nice for UI
   distanceMiles?: number | null
 
+  /**
+   * UI convenience only. Do not treat these as globally authoritative
+   * without request/version validation.
+   */
   slots?: string[]
+}
+
+export type AvailabilityPrimaryPro = ProCard & {
+  offeringId: string
+  isCreator: true
+  timeZone: string
+  locationId: string
 }
 
 export type AvailabilityOtherPro = ProCard & {
@@ -124,117 +174,126 @@ export type AvailabilityOffering = {
   mobilePriceStartingAt: MoneyString | null
 }
 
+export type AvailabilitySummaryDebug = {
+  emptyReason?: string | null
+  otherProsCount?: number
+  includeOtherPros?: boolean
+  center?: {
+    lat: number
+    lng: number
+    radiusMiles: number
+  } | null
+  usedViewerCenter?: boolean
+  addOnIds?: string[]
+  clientAddressId?: string | null
+  requestedSummaryDays?: number
+}
+
 /** ---------------------------
- * Availability: SUMMARY mode
+ * Availability: BOOTSTRAP mode
  * -------------------------- */
 
-export type AvailabilitySummaryOk = ApiOk<{
-  mode: 'SUMMARY'
-  mediaId: string | null
-  serviceId: string
-  professionalId: string
+export type AvailabilityBootstrapOk = ApiOk<
+  AvailabilityFreshness & {
+    mode: 'BOOTSTRAP'
+    request: AvailabilityRequestBase
 
-  serviceName: string | null
-  serviceCategoryName: string | null
+    mediaId: string | null
+    serviceName: string | null
+    serviceCategoryName: string | null
 
-  locationType: ServiceLocationType
-  locationId: string
-  timeZone: string
-
-  stepMinutes: number
-  leadTimeMinutes: number
-  locationBufferMinutes: number
-  adjacencyBufferMinutes: number
-  maxDaysAhead: number
-  durationMinutes: number
-
-  // paged summary window metadata
-  windowStartDate: string
-  windowEndDate: string
-  nextStartDate: string | null
-  hasMoreDays: boolean
-
-  primaryPro: ProCard & {
-    offeringId: string
-    isCreator: true
-    timeZone: string
+    /**
+     * Transitional duplicate fields.
+     * Prefer `request.*` in all new code.
+     */
+    professionalId: string
+    serviceId: string
+    locationType: ServiceLocationType
     locationId: string
+    durationMinutes: number
+
+    timeZone: string
+    stepMinutes: number
+    leadTimeMinutes: number
+    locationBufferMinutes: number
+    adjacencyBufferMinutes: number
+    maxDaysAhead: number
+
+    windowStartDate: string
+    windowEndDate: string
+    nextStartDate: string | null
+    hasMoreDays: boolean
+
+    primaryPro: AvailabilityPrimaryPro
+    availableDays: AvailabilityDaySummary[]
+
+    /**
+     * Canonical enterprise field.
+     * Authoritative for first paint because it belongs to the current
+     * bootstrap response.
+     */
+    selectedDay: AvailabilitySelectedDay | null
+
+    otherPros: AvailabilityOtherPro[]
+    waitlistSupported: boolean
+    offering: AvailabilityOffering
+
+    debug?: AvailabilitySummaryDebug
   }
+>
 
-  availableDays: AvailabilityDaySummary[]
-
-  /**
-   * Explicitly pairs the initially selected day with the slots embedded in summary.
-   * This is the source of truth for drawer-open day selection and preseeded day slots.
-   */
-  initialSelectedDay: AvailabilityInitialSelectedDay | null
-
-  /**
-   * @deprecated Legacy first-available seed.
-   * Keep temporarily for compatibility while all consumers move to initialSelectedDay.
-   */
-  firstDaySlots?: string[]
-
-  otherPros: AvailabilityOtherPro[]
-  waitlistSupported: boolean
-
-  offering: AvailabilityOffering
-
-  debug?: {
-    emptyReason?: string | null
-    otherProsCount?: number
-    includeOtherPros?: boolean
-    center?: {
-      lat: number
-      lng: number
-      radiusMiles: number
-    } | null
-    usedViewerCenter?: boolean
-    addOnIds?: string[]
-    clientAddressId?: string | null
-    requestedSummaryDays?: number
-  }
-}>
-
-export type AvailabilitySummaryFail = ApiFail<{
+export type AvailabilityBootstrapFail = ApiFail<{
   timeZone?: string
   locationId?: string
 }>
 
-export type AvailabilitySummaryResponse =
-  | AvailabilitySummaryOk
-  | AvailabilitySummaryFail
+export type AvailabilityBootstrapResponse =
+  | AvailabilityBootstrapOk
+  | AvailabilityBootstrapFail
+
+/**
+ * Transitional aliases for older imports only.
+ * These now point at the permanent bootstrap contract.
+ */
+export type AvailabilitySummaryOk = AvailabilityBootstrapOk
+export type AvailabilitySummaryFail = AvailabilityBootstrapFail
+export type AvailabilitySummaryResponse = AvailabilityBootstrapResponse
 
 /** ---------------------------
  * Availability: DAY mode
  * -------------------------- */
 
-export type AvailabilityDayOk = ApiOk<{
-  mode: 'DAY'
-  professionalId: string
-  serviceId: string
-  locationType: ServiceLocationType
-  date: string
+export type AvailabilityDayOk = ApiOk<
+  AvailabilityFreshness & {
+    mode: 'DAY'
+    request: AvailabilityDayRequest
 
-  locationId: string
-  timeZone: string
-  stepMinutes: number
-  leadTimeMinutes: number
-  locationBufferMinutes: number
-  adjacencyBufferMinutes: number
-  maxDaysAhead: number
+    /**
+     * Transitional duplicate fields.
+     * Prefer `request.*` in all new code.
+     */
+    professionalId: string
+    serviceId: string
+    locationType: ServiceLocationType
+    locationId: string
+    date: string
+    durationMinutes: number
 
-  durationMinutes: number
-  dayStartUtc: string
-  dayEndExclusiveUtc: string
-  slots: string[]
+    timeZone: string
+    stepMinutes: number
+    leadTimeMinutes: number
+    locationBufferMinutes: number
+    adjacencyBufferMinutes: number
+    maxDaysAhead: number
 
-  offering?: AvailabilityOffering
+    dayStartUtc: string
+    dayEndExclusiveUtc: string
+    slots: string[]
 
-  debug?: unknown
-  addOnIds?: string[]
-  clientAddressId?: string | null
-}>
+    offering?: AvailabilityOffering
+    debug?: unknown
+  }
+>
 
 export type AvailabilityDayFail = ApiFail<{
   timeZone?: string
@@ -242,6 +301,39 @@ export type AvailabilityDayFail = ApiFail<{
 }>
 
 export type AvailabilityDayResponse = AvailabilityDayOk | AvailabilityDayFail
+
+/** ---------------------------
+ * Availability: ALTERNATES mode
+ * -------------------------- */
+
+export type AvailabilityAlternateSlots = {
+  pro: AvailabilityOtherPro
+  slots: string[]
+}
+
+export type AvailabilityAlternatesRequest = Omit<
+  AvailabilityDayRequest,
+  'professionalId'
+>
+
+export type AvailabilityAlternatesOk = ApiOk<
+  AvailabilityFreshness & {
+    mode: 'ALTERNATES'
+    request: AvailabilityAlternatesRequest
+    selectedDay: string
+    alternates: AvailabilityAlternateSlots[]
+    debug?: unknown
+  }
+>
+
+export type AvailabilityAlternatesFail = ApiFail<{
+  timeZone?: string
+  locationId?: string
+}>
+
+export type AvailabilityAlternatesResponse =
+  | AvailabilityAlternatesOk
+  | AvailabilityAlternatesFail
 
 export type HoldParsed = {
   holdId: string

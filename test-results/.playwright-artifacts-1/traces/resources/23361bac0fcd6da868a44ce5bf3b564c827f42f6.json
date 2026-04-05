@@ -1,0 +1,1 @@
+{"ok":false,"error":"Someone is already holding that time. Please try another slot.","code":"TIME_HELD","retryable":true,"uiAction":"PICK_NEW_SLOT","message":"Requested time is currently held."}

@@ -1,25 +1,22 @@
 // app/(main)/booking/AvailabilityDrawer/utils/availabilityPrefetch.ts
 import type {
-  AvailabilitySummaryResponse,
+  AvailabilityBootstrapResponse,
   DrawerContext,
   ServiceLocationType,
 } from '../types'
 
-import { parseAvailabilitySummaryResponse } from '../contract'
+import { parseAvailabilityBootstrapResponse } from '../contract'
 import { safeJson } from './safeJson'
 import { INITIAL_WINDOW_DAYS } from './availabilityWindow'
 
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 
-type SummaryOk = Extract<
-  AvailabilitySummaryResponse,
-  { ok: true; mode: 'SUMMARY' }
->
+type BootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
 
 type CacheEntry = {
   at: number
-  data: SummaryOk
+  data: BootstrapOk
 }
 
 export type ViewerContext = {
@@ -45,8 +42,8 @@ export type AvailabilityPrefetchArgs = {
 const CACHE_TTL_MS = 180_000
 const MAX_CACHE_ENTRIES = 200
 
-const summaryWindowCache = new Map<string, CacheEntry>()
-const inFlightByKey = new Map<string, Promise<SummaryOk>>()
+const bootstrapWindowCache = new Map<string, CacheEntry>()
+const inFlightByKey = new Map<string, Promise<BootstrapOk>>()
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
@@ -131,29 +128,29 @@ function isFresh(entry: CacheEntry): boolean {
 function pruneCache(): void {
   const now = Date.now()
 
-  for (const [key, entry] of summaryWindowCache.entries()) {
+  for (const [key, entry] of bootstrapWindowCache.entries()) {
     if (now - entry.at >= CACHE_TTL_MS) {
-      summaryWindowCache.delete(key)
+      bootstrapWindowCache.delete(key)
     }
   }
 
-  if (summaryWindowCache.size <= MAX_CACHE_ENTRIES) return
+  if (bootstrapWindowCache.size <= MAX_CACHE_ENTRIES) return
 
-  const sorted = Array.from(summaryWindowCache.entries()).sort(
+  const sorted = Array.from(bootstrapWindowCache.entries()).sort(
     (a, b) => a[1].at - b[1].at,
   )
 
-  const overflow = summaryWindowCache.size - MAX_CACHE_ENTRIES
+  const overflow = bootstrapWindowCache.size - MAX_CACHE_ENTRIES
   for (let i = 0; i < overflow; i += 1) {
     const row = sorted[i]
-    if (row) summaryWindowCache.delete(row[0])
+    if (row) bootstrapWindowCache.delete(row[0])
   }
 }
 
 export function getCachedAvailabilitySummaryWindow(
   key: string,
-): SummaryOk | null {
-  const hit = summaryWindowCache.get(key)
+): BootstrapOk | null {
+  const hit = bootstrapWindowCache.get(key)
   if (!hit) return null
   if (!isFresh(hit)) return null
   return hit.data
@@ -161,13 +158,13 @@ export function getCachedAvailabilitySummaryWindow(
 
 export function getAnyCachedAvailabilitySummaryWindow(
   key: string,
-): SummaryOk | null {
-  const hit = summaryWindowCache.get(key)
+): BootstrapOk | null {
+  const hit = bootstrapWindowCache.get(key)
   return hit ? hit.data : null
 }
 
 export function clearAvailabilitySummaryPrefetchCache(): void {
-  summaryWindowCache.clear()
+  bootstrapWindowCache.clear()
   inFlightByKey.clear()
 }
 
@@ -201,7 +198,7 @@ export function buildAvailabilitySummaryPrefetchKey(args: {
 
 export async function fetchAvailabilitySummaryWindow(
   args: AvailabilityPrefetchArgs,
-): Promise<SummaryOk> {
+): Promise<BootstrapOk> {
   const professionalId = normalizeTrimmed(args.professionalId)
   const serviceId = normalizeTrimmed(args.serviceId)
   const mediaId = normalizeTrimmed(args.mediaId)
@@ -280,8 +277,8 @@ export async function fetchAvailabilitySummaryWindow(
       }
     }
 
-    promise = (async (): Promise<SummaryOk> => {
-      const res = await fetch(`/api/availability/day?${qs.toString()}`, {
+    promise = (async (): Promise<BootstrapOk> => {
+      const res = await fetch(`/api/availability/bootstrap?${qs.toString()}`, {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: args.signal,
@@ -299,7 +296,7 @@ export async function fetchAvailabilitySummaryWindow(
         )
       }
 
-      const parsed = parseAvailabilitySummaryResponse(raw)
+      const parsed = parseAvailabilityBootstrapResponse(raw)
       if (!parsed) {
         throw new Error('Availability endpoint returned unexpected response.')
       }
@@ -308,12 +305,12 @@ export async function fetchAvailabilitySummaryWindow(
         throw new Error(parsed.error)
       }
 
-      if (parsed.mode !== 'SUMMARY') {
+      if (parsed.mode !== 'BOOTSTRAP') {
         throw new Error('Availability endpoint returned unexpected response.')
       }
 
       pruneCache()
-      summaryWindowCache.set(windowKey, {
+      bootstrapWindowCache.set(windowKey, {
         at: Date.now(),
         data: parsed,
       })
