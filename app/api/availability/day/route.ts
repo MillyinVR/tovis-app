@@ -121,6 +121,29 @@ function resolveInitialSelectedDay(args: {
   }
 }
 
+async function resolveRequestedDurationMinutes(args: {
+  professionalId: string
+  offeringId: string
+  addOnIds: string[]
+  locationType: ServiceLocationType
+  baseDurationMinutes: number
+}) {
+  if (args.addOnIds.length === 0) {
+    return {
+      ok: true as const,
+      durationMinutes: args.baseDurationMinutes,
+    }
+  }
+
+  return resolveDurationWithAddOns({
+    professionalId: args.professionalId,
+    offeringId: args.offeringId,
+    addOnIds: args.addOnIds,
+    locationType: args.locationType,
+    baseDurationMinutes: args.baseDurationMinutes,
+  })
+}
+
 export async function GET(req: Request) {
   try {
     const {
@@ -212,22 +235,6 @@ export async function GET(req: Request) {
         ? clampInt(toInt(leadRaw, defaultLead), 0, MAX_LEAD_MINUTES)
         : defaultLead
 
-    const addOnResult = await resolveDurationWithAddOns({
-      professionalId,
-      offeringId: offeringDbId,
-      addOnIds,
-      locationType: effectiveLocationType,
-      baseDurationMinutes: durationMinutes,
-    })
-
-    if (!addOnResult.ok) {
-      return bookingJsonFail(addOnResult.code, {
-        userMessage: 'One or more add-ons are invalid for this offering.',
-      })
-    }
-
-    durationMinutes = addOnResult.durationMinutes
-
     const nowUtc = new Date()
     const nowParts = utcDateToLocalParts(nowUtc, timeZone)
     const todayYMD = {
@@ -299,6 +306,22 @@ export async function GET(req: Request) {
           })
         }
       }
+
+        const addOnResult = await resolveRequestedDurationMinutes({
+        professionalId,
+        offeringId: offeringDbId,
+        addOnIds,
+        locationType: effectiveLocationType,
+        baseDurationMinutes: durationMinutes,
+      })
+
+      if (!addOnResult.ok) {
+        return bookingJsonFail(addOnResult.code, {
+          userMessage: 'One or more add-ons are invalid for this offering.',
+        })
+      }
+
+      durationMinutes = addOnResult.durationMinutes
 
       const ymds = summaryWindow.ymds
       const firstBounds = computeDayBoundsUtc(ymds[0] ?? todayYMD, timeZone)
@@ -491,6 +514,22 @@ const firstDaySlots = availableDaySlots[0]?.slots.slice() ?? []
         `You can book up to ${maxAdvanceDays} days in advance.`,
       )
     }
+
+    const addOnResult = await resolveRequestedDurationMinutes({
+      professionalId,
+      offeringId: offeringDbId,
+      addOnIds,
+      locationType: effectiveLocationType,
+      baseDurationMinutes: durationMinutes,
+    })
+
+    if (!addOnResult.ok) {
+      return bookingJsonFail(addOnResult.code, {
+        userMessage: 'One or more add-ons are invalid for this offering.',
+      })
+    }
+
+    durationMinutes = addOnResult.durationMinutes
 
     const dayCacheKey = debug
       ? null

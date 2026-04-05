@@ -747,7 +747,7 @@ const currentDataKeyRef = useRef<string | null>(null)
       return
     }
 
-    setData(null)
+    clearSummaryData()
     setError(null)
     setLoadingMore(false)
     void loadInitial('blocking')
@@ -790,7 +790,7 @@ const currentDataKeyRef = useRef<string | null>(null)
     hasMoreDays: Boolean(data?.hasMoreDays),
     loadMore,
     setError,
-    setData,
+    setData: commitSummaryData,
     refresh,
   }
 }

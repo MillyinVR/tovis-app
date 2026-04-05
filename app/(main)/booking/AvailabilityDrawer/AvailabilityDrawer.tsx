@@ -557,7 +557,7 @@ export default function AvailabilityDrawer(props: {
     context,
     locationType,
     selectedClientAddressId,
-    true,
+    otherProsRequested,
   )
 
   const summary = isSummary(data) ? data : null
@@ -1028,13 +1028,13 @@ export default function AvailabilityDrawer(props: {
     if (openedOnceRef.current) return
     openedOnceRef.current = true
 
-    setSelectedDayYMD(null)
     setPeriod('AFTERNOON')
     setOtherProsRequested(false)
-    clearDaySlots()
 
-    void hardResetUi({ deleteHold: true })
-  }, [open, clearDaySlots, hardResetUi])
+    // Preserve selected day and cached day slots for same-context reopen.
+    // Actual context/location changes already have dedicated reset paths.
+    void hardResetUi()
+  }, [open, hardResetUi])
 
   useEffect(() => {
     if (!open) return

@@ -4,14 +4,14 @@
   "environment": "desktop",
   "deviceProfile": "chromium",
   "projectName": "chromium",
-  "collectedAt": "2026-04-05T00:15:58.943Z",
+  "collectedAt": "2026-04-05T02:12:08.890Z",
   "sampleTargetPerScenario": 1,
   "bookingUrl": "http://127.0.0.1:3000/looks",
   "samples": [
     {
       "scenario": "drawer-open",
       "metric": "drawer_open_to_first_usable_ms",
-      "durationMs": 7209.9000000059605,
+      "durationMs": 6593.799999982119,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
@@ -43,35 +43,45 @@
       "scenario": "hold-request",
       "metric": "hold_request_latency_ms",
       "invalid": true,
-      "invalidReason": "hold_not_created"
+      "invalidReason": "hold_request_status_409",
+      "meta": {
+        "professionalId": "cmmu9zguw0001jr04dmid46j3",
+        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
+        "offeringId": "cmnhaui65001stzk45vtya1ub",
+        "selectedDayYMD": "2026-04-09",
+        "slotISO": "2026-04-09T18:30:00.000Z",
+        "locationType": "SALON",
+        "bookingSource": "DISCOVERY",
+        "statusCode": 409,
+        "ok": false
+      }
     },
     {
       "scenario": "continue-to-add-ons",
       "metric": "continue_to_add_ons_ms",
-      "durationMs": 5696.4000000059605,
+      "invalid": true,
+      "invalidReason": "hold_request_status_409",
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "offeringId": "cmnhaui65001stzk45vtya1ub",
         "selectedDayYMD": "2026-04-10",
-        "slotISO": "2026-04-10T16:00:00.000Z",
+        "slotISO": "2026-04-10T18:30:00.000Z",
         "locationType": "SALON",
         "bookingSource": "DISCOVERY",
-        "holdId": "cmnl0fphy0001tzxs0iak82d3",
-        "mediaId": "cmnhauj9q001ytzk4e6sl0m2x",
-        "addOnCount": 0,
-        "readyTarget": "booking-add-ons-continue-button"
+        "statusCode": 409,
+        "ok": false
       }
     },
     {
       "scenario": "background-refresh",
       "metric": "background_refresh_ms",
-      "durationMs": 1.199999988079071,
+      "durationMs": 1.4000000059604645,
       "meta": {
         "professionalId": "cmmu9zguw0001jr04dmid46j3",
         "serviceId": "cmnhaud8o0010tzk44xtodu4g",
         "locationType": null,
-        "includeOtherPros": true,
+        "includeOtherPros": false,
         "refreshKind": "initial-background",
         "cacheState": "cached-primary",
         "dayCount": 5,
