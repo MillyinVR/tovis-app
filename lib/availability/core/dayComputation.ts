@@ -20,7 +20,7 @@ import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
-import { canShowSlot } from '@/lib/booking/policies/showSlotPolicy'
+import { checkSlotReadiness } from '@/lib/booking/slotReadiness'
 import { type YMD, ymdToString } from '@/lib/availability/core/summaryWindow'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
@@ -63,6 +63,11 @@ type LocalWallTime = {
 }
 
 type LocalMinuteCandidateCache = Map<number, Date[]>
+
+type BusyConflictScanResult = {
+  hasConflict: boolean
+  nextIndex: number
+}
 
 export function computeDayBoundsUtc(dateYMD: YMD, timeZoneRaw: string) {
   const timeZone = sanitizeTimeZone(timeZoneRaw, 'UTC')
@@ -282,6 +287,90 @@ function buildRelevantBusyIntervals(args: {
   return mergeBusyIntervals(relevant)
 }
 
+function buildSortedCandidateSlotStarts(args: {
+  dateYMD: YMD
+  timeZone: string
+  windowStartMinutes: number
+  windowEndMinutes: number
+  durationMinutes: number
+  bufferMinutes: number
+  stepMinutes: number
+  cache: LocalMinuteCandidateCache
+  debug: boolean
+  skippedDstWallTimes: string[]
+}): Date[] {
+  const rawCandidates: Date[] = []
+
+  for (
+    let minute = args.windowStartMinutes;
+    minute + args.durationMinutes + args.bufferMinutes <= args.windowEndMinutes;
+    minute += args.stepMinutes
+  ) {
+    const slotStartUtcCandidates = getCachedUtcCandidatesForLocalMinute({
+      cache: args.cache,
+      dateYMD: args.dateYMD,
+      minuteOffset: minute,
+      timeZone: args.timeZone,
+    })
+
+    if (slotStartUtcCandidates.length === 0) {
+      if (args.debug) {
+        args.skippedDstWallTimes.push(formatSkippedWallTime(minute))
+      }
+      continue
+    }
+
+    rawCandidates.push(...slotStartUtcCandidates)
+  }
+
+  return uniqueSortedDates(rawCandidates)
+}
+
+function scanBusyConflictFromIndex(args: {
+  busyIntervals: BusyInterval[]
+  requestedStart: Date
+  requestedEnd: Date
+  startIndex: number
+}): BusyConflictScanResult {
+  const requestedStartMs = args.requestedStart.getTime()
+  const requestedEndMs = args.requestedEnd.getTime()
+
+  let index = args.startIndex
+
+  while (
+    index < args.busyIntervals.length &&
+    args.busyIntervals[index].end.getTime() <= requestedStartMs
+  ) {
+    index += 1
+  }
+
+  for (let current = index; current < args.busyIntervals.length; current += 1) {
+    const interval = args.busyIntervals[current]
+
+    if (interval.start.getTime() >= requestedEndMs) {
+      return {
+        hasConflict: false,
+        nextIndex: index,
+      }
+    }
+
+    if (
+      interval.start.getTime() < requestedEndMs &&
+      interval.end.getTime() > requestedStartMs
+    ) {
+      return {
+        hasConflict: true,
+        nextIndex: index,
+      }
+    }
+  }
+
+  return {
+    hasConflict: false,
+    nextIndex: index,
+  }
+}
+
 export async function computeDaySlotsFast(args: {
   dateYMD: YMD
   durationMinutes: number
@@ -374,10 +463,9 @@ export async function computeDaySlotsFast(args: {
     MAX_LEAD_MINUTES,
   )
 
-  const rawSlots: string[] = []
   const skippedDstWallTimes: string[] = []
-
   const candidateCache: LocalMinuteCandidateCache = new Map()
+
   const relevantBusy = buildRelevantBusyIntervals({
     busy,
     dayStartUtc,
@@ -386,47 +474,51 @@ export async function computeDaySlotsFast(args: {
     bufferMinutes: buffer,
   })
 
-  for (
-    let minute = window.startMinutes;
-    minute + duration + buffer <= window.endMinutes;
-    minute += step
-  ) {
-    const slotStartUtcCandidates = getCachedUtcCandidatesForLocalMinute({
-      cache: candidateCache,
-      dateYMD,
-      minuteOffset: minute,
+  const sortedCandidateStarts = buildSortedCandidateSlotStarts({
+    dateYMD,
+    timeZone,
+    windowStartMinutes: window.startMinutes,
+    windowEndMinutes: window.endMinutes,
+    durationMinutes: duration,
+    bufferMinutes: buffer,
+    stepMinutes: step,
+    cache: candidateCache,
+    debug: Boolean(debug),
+    skippedDstWallTimes,
+  })
+
+  const slots: string[] = []
+  let busyIndex = 0
+
+  for (const slotStartUtc of sortedCandidateStarts) {
+    const readiness = checkSlotReadiness({
+      startUtc: slotStartUtc,
+      nowUtc,
+      durationMinutes: duration,
+      bufferMinutes: buffer,
+      workingHours,
       timeZone,
+      stepMinutes: step,
+      advanceNoticeMinutes: normalizedLeadTimeMinutes,
+      maxDaysAhead: maxAdvanceDays,
+      fallbackTimeZone: 'UTC',
     })
 
-    if (slotStartUtcCandidates.length === 0) {
-      if (debug) {
-        skippedDstWallTimes.push(formatSkippedWallTime(minute))
-      }
-      continue
-    }
+    if (!readiness.ok) continue
 
-    for (const slotStartUtc of slotStartUtcCandidates) {
-      const slotDecision = canShowSlot({
-        startUtc: slotStartUtc,
-        nowUtc,
-        durationMinutes: duration,
-        bufferMinutes: buffer,
-        workingHours,
-        timeZone,
-        stepMinutes: step,
-        advanceNoticeMinutes: normalizedLeadTimeMinutes,
-        maxDaysAhead: maxAdvanceDays,
-        busy: relevantBusy,
-        fallbackTimeZone: 'UTC',
-      })
+    const busyConflict = scanBusyConflictFromIndex({
+      busyIntervals: relevantBusy,
+      requestedStart: slotStartUtc,
+      requestedEnd: readiness.endUtc,
+      startIndex: busyIndex,
+    })
 
-      if (!slotDecision.ok) continue
+    busyIndex = busyConflict.nextIndex
 
-      rawSlots.push(slotDecision.value.startUtc.toISOString())
-    }
+    if (busyConflict.hasConflict) continue
+
+    slots.push(readiness.startUtc.toISOString())
   }
-
-  const slots = [...new Set(rawSlots)].sort()
 
   return {
     ok: true,
