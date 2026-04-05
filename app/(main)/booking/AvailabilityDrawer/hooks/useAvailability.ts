@@ -58,8 +58,13 @@ function mergeBootstrapRefresh(
 ): BootstrapOk {
   if (!current) return incoming
 
+  /**
+   * selectedDay carries exact slot truth for the bootstrap response only.
+   * Never stamp a freshly generated bootstrap window around an older
+   * selectedDay payload.
+   */
   const preservedSelectedDay =
-    current.selectedDay ?? incoming.selectedDay ?? null
+    incoming.selectedDay ?? current.selectedDay ?? null
 
   return {
     ...incoming,
@@ -80,8 +85,12 @@ function mergeBootstrapAppend(
 ): BootstrapOk {
   if (!current) return incoming
 
+  /**
+   * Keep selectedDay aligned with the freshest bootstrap payload when one is
+   * available. Exact visible slot truth still lives in the day-slot hook.
+   */
   const preservedSelectedDay =
-    current.selectedDay ?? incoming.selectedDay ?? null
+    incoming.selectedDay ?? current.selectedDay ?? null
 
   return {
     ...current,

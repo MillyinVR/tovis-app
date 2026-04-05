@@ -77,6 +77,39 @@ type DaySwitchOutcome =
       reason: string
     }
 
+type PageDiagnostics = {
+  consoleErrors: string[]
+  pageErrors: string[]
+  requestFailures: string[]
+}
+
+function attachPageDiagnostics(page: Page): PageDiagnostics {
+  const diagnostics: PageDiagnostics = {
+    consoleErrors: [],
+    pageErrors: [],
+    requestFailures: [],
+  }
+
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return
+    diagnostics.consoleErrors.push(msg.text())
+  })
+
+  page.on('pageerror', (error) => {
+    diagnostics.pageErrors.push(
+      error instanceof Error ? error.message : String(error),
+    )
+  })
+
+  page.on('requestfailed', (request) => {
+    diagnostics.requestFailures.push(
+      `${request.method()} ${request.url()} :: ${request.failure()?.errorText ?? 'request_failed'}`,
+    )
+  })
+
+  return diagnostics
+}
+
 const PERF_CASES = {
   drawerOpen: {
     scenario: 'drawer-open',
@@ -107,7 +140,10 @@ const PERF_CASES = {
 >
 
 const DEFAULT_SAMPLE_COUNT = 2
-const DEFAULT_BOOKING_URL = 'http://127.0.0.1:3000/looks'
+const DEFAULT_BOOKING_BASE_URL =
+  process.env.PLAYWRIGHT_BASE_URL ??
+  `http://127.0.0.1:${process.env.PORT ?? 3000}`
+const DEFAULT_BOOKING_URL = `${DEFAULT_BOOKING_BASE_URL.replace(/\/$/, '')}/looks`
 const MAX_HOLD_ATTEMPTS_PER_SAMPLE = 8
 const MAX_BOOKING_PAGE_RETRIES = 3
 const MAX_FUTURE_DAY_ATTEMPTS = 7
@@ -255,6 +291,31 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
+async function waitForLooksPageReady(page: Page): Promise<void> {
+  await page.waitForLoadState('domcontentloaded')
+
+  try {
+    await page.waitForLoadState('networkidle', { timeout: 15_000 })
+  } catch {
+    // tolerate long-lived background requests
+  }
+
+  await expect(page.locator('body')).toBeVisible({ timeout: 15_000 })
+
+  await expect
+    .poll(
+      async () => {
+        const text = ((await page.locator('body').textContent()) ?? '')
+          .replace(/\s+/g, ' ')
+          .trim()
+
+        return text.length
+      },
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(0)
+}
+
 function buildRunBookingUrl(): string {
   const url = new URL(BOOKING_URL)
   url.searchParams.set('perfRun', String(Date.now()))
@@ -296,6 +357,12 @@ async function ensureBookingPageReachable(
 
 async function resetPerfStore(page: Page): Promise<void> {
   await page.evaluate(() => {
+    try {
+      window.sessionStorage.removeItem('__tovis_availability_perf_store_v1')
+    } catch {
+      // ignore storage reset failures
+    }
+
     if (!window.__tovisAvailabilityPerf) {
       window.__tovisAvailabilityPerf = {
         version: 1,
@@ -370,6 +437,7 @@ async function gotoBookingPage(
   for (let attempt = 1; attempt <= MAX_BOOKING_PAGE_RETRIES; attempt += 1) {
     try {
       await page.goto(buildRunBookingUrl(), { waitUntil: 'domcontentloaded' })
+      await waitForLooksPageReady(page)
       return
     } catch (error) {
       lastError = error
@@ -415,6 +483,119 @@ async function firstVisibleLocator(
   return null
 }
 
+async function countVisibleLocators(
+  page: Page,
+  selectors: readonly string[],
+): Promise<number> {
+  let visibleCount = 0
+
+  for (const selector of selectors) {
+    const locators = page.locator(selector)
+    const count = await locators.count()
+
+    for (let index = 0; index < count; index += 1) {
+      try {
+        if (await locators.nth(index).isVisible()) {
+          visibleCount += 1
+        }
+      } catch {
+        // ignore transient visibility errors
+      }
+    }
+  }
+
+  return visibleCount
+}
+
+async function describeBookingTriggers(
+  page: Page,
+  selectors: readonly string[],
+): Promise<string> {
+  const lines: string[] = []
+
+  for (const selector of selectors) {
+    const locators = page.locator(selector)
+    const count = await locators.count()
+    let visibleCount = 0
+    const samples: string[] = []
+
+    for (let index = 0; index < Math.min(count, 3); index += 1) {
+      const locator = locators.nth(index)
+
+      let visible = false
+      try {
+        visible = await locator.isVisible()
+      } catch {
+        visible = false
+      }
+
+      if (visible) {
+        visibleCount += 1
+      }
+
+      let text = ''
+      try {
+        text = (((await locator.textContent()) ?? '').replace(/\s+/g, ' ').trim())
+      } catch {
+        text = ''
+      }
+
+      samples.push(
+        `[${index}] visible=${visible} text="${text.slice(0, 80)}"`,
+      )
+    }
+
+    lines.push(
+      `${selector} => count=${count}, visible=${visibleCount}${
+        samples.length ? `, samples=${samples.join(' | ')}` : ''
+      }`,
+    )
+  }
+
+  return lines.join(' || ')
+}
+
+async function describePageState(page: Page): Promise<string> {
+  const url = page.url()
+
+  let title = ''
+  try {
+    title = await page.title()
+  } catch {
+    title = ''
+  }
+
+  let bodyText = ''
+  try {
+    bodyText = ((await page.locator('body').textContent()) ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 300)
+  } catch {
+    bodyText = ''
+  }
+
+  const visibleButtons = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('button'))
+      .map((button) => {
+        const text = (button.textContent ?? '').replace(/\s+/g, ' ').trim()
+        return text
+      })
+      .filter(Boolean)
+      .slice(0, 12)
+  })
+
+  return `url=${url} | title="${title}" | body="${bodyText}" | visibleButtons=${JSON.stringify(visibleButtons)}`
+}
+
+function describeDiagnostics(diagnostics: PageDiagnostics): string {
+  return [
+    `consoleErrors=${JSON.stringify(diagnostics.consoleErrors.slice(0, 8))}`,
+    `pageErrors=${JSON.stringify(diagnostics.pageErrors.slice(0, 8))}`,
+    `requestFailures=${JSON.stringify(diagnostics.requestFailures.slice(0, 8))}`,
+  ].join(' | ')
+}
+
 async function findBookingTrigger(page: Page): Promise<Locator> {
   const locator = await firstVisibleLocator(page, SELECTORS.bookingTrigger)
 
@@ -429,35 +610,31 @@ async function findBookingTrigger(page: Page): Promise<Locator> {
 
 async function openDrawerAndWaitUsable(
   page: Page,
+  diagnostics?: PageDiagnostics,
 ): Promise<AvailabilityPerfCompletedEntry | null> {
-await expect
-  .poll(
-    async () => {
-      const locators = page.locator('[data-testid="open-availability-button"]')
-      const count = await locators.count()
-      let visibleCount = 0
+  const startedAt = Date.now()
 
-      for (let index = 0; index < count; index += 1) {
-        try {
-          if (await locators.nth(index).isVisible()) {
-            visibleCount += 1
-          }
-        } catch {
-          // ignore transient visibility errors
-        }
-      }
+  while (Date.now() - startedAt < 20_000) {
+    const visibleCount = await countVisibleLocators(page, SELECTORS.bookingTrigger)
 
-      return visibleCount
-    },
-    { timeout: 10_000 },
+    if (visibleCount > 0) {
+      const trigger = await findBookingTrigger(page)
+      await trigger.scrollIntoViewIfNeeded()
+      await trigger.click()
+
+      await expect(page.getByTestId('availability-drawer')).toBeVisible()
+      return waitForMetric(page, PERF_CASES.drawerOpen.metric)
+    }
+
+    await page.waitForTimeout(200)
+  }
+
+  const diagnostic = await describeBookingTriggers(page, SELECTORS.bookingTrigger)
+  const pageState = await describePageState(page)
+  const browserState = diagnostics ? describeDiagnostics(diagnostics) : ''
+  throw new Error(
+    `booking_trigger_not_visible | ${diagnostic} | ${pageState}${browserState ? ` | ${browserState}` : ''}`,
   )
-  .toBeGreaterThan(0)
-
-  const trigger = await findBookingTrigger(page)
-  await trigger.click()
-
-  await expect(page.getByTestId('availability-drawer')).toBeVisible()
-  return waitForMetric(page, PERF_CASES.drawerOpen.metric)
 }
 
 async function findDayButtons(page: Page): Promise<Locator[]> {
@@ -1008,10 +1185,11 @@ async function collectDrawerOpenSample(
   request: APIRequestContext,
 ): Promise<RawPerfSample> {
   try {
+    const diagnostics = attachPageDiagnostics(page)
     await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
-    const entry = await openDrawerAndWaitUsable(page)
+    const entry = await openDrawerAndWaitUsable(page, diagnostics)
 
     if (!entry) {
       return toInvalidSample(PERF_CASES.drawerOpen, 'missing_perf_metric')

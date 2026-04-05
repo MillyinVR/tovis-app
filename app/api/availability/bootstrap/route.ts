@@ -59,6 +59,11 @@ type SummarySeededDay = {
   slots: string[]
 }
 
+type SummaryAvailableDay = {
+  date: string
+  slotCount: number
+}
+
 type AvailabilityBootstrapRequestPayload = {
   professionalId: string
   serviceId: string
@@ -171,29 +176,6 @@ function buildBootstrapRequestPayload(args: {
   }
 }
 
-function resolveSelectedDay(args: {
-  availableDaySlots: SummarySeededDay[]
-  todayDate: string
-}): SummarySeededDay | null {
-  const todayMatch = args.availableDaySlots.find(
-    (day) => day.date === args.todayDate,
-  )
-  if (todayMatch) {
-    return {
-      date: todayMatch.date,
-      slots: todayMatch.slots.slice(),
-    }
-  }
-
-  const firstAvailable = args.availableDaySlots[0]
-  if (!firstAvailable) return null
-
-  return {
-    date: firstAvailable.date,
-    slots: firstAvailable.slots.slice(),
-  }
-}
-
 function pickSeededDay(x: unknown): SummarySeededDay | null {
   if (!isRecord(x)) return null
 
@@ -208,30 +190,90 @@ function pickSeededDay(x: unknown): SummarySeededDay | null {
   }
 }
 
+function pickAvailableDays(x: unknown): SummaryAvailableDay[] {
+  if (!Array.isArray(x)) return []
+
+  const normalized: SummaryAvailableDay[] = []
+
+  for (const row of x) {
+    if (!isRecord(row)) continue
+
+    const date = pickString(row.date)
+    const slotCount = pickNumber(row.slotCount)
+
+    if (!date) continue
+    if (slotCount == null || slotCount <= 0) continue
+
+    normalized.push({
+      date,
+      slotCount: Math.trunc(slotCount),
+    })
+  }
+
+  return normalized
+}
+
+function resolveSelectedDay(args: {
+  availableDays: SummaryAvailableDay[]
+  todayDate: string
+  todaySelectedDay: SummarySeededDay | null
+  firstAvailableSelectedDay: SummarySeededDay | null
+}): SummarySeededDay | null {
+  const todayExists = args.availableDays.some((day) => day.date === args.todayDate)
+  if (todayExists && args.todaySelectedDay) {
+    return {
+      date: args.todaySelectedDay.date,
+      slots: args.todaySelectedDay.slots.slice(),
+    }
+  }
+
+  if (args.firstAvailableSelectedDay) {
+    return {
+      date: args.firstAvailableSelectedDay.date,
+      slots: args.firstAvailableSelectedDay.slots.slice(),
+    }
+  }
+
+  return null
+}
+
 function deriveSelectedDayFromCachedBootstrap(args: {
   cached: Record<string, unknown>
+  availableDays: SummaryAvailableDay[]
+  todayDate: string
 }): SummarySeededDay | null {
   const selectedDay = pickSeededDay(args.cached.selectedDay)
-  if (selectedDay) return selectedDay
+  if (
+    selectedDay &&
+    selectedDay.slots.length > 0 &&
+    args.availableDays.some((day) => day.date === selectedDay.date)
+  ) {
+    return selectedDay
+  }
 
   const legacyInitialSelectedDay = pickSeededDay(args.cached.initialSelectedDay)
-  if (legacyInitialSelectedDay) return legacyInitialSelectedDay
+  if (
+    legacyInitialSelectedDay &&
+    legacyInitialSelectedDay.slots.length > 0 &&
+    args.availableDays.some((day) => day.date === legacyInitialSelectedDay.date)
+  ) {
+    return legacyInitialSelectedDay
+  }
 
   const firstDaySlots = pickStringArray(args.cached.firstDaySlots)
-  const availableDaysRaw = args.cached.availableDays
+  if (firstDaySlots && firstDaySlots.length > 0) {
+    const todayDay = args.availableDays.find((day) => day.date === args.todayDate)
+    const fallbackDay = todayDay ?? args.availableDays[0]
 
-  if (!firstDaySlots?.length || !Array.isArray(availableDaysRaw)) return null
-
-  const firstRow = availableDaysRaw.find((row) => isRecord(row) && pickString(row.date))
-  if (!firstRow || !isRecord(firstRow)) return null
-
-  const date = pickString(firstRow.date)
-  if (!date) return null
-
-  return {
-    date,
-    slots: firstDaySlots.slice(),
+    if (fallbackDay) {
+      return {
+        date: fallbackDay.date,
+        slots: firstDaySlots.slice(),
+      }
+    }
   }
+
+  return null
 }
 
 async function resolveRequestedDurationMinutes(args: {
@@ -263,20 +305,27 @@ function normalizeBootstrapCacheHit(args: {
   request: AvailabilityBootstrapRequestPayload
   availabilityVersion: string
   generatedAt: string
+  todayDate: string
 }) {
+  const availableDays = pickAvailableDays(args.cached.availableDays)
+
   const selectedDay =
     deriveSelectedDayFromCachedBootstrap({
       cached: args.cached,
+      availableDays,
+      todayDate: args.todayDate,
     }) ?? null
 
   return {
     ...args.cached,
+    ok: true as const,
     mode: 'BOOTSTRAP' as const,
     mediaId: args.mediaId,
     request: isRecord(args.cached.request) ? args.cached.request : args.request,
     availabilityVersion:
       pickString(args.cached.availabilityVersion) ?? args.availabilityVersion,
     generatedAt: pickString(args.cached.generatedAt) ?? args.generatedAt,
+    availableDays,
     selectedDay,
   }
 }
@@ -441,55 +490,55 @@ export async function GET(req: Request) {
           clientAddressId: resolvedClientAddressId,
         })
 
-    if (summaryCacheKey) {
+        if (summaryCacheKey) {
       const hit = await cacheGetJson<unknown>(summaryCacheKey)
+
       if (isBootstrapCacheHit(hit)) {
         const cachedDurationMinutes = pickNumber(hit.durationMinutes)
-        const request =
-          cachedDurationMinutes == null
-            ? null
-            : buildBootstrapRequestPayload({
-                professionalId,
-                serviceId,
-                offeringId: offeringDbId,
-                locationType: effectiveLocationType,
-                locationId,
-                clientAddressId: resolvedClientAddressId,
-                addOnIds,
-                durationMinutes: cachedDurationMinutes,
-              })
 
-      if (request && cachedDurationMinutes != null) {
-        const generatedAt = new Date().toISOString()
-        const availabilityVersion = buildAvailabilityVersion({
-          professionalId,
-          serviceId,
-          offeringId: offeringDbId,
-          locationType: effectiveLocationType,
-          locationId,
-          clientAddressId: resolvedClientAddressId,
-          addOnIds,
-          durationMinutes: cachedDurationMinutes,
-          scheduleVersion,
-          scheduleConfigVersion,
-          windowStartDate,
-          windowEndDate,
-          includeOtherPros,
-          viewerLat,
-          viewerLng,
-          radiusMiles,
-        })
+        if (cachedDurationMinutes != null) {
+          const request = buildBootstrapRequestPayload({
+            professionalId,
+            serviceId,
+            offeringId: offeringDbId,
+            locationType: effectiveLocationType,
+            locationId,
+            clientAddressId: resolvedClientAddressId,
+            addOnIds,
+            durationMinutes: cachedDurationMinutes,
+          })
 
-        return jsonOk(
-          normalizeBootstrapCacheHit({
-            cached: hit,
-            mediaId: mediaId || null,
-            request,
-            availabilityVersion,
-            generatedAt,
-          }),
-        )
-      }
+          const generatedAt = new Date().toISOString()
+          const availabilityVersion = buildAvailabilityVersion({
+            professionalId,
+            serviceId,
+            offeringId: offeringDbId,
+            locationType: effectiveLocationType,
+            locationId,
+            clientAddressId: resolvedClientAddressId,
+            addOnIds,
+            durationMinutes: cachedDurationMinutes,
+            scheduleVersion,
+            scheduleConfigVersion,
+            windowStartDate,
+            windowEndDate,
+            includeOtherPros,
+            viewerLat,
+            viewerLng,
+            radiusMiles,
+          })
+
+          return jsonOk(
+            normalizeBootstrapCacheHit({
+              cached: hit,
+              mediaId: mediaId || null,
+              request,
+              availabilityVersion,
+              generatedAt,
+              todayDate,
+            }),
+          )
+        }
       }
     }
 
@@ -575,8 +624,9 @@ export async function GET(req: Request) {
       }),
     )
 
-    const availableDays: Array<{ date: string; slotCount: number }> = []
-    const availableDaySlots: SummarySeededDay[] = []
+    const availableDays: SummaryAvailableDay[] = []
+    let todaySelectedDay: SummarySeededDay | null = null
+    let firstAvailableSelectedDay: SummarySeededDay | null = null
     let firstErrorCode: BookingErrorCode | null = null
 
     for (const row of dayResults) {
@@ -585,25 +635,37 @@ export async function GET(req: Request) {
         continue
       }
 
-      if (row.result.slots.length > 0) {
-        const date = ymdToString(row.ymd)
-        const slots = row.result.slots.slice()
+      const slotCount = row.result.slots.length
+      if (slotCount <= 0) continue
 
-        availableDays.push({
-          date,
-          slotCount: slots.length,
-        })
+      const date = ymdToString(row.ymd)
+      const slots = row.result.slots.slice()
 
-        availableDaySlots.push({
+      availableDays.push({
+        date,
+        slotCount,
+      })
+
+      if (date === todayDate && !todaySelectedDay) {
+        todaySelectedDay = {
           date,
           slots,
-        })
+        }
+      }
+
+      if (!firstAvailableSelectedDay) {
+        firstAvailableSelectedDay = {
+          date,
+          slots,
+        }
       }
     }
 
     const selectedDay = resolveSelectedDay({
-      availableDaySlots,
+      availableDays,
       todayDate,
+      todaySelectedDay,
+      firstAvailableSelectedDay,
     })
 
     const request = buildBootstrapRequestPayload({

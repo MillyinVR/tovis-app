@@ -259,6 +259,36 @@ function getBookingUiMessage(
   }
 }
 
+function shouldRefreshAvailabilityAfterBookingError(
+  parsed: ParsedBookingApiError | null,
+  status: number,
+): boolean {
+  if (
+    parsed?.uiAction === 'REFRESH_AVAILABILITY' ||
+    parsed?.uiAction === 'PICK_NEW_SLOT'
+  ) {
+    return true
+  }
+
+  switch (parsed?.code) {
+    case 'HOLD_EXPIRED':
+    case 'HOLD_NOT_FOUND':
+    case 'HOLD_MISMATCH':
+    case 'TIME_BLOCKED':
+    case 'TIME_BOOKED':
+    case 'TIME_HELD':
+    case 'TIME_NOT_AVAILABLE':
+    case 'STEP_MISMATCH':
+    case 'OUTSIDE_WORKING_HOURS':
+    case 'ADVANCE_NOTICE_REQUIRED':
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return true
+
+    default:
+      return status === 409
+  }
+}
+
 function periodOfHour(h: number): Period {
   if (h < 12) return 'MORNING'
   if (h < 17) return 'AFTERNOON'
@@ -730,6 +760,31 @@ export default function AvailabilityDrawer(props: {
     setSlotRetryKey((k) => k + 1)
   }, [setError])
 
+    const refreshAfterAvailabilityConflict = useCallback(() => {
+    setSelected(null)
+    setHoldUntil(null)
+    setOtherProsRequested(false)
+
+    if (selectedDayYMD) {
+      invalidateDaySlotCache({
+        selectedDayYMD,
+        locationType: activeLocationType,
+        clientAddressId: selectedClientAddressId,
+      })
+    }
+
+    clearAlternates()
+    setSlotRetryKey((k) => k + 1)
+    refresh()
+  }, [
+    selectedDayYMD,
+    activeLocationType,
+    selectedClientAddressId,
+    invalidateDaySlotCache,
+    clearAlternates,
+    refresh,
+  ])
+
   const handleManualRefresh = useCallback(() => {
     setHoldError(null)
     refresh()
@@ -1112,10 +1167,12 @@ export default function AvailabilityDrawer(props: {
 
   useEffect(() => {
     if (!holdExpired) return
+
     setHoldUntil(null)
     setSelected(null)
     setHoldError('That hold expired. Please pick a new slot.')
-  }, [holdExpired])
+    refreshAfterAvailabilityConflict()
+  }, [holdExpired, refreshAfterAvailabilityConflict])
 
   useEffect(() => {
     if (!open) return
@@ -1337,6 +1394,11 @@ export default function AvailabilityDrawer(props: {
 
       if (!res.ok) {
         const parsedError = parseBookingApiError(raw, res.status)
+
+        if (shouldRefreshAvailabilityAfterBookingError(parsedError, res.status)) {
+          refreshAfterAvailabilityConflict()
+        }
+
         throw new Error(
           getBookingUiMessage(parsedError, `Hold failed (${res.status}).`),
         )

@@ -1,0 +1,140 @@
+*** Begin Patch
+*** Update File: app/(main)/booking/AvailabilityDrawer/hooks/useAvailability.ts
+@@
+ function mergeBootstrapRefresh(
+   current: BootstrapOk | null,
+   incoming: BootstrapOk,
+ ): BootstrapOk {
+   if (!current) return incoming
+ 
+-  const preservedSelectedDay =
+-    current.selectedDay ?? incoming.selectedDay ?? null
++  /**
++   * selectedDay carries exact slot truth for the bootstrap response only.
++   * Never stamp a freshly generated bootstrap window around an older
++   * selectedDay payload.
++   */
++  const preservedSelectedDay =
++    incoming.selectedDay ?? current.selectedDay ?? null
+@@
+ function mergeBootstrapAppend(
+   current: BootstrapOk | null,
+   incoming: BootstrapOk,
+ ): BootstrapOk {
+   if (!current) return incoming
+ 
+-  const preservedSelectedDay =
+-    current.selectedDay ?? incoming.selectedDay ?? null
++  /**
++   * Keep selectedDay aligned with the freshest bootstrap payload when one is
++   * available. Exact visible slot truth still lives in the day-slot hook.
++   */
++  const preservedSelectedDay =
++    incoming.selectedDay ?? current.selectedDay ?? null
+*** Update File: app/(main)/booking/AvailabilityDrawer/hooks/useDaySlots.ts
+@@
+ function canUseBootstrapSelectedDayAsPlaceholder(
+   summary: BootstrapData | null,
+ ): boolean {
+   if (!summary) return false
+@@
+ 
+   return Date.now() - generatedAtMs <= MAX_BOOTSTRAP_SELECTED_DAY_AGE_MS
+ }
++
++function getFreshBootstrapSelectedDayForRequest(args: {
++  summary: BootstrapData | null
++  selectedDayYMD: string | null
++  locationType: ServiceLocationType
++  selectedClientAddressId: string | null
++}): { date: string; slots: string[] } | null {
++  const selectedDay = getBootstrapSelectedDay({
++    summary: args.summary,
++    selectedDayYMD: args.selectedDayYMD,
++  })
++
++  if (!selectedDay) return null
++  if (!canUseBootstrapSelectedDayAsPlaceholder(args.summary)) return null
++  if (!args.summary) return null
++  if (args.summary.request.locationType !== args.locationType) return null
++
++  const requestClientAddressId = args.summary.request.clientAddressId ?? null
++  const activeClientAddressId =
++    args.locationType === 'MOBILE' ? (args.selectedClientAddressId ?? null) : null
++
++  if (requestClientAddressId !== activeClientAddressId) {
++    return null
++  }
++
++  return selectedDay
++}
+@@
+-    const bootstrapSelectedDay = getBootstrapSelectedDay({
+-      summary,
+-      selectedDayYMD: currentDayYMD,
+-    })
++    const bootstrapSelectedDay = getFreshBootstrapSelectedDayForRequest({
++      summary,
++      selectedDayYMD: currentDayYMD,
++      locationType: activeLocationType,
++      selectedClientAddressId,
++    })
+@@
+-    const canUseBootstrapPlaceholder =
+-      !forceRefresh &&
+-      bootstrapSelectedDay != null &&
+-      canUseBootstrapSelectedDayAsPlaceholder(summary)
+-
+-    if (canUseBootstrapPlaceholder) {
++    const shouldUseBootstrapSelectedDay =
++      !forceRefresh && bootstrapSelectedDay != null
++
++    if (shouldUseBootstrapSelectedDay) {
+       setPrimarySlots(bootstrapSelectedDay.slots)
+-    } else {
+-      setPrimarySlots([])
+-    }
+-
+-    if (!holding) {
+-      setError(null)
+-    }
+-
+-    setLoadingPrimarySlots(true)
++      if (!holding) {
++        setError(null)
++      }
++      setLoadingPrimarySlots(false)
++      return
++    }
++
++    setPrimarySlots([])
++
++    if (!holding) {
++      setError(null)
++    }
++
++    setLoadingPrimarySlots(true)
+@@
+     selectedDayYMD,
+     activeLocationType,
++    selectedClientAddressId,
+     retryKey,
+     holding,
+     setError,
+   ])
+*** Update File: playwright.config.ts
+@@
+ const isCI = !!process.env.CI
+ const port = Number(process.env.PORT ?? 3000)
+-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:3000`
++const baseURL =
++  process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`
+*** Update File: tests/e2e/availability.perf.spec.ts
+@@
+ const DEFAULT_SAMPLE_COUNT = 2
+-const DEFAULT_BOOKING_URL = 'http://127.0.0.1:3000/looks'
++const DEFAULT_BOOKING_BASE_URL =
++  process.env.PLAYWRIGHT_BASE_URL ??
++  `http://127.0.0.1:${process.env.PORT ?? 3000}`
++const DEFAULT_BOOKING_URL = `${DEFAULT_BOOKING_BASE_URL.replace(/\/$/, '')}/looks`
+*** End Patch
