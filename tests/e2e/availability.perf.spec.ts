@@ -387,18 +387,29 @@ async function gotoBookingPage(
 async function firstVisibleLocator(
   page: Page,
   selectors: readonly string[],
+  timeoutMs = 10_000,
 ): Promise<Locator | null> {
-  for (const selector of selectors) {
-    const locator = page.locator(selector).first()
+  const startedAt = Date.now()
 
-    if ((await locator.count()) === 0) continue
+  while (Date.now() - startedAt < timeoutMs) {
+    for (const selector of selectors) {
+      const locators = page.locator(selector)
+      const count = await locators.count()
 
-    try {
-      await locator.waitFor({ state: 'visible', timeout: 750 })
-      return locator
-    } catch {
-      // try next selector
+      for (let index = 0; index < count; index += 1) {
+        const locator = locators.nth(index)
+
+        try {
+          if (await locator.isVisible()) {
+            return locator
+          }
+        } catch {
+          // keep scanning
+        }
+      }
     }
+
+    await page.waitForTimeout(200)
   }
 
   return null
@@ -419,6 +430,29 @@ async function findBookingTrigger(page: Page): Promise<Locator> {
 async function openDrawerAndWaitUsable(
   page: Page,
 ): Promise<AvailabilityPerfCompletedEntry | null> {
+await expect
+  .poll(
+    async () => {
+      const locators = page.locator('[data-testid="open-availability-button"]')
+      const count = await locators.count()
+      let visibleCount = 0
+
+      for (let index = 0; index < count; index += 1) {
+        try {
+          if (await locators.nth(index).isVisible()) {
+            visibleCount += 1
+          }
+        } catch {
+          // ignore transient visibility errors
+        }
+      }
+
+      return visibleCount
+    },
+    { timeout: 10_000 },
+  )
+  .toBeGreaterThan(0)
+
   const trigger = await findBookingTrigger(page)
   await trigger.click()
 

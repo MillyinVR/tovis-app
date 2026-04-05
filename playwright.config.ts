@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 const isCI = !!process.env.CI
 const port = Number(process.env.PORT ?? 3000)
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:3000`
 const clientAuthFile = path.join(
   process.cwd(),
   'playwright',
