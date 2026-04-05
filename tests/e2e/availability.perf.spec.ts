@@ -1,6 +1,12 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from '@playwright/test'
 
 import type {
   AvailabilityPerfCompletedEntry,
@@ -51,6 +57,26 @@ type HoldAttemptOutcome =
       meta?: AvailabilityPerfMeta
     }
 
+type VisibleSlotInspection = {
+  signatures: string[]
+  slotCount: number
+  enabledCount: number
+  inferredSelectedDayYMD: string | null
+}
+
+type DaySwitchOutcome =
+  | {
+      ok: true
+      label: string
+      selectedDayYMD: string | null
+      entry: AvailabilityPerfCompletedEntry | null
+      inspection: VisibleSlotInspection
+    }
+  | {
+      ok: false
+      reason: string
+    }
+
 const PERF_CASES = {
   drawerOpen: {
     scenario: 'drawer-open',
@@ -83,6 +109,8 @@ const PERF_CASES = {
 const DEFAULT_SAMPLE_COUNT = 2
 const DEFAULT_BOOKING_URL = 'http://127.0.0.1:3000/looks'
 const MAX_HOLD_ATTEMPTS_PER_SAMPLE = 8
+const MAX_BOOKING_PAGE_RETRIES = 3
+const MAX_FUTURE_DAY_ATTEMPTS = 7
 
 const SAMPLE_COUNT = parsePositiveInteger(
   process.env.PERF_SAMPLES,
@@ -221,6 +249,51 @@ function getHoldFailureReason(entry: AvailabilityPerfCompletedEntry): string {
   return 'hold_request_missing_success_signal'
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function buildRunBookingUrl(): string {
+  const url = new URL(BOOKING_URL)
+  url.searchParams.set('perfRun', String(Date.now()))
+  return url.toString()
+}
+
+async function ensureBookingPageReachable(
+  request: APIRequestContext,
+): Promise<void> {
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= MAX_BOOKING_PAGE_RETRIES; attempt += 1) {
+    try {
+      const response = await request.get(BOOKING_URL, {
+        failOnStatusCode: false,
+        timeout: 5_000,
+      })
+
+      if (response.status() < 500) {
+        return
+      }
+
+      lastError = new Error(`booking_url_status_${response.status()}`)
+    } catch (error) {
+      lastError = error
+    }
+
+    if (attempt < MAX_BOOKING_PAGE_RETRIES) {
+      await sleep(750 * attempt)
+    }
+  }
+
+  throw new Error(
+    lastError instanceof Error
+      ? lastError.message
+      : 'booking_url_unreachable',
+  )
+}
+
 async function resetPerfStore(page: Page): Promise<void> {
   await page.evaluate(() => {
     if (!window.__tovisAvailabilityPerf) {
@@ -280,14 +353,35 @@ async function waitForMetric(
   )
 }
 
-async function gotoBookingPage(page: Page): Promise<void> {
+async function gotoBookingPage(
+  page: Page,
+  request: APIRequestContext,
+): Promise<void> {
   if (!BOOKING_URL) {
     throw new Error(
       'Missing PERF_BOOKING_URL. Set it to a page where the availability flow can be opened.',
     )
   }
 
-  await page.goto(BOOKING_URL, { waitUntil: 'networkidle' })
+  await ensureBookingPageReachable(request)
+
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= MAX_BOOKING_PAGE_RETRIES; attempt += 1) {
+    try {
+      await page.goto(buildRunBookingUrl(), { waitUntil: 'domcontentloaded' })
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < MAX_BOOKING_PAGE_RETRIES) {
+        await sleep(750 * attempt)
+      }
+    }
+  }
+
+  throw new Error(
+    lastError instanceof Error ? lastError.message : 'page_goto_failed',
+  )
 }
 
 async function firstVisibleLocator(
@@ -383,50 +477,9 @@ async function waitForHoldReady(page: Page): Promise<void> {
   throw new Error('hold_ready_ui_missing')
 }
 
-async function clickDayByIndex(
-  page: Page,
-  targetIndex: number,
-): Promise<string | null> {
-  const buttons = await findDayButtons(page)
-
-  if (buttons.length <= targetIndex) return null
-
-  const target = buttons[targetIndex]
-  const label = ((await target.textContent()) ?? '').replace(/\s+/g, ' ').trim()
-
-  await target.click()
-  return label || 'unknown-day'
-}
-
-async function prepareHoldCandidateDay(
-  page: Page,
-  currentSelectedDayYMD: string | null,
-  targetDayIndex: number,
-): Promise<string | null> {
-  const previousSlotSignatures = await readVisibleSlotButtonSignatures(page)
-  const switchedDayLabel = await clickDayByIndex(page, targetDayIndex)
-
-  if (!switchedDayLabel) {
-    return currentSelectedDayYMD
-  }
-
-  const daySwitchEntry = await waitForMetric(
-    page,
-    PERF_CASES.daySwitch.metric,
-    undefined,
-    10_000,
-  )
-
-  try {
-    await waitForSlotButtonsToRefresh(page, previousSlotSignatures)
-  } catch {
-    // tolerate unchanged signatures
-  }
-
-  return (
-    readStringMeta(daySwitchEntry?.meta, 'selectedDayYMD') ??
-    currentSelectedDayYMD
-  )
+async function readDayButtonLabel(button: Locator): Promise<string> {
+  return (((await button.textContent()) ?? '').replace(/\s+/g, ' ').trim() ||
+    'unknown-day')
 }
 
 async function findSlotButtons(page: Page): Promise<Locator[]> {
@@ -482,6 +535,44 @@ function extractSlotIsoFromSignature(signature: string): string | null {
   return match?.[1] ?? null
 }
 
+function inferSelectedDayYMDFromSignatures(signatures: string[]): string | null {
+  const values = Array.from(
+    new Set(
+      signatures
+        .map((signature) => extractSlotIsoFromSignature(signature)?.slice(0, 10) ?? null)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  )
+
+  if (values.length === 0) return null
+  return values[0] ?? null
+}
+
+async function inspectVisibleSlots(page: Page): Promise<VisibleSlotInspection> {
+  const slotButtons = await findSlotButtons(page)
+  const signatures = await readVisibleSlotButtonSignatures(page)
+
+  let enabledCount = 0
+
+  for (const slotButton of slotButtons) {
+    try {
+      if (!(await slotButton.isVisible())) continue
+      if (await slotButton.isEnabled()) {
+        enabledCount += 1
+      }
+    } catch {
+      // ignore individual button errors
+    }
+  }
+
+  return {
+    signatures,
+    slotCount: slotButtons.length,
+    enabledCount,
+    inferredSelectedDayYMD: inferSelectedDayYMDFromSignatures(signatures),
+  }
+}
+
 async function waitForSlotButtonsToRefresh(
   page: Page,
   previousSignatures: string[],
@@ -498,6 +589,51 @@ async function waitForSlotButtonsToRefresh(
     .not.toBe(previousKey)
 }
 
+async function switchToDayByIndex(
+  page: Page,
+  targetIndex: number,
+  previousSignatures: string[],
+  fallbackSelectedDayYMD: string | null,
+): Promise<DaySwitchOutcome> {
+  const buttons = await findDayButtons(page)
+
+  if (buttons.length <= targetIndex) {
+    return { ok: false, reason: 'insufficient_day_buttons' }
+  }
+
+  const target = buttons[targetIndex]
+  const label = await readDayButtonLabel(target)
+
+  await resetPerfStore(page)
+  await target.click()
+
+  const entry = await waitForMetric(
+    page,
+    PERF_CASES.daySwitch.metric,
+    undefined,
+    10_000,
+  )
+
+  try {
+    await waitForSlotButtonsToRefresh(page, previousSignatures)
+  } catch {
+    // tolerate unchanged signatures; inspection still tells us current state
+  }
+
+  const inspection = await inspectVisibleSlots(page)
+  const selectedDayYMD =
+    readStringMeta(entry?.meta, 'selectedDayYMD') ??
+    inspection.inferredSelectedDayYMD ??
+    fallbackSelectedDayYMD
+
+  return {
+    ok: true,
+    label,
+    selectedDayYMD,
+    entry,
+    inspection,
+  }
+}
 
 async function createSuccessfulHold(
   page: Page,
@@ -605,6 +741,79 @@ function isEntryForExpectedDay(
   if (!slotISO) return true
 
   return slotISO.startsWith(expectedSelectedDayYMD)
+}
+
+async function createSuccessfulHoldAcrossDays(
+  page: Page,
+  options?: {
+    requireReadyUi?: boolean
+    currentSelectedDayYMD?: string | null
+  },
+): Promise<HoldAttemptOutcome> {
+  let activeSelectedDayYMD = options?.currentSelectedDayYMD ?? null
+  let currentInspection = await inspectVisibleSlots(page)
+
+  activeSelectedDayYMD =
+    activeSelectedDayYMD ?? currentInspection.inferredSelectedDayYMD
+
+  let lastFailureReason = 'no_bookable_slots_on_visible_days'
+  let lastFailureMeta: AvailabilityPerfMeta | undefined
+  let previousSignatures = currentInspection.signatures
+
+  if (currentInspection.enabledCount > 0) {
+    const currentAttempt = await createSuccessfulHold(page, {
+      requireReadyUi: options?.requireReadyUi,
+      expectedSelectedDayYMD: activeSelectedDayYMD,
+    })
+
+    if (currentAttempt.ok) return currentAttempt
+
+    lastFailureReason = currentAttempt.reason
+    lastFailureMeta = currentAttempt.meta
+  }
+
+  const dayButtons = await findDayButtons(page)
+  const maxFutureIndex = Math.min(dayButtons.length - 1, MAX_FUTURE_DAY_ATTEMPTS)
+
+  for (let dayIndex = 1; dayIndex <= maxFutureIndex; dayIndex += 1) {
+    const switched = await switchToDayByIndex(
+      page,
+      dayIndex,
+      previousSignatures,
+      activeSelectedDayYMD,
+    )
+
+    if (!switched.ok) {
+      lastFailureReason = switched.reason
+      continue
+    }
+
+    previousSignatures = switched.inspection.signatures
+    activeSelectedDayYMD = switched.selectedDayYMD
+
+    if (switched.inspection.enabledCount === 0) {
+      lastFailureReason = 'no_enabled_slots_on_candidate_day'
+      continue
+    }
+
+    const holdAttempt = await createSuccessfulHold(page, {
+      requireReadyUi: options?.requireReadyUi,
+      expectedSelectedDayYMD: activeSelectedDayYMD,
+    })
+
+    if (holdAttempt.ok) {
+      return holdAttempt
+    }
+
+    lastFailureReason = holdAttempt.reason
+    lastFailureMeta = holdAttempt.meta
+  }
+
+  return {
+    ok: false,
+    reason: lastFailureReason,
+    meta: lastFailureMeta,
+  }
 }
 
 async function waitForAddOnsReady(page: Page): Promise<void> {
@@ -749,9 +958,23 @@ function toInvalidSample(
   }
 }
 
-async function collectDrawerOpenSample(page: Page): Promise<RawPerfSample> {
+function validateBackgroundRefreshEntry(
+  entry: AvailabilityPerfCompletedEntry,
+): string | null {
+  const refreshKind = readStringMeta(entry.meta, 'refreshKind')
+  if (!refreshKind) {
+    return 'background_refresh_missing_kind'
+  }
+
+  return null
+}
+
+async function collectDrawerOpenSample(
+  page: Page,
+  request: APIRequestContext,
+): Promise<RawPerfSample> {
   try {
-    await gotoBookingPage(page)
+    await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
     const entry = await openDrawerAndWaitUsable(page)
@@ -769,9 +992,12 @@ async function collectDrawerOpenSample(page: Page): Promise<RawPerfSample> {
   }
 }
 
-async function collectDaySwitchSample(page: Page): Promise<RawPerfSample> {
+async function collectDaySwitchSample(
+  page: Page,
+  request: APIRequestContext,
+): Promise<RawPerfSample> {
   try {
-    await gotoBookingPage(page)
+    await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
     const usable = await openDrawerAndWaitUsable(page)
@@ -780,24 +1006,27 @@ async function collectDaySwitchSample(page: Page): Promise<RawPerfSample> {
       return toInvalidSample(PERF_CASES.daySwitch, 'drawer_not_usable')
     }
 
-    await resetPerfStore(page)
+    const currentSelectedDayYMD = readStringMeta(usable.meta, 'selectedDayYMD')
+    const previousSignatures = await readVisibleSlotButtonSignatures(page)
+    const switched = await switchToDayByIndex(
+      page,
+      1,
+      previousSignatures,
+      currentSelectedDayYMD,
+    )
 
-    const dayLabel = await clickDayByIndex(page, 1)
-
-    if (!dayLabel) {
-      return toInvalidSample(PERF_CASES.daySwitch, 'insufficient_day_buttons')
+    if (!switched.ok) {
+      return toInvalidSample(PERF_CASES.daySwitch, switched.reason)
     }
 
-    const entry = await waitForMetric(page, PERF_CASES.daySwitch.metric)
-
-    if (!entry) {
+    if (!switched.entry) {
       return toInvalidSample(PERF_CASES.daySwitch, 'missing_perf_metric', {
-        requestedDayLabel: dayLabel,
+        requestedDayLabel: switched.label,
       })
     }
 
-    return toCompletedSample(PERF_CASES.daySwitch, entry, {
-      requestedDayLabel: dayLabel,
+    return toCompletedSample(PERF_CASES.daySwitch, switched.entry, {
+      requestedDayLabel: switched.label,
     })
   } catch (error) {
     return toInvalidSample(
@@ -807,9 +1036,12 @@ async function collectDaySwitchSample(page: Page): Promise<RawPerfSample> {
   }
 }
 
-async function collectHoldRequestSample(page: Page): Promise<RawPerfSample> {
+async function collectHoldRequestSample(
+  page: Page,
+  request: APIRequestContext,
+): Promise<RawPerfSample> {
   try {
-    await gotoBookingPage(page)
+    await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
     const usable = await openDrawerAndWaitUsable(page)
@@ -818,19 +1050,10 @@ async function collectHoldRequestSample(page: Page): Promise<RawPerfSample> {
       return toInvalidSample(PERF_CASES.holdRequest, 'drawer_not_usable')
     }
 
-    const currentSelectedDayYMD =
-      readStringMeta(usable.meta, 'selectedDayYMD')
+    const currentSelectedDayYMD = readStringMeta(usable.meta, 'selectedDayYMD')
 
-    await resetPerfStore(page)
-    const expectedSelectedDayYMD = await prepareHoldCandidateDay(
-      page,
+    const holdOutcome = await createSuccessfulHoldAcrossDays(page, {
       currentSelectedDayYMD,
-      3,
-    )
-    await resetPerfStore(page)
-
-    const holdOutcome = await createSuccessfulHold(page, {
-      expectedSelectedDayYMD,
     })
 
     if (!holdOutcome.ok) {
@@ -850,9 +1073,12 @@ async function collectHoldRequestSample(page: Page): Promise<RawPerfSample> {
   }
 }
 
-async function collectContinueSample(page: Page): Promise<RawPerfSample> {
+async function collectContinueSample(
+  page: Page,
+  request: APIRequestContext,
+): Promise<RawPerfSample> {
   try {
-    await gotoBookingPage(page)
+    await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
     const usable = await openDrawerAndWaitUsable(page)
@@ -861,20 +1087,11 @@ async function collectContinueSample(page: Page): Promise<RawPerfSample> {
       return toInvalidSample(PERF_CASES.continueToAddOns, 'drawer_not_usable')
     }
 
-    const currentSelectedDayYMD =
-      readStringMeta(usable.meta, 'selectedDayYMD')
+    const currentSelectedDayYMD = readStringMeta(usable.meta, 'selectedDayYMD')
 
-    await resetPerfStore(page)
-    const expectedSelectedDayYMD = await prepareHoldCandidateDay(
-      page,
-      currentSelectedDayYMD,
-      4,
-    )
-    await resetPerfStore(page)
-
-    const holdOutcome = await createSuccessfulHold(page, {
+    const holdOutcome = await createSuccessfulHoldAcrossDays(page, {
       requireReadyUi: true,
-      expectedSelectedDayYMD,
+      currentSelectedDayYMD,
     })
 
     if (!holdOutcome.ok) {
@@ -904,9 +1121,10 @@ async function collectContinueSample(page: Page): Promise<RawPerfSample> {
 
 async function collectBackgroundRefreshSample(
   page: Page,
+  request: APIRequestContext,
 ): Promise<RawPerfSample> {
   try {
-    await gotoBookingPage(page)
+    await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
     const usable = await openDrawerAndWaitUsable(page)
@@ -929,6 +1147,15 @@ async function collectBackgroundRefreshSample(
       return toInvalidSample(PERF_CASES.backgroundRefresh, 'missing_perf_metric')
     }
 
+    const invalidReason = validateBackgroundRefreshEntry(entry)
+    if (invalidReason) {
+      return toInvalidSample(
+        PERF_CASES.backgroundRefresh,
+        invalidReason,
+        entry.meta,
+      )
+    }
+
     return toCompletedSample(PERF_CASES.backgroundRefresh, entry)
   } catch (error) {
     return toInvalidSample(
@@ -941,7 +1168,7 @@ async function collectBackgroundRefreshSample(
 test.describe('availability performance collection', () => {
   test.describe.configure({ mode: 'serial' })
 
-  test('collect raw perf samples', async ({ page }, testInfo) => {
+  test('collect raw perf samples', async ({ page, request }, testInfo) => {
     test.setTimeout(10 * 60 * 1000)
 
     const projectName = testInfo.project.name
@@ -949,23 +1176,23 @@ test.describe('availability performance collection', () => {
     const samples: RawPerfSample[] = []
 
     for (let index = 0; index < SAMPLE_COUNT; index += 1) {
-      samples.push(await collectDrawerOpenSample(page))
+      samples.push(await collectDrawerOpenSample(page, request))
     }
 
     for (let index = 0; index < SAMPLE_COUNT; index += 1) {
-      samples.push(await collectDaySwitchSample(page))
+      samples.push(await collectDaySwitchSample(page, request))
     }
 
     for (let index = 0; index < SAMPLE_COUNT; index += 1) {
-      samples.push(await collectHoldRequestSample(page))
+      samples.push(await collectHoldRequestSample(page, request))
     }
 
     for (let index = 0; index < SAMPLE_COUNT; index += 1) {
-      samples.push(await collectContinueSample(page))
+      samples.push(await collectContinueSample(page, request))
     }
 
     for (let index = 0; index < SAMPLE_COUNT; index += 1) {
-      samples.push(await collectBackgroundRefreshSample(page))
+      samples.push(await collectBackgroundRefreshSample(page, request))
     }
 
     const artifact: RawPerfArtifact = {

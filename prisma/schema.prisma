@@ -1268,6 +1268,10 @@ model BookingHold {
   clientAddressLatSnapshot Float?
   clientAddressLngSnapshot Float?
 
+durationMinutesSnapshot Int?
+bufferMinutesSnapshot   Int?
+endsAtSnapshot          DateTime?
+
   @@unique([professionalId, scheduledFor])
   @@index([locationId, scheduledFor])
   @@index([professionalId, expiresAt])

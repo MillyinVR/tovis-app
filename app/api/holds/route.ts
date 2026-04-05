@@ -37,8 +37,16 @@ type HoldCreateOfferingRecord = Prisma.ProfessionalServiceOfferingGetPayload<{
   select: typeof HOLD_CREATE_OFFERING_SELECT
 }>
 
-function isValidDate(date: Date): boolean {
-  return date instanceof Date && Number.isFinite(date.getTime())
+type ParsedHoldRequest = {
+  offeringId: string
+  requestedLocationId: string | null
+  clientAddressId: string | null
+  locationType: ServiceLocationType
+  requestedStart: Date
+}
+
+function isValidDate(value: Date): boolean {
+  return value instanceof Date && Number.isFinite(value.getTime())
 }
 
 function bookingJsonFail(
@@ -101,7 +109,61 @@ function withServerTiming<T extends Response>(
       )
       .join(', '),
   )
+  response.headers.set('Cache-Control', 'no-store')
   return response
+}
+
+function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
+  if (!isRecord(rawBody)) {
+    return jsonFail(400, 'Request body must be a JSON object.')
+  }
+
+  const offeringId = pickString(rawBody.offeringId)
+  const requestedLocationId = pickString(rawBody.locationId)
+  const clientAddressId = pickString(rawBody.clientAddressId)
+  const locationType = normalizeLocationType(rawBody.locationType)
+  const scheduledForRaw = pickString(rawBody.scheduledFor)
+
+  if (!offeringId) {
+    return bookingJsonFail('OFFERING_ID_REQUIRED')
+  }
+
+  if (!scheduledForRaw) {
+    return bookingJsonFail('INVALID_SCHEDULED_FOR', {
+      message: 'Scheduled time is required.',
+      userMessage: 'Missing scheduled time.',
+    })
+  }
+
+  if (!locationType) {
+    return bookingJsonFail('LOCATION_TYPE_REQUIRED')
+  }
+
+  if (
+    locationType === ServiceLocationType.MOBILE &&
+    !clientAddressId
+  ) {
+    return bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED')
+  }
+
+  const scheduledForParsed = new Date(scheduledForRaw)
+  if (!isValidDate(scheduledForParsed)) {
+    return bookingJsonFail('INVALID_SCHEDULED_FOR')
+  }
+
+  const requestedStart = normalizeToMinute(scheduledForParsed)
+
+  if (requestedStart.getTime() < Date.now() + 60_000) {
+    return bookingJsonFail('TIME_IN_PAST')
+  }
+
+  return {
+    offeringId,
+    requestedLocationId,
+    clientAddressId,
+    locationType,
+    requestedStart,
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -131,81 +193,41 @@ export async function POST(req: NextRequest) {
   ]
 
   try {
-    const [auth, rawBody] = await Promise.all([
-      requireClient(),
-      req.json().catch(() => ({})),
-    ])
+    const auth = await requireClient()
+
+    if (!auth.ok) {
+      afterAuthAndBodyMs = nowMs()
+      afterOfferingLookupMs = afterAuthAndBodyMs
+      afterCreateHoldMs = afterAuthAndBodyMs
+      return withServerTiming(auth.res, buildServerTimingMetrics())
+    }
+
+    let rawBody: unknown
+    try {
+      rawBody = await req.json()
+    } catch {
+      afterAuthAndBodyMs = nowMs()
+      afterOfferingLookupMs = afterAuthAndBodyMs
+      afterCreateHoldMs = afterAuthAndBodyMs
+
+      return withServerTiming(
+        jsonFail(400, 'Invalid JSON body.'),
+        buildServerTimingMetrics(),
+      )
+    }
+
+    const parsed = parseHoldCreateBody(rawBody)
 
     afterAuthAndBodyMs = nowMs()
     afterOfferingLookupMs = afterAuthAndBodyMs
     afterCreateHoldMs = afterAuthAndBodyMs
 
-    if (!auth.ok) {
-      return withServerTiming(auth.res, buildServerTimingMetrics())
-    }
-
-    const clientId = auth.clientId
-    const body = isRecord(rawBody) ? rawBody : {}
-
-    const offeringId = pickString(body.offeringId)
-    const requestedLocationId = pickString(body.locationId)
-    const clientAddressId = pickString(body.clientAddressId)
-    const locationType = normalizeLocationType(body.locationType)
-    const scheduledForRaw = pickString(body.scheduledFor)
-
-    if (!offeringId) {
-      return withServerTiming(
-        bookingJsonFail('OFFERING_ID_REQUIRED'),
-        buildServerTimingMetrics(),
-      )
-    }
-
-    if (!scheduledForRaw) {
-      return withServerTiming(
-        bookingJsonFail('INVALID_SCHEDULED_FOR', {
-          message: 'Scheduled time is required.',
-          userMessage: 'Missing scheduled time.',
-        }),
-        buildServerTimingMetrics(),
-      )
-    }
-
-    if (!locationType) {
-      return withServerTiming(
-        bookingJsonFail('LOCATION_TYPE_REQUIRED'),
-        buildServerTimingMetrics(),
-      )
-    }
-
-    if (
-      locationType === ServiceLocationType.MOBILE &&
-      !clientAddressId
-    ) {
-      return withServerTiming(
-        bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED'),
-        buildServerTimingMetrics(),
-      )
-    }
-
-    const scheduledForParsed = new Date(scheduledForRaw)
-    if (!isValidDate(scheduledForParsed)) {
-      return withServerTiming(
-        bookingJsonFail('INVALID_SCHEDULED_FOR'),
-        buildServerTimingMetrics(),
-      )
-    }
-
-    const requestedStart = normalizeToMinute(scheduledForParsed)
-
-    if (requestedStart.getTime() < Date.now() + 60_000) {
-      return withServerTiming(
-        bookingJsonFail('TIME_IN_PAST'),
-        buildServerTimingMetrics(),
-      )
+    if (parsed instanceof Response) {
+      return withServerTiming(parsed, buildServerTimingMetrics())
     }
 
     const offering = await prisma.professionalServiceOffering.findUnique({
-      where: { id: offeringId },
+      where: { id: parsed.offeringId },
       select: HOLD_CREATE_OFFERING_SELECT,
     })
 
@@ -220,12 +242,12 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await createHold({
-      clientId,
+      clientId: auth.clientId,
       offering: toCreateHoldOffering(offering),
-      requestedStart,
-      requestedLocationId,
-      locationType,
-      clientAddressId,
+      requestedStart: parsed.requestedStart,
+      requestedLocationId: parsed.requestedLocationId,
+      locationType: parsed.locationType,
+      clientAddressId: parsed.clientAddressId,
     })
 
     afterCreateHoldMs = nowMs()
@@ -254,6 +276,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.error('POST /api/holds error', error)
+
     return withServerTiming(
       bookingJsonFail('INTERNAL_ERROR'),
       buildServerTimingMetrics(),

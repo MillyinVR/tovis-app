@@ -22,8 +22,9 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, Prisma } from '@prisma/client'
+import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
 import {
+  addMinutes,
   type BusyInterval,
   bookingToBusyInterval,
   bufferOrZero,
@@ -118,6 +119,71 @@ function normalizeTake(value: unknown, fallback: number): number {
   if (whole < 1) return fallback
 
   return Math.min(whole, 10_000)
+}
+
+function isValidDate(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime())
+}
+
+function normalizeSnapshotMinutes(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const whole = Math.trunc(value)
+  return whole >= 0 ? whole : null
+}
+
+function holdRecordToBusyInterval(args: {
+  hold: {
+    scheduledFor: Date
+    locationType: ServiceLocationType
+    endsAtSnapshot?: Date | null
+    durationMinutesSnapshot?: number | null
+    bufferMinutesSnapshot?: number | null
+    offering?: {
+      salonDurationMinutes: number | null
+      mobileDurationMinutes: number | null
+    } | null
+    location?: {
+      bufferMinutes: number | null
+    } | null
+  }
+  defaultBufferMinutes: number
+  fallbackDurationMinutes: number
+}): BusyInterval {
+  const start = new Date(args.hold.scheduledFor)
+
+  if (isValidDate(args.hold.endsAtSnapshot)) {
+    return {
+      start,
+      end: new Date(args.hold.endsAtSnapshot),
+    }
+  }
+
+  const durationMinutes = normalizeSnapshotMinutes(
+    args.hold.durationMinutesSnapshot,
+  )
+  const bufferMinutesSnapshot = normalizeSnapshotMinutes(
+    args.hold.bufferMinutesSnapshot,
+  )
+
+  if (durationMinutes != null) {
+    return {
+      start,
+      end: addMinutes(start, durationMinutes + (bufferMinutesSnapshot ?? 0)),
+    }
+  }
+
+  const legacyBufferMinutes =
+    (args.hold.location
+      ? bufferOrZero(args.hold.location.bufferMinutes)
+      : undefined) ?? bufferOrZero(args.defaultBufferMinutes)
+
+  return holdToBusyInterval({
+    hold: args.hold,
+    salonDurationMinutes: args.hold.offering?.salonDurationMinutes,
+    mobileDurationMinutes: args.hold.offering?.mobileDurationMinutes,
+    fallbackDurationMinutes: args.fallbackDurationMinutes,
+    bufferMinutes: legacyBufferMinutes,
+  })
 }
 
 function assertValidRange(start: Date, end: Date): void {
@@ -319,6 +385,9 @@ export async function hasHoldConflict(
     select: {
       id: true,
       scheduledFor: true,
+      endsAtSnapshot: true,
+      durationMinutesSnapshot: true,
+      bufferMinutesSnapshot: true,
       offeringId: true,
       locationId: true,
       locationType: true,
@@ -341,21 +410,15 @@ export async function hasHoldConflict(
 
   if (!holds.length) return false
 
-  return holds.some((hold) => {
-    const bufferMinutes =
-      (hold.location ? bufferOrZero(hold.location.bufferMinutes) : undefined) ??
-      bufferOrZero(defaultBufferMinutes)
+    return holds.some((hold) => {
+      const interval = holdRecordToBusyInterval({
+        hold,
+        defaultBufferMinutes,
+        fallbackDurationMinutes,
+      })
 
-    const interval = holdToBusyInterval({
-      hold,
-      salonDurationMinutes: hold.offering?.salonDurationMinutes,
-      mobileDurationMinutes: hold.offering?.mobileDurationMinutes,
-      fallbackDurationMinutes,
-      bufferMinutes,
+      return overlaps(interval.start, interval.end, requestedStart, requestedEnd)
     })
-
-    return overlaps(interval.start, interval.end, requestedStart, requestedEnd)
-  })
 }
 
 export async function assertNoCalendarBlockConflict(
@@ -439,6 +502,9 @@ export async function loadBusyIntervalsForWindow(
       select: {
         id: true,
         scheduledFor: true,
+        endsAtSnapshot: true,
+        durationMinutesSnapshot: true,
+        bufferMinutesSnapshot: true,
         offeringId: true,
         locationId: true,
         locationType: true,
@@ -477,19 +543,13 @@ export async function loadBusyIntervalsForWindow(
     ...bookings.map((booking) =>
       bookingToBusyInterval(booking, fallbackDurationMinutes),
     ),
-    ...holds.map((hold) => {
-      const bufferMinutes =
-        (hold.location ? bufferOrZero(hold.location.bufferMinutes) : undefined) ??
-        bufferOrZero(defaultBufferMinutes)
-
-      return holdToBusyInterval({
-        hold,
-        salonDurationMinutes: hold.offering?.salonDurationMinutes,
-        mobileDurationMinutes: hold.offering?.mobileDurationMinutes,
-        fallbackDurationMinutes,
-        bufferMinutes,
-      })
-    }),
+    ...holds.map((hold) =>
+        holdRecordToBusyInterval({
+          hold,
+          defaultBufferMinutes,
+          fallbackDurationMinutes,
+        }),
+      ),
     ...blocks.map((block) => ({
       start: new Date(block.startsAt),
       end: new Date(block.endsAt),

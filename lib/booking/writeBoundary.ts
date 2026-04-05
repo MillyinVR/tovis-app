@@ -4873,6 +4873,13 @@ const startedAtMs = Date.now()
 
       afterClientAddressLoadMs = Date.now()
 
+if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedClientAddress) {
+  throw bookingError('CLIENT_SERVICE_ADDRESS_INVALID', {
+    message: 'Selected client service address was not found or is not owned by this client.',
+    userMessage: 'Please choose a valid saved service address.',
+  })
+}
+
   const clientServiceAddress =
     locationType === ServiceLocationType.MOBILE
       ? normalizeAddress(selectedClientAddress?.formattedAddress)
@@ -4990,6 +4997,9 @@ afterHoldPolicyMs = Date.now()
     professionalId: offering.professionalId,
     clientId,
     scheduledFor: requestedStart,
+    endsAtSnapshot: requestedEnd,
+    durationMinutesSnapshot: durationMinutes,
+    bufferMinutesSnapshot: locationContext.bufferMinutes,
     expiresAt,
     locationType,
     locationId: locationContext.locationId,

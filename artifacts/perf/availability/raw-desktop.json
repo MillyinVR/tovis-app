@@ -4,89 +4,39 @@
   "environment": "desktop",
   "deviceProfile": "chromium",
   "projectName": "chromium",
-  "collectedAt": "2026-04-05T02:12:08.890Z",
+  "collectedAt": "2026-04-05T06:06:57.779Z",
   "sampleTargetPerScenario": 1,
-  "bookingUrl": "http://127.0.0.1:3000/looks",
+  "bookingUrl": "http://localhost:3000/looks",
   "samples": [
     {
       "scenario": "drawer-open",
       "metric": "drawer_open_to_first_usable_ms",
-      "durationMs": 6593.799999982119,
-      "meta": {
-        "professionalId": "cmmu9zguw0001jr04dmid46j3",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "bookingSource": "DISCOVERY",
-        "locationType": "SALON",
-        "selectedDayYMD": "2026-04-06",
-        "slotCount": 5,
-        "dayCount": 5
-      }
+      "invalid": true,
+      "invalidReason": "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page."
     },
     {
       "scenario": "day-switch",
       "metric": "day_switch_to_times_visible_ms",
-      "durationMs": 2.2000000178813934,
-      "meta": {
-        "previousDayYMD": "2026-04-06",
-        "nextDayYMD": "2026-04-07",
-        "locationType": "SALON",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "bookingSource": "DISCOVERY",
-        "selectedDayYMD": "2026-04-07",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "slotCount": 5,
-        "requestedDayLabel": "Tue07"
-      }
+      "invalid": true,
+      "invalidReason": "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page."
     },
     {
       "scenario": "hold-request",
       "metric": "hold_request_latency_ms",
       "invalid": true,
-      "invalidReason": "hold_request_status_409",
-      "meta": {
-        "professionalId": "cmmu9zguw0001jr04dmid46j3",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "selectedDayYMD": "2026-04-09",
-        "slotISO": "2026-04-09T18:30:00.000Z",
-        "locationType": "SALON",
-        "bookingSource": "DISCOVERY",
-        "statusCode": 409,
-        "ok": false
-      }
+      "invalidReason": "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page."
     },
     {
       "scenario": "continue-to-add-ons",
       "metric": "continue_to_add_ons_ms",
       "invalid": true,
-      "invalidReason": "hold_request_status_409",
-      "meta": {
-        "professionalId": "cmmu9zguw0001jr04dmid46j3",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "offeringId": "cmnhaui65001stzk45vtya1ub",
-        "selectedDayYMD": "2026-04-10",
-        "slotISO": "2026-04-10T18:30:00.000Z",
-        "locationType": "SALON",
-        "bookingSource": "DISCOVERY",
-        "statusCode": 409,
-        "ok": false
-      }
+      "invalidReason": "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page."
     },
     {
       "scenario": "background-refresh",
       "metric": "background_refresh_ms",
-      "durationMs": 1.4000000059604645,
-      "meta": {
-        "professionalId": "cmmu9zguw0001jr04dmid46j3",
-        "serviceId": "cmnhaud8o0010tzk44xtodu4g",
-        "locationType": null,
-        "includeOtherPros": false,
-        "refreshKind": "initial-background",
-        "cacheState": "cached-primary",
-        "dayCount": 5,
-        "hasOtherPros": false
-      }
+      "invalid": true,
+      "invalidReason": "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page."
     }
   ]
 }

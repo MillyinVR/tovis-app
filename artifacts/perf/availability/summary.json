@@ -1,7 +1,7 @@
 {
   "gate": 2,
   "suite": "availability",
-  "generatedAt": "2026-04-05T02:15:23.466Z",
+  "generatedAt": "2026-04-05T06:32:00.138Z",
   "budgetSource": "docs/performance/availability-gate2-budget.json",
   "artifacts": {
     "rawDesktop": "artifacts/perf/availability/raw-desktop.json",
@@ -14,38 +14,42 @@
       "deviceProfile": "chromium",
       "projectName": "chromium",
       "totalRawSamples": 5,
-      "invalidSampleCount": 2,
+      "invalidSampleCount": 5,
       "invalidReasons": {
-        "hold_request_status_409": 2
+        "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 5
       },
       "metrics": {
         "drawer_open_to_first_usable_ms": {
-          "count": 1,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 6593.799999982119,
-          "max": 6593.799999982119,
-          "mean": 6593.8,
-          "p50": 6593.799999982119,
-          "p95": 6593.799999982119,
-          "p99": 6593.799999982119
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         },
         "day_switch_to_times_visible_ms": {
-          "count": 1,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 2.2000000178813934,
-          "max": 2.2000000178813934,
-          "mean": 2.2,
-          "p50": 2.2000000178813934,
-          "p95": 2.2000000178813934,
-          "p99": 2.2000000178813934
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         },
         "hold_request_latency_ms": {
           "count": 0,
           "invalidCount": 1,
           "invalidReasons": {
-            "hold_request_status_409": 1
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
           },
           "min": null,
           "max": null,
@@ -58,7 +62,7 @@
           "count": 0,
           "invalidCount": 1,
           "invalidReasons": {
-            "hold_request_status_409": 1
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
           },
           "min": null,
           "max": null,
@@ -68,15 +72,17 @@
           "p99": null
         },
         "background_refresh_ms": {
-          "count": 1,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 1.4000000059604645,
-          "max": 1.4000000059604645,
-          "mean": 1.4,
-          "p50": 1.4000000059604645,
-          "p95": 1.4000000059604645,
-          "p99": 1.4000000059604645
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         }
       }
     },
@@ -84,39 +90,42 @@
       "deviceProfile": "mobile-chrome",
       "projectName": "mobile-chrome",
       "totalRawSamples": 5,
-      "invalidSampleCount": 2,
+      "invalidSampleCount": 5,
       "invalidReasons": {
-        "hold_request_status_409": 1,
-        "hold_not_created": 1
+        "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 5
       },
       "metrics": {
         "drawer_open_to_first_usable_ms": {
-          "count": 1,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 7138.799999982119,
-          "max": 7138.799999982119,
-          "mean": 7138.8,
-          "p50": 7138.799999982119,
-          "p95": 7138.799999982119,
-          "p99": 7138.799999982119
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         },
         "day_switch_to_times_visible_ms": {
-          "count": 1,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 2.5999999940395355,
-          "max": 2.5999999940395355,
-          "mean": 2.6,
-          "p50": 2.5999999940395355,
-          "p95": 2.5999999940395355,
-          "p99": 2.5999999940395355
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         },
         "hold_request_latency_ms": {
           "count": 0,
           "invalidCount": 1,
           "invalidReasons": {
-            "hold_request_status_409": 1
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
           },
           "min": null,
           "max": null,
@@ -129,7 +138,7 @@
           "count": 0,
           "invalidCount": 1,
           "invalidReasons": {
-            "hold_not_created": 1
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
           },
           "min": null,
           "max": null,
@@ -139,64 +148,69 @@
           "p99": null
         },
         "background_refresh_ms": {
-          "count": 1,
-          "invalidCount": 0,
-          "invalidReasons": {},
-          "min": 1.5,
-          "max": 1.5,
-          "mean": 1.5,
-          "p50": 1.5,
-          "p95": 1.5,
-          "p99": 1.5
+          "count": 0,
+          "invalidCount": 1,
+          "invalidReasons": {
+            "Could not find booking trigger. Set PERF_BOOKING_TRIGGER_SELECTOR for this page.": 1
+          },
+          "min": null,
+          "max": null,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null
         }
       }
     }
   },
   "budgetCheck": {
     "passed": false,
-    "checkedAt": "2026-04-05T02:15:26.858Z",
+    "checkedAt": "2026-04-05T06:32:02.150Z",
     "requiredSampleCount": 30,
     "failures": [
-      "[FAIL] desktop drawer_open_to_first_usable_ms sample_count=1 required=30",
-      "[FAIL] desktop drawer_open_to_first_usable_ms p95=6593.799999982119 budget=1500",
-      "[FAIL] desktop drawer_open_to_first_usable_ms p99=6593.799999982119 budget=2500",
-      "[FAIL] desktop day_switch_to_times_visible_ms sample_count=1 required=30",
+      "[FAIL] desktop drawer_open_to_first_usable_ms sample_count=0 required=30",
+      "[FAIL] desktop drawer_open_to_first_usable_ms p95 missing",
+      "[FAIL] desktop drawer_open_to_first_usable_ms p99 missing",
+      "[FAIL] desktop day_switch_to_times_visible_ms sample_count=0 required=30",
+      "[FAIL] desktop day_switch_to_times_visible_ms p95 missing",
+      "[FAIL] desktop day_switch_to_times_visible_ms p99 missing",
       "[FAIL] desktop hold_request_latency_ms sample_count=0 required=30",
       "[FAIL] desktop hold_request_latency_ms p95 missing",
       "[FAIL] desktop hold_request_latency_ms p99 missing",
       "[FAIL] desktop continue_to_add_ons_ms sample_count=0 required=30",
       "[FAIL] desktop continue_to_add_ons_ms p95 missing",
       "[FAIL] desktop continue_to_add_ons_ms p99 missing",
-      "[FAIL] desktop background_refresh_ms sample_count=1 required=30",
-      "[FAIL] mobile drawer_open_to_first_usable_ms sample_count=1 required=30",
-      "[FAIL] mobile drawer_open_to_first_usable_ms p95=7138.799999982119 budget=1500",
-      "[FAIL] mobile drawer_open_to_first_usable_ms p99=7138.799999982119 budget=2500",
-      "[FAIL] mobile day_switch_to_times_visible_ms sample_count=1 required=30",
+      "[FAIL] desktop background_refresh_ms sample_count=0 required=30",
+      "[FAIL] desktop background_refresh_ms p95 missing",
+      "[FAIL] desktop background_refresh_ms p99 missing",
+      "[FAIL] mobile drawer_open_to_first_usable_ms sample_count=0 required=30",
+      "[FAIL] mobile drawer_open_to_first_usable_ms p95 missing",
+      "[FAIL] mobile drawer_open_to_first_usable_ms p99 missing",
+      "[FAIL] mobile day_switch_to_times_visible_ms sample_count=0 required=30",
+      "[FAIL] mobile day_switch_to_times_visible_ms p95 missing",
+      "[FAIL] mobile day_switch_to_times_visible_ms p99 missing",
       "[FAIL] mobile hold_request_latency_ms sample_count=0 required=30",
       "[FAIL] mobile hold_request_latency_ms p95 missing",
       "[FAIL] mobile hold_request_latency_ms p99 missing",
       "[FAIL] mobile continue_to_add_ons_ms sample_count=0 required=30",
       "[FAIL] mobile continue_to_add_ons_ms p95 missing",
       "[FAIL] mobile continue_to_add_ons_ms p99 missing",
-      "[FAIL] mobile background_refresh_ms sample_count=1 required=30"
+      "[FAIL] mobile background_refresh_ms sample_count=0 required=30",
+      "[FAIL] mobile background_refresh_ms p95 missing",
+      "[FAIL] mobile background_refresh_ms p99 missing"
     ],
     "warnings": [
-      "[WARN] desktop drawer_open_to_first_usable_ms p50=6593.799999982119 budget=700",
+      "[WARN] desktop drawer_open_to_first_usable_ms invalid_count=1",
+      "[WARN] desktop day_switch_to_times_visible_ms invalid_count=1",
       "[WARN] desktop hold_request_latency_ms invalid_count=1",
       "[WARN] desktop continue_to_add_ons_ms invalid_count=1",
-      "[WARN] mobile drawer_open_to_first_usable_ms p50=7138.799999982119 budget=700",
+      "[WARN] desktop background_refresh_ms invalid_count=1",
+      "[WARN] mobile drawer_open_to_first_usable_ms invalid_count=1",
+      "[WARN] mobile day_switch_to_times_visible_ms invalid_count=1",
       "[WARN] mobile hold_request_latency_ms invalid_count=1",
-      "[WARN] mobile continue_to_add_ons_ms invalid_count=1"
+      "[WARN] mobile continue_to_add_ons_ms invalid_count=1",
+      "[WARN] mobile background_refresh_ms invalid_count=1"
     ],
-    "passes": [
-      "[PASS] desktop day_switch_to_times_visible_ms p95=2.2000000178813934 budget=900",
-      "[PASS] desktop day_switch_to_times_visible_ms p99=2.2000000178813934 budget=1500",
-      "[PASS] desktop background_refresh_ms p95=1.4000000059604645 budget=1800",
-      "[PASS] desktop background_refresh_ms p99=1.4000000059604645 budget=3000",
-      "[PASS] mobile day_switch_to_times_visible_ms p95=2.5999999940395355 budget=900",
-      "[PASS] mobile day_switch_to_times_visible_ms p99=2.5999999940395355 budget=1500",
-      "[PASS] mobile background_refresh_ms p95=1.5 budget=1800",
-      "[PASS] mobile background_refresh_ms p99=1.5 budget=3000"
-    ]
+    "passes": []
   }
 }
