@@ -73,6 +73,10 @@ import {
 } from '@/lib/booking/policies/proSchedulingPolicy'
 import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import {
+  deleteActiveHoldsForClient,
+  deleteExpiredHoldsForProfessional,
+} from '@/lib/booking/holdCleanup'
+import {
   type RequestedServiceItemInput,
   buildNormalizedBookingItemsFromRequestedOfferings,
   computeBookingItemLikeTotals,
@@ -4921,6 +4925,22 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
       ? normalizeAddress(locationContext.formattedAddress)
       : null
 
+  const deletedExpiredHoldCount = await deleteExpiredHoldsForProfessional({
+    tx,
+    professionalId: offering.professionalId,
+    now,
+  })
+
+  const deletedClientHoldCount = await deleteActiveHoldsForClient({
+    tx,
+    professionalId: offering.professionalId,
+    clientId,
+    now,
+  })
+
+  const didDeleteExistingHolds =
+    deletedExpiredHoldCount > 0 || deletedClientHoldCount > 0
+
   const decision = await evaluateHoldCreationDecision({
     tx,
     now,
@@ -4961,7 +4981,13 @@ afterHoldPolicyMs = Date.now()
     }
 
     afterHoldInsertMs = afterHoldPolicyMs
-    afterScheduleVersionMs = afterHoldPolicyMs
+
+    if (didDeleteExistingHolds) {
+      await bumpProfessionalScheduleVersion(offering.professionalId)
+      afterScheduleVersionMs = Date.now()
+    } else {
+      afterScheduleVersionMs = afterHoldPolicyMs
+    }
 
     logHoldCreateTiming(
       buildHoldCreateTiming('policy_conflict', {
