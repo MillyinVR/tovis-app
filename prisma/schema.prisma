@@ -162,6 +162,8 @@ enum ClientNotificationType {
   BOOKING_CANCELLED
   BOOKING_CONFIRMED
   BOOKING_RESCHEDULED
+  CONSULTATION_PROPOSAL
+  APPOINTMENT_REMINDER
 }
 
 enum SessionStep {
@@ -469,14 +471,15 @@ model ClientProfile {
   viralRequests        ViralServiceRequest[]
   alertBanner          String?
 
-  bookings        Booking[]
-  bookingHolds    BookingHold[]
-  notes           ClientProfessionalNote[]
-  allergies       ClientAllergy[]
-  reviews         Review[]
-  reminders       Reminder[]
-  notifications   ClientNotification[]
-  waitlistEntries WaitlistEntry[]
+  bookings               Booking[]
+  bookingHolds           BookingHold[]
+  notes                  ClientProfessionalNote[]
+  allergies              ClientAllergy[]
+  reviews                Review[]
+  reminders              Reminder[]
+  notifications          ClientNotification[]
+  scheduledNotifications ScheduledClientNotification[]
+  waitlistEntries        WaitlistEntry[]
 }
 
 model ClientAddress {
@@ -1083,16 +1086,20 @@ model Booking {
   consultationConfirmedAt DateTime?
   consultationApproval    ConsultationApproval?
 
-  aftercareSummary    AftercareSummary?
-  clientNotifications ClientNotification[]
-  reviews             Review[]
-  reminders           Reminder[]
+  aftercareSummary             AftercareSummary?
+  clientNotifications          ClientNotification[]
+  scheduledClientNotifications ScheduledClientNotification[]
+  reviews                      Review[]
+  reminders                    Reminder[]
 
   notifications     Notification[]
   overrideAuditLogs BookingOverrideAuditLog[]
   closeoutAuditLogs BookingCloseoutAuditLog[]
 
   sessionStep           SessionStep      @default(NONE)
+  // LEGACY single-reminder fields.
+  // Keep for now so existing code does not break.
+  // New client reminder scheduling should use ScheduledClientNotification.
   reminderMinutesBefore Int?             @default(1440)
   reminderSentAt        DateTime?
   reminderChannel       ReminderChannel?
@@ -1268,9 +1275,9 @@ model BookingHold {
   clientAddressLatSnapshot Float?
   clientAddressLngSnapshot Float?
 
-durationMinutesSnapshot Int?
-bufferMinutesSnapshot   Int?
-endsAtSnapshot          DateTime?
+  durationMinutesSnapshot Int?
+  bufferMinutesSnapshot   Int?
+  endsAtSnapshot          DateTime?
 
   @@unique([professionalId, scheduledFor])
   @@index([locationId, scheduledFor])
@@ -1743,22 +1750,62 @@ model ClientNotification {
   body  String?
 
   // linking / deep link support
+  href        String  @default("")
   bookingId   String?
   aftercareId String?
 
-  // for dedupe so you don’t spam them on edits
-  dedupeKey String? @unique
+  // structured metadata for notification-specific context
+  data Json?
+
+  // dedupe should be per client, not global across the whole app
+  dedupeKey String?
 
   // read state
   readAt    DateTime?
   createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
 
-  client    ClientProfile     @relation(fields: [clientId], references: [id])
-  booking   Booking?          @relation(fields: [bookingId], references: [id])
-  aftercare AftercareSummary? @relation(fields: [aftercareId], references: [id])
+  client    ClientProfile     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  booking   Booking?          @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  aftercare AftercareSummary? @relation(fields: [aftercareId], references: [id], onDelete: SetNull)
 
+  @@unique([clientId, dedupeKey])
   @@index([clientId, createdAt])
   @@index([clientId, readAt])
+  @@index([clientId, type, createdAt])
+  @@index([bookingId])
+  @@index([aftercareId])
+}
+
+model ScheduledClientNotification {
+  id        String  @id @default(cuid())
+  clientId  String
+  bookingId String?
+
+  type  ClientNotificationType
+  runAt DateTime
+  href  String                 @default("")
+
+  // structured metadata used to render the final notification
+  data Json?
+
+  dedupeKey String?
+
+  processedAt DateTime?
+  cancelledAt DateTime?
+  failedAt    DateTime?
+  lastError   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  client  ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  booking Booking?      @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@unique([clientId, dedupeKey])
+  @@index([processedAt, cancelledAt, runAt])
+  @@index([clientId, runAt])
+  @@index([bookingId, runAt])
 }
 
 model BookingServiceItem {

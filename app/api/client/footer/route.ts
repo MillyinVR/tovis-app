@@ -1,8 +1,8 @@
 // app/api/client/footer/route.ts
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { Role, ClientNotificationType } from '@prisma/client'
+import { getUnreadClientNotificationCount } from '@/lib/notifications/clientNotifications'
+import { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,15 +18,11 @@ export async function GET() {
       return jsonFail(401, 'Unauthorized')
     }
 
-    const unreadAftercareCount = await prisma.clientNotification.count({
-      where: {
-        clientId: user.clientProfile.id,
-        type: ClientNotificationType.AFTERCARE,
-        readAt: null,
-      },
+    const unreadNotificationCount = await getUnreadClientNotificationCount({
+      clientId: user.clientProfile.id,
     })
 
-    const inboxBadge = clampSmallCount(unreadAftercareCount)
+    const inboxBadge = clampSmallCount(unreadNotificationCount)
     return inboxBadge ? jsonOk({ inboxBadge }) : jsonOk({})
   } catch (err: unknown) {
     console.error('GET /api/client/footer error', err)

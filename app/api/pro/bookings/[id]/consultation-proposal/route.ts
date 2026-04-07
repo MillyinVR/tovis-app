@@ -16,6 +16,7 @@ import {
   areAuditValuesEqual,
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
+import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -531,28 +532,23 @@ export async function POST(req: Request, ctx: Ctx) {
         }
       }
 
-      await tx.clientNotification.upsert({
-        where: {
-          dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
-        },
-        create: {
-          clientId: booking.clientId,
-          type: ClientNotificationType.BOOKING,
-          title: 'Consultation proposal ready',
-          body: 'Your professional sent an updated service total for approval.',
+      await upsertClientNotification({
+        tx,
+        clientId: booking.clientId,
+        type: ClientNotificationType.CONSULTATION_PROPOSAL,
+        title: 'Consultation proposal ready',
+        body: 'Your professional sent an updated service total for approval.',
+        bookingId: booking.id,
+        href: `/client/bookings/${booking.id}`,
+        dedupeKey: `CONSULTATION_PROPOSAL:${booking.id}`,
+        data: {
           bookingId: booking.id,
-          dedupeKey: `CONSULTATION_PROPOSED:${booking.id}`,
-        },
-        update: {
-          clientId: booking.clientId,
-          type: ClientNotificationType.BOOKING,
-          title: 'Consultation proposal ready',
-          body: 'Your professional sent an updated service total for approval.',
-          bookingId: booking.id,
+          consultationApprovalId: approval.id,
+          reason: 'CONSULTATION_PROPOSAL_READY',
         },
       })
 
-            const oldProposalState = buildConsultationProposalAuditSnapshot({
+        const oldProposalState = buildConsultationProposalAuditSnapshot({
         status: existingApproval?.status,
         proposedServicesJson: existingApproval?.proposedServicesJson ?? null,
         proposedTotal: existingApproval?.proposedTotal,

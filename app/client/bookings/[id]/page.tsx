@@ -5,9 +5,11 @@ import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { prisma } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
+import { ClientNotificationType } from '@prisma/client'
 
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
@@ -352,6 +354,76 @@ function tabDisabledClass(): string {
     'inline-flex cursor-not-allowed select-none items-center rounded-full px-4 py-2 text-xs font-black opacity-50',
     'border border-white/10 bg-bgPrimary text-textSecondary',
   )
+}
+
+async function markClientBookingStepNotificationsRead(args: {
+  clientId: string
+  bookingId: string
+  step: StepKey
+  aftercareId?: string | null
+}): Promise<{ hadUnreadAftercare: boolean }> {
+  const now = new Date()
+
+  if (args.step === 'consult') {
+    await prisma.clientNotification.updateMany({
+      where: {
+        clientId: args.clientId,
+        bookingId: args.bookingId,
+        type: ClientNotificationType.CONSULTATION_PROPOSAL,
+        readAt: null,
+      },
+      data: { readAt: now },
+    })
+
+    return { hadUnreadAftercare: false }
+  }
+
+  if (args.step === 'aftercare' && args.aftercareId) {
+    const unreadAftercare = await prisma.clientNotification.findFirst({
+      where: {
+        clientId: args.clientId,
+        bookingId: args.bookingId,
+        aftercareId: args.aftercareId,
+        type: ClientNotificationType.AFTERCARE,
+        readAt: null,
+      },
+      select: { id: true },
+    })
+
+    await prisma.clientNotification.updateMany({
+      where: {
+        clientId: args.clientId,
+        bookingId: args.bookingId,
+        aftercareId: args.aftercareId,
+        type: ClientNotificationType.AFTERCARE,
+        readAt: null,
+      },
+      data: { readAt: now },
+    })
+
+    return { hadUnreadAftercare: Boolean(unreadAftercare) }
+  }
+
+  if (args.step === 'overview') {
+    await prisma.clientNotification.updateMany({
+      where: {
+        clientId: args.clientId,
+        bookingId: args.bookingId,
+        type: {
+          in: [
+            ClientNotificationType.BOOKING_CONFIRMED,
+            ClientNotificationType.BOOKING_RESCHEDULED,
+            ClientNotificationType.BOOKING_CANCELLED,
+            ClientNotificationType.APPOINTMENT_REMINDER,
+          ],
+        },
+        readAt: null,
+      },
+      data: { readAt: now },
+    })
+  }
+
+  return { hadUnreadAftercare: false }
 }
 
 function getAftercareRebookInfo(
@@ -704,37 +776,15 @@ export default async function ClientBookingPage(props: {
     redirect(`${baseHref}?step=overview`)
   }
 
-  let showUnreadAftercareBadge = false
-  if (step === 'aftercare' && aftercare?.id) {
-    const { prisma } = await import('@/lib/prisma')
+  const { hadUnreadAftercare } = await markClientBookingStepNotificationsRead({
+    clientId,
+    bookingId: raw.id,
+    step,
+    aftercareId: aftercare?.id ?? null,
+  })
 
-    const unreadNotification = await prisma.clientNotification.findFirst({
-      where: {
-        clientId,
-        type: 'AFTERCARE',
-        bookingId: raw.id,
-        aftercareId: aftercare.id,
-        readAt: null,
-      },
-      select: { id: true },
-    })
-
-    showUnreadAftercareBadge = Boolean(unreadNotification)
-
-    if (unreadNotification) {
-      await prisma.clientNotification.updateMany({
-        where: {
-          clientId,
-          type: 'AFTERCARE',
-          bookingId: raw.id,
-          aftercareId: aftercare.id,
-          readAt: null,
-        },
-        data: { readAt: new Date() },
-      })
-      showUnreadAftercareBadge = false
-    }
-  }
+  const showUnreadAftercareBadge =
+    step === 'aftercare' && hadUnreadAftercare
 
   const appointmentTimeZone = sanitizeTimeZone(booking.timeZone, 'UTC')
   const scheduled = toDate(booking.scheduledFor)

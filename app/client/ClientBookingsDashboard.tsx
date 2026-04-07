@@ -40,9 +40,24 @@ type Counts = {
   waitlist: number
 }
 
+type NotificationSummary = {
+  upcomingUnreadCount: number
+  aftercareUnreadCount: number
+  pendingUnreadCount: number
+  hasAnyUnreadUpdates: boolean
+}
+
 type CardMeta = {
   href: string
   badge: React.ReactNode
+  badgeKey:
+    | 'none'
+    | 'recentlyApproved'
+    | 'actionRequired'
+    | 'newAftercare'
+    | 'requested'
+    | 'confirmed'
+    | 'completed'
 }
 
 const EMPTY: ApiBuckets = {
@@ -51,6 +66,13 @@ const EMPTY: ApiBuckets = {
   waitlist: [],
   prebooked: [],
   past: [],
+}
+
+const EMPTY_NOTIFICATION_SUMMARY: NotificationSummary = {
+  upcomingUnreadCount: 0,
+  aftercareUnreadCount: 0,
+  pendingUnreadCount: 0,
+  hasAnyUnreadUpdates: false,
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,19 +218,29 @@ function getBookingCardMeta(params: {
           : `/client/bookings/${encodeURIComponent(booking.id)}?step=overview`
 
   let badge: React.ReactNode = null
+  let badgeKey: CardMeta['badgeKey'] = 'none'
+
   if (recentlyApproved) {
+    badgeKey = 'recentlyApproved'
     badge = <Badge label="Recently approved" variant="success" />
   } else if (booking.hasPendingConsultationApproval) {
+    badgeKey = 'actionRequired'
     badge = <Badge label="Action required" variant="accent" />
+  } else if (booking.hasUnreadAftercare) {
+    badgeKey = 'newAftercare'
+    badge = <Badge label="New aftercare" variant="accent" />
   } else if (status === 'PENDING') {
+    badgeKey = 'requested'
     badge = <Badge label="Requested" variant="accent" />
   } else if (status === 'ACCEPTED') {
+    badgeKey = 'confirmed'
     badge = <Badge label="Confirmed" variant="success" />
   } else if (status === 'COMPLETED') {
+    badgeKey = 'completed'
     badge = <Badge label="Completed" variant="default" />
   }
 
-  return { href, badge }
+  return { href, badge, badgeKey }
 }
 
 function HeroThumb(props: { title: string; subtitle?: string | null }) {
@@ -241,24 +273,35 @@ function TopTabs(props: {
   tab: TabKey
   setTab: (key: TabKey) => void
   counts: Counts
-  hasUnreadAftercare: boolean
+  upcomingUnreadCount: number
+  aftercareUnreadCount: number
+  pendingUnreadCount: number
 }) {
   const items: Array<{ k: TabKey; label: string; count: number; dot?: boolean }> =
     [
-      { k: 'upcoming', label: 'Upcoming', count: props.counts.upcoming },
+      {
+        k: 'upcoming',
+        label: 'Upcoming',
+        count: props.counts.upcoming,
+        dot: props.upcomingUnreadCount > 0,
+      },
       {
         k: 'aftercare',
         label: 'Aftercare',
         count: props.counts.aftercare,
-        dot: props.hasUnreadAftercare,
+        dot: props.aftercareUnreadCount > 0,
       },
       {
         k: 'pending',
         label: 'Pending',
         count: props.counts.pending,
-        dot: props.counts.pending > 0,
+        dot: props.pendingUnreadCount > 0,
       },
-      { k: 'waitlist', label: 'Waitlist', count: props.counts.waitlist },
+      {
+        k: 'waitlist',
+        label: 'Waitlist',
+        count: props.counts.waitlist,
+      },
     ]
 
   const activeIndex = Math.max(0, items.findIndex((item) => item.k === props.tab))
@@ -394,6 +437,7 @@ function SearchBar(props: {
 function BookingHeroCard(props: {
   booking: BookingLike
   badge?: React.ReactNode
+  badgeKey: CardMeta['badgeKey']
   href: string
 }) {
   const router = useRouter()
@@ -402,6 +446,13 @@ function BookingHeroCard(props: {
   const when = prettyWhen(props.booking.scheduledFor, props.booking.timeZone)
   const proLabel = props.booking.professional?.businessName || 'Professional'
   const location = bookingLocationLabel(props.booking)
+
+  const showPrebookedBadge = isPrebookedSource(props.booking.source)
+  const showAftercareBadge =
+    props.booking.hasUnreadAftercare && props.badgeKey !== 'newAftercare'
+  const showActionRequiredBadge =
+    props.booking.hasPendingConsultationApproval &&
+    props.badgeKey !== 'actionRequired'
 
   const goToBooking = () => {
     router.push(props.href)
@@ -460,13 +511,15 @@ function BookingHeroCard(props: {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {isPrebookedSource(props.booking.source) ? (
+            {showPrebookedBadge ? (
               <Badge label="Prebooked" variant="default" />
             ) : null}
-            {props.booking.hasUnreadAftercare ? (
+
+            {showAftercareBadge ? (
               <Badge label="New aftercare" variant="accent" />
             ) : null}
-            {props.booking.hasPendingConsultationApproval ? (
+
+            {showActionRequiredBadge ? (
               <Badge label="Action required" variant="accent" />
             ) : null}
 
@@ -620,6 +673,8 @@ export default function ClientBookingsDashboard() {
   const [recentlyApprovedIds, setRecentlyApprovedIds] = useState<Set<string>>(
     new Set(),
   )
+  const [notificationSummary, setNotificationSummary] =
+    useState<NotificationSummary>(EMPTY_NOTIFICATION_SUMMARY)
   const [didPickDefaultTab, setDidPickDefaultTab] = useState(false)
 
   const reload = useCallback(async () => {
@@ -627,16 +682,52 @@ export default function ClientBookingsDashboard() {
       setLoading(true)
       setErrorMessage(null)
 
-      const response = await fetch('/api/client/bookings', { cache: 'no-store' })
-      const payload: unknown = await response.json().catch(() => ({}))
-      const apiResponse: ApiResponse = isRecord(payload) ? payload : {}
+      const [bookingsResponse, notificationsResponse] = await Promise.all([
+        fetch('/api/client/bookings', { cache: 'no-store' }),
+        fetch('/api/client/notifications/summary', { cache: 'no-store' }),
+      ])
 
-      if (!response.ok) {
-        throw new Error(apiResponse.error || 'Failed to load bookings.')
+      const bookingsPayload: unknown = await bookingsResponse.json().catch(() => ({}))
+      const bookingsApiResponse: ApiResponse = isRecord(bookingsPayload)
+        ? bookingsPayload
+        : {}
+
+      if (!bookingsResponse.ok) {
+        throw new Error(bookingsApiResponse.error || 'Failed to load bookings.')
       }
 
-      const nextBuckets = normalizeBuckets(apiResponse.buckets)
+      const notificationsPayload: unknown = await notificationsResponse
+        .json()
+        .catch(() => ({}))
+
+      const notificationsData =
+        isRecord(notificationsPayload) &&
+        isRecord((notificationsPayload as { data?: unknown }).data)
+          ? ((notificationsPayload as { data: NotificationSummary }).data ??
+            EMPTY_NOTIFICATION_SUMMARY)
+          : EMPTY_NOTIFICATION_SUMMARY
+
+      const nextBuckets = normalizeBuckets(bookingsApiResponse.buckets)
       setBuckets(nextBuckets)
+
+      setNotificationSummary({
+        upcomingUnreadCount:
+          typeof notificationsData.upcomingUnreadCount === 'number'
+            ? notificationsData.upcomingUnreadCount
+            : 0,
+        aftercareUnreadCount:
+          typeof notificationsData.aftercareUnreadCount === 'number'
+            ? notificationsData.aftercareUnreadCount
+            : 0,
+        pendingUnreadCount:
+          typeof notificationsData.pendingUnreadCount === 'number'
+            ? notificationsData.pendingUnreadCount
+            : 0,
+        hasAnyUnreadUpdates:
+          typeof notificationsData.hasAnyUnreadUpdates === 'boolean'
+            ? notificationsData.hasAnyUnreadUpdates
+            : false,
+      })
 
       const previousPendingIds = loadStringSet('tovis:client:pendingIds')
       const currentPendingIds = new Set(nextBuckets.pending.map((booking) => booking.id))
@@ -658,6 +749,7 @@ export default function ClientBookingsDashboard() {
         error instanceof Error ? error.message : 'Failed to load bookings.'
       setErrorMessage(message)
       setBuckets(EMPTY)
+      setNotificationSummary(EMPTY_NOTIFICATION_SUMMARY)
     } finally {
       setLoading(false)
     }
@@ -685,9 +777,9 @@ export default function ClientBookingsDashboard() {
     return merged
   }, [buckets.past])
 
-  const hasUnreadAftercare = useMemo(() => {
-    return aftercareBookings.some((booking) => Boolean(booking.hasUnreadAftercare))
-  }, [aftercareBookings])
+  const hasUnreadAftercare = notificationSummary.aftercareUnreadCount > 0
+  const hasUnreadPending = notificationSummary.pendingUnreadCount > 0
+  const hasUnreadUpcoming = notificationSummary.upcomingUnreadCount > 0
 
   const counts = useMemo<Counts>(() => {
     return {
@@ -704,11 +796,26 @@ export default function ClientBookingsDashboard() {
     aftercareBookings.length,
   ])
 
-  useEffect(() => {
-    if (didPickDefaultTab) return
-    setTab(hasUnreadAftercare ? 'aftercare' : 'upcoming')
-    setDidPickDefaultTab(true)
-  }, [didPickDefaultTab, hasUnreadAftercare])
+useEffect(() => {
+  if (didPickDefaultTab) return
+
+  if (hasUnreadPending) {
+    setTab('pending')
+  } else if (hasUnreadAftercare) {
+    setTab('aftercare')
+  } else if (hasUnreadUpcoming) {
+    setTab('upcoming')
+  } else {
+    setTab('upcoming')
+  }
+
+  setDidPickDefaultTab(true)
+}, [
+  didPickDefaultTab,
+  hasUnreadPending,
+  hasUnreadAftercare,
+  hasUnreadUpcoming,
+])
 
   const upcomingFeed = useMemo(() => {
     return [...buckets.upcoming, ...buckets.prebooked]
@@ -804,12 +911,55 @@ export default function ClientBookingsDashboard() {
 
   return (
     <section className="flex h-full flex-col gap-4">
-      <TopTabs
-        tab={tab}
-        setTab={setTab}
-        counts={counts}
-        hasUnreadAftercare={hasUnreadAftercare}
-      />
+      {notificationSummary.hasAnyUnreadUpdates ? (
+  <div className="mx-auto w-full max-w-xl">
+    <button
+      type="button"
+      onClick={() => {
+        if (notificationSummary.pendingUnreadCount > 0) {
+          setTab('pending')
+        } else if (notificationSummary.aftercareUnreadCount > 0) {
+          setTab('aftercare')
+        } else if (notificationSummary.upcomingUnreadCount > 0) {
+          setTab('upcoming')
+        }
+      }}
+      className={cn(
+        'flex w-full items-center justify-between rounded-card border border-white/10 bg-bgSecondary px-4 py-3',
+        'text-left shadow-[0_10px_30px_rgba(0,0,0,0.35)] hover:border-white/20',
+      )}
+    >
+      <div>
+        <div className="text-[12px] font-black text-textPrimary">
+          New updates
+        </div>
+        <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+          {notificationSummary.pendingUnreadCount +
+            notificationSummary.aftercareUnreadCount +
+            notificationSummary.upcomingUnreadCount}{' '}
+          unread update
+          {notificationSummary.pendingUnreadCount +
+            notificationSummary.aftercareUnreadCount +
+            notificationSummary.upcomingUnreadCount ===
+          1
+            ? ''
+            : 's'}
+        </div>
+      </div>
+
+      <div className="text-[12px] font-black text-textPrimary">View →</div>
+    </button>
+  </div>
+) : null}
+
+    <TopTabs
+      tab={tab}
+      setTab={setTab}
+      counts={counts}
+      upcomingUnreadCount={notificationSummary.upcomingUnreadCount}
+      aftercareUnreadCount={notificationSummary.aftercareUnreadCount}
+      pendingUnreadCount={notificationSummary.pendingUnreadCount}
+    />
 
       <SearchBar
         value={search}
@@ -853,6 +1003,7 @@ export default function ClientBookingsDashboard() {
                   key={booking.id}
                   booking={booking}
                   badge={meta.badge}
+                  badgeKey={meta.badgeKey}
                   href={meta.href}
                 />
               )
@@ -892,10 +1043,11 @@ export default function ClientBookingsDashboard() {
                 })
 
                 return (
-                  <BookingHeroCard
+                 <BookingHeroCard
                     key={booking.id}
                     booking={booking}
                     badge={meta.badge}
+                    badgeKey={meta.badgeKey}
                     href={meta.href}
                   />
                 )
