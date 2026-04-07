@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => ({
 
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
-  txClientNotificationCreate: vi.fn(),
+
+  upsertClientNotification: vi.fn(),
+  scheduleClientNotification: vi.fn(),
+  cancelScheduledClientNotificationsForBooking: vi.fn(),
 
   txBookingHoldFindUnique: vi.fn(),
   txBookingHoldDelete: vi.fn(),
@@ -43,16 +46,19 @@ vi.mock('@/lib/booking/scheduleLock', () => ({
   lockProfessionalSchedule: mocks.lockProfessionalSchedule,
 }))
 
-import { BookingError } from '@/lib/booking/errors'
+vi.mock('@/lib/notifications/clientNotifications', () => ({
+  upsertClientNotification: mocks.upsertClientNotification,
+  scheduleClientNotification: mocks.scheduleClientNotification,
+  cancelScheduledClientNotificationsForBooking:
+    mocks.cancelScheduledClientNotificationsForBooking,
+}))
+
 import { cancelBooking, releaseHold } from './writeBoundary'
 
 const tx = {
   booking: {
     findUnique: mocks.txBookingFindUnique,
     update: mocks.txBookingUpdate,
-  },
-  clientNotification: {
-    create: mocks.txClientNotificationCreate,
   },
   bookingHold: {
     findUnique: mocks.txBookingHoldFindUnique,
@@ -142,14 +148,30 @@ describe('lib/booking/writeBoundary', () => {
       },
     })
 
-    expect(mocks.txClientNotificationCreate).toHaveBeenCalledWith({
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).toHaveBeenCalledWith({
+      tx,
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      types: [ClientNotificationType.APPOINTMENT_REMINDER],
+      onlyPending: true,
+    })
+
+    expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
+      tx,
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      aftercareId: null,
+      type: ClientNotificationType.BOOKING_CANCELLED,
+      title: 'Appointment cancelled',
+      body: 'Your appointment was cancelled. Reason: Need to reschedule',
+      dedupeKey: 'BOOKING_CANCELLED:booking_1',
+      href: '/client/bookings/booking_1?step=overview',
       data: {
-        clientId: 'client_1',
         bookingId: 'booking_1',
-        type: ClientNotificationType.BOOKING_CANCELLED,
-        title: 'Appointment cancelled',
-        body: 'Your appointment was cancelled. Reason: Need to reschedule',
-        dedupeKey: 'BOOKING_CANCELLED:booking_1',
+        reason: 'Need to reschedule',
+        notificationReason: 'BOOKING_CANCELLED',
       },
     })
 
@@ -187,7 +209,10 @@ describe('lib/booking/writeBoundary', () => {
     })
 
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
-    expect(mocks.txClientNotificationCreate).not.toHaveBeenCalled()
+    expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       booking: {
@@ -246,13 +271,13 @@ describe('lib/booking/writeBoundary', () => {
     })
 
     await expect(
-        releaseHold({
-            holdId: 'hold_2',
-            clientId: 'client_1',
-        }),
-        ).rejects.toMatchObject({
-        code: 'HOLD_FORBIDDEN',
-        })
+      releaseHold({
+        holdId: 'hold_2',
+        clientId: 'client_1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'HOLD_FORBIDDEN',
+    })
 
     expect(mocks.lockProfessionalSchedule).not.toHaveBeenCalled()
     expect(mocks.txBookingHoldDelete).not.toHaveBeenCalled()

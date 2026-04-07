@@ -539,7 +539,7 @@ export async function POST(req: Request, ctx: Ctx) {
         title: 'Consultation proposal ready',
         body: 'Your professional sent an updated service total for approval.',
         bookingId: booking.id,
-        href: `/client/bookings/${booking.id}`,
+        href: `/client/bookings/${booking.id}?step=consult`,
         dedupeKey: `CONSULTATION_PROPOSAL:${booking.id}`,
         data: {
           bookingId: booking.id,

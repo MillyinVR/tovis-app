@@ -96,7 +96,11 @@ import {
   areAuditValuesEqual,
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
-import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
+import {
+  cancelScheduledClientNotificationsForBooking,
+  scheduleClientNotification,
+  upsertClientNotification,
+} from '@/lib/notifications/clientNotifications'
 
 type MutationMeta = {
   mutated: boolean
@@ -790,6 +794,7 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
   locationType: true,
   serviceId: true,
   offeringId: true,
+  scheduledFor: true,
   subtotalSnapshot: true,
   totalDurationMinutes: true,
   consultationConfirmedAt: true,
@@ -2526,6 +2531,103 @@ async function createUpdateClientNotification(args: {
   })
 }
 
+type AppointmentReminderKind = 'ONE_WEEK' | 'DAY_BEFORE'
+
+function makeAppointmentReminderDedupeKey(
+  bookingId: string,
+  kind: AppointmentReminderKind,
+): string {
+  return `CLIENT_REMINDER:${kind}:${bookingId}`
+}
+
+function resolveAppointmentReminderTimeZone(
+  value: string | null | undefined,
+): string {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (raw && isValidIanaTimeZone(raw)) {
+    return sanitizeTimeZone(raw, DEFAULT_TIME_ZONE)
+  }
+  return DEFAULT_TIME_ZONE
+}
+
+function computeAppointmentReminderRunAt(args: {
+  scheduledFor: Date
+  kind: AppointmentReminderKind
+}): Date | null {
+  const offsetMs =
+    args.kind === 'ONE_WEEK'
+      ? 7 * 24 * 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000
+
+  const runAt = new Date(args.scheduledFor.getTime() - offsetMs)
+  return Number.isNaN(runAt.getTime()) ? null : runAt
+}
+
+async function scheduleBookingAppointmentReminders(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+  scheduledFor: Date
+  href?: string | null
+  timeZone?: string | null
+  serviceName?: string | null
+  professionalName?: string | null
+}): Promise<void> {
+  const href =
+    typeof args.href === 'string' && args.href.trim().length > 0
+      ? args.href.trim()
+      : `/client/bookings/${args.bookingId}?step=overview`
+
+  const timeZone = resolveAppointmentReminderTimeZone(args.timeZone)
+  const reminderKinds: AppointmentReminderKind[] = ['ONE_WEEK', 'DAY_BEFORE']
+  const now = Date.now()
+
+  for (const reminderKind of reminderKinds) {
+    const runAt = computeAppointmentReminderRunAt({
+      scheduledFor: args.scheduledFor,
+      kind: reminderKind,
+    })
+
+    if (!runAt) continue
+    if (runAt.getTime() <= now) continue
+
+    await scheduleClientNotification({
+      tx: args.tx,
+      clientId: args.clientId,
+      bookingId: args.bookingId,
+      type: ClientNotificationType.APPOINTMENT_REMINDER,
+      runAt,
+      dedupeKey: makeAppointmentReminderDedupeKey(
+        args.bookingId,
+        reminderKind,
+      ),
+      href,
+      data: {
+        reminderKind,
+        bookingId: args.bookingId,
+        scheduledFor: args.scheduledFor.toISOString(),
+        timeZone,
+        serviceName: args.serviceName ?? null,
+        professionalName: args.professionalName ?? null,
+      },
+    })
+  }
+}
+
+async function cancelBookingAppointmentReminders(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+}): Promise<void> {
+  await cancelScheduledClientNotificationsForBooking({
+    tx: args.tx,
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    types: [ClientNotificationType.APPOINTMENT_REMINDER],
+    onlyPending: true,
+  })
+}
+
 async function resolveUpdateBookingSchedulingContext(args: {
   bookingLocationTimeZone?: unknown
   locationId?: string | null
@@ -3031,7 +3133,7 @@ async function maybeCreateBookingCancelledNotification(args: {
     title: 'Appointment cancelled',
     body,
     dedupeKey: `BOOKING_CANCELLED:${booking.id}`,
-    href: `/client/bookings/${booking.id}`,
+    href: `/client/bookings/${booking.id}?step=overview`,
     data: {
       bookingId: booking.id,
       reason: reason ?? null,
@@ -3646,6 +3748,12 @@ async function performLockedCancel(args: {
       status: true,
       sessionStep: true,
     } satisfies Prisma.BookingSelect,
+  })
+
+  await cancelBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: booking.id,
+    clientId: booking.clientId,
   })
 
     await maybeCreateBookingCancelledNotification({
@@ -5605,21 +5713,35 @@ const offeringIds = Array.from(
   })
 
   const updatedApproval = await args.tx.consultationApproval.update({
-    where: { bookingId: booking.id },
-    data: {
-      status: ConsultationApprovalStatus.APPROVED,
-      approvedAt: args.now,
-      rejectedAt: null,
-      clientId: args.clientId,
-      proId: args.professionalId,
-    },
-    select: {
-      id: true,
-      status: true,
-      approvedAt: true,
-      rejectedAt: true,
-    },
-  })
+  where: { bookingId: booking.id },
+  data: {
+    status: ConsultationApprovalStatus.APPROVED,
+    approvedAt: args.now,
+    rejectedAt: null,
+    clientId: args.clientId,
+    proId: args.professionalId,
+  },
+  select: {
+    id: true,
+    status: true,
+    approvedAt: true,
+    rejectedAt: true,
+  },
+})
+
+await cancelBookingAppointmentReminders({
+  tx: args.tx,
+  bookingId: booking.id,
+  clientId: booking.clientId,
+})
+
+await scheduleBookingAppointmentReminders({
+  tx: args.tx,
+  clientId: booking.clientId,
+  bookingId: booking.id,
+  scheduledFor: booking.scheduledFor,
+  href: `/client/bookings/${booking.id}?step=overview`,
+})
 
 await createBookingCloseoutAuditLog({
   tx: args.tx,
@@ -6411,6 +6533,33 @@ async function performLockedCreateProBooking(args: {
       sortOrder: 0,
     },
   })
+
+await createUpdateClientNotification({
+  tx: args.tx,
+  clientId: args.clientId,
+  bookingId: booking.id,
+  type: ClientNotificationType.BOOKING_CONFIRMED,
+  title: 'Appointment booked',
+  body: `Your appointment for ${offering.service.name || 'Appointment'} has been booked.`,
+  dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
+  href: `/client/bookings/${booking.id}?step=overview`,
+  data: {
+    bookingId: booking.id,
+    notificationReason: 'BOOKING_CONFIRMED',
+    bookingReason: 'PRO_BOOKED_APPOINTMENT',
+  },
+})
+
+await scheduleBookingAppointmentReminders({
+  tx: args.tx,
+  clientId: args.clientId,
+  bookingId: booking.id,
+  scheduledFor: requestedStart,
+  href: `/client/bookings/${booking.id}?step=overview`,
+  timeZone: locationContext.timeZone,
+  serviceName: offering.service.name || 'Appointment',
+})
+  
 if (
   schedulingDecision.appliedOverrides.length > 0 &&
   normalizedOverrideReason
@@ -6974,7 +7123,7 @@ async function performLockedUpdateProBooking(args: {
   }
 
   if (args.nextStatus === BookingStatus.CANCELLED) {
-  const updated = await args.tx.booking.update({
+    const updated = await args.tx.booking.update({
     where: { id: existing.id },
     data: { status: BookingStatus.CANCELLED },
     select: {
@@ -6987,6 +7136,12 @@ async function performLockedUpdateProBooking(args: {
     } satisfies Prisma.BookingSelect,
   })
 
+  await cancelBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: updated.id,
+    clientId: existing.clientId,
+  })
+
   if (args.notifyClient) {
     await createUpdateClientNotification({
       tx: args.tx,
@@ -6996,7 +7151,7 @@ async function performLockedUpdateProBooking(args: {
       title: 'Appointment cancelled',
       body: 'Your appointment was cancelled.',
       dedupeKey: `BOOKING_CANCELLED:${updated.id}`,
-      href: `/client/bookings/${updated.id}`,
+      href: `/client/bookings/${updated.id}?step=overview`,
       data: {
         bookingId: updated.id,
         notificationReason: 'BOOKING_CANCELLED',
@@ -7375,7 +7530,27 @@ async function performLockedUpdateProBooking(args: {
   })
 }
 
-  if (args.notifyClient) {
+  if (
+  updated.status === BookingStatus.ACCEPTED &&
+  (args.nextStatus === BookingStatus.ACCEPTED || occupancyChanged)
+) {
+  await cancelBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: updated.id,
+    clientId: existing.clientId,
+  })
+
+  await scheduleBookingAppointmentReminders({
+    tx: args.tx,
+    clientId: existing.clientId,
+    bookingId: updated.id,
+    scheduledFor: new Date(updated.scheduledFor),
+    href: `/client/bookings/${updated.id}?step=overview`,
+    timeZone: appointmentTimeZone,
+  })
+}
+
+if (args.notifyClient) {
   const isConfirm = args.nextStatus === BookingStatus.ACCEPTED
   const title = isConfirm ? 'Appointment confirmed' : 'Appointment updated'
   const bodyText = isConfirm
@@ -7396,15 +7571,16 @@ async function performLockedUpdateProBooking(args: {
     title,
     body: bodyText,
     dedupeKey: notifKey,
-    href: `/client/bookings/${updated.id}`,
+    href: `/client/bookings/${updated.id}?step=overview`,
     data: {
       bookingId: updated.id,
       notificationReason: isConfirm
         ? 'BOOKING_CONFIRMED'
         : 'BOOKING_RESCHEDULED',
+      bookingReason: isConfirm ? 'REQUEST_APPROVED' : 'BOOKING_RESCHEDULED',
     },
   })
-  }
+}
 
   if (occupancyChanged) {
     await bumpProfessionalScheduleVersion(existing.professionalId)
@@ -7712,7 +7888,7 @@ await createUpdateClientNotification({
   title: notifTitle,
   body: bodyPreview,
   dedupeKey: notifKey,
-  href: `/client/bookings/${booking.id}`,
+  href: `/client/bookings/${booking.id}?step=aftercare`,
   data: {
     bookingId: booking.id,
     aftercareId: aftercare.id,
