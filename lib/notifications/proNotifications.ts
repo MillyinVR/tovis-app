@@ -1,180 +1,300 @@
 // lib/notifications/proNotifications.ts
 import { prisma } from '@/lib/prisma'
-import type { NotificationType } from '@prisma/client'
+import { NotificationPriority, Prisma } from '@prisma/client'
+import type { NotificationType, ProNotificationReason } from '@prisma/client'
 
-type CreateProNotificationArgs = {
+const MAX_ID = 64
+const MAX_TITLE = 160
+const MAX_BODY = 4000
+const MAX_HREF = 2048
+const MAX_DEDUPE_KEY = 256
+
+const notificationIdSelect = {
+  id: true,
+} satisfies Prisma.NotificationSelect
+
+export type CreateProNotificationArgs = {
   professionalId: string
   type: NotificationType
+  reason: ProNotificationReason
+  priority?: NotificationPriority | null
+
   title: string
   body?: string | null
   href?: string | null
+  data?: Prisma.InputJsonValue
+
   dedupeKey?: string | null
 
   actorUserId?: string | null
   bookingId?: string | null
   reviewId?: string | null
+
+  /**
+   * Optional transaction client so callers can create notifications
+   * inside an existing prisma.$transaction(...) block.
+   */
+  tx?: Prisma.TransactionClient
 }
 
-function normRequired(v: unknown, max: number) {
-  const s = typeof v === 'string' ? v.trim() : ''
+export type ProNotificationCreateResult = {
+  id: string
+}
+
+function normRequiredString(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value.trim() : ''
   return s.slice(0, max)
 }
 
-/**
- * For non-nullable prisma string fields with @default(""):
- * - always return a string (possibly empty)
- */
-function normDefaultString(v: unknown, max: number) {
-  const s = typeof v === 'string' ? v.trim() : ''
+function normDefaultString(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value.trim() : ''
   return s.slice(0, max)
 }
 
-/**
- * For nullable fields (like dedupeKey String?):
- * - return trimmed string or null
- */
-function normNullableString(v: unknown, max: number) {
-  const s = typeof v === 'string' ? v.trim() : ''
+function normNullableString(value: unknown, max: number): string | null {
+  const s = typeof value === 'string' ? value.trim() : ''
   const clipped = s.slice(0, max)
-  return clipped ? clipped : null
+  return clipped.length > 0 ? clipped : null
+}
+
+/**
+ * Only allow internal app paths.
+ * This prevents accidentally storing external or protocol-relative links
+ * in notification href values.
+ */
+function normInternalHref(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value.trim().slice(0, max) : ''
+  if (!s) return ''
+  if (!s.startsWith('/')) return ''
+  if (s.startsWith('//')) return ''
+  return s
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
 
 /**
  * Optional realtime publish hook.
- * Safe on Vercel: if not configured, it no-ops.
- *
- * Later you can swap this to Ably/Pusher/Redis gateway without touching callers.
+ * Safe default: no-op until you wire Ably / Pusher / Redis / SSE.
  */
-async function publishProNotificationEvent(_args: { professionalId: string; notificationId: string }) {
-  // Intentionally a no-op unless you wire Ably/Pusher.
-  // Example later:
-  // if (!process.env.ABLY_API_KEY) return
-  // await ably.channels.get(`pro:${_args.professionalId}`).publish('notification', { id: _args.notificationId })
+async function publishProNotificationEvent(args: {
+  professionalId: string
+  notificationId: string
+}): Promise<void> {
+  void args
   return
 }
 
+function getDb(tx?: Prisma.TransactionClient) {
+  return tx ?? prisma
+}
+
+function buildUpdateData(
+  normalized: ReturnType<typeof normalizeCreateArgs>,
+): Prisma.NotificationUncheckedUpdateManyInput {
+  const data: Prisma.NotificationUncheckedUpdateManyInput = {
+    type: normalized.type,
+    reason: normalized.reason,
+    priority: normalized.priority,
+    title: normalized.title,
+    body: normalized.body,
+    href: normalized.href,
+    dedupeKey: normalized.dedupeKey,
+    actorUserId: normalized.actorUserId,
+    bookingId: normalized.bookingId,
+    reviewId: normalized.reviewId,
+
+    // Resurface deduped items as active/unread again.
+    seenAt: null,
+    readAt: null,
+    clickedAt: null,
+    archivedAt: null,
+  }
+
+  if (normalized.data !== undefined) {
+    data.data = normalized.data
+  }
+
+  return data
+}
+
+function buildCreateData(
+  normalized: ReturnType<typeof normalizeCreateArgs>,
+): Prisma.NotificationUncheckedCreateInput {
+  return {
+    professionalId: normalized.professionalId,
+    type: normalized.type,
+    reason: normalized.reason,
+    priority: normalized.priority,
+    title: normalized.title,
+    body: normalized.body,
+    href: normalized.href,
+    dedupeKey: normalized.dedupeKey,
+    actorUserId: normalized.actorUserId,
+    bookingId: normalized.bookingId,
+    reviewId: normalized.reviewId,
+
+    seenAt: null,
+    readAt: null,
+    clickedAt: null,
+    archivedAt: null,
+
+    ...(normalized.data !== undefined ? { data: normalized.data } : {}),
+  }
+}
+
+function normalizeCreateArgs(args: CreateProNotificationArgs) {
+  const professionalId = normRequiredString(args.professionalId, MAX_ID)
+  const title = normRequiredString(args.title, MAX_TITLE)
+
+  if (!professionalId) {
+    throw new Error('createProNotification: missing professionalId')
+  }
+
+  if (!title) {
+    throw new Error('createProNotification: missing title')
+  }
+
+  return {
+    professionalId,
+    type: args.type,
+    reason: args.reason,
+    priority: args.priority ?? NotificationPriority.NORMAL,
+
+    title,
+    body: normDefaultString(args.body, MAX_BODY),
+    href: normInternalHref(args.href, MAX_HREF),
+    data: args.data,
+
+    dedupeKey: normNullableString(args.dedupeKey, MAX_DEDUPE_KEY),
+
+    actorUserId: normNullableString(args.actorUserId, MAX_ID),
+    bookingId: normNullableString(args.bookingId, MAX_ID),
+    reviewId: normNullableString(args.reviewId, MAX_ID),
+  }
+}
+
+async function findNotificationIdByDedupe(args: {
+  professionalId: string
+  dedupeKey: string
+  tx?: Prisma.TransactionClient
+}): Promise<ProNotificationCreateResult> {
+  const db = getDb(args.tx)
+
+  const found = await db.notification.findFirst({
+    where: {
+      professionalId: args.professionalId,
+      dedupeKey: args.dedupeKey,
+    },
+    select: notificationIdSelect,
+  })
+
+  if (!found) {
+    throw new Error('createProNotification: notification not found after dedupe update/create')
+  }
+
+  return found
+}
+
 /**
- * Idempotent pro notifications.
+ * Idempotent pro notification creation.
  *
  * Contract:
- * - If dedupeKey is provided: behaves like upsert and resets readAt to null (unread)
- * - If no dedupeKey: always creates a new notification
+ * - If dedupeKey is present: behaves like upsert and resets unread state.
+ * - If dedupeKey is absent: always creates a new row.
  *
- * IMPORTANT:
- * - Dedupe is scoped to (professionalId + dedupeKey), not just dedupeKey.
- *   Enforce this in Prisma:
- *     @@unique([professionalId, dedupeKey])
+ * Dedupe is scoped to:
+ *   @@unique([professionalId, dedupeKey])
  */
-export async function createProNotification(args: CreateProNotificationArgs) {
-  const professionalId = normRequired(args.professionalId, 64)
-  const title = normRequired(args.title, 160)
+export async function createProNotification(
+  args: CreateProNotificationArgs,
+): Promise<ProNotificationCreateResult> {
+  const db = getDb(args.tx)
+  const normalized = normalizeCreateArgs(args)
 
-  // Prisma schema: body/href are NOT nullable (String @default(""))
-  const body = normDefaultString(args.body, 4000)
-  const href = normDefaultString(args.href, 2048)
-
-  // Prisma schema: dedupeKey is nullable
-  const dedupeKey = normNullableString(args.dedupeKey, 256)
-
-  if (!professionalId) throw new Error('createProNotification: missing professionalId')
-  if (!title) throw new Error('createProNotification: missing title')
-
-  const actorUserId = args.actorUserId ?? null
-  const bookingId = args.bookingId ?? null
-  const reviewId = args.reviewId ?? null
-
-  // No dedupe: always create a new row
-  if (!dedupeKey) {
-    const created = await prisma.notification.create({
+  // No dedupe key = always create a new row.
+  if (!normalized.dedupeKey) {
+    const created = await db.notification.create({
       data: {
-        professionalId,
-        type: args.type,
-        title,
-        body,
-        href,
-        dedupeKey: null,
-        actorUserId,
-        bookingId,
-        reviewId,
-        readAt: null,
+        ...buildCreateData({
+          ...normalized,
+          dedupeKey: null,
+        }),
       },
-      select: { id: true },
+      select: notificationIdSelect,
     })
 
-    await publishProNotificationEvent({ professionalId, notificationId: created.id })
+    await publishProNotificationEvent({
+      professionalId: normalized.professionalId,
+      notificationId: created.id,
+    })
+
     return created
   }
 
-  // Update-first (fast path)
-  const updated = await prisma.notification.updateMany({
-    where: { professionalId, dedupeKey },
-    data: {
-      type: args.type,
-      title,
-      body,
-      href,
-      actorUserId,
-      bookingId,
-      reviewId,
-      readAt: null,
+  // Fast path: update existing deduped row first.
+  const updated = await db.notification.updateMany({
+    where: {
+      professionalId: normalized.professionalId,
+      dedupeKey: normalized.dedupeKey,
     },
+    data: buildUpdateData(normalized),
   })
 
   if (updated.count > 0) {
-    const found = await prisma.notification.findFirst({
-      where: { professionalId, dedupeKey },
-      select: { id: true },
+    const found = await findNotificationIdByDedupe({
+      professionalId: normalized.professionalId,
+      dedupeKey: normalized.dedupeKey,
+      tx: args.tx,
     })
 
-    if (found?.id) {
-      await publishProNotificationEvent({ professionalId, notificationId: found.id })
-    }
+    await publishProNotificationEvent({
+      professionalId: normalized.professionalId,
+      notificationId: found.id,
+    })
+
     return found
   }
 
-  // Create; if a race happens, unique constraint will throw — retry update
+  // No existing row: create one.
   try {
-    const created = await prisma.notification.create({
-      data: {
-        professionalId,
-        type: args.type,
-        title,
-        body,
-        href,
-        dedupeKey,
-        actorUserId,
-        bookingId,
-        reviewId,
-        readAt: null,
-      },
-      select: { id: true },
+    const created = await db.notification.create({
+      data: buildCreateData(normalized),
+      select: notificationIdSelect,
     })
 
-    await publishProNotificationEvent({ professionalId, notificationId: created.id })
+    await publishProNotificationEvent({
+      professionalId: normalized.professionalId,
+      notificationId: created.id,
+    })
+
     return created
-  } catch {
-    await prisma.notification.updateMany({
-      where: { professionalId, dedupeKey },
-      data: {
-        type: args.type,
-        title,
-        body,
-        href,
-        actorUserId,
-        bookingId,
-        reviewId,
-        readAt: null,
-      },
-    })
-
-    const found = await prisma.notification.findFirst({
-      where: { professionalId, dedupeKey },
-      select: { id: true },
-    })
-
-    if (found?.id) {
-      await publishProNotificationEvent({ professionalId, notificationId: found.id })
+  } catch (error) {
+    // Race condition: another request created the same deduped row first.
+    if (!isUniqueConstraintError(error)) {
+      throw error
     }
+
+    await db.notification.updateMany({
+      where: {
+        professionalId: normalized.professionalId,
+        dedupeKey: normalized.dedupeKey,
+      },
+      data: buildUpdateData(normalized),
+    })
+
+    const found = await findNotificationIdByDedupe({
+      professionalId: normalized.professionalId,
+      dedupeKey: normalized.dedupeKey,
+      tx: args.tx,
+    })
+
+    await publishProNotificationEvent({
+      professionalId: normalized.professionalId,
+      notificationId: found.id,
+    })
+
     return found
   }
 }

@@ -7,8 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   test: {
     environment: 'node',
+    environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']],
     globals: true,
-    include: ['**/*.test.ts'],
+    include: ['**/*.test.ts', '**/*.test.tsx'],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
@@ -19,6 +20,7 @@ export default defineConfig({
     clearMocks: true,
     restoreMocks: true,
     mockReset: true,
+    setupFiles: ['./vitest.setup.ts'],
   },
   resolve: {
     alias: {

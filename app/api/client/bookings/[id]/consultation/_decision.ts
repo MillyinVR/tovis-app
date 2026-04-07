@@ -10,11 +10,13 @@ import {
 } from '@/app/api/_utils'
 import { approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBoundary'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
+import { createProNotification } from '@/lib/notifications/proNotifications'
 import {
   BookingCloseoutAuditAction,
   ConsultationApprovalStatus,
   NotificationType,
   Prisma,
+  ProNotificationReason,
 } from '@prisma/client'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
@@ -84,29 +86,49 @@ function buildConsultationApprovalAuditSnapshot(
   }
 }
 
+function getConsultationDecisionNotificationMeta(action: ConsultationDecisionAction): {
+  title: string
+  body: string
+  reason: ProNotificationReason
+} {
+  if (action === 'APPROVE') {
+    return {
+      title: 'Consultation approved',
+      body: 'Client approved your consultation proposal.',
+      reason: ProNotificationReason.CONSULTATION_APPROVED,
+    }
+  }
+
+  return {
+    title: 'Consultation rejected',
+    body: 'Client rejected your consultation proposal.',
+    reason: ProNotificationReason.CONSULTATION_REJECTED,
+  }
+}
+
 async function createConsultationDecisionNotification(args: {
   bookingId: string
   professionalId: string
   actorUserId: string
   action: ConsultationDecisionAction
 }): Promise<void> {
+  const meta = getConsultationDecisionNotificationMeta(args.action)
+
   try {
-    await prisma.notification.create({
+    await createProNotification({
+      professionalId: args.professionalId,
+      type: NotificationType.BOOKING_UPDATE,
+      reason: meta.reason,
+      title: meta.title,
+      body: meta.body,
+      href: `/pro/bookings/${args.bookingId}?step=consult`,
+      actorUserId: args.actorUserId,
+      bookingId: args.bookingId,
+      dedupeKey: `PRO_NOTIF:${meta.reason}:${args.bookingId}`,
       data: {
-        type: NotificationType.BOOKING_UPDATE,
-        professionalId: args.professionalId,
-        actorUserId: args.actorUserId,
         bookingId: args.bookingId,
-        title:
-          args.action === 'APPROVE'
-            ? 'Consultation approved'
-            : 'Consultation rejected',
-        body:
-          args.action === 'APPROVE'
-            ? 'Client approved your consultation proposal.'
-            : 'Client rejected your consultation proposal.',
-        href: `/pro/bookings/${args.bookingId}?step=consult`,
-        dedupeKey: `CONSULT_DECISION:${args.bookingId}:${args.action}`,
+        action: args.action,
+        step: 'consult',
       },
     })
   } catch (e) {

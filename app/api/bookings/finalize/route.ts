@@ -5,6 +5,7 @@ import {
   BookingStatus,
   NotificationType,
   Prisma,
+  ProNotificationReason,
   type ServiceLocationType,
 } from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
@@ -116,6 +117,63 @@ function toFinalizeOffering(
     mobileDurationMinutes: offering.mobileDurationMinutes,
     professionalTimeZone: offering.professional?.timeZone ?? null,
   }
+}
+
+function getFinalizeProNotificationMeta(status: BookingStatus): {
+  type: NotificationType
+  reason: ProNotificationReason
+  title: string
+} {
+  if (status === BookingStatus.PENDING) {
+    return {
+      type: NotificationType.BOOKING_REQUEST,
+      reason: ProNotificationReason.BOOKING_REQUEST_CREATED,
+      title: 'New booking request',
+    }
+  }
+
+  if (status === BookingStatus.ACCEPTED) {
+    return {
+      type: NotificationType.BOOKING_UPDATE,
+      reason: ProNotificationReason.BOOKING_CONFIRMED,
+      title: 'New booking confirmed',
+    }
+  }
+
+  return {
+    type: NotificationType.BOOKING_UPDATE,
+    reason: ProNotificationReason.BOOKING_CONFIRMED,
+    title: 'New booking confirmed',
+  }
+}
+
+async function createFinalizeProNotification(args: {
+  professionalId: string
+  bookingId: string
+  actorUserId: string
+  bookingStatus: BookingStatus
+  source: BookingSource
+  locationType: ServiceLocationType
+}) {
+  const meta = getFinalizeProNotificationMeta(args.bookingStatus)
+
+  await createProNotification({
+    professionalId: args.professionalId,
+    type: meta.type,
+    reason: meta.reason,
+    title: meta.title,
+    body: '',
+    href: `/pro/bookings/${args.bookingId}`,
+    actorUserId: args.actorUserId,
+    bookingId: args.bookingId,
+    dedupeKey: `PRO_NOTIF:${meta.reason}:${args.bookingId}`,
+    data: {
+      bookingId: args.bookingId,
+      bookingStatus: args.bookingStatus,
+      source: args.source,
+      locationType: args.locationType,
+    },
+  })
 }
 
 export async function POST(request: Request) {
@@ -240,24 +298,18 @@ export async function POST(request: Request) {
       fallbackTimeZone: 'UTC',
     })
 
-    const notificationType =
-      result.booking.status === BookingStatus.PENDING
-        ? NotificationType.BOOKING_REQUEST
-        : NotificationType.BOOKING_UPDATE
-
-    await createProNotification({
-      professionalId: result.booking.professionalId,
-      type: notificationType,
-      title:
-        notificationType === NotificationType.BOOKING_REQUEST
-          ? 'New booking request'
-          : 'New booking confirmed',
-      body: '',
-      href: `/pro/bookings/${result.booking.id}`,
-      actorUserId: user.id,
-      bookingId: result.booking.id,
-      dedupeKey: `PRO_NOTIF:${String(notificationType)}:${result.booking.id}`,
-    })
+    try {
+      await createFinalizeProNotification({
+        professionalId: result.booking.professionalId,
+        bookingId: result.booking.id,
+        actorUserId: user.id,
+        bookingStatus: result.booking.status,
+        source,
+        locationType,
+      })
+    } catch (notificationError: unknown) {
+      console.error('POST /api/bookings/finalize pro notification error:', notificationError)
+    }
 
     return jsonOk(
       {

@@ -218,6 +218,26 @@ enum NotificationType {
   REVIEW
 }
 
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum ProNotificationReason {
+  BOOKING_REQUEST_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_RESCHEDULED
+  BOOKING_CANCELLED_BY_CLIENT
+  BOOKING_CANCELLED_BY_ADMIN
+  CONSULTATION_APPROVED
+  CONSULTATION_REJECTED
+  REVIEW_RECEIVED
+  PAYMENT_COLLECTED
+  PAYMENT_ACTION_REQUIRED
+}
+
 enum SupportTicketStatus {
   OPEN
   IN_PROGRESS
@@ -303,6 +323,10 @@ model Notification {
   id   String           @id @default(cuid())
   type NotificationType
 
+  // exact business event
+  reason   ProNotificationReason
+  priority NotificationPriority @default(NORMAL)
+
   professionalId String
   professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
 
@@ -319,15 +343,29 @@ model Notification {
   body  String @default("")
   href  String @default("")
 
+  // structured payload for UI + future-proofing
+  data Json?
+
   dedupeKey String?
-  readAt    DateTime?
+
+  // state
+  seenAt     DateTime?
+  readAt     DateTime?
+  clickedAt  DateTime?
+  archivedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([professionalId, dedupeKey])
-  @@index([professionalId, createdAt])
-  @@index([professionalId, readAt])
+
+  // main inbox query
+  @@index([professionalId, archivedAt, readAt, createdAt])
+
+  // filters
+  @@index([professionalId, type, archivedAt, createdAt])
+  @@index([professionalId, reason, archivedAt, createdAt])
+
   @@index([bookingId])
   @@index([reviewId])
 }

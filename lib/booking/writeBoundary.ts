@@ -12,10 +12,13 @@ import {
   MediaPhase,
   MediaType,
   MediaVisibility,
+  NotificationPriority,
+  NotificationType,
   OpeningStatus,
   PaymentMethod,
   Prisma,
   ProfessionalLocationType,
+  ProNotificationReason,
   Role,
   ServiceLocationType,
   SessionStep,
@@ -101,6 +104,7 @@ import {
   scheduleClientNotification,
   upsertClientNotification,
 } from '@/lib/notifications/clientNotifications'
+import { createProNotification } from '@/lib/notifications/proNotifications'
 
 type MutationMeta = {
   mutated: boolean
@@ -817,6 +821,9 @@ const RESCHEDULE_BOOKING_SELECT = {
   clientId: true,
   professionalId: true,
   offeringId: true,
+  scheduledFor: true,
+  locationType: true,
+  locationTimeZone: true,
   startedAt: true,
   finishedAt: true,
   totalDurationMinutes: true,
@@ -3142,6 +3149,93 @@ async function maybeCreateBookingCancelledNotification(args: {
   })
 }
 
+async function maybeCreateProBookingCancelledNotification(args: {
+  tx: Prisma.TransactionClient
+  booking: CancelBookingRecord
+  actor: CancelActor
+  reason?: string | null
+}): Promise<void> {
+  const reason = normalizeReason(args.reason)
+  let notificationReason: ProNotificationReason
+  let title: string
+  let body: string
+
+  if (args.actor.kind === 'client') {
+    notificationReason = ProNotificationReason.BOOKING_CANCELLED_BY_CLIENT
+    title = 'Booking cancelled by client'
+    body = reason
+      ? `Client cancelled this booking. Reason: ${reason}`
+      : 'Client cancelled this booking.'
+  } else if (args.actor.kind === 'admin') {
+    notificationReason = ProNotificationReason.BOOKING_CANCELLED_BY_ADMIN
+    title = 'Booking cancelled by admin'
+    body = reason
+      ? `An admin cancelled this booking. Reason: ${reason}`
+      : 'An admin cancelled this booking.'
+  } else {
+    // Pro cancelled their own booking.
+    // Do not create a pro inbox notification for self-cancel.
+    return
+  }
+
+  await createProNotification({
+    tx: args.tx,
+    professionalId: args.booking.professionalId,
+    type: NotificationType.BOOKING_CANCELLED,
+    reason: notificationReason,
+    priority: NotificationPriority.HIGH,
+    title,
+    body,
+    href: `/pro/bookings/${args.booking.id}`,
+    actorUserId: null,
+    bookingId: args.booking.id,
+    dedupeKey: `PRO_NOTIF:${notificationReason}:${args.booking.id}`,
+    data: {
+      bookingId: args.booking.id,
+      cancelledBy: args.actor.kind,
+      reason: reason ?? null,
+      previousStatus: args.booking.status,
+      previousSessionStep: args.booking.sessionStep ?? SessionStep.NONE,
+    },
+  })
+}
+
+async function createProBookingRescheduledNotification(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  actorUserId: string | null
+  previousScheduledFor: Date
+  nextScheduledFor: Date
+  previousLocationType: ServiceLocationType
+  nextLocationType: ServiceLocationType
+  previousLocationTimeZone: string | null
+  nextLocationTimeZone: string | null
+}): Promise<void> {
+  await createProNotification({
+    tx: args.tx,
+    professionalId: args.professionalId,
+    type: NotificationType.BOOKING_UPDATE,
+    reason: ProNotificationReason.BOOKING_RESCHEDULED,
+    priority: NotificationPriority.HIGH,
+    title: 'Booking rescheduled',
+    body: 'A booking was rescheduled.',
+    href: `/pro/bookings/${args.bookingId}`,
+    actorUserId: args.actorUserId,
+    bookingId: args.bookingId,
+    dedupeKey: `PRO_NOTIF:${ProNotificationReason.BOOKING_RESCHEDULED}:${args.bookingId}`,
+    data: {
+      bookingId: args.bookingId,
+      previousScheduledFor: args.previousScheduledFor.toISOString(),
+      nextScheduledFor: args.nextScheduledFor.toISOString(),
+      previousLocationType: args.previousLocationType,
+      nextLocationType: args.nextLocationType,
+      previousLocationTimeZone: args.previousLocationTimeZone,
+      nextLocationTimeZone: args.nextLocationTimeZone,
+    },
+  })
+}
+
 function logHoldConflict(args: {
   professionalId: string
   locationId: string | null
@@ -3760,6 +3854,13 @@ async function performLockedCancel(args: {
     tx: args.tx,
     booking,
     notifyClient: args.notifyClient,
+    reason: args.reason,
+  })
+
+  await maybeCreateProBookingCancelledNotification({
+    tx: args.tx,
+    booking,
+    actor: args.actor,
     reason: args.reason,
   })
 
@@ -5465,6 +5566,19 @@ async function performLockedRescheduleBookingFromHold(args: {
 
     await args.tx.bookingHold.delete({
     where: { id: hold.id },
+  })
+
+  await createProBookingRescheduledNotification({
+    tx: args.tx,
+    bookingId: updated.id,
+    professionalId: booking.professionalId,
+    actorUserId: null,
+    previousScheduledFor: booking.scheduledFor,
+    nextScheduledFor: updated.scheduledFor,
+    previousLocationType: booking.locationType,
+    nextLocationType: updated.locationType,
+    previousLocationTimeZone: booking.locationTimeZone ?? null,
+    nextLocationTimeZone: updated.locationTimeZone ?? null,
   })
 
   await bumpProfessionalScheduleVersion(booking.professionalId)

@@ -5,6 +5,9 @@ import {
   BookingCloseoutAuditAction,
   MediaType,
   MediaVisibility,
+  NotificationPriority,
+  NotificationType,
+  ProNotificationReason,
   Role,
 } from '@prisma/client'
 import {
@@ -21,6 +24,7 @@ import {
   createBookingCloseoutAuditLog,
   normalizeIdempotencyKey,
 } from '@/lib/booking/closeoutAudit'
+import { createProNotification } from '@/lib/notifications/proNotifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -123,6 +127,44 @@ function enforceClientMediaCaps(items: IncomingMediaItem[]): string | null {
  */
 const REVIEW_MEDIA_VISIBILITY = MediaVisibility.PUBLIC
 
+async function createReviewReceivedProNotification(args: {
+  professionalId: string
+  bookingId: string
+  reviewId: string
+  actorUserId: string
+  rating: number
+  headline: string | null
+  attachedAppointmentMediaCount: number
+  clientUploadedMediaCount: number
+}): Promise<void> {
+  const title = 'New review received'
+  const body = `A client left a ${args.rating}-star review.`
+
+  await createProNotification({
+    professionalId: args.professionalId,
+    type: NotificationType.REVIEW,
+    reason: ProNotificationReason.REVIEW_RECEIVED,
+    priority: NotificationPriority.NORMAL,
+    title,
+    body,
+    href: `/pro/bookings/${args.bookingId}`,
+    actorUserId: args.actorUserId,
+    bookingId: args.bookingId,
+    reviewId: args.reviewId,
+    dedupeKey: `PRO_NOTIF:${ProNotificationReason.REVIEW_RECEIVED}:${args.reviewId}`,
+    data: {
+      bookingId: args.bookingId,
+      reviewId: args.reviewId,
+      rating: args.rating,
+      headline: args.headline,
+      attachedAppointmentMediaCount: args.attachedAppointmentMediaCount,
+      clientUploadedMediaCount: args.clientUploadedMediaCount,
+      hasMedia:
+        args.attachedAppointmentMediaCount + args.clientUploadedMediaCount > 0,
+    },
+  })
+}
+
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
@@ -143,7 +185,7 @@ export async function POST(
     const idempotencyKey = normalizeIdempotencyKey(
       req.headers.get('x-idempotency-key') ?? pickString(body.idempotencyKey),
     )
-    
+
     const rating = parseRating1to5(body.rating)
     if (!rating) {
       return jsonFail(400, 'Rating must be an integer from 1–5.')
@@ -193,7 +235,7 @@ export async function POST(
       }
     })
 
-        const reviewResult = await prisma.$transaction(async (tx) => {
+    const reviewResult = await prisma.$transaction(async (tx) => {
       if (idempotencyKey) {
         const existingByKey = await tx.review.findFirst({
           where: {
@@ -377,8 +419,27 @@ export async function POST(
     })
 
     if (!reviewResult.review) {
-      
       return jsonFail(500, 'Internal server error.')
+    }
+
+    if (reviewResult.created) {
+      try {
+        await createReviewReceivedProNotification({
+          professionalId: eligibility.booking.professionalId,
+          bookingId: eligibility.booking.id,
+          reviewId: reviewResult.review.id,
+          actorUserId: user.id,
+          rating,
+          headline: headline || null,
+          attachedAppointmentMediaCount: attachedMediaIds.length,
+          clientUploadedMediaCount: resolvedClientMedia.length,
+        })
+      } catch (notificationError: unknown) {
+        console.error(
+          'POST /api/client/bookings/[id]/review pro notification error',
+          notificationError,
+        )
+      }
     }
 
     return jsonOk(
