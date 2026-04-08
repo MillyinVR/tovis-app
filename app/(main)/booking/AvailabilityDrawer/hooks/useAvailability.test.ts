@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   useRouter: vi.fn(),
   redirectToLogin: vi.fn(),
   safeJson: vi.fn(),
+  parseAvailabilityBootstrapResponse: vi.fn(),
   parseAvailabilitySummaryResponse: vi.fn(),
   fetch: vi.fn(),
 }))
@@ -27,9 +28,18 @@ vi.mock('../utils/safeJson', () => ({
   safeJson: mocks.safeJson,
 }))
 
-vi.mock('../contract', () => ({
-  parseAvailabilitySummaryResponse: mocks.parseAvailabilitySummaryResponse,
-}))
+vi.mock('../contract', async () => {
+  const actual =
+    await vi.importActual<typeof import('../contract')>('../contract')
+
+  return {
+    ...actual,
+    parseAvailabilityBootstrapResponse:
+      mocks.parseAvailabilityBootstrapResponse,
+    parseAvailabilitySummaryResponse:
+      mocks.parseAvailabilitySummaryResponse,
+  }
+})
 
 type HookProps = {
   open: boolean
@@ -39,56 +49,87 @@ type HookProps = {
   includeOtherPros: boolean
 }
 
-function makeSummary(overrides?: Record<string, unknown>) {
-  return {
-    ok: true,
-    mode: 'SUMMARY',
-    mediaId: null,
-    serviceId: 'service_1',
+function makeSummary(
+  overrides?: Partial<Record<string, unknown>> & {
+    request?: Partial<{
+      professionalId: string
+      serviceId: string
+      offeringId: string | null
+      locationType: ServiceLocationType
+      locationId: string
+      clientAddressId: string | null
+      addOnIds: string[]
+      durationMinutes: number
+    }>
+  },
+) {
+  const request = {
     professionalId: 'pro_1',
-    serviceName: 'Haircut',
-    serviceCategoryName: 'Hair',
-    locationType: 'SALON',
+    serviceId: 'service_1',
+    offeringId: null,
+    locationType: 'SALON' as ServiceLocationType,
     locationId: 'loc_1',
-    timeZone: 'America/Los_Angeles',
-    stepMinutes: 15,
-    leadTimeMinutes: 0,
-    locationBufferMinutes: 15,
-    adjacencyBufferMinutes: 15,
-    maxDaysAhead: 30,
+    clientAddressId: null,
+    addOnIds: [],
     durationMinutes: 60,
-    windowStartDate: '2026-03-11',
-    windowEndDate: '2026-03-12',
-    nextStartDate: null,
-    hasMoreDays: false,
-    firstDaySlots: ['2026-03-11T17:00:00.000Z'],
-    primaryPro: {
-      id: 'pro_1',
-      businessName: 'Test Pro',
-      avatarUrl: null,
-      location: 'Los Angeles',
-      offeringId: 'offering_1',
-      isCreator: true,
-      timeZone: 'America/Los_Angeles',
-      locationId: 'loc_1',
-    },
-    availableDays: [
-      { date: '2026-03-11', slotCount: 4 },
-      { date: '2026-03-12', slotCount: 2 },
-    ],
-    otherPros: [],
-    waitlistSupported: true,
-    offering: {
-      id: 'offering_1',
-      offersInSalon: true,
-      offersMobile: true,
-      salonDurationMinutes: 60,
-      mobileDurationMinutes: 75,
-      salonPriceStartingAt: '100.00',
-      mobilePriceStartingAt: '120.00',
-    },
-    ...overrides,
+    ...(overrides?.request ?? {}),
   }
+
+  return {
+  ok: true,
+  mode: 'BOOTSTRAP',
+  availabilityVersion: 'av_v1',
+  generatedAt: '2026-03-10T12:00:00.000Z',
+  mediaId: null,
+  serviceId: request.serviceId,
+  professionalId: request.professionalId,
+  serviceName: 'Haircut',
+  serviceCategoryName: 'Hair',
+  locationType: request.locationType,
+  locationId: request.locationId,
+  timeZone: 'America/Los_Angeles',
+  stepMinutes: 15,
+  leadTimeMinutes: 0,
+  locationBufferMinutes: 15,
+  adjacencyBufferMinutes: 15,
+  maxDaysAhead: 30,
+  durationMinutes: request.durationMinutes,
+  windowStartDate: '2026-03-11',
+  windowEndDate: '2026-03-12',
+  nextStartDate: null,
+  hasMoreDays: false,
+  selectedDay: {
+    date: '2026-03-11',
+    slots: ['2026-03-11T17:00:00.000Z'],
+  },
+  primaryPro: {
+    id: 'pro_1',
+    businessName: 'Test Pro',
+    avatarUrl: null,
+    location: 'Los Angeles',
+    offeringId: 'offering_1',
+    isCreator: true,
+    timeZone: 'America/Los_Angeles',
+    locationId: 'loc_1',
+  },
+  availableDays: [
+    { date: '2026-03-11', slotCount: 4 },
+    { date: '2026-03-12', slotCount: 2 },
+  ],
+  otherPros: [],
+  waitlistSupported: true,
+  offering: {
+    id: 'offering_1',
+    offersInSalon: true,
+    offersMobile: true,
+    salonDurationMinutes: 60,
+    mobileDurationMinutes: 75,
+    salonPriceStartingAt: '100.00',
+    mobilePriceStartingAt: '120.00',
+  },
+  ...overrides,
+  request,
+}
 }
 
 function makeContext(overrides?: Partial<DrawerContext>): DrawerContext {
@@ -159,6 +200,10 @@ describe('useAvailability', () => {
 
     mocks.safeJson.mockImplementation(async (response: Response) =>
       response.json(),
+    )
+
+    mocks.parseAvailabilityBootstrapResponse.mockImplementation(
+      (raw: unknown) => raw,
     )
 
     mocks.parseAvailabilitySummaryResponse.mockImplementation(
@@ -283,10 +328,13 @@ describe('useAvailability', () => {
     nowSpy.mockImplementation(() => nowMs)
 
     const staleSummary = makeSummary({
+      availabilityVersion: 'av_v1',
       serviceName: 'Haircut v1',
     })
 
     const freshSummary = makeSummary({
+      availabilityVersion: 'av_v2',
+      generatedAt: '2026-03-10T12:03:01.000Z',
       serviceName: 'Haircut v2',
     })
 
@@ -368,6 +416,8 @@ describe('useAvailability', () => {
     })
 
     const fullSummary = makeSummary({
+      availabilityVersion: 'av_v2',
+      generatedAt: '2026-03-10T12:01:00.000Z',
       otherPros: [
         {
           id: 'pro_2',
@@ -378,6 +428,7 @@ describe('useAvailability', () => {
           isCreator: false,
           timeZone: 'America/Los_Angeles',
           locationId: 'loc_2',
+          distanceMiles: 1.2,
         },
       ],
     })
@@ -537,6 +588,10 @@ describe('useAvailability', () => {
 
     const summary = makeSummary({
       locationType: 'MOBILE',
+      request: {
+        locationType: 'MOBILE',
+        clientAddressId: 'addr_1',
+      },
     })
 
     mocks.fetch.mockResolvedValueOnce(makeResponse(summary))

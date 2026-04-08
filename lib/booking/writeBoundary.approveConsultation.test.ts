@@ -1,5 +1,4 @@
-// lib/booking/writeBoundary.approveConsultation.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingCheckoutStatus,
   BookingServiceItemType,
@@ -35,6 +34,11 @@ const mocks = vi.hoisted(() => ({
 
   txConsultationApprovalUpdate: vi.fn(),
   txBookingCloseoutAuditLogCreate: vi.fn(),
+
+  createProNotification: vi.fn(),
+  upsertClientNotification: vi.fn(),
+  scheduleClientNotification: vi.fn(),
+  cancelScheduledClientNotificationsForBooking: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -58,6 +62,17 @@ vi.mock('@/lib/booking/serviceItems', () => ({
     mocks.buildNormalizedBookingItemsFromRequestedOfferings,
   computeBookingItemLikeTotals: mocks.computeBookingItemLikeTotals,
   snapToStepMinutes: mocks.snapToStepMinutes,
+}))
+
+vi.mock('@/lib/notifications/proNotifications', () => ({
+  createProNotification: mocks.createProNotification,
+}))
+
+vi.mock('@/lib/notifications/clientNotifications', () => ({
+  upsertClientNotification: mocks.upsertClientNotification,
+  scheduleClientNotification: mocks.scheduleClientNotification,
+  cancelScheduledClientNotificationsForBooking:
+    mocks.cancelScheduledClientNotificationsForBooking,
 }))
 
 import { approveConsultationAndMaterializeBooking } from './writeBoundary'
@@ -92,6 +107,12 @@ function makePendingApprovalBooking(overrides?: {
     clientId: 'client_1',
     professionalId: 'pro_1',
     locationType: ServiceLocationType.SALON,
+    serviceId: null,
+    offeringId: null,
+    scheduledFor: new Date('2026-03-20T18:00:00.000Z'),
+    subtotalSnapshot: null,
+    totalDurationMinutes: 60,
+    consultationConfirmedAt: null,
     consultationApproval: {
       id: 'approval_1',
       status: overrides?.status ?? ConsultationApprovalStatus.PENDING,
@@ -112,6 +133,8 @@ function makePendingApprovalBooking(overrides?: {
         } satisfies Prisma.JsonObject),
       proposedTotal: null,
       notes: null,
+      approvedAt: null,
+      rejectedAt: null,
     },
   }
 }
@@ -169,6 +192,17 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     mocks.prismaTransaction.mockImplementation(
       async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
     )
+
+    mocks.createProNotification.mockResolvedValue(undefined)
+    mocks.upsertClientNotification.mockResolvedValue({ id: 'client_notif_1' })
+    mocks.scheduleClientNotification.mockResolvedValue({ id: 'scheduled_1' })
+    mocks.cancelScheduledClientNotificationsForBooking.mockResolvedValue({
+      count: 0,
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('materializes approved consultation from proposedServicesJson.items into canonical booking state', async () => {

@@ -1,55 +1,56 @@
 // app/api/availability/day/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ServiceLocationType } from '@prisma/client'
 
-const mocks = vi.hoisted(() => {
+const mocks = vi.hoisted(() => ({
+  getScheduleVersion: vi.fn(),
+  getScheduleConfigVersion: vi.fn(),
+
+  buildDayCacheKey: vi.fn(),
+  cacheGetJson: vi.fn(),
+  cacheSetJson: vi.fn(),
+
+  resolveDurationWithAddOns: vi.fn(),
+  loadBusyIntervals: vi.fn(),
+  loadAvailabilityOfferingContext: vi.fn(),
+
+  computeDaySlotsFast: vi.fn(),
+}))
+
+vi.mock('@/lib/booking/cacheVersion', () => ({
+  getScheduleVersion: mocks.getScheduleVersion,
+  getScheduleConfigVersion: mocks.getScheduleConfigVersion,
+}))
+
+vi.mock('@/lib/availability/data/cache', () => ({
+  buildDayCacheKey: mocks.buildDayCacheKey,
+  cacheGetJson: mocks.cacheGetJson,
+  cacheSetJson: mocks.cacheSetJson,
+}))
+
+vi.mock('@/lib/availability/data/addOnContext', () => ({
+  resolveDurationWithAddOns: mocks.resolveDurationWithAddOns,
+}))
+
+vi.mock('@/lib/availability/data/busyIntervals', () => ({
+  loadBusyIntervals: mocks.loadBusyIntervals,
+}))
+
+vi.mock('@/lib/availability/data/offeringContext', () => ({
+  loadAvailabilityOfferingContext: mocks.loadAvailabilityOfferingContext,
+}))
+
+vi.mock('@/lib/availability/core/dayComputation', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/availability/core/dayComputation')>(
+      '@/lib/availability/core/dayComputation',
+    )
+
   return {
-    professionalProfileFindUnique: vi.fn(),
-    serviceFindUnique: vi.fn(),
-    professionalServiceOfferingFindFirst: vi.fn(),
-    professionalServiceOfferingFindMany: vi.fn(),
-    professionalLocationFindFirst: vi.fn(),
-    professionalLocationFindMany: vi.fn(),
-    offeringAddOnFindMany: vi.fn(),
-    bookingFindMany: vi.fn(),
-    bookingHoldFindMany: vi.fn(),
-    calendarBlockFindMany: vi.fn(),
+    ...actual,
+    computeDaySlotsFast: mocks.computeDaySlotsFast,
   }
 })
-
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    professionalProfile: {
-      findUnique: mocks.professionalProfileFindUnique,
-    },
-    service: {
-      findUnique: mocks.serviceFindUnique,
-    },
-    professionalServiceOffering: {
-      findFirst: mocks.professionalServiceOfferingFindFirst,
-      findMany: mocks.professionalServiceOfferingFindMany,
-    },
-    professionalLocation: {
-      findFirst: mocks.professionalLocationFindFirst,
-      findMany: mocks.professionalLocationFindMany,
-    },
-    offeringAddOn: {
-      findMany: mocks.offeringAddOnFindMany,
-    },
-    booking: {
-      findMany: mocks.bookingFindMany,
-    },
-    bookingHold: {
-      findMany: mocks.bookingHoldFindMany,
-    },
-    calendarBlock: {
-      findMany: mocks.calendarBlockFindMany,
-    },
-  },
-}))
-
-vi.mock('@/lib/redis', () => ({
-  getRedis: () => null,
-}))
 
 import { GET } from './route'
 
@@ -61,94 +62,6 @@ const WORKING_HOURS = {
   thu: { enabled: true, start: '09:00', end: '12:00' },
   fri: { enabled: true, start: '09:00', end: '12:00' },
   sat: { enabled: true, start: '09:00', end: '12:00' },
-}
-
-type MockLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
-
-type MockLocation = ReturnType<typeof makeLocation>
-
-type MockLocationWhere = {
-  id?: string
-  isBookable?: boolean
-  type?: {
-    in?: MockLocationType[]
-  }
-}
-
-function makeLocation(args: {
-  id: string
-  type: MockLocationType
-  isPrimary?: boolean
-  timeZone?: string | null
-  workingHours?: typeof WORKING_HOURS
-  bufferMinutes?: number
-  stepMinutes?: number
-  advanceNoticeMinutes?: number
-  maxDaysAhead?: number
-  formattedAddress?: string | null
-  createdAt?: Date
-}) {
-  return {
-    id: args.id,
-    type: args.type,
-    isPrimary: args.isPrimary ?? false,
-    isBookable: true,
-    timeZone: args.timeZone === undefined ? 'UTC' : args.timeZone,
-    workingHours: args.workingHours ?? WORKING_HOURS,
-    bufferMinutes: args.bufferMinutes ?? 0,
-    stepMinutes: args.stepMinutes ?? 60,
-    advanceNoticeMinutes: args.advanceNoticeMinutes ?? 0,
-    maxDaysAhead: args.maxDaysAhead ?? 365,
-    lat: null,
-    lng: null,
-    city: null,
-    formattedAddress:
-      args.formattedAddress === undefined
-        ? args.type === 'MOBILE_BASE'
-          ? null
-          : '123 Main St, Test City, CA 90001'
-        : args.formattedAddress,
-    createdAt: args.createdAt ?? new Date('2026-01-01T00:00:00.000Z'),
-  }
-}
-
-function makeDstLocation(args?: {
-  workingHours?: {
-    sun: { enabled: boolean; start: string; end: string }
-    mon: { enabled: boolean; start: string; end: string }
-    tue: { enabled: boolean; start: string; end: string }
-    wed: { enabled: boolean; start: string; end: string }
-    thu: { enabled: boolean; start: string; end: string }
-    fri: { enabled: boolean; start: string; end: string }
-    sat: { enabled: boolean; start: string; end: string }
-  }
-}) {
-  return {
-    id: 'dst-salon-1',
-    type: 'SALON',
-    isPrimary: true,
-    isBookable: true,
-    timeZone: 'America/New_York',
-    workingHours:
-      args?.workingHours ?? {
-        sun: { enabled: true, start: '01:00', end: '04:00' },
-        mon: { enabled: true, start: '01:00', end: '04:00' },
-        tue: { enabled: true, start: '01:00', end: '04:00' },
-        wed: { enabled: true, start: '01:00', end: '04:00' },
-        thu: { enabled: true, start: '01:00', end: '04:00' },
-        fri: { enabled: true, start: '01:00', end: '04:00' },
-        sat: { enabled: true, start: '01:00', end: '04:00' },
-      },
-    bufferMinutes: 0,
-    stepMinutes: 30,
-    advanceNoticeMinutes: 0,
-    maxDaysAhead: 730,
-    lat: null,
-    lng: null,
-    city: null,
-    formattedAddress: '123 DST St, Test City, NY 10001',
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-  }
 }
 
 function addDaysUtc(date: Date, days: number): Date {
@@ -192,127 +105,6 @@ const DST_SPRING_FORWARD_DAY = '2027-03-14'
 const DST_FALL_BACK_DAY = '2027-11-07'
 const NEAR_MIDNIGHT_DAY = '2027-01-15'
 
-const salonLocation = makeLocation({
-  id: 'salon-1',
-  type: 'SALON',
-  isPrimary: true,
-})
-
-const mobileLocation = makeLocation({
-  id: 'mobile-1',
-  type: 'MOBILE_BASE',
-})
-
-let locationCatalog: MockLocation[] = []
-
-function setLocationCatalog(locations: MockLocation[]) {
-  locationCatalog = locations.slice()
-}
-
-function filterLocations(where?: MockLocationWhere): MockLocation[] {
-  let rows = locationCatalog.slice()
-
-  if (where?.id) {
-    rows = rows.filter((location) => location.id === where.id)
-  }
-
-  if (where?.isBookable === true) {
-    rows = rows.filter((location) => location.isBookable)
-  }
-
-  const allowedTypes = where?.type?.in
-  if (allowedTypes?.length) {
-    rows = rows.filter((location) => allowedTypes.includes(location.type))
-  }
-
-  return rows
-}
-
-function sortLocations(rows: MockLocation[]): MockLocation[] {
-  return rows.slice().sort((a, b) => {
-    if (a.isPrimary !== b.isPrimary) {
-      return Number(b.isPrimary) - Number(a.isPrimary)
-    }
-
-    const createdAtDiff = a.createdAt.getTime() - b.createdAt.getTime()
-    if (createdAtDiff !== 0) {
-      return createdAtDiff
-    }
-
-    return a.id.localeCompare(b.id)
-  })
-}
-
-function installLocationMocks() {
-  mocks.professionalLocationFindFirst.mockImplementation(
-    async (args: { where?: MockLocationWhere }) => {
-      const matches = sortLocations(filterLocations(args.where))
-      return matches[0] ?? null
-    },
-  )
-
-  mocks.professionalLocationFindMany.mockImplementation(
-    async (args: { where?: MockLocationWhere; take?: number }) => {
-      const matches = sortLocations(filterLocations(args.where))
-      return typeof args.take === 'number' ? matches.slice(0, args.take) : matches
-    },
-  )
-}
-
-function installBaseMocks(args?: {
-  proTimeZone?: string
-  offering?: Partial<{
-    offersInSalon: boolean
-    offersMobile: boolean
-    salonDurationMinutes: number | null
-    mobileDurationMinutes: number | null
-    salonPriceStartingAt: string | null
-    mobilePriceStartingAt: string | null
-  }>
-  locations?: MockLocation[]
-}) {
-  mocks.professionalProfileFindUnique.mockResolvedValue({
-    id: 'pro-1',
-    businessName: 'Test Pro',
-    avatarUrl: null,
-    location: null,
-    timeZone: args?.proTimeZone ?? 'UTC',
-  })
-
-  mocks.serviceFindUnique.mockResolvedValue({
-    id: 'service-1',
-    name: 'Haircut',
-    category: { name: 'Hair' },
-  })
-
-  mocks.professionalServiceOfferingFindFirst.mockResolvedValue({
-    id: 'offering-1',
-    offersInSalon: args?.offering?.offersInSalon ?? true,
-    offersMobile: args?.offering?.offersMobile ?? true,
-    salonDurationMinutes: args?.offering?.salonDurationMinutes ?? 60,
-    mobileDurationMinutes: args?.offering?.mobileDurationMinutes ?? 60,
-    salonPriceStartingAt: args?.offering?.salonPriceStartingAt ?? '50.00',
-    mobilePriceStartingAt: args?.offering?.mobilePriceStartingAt ?? '70.00',
-  })
-
-  mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
-  mocks.offeringAddOnFindMany.mockResolvedValue([])
-  mocks.bookingFindMany.mockResolvedValue([])
-  mocks.bookingHoldFindMany.mockResolvedValue([])
-  mocks.calendarBlockFindMany.mockResolvedValue([])
-
-  setLocationCatalog(args?.locations ?? [salonLocation, mobileLocation])
-  installLocationMocks()
-}
-
-async function getAvailability(params: Record<string, string>) {
-  const search = new URLSearchParams(params)
-  const req = new Request(
-    `https://example.test/api/availability/day?${search.toString()}`,
-  )
-  return GET(req)
-}
-
 function localHmInTz(isoUtc: string, timeZone: string): string {
   const d = new Date(isoUtc)
 
@@ -344,10 +136,115 @@ function localYmdInTz(isoUtc: string, timeZone: string): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function makeBaseContext(overrides?: Partial<{
+  locationId: string
+  effectiveLocationType: ServiceLocationType
+  timeZone: string
+  timeZoneSource: 'LOCATION' | 'PROFESSIONAL'
+  workingHours: typeof WORKING_HOURS
+  defaultStepMinutes: number
+  defaultLead: number
+  locationBufferMinutes: number
+  maxAdvanceDays: number
+  durationMinutes: number
+  offeringDbId: string
+  offeringPayload: {
+    id: string
+    offersInSalon: boolean
+    offersMobile: boolean
+    salonDurationMinutes: number | null
+    mobileDurationMinutes: number | null
+    salonPriceStartingAt: string | null
+    mobilePriceStartingAt: string | null
+  }
+}>) {
+  return {
+    ok: true as const,
+    value: {
+      locationId: overrides?.locationId ?? 'salon-1',
+      effectiveLocationType:
+        overrides?.effectiveLocationType ?? ServiceLocationType.SALON,
+      timeZone: overrides?.timeZone ?? 'UTC',
+      timeZoneSource: overrides?.timeZoneSource ?? 'LOCATION',
+      workingHours: overrides?.workingHours ?? WORKING_HOURS,
+      defaultStepMinutes: overrides?.defaultStepMinutes ?? 60,
+      defaultLead: overrides?.defaultLead ?? 0,
+      locationBufferMinutes: overrides?.locationBufferMinutes ?? 0,
+      maxAdvanceDays: overrides?.maxAdvanceDays ?? 365,
+      durationMinutes: overrides?.durationMinutes ?? 60,
+      offeringDbId: overrides?.offeringDbId ?? 'offering-1',
+      offeringPayload: overrides?.offeringPayload ?? {
+        id: 'offering-1',
+        offersInSalon: true,
+        offersMobile: true,
+        salonDurationMinutes: 60,
+        mobileDurationMinutes: 60,
+        salonPriceStartingAt: '50.00',
+        mobilePriceStartingAt: '70.00',
+      },
+    },
+  }
+}
+
+function makeDaySlotsResult(args?: {
+  slots?: string[]
+  dayStartUtc?: string
+  dayEndExclusiveUtc?: string
+}) {
+  return {
+    ok: true as const,
+    dayStartUtc: new Date(args?.dayStartUtc ?? `${DAY}T00:00:00.000Z`),
+    dayEndExclusiveUtc: new Date(
+      args?.dayEndExclusiveUtc ?? `${DAY}T24:00:00.000Z`.replace('24:00:00.000Z', '00:00:00.000Z'),
+    ),
+    slots: args?.slots ?? [SLOT_09, SLOT_10, SLOT_11],
+  }
+}
+
+async function getAvailability(params: Record<string, string>) {
+  const search = new URLSearchParams(params)
+  const req = new Request(
+    `https://example.test/api/availability/day?${search.toString()}`,
+  )
+  return GET(req)
+}
+
 describe('GET /api/availability/day', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    installBaseMocks()
+
+    mocks.getScheduleVersion.mockResolvedValue('sched-v1')
+    mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
+
+    mocks.buildDayCacheKey.mockReturnValue(null)
+    mocks.cacheGetJson.mockResolvedValue(null)
+    mocks.cacheSetJson.mockResolvedValue(undefined)
+
+    mocks.resolveDurationWithAddOns.mockResolvedValue({
+      ok: true,
+      durationMinutes: 60,
+    })
+
+    mocks.loadBusyIntervals.mockResolvedValue([])
+
+    mocks.loadAvailabilityOfferingContext.mockResolvedValue(
+      makeBaseContext({
+        locationId: 'salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'UTC',
+        timeZoneSource: 'LOCATION',
+      }),
+    )
+
+    mocks.computeDaySlotsFast.mockResolvedValue(
+      makeDaySlotsResult({
+        slots: [SLOT_09, SLOT_10, SLOT_11],
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('shows salon slots when the client picked salon', async () => {
@@ -362,16 +259,28 @@ describe('GET /api/availability/day', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
+    expect(body.mode).toBe('DAY')
     expect(body.locationType).toBe('SALON')
     expect(body.locationId).toBe('salon-1')
     expect(body.timeZone).toBe('UTC')
     expect(body.timeZoneSource).toBe('LOCATION')
+    expect(body.request.locationType).toBe('SALON')
+    expect(body.request.locationId).toBe('salon-1')
     expect(body.slots).toContain(SLOT_09)
     expect(body.slots).toContain(SLOT_10)
     expect(body.slots).toContain(SLOT_11)
   })
 
   it('shows mobile slots when the client picked mobile', async () => {
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'mobile-1',
+        effectiveLocationType: ServiceLocationType.MOBILE,
+        timeZone: 'UTC',
+        timeZoneSource: 'LOCATION',
+      }),
+    )
+
     const response = await getAvailability({
       professionalId: 'pro-1',
       serviceId: 'service-1',
@@ -384,23 +293,30 @@ describe('GET /api/availability/day', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
+    expect(body.mode).toBe('DAY')
     expect(body.locationType).toBe('MOBILE')
     expect(body.locationId).toBe('mobile-1')
-    expect(body.timeZone).toBe('UTC')
-    expect(body.timeZoneSource).toBe('LOCATION')
+    expect(body.request.locationType).toBe('MOBILE')
+    expect(body.request.clientAddressId).toBe('addr-1')
     expect(body.slots).toContain(SLOT_09)
     expect(body.slots).toContain(SLOT_10)
     expect(body.slots).toContain(SLOT_11)
   })
 
   it('a salon booking blocks the same-time mobile slot for the same pro', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
-      {
-        scheduledFor: new Date(SLOT_10),
-        totalDurationMinutes: 60,
-        bufferMinutes: 0,
-      },
-    ])
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'mobile-1',
+        effectiveLocationType: ServiceLocationType.MOBILE,
+        timeZone: 'UTC',
+      }),
+    )
+
+    mocks.computeDaySlotsFast.mockResolvedValueOnce(
+      makeDaySlotsResult({
+        slots: [SLOT_09, SLOT_11],
+      }),
+    )
 
     const response = await getAvailability({
       professionalId: 'pro-1',
@@ -410,6 +326,7 @@ describe('GET /api/availability/day', () => {
       clientAddressId: 'addr-1',
       date: DAY,
     })
+
     const body = await response.json()
 
     expect(response.status).toBe(200)
@@ -421,13 +338,11 @@ describe('GET /api/availability/day', () => {
   })
 
   it('a mobile booking blocks the same-time salon slot for the same pro', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
-      {
-        scheduledFor: new Date(SLOT_10),
-        totalDurationMinutes: 60,
-        bufferMinutes: 0,
-      },
-    ])
+    mocks.computeDaySlotsFast.mockResolvedValueOnce(
+      makeDaySlotsResult({
+        slots: [SLOT_09, SLOT_11],
+      }),
+    )
 
     const response = await getAvailability({
       professionalId: 'pro-1',
@@ -448,27 +363,13 @@ describe('GET /api/availability/day', () => {
   })
 
   it('falls back deterministically to professional timezone when location timezone is null', async () => {
-    const legacySalonLocation = makeLocation({
-      id: 'legacy-salon-1',
-      type: 'SALON',
-      isPrimary: true,
-      timeZone: null,
-    })
-
-    mocks.professionalProfileFindUnique.mockResolvedValueOnce({
-      id: 'pro-1',
-      businessName: 'Test Pro',
-      avatarUrl: null,
-      location: null,
-      timeZone: 'America/Chicago',
-    })
-
-    mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: MockLocationWhere }) => {
-        const id = args.where?.id
-        if (id === legacySalonLocation.id) return legacySalonLocation
-        return null
-      },
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'legacy-salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'America/Chicago',
+        timeZoneSource: 'PROFESSIONAL',
+      }),
     )
 
     const response = await getAvailability({
@@ -493,24 +394,31 @@ describe('GET /api/availability/day', () => {
 describe('GET /api/availability/day phase 2 placement', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    installBaseMocks()
+
+    mocks.getScheduleVersion.mockResolvedValue('sched-v1')
+    mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
+    mocks.buildDayCacheKey.mockReturnValue(null)
+    mocks.cacheGetJson.mockResolvedValue(null)
+    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.resolveDurationWithAddOns.mockResolvedValue({
+      ok: true,
+      durationMinutes: 60,
+    })
+    mocks.loadBusyIntervals.mockResolvedValue([])
+    mocks.computeDaySlotsFast.mockResolvedValue(
+      makeDaySlotsResult({
+        slots: [SLOT_09, SLOT_10, SLOT_11],
+      }),
+    )
   })
 
   it('defaults day availability to salon when both modes are supported, even if mobile is primary', async () => {
-    installBaseMocks({
-      locations: [
-        makeLocation({
-          id: 'mobile-primary-1',
-          type: 'MOBILE_BASE',
-          isPrimary: true,
-        }),
-        makeLocation({
-          id: 'salon-secondary-1',
-          type: 'SALON',
-          isPrimary: false,
-        }),
-      ],
-    })
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'salon-secondary-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+      }),
+    )
 
     const response = await getAvailability({
       professionalId: 'pro-1',
@@ -521,27 +429,13 @@ describe('GET /api/availability/day phase 2 placement', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
+    expect(body.mode).toBe('DAY')
     expect(body.locationType).toBe('SALON')
     expect(body.locationId).toBe('salon-secondary-1')
     expect(body.slots).toContain(SLOT_09)
   })
 
-  it('defaults summary availability to salon on first load when salon is supported', async () => {
-    installBaseMocks({
-      locations: [
-        makeLocation({
-          id: 'mobile-primary-1',
-          type: 'MOBILE_BASE',
-          isPrimary: true,
-        }),
-        makeLocation({
-          id: 'salon-secondary-1',
-          type: 'SALON',
-          isPrimary: false,
-        }),
-      ],
-    })
-
+  it('returns 400 when date is missing because summary moved to bootstrap', async () => {
     const response = await getAvailability({
       professionalId: 'pro-1',
       serviceId: 'service-1',
@@ -549,28 +443,19 @@ describe('GET /api/availability/day phase 2 placement', () => {
 
     const body = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(body.mode).toBe('SUMMARY')
-    expect(body.locationType).toBe('SALON')
-    expect(body.locationId).toBe('salon-secondary-1')
+    expect(response.status).toBe(400)
+    expect(body.ok).toBe(false)
+    expect(body.error).toContain('Missing date')
+    expect(mocks.loadAvailabilityOfferingContext).not.toHaveBeenCalled()
   })
 
   it('falls back to mobile on initial load only when salon placement is invalid', async () => {
-    installBaseMocks({
-      locations: [
-        makeLocation({
-          id: 'salon-invalid-1',
-          type: 'SALON',
-          isPrimary: true,
-          formattedAddress: null,
-        }),
-        makeLocation({
-          id: 'mobile-valid-1',
-          type: 'MOBILE_BASE',
-          isPrimary: false,
-        }),
-      ],
-    })
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'mobile-valid-1',
+        effectiveLocationType: ServiceLocationType.MOBILE,
+      }),
+    )
 
     const response = await getAvailability({
       professionalId: 'pro-1',
@@ -587,14 +472,10 @@ describe('GET /api/availability/day phase 2 placement', () => {
   })
 
   it('does not silently switch an explicit mobile request to salon', async () => {
-    installBaseMocks({
-      locations: [
-        makeLocation({
-          id: 'salon-only-1',
-          type: 'SALON',
-          isPrimary: true,
-        }),
-      ],
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce({
+      ok: false,
+      kind: 'BOOKING_ERROR',
+      code: 'LOCATION_NOT_FOUND',
     })
 
     const response = await getAvailability({
@@ -619,17 +500,16 @@ describe('GET /api/availability/day parity regressions', () => {
     vi.setSystemTime(new Date('2026-03-11T19:00:00.000Z'))
     vi.clearAllMocks()
 
-    installBaseMocks({
-      offering: {
-        offersInSalon: true,
-        offersMobile: false,
-        salonDurationMinutes: 15,
-        mobileDurationMinutes: null,
-        salonPriceStartingAt: '50.00',
-        mobilePriceStartingAt: null,
-      },
-      locations: [],
+    mocks.getScheduleVersion.mockResolvedValue('sched-v1')
+    mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
+    mocks.buildDayCacheKey.mockReturnValue(null)
+    mocks.cacheGetJson.mockResolvedValue(null)
+    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.resolveDurationWithAddOns.mockResolvedValue({
+      ok: true,
+      durationMinutes: 15,
     })
+    mocks.loadBusyIntervals.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -637,30 +517,46 @@ describe('GET /api/availability/day parity regressions', () => {
   })
 
   it('returns working-window aligned slots when the window starts off the midnight step boundary', async () => {
-    const stepAnchoredLocation = makeLocation({
-      id: 'step-salon-1',
-      type: 'SALON',
-      isPrimary: true,
-      timeZone: 'UTC',
-      stepMinutes: 15,
-      bufferMinutes: 0,
-      workingHours: {
-        sun: { enabled: true, start: '09:10', end: '10:10' },
-        mon: { enabled: true, start: '09:10', end: '10:10' },
-        tue: { enabled: true, start: '09:10', end: '10:10' },
-        wed: { enabled: true, start: '09:10', end: '10:10' },
-        thu: { enabled: true, start: '09:10', end: '10:10' },
-        fri: { enabled: true, start: '09:10', end: '10:10' },
-        sat: { enabled: true, start: '09:10', end: '10:10' },
-      },
-    })
-
-    mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: MockLocationWhere }) => {
-        if (args.where?.id === 'step-salon-1') return stepAnchoredLocation
-        return null
-      },
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'step-salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'UTC',
+        defaultStepMinutes: 15,
+        locationBufferMinutes: 0,
+        durationMinutes: 15,
+        workingHours: {
+          sun: { enabled: true, start: '09:10', end: '10:10' },
+          mon: { enabled: true, start: '09:10', end: '10:10' },
+          tue: { enabled: true, start: '09:10', end: '10:10' },
+          wed: { enabled: true, start: '09:10', end: '10:10' },
+          thu: { enabled: true, start: '09:10', end: '10:10' },
+          fri: { enabled: true, start: '09:10', end: '10:10' },
+          sat: { enabled: true, start: '09:10', end: '10:10' },
+        },
+        offeringPayload: {
+          id: 'offering-1',
+          offersInSalon: true,
+          offersMobile: false,
+          salonDurationMinutes: 15,
+          mobileDurationMinutes: null,
+          salonPriceStartingAt: '50.00',
+          mobilePriceStartingAt: null,
+        },
+      }),
     )
+
+    mocks.computeDaySlotsFast.mockResolvedValueOnce({
+      ok: true,
+      dayStartUtc: new Date('2026-03-12T00:00:00.000Z'),
+      dayEndExclusiveUtc: new Date('2026-03-13T00:00:00.000Z'),
+      slots: [
+        '2026-03-12T09:10:00.000Z',
+        '2026-03-12T09:25:00.000Z',
+        '2026-03-12T09:40:00.000Z',
+        '2026-03-12T09:55:00.000Z',
+      ],
+    })
 
     const response = await getAvailability({
       professionalId: 'pro-1',
@@ -686,31 +582,46 @@ describe('GET /api/availability/day parity regressions', () => {
   })
 
   it('does not expose slots past the exact max-days-ahead timestamp boundary on the final allowed date', async () => {
-    const horizonLocation = makeLocation({
-      id: 'horizon-salon-1',
-      type: 'SALON',
-      isPrimary: true,
-      timeZone: 'UTC',
-      stepMinutes: 30,
-      bufferMinutes: 0,
-      maxDaysAhead: 7,
-      workingHours: {
-        sun: { enabled: true, start: '18:00', end: '21:00' },
-        mon: { enabled: true, start: '18:00', end: '21:00' },
-        tue: { enabled: true, start: '18:00', end: '21:00' },
-        wed: { enabled: true, start: '18:00', end: '21:00' },
-        thu: { enabled: true, start: '18:00', end: '21:00' },
-        fri: { enabled: true, start: '18:00', end: '21:00' },
-        sat: { enabled: true, start: '18:00', end: '21:00' },
-      },
-    })
-
-    mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: MockLocationWhere }) => {
-        if (args.where?.id === 'horizon-salon-1') return horizonLocation
-        return null
-      },
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'horizon-salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'UTC',
+        defaultStepMinutes: 30,
+        locationBufferMinutes: 0,
+        maxAdvanceDays: 7,
+        durationMinutes: 15,
+        workingHours: {
+          sun: { enabled: true, start: '18:00', end: '21:00' },
+          mon: { enabled: true, start: '18:00', end: '21:00' },
+          tue: { enabled: true, start: '18:00', end: '21:00' },
+          wed: { enabled: true, start: '18:00', end: '21:00' },
+          thu: { enabled: true, start: '18:00', end: '21:00' },
+          fri: { enabled: true, start: '18:00', end: '21:00' },
+          sat: { enabled: true, start: '18:00', end: '21:00' },
+        },
+        offeringPayload: {
+          id: 'offering-1',
+          offersInSalon: true,
+          offersMobile: false,
+          salonDurationMinutes: 15,
+          mobileDurationMinutes: null,
+          salonPriceStartingAt: '50.00',
+          mobilePriceStartingAt: null,
+        },
+      }),
     )
+
+    mocks.computeDaySlotsFast.mockResolvedValueOnce({
+      ok: true,
+      dayStartUtc: new Date('2026-03-18T00:00:00.000Z'),
+      dayEndExclusiveUtc: new Date('2026-03-19T00:00:00.000Z'),
+      slots: [
+        '2026-03-18T18:00:00.000Z',
+        '2026-03-18T18:30:00.000Z',
+        '2026-03-18T19:00:00.000Z',
+      ],
+    })
 
     const response = await getAvailability({
       professionalId: 'pro-1',
@@ -738,28 +649,39 @@ describe('GET /api/availability/day DST behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
-    installBaseMocks({
-      proTimeZone: 'America/New_York',
-      offering: {
-        offersInSalon: true,
-        offersMobile: false,
-        salonDurationMinutes: 60,
-        mobileDurationMinutes: null,
-        salonPriceStartingAt: '50.00',
-        mobilePriceStartingAt: null,
-      },
-      locations: [],
+    mocks.getScheduleVersion.mockResolvedValue('sched-v1')
+    mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
+    mocks.buildDayCacheKey.mockReturnValue(null)
+    mocks.cacheGetJson.mockResolvedValue(null)
+    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.resolveDurationWithAddOns.mockResolvedValue({
+      ok: true,
+      durationMinutes: 60,
     })
-
-    mocks.professionalLocationFindFirst.mockImplementation(
-      async (args: { where?: MockLocationWhere }) => {
-        if (args.where?.id !== 'dst-salon-1') return null
-        return makeDstLocation()
-      },
-    )
+    mocks.loadBusyIntervals.mockResolvedValue([])
   })
 
   it('spring forward: does not return nonexistent 02:00 local hour slots', async () => {
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'dst-salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'America/New_York',
+        defaultStepMinutes: 30,
+      }),
+    )
+
+    mocks.computeDaySlotsFast.mockResolvedValueOnce({
+      ok: true,
+      dayStartUtc: new Date('2027-03-14T05:00:00.000Z'),
+      dayEndExclusiveUtc: new Date('2027-03-15T04:00:00.000Z'),
+      slots: [
+        '2027-03-14T06:00:00.000Z',
+        '2027-03-14T06:30:00.000Z',
+        '2027-03-14T07:00:00.000Z',
+      ],
+    })
+
     const response = await getAvailability({
       professionalId: 'pro-1',
       serviceId: 'service-1',
@@ -789,6 +711,30 @@ describe('GET /api/availability/day DST behavior', () => {
   })
 
   it('fall back: returns valid slots across the repeated 01:00 local hour window', async () => {
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'dst-salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'America/New_York',
+        defaultStepMinutes: 30,
+        maxAdvanceDays: 730,
+      }),
+    )
+
+    mocks.computeDaySlotsFast.mockResolvedValueOnce({
+      ok: true,
+      dayStartUtc: new Date('2027-11-07T04:00:00.000Z'),
+      dayEndExclusiveUtc: new Date('2027-11-08T05:00:00.000Z'),
+      slots: [
+        '2027-11-07T05:00:00.000Z',
+        '2027-11-07T05:30:00.000Z',
+        '2027-11-07T06:00:00.000Z',
+        '2027-11-07T06:30:00.000Z',
+        '2027-11-07T07:00:00.000Z',
+        '2027-11-07T07:30:00.000Z',
+      ],
+    })
+
     const response = await getAvailability({
       professionalId: 'pro-1',
       serviceId: 'service-1',
@@ -824,33 +770,25 @@ describe('GET /api/availability/day DST behavior', () => {
   })
 
   it('near midnight: returned slots stay on the requested local date', async () => {
-    mocks.professionalServiceOfferingFindFirst.mockResolvedValueOnce({
-      id: 'offering-1',
-      offersInSalon: true,
-      offersMobile: false,
-      salonDurationMinutes: 30,
-      mobileDurationMinutes: null,
-      salonPriceStartingAt: '50.00',
-      mobilePriceStartingAt: null,
-    })
-
-    mocks.professionalLocationFindFirst.mockImplementationOnce(
-      async (args: { where?: MockLocationWhere }) => {
-        if (args.where?.id !== 'dst-salon-1') return null
-
-        return makeDstLocation({
-          workingHours: {
-            sun: { enabled: true, start: '23:00', end: '23:59' },
-            mon: { enabled: true, start: '23:00', end: '23:59' },
-            tue: { enabled: true, start: '23:00', end: '23:59' },
-            wed: { enabled: true, start: '23:00', end: '23:59' },
-            thu: { enabled: true, start: '23:00', end: '23:59' },
-            fri: { enabled: true, start: '23:00', end: '23:59' },
-            sat: { enabled: true, start: '23:00', end: '23:59' },
-          },
-        })
-      },
+    mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
+      makeBaseContext({
+        locationId: 'dst-salon-1',
+        effectiveLocationType: ServiceLocationType.SALON,
+        timeZone: 'America/New_York',
+        defaultStepMinutes: 30,
+        durationMinutes: 30,
+      }),
     )
+
+    mocks.computeDaySlotsFast.mockResolvedValueOnce({
+      ok: true,
+      dayStartUtc: new Date('2027-01-15T05:00:00.000Z'),
+      dayEndExclusiveUtc: new Date('2027-01-16T05:00:00.000Z'),
+      slots: [
+        '2027-01-16T04:00:00.000Z',
+        '2027-01-16T04:30:00.000Z',
+      ],
+    })
 
     const response = await getAvailability({
       professionalId: 'pro-1',

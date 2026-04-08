@@ -29,6 +29,11 @@ const mocks = vi.hoisted(() => ({
   resolveValidatedBookingContext: vi.fn(),
 
   bumpScheduleVersion: vi.fn(),
+
+  createProNotification: vi.fn(),
+  upsertClientNotification: vi.fn(),
+  scheduleClientNotification: vi.fn(),
+  cancelScheduledClientNotificationsForBooking: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -66,6 +71,17 @@ vi.mock('@/lib/booking/locationContext', async () => {
     resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
   }
 })
+
+vi.mock('@/lib/notifications/proNotifications', () => ({
+  createProNotification: mocks.createProNotification,
+}))
+
+vi.mock('@/lib/notifications/clientNotifications', () => ({
+  upsertClientNotification: mocks.upsertClientNotification,
+  scheduleClientNotification: mocks.scheduleClientNotification,
+  cancelScheduledClientNotificationsForBooking:
+    mocks.cancelScheduledClientNotificationsForBooking,
+}))
 
 import { createProBooking } from './writeBoundary'
 
@@ -175,6 +191,13 @@ describe('lib/booking/writeBoundary override audit', () => {
 
     mocks.assertCanUseBookingOverride.mockResolvedValue(undefined)
     mocks.bumpScheduleVersion.mockResolvedValue(undefined)
+
+    mocks.createProNotification.mockResolvedValue(undefined)
+    mocks.upsertClientNotification.mockResolvedValue({ id: 'client_notif_1' })
+    mocks.scheduleClientNotification.mockResolvedValue({ id: 'scheduled_1' })
+    mocks.cancelScheduledClientNotificationsForBooking.mockResolvedValue({
+      count: 0,
+    })
   })
 
   afterEach(() => {

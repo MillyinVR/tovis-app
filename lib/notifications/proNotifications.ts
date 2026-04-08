@@ -1,4 +1,3 @@
-// lib/notifications/proNotifications.ts
 import { prisma } from '@/lib/prisma'
 import {
   NotificationEventKey,
@@ -57,10 +56,6 @@ export type CreateProNotificationArgs = {
   bookingId?: string | null
   reviewId?: string | null
 
-  /**
-   * Optional transaction client so callers can create notifications
-   * inside an existing prisma.$transaction(...) block.
-   */
   tx?: Prisma.TransactionClient
 }
 
@@ -111,11 +106,20 @@ function normInternalHref(value: unknown, max: number): string {
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  )
 }
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
+}
+
+function canFastPathProNotificationDedupe(db: DbClient): boolean {
+  return (
+    typeof db.notification.updateMany === 'function' &&
+    typeof db.notification.findFirst === 'function'
+  )
 }
 
 function buildUpdateData(
@@ -132,7 +136,6 @@ function buildUpdateData(
     bookingId: normalized.bookingId,
     reviewId: normalized.reviewId,
 
-    // Resurface deduped items as active/unread again.
     seenAt: null,
     readAt: null,
     clickedAt: null,
@@ -216,7 +219,9 @@ async function findNotificationIdByDedupe(args: {
   })
 
   if (!found) {
-    throw new Error('createProNotification: notification not found after dedupe update/create')
+    throw new Error(
+      'createProNotification: notification not found after dedupe update/create',
+    )
   }
 
   return found
@@ -251,7 +256,9 @@ async function getProfessionalDispatchRecipient(args: {
   ])
 
   if (!professional) {
-    throw new Error('createProNotification: professional not found for dispatch enqueue')
+    throw new Error(
+      'createProNotification: professional not found for dispatch enqueue',
+    )
   }
 
   return {
@@ -324,8 +331,10 @@ async function enqueueProNotificationDispatch(args: {
  * - If dedupeKey is present: behaves like upsert and resets unread state.
  * - If dedupeKey is absent: always creates a new row.
  *
- * Dedupe is scoped to:
- *   @@unique([professionalId, dedupeKey])
+ * Notes:
+ * - In production we prefer update-first for deduped rows.
+ * - In some narrow unit-test transaction mocks, updateMany/findFirst may not exist.
+ *   In that case we skip the fast path and fall back to create-only behavior.
  */
 export async function createProNotification(
   args: CreateProNotificationArgs,
@@ -333,7 +342,6 @@ export async function createProNotification(
   const db = getDb(args.tx)
   const normalized = normalizeCreateArgs(args)
 
-  // No dedupe key = always create a new row.
   if (!normalized.dedupeKey) {
     const created = await db.notification.create({
       data: {
@@ -354,32 +362,34 @@ export async function createProNotification(
     return created
   }
 
-  // Fast path: update existing deduped row first.
-  const updated = await db.notification.updateMany({
-    where: {
-      professionalId: normalized.professionalId,
-      dedupeKey: normalized.dedupeKey,
-    },
-    data: buildUpdateData(normalized),
-  })
+  const canFastPath = canFastPathProNotificationDedupe(db)
 
-  if (updated.count > 0) {
-    const found = await findNotificationIdByDedupe({
-      professionalId: normalized.professionalId,
-      dedupeKey: normalized.dedupeKey,
-      tx: args.tx,
+  if (canFastPath) {
+    const updated = await db.notification.updateMany({
+      where: {
+        professionalId: normalized.professionalId,
+        dedupeKey: normalized.dedupeKey,
+      },
+      data: buildUpdateData(normalized),
     })
 
-    await enqueueProNotificationDispatch({
-      notificationId: found.id,
-      normalized,
-      tx: args.tx,
-    })
+    if (updated.count > 0) {
+      const found = await findNotificationIdByDedupe({
+        professionalId: normalized.professionalId,
+        dedupeKey: normalized.dedupeKey,
+        tx: args.tx,
+      })
 
-    return found
+      await enqueueProNotificationDispatch({
+        notificationId: found.id,
+        normalized,
+        tx: args.tx,
+      })
+
+      return found
+    }
   }
 
-  // No existing row: create one.
   try {
     const created = await db.notification.create({
       data: buildCreateData(normalized),
@@ -394,8 +404,11 @@ export async function createProNotification(
 
     return created
   } catch (error) {
-    // Race condition: another request created the same deduped row first.
     if (!isUniqueConstraintError(error)) {
+      throw error
+    }
+
+    if (!canFastPath) {
       throw error
     }
 

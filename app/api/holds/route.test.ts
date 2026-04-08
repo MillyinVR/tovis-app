@@ -45,6 +45,16 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 import { POST } from './route'
 
+function makeJsonResponse(
+  body: Record<string, unknown>,
+  status: number,
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 function makeRequest(body: unknown): NextRequest {
   const req = new Request('http://localhost/api/holds', {
     method: 'POST',
@@ -53,6 +63,10 @@ function makeRequest(body: unknown): NextRequest {
   })
 
   return req as NextRequest
+}
+
+async function readJson(response: Response) {
+  return response.json()
 }
 
 const offering = {
@@ -83,19 +97,26 @@ describe('POST /api/holds', () => {
     })
 
     mocks.jsonFail.mockImplementation(
-      (status: number, error: string, extra?: unknown) => ({
-        ok: false,
-        status,
-        error,
-        ...(extra && typeof extra === 'object' ? extra : {}),
-      }),
+      (status: number, error: string, extra?: unknown) =>
+        makeJsonResponse(
+          {
+            ok: false,
+            error,
+            ...(extra && typeof extra === 'object' ? extra : {}),
+          },
+          status,
+        ),
     )
 
-    mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
-      ok: true,
-      status,
-      data,
-    }))
+    mocks.jsonOk.mockImplementation((data: unknown, status = 200) =>
+      makeJsonResponse(
+        {
+          ok: true,
+          ...(data && typeof data === 'object' ? data : {}),
+        },
+        status,
+      ),
+    )
 
     mocks.pickString.mockImplementation((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
@@ -132,7 +153,7 @@ describe('POST /api/holds', () => {
   })
 
   it('calls createHold with parsed values and returns hold payload', async () => {
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
@@ -140,6 +161,7 @@ describe('POST /api/holds', () => {
         locationId: 'loc_1',
       }),
     )
+    const json = await readJson(response)
 
     expect(mocks.professionalServiceOfferingFindUnique).toHaveBeenCalledWith({
       where: { id: 'offering_1' },
@@ -180,65 +202,58 @@ describe('POST /api/holds', () => {
       clientAddressId: null,
     })
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(
-      {
-        hold: {
-          id: 'hold_1',
-          expiresAt: HOLD_EXPIRES,
-          scheduledFor: SLOT_START,
-          locationType: ServiceLocationType.SALON,
-          locationId: 'loc_1',
-          locationTimeZone: 'America/Los_Angeles',
-          clientAddressId: null,
-          clientAddressSnapshot: null,
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
-      201,
-    )
+    expect(response.status).toBe(201)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('server-timing')).toContain('hold_total')
 
-    expect(result).toEqual({
+    expect(json).toEqual({
       ok: true,
-      status: 201,
-      data: {
-        hold: {
-          id: 'hold_1',
-          expiresAt: HOLD_EXPIRES,
-          scheduledFor: SLOT_START,
-          locationType: ServiceLocationType.SALON,
-          locationId: 'loc_1',
-          locationTimeZone: 'America/Los_Angeles',
-          clientAddressId: null,
-          clientAddressSnapshot: null,
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
+      hold: {
+        id: 'hold_1',
+        expiresAt: HOLD_EXPIRES.toISOString(),
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: ServiceLocationType.SALON,
+        locationId: 'loc_1',
+        locationTimeZone: 'America/Los_Angeles',
+        clientAddressId: null,
+        clientAddressSnapshot: null,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
       },
     })
   })
 
   it('returns auth response when client auth fails', async () => {
-    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
+    const authRes = makeJsonResponse(
+      { ok: false, error: 'Unauthorized' },
+      401,
+    )
 
     mocks.requireClient.mockResolvedValueOnce({
       ok: false,
       res: authRes,
     })
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toBe(authRes)
+    expect(response).toBe(authRes)
+    expect(response.status).toBe(401)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('server-timing')).toContain('hold_total')
+    expect(json).toEqual({
+      ok: false,
+      error: 'Unauthorized',
+    })
+
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.createHold).not.toHaveBeenCalled()
   })
@@ -246,12 +261,13 @@ describe('POST /api/holds', () => {
   it('returns OFFERING_ID_REQUIRED when offering id is missing', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_ID_REQUIRED')
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         scheduledFor: SLOT_START.toISOString(),
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       descriptor.httpStatus,
@@ -264,9 +280,9 @@ describe('POST /api/holds', () => {
       },
     )
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -274,20 +290,22 @@ describe('POST /api/holds', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns invalid scheduled time when scheduledFor is missing', async () => {
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(400)
+    expect(json).toEqual({
       ok: false,
-      status: 400,
       error: 'Missing scheduled time.',
       code: 'INVALID_SCHEDULED_FOR',
       retryable: false,
@@ -295,22 +313,24 @@ describe('POST /api/holds', () => {
       message: 'Scheduled time is required.',
     })
 
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns LOCATION_TYPE_REQUIRED when location type is missing', async () => {
     const descriptor = getBookingErrorDescriptor('LOCATION_TYPE_REQUIRED')
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -318,11 +338,14 @@ describe('POST /api/holds', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns CLIENT_SERVICE_ADDRESS_REQUIRED when mobile booking is missing client address id', async () => {
-    const result = await POST(
+    const descriptor = getBookingErrorDescriptor('CLIENT_SERVICE_ADDRESS_REQUIRED')
+
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
@@ -330,35 +353,37 @@ describe('POST /api/holds', () => {
         locationId: 'loc_1',
       }),
     )
+    const json = await readJson(response)
 
-    expect(mocks.createHold).not.toHaveBeenCalled()
-
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: 400,
-      error:
-        'Add or select a mobile service address before booking this in-home appointment.',
-      code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
-      retryable: false,
-      uiAction: 'ADD_SERVICE_ADDRESS',
-      message: 'Client service address is required.',
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
+
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns INVALID_SCHEDULED_FOR when date is invalid', async () => {
     const descriptor = getBookingErrorDescriptor('INVALID_SCHEDULED_FOR')
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: 'definitely-not-a-date',
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -366,23 +391,25 @@ describe('POST /api/holds', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns TIME_IN_PAST when requested time is too soon', async () => {
     const descriptor = getBookingErrorDescriptor('TIME_IN_PAST')
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: '2026-03-17T12:55:30.000Z',
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -390,6 +417,7 @@ describe('POST /api/holds', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
@@ -398,17 +426,18 @@ describe('POST /api/holds', () => {
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(null)
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'missing_offering',
         scheduledFor: SLOT_START.toISOString(),
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -427,17 +456,18 @@ describe('POST /api/holds', () => {
       isActive: false,
     })
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -453,7 +483,7 @@ describe('POST /api/holds', () => {
 
     mocks.createHold.mockRejectedValueOnce(new BookingError('TIME_HELD'))
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
@@ -461,10 +491,11 @@ describe('POST /api/holds', () => {
         locationId: 'loc_1',
       }),
     )
+    const json = await readJson(response)
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -474,35 +505,38 @@ describe('POST /api/holds', () => {
   })
 
   it('returns 500 when createHold throws a non-booking error', async () => {
+    const descriptor = getBookingErrorDescriptor('INTERNAL_ERROR')
+
     mocks.createHold.mockRejectedValueOnce(new Error('boom'))
 
-    const result = await POST(
+    const response = await POST(
       makeRequest({
         offeringId: 'offering_1',
         scheduledFor: SLOT_START.toISOString(),
         locationType: 'SALON',
       }),
     )
+    const json = await readJson(response)
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
-      500,
-      'Something went wrong while processing the booking.',
+      descriptor.httpStatus,
+      descriptor.userMessage,
       {
-        code: 'INTERNAL_ERROR',
-        retryable: false,
-        uiAction: 'CONTACT_SUPPORT',
-        message: 'Internal booking error.',
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       },
     )
 
-    expect(result).toEqual({
+    expect(response.status).toBe(descriptor.httpStatus)
+    expect(json).toEqual({
       ok: false,
-      status: 500,
-      error: 'Something went wrong while processing the booking.',
-      code: 'INTERNAL_ERROR',
-      retryable: false,
-      uiAction: 'CONTACT_SUPPORT',
-      message: 'Internal booking error.',
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
   })
 })

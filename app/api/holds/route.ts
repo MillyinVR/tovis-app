@@ -1,4 +1,3 @@
-// app/api/holds/route.ts
 import { NextRequest } from 'next/server'
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
@@ -43,6 +42,10 @@ type ParsedHoldRequest = {
   clientAddressId: string | null
   locationType: ServiceLocationType
   requestedStart: Date
+}
+
+type HeaderCarrier = {
+  headers?: Headers | null
 }
 
 function isValidDate(value: Date): boolean {
@@ -97,11 +100,30 @@ function formatServerTimingMetric(name: string, durationMs: number): string {
   return `${name};dur=${Math.max(0, durationMs).toFixed(1)}`
 }
 
-function withServerTiming<T extends Response>(
+function getMutableHeaders(target: HeaderCarrier): Headers {
+  if (target.headers instanceof Headers) {
+    return target.headers
+  }
+
+  const headers = new Headers()
+
+  Object.defineProperty(target, 'headers', {
+    value: headers,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  })
+
+  return headers
+}
+
+function withServerTiming<T extends Response | HeaderCarrier>(
   response: T,
   metrics: Array<{ name: string; durationMs: number }>,
 ): T {
-  response.headers.set(
+  const headers = getMutableHeaders(response)
+
+  headers.set(
     'Server-Timing',
     metrics
       .map((metric) =>
@@ -109,7 +131,8 @@ function withServerTiming<T extends Response>(
       )
       .join(', '),
   )
-  response.headers.set('Cache-Control', 'no-store')
+  headers.set('Cache-Control', 'no-store')
+
   return response
 }
 
@@ -139,10 +162,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
     return bookingJsonFail('LOCATION_TYPE_REQUIRED')
   }
 
-  if (
-    locationType === ServiceLocationType.MOBILE &&
-    !clientAddressId
-  ) {
+  if (locationType === ServiceLocationType.MOBILE && !clientAddressId) {
     return bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED')
   }
 

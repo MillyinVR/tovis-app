@@ -317,7 +317,7 @@ describe('conflictQueries', () => {
           professionalId,
           expiresAt: { gt: nowUtc },
           scheduledFor: {
-            gte: expect.any(Date),
+            gte: new Date('2026-03-09T19:00:00.000Z'),
             lt: requestedEnd,
           },
         },
@@ -327,6 +327,9 @@ describe('conflictQueries', () => {
           offeringId: true,
           locationId: true,
           locationType: true,
+          durationMinutesSnapshot: true,
+          bufferMinutesSnapshot: true,
+          endsAtSnapshot: true,
           offering: {
             select: {
               id: true,
@@ -343,9 +346,6 @@ describe('conflictQueries', () => {
         },
         take: 2000,
       })
-
-      const callArg = prismaMockFns.bookingHoldFindMany.mock.calls[0]?.[0]
-      expect(callArg.where.scheduledFor.gte).toBeInstanceOf(Date)
     })
 
     it('returns false when no hold overlaps', async () => {
@@ -382,40 +382,40 @@ describe('conflictQueries', () => {
 
   describe('getTimeRangeConflict', () => {
     it('returns BLOCKED when a calendar block conflict exists', async () => {
-  prismaMockFns.calendarBlockFindFirst.mockResolvedValue({
-    id: 'block_1',
-  })
+      prismaMockFns.calendarBlockFindFirst.mockResolvedValue({
+        id: 'block_1',
+      })
 
-  const result = await getTimeRangeConflict({
-    professionalId,
-    locationId,
-    requestedStart,
-    requestedEnd,
-    defaultBufferMinutes: 15,
-    nowUtc,
-  })
+      const result = await getTimeRangeConflict({
+        professionalId,
+        locationId,
+        requestedStart,
+        requestedEnd,
+        defaultBufferMinutes: 15,
+        nowUtc,
+      })
 
-  expect(result).toBe('BLOCKED')
+      expect(result).toBe('BLOCKED')
 
-  const blockCallArg = prismaMockFns.calendarBlockFindFirst.mock.calls[0]?.[0]
+      const blockCallArg = prismaMockFns.calendarBlockFindFirst.mock.calls[0]?.[0]
 
-  expect(blockCallArg).toMatchObject({
-    where: {
-      professionalId,
-      startsAt: { lt: requestedEnd },
-      endsAt: { gt: requestedStart },
-    },
-    select: { id: true },
-  })
+      expect(blockCallArg).toMatchObject({
+        where: {
+          professionalId,
+          startsAt: { lt: requestedEnd },
+          endsAt: { gt: requestedStart },
+        },
+        select: { id: true },
+      })
 
-  expect(blockCallArg?.where?.OR).toEqual(
-    expect.arrayContaining([{ locationId }, { locationId: null }]),
-  )
-  expect(blockCallArg?.where?.OR).toHaveLength(2)
+      expect(blockCallArg?.where?.OR).toEqual(
+        expect.arrayContaining([{ locationId }, { locationId: null }]),
+      )
+      expect(blockCallArg?.where?.OR).toHaveLength(2)
 
-  expect(prismaMockFns.bookingFindMany).toHaveBeenCalled()
-  expect(prismaMockFns.bookingHoldFindMany).toHaveBeenCalled()
-})
+      expect(prismaMockFns.bookingFindMany).toHaveBeenCalled()
+      expect(prismaMockFns.bookingHoldFindMany).toHaveBeenCalled()
+    })
 
     it('returns BOOKING when no block exists and a booking overlaps', async () => {
       prismaMockFns.bookingFindMany.mockResolvedValue([

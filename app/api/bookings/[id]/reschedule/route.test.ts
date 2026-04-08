@@ -31,6 +31,11 @@ const mocks = vi.hoisted(() => ({
   txBookingHoldFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
   txBookingHoldDelete: vi.fn(),
+
+  createProNotification: vi.fn(),
+  upsertClientNotification: vi.fn(),
+  scheduleClientNotification: vi.fn(),
+  cancelScheduledClientNotificationsForBooking: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -76,6 +81,17 @@ vi.mock('@/lib/booking/policies/reschedulePolicy', () => ({
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedClientOwnedBookingTransaction:
     mocks.withLockedClientOwnedBookingTransaction,
+}))
+
+vi.mock('@/lib/notifications/proNotifications', () => ({
+  createProNotification: mocks.createProNotification,
+}))
+
+vi.mock('@/lib/notifications/clientNotifications', () => ({
+  upsertClientNotification: mocks.upsertClientNotification,
+  scheduleClientNotification: mocks.scheduleClientNotification,
+  cancelScheduledClientNotificationsForBooking:
+    mocks.cancelScheduledClientNotificationsForBooking,
 }))
 
 import { POST } from './route'
@@ -273,8 +289,6 @@ describe('POST /api/bookings/[id]/reschedule', () => {
 
     mocks.withLockedClientOwnedBookingTransaction.mockImplementation(
       async ({
-        bookingId,
-        clientId,
         run,
       }: {
         bookingId: string
@@ -286,6 +300,13 @@ describe('POST /api/bookings/[id]/reschedule', () => {
           now: NOW,
         }),
     )
+
+    mocks.createProNotification.mockResolvedValue(undefined)
+    mocks.upsertClientNotification.mockResolvedValue({ id: 'client_notif_1' })
+    mocks.scheduleClientNotification.mockResolvedValue({ id: 'scheduled_1' })
+    mocks.cancelScheduledClientNotificationsForBooking.mockResolvedValue({
+      count: 0,
+    })
   })
 
   afterEach(() => {

@@ -1,20 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const requirePro = vi.fn()
-const jsonOk = vi.fn((body: unknown, status: number) => ({
-  status,
-  body,
+const mocks = vi.hoisted(() => ({
+  requirePro: vi.fn(),
+  jsonOk: vi.fn((body: unknown, status: number) => ({
+    status,
+    body,
+  })),
+  markAllProNotificationsRead: vi.fn(),
 }))
 
-const markAllProNotificationsRead = vi.fn()
-
 vi.mock('@/app/api/_utils', () => ({
-  requirePro,
-  jsonOk,
+  requirePro: mocks.requirePro,
+  jsonOk: mocks.jsonOk,
 }))
 
 vi.mock('@/lib/notifications/proNotificationQueries', () => ({
-  markAllProNotificationsRead,
+  markAllProNotificationsRead: mocks.markAllProNotificationsRead,
 }))
 
 import { POST } from '@/app/api/pro/notifications/mark-read/route'
@@ -27,7 +28,7 @@ describe('POST /api/pro/notifications/mark-read', () => {
   it('returns auth response when requirePro fails', async () => {
     const authRes = { status: 401, body: { ok: false, error: 'Unauthorized' } }
 
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: false,
       res: authRes,
     })
@@ -35,26 +36,26 @@ describe('POST /api/pro/notifications/mark-read', () => {
     const result = await POST()
 
     expect(result).toBe(authRes)
-    expect(markAllProNotificationsRead).not.toHaveBeenCalled()
+    expect(mocks.markAllProNotificationsRead).not.toHaveBeenCalled()
   })
 
   it('marks all unread notifications as read and returns count', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    markAllProNotificationsRead.mockResolvedValueOnce({
+    mocks.markAllProNotificationsRead.mockResolvedValueOnce({
       count: 7,
     })
 
     const result = await POST()
 
-    expect(markAllProNotificationsRead).toHaveBeenCalledWith({
+    expect(mocks.markAllProNotificationsRead).toHaveBeenCalledWith({
       professionalId: 'pro_123',
     })
 
-    expect(jsonOk).toHaveBeenCalledWith(
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
         ok: true,
         count: 7,
@@ -72,22 +73,22 @@ describe('POST /api/pro/notifications/mark-read', () => {
   })
 
   it('returns ok with count 0 when there is nothing unread', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    markAllProNotificationsRead.mockResolvedValueOnce({
+    mocks.markAllProNotificationsRead.mockResolvedValueOnce({
       count: 0,
     })
 
     const result = await POST()
 
-    expect(markAllProNotificationsRead).toHaveBeenCalledWith({
+    expect(mocks.markAllProNotificationsRead).toHaveBeenCalledWith({
       professionalId: 'pro_123',
     })
 
-    expect(jsonOk).toHaveBeenCalledWith(
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
         ok: true,
         count: 0,

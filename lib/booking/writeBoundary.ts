@@ -3206,13 +3206,28 @@ async function maybeCreateProBookingCancelledNotification(args: {
   })
 }
 
+function toOptionalIsoString(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString()
+  }
+
+  if (typeof value === 'string') {
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString()
+    }
+  }
+
+  return null
+}
+
 async function createProBookingRescheduledNotification(args: {
   tx: Prisma.TransactionClient
   bookingId: string
   professionalId: string
   actorUserId: string | null
-  previousScheduledFor: Date
-  nextScheduledFor: Date
+  previousScheduledFor: Date | string | null | undefined
+  nextScheduledFor: Date | string | null | undefined
   previousLocationType: ServiceLocationType
   nextLocationType: ServiceLocationType
   previousLocationTimeZone: string | null
@@ -3231,8 +3246,8 @@ async function createProBookingRescheduledNotification(args: {
     dedupeKey: `PRO_NOTIF:${NotificationEventKey.BOOKING_RESCHEDULED}:${args.bookingId}`,
     data: {
       bookingId: args.bookingId,
-      previousScheduledFor: args.previousScheduledFor.toISOString(),
-      nextScheduledFor: args.nextScheduledFor.toISOString(),
+      previousScheduledFor: toOptionalIsoString(args.previousScheduledFor),
+      nextScheduledFor: toOptionalIsoString(args.nextScheduledFor),
       previousLocationType: args.previousLocationType,
       nextLocationType: args.nextLocationType,
       previousLocationTimeZone: args.previousLocationTimeZone,

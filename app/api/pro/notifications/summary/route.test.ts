@@ -1,23 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const requirePro = vi.fn()
-const jsonOk = vi.fn((body: unknown, status: number) => ({
-  status,
-  body,
+const mocks = vi.hoisted(() => ({
+  requirePro: vi.fn(),
+  jsonOk: vi.fn((body: unknown, status: number) => ({
+    status,
+    body,
+  })),
+  getProNotificationSummary: vi.fn(),
 }))
 
-const getProNotificationSummary = vi.fn()
-
 vi.mock('@/app/api/_utils/auth/requirePro', () => ({
-  requirePro,
+  requirePro: mocks.requirePro,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
-  jsonOk,
+  jsonOk: mocks.jsonOk,
 }))
 
 vi.mock('@/lib/notifications/proNotificationQueries', () => ({
-  getProNotificationSummary,
+  getProNotificationSummary: mocks.getProNotificationSummary,
 }))
 
 import { GET } from '@/app/api/pro/notifications/summary/route'
@@ -33,7 +34,7 @@ describe('GET /api/pro/notifications/summary', () => {
       body: { ok: false, error: 'Unauthorized' },
     }
 
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: false,
       res: authRes,
     })
@@ -41,27 +42,27 @@ describe('GET /api/pro/notifications/summary', () => {
     const result = await GET()
 
     expect(result).toBe(authRes)
-    expect(getProNotificationSummary).not.toHaveBeenCalled()
+    expect(mocks.getProNotificationSummary).not.toHaveBeenCalled()
   })
 
   it('returns unread summary for the authenticated pro', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    getProNotificationSummary.mockResolvedValueOnce({
+    mocks.getProNotificationSummary.mockResolvedValueOnce({
       hasUnread: true,
       count: 5,
     })
 
     const result = await GET()
 
-    expect(getProNotificationSummary).toHaveBeenCalledWith({
+    expect(mocks.getProNotificationSummary).toHaveBeenCalledWith({
       professionalId: 'pro_123',
     })
 
-    expect(jsonOk).toHaveBeenCalledWith(
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
         hasUnread: true,
         count: 5,
@@ -79,23 +80,23 @@ describe('GET /api/pro/notifications/summary', () => {
   })
 
   it('returns zero summary when there are no unread notifications', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    getProNotificationSummary.mockResolvedValueOnce({
+    mocks.getProNotificationSummary.mockResolvedValueOnce({
       hasUnread: false,
       count: 0,
     })
 
     const result = await GET()
 
-    expect(getProNotificationSummary).toHaveBeenCalledWith({
+    expect(mocks.getProNotificationSummary).toHaveBeenCalledWith({
       professionalId: 'pro_123',
     })
 
-    expect(jsonOk).toHaveBeenCalledWith(
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
         hasUnread: false,
         count: 0,

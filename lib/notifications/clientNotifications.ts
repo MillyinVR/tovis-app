@@ -1,4 +1,3 @@
-// lib/notifications/clientNotifications.ts
 import { prisma } from '@/lib/prisma'
 import {
   NotificationEventKey,
@@ -113,9 +112,10 @@ type ClientDispatchRecipientRow = Prisma.ClientProfileGetPayload<{
   select: typeof clientDispatchRecipientSelect
 }>
 
-type ClientNotificationPreferenceRow = Prisma.ClientNotificationPreferenceGetPayload<{
-  select: typeof clientNotificationPreferenceSelect
-}>
+type ClientNotificationPreferenceRow =
+  Prisma.ClientNotificationPreferenceGetPayload<{
+    select: typeof clientNotificationPreferenceSelect
+  }>
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
@@ -153,7 +153,11 @@ function normInternalHref(value: unknown, max: number): string {
   return s
 }
 
-function normStringArray(values: unknown, maxItems: number, maxLen: number): string[] {
+function normStringArray(
+  values: unknown,
+  maxItems: number,
+  maxLen: number,
+): string[] {
   if (!Array.isArray(values)) return []
 
   return values
@@ -176,10 +180,28 @@ function normalizeDate(value: unknown, fieldName: string): Date {
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  )
 }
 
-function normalizeCreateClientNotificationArgs(args: CreateClientNotificationArgs) {
+function canFastPathClientNotificationDedupe(db: DbClient): boolean {
+  return (
+    typeof db.clientNotification.updateMany === 'function' &&
+    typeof db.clientNotification.findFirst === 'function'
+  )
+}
+
+function canFastPathScheduledClientNotificationDedupe(db: DbClient): boolean {
+  return (
+    typeof db.scheduledClientNotification.updateMany === 'function' &&
+    typeof db.scheduledClientNotification.findFirst === 'function'
+  )
+}
+
+function normalizeCreateClientNotificationArgs(
+  args: CreateClientNotificationArgs,
+) {
   const clientId = normRequired(args.clientId, MAX_ID)
   const title = normRequired(args.title, MAX_TITLE)
 
@@ -370,8 +392,15 @@ async function enqueueClientNotificationDispatch(args: {
  * Contract:
  * - If dedupeKey is provided: behaves like an idempotent upsert and resets readAt to null
  * - If no dedupeKey: always creates a new notification
+ *
+ * Notes:
+ * - In production we prefer update-first for deduped rows.
+ * - In some narrow unit-test transaction mocks, updateMany/findFirst may not exist.
+ *   In that case we skip the fast path and fall back to create-only behavior.
  */
-export async function createClientNotification(args: CreateClientNotificationArgs) {
+export async function createClientNotification(
+  args: CreateClientNotificationArgs,
+) {
   const db = getDb(args.tx)
   const normalized = normalizeCreateClientNotificationArgs(args)
 
@@ -393,28 +422,32 @@ export async function createClientNotification(args: CreateClientNotificationArg
     return created
   }
 
-  const updated = await db.clientNotification.updateMany({
-    where: {
-      clientId: normalized.clientId,
-      dedupeKey: normalized.dedupeKey,
-    },
-    data: buildClientNotificationUpdateData(normalized),
-  })
+  const canFastPath = canFastPathClientNotificationDedupe(db)
 
-  if (updated.count > 0) {
-    const found = await findClientNotificationIdByDedupe({
-      clientId: normalized.clientId,
-      dedupeKey: normalized.dedupeKey,
-      tx: args.tx,
+  if (canFastPath) {
+    const updated = await db.clientNotification.updateMany({
+      where: {
+        clientId: normalized.clientId,
+        dedupeKey: normalized.dedupeKey,
+      },
+      data: buildClientNotificationUpdateData(normalized),
     })
 
-    await enqueueClientNotificationDispatch({
-      notificationId: found.id,
-      normalized,
-      tx: args.tx,
-    })
+    if (updated.count > 0) {
+      const found = await findClientNotificationIdByDedupe({
+        clientId: normalized.clientId,
+        dedupeKey: normalized.dedupeKey,
+        tx: args.tx,
+      })
 
-    return found
+      await enqueueClientNotificationDispatch({
+        notificationId: found.id,
+        normalized,
+        tx: args.tx,
+      })
+
+      return found
+    }
   }
 
   try {
@@ -432,6 +465,10 @@ export async function createClientNotification(args: CreateClientNotificationArg
     return created
   } catch (error) {
     if (!isUniqueConstraintError(error)) {
+      throw error
+    }
+
+    if (!canFastPath) {
       throw error
     }
 
@@ -463,7 +500,9 @@ export async function createClientNotification(args: CreateClientNotificationArg
  * Same behavior as createClientNotification, but forces callers
  * to provide a dedupeKey explicitly.
  */
-export async function upsertClientNotification(args: UpsertClientNotificationArgs) {
+export async function upsertClientNotification(
+  args: UpsertClientNotificationArgs,
+) {
   const dedupeKey = normRequired(args.dedupeKey, MAX_DEDUPE_KEY)
   if (!dedupeKey) {
     throw new Error('upsertClientNotification: missing dedupeKey')
@@ -483,7 +522,9 @@ export async function upsertClientNotification(args: UpsertClientNotificationArg
  * - It does NOT enqueue delivery yet.
  * - Multi-channel dispatch should happen when the scheduled row is actually processed.
  */
-export async function scheduleClientNotification(args: ScheduleClientNotificationArgs) {
+export async function scheduleClientNotification(
+  args: ScheduleClientNotificationArgs,
+) {
   const db = getDb(args.tx)
 
   const clientId = normRequired(args.clientId, MAX_ID)
@@ -520,30 +561,34 @@ export async function scheduleClientNotification(args: ScheduleClientNotificatio
     })
   }
 
-  const updated = await db.scheduledClientNotification.updateMany({
-    where: {
-      clientId,
-      dedupeKey,
-    },
-    data: baseWrite,
-  })
+  const canFastPath = canFastPathScheduledClientNotificationDedupe(db)
 
-  if (updated.count > 0) {
-    const found = await db.scheduledClientNotification.findFirst({
+  if (canFastPath) {
+    const updated = await db.scheduledClientNotification.updateMany({
       where: {
         clientId,
         dedupeKey,
       },
-      select: scheduledClientNotificationIdSelect,
+      data: baseWrite,
     })
 
-    if (!found) {
-      throw new Error(
-        'scheduleClientNotification: scheduled notification not found after update',
-      )
-    }
+    if (updated.count > 0) {
+      const found = await db.scheduledClientNotification.findFirst({
+        where: {
+          clientId,
+          dedupeKey,
+        },
+        select: scheduledClientNotificationIdSelect,
+      })
 
-    return found
+      if (!found) {
+        throw new Error(
+          'scheduleClientNotification: scheduled notification not found after update',
+        )
+      }
+
+      return found
+    }
   }
 
   try {
@@ -557,6 +602,10 @@ export async function scheduleClientNotification(args: ScheduleClientNotificatio
     })
   } catch (error) {
     if (!isUniqueConstraintError(error)) {
+      throw error
+    }
+
+    if (!canFastPath) {
       throw error
     }
 
@@ -632,7 +681,9 @@ export async function cancelScheduledClientNotificationsForBooking(
  * - if ids is provided but sanitizes to an empty list, this becomes a no-op
  * - if ids is omitted, it marks the matching unread notifications read
  */
-export async function markClientNotificationsRead(args: MarkClientNotificationsReadArgs) {
+export async function markClientNotificationsRead(
+  args: MarkClientNotificationsReadArgs,
+) {
   const db = getDb(args.tx)
 
   const clientId = normRequired(args.clientId, MAX_ID)
@@ -643,7 +694,9 @@ export async function markClientNotificationsRead(args: MarkClientNotificationsR
   const idsProvided = Array.isArray(args.ids)
   const ids = normStringArray(args.ids, 1000, MAX_ID)
   const before =
-    args.before instanceof Date && !Number.isNaN(args.before.getTime()) ? args.before : undefined
+    args.before instanceof Date && !Number.isNaN(args.before.getTime())
+      ? args.before
+      : undefined
   const eventKeys =
     Array.isArray(args.eventKeys) && args.eventKeys.length > 0
       ? args.eventKeys

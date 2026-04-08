@@ -1,26 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationEventKey } from '@prisma/client'
 
-const requirePro = vi.fn()
-const jsonOk = vi.fn((body: unknown, status: number) => ({
-  status,
-  body,
+const mocks = vi.hoisted(() => ({
+  requirePro: vi.fn(),
+  jsonOk: vi.fn((body: unknown, status: number) => ({
+    status,
+    body,
+  })),
+  jsonFail: vi.fn((status: number, error: string) => ({
+    status,
+    body: { ok: false, error },
+  })),
+  listProNotifications: vi.fn(),
 }))
-const jsonFail = vi.fn((status: number, error: string) => ({
-  status,
-  body: { ok: false, error },
-}))
-
-const listProNotifications = vi.fn()
 
 vi.mock('@/app/api/_utils', () => ({
-  requirePro,
-  jsonOk,
-  jsonFail,
+  requirePro: mocks.requirePro,
+  jsonOk: mocks.jsonOk,
+  jsonFail: mocks.jsonFail,
 }))
 
 vi.mock('@/lib/notifications/proNotificationQueries', () => ({
-  listProNotifications,
+  listProNotifications: mocks.listProNotifications,
 }))
 
 import { GET } from '@/app/api/pro/notifications/route'
@@ -36,7 +37,7 @@ describe('GET /api/pro/notifications', () => {
       body: { ok: false, error: 'Unauthorized' },
     }
 
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: false,
       res: authRes,
     })
@@ -45,16 +46,16 @@ describe('GET /api/pro/notifications', () => {
     const result = await GET(req)
 
     expect(result).toBe(authRes)
-    expect(listProNotifications).not.toHaveBeenCalled()
+    expect(mocks.listProNotifications).not.toHaveBeenCalled()
   })
 
   it('returns the first page with default take', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValueOnce({
+    mocks.listProNotifications.mockResolvedValueOnce({
       items: [
         {
           id: 'notif_1',
@@ -68,7 +69,7 @@ describe('GET /api/pro/notifications', () => {
     const req = new Request('http://localhost/api/pro/notifications')
     const result = await GET(req)
 
-    expect(listProNotifications).toHaveBeenCalledWith({
+    expect(mocks.listProNotifications).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
@@ -76,7 +77,7 @@ describe('GET /api/pro/notifications', () => {
       eventKey: null,
     })
 
-    expect(jsonOk).toHaveBeenCalledWith(
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
         items: [
           {
@@ -106,12 +107,12 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('passes cursor, unread filter, and eventKey filter through', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValueOnce({
+    mocks.listProNotifications.mockResolvedValueOnce({
       items: [],
       nextCursor: 'notif_next',
     })
@@ -122,7 +123,7 @@ describe('GET /api/pro/notifications', () => {
 
     await GET(req)
 
-    expect(listProNotifications).toHaveBeenCalledWith({
+    expect(mocks.listProNotifications).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       take: 25,
       cursorId: 'notif_cursor',
@@ -132,12 +133,12 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('clamps take to the maximum of 100', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValueOnce({
+    mocks.listProNotifications.mockResolvedValueOnce({
       items: [],
       nextCursor: null,
     })
@@ -148,7 +149,7 @@ describe('GET /api/pro/notifications', () => {
 
     await GET(req)
 
-    expect(listProNotifications).toHaveBeenCalledWith({
+    expect(mocks.listProNotifications).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       take: 100,
       cursorId: null,
@@ -158,12 +159,12 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('clamps take to the minimum of 1', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValueOnce({
+    mocks.listProNotifications.mockResolvedValueOnce({
       items: [],
       nextCursor: null,
     })
@@ -174,7 +175,7 @@ describe('GET /api/pro/notifications', () => {
 
     await GET(req)
 
-    expect(listProNotifications).toHaveBeenCalledWith({
+    expect(mocks.listProNotifications).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       take: 1,
       cursorId: null,
@@ -184,12 +185,12 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('uses fallback take when take is invalid', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValueOnce({
+    mocks.listProNotifications.mockResolvedValueOnce({
       items: [],
       nextCursor: null,
     })
@@ -200,7 +201,7 @@ describe('GET /api/pro/notifications', () => {
 
     await GET(req)
 
-    expect(listProNotifications).toHaveBeenCalledWith({
+    expect(mocks.listProNotifications).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
@@ -210,7 +211,7 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('returns 400 when eventKey is invalid', async () => {
-    requirePro.mockResolvedValueOnce({
+    mocks.requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
@@ -221,11 +222,11 @@ describe('GET /api/pro/notifications', () => {
 
     const result = await GET(req)
 
-    expect(jsonFail).toHaveBeenCalledWith(
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
       'Invalid notification event key.',
     )
-    expect(listProNotifications).not.toHaveBeenCalled()
+    expect(mocks.listProNotifications).not.toHaveBeenCalled()
     expect(result).toEqual({
       status: 400,
       body: { ok: false, error: 'Invalid notification event key.' },
@@ -233,12 +234,12 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('accepts representative supported notification event keys', async () => {
-    requirePro.mockResolvedValue({
+    mocks.requirePro.mockResolvedValue({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValue({
+    mocks.listProNotifications.mockResolvedValue({
       items: [],
       nextCursor: null,
     })
@@ -258,29 +259,29 @@ describe('GET /api/pro/notifications', () => {
       )
     }
 
-    expect(listProNotifications).toHaveBeenCalledTimes(4)
-    expect(listProNotifications).toHaveBeenNthCalledWith(1, {
+    expect(mocks.listProNotifications).toHaveBeenCalledTimes(4)
+    expect(mocks.listProNotifications).toHaveBeenNthCalledWith(1, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: false,
       eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
     })
-    expect(listProNotifications).toHaveBeenNthCalledWith(2, {
+    expect(mocks.listProNotifications).toHaveBeenNthCalledWith(2, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: false,
       eventKey: NotificationEventKey.BOOKING_CONFIRMED,
     })
-    expect(listProNotifications).toHaveBeenNthCalledWith(3, {
+    expect(mocks.listProNotifications).toHaveBeenNthCalledWith(3, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: false,
       eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
     })
-    expect(listProNotifications).toHaveBeenNthCalledWith(4, {
+    expect(mocks.listProNotifications).toHaveBeenNthCalledWith(4, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
@@ -290,12 +291,12 @@ describe('GET /api/pro/notifications', () => {
   })
 
   it('treats unread=true and unread=yes as unreadOnly', async () => {
-    requirePro.mockResolvedValue({
+    mocks.requirePro.mockResolvedValue({
       ok: true,
       professionalId: 'pro_123',
     })
 
-    listProNotifications.mockResolvedValue({
+    mocks.listProNotifications.mockResolvedValue({
       items: [],
       nextCursor: null,
     })
@@ -307,14 +308,14 @@ describe('GET /api/pro/notifications', () => {
       new Request('http://localhost/api/pro/notifications?unread=yes'),
     )
 
-    expect(listProNotifications).toHaveBeenNthCalledWith(1, {
+    expect(mocks.listProNotifications).toHaveBeenNthCalledWith(1, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: true,
       eventKey: null,
     })
-    expect(listProNotifications).toHaveBeenNthCalledWith(2, {
+    expect(mocks.listProNotifications).toHaveBeenNthCalledWith(2, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,

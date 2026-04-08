@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
 import {
   BookingStatus,
   NotificationEventKey,
@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   upsertClientNotification: vi.fn(),
   scheduleClientNotification: vi.fn(),
   cancelScheduledClientNotificationsForBooking: vi.fn(),
+
+  createProNotification: vi.fn(),
 
   txBookingHoldFindUnique: vi.fn(),
   txBookingHoldDelete: vi.fn(),
@@ -50,6 +52,10 @@ vi.mock('@/lib/notifications/clientNotifications', () => ({
   scheduleClientNotification: mocks.scheduleClientNotification,
   cancelScheduledClientNotificationsForBooking:
     mocks.cancelScheduledClientNotificationsForBooking,
+}))
+
+vi.mock('@/lib/notifications/proNotifications', () => ({
+  createProNotification: mocks.createProNotification,
 }))
 
 import { cancelBooking, releaseHold } from './writeBoundary'
@@ -95,6 +101,12 @@ describe('lib/booking/writeBoundary', () => {
     mocks.prismaTransaction.mockImplementation(
       async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
     )
+
+    mocks.createProNotification.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('cancels a client-owned booking through the locked client-owned booking transaction', async () => {
@@ -175,6 +187,26 @@ describe('lib/booking/writeBoundary', () => {
       },
     })
 
+    expect(mocks.createProNotification).toHaveBeenCalledWith({
+      tx,
+      professionalId: 'pro_1',
+      eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+      priority: 'HIGH',
+      title: 'Booking cancelled by client',
+      body: 'Client cancelled this booking. Reason: Need to reschedule',
+      href: '/pro/bookings/booking_1',
+      actorUserId: null,
+      bookingId: 'booking_1',
+      dedupeKey: `PRO_NOTIF:${NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT}:booking_1`,
+      data: {
+        bookingId: 'booking_1',
+        cancelledBy: 'client',
+        reason: 'Need to reschedule',
+        previousStatus: BookingStatus.PENDING,
+        previousSessionStep: SessionStep.NONE,
+      },
+    })
+
     expect(result).toEqual({
       booking: {
         id: 'booking_1',
@@ -210,6 +242,7 @@ describe('lib/booking/writeBoundary', () => {
 
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
     expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
     expect(
       mocks.cancelScheduledClientNotificationsForBooking,
     ).not.toHaveBeenCalled()
