@@ -90,11 +90,6 @@ enum VerificationDocumentType {
   MAKEUP_SECONDARY
 }
 
-enum ReminderChannel {
-  SMS
-  EMAIL
-}
-
 enum MediaType {
   IMAGE
   VIDEO
@@ -417,6 +412,12 @@ model NotificationDispatch {
   userId String?
   professionalId String?
   clientId String?
+
+  // durable recipient snapshot for delivery-time policy, audit, and retries
+  recipientInAppTargetId String? @db.VarChar(64)
+  recipientPhone         String? @db.VarChar(32)
+  recipientEmail         String? @db.VarChar(320)
+  recipientTimeZone      String? @db.VarChar(64)
 
   // optional links back to product-facing inbox records
   notificationId String?
@@ -1336,12 +1337,7 @@ model Booking {
   closeoutAuditLogs BookingCloseoutAuditLog[]
 
   sessionStep           SessionStep      @default(NONE)
-  // LEGACY single-reminder fields.
-  // Keep for now so existing code does not break.
-  // New client reminder scheduling should use ScheduledClientNotification.
-  reminderMinutesBefore Int?             @default(1440)
-  reminderSentAt        DateTime?
-  reminderChannel       ReminderChannel?
+
 
   startedAt  DateTime?
   finishedAt DateTime?

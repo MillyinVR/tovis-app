@@ -29,7 +29,9 @@ const MAX_SOURCE_KEY = 256
 const MAX_TITLE = 160
 const MAX_BODY = 4000
 const MAX_HREF = 2048
-const MAX_DESTINATION = 320
+const MAX_PHONE = 32
+const MAX_EMAIL = 320
+const MAX_TIME_ZONE = 64
 const MAX_TEMPLATE_KEY = 128
 
 const DEFAULT_TEMPLATE_VERSION = 1
@@ -43,6 +45,10 @@ const enqueueDispatchSelect = {
   userId: true,
   professionalId: true,
   clientId: true,
+  recipientInAppTargetId: true,
+  recipientPhone: true,
+  recipientEmail: true,
+  recipientTimeZone: true,
   notificationId: true,
   clientNotificationId: true,
   title: true,
@@ -398,6 +404,12 @@ function buildDispatchCreateData(args: {
     eventKey: normalized.key,
     recipientKind: normalized.recipientKind,
     priority: normalized.priority,
+
+    recipientInAppTargetId: normalized.inAppTargetId,
+    recipientPhone: normalized.phone,
+    recipientEmail: normalized.email,
+    recipientTimeZone: normalized.timeZone,
+
     title: normalized.title,
     body: normalized.body,
     href: normalized.href,
@@ -488,9 +500,9 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
 
   const userId = normNullableString(args.recipient.userId, MAX_ID)
   const inAppTargetId = resolveInAppTargetId(args.recipient)
-  const phone = normNullableString(args.recipient.phone, MAX_DESTINATION)
-  const email = normNullableString(args.recipient.email, MAX_DESTINATION)
-  const timeZone = normNullableString(args.recipient.timeZone, 64)
+  const phone = normNullableString(args.recipient.phone, MAX_PHONE)
+  const email = normNullableString(args.recipient.email, MAX_EMAIL)
+  const timeZone = normNullableString(args.recipient.timeZone, MAX_TIME_ZONE)
 
   if (
     args.recipient.phoneVerifiedAt != null &&

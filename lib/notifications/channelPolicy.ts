@@ -78,10 +78,13 @@ export type ResolveChannelPolicyArgs = {
 
   /**
    * Emergency/manual override for system-internal use only.
-   * This bypasses quiet hours but still respects:
+   * This bypasses quiet hours only when the event definition allows bypass.
+   *
+   * It still respects:
    * - event channel support
    * - recipient support
    * - channel capability checks
+   * - user preference checks
    *
    * It does NOT bypass missing destinations.
    */
@@ -119,8 +122,7 @@ function normalizeRequestedChannels(
 ): NotificationChannel[] | null {
   if (!Array.isArray(value) || value.length === 0) return null
 
-  const deduped = Array.from(new Set(value))
-  return deduped
+  return Array.from(new Set(value))
 }
 
 function getCapabilityForChannel(
@@ -187,7 +189,7 @@ function isWithinQuietHours(args: {
   // Equal values mean "disabled / not configured", not 24-hour suppression.
   if (start === end) return false
 
-  // Same-day range, e.g. 22:00 -> 23:30 is not possible here because wrap is handled below.
+  // Same-day range, e.g. 09:00 -> 17:00
   if (start < end) {
     return current >= start && current < end
   }
@@ -204,9 +206,30 @@ function isRequestedChannel(
   return requestedChannels.includes(channel)
 }
 
+function shouldBypassQuietHours(args: {
+  allowQuietHoursBypass: boolean
+  bypassQuietHours: boolean
+}): boolean {
+  return args.allowQuietHoursBypass && args.bypassQuietHours
+}
+
+function shouldApplyQuietHours(args: {
+  channel: NotificationChannel
+  allowQuietHoursBypass: boolean
+  bypassQuietHours: boolean
+}): boolean {
+  if (!channelUsesQuietHours(args.channel)) {
+    return false
+  }
+
+  return !shouldBypassQuietHours({
+    allowQuietHoursBypass: args.allowQuietHoursBypass,
+    bypassQuietHours: args.bypassQuietHours,
+  })
+}
+
 function buildChannelEvaluation(args: {
   key: NotificationEventKey
-  recipientKind: NotificationRecipientKind
   channel: NotificationChannel
   capabilities: RecipientChannelCapabilities
   preference?: NotificationPreferenceLike | null
@@ -240,13 +263,12 @@ function buildChannelEvaluation(args: {
 
   const definition = getNotificationEventDefinition(args.key)
 
-  const shouldApplyQuietHours =
-    channelUsesQuietHours(args.channel) &&
-    !args.bypassQuietHours &&
-    !definition.allowQuietHoursBypass
-
   if (
-    shouldApplyQuietHours &&
+    shouldApplyQuietHours({
+      channel: args.channel,
+      allowQuietHoursBypass: definition.allowQuietHoursBypass,
+      bypassQuietHours: args.bypassQuietHours,
+    }) &&
     isWithinQuietHours({
       quietHoursStartMinutes: args.preference?.quietHoursStartMinutes ?? null,
       quietHoursEndMinutes: args.preference?.quietHoursEndMinutes ?? null,
@@ -358,17 +380,17 @@ export function resolveChannelPolicy(
 
   const requestedChannels = normalizeRequestedChannels(args.requestedChannels)
   const recipientLocalMinutes = normalizeMinuteOfDay(args.recipientLocalMinutes)
+  const bypassQuietHours = args.bypassQuietHours ?? false
 
   const evaluations = defaultChannels.map((channel) =>
     buildChannelEvaluation({
       key: args.key,
-      recipientKind: args.recipientKind,
       channel,
       capabilities: args.capabilities,
       preference: args.preference,
       requestedChannels,
       recipientLocalMinutes,
-      bypassQuietHours: args.bypassQuietHours ?? false,
+      bypassQuietHours,
     }),
   )
 

@@ -23,6 +23,7 @@ const professionalDispatchRecipientSelect = {
   userId: true,
   phone: true,
   phoneVerifiedAt: true,
+  timeZone: true,
   user: {
     select: {
       email: true,
@@ -312,6 +313,7 @@ async function enqueueProNotificationDispatch(args: {
       phone: preferredPhone.phone,
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
       email: professional.user.email,
+      timeZone: professional.timeZone,
       preference,
     },
     title: args.normalized.title,

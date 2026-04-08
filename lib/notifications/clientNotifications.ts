@@ -14,6 +14,7 @@ const MAX_TITLE = 160
 const MAX_BODY = 4000
 const MAX_HREF = 2048
 const MAX_DEDUPE_KEY = 256
+const MAX_TIME_ZONE = 64
 
 const clientNotificationIdSelect = {
   id: true,
@@ -44,6 +45,20 @@ const clientNotificationPreferenceSelect = {
   quietHoursStartMinutes: true,
   quietHoursEndMinutes: true,
 } satisfies Prisma.ClientNotificationPreferenceSelect
+
+const clientDispatchBookingTimeZoneSelect = {
+  locationTimeZone: true,
+  clientTimeZoneAtBooking: true,
+} satisfies Prisma.BookingSelect
+
+const clientDispatchAftercareTimeZoneSelect = {
+  booking: {
+    select: {
+      locationTimeZone: true,
+      clientTimeZoneAtBooking: true,
+    },
+  },
+} satisfies Prisma.AftercareSummarySelect
 
 export type CreateClientNotificationArgs = {
   clientId: string
@@ -351,6 +366,64 @@ function resolvePreferredClientPhone(
   }
 }
 
+function pickClientDispatchTimeZone(args: {
+  clientTimeZoneAtBooking: string | null | undefined
+  locationTimeZone: string | null | undefined
+}): string | null {
+  const clientTimeZoneAtBooking = normNullableString(
+    args.clientTimeZoneAtBooking,
+    MAX_TIME_ZONE,
+  )
+
+  if (clientTimeZoneAtBooking) {
+    return clientTimeZoneAtBooking
+  }
+
+  return normNullableString(args.locationTimeZone, MAX_TIME_ZONE)
+}
+
+async function resolveClientDispatchTimeZone(args: {
+  bookingId: string | null
+  aftercareId: string | null
+  tx?: Prisma.TransactionClient
+}): Promise<string | null> {
+  const db = getDb(args.tx)
+
+  if (args.bookingId) {
+    const booking = await db.booking.findUnique({
+      where: {
+        id: args.bookingId,
+      },
+      select: clientDispatchBookingTimeZoneSelect,
+    })
+
+    if (booking) {
+      return pickClientDispatchTimeZone({
+        clientTimeZoneAtBooking: booking.clientTimeZoneAtBooking,
+        locationTimeZone: booking.locationTimeZone,
+      })
+    }
+  }
+
+  if (args.aftercareId) {
+    const aftercare = await db.aftercareSummary.findUnique({
+      where: {
+        id: args.aftercareId,
+      },
+      select: clientDispatchAftercareTimeZoneSelect,
+    })
+
+    if (aftercare?.booking) {
+      return pickClientDispatchTimeZone({
+        clientTimeZoneAtBooking: aftercare.booking.clientTimeZoneAtBooking,
+        locationTimeZone: aftercare.booking.locationTimeZone,
+      })
+    }
+  }
+
+  return null
+}
+
 async function enqueueClientNotificationDispatch(args: {
   notificationId: string
   normalized: NormalizedCreateClientNotificationArgs
@@ -364,6 +437,12 @@ async function enqueueClientNotificationDispatch(args: {
 
   const preferredPhone = resolvePreferredClientPhone(recipient.client)
 
+  const timeZone = await resolveClientDispatchTimeZone({
+    bookingId: args.normalized.bookingId,
+    aftercareId: args.normalized.aftercareId,
+    tx: args.tx,
+  })
+
   await enqueueDispatch({
     key: args.normalized.eventKey,
     sourceKey: `client-notification:${args.notificationId}`,
@@ -375,6 +454,7 @@ async function enqueueClientNotificationDispatch(args: {
       phone: preferredPhone.phone,
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
       email: recipient.client.user.email,
+      timeZone,
       preference: recipient.preference,
     },
     title: args.normalized.title,

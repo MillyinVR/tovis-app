@@ -21,6 +21,12 @@ const mockPrisma = vi.hoisted(() => ({
   clientNotificationPreference: {
     findUnique: vi.fn(),
   },
+  booking: {
+    findUnique: vi.fn(),
+  },
+  aftercareSummary: {
+    findUnique: vi.fn(),
+  },
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -62,6 +68,8 @@ describe('lib/notifications/clientNotifications', () => {
     resetMockGroup(mockPrisma.scheduledClientNotification)
     resetMockGroup(mockPrisma.clientProfile)
     resetMockGroup(mockPrisma.clientNotificationPreference)
+    resetMockGroup(mockPrisma.booking)
+    resetMockGroup(mockPrisma.aftercareSummary)
     mockEnqueueDispatch.mockReset()
 
     mockPrisma.clientProfile.findUnique.mockResolvedValue({
@@ -77,11 +85,17 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     mockPrisma.clientNotificationPreference.findUnique.mockResolvedValue(null)
+    mockPrisma.booking.findUnique.mockResolvedValue(null)
+    mockPrisma.aftercareSummary.findUnique.mockResolvedValue(null)
     mockEnqueueDispatch.mockResolvedValue(undefined)
   })
 
   it('creates a new client notification when no dedupeKey is provided', async () => {
     mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_1' })
+    mockPrisma.booking.findUnique.mockResolvedValue({
+      locationTimeZone: 'America/Los_Angeles',
+      clientTimeZoneAtBooking: null,
+    })
 
     const result = await createClientNotification({
       clientId: 'client_1',
@@ -120,6 +134,16 @@ describe('lib/notifications/clientNotifications', () => {
 
     expect(mockPrisma.clientNotification.updateMany).not.toHaveBeenCalled()
 
+    expect(mockPrisma.booking.findUnique).toHaveBeenCalledWith({
+      where: {
+        id: 'booking_1',
+      },
+      select: {
+        locationTimeZone: true,
+        clientTimeZoneAtBooking: true,
+      },
+    })
+
     expect(mockEnqueueDispatch).toHaveBeenCalledWith({
       key: NotificationEventKey.AFTERCARE_READY,
       sourceKey: 'client-notification:notif_1',
@@ -131,6 +155,7 @@ describe('lib/notifications/clientNotifications', () => {
         phone: null,
         phoneVerifiedAt: null,
         email: 'client@example.com',
+        timeZone: 'America/Los_Angeles',
         preference: null,
       },
       title: 'Aftercare ready',
@@ -143,6 +168,51 @@ describe('lib/notifications/clientNotifications', () => {
       clientNotificationId: 'notif_1',
       tx: undefined,
     })
+  })
+
+  it('uses aftercare booking timezone when booking lookup is unavailable', async () => {
+    mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_aftercare' })
+    mockPrisma.booking.findUnique.mockResolvedValue(null)
+    mockPrisma.aftercareSummary.findUnique.mockResolvedValue({
+      booking: {
+        locationTimeZone: 'America/New_York',
+        clientTimeZoneAtBooking: 'America/Chicago',
+      },
+    })
+
+    const result = await createClientNotification({
+      clientId: 'client_1',
+      eventKey: NotificationEventKey.AFTERCARE_READY,
+      title: 'Aftercare ready',
+      aftercareId: 'aftercare_1',
+      body: 'Review your aftercare plan.',
+    })
+
+    expect(result).toEqual({ id: 'notif_aftercare' })
+
+    expect(mockPrisma.booking.findUnique).not.toHaveBeenCalled()
+
+    expect(mockPrisma.aftercareSummary.findUnique).toHaveBeenCalledWith({
+      where: {
+        id: 'aftercare_1',
+      },
+      select: {
+        booking: {
+          select: {
+            locationTimeZone: true,
+            clientTimeZoneAtBooking: true,
+          },
+        },
+      },
+    })
+
+    expect(mockEnqueueDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient: expect.objectContaining({
+          timeZone: 'America/Chicago',
+        }),
+      }),
+    )
   })
 
   it('updates an existing deduped notification instead of creating a new one', async () => {
