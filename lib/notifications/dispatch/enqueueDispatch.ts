@@ -1,12 +1,9 @@
-// lib/notifications/dispatch/enqueueDispatch.ts
-
 import { prisma } from '@/lib/prisma'
 import {
   NotificationChannel,
   NotificationDeliveryEventType,
   NotificationDeliveryStatus,
   NotificationPriority,
-  NotificationProvider,
   NotificationRecipientKind,
   Prisma,
   type NotificationEventKey,
@@ -18,6 +15,10 @@ import {
   getRecipientChannelCapabilities,
   resolveChannelPolicy,
 } from '../channelPolicy'
+import {
+  getMaxAttemptsForChannel,
+  getProviderForChannel,
+} from '../delivery/providerPolicy'
 
 const RECIPIENT_KIND = {
   PRO: 'PRO',
@@ -186,7 +187,6 @@ type NormalizedEnqueueDispatchArgs = {
 
 type DeliveryCreateRow = {
   channel: NotificationChannel
-  provider: NotificationProvider
   status: NotificationDeliveryStatus
   destination: string | null
   templateKey: string
@@ -244,12 +244,6 @@ function isProDispatchRecipient(
   return recipient.kind === RECIPIENT_KIND.PRO
 }
 
-function isClientDispatchRecipient(
-  recipient: EnqueueDispatchRecipient,
-): recipient is EnqueueClientDispatchRecipient {
-  return recipient.kind === RECIPIENT_KIND.CLIENT
-}
-
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
@@ -263,30 +257,6 @@ function resolveInAppTargetId(recipient: EnqueueDispatchRecipient): string | nul
   }
 
   return normNullableString(recipient.clientId, MAX_ID)
-}
-
-function getProviderForChannel(channel: NotificationChannel): NotificationProvider {
-  if (channel === NotificationChannel.IN_APP) {
-    return NotificationProvider.INTERNAL_REALTIME
-  }
-
-  if (channel === NotificationChannel.SMS) {
-    return NotificationProvider.TWILIO
-  }
-
-  return NotificationProvider.POSTMARK
-}
-
-function getMaxAttemptsForChannel(channel: NotificationChannel): number {
-  if (channel === NotificationChannel.IN_APP) {
-    return 3
-  }
-
-  if (channel === NotificationChannel.SMS) {
-    return 5
-  }
-
-  return 6
 }
 
 function getDestinationForChannel(args: {
@@ -377,7 +347,6 @@ function buildDeliveryRows(args: {
 
     return {
       channel: evaluation.channel,
-      provider: getProviderForChannel(evaluation.channel),
       status,
       destination,
       templateKey,
@@ -460,7 +429,7 @@ function buildDispatchCreateData(args: {
     deliveries: {
       create: deliveryRows.map((row) => ({
         channel: row.channel,
-        provider: row.provider,
+        provider: getProviderForChannel(row.channel),
         status: row.status,
         destination: row.destination,
         templateKey: row.templateKey,
