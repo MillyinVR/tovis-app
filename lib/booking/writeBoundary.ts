@@ -9269,31 +9269,23 @@ export async function uploadProBookingMedia(
       }),
   )
 }
-
+/**
+ * Legacy compatibility shim.
+ *
+ * The old reminder flow used Booking.reminderSentAt as a write-back flag.
+ * That field no longer exists on Booking, and reminder delivery is moving to
+ * the scheduled notification pipeline instead.
+ *
+ * Keep this export for any remaining legacy imports, but do not mutate Booking.
+ */
 export async function markBookingRemindersSent(
   args: MarkBookingRemindersSentArgs,
 ): Promise<MarkBookingRemindersSentResult> {
-  const bookingIds = Array.from(
-    new Set(args.bookingIds.map((id) => id.trim()).filter(Boolean)),
-  )
-
-  if (bookingIds.length === 0) {
-    return {
-      count: 0,
-      meta: buildMeta(false),
-    }
-  }
-
-  const result = await prisma.booking.updateMany({
-    where: { id: { in: bookingIds } },
-    data: {
-      reminderSentAt: args.sentAt ?? new Date(),
-    },
-  })
+  void args
 
   return {
-    count: result.count,
-    meta: buildMeta(result.count > 0),
+    count: 0,
+    meta: buildMeta(false),
   }
 }
 
