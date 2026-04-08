@@ -8,9 +8,9 @@ import {
   type NotificationDeliveryStatus,
 } from '@prisma/client'
 
+import { EmailDeliveryProvider } from './sendEmail'
 import { InAppDeliveryProvider } from './sendInApp'
 import { SmsDeliveryProvider } from './sendSms'
-import { EmailDeliveryProvider } from './sendEmail'
 
 const mockClaimDeliveries = vi.hoisted(() => vi.fn())
 const mockCompleteDeliveryAttempt = vi.hoisted(() => vi.fn())
@@ -37,6 +37,7 @@ function makeClaimedDelivery(
     maxAttempts: number
     leaseToken: string | null
     status: NotificationDeliveryStatus
+    eventKey: NotificationEventKey
   }> = {},
 ) {
   const now = new Date('2026-04-09T12:00:00.000Z')
@@ -46,7 +47,7 @@ function makeClaimedDelivery(
     channel: args.channel ?? NotificationChannel.IN_APP,
     provider: args.provider ?? NotificationProvider.INTERNAL_REALTIME,
     status: args.status ?? 'PENDING',
-    destination: args.destination ?? 'pro_1',
+    destination: args.destination ?? 'client_1',
     templateKey: args.templateKey ?? 'booking_confirmed',
     templateVersion: args.templateVersion ?? 1,
     attemptCount: args.attemptCount ?? 0,
@@ -70,7 +71,7 @@ function makeClaimedDelivery(
     dispatch: {
       id: 'dispatch_1',
       sourceKey: 'client-notification:notif_1',
-      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+      eventKey: args.eventKey ?? NotificationEventKey.BOOKING_CONFIRMED,
       recipientKind: NotificationRecipientKind.CLIENT,
       priority: NotificationPriority.NORMAL,
       userId: 'user_1',
@@ -186,7 +187,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           id: 'delivery_in_app_1',
           channel: NotificationChannel.IN_APP,
           provider: NotificationProvider.INTERNAL_REALTIME,
-          destination: 'pro_1',
+          destination: 'client_1',
           attemptCount: 0,
           maxAttempts: 3,
         }),
@@ -263,7 +264,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           channel: NotificationChannel.SMS,
           provider: NotificationProvider.TWILIO,
           destination: '+15551234567',
-          templateKey: 'appointment_reminder',
+          templateKey: 'booking_confirmed',
           attemptCount: 0,
           maxAttempts: 5,
         }),
@@ -300,12 +301,21 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
       },
     })
 
-    expect(result.sentCount).toBe(1)
-    expect(result.outcomes[0]).toEqual({
-      deliveryId: 'delivery_sms_1',
-      provider: NotificationProvider.TWILIO,
-      channel: NotificationChannel.SMS,
-      result: 'SENT',
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 1,
+      retryScheduledCount: 0,
+      finalFailureCount: 0,
+      orchestrationErrorCount: 0,
+      outcomes: [
+        {
+          deliveryId: 'delivery_sms_1',
+          provider: NotificationProvider.TWILIO,
+          channel: NotificationChannel.SMS,
+          result: 'SENT',
+        },
+      ],
     })
   })
 
@@ -323,7 +333,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           channel: NotificationChannel.SMS,
           provider: NotificationProvider.TWILIO,
           destination: '+15551234567',
-          templateKey: 'appointment_reminder',
+          templateKey: 'booking_confirmed',
           attemptCount: 1,
           maxAttempts: 5,
         }),
@@ -431,12 +441,21 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
       },
     })
 
-    expect(result.finalFailureCount).toBe(1)
-    expect(result.outcomes[0]).toEqual({
-      deliveryId: 'delivery_email_final',
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      result: 'FAILED_FINAL',
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 0,
+      retryScheduledCount: 0,
+      finalFailureCount: 1,
+      orchestrationErrorCount: 0,
+      outcomes: [
+        {
+          deliveryId: 'delivery_email_final',
+          provider: NotificationProvider.POSTMARK,
+          channel: NotificationChannel.EMAIL,
+          result: 'FAILED_FINAL',
+        },
+      ],
     })
   })
 
@@ -490,7 +509,22 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
       },
     })
 
-    expect(result.finalFailureCount).toBe(1)
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 0,
+      retryScheduledCount: 0,
+      finalFailureCount: 1,
+      orchestrationErrorCount: 0,
+      outcomes: [
+        {
+          deliveryId: 'delivery_email_invalid',
+          provider: NotificationProvider.POSTMARK,
+          channel: NotificationChannel.EMAIL,
+          result: 'FAILED_FINAL',
+        },
+      ],
+    })
   })
 
   it('marks orchestration error when provider send throws', async () => {
@@ -506,7 +540,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           id: 'delivery_throw_1',
           channel: NotificationChannel.IN_APP,
           provider: NotificationProvider.INTERNAL_REALTIME,
-          destination: 'pro_1',
+          destination: 'client_1',
+          templateKey: 'booking_confirmed',
         }),
       ],
     })
@@ -552,7 +587,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     })
   })
 
-  it('marks orchestration error when claimed delivery is missing leaseToken', async () => {
+  it('returns orchestration error when claimed delivery is missing leaseToken', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, inAppSend, smsSend, emailSend } = makeProviders()
 
@@ -567,13 +602,10 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           channel: NotificationChannel.SMS,
           provider: NotificationProvider.TWILIO,
           destination: '+15551234567',
+          templateKey: 'booking_confirmed',
         }),
       ],
     })
-
-    mockCompleteDeliveryAttempt.mockRejectedValueOnce(
-      new Error('lease completion intentionally swallowed'),
-    )
 
     const result = await processDueDeliveries({
       providers,
@@ -583,19 +615,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     expect(inAppSend).not.toHaveBeenCalled()
     expect(smsSend).not.toHaveBeenCalled()
     expect(emailSend).not.toHaveBeenCalled()
-
-    expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
-      kind: 'FINAL_FAILURE',
-      deliveryId: 'delivery_missing_lease',
-      leaseToken: '',
-      attemptedAt: now,
-      code: 'DELIVERY_LEASE_MISSING',
-      message: 'Claimed delivery is missing leaseToken.',
-      providerStatus: 'invalid_claim',
-      responseMeta: {
-        source: 'processDueDeliveries',
-      },
-    })
+    expect(mockCompleteDeliveryAttempt).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       claimedCount: 1,
@@ -610,13 +630,14 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           provider: NotificationProvider.TWILIO,
           channel: NotificationChannel.SMS,
           result: 'ORCHESTRATION_ERROR',
-          message: 'Claimed delivery is missing leaseToken.',
+          message:
+            'Claimed delivery is missing leaseToken. Delivery could not be finalized because lease ownership is required.',
         },
       ],
     })
   })
 
-  it('returns orchestration error when templateKey is unsupported', async () => {
+  it('marks orchestration error and finalizes when delivery templateKey mismatches the event definition', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, inAppSend } = makeProviders()
 
@@ -630,7 +651,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           templateKey: 'totally_invalid_template_key',
           channel: NotificationChannel.IN_APP,
           provider: NotificationProvider.INTERNAL_REALTIME,
-          destination: 'pro_1',
+          destination: 'client_1',
+          eventKey: NotificationEventKey.BOOKING_CONFIRMED,
         }),
       ],
     })
@@ -641,7 +663,22 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     })
 
     expect(inAppSend).not.toHaveBeenCalled()
-    expect(mockCompleteDeliveryAttempt).not.toHaveBeenCalled()
+
+    expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
+      kind: 'FINAL_FAILURE',
+      deliveryId: 'delivery_bad_template',
+      leaseToken: 'lease_token_1',
+      attemptedAt: now,
+      code: 'DELIVERY_ORCHESTRATION_ERROR',
+      message:
+        'processDueDeliveries: delivery templateKey totally_invalid_template_key does not match event BOOKING_CONFIRMED (booking_confirmed)',
+      providerStatus: 'orchestration_error',
+      responseMeta: {
+        source: 'processDueDeliveries',
+        provider: NotificationProvider.INTERNAL_REALTIME,
+        channel: NotificationChannel.IN_APP,
+      },
+    })
 
     expect(result).toEqual({
       claimedCount: 1,
@@ -657,7 +694,56 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           channel: NotificationChannel.IN_APP,
           result: 'ORCHESTRATION_ERROR',
           message:
-            'processDueDeliveries: unsupported templateKey totally_invalid_template_key',
+            'processDueDeliveries: delivery templateKey totally_invalid_template_key does not match event BOOKING_CONFIRMED (booking_confirmed)',
+        },
+      ],
+    })
+  })
+
+  it('appends finalization failure detail to the orchestration error message', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, inAppSend } = makeProviders()
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_finalize_fail',
+          channel: NotificationChannel.IN_APP,
+          provider: NotificationProvider.INTERNAL_REALTIME,
+          destination: 'client_1',
+          templateKey: 'booking_confirmed',
+        }),
+      ],
+    })
+
+    inAppSend.mockRejectedValue(new Error('redis offline'))
+    mockCompleteDeliveryAttempt.mockRejectedValueOnce(
+      new Error('db finalize failed'),
+    )
+
+    const result = await processDueDeliveries({
+      providers,
+      claim: { now },
+    })
+
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 0,
+      retryScheduledCount: 0,
+      finalFailureCount: 0,
+      orchestrationErrorCount: 1,
+      outcomes: [
+        {
+          deliveryId: 'delivery_finalize_fail',
+          provider: NotificationProvider.INTERNAL_REALTIME,
+          channel: NotificationChannel.IN_APP,
+          result: 'ORCHESTRATION_ERROR',
+          message:
+            'redis offline Finalization also failed: db finalize failed',
         },
       ],
     })

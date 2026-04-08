@@ -1,3 +1,5 @@
+// lib/notifications/delivery/sendEmail.ts
+
 import {
   NotificationChannel,
   NotificationProvider,
