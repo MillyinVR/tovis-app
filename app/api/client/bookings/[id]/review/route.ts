@@ -1,13 +1,11 @@
-// app/api/client/bookings/[id]/review/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import {
   BookingCloseoutAuditAction,
   MediaType,
   MediaVisibility,
+  NotificationEventKey,
   NotificationPriority,
-  NotificationType,
-  ProNotificationReason,
   Role,
 } from '@prisma/client'
 import {
@@ -142,8 +140,7 @@ async function createReviewReceivedProNotification(args: {
 
   await createProNotification({
     professionalId: args.professionalId,
-    type: NotificationType.REVIEW,
-    reason: ProNotificationReason.REVIEW_RECEIVED,
+    eventKey: NotificationEventKey.REVIEW_RECEIVED,
     priority: NotificationPriority.NORMAL,
     title,
     body,
@@ -151,7 +148,7 @@ async function createReviewReceivedProNotification(args: {
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,
     reviewId: args.reviewId,
-    dedupeKey: `PRO_NOTIF:${ProNotificationReason.REVIEW_RECEIVED}:${args.reviewId}`,
+    dedupeKey: `PRO_NOTIF:${NotificationEventKey.REVIEW_RECEIVED}:${args.reviewId}`,
     data: {
       bookingId: args.bookingId,
       reviewId: args.reviewId,

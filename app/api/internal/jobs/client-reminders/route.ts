@@ -1,8 +1,7 @@
-// app/api/internal/jobs/client-reminders/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
-import { ClientNotificationType, type Prisma } from '@prisma/client'
+import { NotificationEventKey, type Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +14,7 @@ type DueReminderRow = {
   id: string
   clientId: string
   bookingId: string | null
-  type: ClientNotificationType
+  eventKey: NotificationEventKey
   runAt: Date
   href: string
   dedupeKey: string | null
@@ -226,7 +225,7 @@ async function processReminder(row: DueReminderRow): Promise<{
         tx,
         clientId: row.clientId,
         bookingId: row.bookingId,
-        type: ClientNotificationType.APPOINTMENT_REMINDER,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         title: notification.title,
         body: notification.body,
         dedupeKey,
@@ -291,7 +290,7 @@ async function runJob(req: Request) {
 
   const dueRows: DueReminderRow[] = await prisma.scheduledClientNotification.findMany({
     where: {
-      type: ClientNotificationType.APPOINTMENT_REMINDER,
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
       cancelledAt: null,
       processedAt: null,
       runAt: {
@@ -304,7 +303,7 @@ async function runJob(req: Request) {
       id: true,
       clientId: true,
       bookingId: true,
-      type: true,
+      eventKey: true,
       runAt: true,
       href: true,
       dedupeKey: true,

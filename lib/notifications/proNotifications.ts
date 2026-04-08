@@ -1,7 +1,13 @@
 // lib/notifications/proNotifications.ts
 import { prisma } from '@/lib/prisma'
-import { NotificationPriority, Prisma } from '@prisma/client'
-import type { NotificationType, ProNotificationReason } from '@prisma/client'
+import {
+  NotificationEventKey,
+  NotificationPriority,
+  NotificationRecipientKind,
+  Prisma,
+} from '@prisma/client'
+
+import { enqueueDispatch } from './dispatch/enqueueDispatch'
 
 const MAX_ID = 64
 const MAX_TITLE = 160
@@ -13,10 +19,31 @@ const notificationIdSelect = {
   id: true,
 } satisfies Prisma.NotificationSelect
 
+const professionalDispatchRecipientSelect = {
+  id: true,
+  userId: true,
+  phone: true,
+  phoneVerifiedAt: true,
+  user: {
+    select: {
+      email: true,
+      phone: true,
+      phoneVerifiedAt: true,
+    },
+  },
+} satisfies Prisma.ProfessionalProfileSelect
+
+const professionalNotificationPreferenceSelect = {
+  inAppEnabled: true,
+  smsEnabled: true,
+  emailEnabled: true,
+  quietHoursStartMinutes: true,
+  quietHoursEndMinutes: true,
+} satisfies Prisma.ProfessionalNotificationPreferenceSelect
+
 export type CreateProNotificationArgs = {
   professionalId: string
-  type: NotificationType
-  reason: ProNotificationReason
+  eventKey: NotificationEventKey
   priority?: NotificationPriority | null
 
   title: string
@@ -40,6 +67,19 @@ export type CreateProNotificationArgs = {
 export type ProNotificationCreateResult = {
   id: string
 }
+
+type DbClient = Prisma.TransactionClient | typeof prisma
+
+type NormalizedCreateArgs = ReturnType<typeof normalizeCreateArgs>
+
+type ProfessionalDispatchRecipientRow = Prisma.ProfessionalProfileGetPayload<{
+  select: typeof professionalDispatchRecipientSelect
+}>
+
+type ProfessionalNotificationPreferenceRow =
+  Prisma.ProfessionalNotificationPreferenceGetPayload<{
+    select: typeof professionalNotificationPreferenceSelect
+  }>
 
 function normRequiredString(value: unknown, max: number): string {
   const s = typeof value === 'string' ? value.trim() : ''
@@ -74,28 +114,15 @@ function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
 
-/**
- * Optional realtime publish hook.
- * Safe default: no-op until you wire Ably / Pusher / Redis / SSE.
- */
-async function publishProNotificationEvent(args: {
-  professionalId: string
-  notificationId: string
-}): Promise<void> {
-  void args
-  return
-}
-
-function getDb(tx?: Prisma.TransactionClient) {
+function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
 function buildUpdateData(
-  normalized: ReturnType<typeof normalizeCreateArgs>,
+  normalized: NormalizedCreateArgs,
 ): Prisma.NotificationUncheckedUpdateManyInput {
   const data: Prisma.NotificationUncheckedUpdateManyInput = {
-    type: normalized.type,
-    reason: normalized.reason,
+    eventKey: normalized.eventKey,
     priority: normalized.priority,
     title: normalized.title,
     body: normalized.body,
@@ -120,12 +147,11 @@ function buildUpdateData(
 }
 
 function buildCreateData(
-  normalized: ReturnType<typeof normalizeCreateArgs>,
+  normalized: NormalizedCreateArgs,
 ): Prisma.NotificationUncheckedCreateInput {
   return {
     professionalId: normalized.professionalId,
-    type: normalized.type,
-    reason: normalized.reason,
+    eventKey: normalized.eventKey,
     priority: normalized.priority,
     title: normalized.title,
     body: normalized.body,
@@ -158,8 +184,7 @@ function normalizeCreateArgs(args: CreateProNotificationArgs) {
 
   return {
     professionalId,
-    type: args.type,
-    reason: args.reason,
+    eventKey: args.eventKey,
     priority: args.priority ?? NotificationPriority.NORMAL,
 
     title,
@@ -197,6 +222,101 @@ async function findNotificationIdByDedupe(args: {
   return found
 }
 
+async function getProfessionalDispatchRecipient(args: {
+  professionalId: string
+  eventKey: NotificationEventKey
+  tx?: Prisma.TransactionClient
+}): Promise<{
+  professional: ProfessionalDispatchRecipientRow
+  preference: ProfessionalNotificationPreferenceRow | null
+}> {
+  const db = getDb(args.tx)
+
+  const [professional, preference] = await Promise.all([
+    db.professionalProfile.findUnique({
+      where: {
+        id: args.professionalId,
+      },
+      select: professionalDispatchRecipientSelect,
+    }),
+    db.professionalNotificationPreference.findUnique({
+      where: {
+        professionalId_eventKey: {
+          professionalId: args.professionalId,
+          eventKey: args.eventKey,
+        },
+      },
+      select: professionalNotificationPreferenceSelect,
+    }),
+  ])
+
+  if (!professional) {
+    throw new Error('createProNotification: professional not found for dispatch enqueue')
+  }
+
+  return {
+    professional,
+    preference,
+  }
+}
+
+function resolvePreferredPhone(
+  professional: ProfessionalDispatchRecipientRow,
+): {
+  phone: string | null
+  phoneVerifiedAt: Date | null
+} {
+  const profilePhone = normNullableString(professional.phone, 64)
+  if (profilePhone) {
+    return {
+      phone: profilePhone,
+      phoneVerifiedAt: professional.phoneVerifiedAt ?? null,
+    }
+  }
+
+  const userPhone = normNullableString(professional.user.phone, 64)
+  return {
+    phone: userPhone,
+    phoneVerifiedAt: professional.user.phoneVerifiedAt ?? null,
+  }
+}
+
+async function enqueueProNotificationDispatch(args: {
+  notificationId: string
+  normalized: NormalizedCreateArgs
+  tx?: Prisma.TransactionClient
+}): Promise<void> {
+  const { professional, preference } = await getProfessionalDispatchRecipient({
+    professionalId: args.normalized.professionalId,
+    eventKey: args.normalized.eventKey,
+    tx: args.tx,
+  })
+
+  const preferredPhone = resolvePreferredPhone(professional)
+
+  await enqueueDispatch({
+    key: args.normalized.eventKey,
+    sourceKey: `pro-notification:${args.notificationId}`,
+    recipient: {
+      kind: NotificationRecipientKind.PRO,
+      professionalId: professional.id,
+      userId: professional.userId,
+      inAppTargetId: professional.id,
+      phone: preferredPhone.phone,
+      phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
+      email: professional.user.email,
+      preference,
+    },
+    title: args.normalized.title,
+    body: args.normalized.body,
+    href: args.normalized.href,
+    payload: args.normalized.data,
+    priority: args.normalized.priority,
+    notificationId: args.notificationId,
+    tx: args.tx,
+  })
+}
+
 /**
  * Idempotent pro notification creation.
  *
@@ -225,9 +345,10 @@ export async function createProNotification(
       select: notificationIdSelect,
     })
 
-    await publishProNotificationEvent({
-      professionalId: normalized.professionalId,
+    await enqueueProNotificationDispatch({
       notificationId: created.id,
+      normalized,
+      tx: args.tx,
     })
 
     return created
@@ -249,9 +370,10 @@ export async function createProNotification(
       tx: args.tx,
     })
 
-    await publishProNotificationEvent({
-      professionalId: normalized.professionalId,
+    await enqueueProNotificationDispatch({
       notificationId: found.id,
+      normalized,
+      tx: args.tx,
     })
 
     return found
@@ -264,9 +386,10 @@ export async function createProNotification(
       select: notificationIdSelect,
     })
 
-    await publishProNotificationEvent({
-      professionalId: normalized.professionalId,
+    await enqueueProNotificationDispatch({
       notificationId: created.id,
+      normalized,
+      tx: args.tx,
     })
 
     return created
@@ -290,9 +413,10 @@ export async function createProNotification(
       tx: args.tx,
     })
 
-    await publishProNotificationEvent({
-      professionalId: normalized.professionalId,
+    await enqueueProNotificationDispatch({
       notificationId: found.id,
+      normalized,
+      tx: args.tx,
     })
 
     return found

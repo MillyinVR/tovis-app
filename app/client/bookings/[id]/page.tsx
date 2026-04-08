@@ -9,8 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
-import { ClientNotificationType } from '@prisma/client'
-
+import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
@@ -369,7 +368,7 @@ async function markClientBookingStepNotificationsRead(args: {
       where: {
         clientId: args.clientId,
         bookingId: args.bookingId,
-        type: ClientNotificationType.CONSULTATION_PROPOSAL,
+        eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
         readAt: null,
       },
       data: { readAt: now },
@@ -384,7 +383,7 @@ async function markClientBookingStepNotificationsRead(args: {
         clientId: args.clientId,
         bookingId: args.bookingId,
         aftercareId: args.aftercareId,
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
         readAt: null,
       },
       select: { id: true },
@@ -395,7 +394,7 @@ async function markClientBookingStepNotificationsRead(args: {
         clientId: args.clientId,
         bookingId: args.bookingId,
         aftercareId: args.aftercareId,
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
         readAt: null,
       },
       data: { readAt: now },
@@ -409,12 +408,14 @@ async function markClientBookingStepNotificationsRead(args: {
       where: {
         clientId: args.clientId,
         bookingId: args.bookingId,
-        type: {
+        eventKey: {
           in: [
-            ClientNotificationType.BOOKING_CONFIRMED,
-            ClientNotificationType.BOOKING_RESCHEDULED,
-            ClientNotificationType.BOOKING_CANCELLED,
-            ClientNotificationType.APPOINTMENT_REMINDER,
+            NotificationEventKey.BOOKING_CONFIRMED,
+            NotificationEventKey.BOOKING_RESCHEDULED,
+            NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+            NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
+            NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+            NotificationEventKey.APPOINTMENT_REMINDER,
           ],
         },
         readAt: null,

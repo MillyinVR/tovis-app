@@ -1,11 +1,9 @@
-// app/api/bookings/finalize/route.ts
 import { prisma } from '@/lib/prisma'
 import {
   BookingSource,
   BookingStatus,
-  NotificationType,
+  NotificationEventKey,
   Prisma,
-  ProNotificationReason,
   type ServiceLocationType,
 } from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
@@ -120,29 +118,18 @@ function toFinalizeOffering(
 }
 
 function getFinalizeProNotificationMeta(status: BookingStatus): {
-  type: NotificationType
-  reason: ProNotificationReason
+  eventKey: NotificationEventKey
   title: string
 } {
   if (status === BookingStatus.PENDING) {
     return {
-      type: NotificationType.BOOKING_REQUEST,
-      reason: ProNotificationReason.BOOKING_REQUEST_CREATED,
+      eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
       title: 'New booking request',
     }
   }
 
-  if (status === BookingStatus.ACCEPTED) {
-    return {
-      type: NotificationType.BOOKING_UPDATE,
-      reason: ProNotificationReason.BOOKING_CONFIRMED,
-      title: 'New booking confirmed',
-    }
-  }
-
   return {
-    type: NotificationType.BOOKING_UPDATE,
-    reason: ProNotificationReason.BOOKING_CONFIRMED,
+    eventKey: NotificationEventKey.BOOKING_CONFIRMED,
     title: 'New booking confirmed',
   }
 }
@@ -159,14 +146,13 @@ async function createFinalizeProNotification(args: {
 
   await createProNotification({
     professionalId: args.professionalId,
-    type: meta.type,
-    reason: meta.reason,
+    eventKey: meta.eventKey,
     title: meta.title,
     body: '',
     href: `/pro/bookings/${args.bookingId}`,
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,
-    dedupeKey: `PRO_NOTIF:${meta.reason}:${args.bookingId}`,
+    dedupeKey: `PRO_NOTIF:${meta.eventKey}:${args.bookingId}`,
     data: {
       bookingId: args.bookingId,
       bookingStatus: args.bookingStatus,
@@ -308,7 +294,10 @@ export async function POST(request: Request) {
         locationType,
       })
     } catch (notificationError: unknown) {
-      console.error('POST /api/bookings/finalize pro notification error:', notificationError)
+      console.error(
+        'POST /api/bookings/finalize pro notification error:',
+        notificationError,
+      )
     }
 
     return jsonOk(

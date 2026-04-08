@@ -1,14 +1,17 @@
-// app/api/pro/notifications/route.ts
-import { NotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { listProNotifications } from '@/lib/notifications/proNotificationQueries'
 
 export const dynamic = 'force-dynamic'
 
+const NOTIFICATION_EVENT_KEY_VALUES = new Set<string>(
+  Object.values(NotificationEventKey),
+)
+
 function asInt(value: unknown, fallback: number): number {
   const parsed =
     typeof value === 'string'
-      ? parseInt(value, 10)
+      ? Number.parseInt(value, 10)
       : typeof value === 'number'
         ? Math.trunc(value)
         : Number.NaN
@@ -21,26 +24,17 @@ function parseUnreadOnly(value: unknown): boolean {
   return raw === '1' || raw === 'true' || raw === 'yes'
 }
 
-function parseNotificationType(value: unknown): NotificationType | null {
-  const raw = typeof value === 'string' ? value.trim().toUpperCase() : ''
+function parseNotificationEventKey(
+  value: unknown,
+): NotificationEventKey | null {
+  if (typeof value !== 'string') return null
 
-  if (raw === NotificationType.BOOKING_REQUEST) {
-    return NotificationType.BOOKING_REQUEST
-  }
+  const raw = value.trim()
+  if (!raw) return null
 
-  if (raw === NotificationType.BOOKING_UPDATE) {
-    return NotificationType.BOOKING_UPDATE
-  }
-
-  if (raw === NotificationType.BOOKING_CANCELLED) {
-    return NotificationType.BOOKING_CANCELLED
-  }
-
-  if (raw === NotificationType.REVIEW) {
-    return NotificationType.REVIEW
-  }
-
-  return null
+  return NOTIFICATION_EVENT_KEY_VALUES.has(raw)
+    ? (raw as NotificationEventKey)
+    : null
 }
 
 export async function GET(req: Request) {
@@ -56,10 +50,11 @@ export async function GET(req: Request) {
 
   const cursorId = (url.searchParams.get('cursor') || '').trim() || null
   const unreadOnly = parseUnreadOnly(url.searchParams.get('unread'))
-  const type = parseNotificationType(url.searchParams.get('type'))
+  const rawEventKey = url.searchParams.get('eventKey')
+  const eventKey = parseNotificationEventKey(rawEventKey)
 
-  if (url.searchParams.get('type') && !type) {
-    return jsonFail(400, 'Invalid notification type.')
+  if (rawEventKey && !eventKey) {
+    return jsonFail(400, 'Invalid notification event key.')
   }
 
   const result = await listProNotifications({
@@ -67,7 +62,7 @@ export async function GET(req: Request) {
     take,
     cursorId,
     unreadOnly,
-    type,
+    eventKey,
   })
 
   return jsonOk(

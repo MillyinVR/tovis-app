@@ -1,4 +1,3 @@
-// app/api/client/bookings/[id]/consultation/_decision.ts
 import { prisma } from '@/lib/prisma'
 import {
   jsonFail,
@@ -14,9 +13,8 @@ import { createProNotification } from '@/lib/notifications/proNotifications'
 import {
   BookingCloseoutAuditAction,
   ConsultationApprovalStatus,
-  NotificationType,
+  NotificationEventKey,
   Prisma,
-  ProNotificationReason,
 } from '@prisma/client'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
@@ -86,23 +84,25 @@ function buildConsultationApprovalAuditSnapshot(
   }
 }
 
-function getConsultationDecisionNotificationMeta(action: ConsultationDecisionAction): {
+function getConsultationDecisionNotificationMeta(
+  action: ConsultationDecisionAction,
+): {
   title: string
   body: string
-  reason: ProNotificationReason
+  eventKey: NotificationEventKey
 } {
   if (action === 'APPROVE') {
     return {
       title: 'Consultation approved',
       body: 'Client approved your consultation proposal.',
-      reason: ProNotificationReason.CONSULTATION_APPROVED,
+      eventKey: NotificationEventKey.CONSULTATION_APPROVED,
     }
   }
 
   return {
     title: 'Consultation rejected',
     body: 'Client rejected your consultation proposal.',
-    reason: ProNotificationReason.CONSULTATION_REJECTED,
+    eventKey: NotificationEventKey.CONSULTATION_REJECTED,
   }
 }
 
@@ -117,14 +117,13 @@ async function createConsultationDecisionNotification(args: {
   try {
     await createProNotification({
       professionalId: args.professionalId,
-      type: NotificationType.BOOKING_UPDATE,
-      reason: meta.reason,
+      eventKey: meta.eventKey,
       title: meta.title,
       body: meta.body,
       href: `/pro/bookings/${args.bookingId}?step=consult`,
       actorUserId: args.actorUserId,
       bookingId: args.bookingId,
-      dedupeKey: `PRO_NOTIF:${meta.reason}:${args.bookingId}`,
+      dedupeKey: `PRO_NOTIF:${meta.eventKey}:${args.bookingId}`,
       data: {
         bookingId: args.bookingId,
         action: args.action,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
 const mockPrisma = vi.hoisted(() => ({
@@ -25,16 +25,16 @@ function makeRequest(search = '') {
   )
 }
 
-function makeNotification(id: string, type: ClientNotificationType) {
+function makeNotification(id: string, eventKey: NotificationEventKey) {
   return {
     id,
-    type,
+    eventKey,
     title: `Title ${id}`,
     body: `Body ${id}`,
     href: `/client/bookings/${id}`,
     data: { bookingId: id },
-    createdAt: new Date(`2026-04-06T12:00:00.000Z`),
-    updatedAt: new Date(`2026-04-06T12:00:00.000Z`),
+    createdAt: new Date('2026-04-06T12:00:00.000Z'),
+    updatedAt: new Date('2026-04-06T12:00:00.000Z'),
     readAt: null,
     bookingId: `booking_${id}`,
     aftercareId: null,
@@ -78,19 +78,19 @@ describe('GET /api/client/notifications', () => {
     expect(mockPrisma.clientNotification.findMany).not.toHaveBeenCalled()
   })
 
-  it('returns 400 for an invalid notification type', async () => {
+  it('returns 400 for an invalid notification event key', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
     })
 
-    const response = await GET(makeRequest('?type=NOT_REAL'))
+    const response = await GET(makeRequest('?eventKey=NOT_REAL'))
     const json = await response.json()
 
     expect(response.status).toBe(400)
     expect(json).toEqual({
       ok: false,
-      error: 'Invalid notification type.',
+      error: 'Invalid notification event key.',
     })
     expect(mockPrisma.clientNotification.findMany).not.toHaveBeenCalled()
   })
@@ -102,8 +102,8 @@ describe('GET /api/client/notifications', () => {
     })
 
     const rows = [
-      makeNotification('notif_1', ClientNotificationType.BOOKING_CONFIRMED),
-      makeNotification('notif_2', ClientNotificationType.AFTERCARE),
+      makeNotification('notif_1', NotificationEventKey.BOOKING_CONFIRMED),
+      makeNotification('notif_2', NotificationEventKey.AFTERCARE_READY),
     ]
 
     mockPrisma.clientNotification.findMany.mockResolvedValue(rows)
@@ -119,7 +119,7 @@ describe('GET /api/client/notifications', () => {
       take: 51,
       select: {
         id: true,
-        type: true,
+        eventKey: true,
         title: true,
         body: true,
         href: true,
@@ -134,17 +134,17 @@ describe('GET /api/client/notifications', () => {
 
     expect(response.status).toBe(200)
     expect(json).toEqual({
-    ok: true,
-    items: rows.map(toJsonNotification),
-    nextCursor: null,
-    filters: {
+      ok: true,
+      items: rows.map(toJsonNotification),
+      nextCursor: null,
+      filters: {
         unreadOnly: false,
-        type: null,
-    },
+        eventKey: null,
+      },
     })
   })
 
-  it('applies unread and type filters with cursor pagination', async () => {
+  it('applies unread and eventKey filters with cursor pagination', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -153,7 +153,7 @@ describe('GET /api/client/notifications', () => {
     const rows = Array.from({ length: 26 }, (_, index) =>
       makeNotification(
         `notif_${index + 1}`,
-        ClientNotificationType.AFTERCARE,
+        NotificationEventKey.AFTERCARE_READY,
       ),
     )
 
@@ -161,7 +161,7 @@ describe('GET /api/client/notifications', () => {
 
     const response = await GET(
       makeRequest(
-        '?take=25&cursor=notif_cursor&unread=true&type=AFTERCARE',
+        '?take=25&cursor=notif_cursor&unread=true&eventKey=AFTERCARE_READY',
       ),
     )
     const json = await response.json()
@@ -170,7 +170,7 @@ describe('GET /api/client/notifications', () => {
       where: {
         clientId: 'client_1',
         readAt: null,
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 26,
@@ -178,7 +178,7 @@ describe('GET /api/client/notifications', () => {
       skip: 1,
       select: {
         id: true,
-        type: true,
+        eventKey: true,
         title: true,
         body: true,
         href: true,
@@ -193,13 +193,13 @@ describe('GET /api/client/notifications', () => {
 
     expect(response.status).toBe(200)
     expect(json).toEqual({
-    ok: true,
-    items: rows.slice(0, 25).map(toJsonNotification),
-    nextCursor: 'notif_25',
-    filters: {
+      ok: true,
+      items: rows.slice(0, 25).map(toJsonNotification),
+      nextCursor: 'notif_25',
+      filters: {
         unreadOnly: true,
-        type: ClientNotificationType.AFTERCARE,
-    },
+        eventKey: NotificationEventKey.AFTERCARE_READY,
+      },
     })
   })
 
@@ -222,7 +222,7 @@ describe('GET /api/client/notifications', () => {
       take: 101,
       select: {
         id: true,
-        type: true,
+        eventKey: true,
         title: true,
         body: true,
         href: true,
@@ -242,7 +242,7 @@ describe('GET /api/client/notifications', () => {
       nextCursor: null,
       filters: {
         unreadOnly: false,
-        type: null,
+        eventKey: null,
       },
     })
   })
@@ -266,7 +266,7 @@ describe('GET /api/client/notifications', () => {
       take: 51,
       select: {
         id: true,
-        type: true,
+        eventKey: true,
         title: true,
         body: true,
         href: true,
@@ -286,7 +286,7 @@ describe('GET /api/client/notifications', () => {
       nextCursor: null,
       filters: {
         unreadOnly: false,
-        type: null,
+        eventKey: null,
       },
     })
   })

@@ -8,7 +8,12 @@ import { COPY } from '@/lib/copy'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
-import { AftercareRebookMode, ClientNotificationType, ConsultationApprovalStatus, Prisma } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  ConsultationApprovalStatus,
+  NotificationEventKey,
+  Prisma,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,7 +51,7 @@ function SmallPill({ label }: { label: string }) {
   )
 }
 
-// ✅ Booking shape must match ClientBookingRow expectations from buildClientBookingDTO
+// Booking shape must match ClientBookingRow expectations from buildClientBookingDTO
 const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
   status: true,
@@ -76,7 +81,14 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
 
   service: { select: { id: true, name: true } },
 
-  professional: { select: { id: true, businessName: true, location: true, timeZone: true } },
+  professional: {
+    select: {
+      id: true,
+      businessName: true,
+      location: true,
+      timeZone: true,
+    },
+  },
 
   location: {
     select: {
@@ -104,7 +116,7 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
     },
   },
 
-    productSales: {
+  productSales: {
     orderBy: { createdAt: 'asc' },
     take: 80,
     select: {
@@ -154,7 +166,7 @@ export default async function ClientAftercareInboxPage() {
   const items: InboxItem[] = await prisma.clientNotification.findMany({
     where: {
       clientId: user.clientProfile.id,
-      type: ClientNotificationType.AFTERCARE,
+      eventKey: NotificationEventKey.AFTERCARE_READY,
     },
     orderBy: { createdAt: 'desc' },
     take: 300,
@@ -167,7 +179,9 @@ export default async function ClientAftercareInboxPage() {
 
       let dto: ClientBookingDTO | null = null
       if (raw) {
-        const hasPendingConsultationApproval = raw.consultationApproval?.status === ConsultationApprovalStatus.PENDING
+        const hasPendingConsultationApproval =
+          raw.consultationApproval?.status === ConsultationApprovalStatus.PENDING
+
         try {
           dto = await buildClientBookingDTO({
             booking: raw,
@@ -186,21 +200,30 @@ export default async function ClientAftercareInboxPage() {
   return (
     <main className="mx-auto w-full max-w-860px px-4 pb-24 pt-7 text-textPrimary">
       <h1 className="text-[22px] font-black">{COPY.aftercareInbox.title}</h1>
-      <div className="mt-1 text-[13px] font-semibold text-textSecondary">{COPY.aftercareInbox.subtitle}</div>
+      <div className="mt-1 text-[13px] font-semibold text-textSecondary">
+        {COPY.aftercareInbox.subtitle}
+      </div>
 
       {rows.length === 0 ? (
         <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="text-sm font-black text-textPrimary">{COPY.aftercareInbox.emptyTitle}</div>
-          <div className="mt-1 text-[13px] font-semibold text-textSecondary">{COPY.aftercareInbox.emptyBody}</div>
+          <div className="text-sm font-black text-textPrimary">
+            {COPY.aftercareInbox.emptyTitle}
+          </div>
+          <div className="mt-1 text-[13px] font-semibold text-textSecondary">
+            {COPY.aftercareInbox.emptyBody}
+          </div>
         </div>
       ) : (
         <div className="mt-4 grid gap-2.5">
           {rows.map(({ n, raw, dto }) => {
             const bookingId = safeId(dto?.id ?? raw?.id ?? n.bookingId)
-            const href = bookingId ? `/client/bookings/${encodeURIComponent(bookingId)}?step=aftercare` : null
+            const href = bookingId
+              ? `/client/bookings/${encodeURIComponent(bookingId)}?step=aftercare`
+              : null
 
             const isUnread = !n.readAt
-            const title = dto?.display?.title || safeText(n.title, COPY.aftercareInbox.serviceFallback)
+            const title =
+              dto?.display?.title || safeText(n.title, COPY.aftercareInbox.serviceFallback)
 
             const proId = dto?.professional?.id ?? raw?.professional?.id ?? null
             const proName = safeText(
@@ -253,10 +276,14 @@ export default async function ClientAftercareInboxPage() {
                     />
                   </div>
 
-                  <div className="text-[12px] font-semibold text-textSecondary/90">{hint}</div>
+                  <div className="text-[12px] font-semibold text-textSecondary/90">
+                    {hint}
+                  </div>
 
                   {n.body ? (
-                    <div className="text-[12px] font-semibold leading-snug text-textSecondary/90">{n.body}</div>
+                    <div className="text-[12px] font-semibold leading-snug text-textSecondary/90">
+                      {n.body}
+                    </div>
                   ) : null}
 
                   {href ? (

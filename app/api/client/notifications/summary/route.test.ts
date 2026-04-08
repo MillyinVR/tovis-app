@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
 const mockPrisma = vi.hoisted(() => ({
@@ -60,18 +60,18 @@ describe('GET /api/client/notifications/summary', () => {
 
     expect(response.status).toBe(200)
     expect(json).toEqual({
-    ok: true,
-    pendingUnreadCount: 2,
-    aftercareUnreadCount: 3,
-    upcomingUnreadCount: 4,
-    hasAnyUnreadUpdates: true,
+      ok: true,
+      pendingUnreadCount: 2,
+      aftercareUnreadCount: 3,
+      upcomingUnreadCount: 4,
+      hasAnyUnreadUpdates: true,
     })
 
     expect(mockPrisma.clientNotification.count).toHaveBeenNthCalledWith(1, {
       where: {
         clientId: 'client_1',
         readAt: null,
-        type: ClientNotificationType.CONSULTATION_PROPOSAL,
+        eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       },
     })
 
@@ -79,7 +79,7 @@ describe('GET /api/client/notifications/summary', () => {
       where: {
         clientId: 'client_1',
         readAt: null,
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
       },
     })
 
@@ -87,12 +87,14 @@ describe('GET /api/client/notifications/summary', () => {
       where: {
         clientId: 'client_1',
         readAt: null,
-        type: {
+        eventKey: {
           in: [
-            ClientNotificationType.BOOKING_CONFIRMED,
-            ClientNotificationType.BOOKING_RESCHEDULED,
-            ClientNotificationType.BOOKING_CANCELLED,
-            ClientNotificationType.APPOINTMENT_REMINDER,
+            NotificationEventKey.BOOKING_CONFIRMED,
+            NotificationEventKey.BOOKING_RESCHEDULED,
+            NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+            NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
+            NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+            NotificationEventKey.APPOINTMENT_REMINDER,
           ],
         },
       },
@@ -115,11 +117,11 @@ describe('GET /api/client/notifications/summary', () => {
 
     expect(response.status).toBe(200)
     expect(json).toEqual({
-    ok: true,
-    pendingUnreadCount: 0,
-    aftercareUnreadCount: 0,
-    upcomingUnreadCount: 0,
-    hasAnyUnreadUpdates: false,
+      ok: true,
+      pendingUnreadCount: 0,
+      aftercareUnreadCount: 0,
+      upcomingUnreadCount: 0,
+      hasAnyUnreadUpdates: false,
     })
   })
 

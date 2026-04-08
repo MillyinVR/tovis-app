@@ -1,11 +1,10 @@
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
-import type { NotificationType } from '@prisma/client'
+import type { NotificationEventKey } from '@prisma/client'
 
 const proNotificationListSelect = {
   id: true,
-  type: true,
-  reason: true,
+  eventKey: true,
   priority: true,
   title: true,
   body: true,
@@ -26,13 +25,13 @@ type ListProNotificationsArgs = {
   professionalId: string
   take: number
   cursorId?: string | null
-  type?: NotificationType | null
+  eventKey?: NotificationEventKey | null
   unreadOnly?: boolean
 }
 
 function buildBaseWhere(args: {
   professionalId: string
-  type?: NotificationType | null
+  eventKey?: NotificationEventKey | null
   unreadOnly?: boolean
 }): Prisma.NotificationWhereInput {
   const where: Prisma.NotificationWhereInput = {
@@ -40,8 +39,8 @@ function buildBaseWhere(args: {
     archivedAt: null,
   }
 
-  if (args.type) {
-    where.type = args.type
+  if (args.eventKey) {
+    where.eventKey = args.eventKey
   }
 
   if (args.unreadOnly) {
@@ -77,7 +76,7 @@ export async function listProNotifications(
   const take = Math.max(1, Math.min(100, Math.trunc(args.take)))
   const baseWhere = buildBaseWhere({
     professionalId: args.professionalId,
-    type: args.type ?? null,
+    eventKey: args.eventKey ?? null,
     unreadOnly: args.unreadOnly ?? false,
   })
 

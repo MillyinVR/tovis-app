@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   prismaScheduledFindMany: vi.fn(),
@@ -116,7 +116,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         id: 'sched_1',
         clientId: 'client_1',
         bookingId: 'booking_1',
-        type: ClientNotificationType.APPOINTMENT_REMINDER,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt,
         href: '/client/bookings/booking_1?step=overview',
         dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
@@ -148,7 +148,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
 
     expect(mocks.prismaScheduledFindMany).toHaveBeenCalledWith({
       where: {
-        type: ClientNotificationType.APPOINTMENT_REMINDER,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         cancelledAt: null,
         processedAt: null,
         runAt: {
@@ -161,7 +161,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         id: true,
         clientId: true,
         bookingId: true,
-        type: true,
+        eventKey: true,
         runAt: true,
         href: true,
         dedupeKey: true,
@@ -173,7 +173,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
       tx,
       clientId: 'client_1',
       bookingId: 'booking_1',
-      type: ClientNotificationType.APPOINTMENT_REMINDER,
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
       title: 'Appointment reminder',
       body: expect.stringContaining('in one week'),
       dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
@@ -214,7 +214,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         id: 'sched_2',
         clientId: 'client_1',
         bookingId: 'booking_2',
-        type: ClientNotificationType.APPOINTMENT_REMINDER,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-04-06T17:00:00.000Z'),
         href: '/client/bookings/booking_2?step=overview',
         dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_2',
@@ -259,7 +259,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         id: 'sched_3',
         clientId: 'client_9',
         bookingId: 'booking_9',
-        type: ClientNotificationType.APPOINTMENT_REMINDER,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-04-06T17:00:00.000Z'),
         href: '/client/bookings/booking_9?step=overview',
         dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_9',

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
 const mockMarkClientNotificationsRead = vi.hoisted(() => vi.fn())
@@ -92,7 +92,7 @@ describe('POST /api/client/notifications/read', () => {
     })
   })
 
-  it('marks notifications read by before date and single type', async () => {
+  it('marks notifications read by before date and single event key', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -103,7 +103,7 @@ describe('POST /api/client/notifications/read', () => {
     const response = await POST(
       makeRequest({
         before: '2026-04-06T12:00:00.000Z',
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
       }),
     )
     const json = await response.json()
@@ -111,7 +111,7 @@ describe('POST /api/client/notifications/read', () => {
     expect(mockMarkClientNotificationsRead).toHaveBeenCalledWith({
       clientId: 'client_1',
       before: new Date('2026-04-06T12:00:00.000Z'),
-      types: [ClientNotificationType.AFTERCARE],
+      eventKeys: [NotificationEventKey.AFTERCARE_READY],
     })
 
     expect(response.status).toBe(200)
@@ -121,7 +121,7 @@ describe('POST /api/client/notifications/read', () => {
     })
   })
 
-  it('marks notifications read by multiple deduped types', async () => {
+  it('marks notifications read by multiple deduped event keys', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -131,10 +131,10 @@ describe('POST /api/client/notifications/read', () => {
 
     const response = await POST(
       makeRequest({
-        types: [
-          ClientNotificationType.BOOKING_CONFIRMED,
-          ClientNotificationType.BOOKING_RESCHEDULED,
-          ClientNotificationType.BOOKING_CONFIRMED,
+        eventKeys: [
+          NotificationEventKey.BOOKING_CONFIRMED,
+          NotificationEventKey.BOOKING_RESCHEDULED,
+          NotificationEventKey.BOOKING_CONFIRMED,
         ],
       }),
     )
@@ -142,9 +142,9 @@ describe('POST /api/client/notifications/read', () => {
 
     expect(mockMarkClientNotificationsRead).toHaveBeenCalledWith({
       clientId: 'client_1',
-      types: [
-        ClientNotificationType.BOOKING_CONFIRMED,
-        ClientNotificationType.BOOKING_RESCHEDULED,
+      eventKeys: [
+        NotificationEventKey.BOOKING_CONFIRMED,
+        NotificationEventKey.BOOKING_RESCHEDULED,
       ],
     })
 
@@ -155,7 +155,7 @@ describe('POST /api/client/notifications/read', () => {
     })
   })
 
-  it('returns 400 for an invalid single notification type', async () => {
+  it('returns 400 for an invalid single notification event key', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -163,7 +163,7 @@ describe('POST /api/client/notifications/read', () => {
 
     const response = await POST(
       makeRequest({
-        type: 'NOT_A_REAL_TYPE',
+        eventKey: 'NOT_A_REAL_EVENT_KEY',
       }),
     )
     const json = await response.json()
@@ -171,12 +171,12 @@ describe('POST /api/client/notifications/read', () => {
     expect(response.status).toBe(400)
     expect(json).toEqual({
       ok: false,
-      error: 'Invalid notification type.',
+      error: 'Invalid notification event key.',
     })
     expect(mockMarkClientNotificationsRead).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when types is not an array', async () => {
+  it('returns 400 when eventKeys is not an array', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -184,7 +184,7 @@ describe('POST /api/client/notifications/read', () => {
 
     const response = await POST(
       makeRequest({
-        types: 'NOT_AN_ARRAY',
+        eventKeys: 'NOT_AN_ARRAY',
       }),
     )
     const json = await response.json()
@@ -192,12 +192,12 @@ describe('POST /api/client/notifications/read', () => {
     expect(response.status).toBe(400)
     expect(json).toEqual({
       ok: false,
-      error: 'Invalid notification types.',
+      error: 'Invalid notification event keys.',
     })
     expect(mockMarkClientNotificationsRead).not.toHaveBeenCalled()
   })
 
-  it('ignores invalid entries inside a types array and falls back to no type filter when none survive', async () => {
+  it('ignores invalid entries inside an eventKeys array and falls back to no event key filter when none survive', async () => {
     mockRequireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -207,7 +207,7 @@ describe('POST /api/client/notifications/read', () => {
 
     const response = await POST(
       makeRequest({
-        types: ['NOT_REAL', 'ALSO_NOT_REAL'],
+        eventKeys: ['NOT_REAL', 'ALSO_NOT_REAL'],
       }),
     )
     const json = await response.json()

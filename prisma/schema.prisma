@@ -155,17 +155,6 @@ enum AftercareRebookMode {
   RECOMMENDED_WINDOW // client picks within window
 }
 
-enum ClientNotificationType {
-  BOOKING
-  AFTERCARE
-  LAST_MINUTE
-  BOOKING_CANCELLED
-  BOOKING_CONFIRMED
-  BOOKING_RESCHEDULED
-  CONSULTATION_PROPOSAL
-  APPOINTMENT_REMINDER
-}
-
 enum SessionStep {
   NONE
 
@@ -211,31 +200,12 @@ enum BookingServiceItemType {
   ADD_ON
 }
 
-enum NotificationType {
-  BOOKING_REQUEST
-  BOOKING_UPDATE
-  BOOKING_CANCELLED
-  REVIEW
-}
 
 enum NotificationPriority {
   LOW
   NORMAL
   HIGH
   CRITICAL
-}
-
-enum ProNotificationReason {
-  BOOKING_REQUEST_CREATED
-  BOOKING_CONFIRMED
-  BOOKING_RESCHEDULED
-  BOOKING_CANCELLED_BY_CLIENT
-  BOOKING_CANCELLED_BY_ADMIN
-  CONSULTATION_APPROVED
-  CONSULTATION_REJECTED
-  REVIEW_RECEIVED
-  PAYMENT_COLLECTED
-  PAYMENT_ACTION_REQUIRED
 }
 
 enum SupportTicketStatus {
@@ -316,15 +286,72 @@ enum BookingCloseoutAuditAction {
   PAYMENT_COLLECTED
 }
 
+enum NotificationRecipientKind {
+  PRO
+  CLIENT
+}
+
+enum NotificationEventKey {
+  BOOKING_REQUEST_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_RESCHEDULED
+  BOOKING_CANCELLED_BY_CLIENT
+  BOOKING_CANCELLED_BY_PRO
+  BOOKING_CANCELLED_BY_ADMIN
+  CONSULTATION_PROPOSAL_SENT
+  CONSULTATION_APPROVED
+  CONSULTATION_REJECTED
+  REVIEW_RECEIVED
+  APPOINTMENT_REMINDER
+  AFTERCARE_READY
+  LAST_MINUTE_OPENING_AVAILABLE
+  PAYMENT_COLLECTED
+  PAYMENT_ACTION_REQUIRED
+}
+
+enum NotificationChannel {
+  IN_APP
+  SMS
+  EMAIL
+}
+
+enum NotificationProvider {
+  INTERNAL_REALTIME
+  TWILIO
+  POSTMARK
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DELIVERED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  SUPPRESSED
+  CANCELLED
+}
+
+enum NotificationDeliveryEventType {
+  CREATED
+  CLAIMED
+  SEND_STARTED
+  PROVIDER_ACCEPTED
+  DELIVERED
+  RETRY_SCHEDULED
+  SUPPRESSED
+  FAILED
+  CANCELLED
+  WEBHOOK_UPDATE
+}
+
 // =======================
 // CORE MODELS
 // =======================
 model Notification {
-  id   String           @id @default(cuid())
-  type NotificationType
+  id String @id @default(cuid())
 
-  // exact business event
-  reason   ProNotificationReason
+  eventKey NotificationEventKey
   priority NotificationPriority @default(NORMAL)
 
   professionalId String
@@ -357,17 +384,187 @@ model Notification {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  dispatches NotificationDispatch[] @relation("ProNotificationDispatches")
+
   @@unique([professionalId, dedupeKey])
 
   // main inbox query
   @@index([professionalId, archivedAt, readAt, createdAt])
 
   // filters
-  @@index([professionalId, type, archivedAt, createdAt])
-  @@index([professionalId, reason, archivedAt, createdAt])
+  @@index([professionalId, eventKey, archivedAt, createdAt])
+  @@index([professionalId, priority, archivedAt, createdAt])
 
   @@index([bookingId])
   @@index([reviewId])
+}
+
+model NotificationDispatch {
+  id String @id @default(cuid())
+
+  // stable idempotency key for the source of this dispatch
+  // examples:
+  //   pro-notification:<notificationId>
+  //   client-notification:<clientNotificationId>
+  //   scheduled-client:<scheduledNotificationId>
+  //   booking:<bookingId>:reminder:24h
+  sourceKey String @unique
+
+  eventKey NotificationEventKey
+  recipientKind NotificationRecipientKind
+  priority NotificationPriority @default(NORMAL)
+
+  userId String?
+  professionalId String?
+  clientId String?
+
+  // optional links back to product-facing inbox records
+  notificationId String?
+  clientNotificationId String?
+
+  title String
+  body  String @default("")
+  href  String @default("")
+  payload Json?
+
+  scheduledFor DateTime @default(now())
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User?                @relation("UserNotificationDispatches", fields: [userId], references: [id], onDelete: SetNull)
+  professional ProfessionalProfile? @relation("ProfessionalNotificationDispatches", fields: [professionalId], references: [id], onDelete: Cascade)
+  client       ClientProfile?       @relation("ClientProfileNotificationDispatches", fields: [clientId], references: [id], onDelete: Cascade)
+
+  notification       Notification?      @relation("ProNotificationDispatches", fields: [notificationId], references: [id], onDelete: SetNull)
+  clientNotification ClientNotification? @relation("ClientInboxNotificationDispatches", fields: [clientNotificationId], references: [id], onDelete: SetNull)
+
+  deliveries NotificationDelivery[]
+
+  @@index([recipientKind, scheduledFor, createdAt])
+  @@index([professionalId, createdAt])
+  @@index([clientId, createdAt])
+  @@index([userId, createdAt])
+  @@index([notificationId])
+  @@index([clientNotificationId])
+}
+
+model NotificationDelivery {
+  id String @id @default(cuid())
+
+  dispatchId String
+  channel NotificationChannel
+  provider NotificationProvider
+
+  status NotificationDeliveryStatus @default(PENDING)
+
+  // destination snapshot used at send time
+  destination String?
+  templateKey String
+  templateVersion Int @default(1)
+
+  attemptCount Int @default(0)
+  maxAttempts Int @default(5)
+
+  nextAttemptAt DateTime @default(now())
+  lastAttemptAt DateTime?
+
+  claimedAt DateTime?
+  leaseExpiresAt DateTime?
+  leaseToken String?
+
+  providerMessageId String?
+  providerStatus String?
+
+  lastErrorCode String?
+  lastErrorMessage String?
+
+  sentAt DateTime?
+  deliveredAt DateTime?
+  failedAt DateTime?
+  suppressedAt DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dispatch NotificationDispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  events   NotificationDeliveryEvent[]
+
+  @@unique([dispatchId, channel])
+  @@index([status, nextAttemptAt])
+  @@index([leaseExpiresAt])
+  @@index([provider, providerMessageId])
+}
+
+model NotificationDeliveryEvent {
+  id String @id @default(cuid())
+
+  deliveryId String
+  attemptNumber Int?
+
+  type NotificationDeliveryEventType
+  fromStatus NotificationDeliveryStatus?
+  toStatus NotificationDeliveryStatus?
+
+  providerStatus String?
+  providerMessageId String?
+
+  errorCode String?
+  errorMessage String?
+  message String?
+
+  payload Json?
+
+  createdAt DateTime @default(now())
+
+  delivery NotificationDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryId, createdAt])
+  @@index([type, createdAt])
+}
+
+model ProfessionalNotificationPreference {
+  id String @id @default(cuid())
+  professionalId String
+  eventKey NotificationEventKey
+
+  inAppEnabled Boolean @default(true)
+  smsEnabled   Boolean @default(false)
+  emailEnabled Boolean @default(true)
+
+  quietHoursStartMinutes Int?
+  quietHoursEndMinutes   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@unique([professionalId, eventKey])
+  @@index([professionalId, updatedAt])
+}
+
+model ClientNotificationPreference {
+  id String @id @default(cuid())
+  clientId String
+  eventKey NotificationEventKey
+
+  inAppEnabled Boolean @default(true)
+  smsEnabled   Boolean @default(true)
+  emailEnabled Boolean @default(true)
+
+  quietHoursStartMinutes Int?
+  quietHoursEndMinutes   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, eventKey])
+  @@index([clientId, updatedAt])
 }
 
 model ConsultationApproval {
@@ -435,6 +632,7 @@ model User {
   threadParticipants MessageThreadParticipant[] @relation("UserThreadParticipants")
 
   notificationActor        Notification[]            @relation("NotificationActor")
+  notificationDispatches   NotificationDispatch[]    @relation("UserNotificationDispatches")
   bookingOverrideAuditLogs BookingOverrideAuditLog[] @relation("BookingOverrideActor")
 
   bookingOverridePermissionsGranted BookingOverridePermission[] @relation("BookingOverridePermissionGrantedBy")
@@ -502,12 +700,14 @@ model ClientProfile {
 
   addresses ClientAddress[]
 
-  intentEvents         ClientIntentEvent[]
-  openingNotifications OpeningNotification[]
-  notificationSettings ClientNotificationSettings?
-  messageThreads       MessageThread[]             @relation("ClientThreads")
-  viralRequests        ViralServiceRequest[]
-  alertBanner          String?
+  intentEvents            ClientIntentEvent[]
+  openingNotifications    OpeningNotification[]
+  notificationSettings    ClientNotificationSettings?
+  notificationDispatches  NotificationDispatch[]          @relation("ClientProfileNotificationDispatches")
+  notificationPreferences ClientNotificationPreference[]
+  messageThreads          MessageThread[]                 @relation("ClientThreads")
+  viralRequests           ViralServiceRequest[]
+  alertBanner             String?
 
   bookings               Booking[]
   bookingHolds           BookingHold[]
@@ -587,7 +787,8 @@ model ProfessionalProfile {
   calendarBlocks CalendarBlock[]
 
   notifications Notification[]
-
+  notificationDispatches   NotificationDispatch[]              @relation("ProfessionalNotificationDispatches")
+  notificationPreferences  ProfessionalNotificationPreference[]
   // Licensing / verification (unchanged)
   professionType     ProfessionType?
   licenseNumber      String?
@@ -1783,9 +1984,9 @@ model ClientNotification {
   clientId String
 
   // what happened
-  type  ClientNotificationType
-  title String
-  body  String?
+  eventKey NotificationEventKey
+  title    String
+  body     String?
 
   // linking / deep link support
   href        String  @default("")
@@ -1806,11 +2007,12 @@ model ClientNotification {
   client    ClientProfile     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   booking   Booking?          @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   aftercare AftercareSummary? @relation(fields: [aftercareId], references: [id], onDelete: SetNull)
+  dispatches NotificationDispatch[] @relation("ClientInboxNotificationDispatches")
 
   @@unique([clientId, dedupeKey])
   @@index([clientId, createdAt])
   @@index([clientId, readAt])
-  @@index([clientId, type, createdAt])
+  @@index([clientId, eventKey, createdAt])
   @@index([bookingId])
   @@index([aftercareId])
 }
@@ -1820,9 +2022,9 @@ model ScheduledClientNotification {
   clientId  String
   bookingId String?
 
-  type  ClientNotificationType
-  runAt DateTime
-  href  String                 @default("")
+  eventKey NotificationEventKey
+  runAt    DateTime
+  href     String @default("")
 
   // structured metadata used to render the final notification
   data Json?

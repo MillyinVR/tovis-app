@@ -1,4 +1,3 @@
-// app/pro/notifications/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -9,15 +8,21 @@ import {
   sanitizeTimeZone,
   getZonedParts,
 } from '@/lib/timeZone'
-import { NotificationType, Prisma, Role } from '@prisma/client'
+import { NotificationEventKey, Prisma, Role } from '@prisma/client'
 import NotificationCard from './NotificationCard'
 import MarkAllReadButton from './MarkAllReadButton'
 
 export const dynamic = 'force-dynamic'
 
+type NotificationCategory =
+  | 'REQUESTS'
+  | 'UPDATES'
+  | 'CANCELLED'
+  | 'REVIEWS'
+
 type NotifRow = {
   id: string
-  type: NotificationType
+  eventKey: NotificationEventKey
   title: string
   body: string
   href: string
@@ -26,6 +31,28 @@ type NotifRow = {
 }
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>
+
+const CATEGORY_EVENT_KEYS: Record<
+  NotificationCategory,
+  readonly NotificationEventKey[]
+> = {
+  REQUESTS: [NotificationEventKey.BOOKING_REQUEST_CREATED],
+  UPDATES: [
+    NotificationEventKey.BOOKING_CONFIRMED,
+    NotificationEventKey.BOOKING_RESCHEDULED,
+    NotificationEventKey.CONSULTATION_APPROVED,
+    NotificationEventKey.CONSULTATION_REJECTED,
+    NotificationEventKey.APPOINTMENT_REMINDER,
+    NotificationEventKey.PAYMENT_COLLECTED,
+    NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  ],
+  CANCELLED: [
+    NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+    NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
+    NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+  ],
+  REVIEWS: [NotificationEventKey.REVIEW_RECEIVED],
+}
 
 function spString(value: unknown): string {
   if (typeof value === 'string') return value
@@ -44,35 +71,23 @@ function parseUnreadOnly(raw: unknown): boolean {
   return s === '1' || s === 'true' || s === 'yes'
 }
 
-function parseNotificationType(raw: unknown): NotificationType | null {
+function parseNotificationCategory(raw: unknown): NotificationCategory | null {
   const s = spString(raw).trim().toUpperCase()
 
-  if (s === NotificationType.BOOKING_REQUEST) {
-    return NotificationType.BOOKING_REQUEST
-  }
-
-  if (s === NotificationType.BOOKING_UPDATE) {
-    return NotificationType.BOOKING_UPDATE
-  }
-
-  if (s === NotificationType.BOOKING_CANCELLED) {
-    return NotificationType.BOOKING_CANCELLED
-  }
-
-  if (s === NotificationType.REVIEW) {
-    return NotificationType.REVIEW
-  }
+  if (s === 'REQUESTS') return 'REQUESTS'
+  if (s === 'UPDATES') return 'UPDATES'
+  if (s === 'CANCELLED') return 'CANCELLED'
+  if (s === 'REVIEWS') return 'REVIEWS'
 
   return null
 }
 
-function typeLabel(type: NotificationType): string {
-  if (type === NotificationType.BOOKING_REQUEST) return 'Booking request'
-  if (type === NotificationType.BOOKING_UPDATE) return 'Booking update'
-  if (type === NotificationType.BOOKING_CANCELLED) return 'Booking cancelled'
-  return 'Review'
+function categoryLabel(category: NotificationCategory): string {
+  if (category === 'REQUESTS') return 'Requests'
+  if (category === 'UPDATES') return 'Updates'
+  if (category === 'CANCELLED') return 'Cancelled'
+  return 'Reviews'
 }
-
 
 function buildHref(
   base: string,
@@ -92,7 +107,7 @@ function buildHref(
 
 function buildWhere(args: {
   professionalId: string
-  type: NotificationType | null
+  category: NotificationCategory | null
   unreadOnly: boolean
 }): Prisma.NotificationWhereInput {
   const where: Prisma.NotificationWhereInput = {
@@ -100,8 +115,10 @@ function buildWhere(args: {
     archivedAt: null,
   }
 
-  if (args.type) {
-    where.type = args.type
+  if (args.category) {
+    where.eventKey = {
+      in: [...CATEGORY_EVENT_KEYS[args.category]],
+    }
   }
 
   if (args.unreadOnly) {
@@ -113,13 +130,13 @@ function buildWhere(args: {
 
 async function loadNotificationsForPro(args: {
   professionalId: string
-  type: NotificationType | null
+  category: NotificationCategory | null
   unreadOnly: boolean
   take: number
 }): Promise<NotifRow[]> {
   const baseWhere = buildWhere({
     professionalId: args.professionalId,
-    type: args.type,
+    category: args.category,
     unreadOnly: false,
   })
 
@@ -133,7 +150,7 @@ async function loadNotificationsForPro(args: {
       take: args.take,
       select: {
         id: true,
-        type: true,
+        eventKey: true,
         title: true,
         body: true,
         href: true,
@@ -144,7 +161,7 @@ async function loadNotificationsForPro(args: {
 
     return rows.map((row) => ({
       id: row.id,
-      type: row.type,
+      eventKey: row.eventKey,
       title: row.title,
       body: row.body,
       href: row.href,
@@ -162,7 +179,7 @@ async function loadNotificationsForPro(args: {
     take: args.take,
     select: {
       id: true,
-      type: true,
+      eventKey: true,
       title: true,
       body: true,
       href: true,
@@ -184,7 +201,7 @@ async function loadNotificationsForPro(args: {
           take: remaining,
           select: {
             id: true,
-            type: true,
+            eventKey: true,
             title: true,
             body: true,
             href: true,
@@ -196,7 +213,7 @@ async function loadNotificationsForPro(args: {
 
   return [...unread, ...read].map((row) => ({
     id: row.id,
-    type: row.type,
+    eventKey: row.eventKey,
     title: row.title,
     body: row.body,
     href: row.href,
@@ -240,7 +257,7 @@ export default async function ProNotificationsPage(props: {
 
   const sp = (await props.searchParams) ?? {}
 
-  const type = parseNotificationType(sp.type)
+  const category = parseNotificationCategory(sp.category)
   const unreadOnly = parseUnreadOnly(sp.unread)
   const take = parseTake(sp.take)
   const timeZone = sanitizeTimeZone(
@@ -250,14 +267,14 @@ export default async function ProNotificationsPage(props: {
 
   const whereForCount = buildWhere({
     professionalId: user.professionalProfile.id,
-    type,
+    category,
     unreadOnly,
   })
 
   const [rows, matchCount, unreadCount] = await Promise.all([
     loadNotificationsForPro({
       professionalId: user.professionalProfile.id,
-      type,
+      category,
       unreadOnly,
       take,
     }),
@@ -310,23 +327,24 @@ export default async function ProNotificationsPage(props: {
 
   const base = '/pro/notifications'
   const baseQuery = {
-    type: type ?? null,
+    category: category ?? null,
     unread: unreadOnly ? '1' : null,
   }
 
   const takeNext = Math.min(200, take + 60)
-  const canShowMore = rows.length >= take && matchCount > rows.length && takeNext > take
+  const canShowMore =
+    rows.length >= take && matchCount > rows.length && takeNext > take
 
   const chips = [
     {
       label: 'All',
-      href: buildHref(base, { type: null, unread: null, take: '60' }),
-      active: !type && !unreadOnly,
+      href: buildHref(base, { category: null, unread: null, take: '60' }),
+      active: !category && !unreadOnly,
     },
     {
       label: `Unread${unreadCount ? ` (${unreadCount})` : ''}`,
       href: buildHref(base, {
-        type: type ?? null,
+        category: category ?? null,
         unread: '1',
         take: '60',
       }),
@@ -336,37 +354,37 @@ export default async function ProNotificationsPage(props: {
       label: 'Requests',
       href: buildHref(base, {
         unread: unreadOnly ? '1' : null,
-        type: NotificationType.BOOKING_REQUEST,
+        category: 'REQUESTS',
         take: '60',
       }),
-      active: type === NotificationType.BOOKING_REQUEST,
+      active: category === 'REQUESTS',
     },
     {
       label: 'Updates',
       href: buildHref(base, {
         unread: unreadOnly ? '1' : null,
-        type: NotificationType.BOOKING_UPDATE,
+        category: 'UPDATES',
         take: '60',
       }),
-      active: type === NotificationType.BOOKING_UPDATE,
+      active: category === 'UPDATES',
     },
     {
       label: 'Cancelled',
       href: buildHref(base, {
         unread: unreadOnly ? '1' : null,
-        type: NotificationType.BOOKING_CANCELLED,
+        category: 'CANCELLED',
         take: '60',
       }),
-      active: type === NotificationType.BOOKING_CANCELLED,
+      active: category === 'CANCELLED',
     },
     {
       label: 'Reviews',
       href: buildHref(base, {
         unread: unreadOnly ? '1' : null,
-        type: NotificationType.REVIEW,
+        category: 'REVIEWS',
         take: '60',
       }),
-      active: type === NotificationType.REVIEW,
+      active: category === 'REVIEWS',
     },
   ] as const
 
@@ -394,7 +412,7 @@ export default async function ProNotificationsPage(props: {
                   <span className="font-extrabold text-textPrimary">
                     {matchCount}
                   </span>
-                  {type ? <> • {typeLabel(type)}</> : null}
+                  {category ? <> • {categoryLabel(category)}</> : null}
                   {unreadOnly ? <> • Unread only</> : null}
                 </>
               ) : (
@@ -486,21 +504,24 @@ export default async function ProNotificationsPage(props: {
 
               <div className="grid gap-2">
                 {group.items.map((notification) => {
-
                   return (
                     <NotificationCard
-                        key={notification.id}
-                        id={notification.id}
-                        type={notification.type}
-                        title={notification.title}
-                        body={notification.body}
-                        href={notification.href}
-                        createdAtLabel={formatInTimeZone(notification.createdAt, timeZone, {
+                      key={notification.id}
+                      id={notification.id}
+                      eventKey={notification.eventKey}
+                      title={notification.title}
+                      body={notification.body}
+                      href={notification.href}
+                      createdAtLabel={formatInTimeZone(
+                        notification.createdAt,
+                        timeZone,
+                        {
                           hour: 'numeric',
                           minute: '2-digit',
-                        })}
-                        unread={!notification.readAt}
-                      />
+                        },
+                      )}
+                      unread={!notification.readAt}
+                    />
                   )
                 })}
               </div>

@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  NotificationEventKey,
   NotificationPriority,
-  NotificationType,
-  ProNotificationReason,
 } from '@prisma/client'
 
 const { prismaMock } = vi.hoisted(() => ({
@@ -131,8 +130,7 @@ describe('proNotificationQueries', () => {
       prismaMock.notification.findMany.mockResolvedValueOnce([
         {
           id: 'notif_2',
-          type: NotificationType.BOOKING_REQUEST,
-          reason: ProNotificationReason.BOOKING_REQUEST_CREATED,
+          eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
           priority: NotificationPriority.HIGH,
           title: 'New booking request',
           body: 'Someone requested a booking.',
@@ -167,20 +165,20 @@ describe('proNotificationQueries', () => {
       expect(result.nextCursor).toBeNull()
     })
 
-    it('supports type filtering', async () => {
+    it('supports eventKey filtering', async () => {
       prismaMock.notification.findMany.mockResolvedValueOnce([])
 
       await listProNotifications({
         professionalId: 'pro_123',
         take: 20,
-        type: NotificationType.REVIEW,
+        eventKey: NotificationEventKey.REVIEW_RECEIVED,
       })
 
       expect(prismaMock.notification.findMany).toHaveBeenCalledWith({
         where: {
           professionalId: 'pro_123',
           archivedAt: null,
-          type: NotificationType.REVIEW,
+          eventKey: NotificationEventKey.REVIEW_RECEIVED,
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 21,
@@ -192,8 +190,7 @@ describe('proNotificationQueries', () => {
       prismaMock.notification.findMany.mockResolvedValueOnce([
         {
           id: 'notif_3',
-          type: NotificationType.BOOKING_UPDATE,
-          reason: ProNotificationReason.BOOKING_RESCHEDULED,
+          eventKey: NotificationEventKey.BOOKING_RESCHEDULED,
           priority: NotificationPriority.HIGH,
           title: 'Booking rescheduled',
           body: 'A booking was rescheduled.',
@@ -207,8 +204,7 @@ describe('proNotificationQueries', () => {
         },
         {
           id: 'notif_2',
-          type: NotificationType.BOOKING_UPDATE,
-          reason: ProNotificationReason.BOOKING_CONFIRMED,
+          eventKey: NotificationEventKey.BOOKING_CONFIRMED,
           priority: NotificationPriority.HIGH,
           title: 'Booking confirmed',
           body: 'Booking confirmed.',
@@ -222,8 +218,7 @@ describe('proNotificationQueries', () => {
         },
         {
           id: 'notif_1',
-          type: NotificationType.REVIEW,
-          reason: ProNotificationReason.REVIEW_RECEIVED,
+          eventKey: NotificationEventKey.REVIEW_RECEIVED,
           priority: NotificationPriority.NORMAL,
           title: 'New review received',
           body: 'A client left a review.',

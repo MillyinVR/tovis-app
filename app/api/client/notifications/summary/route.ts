@@ -2,7 +2,7 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { prisma } from '@/lib/prisma'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +22,7 @@ export async function GET() {
         where: {
           clientId,
           readAt: null,
-          type: ClientNotificationType.CONSULTATION_PROPOSAL,
+          eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
         },
       }),
 
@@ -30,7 +30,7 @@ export async function GET() {
         where: {
           clientId,
           readAt: null,
-          type: ClientNotificationType.AFTERCARE,
+          eventKey: NotificationEventKey.AFTERCARE_READY,
         },
       }),
 
@@ -38,12 +38,14 @@ export async function GET() {
         where: {
           clientId,
           readAt: null,
-          type: {
+          eventKey: {
             in: [
-              ClientNotificationType.BOOKING_CONFIRMED,
-              ClientNotificationType.BOOKING_RESCHEDULED,
-              ClientNotificationType.BOOKING_CANCELLED,
-              ClientNotificationType.APPOINTMENT_REMINDER,
+              NotificationEventKey.BOOKING_CONFIRMED,
+              NotificationEventKey.BOOKING_RESCHEDULED,
+              NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+              NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
+              NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+              NotificationEventKey.APPOINTMENT_REMINDER,
             ],
           },
         },

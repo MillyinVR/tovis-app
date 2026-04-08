@@ -1,4 +1,3 @@
-// app/api/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
@@ -6,8 +5,8 @@ import {
   BookingCloseoutAuditAction,
   BookingServiceItemType,
   BookingStatus,
-  ClientNotificationType,
   ConsultationApprovalStatus,
+  NotificationEventKey,
   Prisma,
   SessionStep,
 } from '@prisma/client'
@@ -17,6 +16,7 @@ import {
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
+
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -535,7 +535,7 @@ export async function POST(req: Request, ctx: Ctx) {
       await upsertClientNotification({
         tx,
         clientId: booking.clientId,
-        type: ClientNotificationType.CONSULTATION_PROPOSAL,
+        eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
         title: 'Consultation proposal ready',
         body: 'Your professional sent an updated service total for approval.',
         bookingId: booking.id,
@@ -548,7 +548,7 @@ export async function POST(req: Request, ctx: Ctx) {
         },
       })
 
-        const oldProposalState = buildConsultationProposalAuditSnapshot({
+      const oldProposalState = buildConsultationProposalAuditSnapshot({
         status: existingApproval?.status,
         proposedServicesJson: existingApproval?.proposedServicesJson ?? null,
         proposedTotal: existingApproval?.proposedTotal,

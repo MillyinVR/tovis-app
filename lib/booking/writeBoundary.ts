@@ -7,18 +7,16 @@ import {
   BookingSource,
   BookingStatus,
   ClientAddressKind,
-  ClientNotificationType,
   ConsultationApprovalStatus,
   MediaPhase,
   MediaType,
   MediaVisibility,
+  NotificationEventKey,
   NotificationPriority,
-  NotificationType,
   OpeningStatus,
   PaymentMethod,
   Prisma,
   ProfessionalLocationType,
-  ProNotificationReason,
   Role,
   ServiceLocationType,
   SessionStep,
@@ -2516,7 +2514,7 @@ async function createUpdateClientNotification(args: {
   tx: Prisma.TransactionClient
   clientId: string
   bookingId: string
-  type: ClientNotificationType
+  eventKey: NotificationEventKey
   title: string
   body: string | null
   dedupeKey: string
@@ -2529,7 +2527,7 @@ async function createUpdateClientNotification(args: {
     clientId: args.clientId,
     bookingId: args.bookingId,
     aftercareId: args.aftercareId ?? null,
-    type: args.type,
+    eventKey: args.eventKey,
     title: args.title,
     body: args.body,
     dedupeKey: args.dedupeKey,
@@ -2602,7 +2600,7 @@ async function scheduleBookingAppointmentReminders(args: {
       tx: args.tx,
       clientId: args.clientId,
       bookingId: args.bookingId,
-      type: ClientNotificationType.APPOINTMENT_REMINDER,
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
       runAt,
       dedupeKey: makeAppointmentReminderDedupeKey(
         args.bookingId,
@@ -2630,7 +2628,7 @@ async function cancelBookingAppointmentReminders(args: {
     tx: args.tx,
     bookingId: args.bookingId,
     clientId: args.clientId,
-    types: [ClientNotificationType.APPOINTMENT_REMINDER],
+    eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
     onlyPending: true,
   })
 }
@@ -3120,6 +3118,7 @@ function assertAllowedCancelStatus(args: {
 async function maybeCreateBookingCancelledNotification(args: {
   tx: Prisma.TransactionClient
   booking: CancelBookingRecord
+  actor: CancelActor
   reason?: string | null
   notifyClient?: boolean
 }): Promise<void> {
@@ -3128,6 +3127,13 @@ async function maybeCreateBookingCancelledNotification(args: {
   if (notifyClient !== true) return
 
   const reason = normalizeReason(args.reason)
+  const eventKey =
+    args.actor.kind === 'client'
+      ? NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT
+      : args.actor.kind === 'pro'
+        ? NotificationEventKey.BOOKING_CANCELLED_BY_PRO
+        : NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN
+
   const body = reason
     ? `Your appointment was cancelled. Reason: ${reason}`
     : 'Your appointment was cancelled.'
@@ -3136,7 +3142,7 @@ async function maybeCreateBookingCancelledNotification(args: {
     tx: args.tx,
     clientId: booking.clientId,
     bookingId: booking.id,
-    type: ClientNotificationType.BOOKING_CANCELLED,
+    eventKey,
     title: 'Appointment cancelled',
     body,
     dedupeKey: `BOOKING_CANCELLED:${booking.id}`,
@@ -3144,7 +3150,8 @@ async function maybeCreateBookingCancelledNotification(args: {
     data: {
       bookingId: booking.id,
       reason: reason ?? null,
-      notificationReason: 'BOOKING_CANCELLED',
+      cancelledBy: args.actor.kind,
+      eventKey,
     },
   })
 }
@@ -3156,18 +3163,18 @@ async function maybeCreateProBookingCancelledNotification(args: {
   reason?: string | null
 }): Promise<void> {
   const reason = normalizeReason(args.reason)
-  let notificationReason: ProNotificationReason
+  let eventKey: NotificationEventKey
   let title: string
   let body: string
 
   if (args.actor.kind === 'client') {
-    notificationReason = ProNotificationReason.BOOKING_CANCELLED_BY_CLIENT
+    eventKey = NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT
     title = 'Booking cancelled by client'
     body = reason
       ? `Client cancelled this booking. Reason: ${reason}`
       : 'Client cancelled this booking.'
   } else if (args.actor.kind === 'admin') {
-    notificationReason = ProNotificationReason.BOOKING_CANCELLED_BY_ADMIN
+    eventKey = NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN
     title = 'Booking cancelled by admin'
     body = reason
       ? `An admin cancelled this booking. Reason: ${reason}`
@@ -3181,15 +3188,14 @@ async function maybeCreateProBookingCancelledNotification(args: {
   await createProNotification({
     tx: args.tx,
     professionalId: args.booking.professionalId,
-    type: NotificationType.BOOKING_CANCELLED,
-    reason: notificationReason,
+    eventKey,
     priority: NotificationPriority.HIGH,
     title,
     body,
     href: `/pro/bookings/${args.booking.id}`,
     actorUserId: null,
     bookingId: args.booking.id,
-    dedupeKey: `PRO_NOTIF:${notificationReason}:${args.booking.id}`,
+    dedupeKey: `PRO_NOTIF:${eventKey}:${args.booking.id}`,
     data: {
       bookingId: args.booking.id,
       cancelledBy: args.actor.kind,
@@ -3215,15 +3221,14 @@ async function createProBookingRescheduledNotification(args: {
   await createProNotification({
     tx: args.tx,
     professionalId: args.professionalId,
-    type: NotificationType.BOOKING_UPDATE,
-    reason: ProNotificationReason.BOOKING_RESCHEDULED,
+    eventKey: NotificationEventKey.BOOKING_RESCHEDULED,
     priority: NotificationPriority.HIGH,
     title: 'Booking rescheduled',
     body: 'A booking was rescheduled.',
     href: `/pro/bookings/${args.bookingId}`,
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,
-    dedupeKey: `PRO_NOTIF:${ProNotificationReason.BOOKING_RESCHEDULED}:${args.bookingId}`,
+    dedupeKey: `PRO_NOTIF:${NotificationEventKey.BOOKING_RESCHEDULED}:${args.bookingId}`,
     data: {
       bookingId: args.bookingId,
       previousScheduledFor: args.previousScheduledFor.toISOString(),
@@ -3850,13 +3855,13 @@ async function performLockedCancel(args: {
     clientId: booking.clientId,
   })
 
-    await maybeCreateBookingCancelledNotification({
-    tx: args.tx,
-    booking,
-    notifyClient: args.notifyClient,
-    reason: args.reason,
-  })
-
+await maybeCreateBookingCancelledNotification({
+  tx: args.tx,
+  booking,
+  actor: args.actor,
+  notifyClient: args.notifyClient,
+  reason: args.reason,
+})
   await maybeCreateProBookingCancelledNotification({
     tx: args.tx,
     booking,
@@ -6652,7 +6657,7 @@ await createUpdateClientNotification({
   tx: args.tx,
   clientId: args.clientId,
   bookingId: booking.id,
-  type: ClientNotificationType.BOOKING_CONFIRMED,
+  eventKey: NotificationEventKey.BOOKING_CONFIRMED,
   title: 'Appointment booked',
   body: `Your appointment for ${offering.service.name || 'Appointment'} has been booked.`,
   dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
@@ -7256,22 +7261,22 @@ async function performLockedUpdateProBooking(args: {
     clientId: existing.clientId,
   })
 
-  if (args.notifyClient) {
-    await createUpdateClientNotification({
-      tx: args.tx,
-      clientId: existing.clientId,
+if (args.notifyClient) {
+  await createUpdateClientNotification({
+    tx: args.tx,
+    clientId: existing.clientId,
+    bookingId: updated.id,
+    eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
+    title: 'Appointment cancelled',
+    body: 'Your appointment was cancelled.',
+    dedupeKey: `BOOKING_CANCELLED:${updated.id}`,
+    href: `/client/bookings/${updated.id}?step=overview`,
+    data: {
       bookingId: updated.id,
-      type: ClientNotificationType.BOOKING_CANCELLED,
-      title: 'Appointment cancelled',
-      body: 'Your appointment was cancelled.',
-      dedupeKey: `BOOKING_CANCELLED:${updated.id}`,
-      href: `/client/bookings/${updated.id}?step=overview`,
-      data: {
-        bookingId: updated.id,
-        notificationReason: 'BOOKING_CANCELLED',
-      },
-    })
-  }
+      notificationReason: 'BOOKING_CANCELLED_BY_PRO',
+    },
+  })
+}
 
     await bumpProfessionalScheduleVersion(existing.professionalId)
 
@@ -7670,9 +7675,9 @@ if (args.notifyClient) {
   const bodyText = isConfirm
     ? 'Your appointment has been confirmed.'
     : 'Your appointment details were updated.'
-  const type = isConfirm
-    ? ClientNotificationType.BOOKING_CONFIRMED
-    : ClientNotificationType.BOOKING_RESCHEDULED
+  const eventKey = isConfirm
+    ? NotificationEventKey.BOOKING_CONFIRMED
+    : NotificationEventKey.BOOKING_RESCHEDULED
   const notifKey = isConfirm
     ? `BOOKING_CONFIRMED:${updated.id}`
     : `BOOKING_RESCHEDULED:${updated.id}`
@@ -7681,7 +7686,7 @@ if (args.notifyClient) {
     tx: args.tx,
     clientId: existing.clientId,
     bookingId: updated.id,
-    type,
+    eventKey,
     title,
     body: bodyText,
     dedupeKey: notifKey,
@@ -7998,7 +8003,7 @@ await createUpdateClientNotification({
   clientId: booking.clientId,
   bookingId: booking.id,
   aftercareId: aftercare.id,
-  type: ClientNotificationType.AFTERCARE,
+  eventKey: NotificationEventKey.AFTERCARE_READY,
   title: notifTitle,
   body: bodyPreview,
   dedupeKey: notifKey,

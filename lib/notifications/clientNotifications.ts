@@ -1,12 +1,54 @@
 // lib/notifications/clientNotifications.ts
 import { prisma } from '@/lib/prisma'
-import { Prisma, type ClientNotificationType } from '@prisma/client'
+import {
+  NotificationEventKey,
+  NotificationRecipientKind,
+  Prisma,
+} from '@prisma/client'
+
+import { enqueueDispatch } from './dispatch/enqueueDispatch'
 
 export type ClientNotificationDbClient = Prisma.TransactionClient | typeof prisma
 
-type CreateClientNotificationArgs = {
+const MAX_ID = 64
+const MAX_TITLE = 160
+const MAX_BODY = 4000
+const MAX_HREF = 2048
+const MAX_DEDUPE_KEY = 256
+
+const clientNotificationIdSelect = {
+  id: true,
+} satisfies Prisma.ClientNotificationSelect
+
+const scheduledClientNotificationIdSelect = {
+  id: true,
+} satisfies Prisma.ScheduledClientNotificationSelect
+
+const clientDispatchRecipientSelect = {
+  id: true,
+  userId: true,
+  phone: true,
+  phoneVerifiedAt: true,
+  user: {
+    select: {
+      email: true,
+      phone: true,
+      phoneVerifiedAt: true,
+    },
+  },
+} satisfies Prisma.ClientProfileSelect
+
+const clientNotificationPreferenceSelect = {
+  inAppEnabled: true,
+  smsEnabled: true,
+  emailEnabled: true,
+  quietHoursStartMinutes: true,
+  quietHoursEndMinutes: true,
+} satisfies Prisma.ClientNotificationPreferenceSelect
+
+export type CreateClientNotificationArgs = {
   clientId: string
-  type: ClientNotificationType
+  eventKey: NotificationEventKey
   title: string
   body?: string | null
   href?: string | null
@@ -19,13 +61,16 @@ type CreateClientNotificationArgs = {
   tx?: Prisma.TransactionClient
 }
 
-type UpsertClientNotificationArgs = Omit<CreateClientNotificationArgs, 'dedupeKey'> & {
+export type UpsertClientNotificationArgs = Omit<
+  CreateClientNotificationArgs,
+  'dedupeKey'
+> & {
   dedupeKey: string
 }
 
-type ScheduleClientNotificationArgs = {
+export type ScheduleClientNotificationArgs = {
   clientId: string
-  type: ClientNotificationType
+  eventKey: NotificationEventKey
   runAt: Date
   href?: string | null
   data?: Prisma.InputJsonValue | null
@@ -36,50 +81,76 @@ type ScheduleClientNotificationArgs = {
   tx?: Prisma.TransactionClient
 }
 
-type CancelScheduledClientNotificationsForBookingArgs = {
+export type CancelScheduledClientNotificationsForBookingArgs = {
   bookingId: string
   clientId?: string | null
-  types?: ClientNotificationType[]
+  eventKeys?: NotificationEventKey[]
   onlyPending?: boolean
   tx?: Prisma.TransactionClient
 }
 
-type MarkClientNotificationsReadArgs = {
+export type MarkClientNotificationsReadArgs = {
   clientId: string
   ids?: string[]
   before?: Date
-  types?: ClientNotificationType[]
+  eventKeys?: NotificationEventKey[]
   tx?: Prisma.TransactionClient
 }
 
-type GetUnreadClientNotificationCountArgs = {
+export type GetUnreadClientNotificationCountArgs = {
   clientId: string
-  types?: ClientNotificationType[]
+  eventKeys?: NotificationEventKey[]
   tx?: Prisma.TransactionClient
 }
 
-function getDb(tx?: Prisma.TransactionClient): ClientNotificationDbClient {
+type DbClient = Prisma.TransactionClient | typeof prisma
+
+type NormalizedCreateClientNotificationArgs = ReturnType<
+  typeof normalizeCreateClientNotificationArgs
+>
+
+type ClientDispatchRecipientRow = Prisma.ClientProfileGetPayload<{
+  select: typeof clientDispatchRecipientSelect
+}>
+
+type ClientNotificationPreferenceRow = Prisma.ClientNotificationPreferenceGetPayload<{
+  select: typeof clientNotificationPreferenceSelect
+}>
+
+function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
-function normRequired(v: unknown, max: number): string {
-  const s = typeof v === 'string' ? v.trim() : ''
+function normRequired(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value.trim() : ''
   return s.slice(0, max)
 }
 
-function normDefaultString(v: unknown, max: number): string {
-  const s = typeof v === 'string' ? v.trim() : ''
+function normDefaultString(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value.trim() : ''
   return s.slice(0, max)
 }
 
-function normNullableString(v: unknown, max: number): string | null {
-  const s = typeof v === 'string' ? v.trim() : ''
+function normNullableString(value: unknown, max: number): string | null {
+  const s = typeof value === 'string' ? value.trim() : ''
   const clipped = s.slice(0, max)
-  return clipped ? clipped : null
+  return clipped.length > 0 ? clipped : null
 }
 
-function normId(v: unknown): string | null {
-  return normNullableString(v, 64)
+function normId(value: unknown): string | null {
+  return normNullableString(value, MAX_ID)
+}
+
+/**
+ * Only allow internal app paths.
+ * This keeps notification href values as safe deep links.
+ */
+function normInternalHref(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value.trim().slice(0, max) : ''
+  if (!s) return ''
+  if (!s.startsWith('/')) return ''
+  if (s.startsWith('//')) return ''
+  return s
 }
 
 function normStringArray(values: unknown, maxItems: number, maxLen: number): string[] {
@@ -100,23 +171,197 @@ function normalizeDate(value: unknown, fieldName: string): Date {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     throw new Error(`clientNotifications: invalid ${fieldName}`)
   }
+
   return value
 }
 
-/**
- * Optional realtime publish hook.
- * Safe default for now: no-op.
- *
- * Later:
- * - websocket / SSE
- * - Ably / Pusher
- * - invalidation event bus
- */
-async function publishClientNotificationEvent(_args: {
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+function normalizeCreateClientNotificationArgs(args: CreateClientNotificationArgs) {
+  const clientId = normRequired(args.clientId, MAX_ID)
+  const title = normRequired(args.title, MAX_TITLE)
+
+  if (!clientId) {
+    throw new Error('createClientNotification: missing clientId')
+  }
+
+  if (!title) {
+    throw new Error('createClientNotification: missing title')
+  }
+
+  return {
+    clientId,
+    eventKey: args.eventKey,
+    title,
+    body: normDefaultString(args.body, MAX_BODY),
+    href: normInternalHref(args.href, MAX_HREF),
+    data: args.data,
+    dedupeKey: normNullableString(args.dedupeKey, MAX_DEDUPE_KEY),
+    bookingId: normId(args.bookingId),
+    aftercareId: normId(args.aftercareId),
+  }
+}
+
+function buildClientNotificationCreateData(
+  normalized: NormalizedCreateClientNotificationArgs,
+): Prisma.ClientNotificationUncheckedCreateInput {
+  const data = normalizeJsonField(normalized.data)
+
+  return {
+    clientId: normalized.clientId,
+    eventKey: normalized.eventKey,
+    title: normalized.title,
+    body: normalized.body,
+    href: normalized.href,
+    bookingId: normalized.bookingId,
+    aftercareId: normalized.aftercareId,
+    dedupeKey: normalized.dedupeKey,
+    readAt: null,
+    ...(data !== undefined ? { data } : {}),
+  }
+}
+
+function buildClientNotificationUpdateData(
+  normalized: NormalizedCreateClientNotificationArgs,
+): Prisma.ClientNotificationUncheckedUpdateManyInput {
+  const data = normalizeJsonField(normalized.data)
+
+  const update: Prisma.ClientNotificationUncheckedUpdateManyInput = {
+    eventKey: normalized.eventKey,
+    title: normalized.title,
+    body: normalized.body,
+    href: normalized.href,
+    bookingId: normalized.bookingId,
+    aftercareId: normalized.aftercareId,
+    dedupeKey: normalized.dedupeKey,
+    readAt: null,
+  }
+
+  if (data !== undefined) {
+    update.data = data
+  }
+
+  return update
+}
+
+async function findClientNotificationIdByDedupe(args: {
   clientId: string
-  notificationId: string
+  dedupeKey: string
+  tx?: Prisma.TransactionClient
 }) {
-  return
+  const db = getDb(args.tx)
+
+  const found = await db.clientNotification.findFirst({
+    where: {
+      clientId: args.clientId,
+      dedupeKey: args.dedupeKey,
+    },
+    select: clientNotificationIdSelect,
+  })
+
+  if (!found) {
+    throw new Error(
+      'createClientNotification: notification not found after dedupe update/create',
+    )
+  }
+
+  return found
+}
+
+async function getClientDispatchRecipient(args: {
+  clientId: string
+  eventKey: NotificationEventKey
+  tx?: Prisma.TransactionClient
+}): Promise<{
+  client: ClientDispatchRecipientRow
+  preference: ClientNotificationPreferenceRow | null
+}> {
+  const db = getDb(args.tx)
+
+  const [client, preference] = await Promise.all([
+    db.clientProfile.findUnique({
+      where: {
+        id: args.clientId,
+      },
+      select: clientDispatchRecipientSelect,
+    }),
+    db.clientNotificationPreference.findUnique({
+      where: {
+        clientId_eventKey: {
+          clientId: args.clientId,
+          eventKey: args.eventKey,
+        },
+      },
+      select: clientNotificationPreferenceSelect,
+    }),
+  ])
+
+  if (!client) {
+    throw new Error('createClientNotification: client not found for dispatch enqueue')
+  }
+
+  return {
+    client,
+    preference,
+  }
+}
+
+function resolvePreferredClientPhone(
+  client: ClientDispatchRecipientRow,
+): {
+  phone: string | null
+  phoneVerifiedAt: Date | null
+} {
+  const profilePhone = normNullableString(client.phone, 64)
+  if (profilePhone) {
+    return {
+      phone: profilePhone,
+      phoneVerifiedAt: client.phoneVerifiedAt ?? null,
+    }
+  }
+
+  const userPhone = normNullableString(client.user.phone, 64)
+  return {
+    phone: userPhone,
+    phoneVerifiedAt: client.user.phoneVerifiedAt ?? null,
+  }
+}
+
+async function enqueueClientNotificationDispatch(args: {
+  notificationId: string
+  normalized: NormalizedCreateClientNotificationArgs
+  tx?: Prisma.TransactionClient
+}): Promise<void> {
+  const recipient = await getClientDispatchRecipient({
+    clientId: args.normalized.clientId,
+    eventKey: args.normalized.eventKey,
+    tx: args.tx,
+  })
+
+  const preferredPhone = resolvePreferredClientPhone(recipient.client)
+
+  await enqueueDispatch({
+    key: args.normalized.eventKey,
+    sourceKey: `client-notification:${args.notificationId}`,
+    recipient: {
+      kind: NotificationRecipientKind.CLIENT,
+      clientId: recipient.client.id,
+      userId: recipient.client.userId,
+      inAppTargetId: recipient.client.id,
+      phone: preferredPhone.phone,
+      phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
+      email: recipient.client.user.email,
+      preference: recipient.preference,
+    },
+    title: args.normalized.title,
+    body: args.normalized.body,
+    href: args.normalized.href,
+    payload: args.normalized.data,
+    clientNotificationId: args.notificationId,
+    tx: args.tx,
+  })
 }
 
 /**
@@ -128,110 +373,87 @@ async function publishClientNotificationEvent(_args: {
  */
 export async function createClientNotification(args: CreateClientNotificationArgs) {
   const db = getDb(args.tx)
+  const normalized = normalizeCreateClientNotificationArgs(args)
 
-  const clientId = normRequired(args.clientId, 64)
-  const title = normRequired(args.title, 160)
-  const body = normDefaultString(args.body, 4000)
-  const href = normDefaultString(args.href, 2048)
-  const dedupeKey = normNullableString(args.dedupeKey, 256)
-
-  if (!clientId) throw new Error('createClientNotification: missing clientId')
-  if (!title) throw new Error('createClientNotification: missing title')
-
-  const bookingId = normId(args.bookingId)
-  const aftercareId = normId(args.aftercareId)
-  const data = normalizeJsonField(args.data)
-
-  const baseWrite = {
-    type: args.type,
-    title,
-    body,
-    href,
-    bookingId,
-    aftercareId,
-    readAt: null as Date | null,
-    ...(data !== undefined ? { data } : {}),
-  }
-
-  // No dedupe: always create a new row
-  if (!dedupeKey) {
+  if (!normalized.dedupeKey) {
     const created = await db.clientNotification.create({
-      data: {
-        clientId,
+      data: buildClientNotificationCreateData({
+        ...normalized,
         dedupeKey: null,
-        ...baseWrite,
-      },
-      select: { id: true },
+      }),
+      select: clientNotificationIdSelect,
     })
 
-    await publishClientNotificationEvent({
-      clientId,
+    await enqueueClientNotificationDispatch({
       notificationId: created.id,
+      normalized,
+      tx: args.tx,
     })
 
     return created
   }
 
-  // Update-first (fast path)
   const updated = await db.clientNotification.updateMany({
-    where: { clientId, dedupeKey },
-    data: {
-      ...baseWrite,
+    where: {
+      clientId: normalized.clientId,
+      dedupeKey: normalized.dedupeKey,
     },
+    data: buildClientNotificationUpdateData(normalized),
   })
 
   if (updated.count > 0) {
-    const found = await db.clientNotification.findFirst({
-      where: { clientId, dedupeKey },
-      select: { id: true },
+    const found = await findClientNotificationIdByDedupe({
+      clientId: normalized.clientId,
+      dedupeKey: normalized.dedupeKey,
+      tx: args.tx,
     })
 
-    if (found?.id) {
-      await publishClientNotificationEvent({
-        clientId,
-        notificationId: found.id,
-      })
-    }
+    await enqueueClientNotificationDispatch({
+      notificationId: found.id,
+      normalized,
+      tx: args.tx,
+    })
 
     return found
   }
 
-  // Create; if a race happens, unique constraint will throw — retry update
   try {
     const created = await db.clientNotification.create({
-      data: {
-        clientId,
-        dedupeKey,
-        ...baseWrite,
-      },
-      select: { id: true },
+      data: buildClientNotificationCreateData(normalized),
+      select: clientNotificationIdSelect,
     })
 
-    await publishClientNotificationEvent({
-      clientId,
+    await enqueueClientNotificationDispatch({
       notificationId: created.id,
+      normalized,
+      tx: args.tx,
     })
 
     return created
-  } catch {
-    await db.clientNotification.updateMany({
-      where: { clientId, dedupeKey },
-      data: {
-        ...baseWrite,
-      },
-    })
-
-    const found = await db.clientNotification.findFirst({
-      where: { clientId, dedupeKey },
-      select: { id: true },
-    })
-
-    if (found?.id) {
-      await publishClientNotificationEvent({
-        clientId,
-        notificationId: found.id,
-      })
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) {
+      throw error
     }
+
+    await db.clientNotification.updateMany({
+      where: {
+        clientId: normalized.clientId,
+        dedupeKey: normalized.dedupeKey,
+      },
+      data: buildClientNotificationUpdateData(normalized),
+    })
+
+    const found = await findClientNotificationIdByDedupe({
+      clientId: normalized.clientId,
+      dedupeKey: normalized.dedupeKey,
+      tx: args.tx,
+    })
+
+    await enqueueClientNotificationDispatch({
+      notificationId: found.id,
+      normalized,
+      tx: args.tx,
+    })
 
     return found
   }
@@ -242,7 +464,7 @@ export async function createClientNotification(args: CreateClientNotificationArg
  * to provide a dedupeKey explicitly.
  */
 export async function upsertClientNotification(args: UpsertClientNotificationArgs) {
-  const dedupeKey = normRequired(args.dedupeKey, 256)
+  const dedupeKey = normRequired(args.dedupeKey, MAX_DEDUPE_KEY)
   if (!dedupeKey) {
     throw new Error('upsertClientNotification: missing dedupeKey')
   }
@@ -254,34 +476,36 @@ export async function upsertClientNotification(args: UpsertClientNotificationArg
 }
 
 /**
- * Schedules a future client notification.
+ * Schedules a future client notification inbox row.
  *
- * Contract:
- * - If dedupeKey is provided: behaves like an idempotent upsert
- * - If no dedupeKey: always creates a new scheduled row
- * - Scheduling again with the same dedupeKey re-arms the row
+ * Important:
+ * - This only writes the scheduled row.
+ * - It does NOT enqueue delivery yet.
+ * - Multi-channel dispatch should happen when the scheduled row is actually processed.
  */
 export async function scheduleClientNotification(args: ScheduleClientNotificationArgs) {
   const db = getDb(args.tx)
 
-  const clientId = normRequired(args.clientId, 64)
-  const href = normDefaultString(args.href, 2048)
-  const dedupeKey = normNullableString(args.dedupeKey, 256)
+  const clientId = normRequired(args.clientId, MAX_ID)
+  const href = normInternalHref(args.href, MAX_HREF)
+  const dedupeKey = normNullableString(args.dedupeKey, MAX_DEDUPE_KEY)
   const bookingId = normId(args.bookingId)
   const runAt = normalizeDate(args.runAt, 'runAt')
   const data = normalizeJsonField(args.data)
 
-  if (!clientId) throw new Error('scheduleClientNotification: missing clientId')
+  if (!clientId) {
+    throw new Error('scheduleClientNotification: missing clientId')
+  }
 
   const baseWrite = {
-    type: args.type,
+    eventKey: args.eventKey,
     runAt,
     href,
     bookingId,
-    processedAt: null as Date | null,
-    cancelledAt: null as Date | null,
-    failedAt: null as Date | null,
-    lastError: null as string | null,
+    processedAt: null,
+    cancelledAt: null,
+    failedAt: null,
+    lastError: null,
     ...(data !== undefined ? { data } : {}),
   }
 
@@ -292,22 +516,34 @@ export async function scheduleClientNotification(args: ScheduleClientNotificatio
         dedupeKey: null,
         ...baseWrite,
       },
-      select: { id: true },
+      select: scheduledClientNotificationIdSelect,
     })
   }
 
   const updated = await db.scheduledClientNotification.updateMany({
-    where: { clientId, dedupeKey },
-    data: {
-      ...baseWrite,
+    where: {
+      clientId,
+      dedupeKey,
     },
+    data: baseWrite,
   })
 
   if (updated.count > 0) {
-    return db.scheduledClientNotification.findFirst({
-      where: { clientId, dedupeKey },
-      select: { id: true },
+    const found = await db.scheduledClientNotification.findFirst({
+      where: {
+        clientId,
+        dedupeKey,
+      },
+      select: scheduledClientNotificationIdSelect,
     })
+
+    if (!found) {
+      throw new Error(
+        'scheduleClientNotification: scheduled notification not found after update',
+      )
+    }
+
+    return found
   }
 
   try {
@@ -317,20 +553,36 @@ export async function scheduleClientNotification(args: ScheduleClientNotificatio
         dedupeKey,
         ...baseWrite,
       },
-      select: { id: true },
+      select: scheduledClientNotificationIdSelect,
     })
-  } catch {
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) {
+      throw error
+    }
+
     await db.scheduledClientNotification.updateMany({
-      where: { clientId, dedupeKey },
-      data: {
-        ...baseWrite,
+      where: {
+        clientId,
+        dedupeKey,
       },
+      data: baseWrite,
     })
 
-    return db.scheduledClientNotification.findFirst({
-      where: { clientId, dedupeKey },
-      select: { id: true },
+    const found = await db.scheduledClientNotification.findFirst({
+      where: {
+        clientId,
+        dedupeKey,
+      },
+      select: scheduledClientNotificationIdSelect,
     })
+
+    if (!found) {
+      throw new Error(
+        'scheduleClientNotification: scheduled notification not found after race retry',
+      )
+    }
+
+    return found
   }
 }
 
@@ -345,20 +597,23 @@ export async function cancelScheduledClientNotificationsForBooking(
 ) {
   const db = getDb(args.tx)
 
-  const bookingId = normRequired(args.bookingId, 64)
+  const bookingId = normRequired(args.bookingId, MAX_ID)
   if (!bookingId) {
     throw new Error('cancelScheduledClientNotificationsForBooking: missing bookingId')
   }
 
   const clientId = normId(args.clientId)
-  const types = Array.isArray(args.types) && args.types.length > 0 ? args.types : undefined
+  const eventKeys =
+    Array.isArray(args.eventKeys) && args.eventKeys.length > 0
+      ? args.eventKeys
+      : undefined
   const onlyPending = args.onlyPending ?? true
 
   return db.scheduledClientNotification.updateMany({
     where: {
       bookingId,
       ...(clientId ? { clientId } : {}),
-      ...(types ? { type: { in: types } } : {}),
+      ...(eventKeys ? { eventKey: { in: eventKeys } } : {}),
       cancelledAt: null,
       ...(onlyPending ? { processedAt: null } : {}),
     },
@@ -380,16 +635,19 @@ export async function cancelScheduledClientNotificationsForBooking(
 export async function markClientNotificationsRead(args: MarkClientNotificationsReadArgs) {
   const db = getDb(args.tx)
 
-  const clientId = normRequired(args.clientId, 64)
+  const clientId = normRequired(args.clientId, MAX_ID)
   if (!clientId) {
     throw new Error('markClientNotificationsRead: missing clientId')
   }
 
   const idsProvided = Array.isArray(args.ids)
-  const ids = normStringArray(args.ids, 1000, 64)
+  const ids = normStringArray(args.ids, 1000, MAX_ID)
   const before =
     args.before instanceof Date && !Number.isNaN(args.before.getTime()) ? args.before : undefined
-  const types = Array.isArray(args.types) && args.types.length > 0 ? args.types : undefined
+  const eventKeys =
+    Array.isArray(args.eventKeys) && args.eventKeys.length > 0
+      ? args.eventKeys
+      : undefined
 
   if (idsProvided && ids.length === 0) {
     return { count: 0 }
@@ -401,7 +659,7 @@ export async function markClientNotificationsRead(args: MarkClientNotificationsR
       readAt: null,
       ...(ids.length > 0 ? { id: { in: ids } } : {}),
       ...(before ? { createdAt: { lte: before } } : {}),
-      ...(types ? { type: { in: types } } : {}),
+      ...(eventKeys ? { eventKey: { in: eventKeys } } : {}),
     },
     data: {
       readAt: new Date(),
@@ -414,18 +672,21 @@ export async function getUnreadClientNotificationCount(
 ) {
   const db = getDb(args.tx)
 
-  const clientId = normRequired(args.clientId, 64)
+  const clientId = normRequired(args.clientId, MAX_ID)
   if (!clientId) {
     throw new Error('getUnreadClientNotificationCount: missing clientId')
   }
 
-  const types = Array.isArray(args.types) && args.types.length > 0 ? args.types : undefined
+  const eventKeys =
+    Array.isArray(args.eventKeys) && args.eventKeys.length > 0
+      ? args.eventKeys
+      : undefined
 
   return db.clientNotification.count({
     where: {
       clientId,
       readAt: null,
-      ...(types ? { type: { in: types } } : {}),
+      ...(eventKeys ? { eventKey: { in: eventKeys } } : {}),
     },
   })
 }

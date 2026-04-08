@@ -7,8 +7,7 @@ import { upper } from '@/app/api/_utils/strings'
 import { jsonFail } from '@/app/api/_utils/responses'
 
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
-import { ClientNotificationType, WaitlistStatus, type Prisma, Prisma as PrismaNamespace } from '@prisma/client'
-
+import { NotificationEventKey, WaitlistStatus, type Prisma, Prisma as PrismaNamespace } from '@prisma/client'
 export const dynamic = 'force-dynamic'
 
 function addDaysUtc(date: Date, days: number): Date {
@@ -165,7 +164,7 @@ export async function GET() {
     const unread = await prisma.clientNotification.findMany({
       where: {
         clientId,
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
         readAt: null,
         bookingId: { not: null },
       },

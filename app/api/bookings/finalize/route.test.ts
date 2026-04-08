@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingSource,
   BookingStatus,
-  NotificationType,
+  NotificationEventKey,
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
@@ -587,13 +587,19 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
-      type: NotificationType.BOOKING_REQUEST,
+      eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
       title: 'New booking request',
       body: '',
       href: '/pro/bookings/booking_1',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
-      dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST:booking_1',
+      dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST_CREATED:booking_1',
+      data: {
+        bookingId: 'booking_1',
+        bookingStatus: BookingStatus.PENDING,
+        source: BookingSource.REQUESTED,
+        locationType: ServiceLocationType.SALON,
+      },
     })
 
     expect(result).toEqual({
@@ -614,7 +620,7 @@ describe('POST /api/bookings/finalize', () => {
     })
   })
 
-  it('uses BOOKING_UPDATE notification when booking is auto-confirmed', async () => {
+  it('uses booking confirmed event when booking is auto-confirmed', async () => {
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce({
       ...offering,
       professional: {
@@ -646,13 +652,19 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
-      type: NotificationType.BOOKING_UPDATE,
+      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
       title: 'New booking confirmed',
       body: '',
       href: '/pro/bookings/booking_1',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
-      dedupeKey: 'PRO_NOTIF:BOOKING_UPDATE:booking_1',
+      dedupeKey: 'PRO_NOTIF:BOOKING_CONFIRMED:booking_1',
+      data: {
+        bookingId: 'booking_1',
+        bookingStatus: BookingStatus.ACCEPTED,
+        source: BookingSource.REQUESTED,
+        locationType: ServiceLocationType.SALON,
+      },
     })
   })
 

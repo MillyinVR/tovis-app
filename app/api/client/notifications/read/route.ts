@@ -2,12 +2,12 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { markClientNotificationsRead } from '@/lib/notifications/clientNotifications'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-const CLIENT_NOTIFICATION_TYPE_VALUES = new Set<string>(
-  Object.values(ClientNotificationType),
+const NOTIFICATION_EVENT_KEY_VALUES = new Set<string>(
+  Object.values(NotificationEventKey),
 )
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,24 +33,24 @@ function parseDate(value: unknown): Date | undefined {
   return parsed
 }
 
-function parseType(value: unknown): ClientNotificationType | null {
+function parseEventKey(value: unknown): NotificationEventKey | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   if (!trimmed) return null
 
-  return CLIENT_NOTIFICATION_TYPE_VALUES.has(trimmed)
-    ? (trimmed as ClientNotificationType)
+  return NOTIFICATION_EVENT_KEY_VALUES.has(trimmed)
+    ? (trimmed as NotificationEventKey)
     : null
 }
 
-function parseTypes(value: unknown): ClientNotificationType[] | null {
+function parseEventKeys(value: unknown): NotificationEventKey[] | null {
   if (!Array.isArray(value)) return null
 
   const parsed = value
-    .map((entry) => parseType(entry))
-    .filter((entry): entry is ClientNotificationType => entry !== null)
+    .map((entry) => parseEventKey(entry))
+    .filter((entry): entry is NotificationEventKey => entry !== null)
 
-  return parsed.length > 0 ? Array.from(new Set(parsed)) : []
+  return Array.from(new Set(parsed))
 }
 
 export async function POST(req: Request) {
@@ -66,29 +66,30 @@ export async function POST(req: Request) {
     const ids = parseIdList(body.ids)
     const before = parseDate(body.before)
 
-    const singleType = body.type !== undefined ? parseType(body.type) : null
-    if (body.type !== undefined && singleType === null) {
-      return jsonFail(400, 'Invalid notification type.')
+    const singleEventKey =
+      body.eventKey !== undefined ? parseEventKey(body.eventKey) : null
+    if (body.eventKey !== undefined && singleEventKey === null) {
+      return jsonFail(400, 'Invalid notification event key.')
     }
 
-    const multiTypes =
-      body.types !== undefined ? parseTypes(body.types) : null
-    if (body.types !== undefined && multiTypes === null) {
-      return jsonFail(400, 'Invalid notification types.')
+    const multiEventKeys =
+      body.eventKeys !== undefined ? parseEventKeys(body.eventKeys) : null
+    if (body.eventKeys !== undefined && multiEventKeys === null) {
+      return jsonFail(400, 'Invalid notification event keys.')
     }
 
-    const types =
-      multiTypes !== null
-        ? multiTypes
-        : singleType
-          ? [singleType]
+    const eventKeys =
+      multiEventKeys !== null
+        ? multiEventKeys
+        : singleEventKey
+          ? [singleEventKey]
           : undefined
 
     const result = await markClientNotificationsRead({
       clientId: auth.clientId,
       ...(ids.length > 0 ? { ids } : {}),
       ...(before ? { before } : {}),
-      ...(types && types.length > 0 ? { types } : {}),
+      ...(eventKeys && eventKeys.length > 0 ? { eventKeys } : {}),
     })
 
     return jsonOk(

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { NotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 const requirePro = vi.fn()
 const jsonOk = vi.fn((body: unknown, status: number) => ({
@@ -58,7 +58,7 @@ describe('GET /api/pro/notifications', () => {
       items: [
         {
           id: 'notif_1',
-          type: NotificationType.BOOKING_REQUEST,
+          eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
           title: 'New booking request',
         },
       ],
@@ -73,7 +73,7 @@ describe('GET /api/pro/notifications', () => {
       take: 60,
       cursorId: null,
       unreadOnly: false,
-      type: null,
+      eventKey: null,
     })
 
     expect(jsonOk).toHaveBeenCalledWith(
@@ -81,7 +81,7 @@ describe('GET /api/pro/notifications', () => {
         items: [
           {
             id: 'notif_1',
-            type: NotificationType.BOOKING_REQUEST,
+            eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
             title: 'New booking request',
           },
         ],
@@ -96,7 +96,7 @@ describe('GET /api/pro/notifications', () => {
         items: [
           {
             id: 'notif_1',
-            type: NotificationType.BOOKING_REQUEST,
+            eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
             title: 'New booking request',
           },
         ],
@@ -105,7 +105,7 @@ describe('GET /api/pro/notifications', () => {
     })
   })
 
-  it('passes cursor, unread filter, and type filter through', async () => {
+  it('passes cursor, unread filter, and eventKey filter through', async () => {
     requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
@@ -117,7 +117,7 @@ describe('GET /api/pro/notifications', () => {
     })
 
     const req = new Request(
-      'http://localhost/api/pro/notifications?take=25&cursor=notif_cursor&unread=1&type=REVIEW',
+      'http://localhost/api/pro/notifications?take=25&cursor=notif_cursor&unread=1&eventKey=REVIEW_RECEIVED',
     )
 
     await GET(req)
@@ -127,7 +127,7 @@ describe('GET /api/pro/notifications', () => {
       take: 25,
       cursorId: 'notif_cursor',
       unreadOnly: true,
-      type: NotificationType.REVIEW,
+      eventKey: NotificationEventKey.REVIEW_RECEIVED,
     })
   })
 
@@ -153,7 +153,7 @@ describe('GET /api/pro/notifications', () => {
       take: 100,
       cursorId: null,
       unreadOnly: false,
-      type: null,
+      eventKey: null,
     })
   })
 
@@ -179,7 +179,7 @@ describe('GET /api/pro/notifications', () => {
       take: 1,
       cursorId: null,
       unreadOnly: false,
-      type: null,
+      eventKey: null,
     })
   })
 
@@ -205,31 +205,34 @@ describe('GET /api/pro/notifications', () => {
       take: 60,
       cursorId: null,
       unreadOnly: false,
-      type: null,
+      eventKey: null,
     })
   })
 
-  it('returns 400 when type is invalid', async () => {
+  it('returns 400 when eventKey is invalid', async () => {
     requirePro.mockResolvedValueOnce({
       ok: true,
       professionalId: 'pro_123',
     })
 
     const req = new Request(
-      'http://localhost/api/pro/notifications?type=totally_wrong',
+      'http://localhost/api/pro/notifications?eventKey=totally_wrong',
     )
 
     const result = await GET(req)
 
-    expect(jsonFail).toHaveBeenCalledWith(400, 'Invalid notification type.')
+    expect(jsonFail).toHaveBeenCalledWith(
+      400,
+      'Invalid notification event key.',
+    )
     expect(listProNotifications).not.toHaveBeenCalled()
     expect(result).toEqual({
       status: 400,
-      body: { ok: false, error: 'Invalid notification type.' },
+      body: { ok: false, error: 'Invalid notification event key.' },
     })
   })
 
-  it('accepts each supported notification type', async () => {
+  it('accepts representative supported notification event keys', async () => {
     requirePro.mockResolvedValue({
       ok: true,
       professionalId: 'pro_123',
@@ -240,16 +243,18 @@ describe('GET /api/pro/notifications', () => {
       nextCursor: null,
     })
 
-    const supportedTypes = [
-      'BOOKING_REQUEST',
-      'BOOKING_UPDATE',
-      'BOOKING_CANCELLED',
-      'REVIEW',
+    const supportedEventKeys = [
+      NotificationEventKey.BOOKING_REQUEST_CREATED,
+      NotificationEventKey.BOOKING_CONFIRMED,
+      NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+      NotificationEventKey.REVIEW_RECEIVED,
     ]
 
-    for (const type of supportedTypes) {
+    for (const eventKey of supportedEventKeys) {
       await GET(
-        new Request(`http://localhost/api/pro/notifications?type=${type}`),
+        new Request(
+          `http://localhost/api/pro/notifications?eventKey=${eventKey}`,
+        ),
       )
     }
 
@@ -259,28 +264,28 @@ describe('GET /api/pro/notifications', () => {
       take: 60,
       cursorId: null,
       unreadOnly: false,
-      type: NotificationType.BOOKING_REQUEST,
+      eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
     })
     expect(listProNotifications).toHaveBeenNthCalledWith(2, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: false,
-      type: NotificationType.BOOKING_UPDATE,
+      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
     })
     expect(listProNotifications).toHaveBeenNthCalledWith(3, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: false,
-      type: NotificationType.BOOKING_CANCELLED,
+      eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
     })
     expect(listProNotifications).toHaveBeenNthCalledWith(4, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: false,
-      type: NotificationType.REVIEW,
+      eventKey: NotificationEventKey.REVIEW_RECEIVED,
     })
   })
 
@@ -307,14 +312,14 @@ describe('GET /api/pro/notifications', () => {
       take: 60,
       cursorId: null,
       unreadOnly: true,
-      type: null,
+      eventKey: null,
     })
     expect(listProNotifications).toHaveBeenNthCalledWith(2, {
       professionalId: 'pro_123',
       take: 60,
       cursorId: null,
       unreadOnly: true,
-      type: null,
+      eventKey: null,
     })
   })
 })

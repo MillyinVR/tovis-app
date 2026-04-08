@@ -1,14 +1,13 @@
-// app/pro/notifications/NotificationCard.tsx 
 'use client'
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { NotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 
 type NotificationCardProps = {
   id: string
-  type: NotificationType
+  eventKey: NotificationEventKey
   title: string
   body: string
   href: string
@@ -16,27 +15,44 @@ type NotificationCardProps = {
   unread: boolean
 }
 
-function typeLabel(type: NotificationType): string {
-  if (type === NotificationType.BOOKING_REQUEST) return 'Booking request'
-  if (type === NotificationType.BOOKING_UPDATE) return 'Booking update'
-  if (type === NotificationType.BOOKING_CANCELLED) return 'Booking cancelled'
-  return 'Review'
+function eventKeyLabel(eventKey: NotificationEventKey): string {
+  if (eventKey === NotificationEventKey.BOOKING_REQUEST_CREATED) {
+    return 'Booking request'
+  }
+
+  if (
+    eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT ||
+    eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_PRO ||
+    eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN
+  ) {
+    return 'Booking cancelled'
+  }
+
+  if (eventKey === NotificationEventKey.REVIEW_RECEIVED) {
+    return 'Review'
+  }
+
+  return 'Booking update'
 }
 
-function typeBadgeClass(type: NotificationType): string {
-  if (type === NotificationType.BOOKING_REQUEST) {
+function eventKeyBadgeClass(eventKey: NotificationEventKey): string {
+  if (eventKey === NotificationEventKey.BOOKING_REQUEST_CREATED) {
     return 'border-accentPrimary/35 bg-accentPrimary/12 text-textPrimary'
   }
 
-  if (type === NotificationType.BOOKING_UPDATE) {
-    return 'border-surfaceGlass/14 bg-bgPrimary/40 text-textPrimary'
-  }
-
-  if (type === NotificationType.BOOKING_CANCELLED) {
+  if (
+    eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT ||
+    eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_PRO ||
+    eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN
+  ) {
     return 'border-surfaceGlass/14 bg-bgPrimary/30 text-textPrimary'
   }
 
-  return 'border-accentPrimary/20 bg-bgPrimary/35 text-textPrimary'
+  if (eventKey === NotificationEventKey.REVIEW_RECEIVED) {
+    return 'border-accentPrimary/20 bg-bgPrimary/35 text-textPrimary'
+  }
+
+  return 'border-surfaceGlass/14 bg-bgPrimary/40 text-textPrimary'
 }
 
 function safeInternalHref(raw: string): string {
@@ -122,7 +138,7 @@ export default function NotificationCard(props: NotificationCardProps) {
       prefetch={false}
       onClick={handleClick}
       className={buildCardClass(isUnread)}
-      aria-label={`${typeLabel(props.type)}: ${props.title}`}
+      aria-label={`${eventKeyLabel(props.eventKey)}: ${props.title}`}
     >
       <div className="flex items-start gap-3">
         <div className="mt-0.5 flex min-w-0 flex-1 flex-col">
@@ -131,10 +147,10 @@ export default function NotificationCard(props: NotificationCardProps) {
               <span
                 className={[
                   'inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em]',
-                  typeBadgeClass(props.type),
+                  eventKeyBadgeClass(props.eventKey),
                 ].join(' ')}
               >
-                {typeLabel(props.type)}
+                {eventKeyLabel(props.eventKey)}
               </span>
 
               {isUnread ? (

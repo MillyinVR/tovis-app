@@ -1,7 +1,7 @@
 // app/pro/notifications/NotificationCard.test.tsx
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { NotificationType } from '@prisma/client'
+import { NotificationEventKey } from '@prisma/client'
 import NotificationCard from '@/app/pro/notifications/NotificationCard'
 
 const push = vi.fn()
@@ -39,11 +39,13 @@ vi.mock('next/link', () => ({
   ),
 }))
 
-function renderCard(overrides?: Partial<React.ComponentProps<typeof NotificationCard>>) {
+function renderCard(
+  overrides?: Partial<React.ComponentProps<typeof NotificationCard>>,
+) {
   return render(
     <NotificationCard
       id="notif_123"
-      type={NotificationType.BOOKING_REQUEST}
+      eventKey={NotificationEventKey.BOOKING_REQUEST_CREATED}
       title="New booking request"
       body="Someone requested a booking."
       href="/pro/bookings/booking_123"

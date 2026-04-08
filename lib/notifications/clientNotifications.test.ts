@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClientNotificationType } from '@prisma/client'
+import { NotificationEventKey, Prisma } from '@prisma/client'
+
+const mockEnqueueDispatch = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   clientNotification: {
@@ -13,10 +15,20 @@ const mockPrisma = vi.hoisted(() => ({
     updateMany: vi.fn(),
     findFirst: vi.fn(),
   },
+  clientProfile: {
+    findUnique: vi.fn(),
+  },
+  clientNotificationPreference: {
+    findUnique: vi.fn(),
+  },
 }))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
+}))
+
+vi.mock('./dispatch/enqueueDispatch', () => ({
+  enqueueDispatch: mockEnqueueDispatch,
 }))
 
 import {
@@ -34,10 +46,38 @@ function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   }
 }
 
+function makeUniqueConstraintError() {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed',
+    {
+      code: 'P2002',
+      clientVersion: 'test',
+    },
+  )
+}
+
 describe('lib/notifications/clientNotifications', () => {
   beforeEach(() => {
     resetMockGroup(mockPrisma.clientNotification)
     resetMockGroup(mockPrisma.scheduledClientNotification)
+    resetMockGroup(mockPrisma.clientProfile)
+    resetMockGroup(mockPrisma.clientNotificationPreference)
+    mockEnqueueDispatch.mockReset()
+
+    mockPrisma.clientProfile.findUnique.mockResolvedValue({
+      id: 'client_1',
+      userId: 'user_1',
+      phone: null,
+      phoneVerifiedAt: null,
+      user: {
+        email: 'client@example.com',
+        phone: null,
+        phoneVerifiedAt: null,
+      },
+    })
+
+    mockPrisma.clientNotificationPreference.findUnique.mockResolvedValue(null)
+    mockEnqueueDispatch.mockResolvedValue(undefined)
   })
 
   it('creates a new client notification when no dedupeKey is provided', async () => {
@@ -45,7 +85,7 @@ describe('lib/notifications/clientNotifications', () => {
 
     const result = await createClientNotification({
       clientId: 'client_1',
-      type: ClientNotificationType.AFTERCARE,
+      eventKey: NotificationEventKey.AFTERCARE_READY,
       title: 'Aftercare ready',
       body: ' Your aftercare summary is ready. ',
       bookingId: 'booking_1',
@@ -58,11 +98,12 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_1' })
+
     expect(mockPrisma.clientNotification.create).toHaveBeenCalledWith({
       data: {
         clientId: 'client_1',
         dedupeKey: null,
-        type: ClientNotificationType.AFTERCARE,
+        eventKey: NotificationEventKey.AFTERCARE_READY,
         title: 'Aftercare ready',
         body: 'Your aftercare summary is ready.',
         href: '/client/bookings/booking_1?step=aftercare',
@@ -76,16 +117,43 @@ describe('lib/notifications/clientNotifications', () => {
       },
       select: { id: true },
     })
+
     expect(mockPrisma.clientNotification.updateMany).not.toHaveBeenCalled()
+
+    expect(mockEnqueueDispatch).toHaveBeenCalledWith({
+      key: NotificationEventKey.AFTERCARE_READY,
+      sourceKey: 'client-notification:notif_1',
+      recipient: {
+        kind: 'CLIENT',
+        clientId: 'client_1',
+        userId: 'user_1',
+        inAppTargetId: 'client_1',
+        phone: null,
+        phoneVerifiedAt: null,
+        email: 'client@example.com',
+        preference: null,
+      },
+      title: 'Aftercare ready',
+      body: 'Your aftercare summary is ready.',
+      href: '/client/bookings/booking_1?step=aftercare',
+      payload: {
+        bookingId: 'booking_1',
+        aftercareId: 'aftercare_1',
+      },
+      clientNotificationId: 'notif_1',
+      tx: undefined,
+    })
   })
 
   it('updates an existing deduped notification instead of creating a new one', async () => {
     mockPrisma.clientNotification.updateMany.mockResolvedValue({ count: 1 })
-    mockPrisma.clientNotification.findFirst.mockResolvedValue({ id: 'notif_existing' })
+    mockPrisma.clientNotification.findFirst.mockResolvedValue({
+      id: 'notif_existing',
+    })
 
     const result = await createClientNotification({
       clientId: 'client_1',
-      type: ClientNotificationType.CONSULTATION_PROPOSAL,
+      eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       title: 'Consultation proposal ready',
       body: 'Review your proposal.',
       bookingId: 'booking_1',
@@ -98,18 +166,20 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_existing' })
+
     expect(mockPrisma.clientNotification.updateMany).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
         dedupeKey: 'CONSULTATION_PROPOSAL:booking_1',
       },
       data: {
-        type: ClientNotificationType.CONSULTATION_PROPOSAL,
+        eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
         title: 'Consultation proposal ready',
         body: 'Review your proposal.',
         href: '/client/bookings/booking_1?step=consult',
         bookingId: 'booking_1',
         aftercareId: null,
+        dedupeKey: 'CONSULTATION_PROPOSAL:booking_1',
         readAt: null,
         data: {
           bookingId: 'booking_1',
@@ -117,6 +187,7 @@ describe('lib/notifications/clientNotifications', () => {
         },
       },
     })
+
     expect(mockPrisma.clientNotification.create).not.toHaveBeenCalled()
   })
 
@@ -124,14 +195,18 @@ describe('lib/notifications/clientNotifications', () => {
     mockPrisma.clientNotification.updateMany
       .mockResolvedValueOnce({ count: 0 })
       .mockResolvedValueOnce({ count: 1 })
+
     mockPrisma.clientNotification.create.mockRejectedValueOnce(
-      new Error('Unique constraint failed'),
+      makeUniqueConstraintError(),
     )
-    mockPrisma.clientNotification.findFirst.mockResolvedValue({ id: 'notif_raced' })
+
+    mockPrisma.clientNotification.findFirst.mockResolvedValue({
+      id: 'notif_raced',
+    })
 
     const result = await createClientNotification({
       clientId: 'client_1',
-      type: ClientNotificationType.BOOKING_CONFIRMED,
+      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
       bookingId: 'booking_1',
@@ -142,6 +217,7 @@ describe('lib/notifications/clientNotifications', () => {
     expect(result).toEqual({ id: 'notif_raced' })
     expect(mockPrisma.clientNotification.create).toHaveBeenCalledTimes(1)
     expect(mockPrisma.clientNotification.updateMany).toHaveBeenCalledTimes(2)
+
     expect(mockPrisma.clientNotification.findFirst).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
@@ -155,7 +231,7 @@ describe('lib/notifications/clientNotifications', () => {
     await expect(
       upsertClientNotification({
         clientId: 'client_1',
-        type: ClientNotificationType.BOOKING_CANCELLED,
+        eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
         title: 'Appointment cancelled',
         body: 'Your appointment was cancelled.',
         bookingId: 'booking_1',
@@ -167,7 +243,9 @@ describe('lib/notifications/clientNotifications', () => {
   it('schedules a deduped client notification by updating an existing row', async () => {
     const runAt = new Date('2026-04-13T10:00:00.000Z')
 
-    mockPrisma.scheduledClientNotification.updateMany.mockResolvedValue({ count: 1 })
+    mockPrisma.scheduledClientNotification.updateMany.mockResolvedValue({
+      count: 1,
+    })
     mockPrisma.scheduledClientNotification.findFirst.mockResolvedValue({
       id: 'scheduled_1',
     })
@@ -175,7 +253,7 @@ describe('lib/notifications/clientNotifications', () => {
     const result = await scheduleClientNotification({
       clientId: 'client_1',
       bookingId: 'booking_1',
-      type: ClientNotificationType.APPOINTMENT_REMINDER,
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
       runAt,
       dedupeKey: 'CLIENT_REMINDER:1W:booking_1',
       href: '/client/bookings/booking_1?step=overview',
@@ -186,13 +264,16 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'scheduled_1' })
-    expect(mockPrisma.scheduledClientNotification.updateMany).toHaveBeenCalledWith({
+
+    expect(
+      mockPrisma.scheduledClientNotification.updateMany,
+    ).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
         dedupeKey: 'CLIENT_REMINDER:1W:booking_1',
       },
       data: {
-        type: ClientNotificationType.APPOINTMENT_REMINDER,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt,
         href: '/client/bookings/booking_1?step=overview',
         bookingId: 'booking_1',
@@ -209,20 +290,25 @@ describe('lib/notifications/clientNotifications', () => {
   })
 
   it('cancels pending scheduled notifications for a booking', async () => {
-    mockPrisma.scheduledClientNotification.updateMany.mockResolvedValue({ count: 2 })
+    mockPrisma.scheduledClientNotification.updateMany.mockResolvedValue({
+      count: 2,
+    })
 
     const result = await cancelScheduledClientNotificationsForBooking({
       bookingId: 'booking_1',
       clientId: 'client_1',
-      types: [ClientNotificationType.APPOINTMENT_REMINDER],
+      eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
     })
 
     expect(result).toEqual({ count: 2 })
-    expect(mockPrisma.scheduledClientNotification.updateMany).toHaveBeenCalledWith({
+
+    expect(
+      mockPrisma.scheduledClientNotification.updateMany,
+    ).toHaveBeenCalledWith({
       where: {
         bookingId: 'booking_1',
         clientId: 'client_1',
-        type: { in: [ClientNotificationType.APPOINTMENT_REMINDER] },
+        eventKey: { in: [NotificationEventKey.APPOINTMENT_REMINDER] },
         cancelledAt: null,
         processedAt: null,
       },
@@ -243,6 +329,7 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     expect(result).toEqual({ count: 2 })
+
     expect(mockPrisma.clientNotification.updateMany).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
@@ -265,26 +352,27 @@ describe('lib/notifications/clientNotifications', () => {
     expect(mockPrisma.clientNotification.updateMany).not.toHaveBeenCalled()
   })
 
-  it('counts unread notifications with optional type filters', async () => {
+  it('counts unread notifications with optional eventKey filters', async () => {
     mockPrisma.clientNotification.count.mockResolvedValue(3)
 
     const result = await getUnreadClientNotificationCount({
       clientId: 'client_1',
-      types: [
-        ClientNotificationType.BOOKING_CONFIRMED,
-        ClientNotificationType.BOOKING_RESCHEDULED,
+      eventKeys: [
+        NotificationEventKey.BOOKING_CONFIRMED,
+        NotificationEventKey.BOOKING_RESCHEDULED,
       ],
     })
 
     expect(result).toBe(3)
+
     expect(mockPrisma.clientNotification.count).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
         readAt: null,
-        type: {
+        eventKey: {
           in: [
-            ClientNotificationType.BOOKING_CONFIRMED,
-            ClientNotificationType.BOOKING_RESCHEDULED,
+            NotificationEventKey.BOOKING_CONFIRMED,
+            NotificationEventKey.BOOKING_RESCHEDULED,
           ],
         },
       },

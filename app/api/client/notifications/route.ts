@@ -3,23 +3,23 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import {
-  ClientNotificationType,
+  NotificationEventKey,
   type Prisma,
 } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-const CLIENT_NOTIFICATION_TYPE_VALUES = new Set<string>(
-  Object.values(ClientNotificationType),
+const NOTIFICATION_EVENT_KEY_VALUES = new Set<string>(
+  Object.values(NotificationEventKey),
 )
 
 function asInt(value: unknown, fallback: number): number {
   const n =
     typeof value === 'string'
-      ? parseInt(value, 10)
+      ? Number.parseInt(value, 10)
       : typeof value === 'number'
         ? Math.trunc(value)
-        : NaN
+        : Number.NaN
 
   return Number.isFinite(n) ? n : fallback
 }
@@ -34,21 +34,22 @@ function asBool(value: unknown): boolean | undefined {
   return undefined
 }
 
-function parseClientNotificationType(
+function parseNotificationEventKey(
   value: unknown,
-): ClientNotificationType | null {
+): NotificationEventKey | null {
   if (typeof value !== 'string') return null
+
   const normalized = value.trim()
   if (!normalized) return null
 
-  return CLIENT_NOTIFICATION_TYPE_VALUES.has(normalized)
-    ? (normalized as ClientNotificationType)
+  return NOTIFICATION_EVENT_KEY_VALUES.has(normalized)
+    ? (normalized as NotificationEventKey)
     : null
 }
 
 const notificationSelect = {
   id: true,
-  type: true,
+  eventKey: true,
   title: true,
   body: true,
   href: true,
@@ -68,8 +69,8 @@ export async function GET(req: Request) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
-    const clientId = auth.clientId
 
+    const clientId = auth.clientId
     const url = new URL(req.url)
 
     const take = Math.max(
@@ -80,18 +81,18 @@ export async function GET(req: Request) {
     const cursor = (url.searchParams.get('cursor') || '').trim() || null
     const unreadOnly = asBool(url.searchParams.get('unread')) === true
 
-    const rawType = url.searchParams.get('type')
-    const type = parseClientNotificationType(rawType)
+    const rawEventKey = url.searchParams.get('eventKey')
+    const eventKey = parseNotificationEventKey(rawEventKey)
 
-    if (rawType && !type) {
-      return jsonFail(400, 'Invalid notification type.')
+    if (rawEventKey && !eventKey) {
+      return jsonFail(400, 'Invalid notification event key.')
     }
 
     const rows: NotificationRow[] = await prisma.clientNotification.findMany({
       where: {
         clientId,
         ...(unreadOnly ? { readAt: null } : {}),
-        ...(type ? { type } : {}),
+        ...(eventKey ? { eventKey } : {}),
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: take + 1,
@@ -114,14 +115,15 @@ export async function GET(req: Request) {
         nextCursor,
         filters: {
           unreadOnly,
-          type,
+          eventKey,
         },
       },
       200,
     )
   } catch (err: unknown) {
     console.error('GET /api/client/notifications error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
+    const message =
+      err instanceof Error ? err.message : 'Internal server error'
     return jsonFail(500, message)
   }
 }

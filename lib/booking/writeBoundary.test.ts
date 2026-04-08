@@ -1,8 +1,7 @@
-// lib/booking/writeBoundary.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
-  ClientNotificationType,
+  NotificationEventKey,
   SessionStep,
 } from '@prisma/client'
 
@@ -154,7 +153,7 @@ describe('lib/booking/writeBoundary', () => {
       tx,
       bookingId: 'booking_1',
       clientId: 'client_1',
-      types: [ClientNotificationType.APPOINTMENT_REMINDER],
+      eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
       onlyPending: true,
     })
 
@@ -163,7 +162,7 @@ describe('lib/booking/writeBoundary', () => {
       clientId: 'client_1',
       bookingId: 'booking_1',
       aftercareId: null,
-      type: ClientNotificationType.BOOKING_CANCELLED,
+      eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
       title: 'Appointment cancelled',
       body: 'Your appointment was cancelled. Reason: Need to reschedule',
       dedupeKey: 'BOOKING_CANCELLED:booking_1',
@@ -171,7 +170,8 @@ describe('lib/booking/writeBoundary', () => {
       data: {
         bookingId: 'booking_1',
         reason: 'Need to reschedule',
-        notificationReason: 'BOOKING_CANCELLED',
+        cancelledBy: 'client',
+        eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
       },
     })
 
