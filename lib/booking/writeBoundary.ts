@@ -8,6 +8,7 @@ import {
   BookingStatus,
   ClientAddressKind,
   ConsultationApprovalStatus,
+  LastMinuteRecipientStatus,
   MediaPhase,
   MediaType,
   MediaVisibility,
@@ -6018,13 +6019,19 @@ async function performLockedFinalizeBookingFromHold(args: {
       where: {
         id: args.openingId,
         status: OpeningStatus.ACTIVE,
+        bookedAt: null,
+        cancelledAt: null,
       },
       select: {
         id: true,
         startAt: true,
         professionalId: true,
-        offeringId: true,
-        serviceId: true,
+        services: {
+          select: {
+            offeringId: true,
+            serviceId: true,
+          },
+        },
       },
     })
 
@@ -6036,17 +6043,13 @@ async function performLockedFinalizeBookingFromHold(args: {
       throw bookingError('OPENING_NOT_AVAILABLE')
     }
 
-    if (
-      activeOpening.offeringId &&
-      activeOpening.offeringId !== args.offering.id
-    ) {
-      throw bookingError('OPENING_NOT_AVAILABLE')
-    }
+    const openingSupportsRequestedOffering = activeOpening.services.some(
+      (serviceRow) =>
+        serviceRow.offeringId === args.offering.id &&
+        serviceRow.serviceId === args.offering.serviceId,
+    )
 
-    if (
-      activeOpening.serviceId &&
-      activeOpening.serviceId !== args.offering.serviceId
-    ) {
+    if (!openingSupportsRequestedOffering) {
       throw bookingError('OPENING_NOT_AVAILABLE')
     }
 
@@ -6057,13 +6060,18 @@ async function performLockedFinalizeBookingFromHold(args: {
       throw bookingError('OPENING_NOT_AVAILABLE')
     }
 
+    const bookedAt = new Date()
+
     const updatedOpening = await args.tx.lastMinuteOpening.updateMany({
       where: {
         id: args.openingId,
         status: OpeningStatus.ACTIVE,
+        bookedAt: null,
+        cancelledAt: null,
       },
       data: {
         status: OpeningStatus.BOOKED,
+        bookedAt,
       },
     })
 
@@ -6333,18 +6341,19 @@ async function performLockedFinalizeBookingFromHold(args: {
     })
   }
 
-  if (args.openingId) {
-    await args.tx.openingNotification.updateMany({
-      where: {
-        clientId: args.clientId,
-        openingId: args.openingId,
-        bookedAt: null,
-      },
-      data: {
-        bookedAt: new Date(),
-      },
-    })
-  }
+if (args.openingId) {
+  await args.tx.lastMinuteRecipient.updateMany({
+    where: {
+      clientId: args.clientId,
+      openingId: args.openingId,
+      bookedAt: null,
+    },
+    data: {
+      bookedAt: new Date(),
+      status: LastMinuteRecipientStatus.BOOKED,
+    },
+  })
+}
 
   await args.tx.bookingHold.delete({
     where: { id: hold.id },

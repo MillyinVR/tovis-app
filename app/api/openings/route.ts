@@ -2,7 +2,14 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { OpeningStatus, Prisma } from '@prisma/client'
+import {
+  LastMinuteOfferType,
+  LastMinuteTier,
+  LastMinuteVisibilityMode,
+  OpeningStatus,
+  Prisma,
+  ServiceLocationType,
+} from '@prisma/client'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -25,31 +32,100 @@ type DisableKey =
   | 'disableSat'
   | 'disableSun'
 
+type Cursor = {
+  startAt: Date
+  id: string
+} | null
+
 const openingSelect = {
   id: true,
+  professionalId: true,
   startAt: true,
   endAt: true,
-  discountPct: true,
   note: true,
-  offeringId: true,
-  serviceId: true,
-
+  status: true,
+  visibilityMode: true,
+  publicVisibleFrom: true,
+  publicVisibleUntil: true,
+  bookedAt: true,
+  cancelledAt: true,
   timeZone: true,
   locationType: true,
   locationId: true,
 
-  service: {
-    select: {
-      name: true,
-    },
-  },
   location: {
     select: {
+      id: true,
       city: true,
       state: true,
       formattedAddress: true,
+      lat: true,
+      lng: true,
+      timeZone: true,
+      type: true,
     },
   },
+
+  services: {
+    where: {
+      offering: {
+        is: {
+          isActive: true,
+        },
+      },
+    },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      openingId: true,
+      serviceId: true,
+      offeringId: true,
+      sortOrder: true,
+      service: {
+        select: {
+          id: true,
+          name: true,
+          minPrice: true,
+          defaultDurationMinutes: true,
+        },
+      },
+      offering: {
+        select: {
+          id: true,
+          title: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+          offersInSalon: true,
+          offersMobile: true,
+        },
+      },
+    },
+  },
+
+  tierPlans: {
+    where: {
+      cancelledAt: null,
+    },
+    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
+    select: {
+      id: true,
+      tier: true,
+      scheduledFor: true,
+      offerType: true,
+      percentOff: true,
+      amountOff: true,
+      freeAddOnServiceId: true,
+      freeAddOnService: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  },
+
   professional: {
     select: {
       id: true,
@@ -77,22 +153,34 @@ type OpeningQueryRow = Prisma.LastMinuteOpeningGetPayload<{
   select: typeof openingSelect
 }>
 
+type PublicIncentiveDto = {
+  tier: LastMinuteTier
+  offerType: LastMinuteOfferType
+  label: string
+  percentOff: number | null
+  amountOff: string | null
+  freeAddOnService: { id: string; name: string } | null
+}
+
 type OpeningDto = {
   id: string
+  professionalId: string
   startAt: string
   endAt: string | null
-  discountPct: number | null
   note: string | null
-  offeringId: string | null
-  serviceId: string | null
-  service: { name: string } | null
+  status: OpeningStatus
+  visibilityMode: LastMinuteVisibilityMode
+  publicVisibleFrom: string | null
+  publicVisibleUntil: string | null
   location: {
     id: string
-    type: OpeningQueryRow['locationType']
+    type: ServiceLocationType
     timeZone: string
     city: string | null
     state: string | null
     formattedAddress: string | null
+    lat: string | null
+    lng: string | null
   }
   professional: {
     id: string
@@ -102,12 +190,40 @@ type OpeningDto = {
     professionType: string | null
     locationLabel: string | null
   }
+  services: {
+    id: string
+    openingId: string
+    serviceId: string
+    offeringId: string
+    sortOrder: number
+    service: {
+      id: string
+      name: string
+      minPrice: string
+      defaultDurationMinutes: number
+    }
+    offering: {
+      id: string
+      title: string | null
+      salonPriceStartingAt: string | null
+      mobilePriceStartingAt: string | null
+      salonDurationMinutes: number | null
+      mobileDurationMinutes: number | null
+      offersInSalon: boolean
+      offersMobile: boolean
+    }
+  }[]
+  publicIncentive: PublicIncentiveDto | null
 }
 
 function clampInt(value: number, min: number, max: number) {
   const n = Math.trunc(Number(value))
   if (!Number.isFinite(n)) return min
   return Math.max(min, Math.min(max, n))
+}
+
+function decimalToString(value: Prisma.Decimal | null): string | null {
+  return value ? value.toString() : null
 }
 
 function weekdayDisableKeyInTimeZone(date: Date, timeZone: string): DisableKey {
@@ -161,27 +277,65 @@ function parseTake(takeParam: string | null) {
   return clampInt(raw, MIN_TAKE, MAX_TAKE)
 }
 
+function parseLocationType(v: string | null): ServiceLocationType | null {
+  const s = pickString(v)?.toUpperCase() ?? ''
+  if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
+  if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
+  return null
+}
+
 function buildOpeningsWhere(args: {
   now: Date
   horizon: Date
-  cursor: { startAt: Date; id: string } | null
+  cursor: Cursor
+  locationType: ServiceLocationType | null
+  serviceId: string | null
 }): Prisma.LastMinuteOpeningWhereInput {
-  const { now, horizon, cursor } = args
+  const { now, horizon, cursor, locationType, serviceId } = args
 
   const baseConditions: Prisma.LastMinuteOpeningWhereInput[] = [
     {
       status: OpeningStatus.ACTIVE,
+      bookedAt: null,
+      cancelledAt: null,
       startAt: { gte: now, lte: horizon },
+      publicVisibleFrom: { lte: now },
+      OR: [{ publicVisibleUntil: null }, { publicVisibleUntil: { gt: now } }],
       professional: {
         lastMinuteSettings: {
           is: { enabled: true },
         },
       },
-    },
-    {
-      OR: [{ offeringId: null }, { offering: { is: { isActive: true } } }],
+      services: {
+        some: {
+          offering: {
+            is: {
+              isActive: true,
+            },
+          },
+        },
+      },
     },
   ]
+
+  if (locationType) {
+    baseConditions.push({ locationType })
+  }
+
+  if (serviceId) {
+    baseConditions.push({
+      services: {
+        some: {
+          serviceId,
+          offering: {
+            is: {
+              isActive: true,
+            },
+          },
+        },
+      },
+    })
+  }
 
   if (!cursor) {
     return { AND: baseConditions }
@@ -209,17 +363,54 @@ function openingIsAllowedByWeekday(row: OpeningQueryRow) {
   return !settings[key]
 }
 
-function mapOpening(row: OpeningQueryRow): OpeningDto {
+function pickPublicTierPlan(row: OpeningQueryRow, now: Date) {
+  const plans = row.tierPlans
+  if (plans.length === 0) return null
+
+  if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY) {
+    return plans.find((plan) => plan.tier === LastMinuteTier.DISCOVERY) ?? null
+  }
+
+  if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_IMMEDIATE) {
+    const started = plans.filter((plan) => plan.scheduledFor.getTime() <= now.getTime())
+    if (started.length > 0) {
+      return started[started.length - 1] ?? null
+    }
+    return plans[0] ?? null
+  }
+
+  return null
+}
+
+function incentiveLabel(plan: NonNullable<ReturnType<typeof pickPublicTierPlan>>): string {
+  if (plan.offerType === LastMinuteOfferType.PERCENT_OFF && plan.percentOff != null) {
+    return `${plan.percentOff}% off`
+  }
+  if (plan.offerType === LastMinuteOfferType.AMOUNT_OFF && plan.amountOff) {
+    return `$${plan.amountOff.toString()} off`
+  }
+  if (plan.offerType === LastMinuteOfferType.FREE_SERVICE) {
+    return 'Free service'
+  }
+  if (plan.offerType === LastMinuteOfferType.FREE_ADD_ON) {
+    return plan.freeAddOnService?.name || 'Free add-on'
+  }
+  return 'No incentive'
+}
+
+function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
+  const publicPlan = pickPublicTierPlan(row, now)
+
   return {
     id: row.id,
+    professionalId: row.professionalId,
     startAt: row.startAt.toISOString(),
     endAt: row.endAt ? row.endAt.toISOString() : null,
-    discountPct: row.discountPct ?? null,
     note: row.note ?? null,
-
-    offeringId: row.offeringId ?? null,
-    serviceId: row.serviceId ?? null,
-    service: row.service ? { name: row.service.name } : null,
+    status: row.status,
+    visibilityMode: row.visibilityMode,
+    publicVisibleFrom: row.publicVisibleFrom ? row.publicVisibleFrom.toISOString() : null,
+    publicVisibleUntil: row.publicVisibleUntil ? row.publicVisibleUntil.toISOString() : null,
 
     location: {
       id: row.locationId,
@@ -228,6 +419,8 @@ function mapOpening(row: OpeningQueryRow): OpeningDto {
       city: row.location?.city ?? null,
       state: row.location?.state ?? null,
       formattedAddress: row.location?.formattedAddress ?? null,
+      lat: decimalToString(row.location?.lat ?? null),
+      lng: decimalToString(row.location?.lng ?? null),
     },
 
     professional: {
@@ -238,6 +431,46 @@ function mapOpening(row: OpeningQueryRow): OpeningDto {
       professionType: row.professional.professionType ?? null,
       locationLabel: row.professional.location ?? null,
     },
+
+    services: row.services.map((serviceRow) => ({
+      id: serviceRow.id,
+      openingId: serviceRow.openingId,
+      serviceId: serviceRow.serviceId,
+      offeringId: serviceRow.offeringId,
+      sortOrder: serviceRow.sortOrder,
+      service: {
+        id: serviceRow.service.id,
+        name: serviceRow.service.name,
+        minPrice: serviceRow.service.minPrice.toString(),
+        defaultDurationMinutes: serviceRow.service.defaultDurationMinutes,
+      },
+      offering: {
+        id: serviceRow.offering.id,
+        title: serviceRow.offering.title ?? null,
+        salonPriceStartingAt: decimalToString(serviceRow.offering.salonPriceStartingAt),
+        mobilePriceStartingAt: decimalToString(serviceRow.offering.mobilePriceStartingAt),
+        salonDurationMinutes: serviceRow.offering.salonDurationMinutes,
+        mobileDurationMinutes: serviceRow.offering.mobileDurationMinutes,
+        offersInSalon: serviceRow.offering.offersInSalon,
+        offersMobile: serviceRow.offering.offersMobile,
+      },
+    })),
+
+    publicIncentive: publicPlan
+      ? {
+          tier: publicPlan.tier,
+          offerType: publicPlan.offerType,
+          label: incentiveLabel(publicPlan),
+          percentOff: publicPlan.percentOff ?? null,
+          amountOff: decimalToString(publicPlan.amountOff),
+          freeAddOnService: publicPlan.freeAddOnService
+            ? {
+                id: publicPlan.freeAddOnService.id,
+                name: publicPlan.freeAddOnService.name,
+              }
+            : null,
+        }
+      : null,
   }
 }
 
@@ -254,16 +487,24 @@ export async function GET(req: Request) {
     })
 
     const take = parseTake(pickString(url.searchParams.get('take')))
+    const locationType = parseLocationType(pickString(url.searchParams.get('locationType')))
+    const serviceId = pickString(url.searchParams.get('serviceId'))
 
     const now = new Date()
     const horizon = new Date(now.getTime() + hours * 60 * 60_000)
 
     const openings: OpeningDto[] = []
-    let cursor: { startAt: Date; id: string } | null = null
+    let cursor: Cursor = null
 
     for (let pageIndex = 0; pageIndex < MAX_PAGES && openings.length < take; pageIndex += 1) {
       const rows: OpeningQueryRow[] = await prisma.lastMinuteOpening.findMany({
-        where: buildOpeningsWhere({ now, horizon, cursor }),
+        where: buildOpeningsWhere({
+          now,
+          horizon,
+          cursor,
+          locationType,
+          serviceId,
+        }),
         orderBy: [{ startAt: 'asc' }, { id: 'asc' }],
         take: PAGE_SIZE,
         select: openingSelect,
@@ -273,8 +514,9 @@ export async function GET(req: Request) {
 
       for (const row of rows) {
         if (!openingIsAllowedByWeekday(row)) continue
+        if (row.services.length === 0) continue
 
-        openings.push(mapOpening(row))
+        openings.push(mapOpening(row, now))
         if (openings.length >= take) break
       }
 

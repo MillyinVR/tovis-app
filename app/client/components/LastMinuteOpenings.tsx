@@ -11,24 +11,79 @@ import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 
 type Pro = {
-  id?: string | null
+  id: string | null
   businessName: string | null
-  city?: string | null
-  location?: string | null
+  handle: string | null
+  avatarUrl: string | null
+  professionType: string | null
+  locationLabel: string | null
+  city: string | null
+  location: string | null
   timeZone: string | null
 }
 
-type Svc = { name: string } | null
+type LocationRow = {
+  id: string | null
+  type: string | null
+  timeZone: string | null
+  city: string | null
+  state: string | null
+  formattedAddress: string | null
+  lat: string | null
+  lng: string | null
+}
+
+type OpeningServiceRow = {
+  id: string
+  openingId: string
+  serviceId: string
+  offeringId: string
+  sortOrder: number
+  service: {
+    id: string
+    name: string
+    minPrice: string
+    defaultDurationMinutes: number
+  }
+  offering: {
+    id: string
+    title: string | null
+    salonPriceStartingAt: string | null
+    mobilePriceStartingAt: string | null
+    salonDurationMinutes: number | null
+    mobileDurationMinutes: number | null
+    offersInSalon: boolean
+    offersMobile: boolean
+  }
+}
+
+type PublicIncentiveRow = {
+  tier: string
+  offerType: string
+  label: string
+  percentOff: number | null
+  amountOff: string | null
+  freeAddOnService: { id: string; name: string } | null
+} | null
 
 type OpeningRow = {
   id: string
   startAt: string
   endAt: string | null
-  discountPct: number | null
   note: string | null
-  offeringId: string | null
+  status: string | null
+  visibilityMode: string | null
+  publicVisibleFrom: string | null
+  publicVisibleUntil: string | null
+  locationType: string | null
+  timeZone: string
   professional: Pro
-  service: Svc
+  location: LocationRow | null
+  services: OpeningServiceRow[]
+  publicIncentive: PublicIncentiveRow
+  legacyOfferingId: string | null
+  legacyDiscountPct: number | null
+  legacyServiceName: string | null
 }
 
 type NotificationRow = {
@@ -44,20 +99,53 @@ type NotificationRow = {
 type TabKey = 'forYou' | 'openNow'
 
 function proTz(o: OpeningRow) {
-  return sanitizeTimeZone(o.professional?.timeZone, 'UTC')
+  const tz =
+    o.timeZone ||
+    o.location?.timeZone ||
+    o.professional.timeZone ||
+    'UTC'
+
+  return sanitizeTimeZone(tz, 'UTC')
+}
+
+function primaryOfferingId(o: OpeningRow) {
+  return o.services[0]?.offeringId ?? o.legacyOfferingId ?? null
 }
 
 function openingHref(o: OpeningRow) {
-  if (!o.offeringId) return null
+  const offeringId = primaryOfferingId(o)
+  if (!offeringId) return null
+
   const tz = proTz(o)
 
-  return `/offerings/${encodeURIComponent(o.offeringId)}?scheduledFor=${encodeURIComponent(
+  return `/offerings/${encodeURIComponent(offeringId)}?scheduledFor=${encodeURIComponent(
     o.startAt,
   )}&source=DISCOVERY&openingId=${encodeURIComponent(o.id)}&proTimeZone=${encodeURIComponent(tz)}`
 }
 
 function TierPill({ tier }: { tier: string }) {
-  const label = tier === 'TIER1_WAITLIST_LAPSED' ? 'Priority' : tier === 'TIER2_FAVORITE_VIEWER' ? 'For you' : 'Open'
+  const normalized = tier.trim().toUpperCase()
+
+  const label =
+    normalized === 'WAITLIST' || normalized === 'TIER1_WAITLIST_LAPSED'
+      ? 'Priority'
+      : normalized === 'REACTIVATION' || normalized === 'TIER2_FAVORITE_VIEWER'
+        ? 'For you'
+        : 'Open'
+
+  return (
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[11px] font-black text-textPrimary">
+      {label}
+    </span>
+  )
+}
+
+function IncentivePill({ opening }: { opening: OpeningRow }) {
+  const label =
+    opening.publicIncentive?.label ||
+    (opening.legacyDiscountPct != null ? `${opening.legacyDiscountPct}% off` : null)
+
+  if (!label) return null
 
   return (
     <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[11px] font-black text-textPrimary">
@@ -83,24 +171,58 @@ function MiniTab({ active, label, onClick }: { active: boolean; label: string; o
   )
 }
 
+function serviceSummary(o: OpeningRow) {
+  const names = Array.from(
+    new Set(
+      o.services
+        .map((row) => row.service.name.trim())
+        .filter((name) => name.length > 0),
+    ),
+  )
+
+  if (names.length === 0) {
+    return o.legacyServiceName || 'Service'
+  }
+
+  if (names.length === 1) {
+    return names[0]
+  }
+
+  return `${names[0]} +${names.length - 1} more`
+}
+
+function proLabel(o: OpeningRow) {
+  return o.professional.businessName || 'Professional'
+}
+
+function locationLabel(o: OpeningRow) {
+  return (
+    o.location?.formattedAddress ||
+    o.location?.city ||
+    o.professional.city ||
+    o.professional.locationLabel ||
+    o.professional.location ||
+    null
+  )
+}
+
 function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
   const tz = proTz(o)
   const when = prettyWhen(o.startAt, tz)
-
-  const proLabel = o.professional?.businessName || 'Professional'
-  const loc = (o.professional?.city || o.professional?.location || null)?.trim?.() || null
-
-  const svc = o.service?.name || 'Service'
-  const discount = o.discountPct ? `${o.discountPct}% off` : null
+  const svc = serviceSummary(o)
+  const pro = proLabel(o)
+  const loc = locationLabel(o)
   const href = openingHref(o)
 
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
       <div className="flex items-baseline justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-black text-textPrimary">{svc}</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="truncate text-sm font-black text-textPrimary">{svc}</div>
           {badge}
+          <IncentivePill opening={o} />
         </div>
+
         <div className="text-xs font-semibold text-textSecondary">
           {when}
           <span className="opacity-75"> · {tz}</span>
@@ -109,10 +231,9 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
 
       <div className="mt-1 text-sm text-textPrimary">
         <span className="font-black">
-          <ProProfileLink proId={o.professional?.id ?? null} label={proLabel} className="text-textPrimary" />
+          <ProProfileLink proId={o.professional.id} label={pro} className="text-textPrimary" />
         </span>
         {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
-        {discount ? <span className="text-textSecondary"> · {discount}</span> : null}
       </div>
 
       {o.note ? <div className="mt-1 text-xs font-medium text-textSecondary">{o.note}</div> : null}
@@ -126,14 +247,12 @@ function OpeningCard({ o, badge }: { o: OpeningRow; badge?: React.ReactNode }) {
             Book this slot
           </a>
         ) : (
-          <span className="text-xs font-semibold text-textSecondary">Missing offeringId</span>
+          <span className="text-xs font-semibold text-textSecondary">Opening link unavailable</span>
         )}
       </div>
     </div>
   )
 }
-
-/** ---------- parsing helpers (no property access on unknown) ---------- */
 
 function asStringOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v : null
@@ -145,21 +264,135 @@ function asNumberOrNull(v: unknown): number | null {
 
 function parsePro(x: unknown): Pro {
   if (!isRecord(x)) {
-    return { id: null, businessName: null, city: null, location: null, timeZone: null }
+    return {
+      id: null,
+      businessName: null,
+      handle: null,
+      avatarUrl: null,
+      professionType: null,
+      locationLabel: null,
+      city: null,
+      location: null,
+      timeZone: null,
+    }
   }
+
   return {
     id: asStringOrNull(x.id),
     businessName: asStringOrNull(x.businessName),
+    handle: asStringOrNull(x.handle),
+    avatarUrl: asStringOrNull(x.avatarUrl),
+    professionType: asStringOrNull(x.professionType),
+    locationLabel: asStringOrNull(x.locationLabel),
     city: asStringOrNull(x.city),
     location: asStringOrNull(x.location),
     timeZone: asStringOrNull(x.timeZone),
   }
 }
 
-function parseSvc(x: unknown): Svc {
+function parseLocation(x: unknown): LocationRow | null {
   if (!isRecord(x)) return null
-  const name = asStringOrNull(x.name)
-  return name ? { name } : null
+
+  return {
+    id: asStringOrNull(x.id),
+    type: asStringOrNull(x.type),
+    timeZone: asStringOrNull(x.timeZone),
+    city: asStringOrNull(x.city),
+    state: asStringOrNull(x.state),
+    formattedAddress: asStringOrNull(x.formattedAddress),
+    lat: asStringOrNull(x.lat),
+    lng: asStringOrNull(x.lng),
+  }
+}
+
+function parseOpeningServiceRow(x: unknown): OpeningServiceRow | null {
+  if (!isRecord(x)) return null
+  if (!isRecord(x.service) || !isRecord(x.offering)) return null
+
+  const id = pickStringOrEmpty(x.id)
+  const openingId = pickStringOrEmpty(x.openingId)
+  const serviceId = pickStringOrEmpty(x.serviceId)
+  const offeringId = pickStringOrEmpty(x.offeringId)
+  const sortOrder = asNumberOrNull(x.sortOrder)
+
+  const serviceName = asStringOrNull(x.service.name)
+  const serviceMinPrice = asStringOrNull(x.service.minPrice)
+  const defaultDurationMinutes = asNumberOrNull(x.service.defaultDurationMinutes)
+
+  if (
+    !id ||
+    !openingId ||
+    !serviceId ||
+    !offeringId ||
+    sortOrder == null ||
+    !serviceName ||
+    !serviceMinPrice ||
+    defaultDurationMinutes == null
+  ) {
+    return null
+  }
+
+  const offersInSalon =
+    typeof x.offering.offersInSalon === 'boolean' ? x.offering.offersInSalon : null
+  const offersMobile =
+    typeof x.offering.offersMobile === 'boolean' ? x.offering.offersMobile : null
+
+  if (offersInSalon == null || offersMobile == null) return null
+
+  return {
+    id,
+    openingId,
+    serviceId,
+    offeringId,
+    sortOrder,
+    service: {
+      id: serviceId,
+      name: serviceName,
+      minPrice: serviceMinPrice,
+      defaultDurationMinutes,
+    },
+    offering: {
+      id: offeringId,
+      title: asStringOrNull(x.offering.title),
+      salonPriceStartingAt: asStringOrNull(x.offering.salonPriceStartingAt),
+      mobilePriceStartingAt: asStringOrNull(x.offering.mobilePriceStartingAt),
+      salonDurationMinutes:
+        x.offering.salonDurationMinutes === null ? null : asNumberOrNull(x.offering.salonDurationMinutes),
+      mobileDurationMinutes:
+        x.offering.mobileDurationMinutes === null ? null : asNumberOrNull(x.offering.mobileDurationMinutes),
+      offersInSalon,
+      offersMobile,
+    },
+  }
+}
+
+function parsePublicIncentive(x: unknown): PublicIncentiveRow {
+  if (!isRecord(x)) return null
+
+  const tier = asStringOrNull(x.tier)
+  const offerType = asStringOrNull(x.offerType)
+  const label = asStringOrNull(x.label)
+
+  if (!tier || !offerType || !label) return null
+
+  const freeAddOnService =
+    isRecord(x.freeAddOnService) &&
+    asStringOrNull(x.freeAddOnService.id) &&
+    asStringOrNull(x.freeAddOnService.name)
+      ? {
+          id: asStringOrNull(x.freeAddOnService.id)!,
+          name: asStringOrNull(x.freeAddOnService.name)!,
+        }
+      : null
+
+  return {
+    tier,
+    offerType,
+    label,
+    percentOff: x.percentOff === null ? null : asNumberOrNull(x.percentOff),
+    amountOff: x.amountOff === null ? null : asStringOrNull(x.amountOff),
+    freeAddOnService,
+  }
 }
 
 function parseOpeningRow(x: unknown): OpeningRow | null {
@@ -169,25 +402,50 @@ function parseOpeningRow(x: unknown): OpeningRow | null {
   const startAt = pickStringOrEmpty(x.startAt)
   if (!id || !startAt) return null
 
+  const services = readArrayField(x, 'services')
+    .map(parseOpeningServiceRow)
+    .filter((row): row is OpeningServiceRow => row !== null)
+
+  const legacyService =
+    isRecord(x.service) && asStringOrNull(x.service.name)
+      ? { name: asStringOrNull(x.service.name)! }
+      : null
+
+  const timeZone =
+    asStringOrNull(x.timeZone) ||
+    (isRecord(x.location) ? asStringOrNull(x.location.timeZone) : null) ||
+    (isRecord(x.professional) ? asStringOrNull(x.professional.timeZone) : null) ||
+    'UTC'
+
   return {
     id,
     startAt,
-    endAt: asStringOrNull(x.endAt),
-    discountPct: asNumberOrNull(x.discountPct),
-    note: asStringOrNull(x.note),
-    offeringId: asStringOrNull(x.offeringId),
+    endAt: x.endAt === null ? null : asStringOrNull(x.endAt),
+    note: x.note === null ? null : asStringOrNull(x.note),
+    status: asStringOrNull(x.status),
+    visibilityMode: asStringOrNull(x.visibilityMode),
+    publicVisibleFrom: x.publicVisibleFrom === null ? null : asStringOrNull(x.publicVisibleFrom),
+    publicVisibleUntil: x.publicVisibleUntil === null ? null : asStringOrNull(x.publicVisibleUntil),
+    locationType: asStringOrNull(x.locationType),
+    timeZone,
     professional: parsePro(x.professional),
-    service: parseSvc(x.service),
+    location: parseLocation(x.location),
+    services,
+    publicIncentive: parsePublicIncentive(x.publicIncentive),
+    legacyOfferingId: asStringOrNull(x.offeringId),
+    legacyDiscountPct: asNumberOrNull(x.discountPct),
+    legacyServiceName: legacyService?.name ?? null,
   }
 }
 
 function parseNotificationRow(x: unknown): NotificationRow | null {
   if (!isRecord(x)) return null
+
   const id = pickStringOrEmpty(x.id)
   const tier = pickStringOrEmpty(x.tier)
   const sentAt = pickStringOrEmpty(x.sentAt)
-
   const opening = parseOpeningRow(x.opening)
+
   if (!id || !tier || !sentAt || !opening) return null
 
   return {
@@ -235,13 +493,17 @@ export default function LastMinuteOpenings() {
 
         if (!alive) return
 
-        const notifications = readArrayField(nData, 'notifications').map(parseNotificationRow).filter(Boolean) as NotificationRow[]
-        const openings = readArrayField(fData, 'openings').map(parseOpeningRow).filter(Boolean) as OpeningRow[]
+        const notifications = readArrayField(nData, 'notifications')
+          .map(parseNotificationRow)
+          .filter((row): row is NotificationRow => row !== null)
+
+        const openings = readArrayField(fData, 'openings')
+          .map(parseOpeningRow)
+          .filter((row): row is OpeningRow => row !== null)
 
         setNotif(notifications)
         setFeed(openings)
 
-        // default mini-tab: "For you" if it exists
         if (notifications.length > 0) setTab('forYou')
       } catch (e: unknown) {
         if (!alive) return
@@ -286,12 +548,14 @@ export default function LastMinuteOpenings() {
         <div>
           <div className="text-[13px] font-black text-textPrimary">Last-minute openings</div>
           <div className="text-[12px] font-semibold text-textSecondary">
-            {showForYou ? 'Based on your activity & waitlist' : 'Next 48 hours'}
+            {showForYou ? 'Based on your activity, matches, and waitlist' : 'Public openings in the next 48 hours'}
           </div>
         </div>
 
         <div className="inline-flex items-end gap-5 border-b border-white/10">
-          {notif.length > 0 ? <MiniTab active={tab === 'forYou'} label="For you" onClick={() => setTab('forYou')} /> : null}
+          {notif.length > 0 ? (
+            <MiniTab active={tab === 'forYou'} label="For you" onClick={() => setTab('forYou')} />
+          ) : null}
           <MiniTab active={tab === 'openNow'} label="Open now" onClick={() => setTab('openNow')} />
         </div>
       </div>
@@ -301,7 +565,7 @@ export default function LastMinuteOpenings() {
           list.slice(0, 8).map((row) => <OpeningCard key={row.key} o={row.opening} badge={row.badge} />)
         ) : (
           <div className="text-sm font-semibold text-textSecondary">
-            When pros open slots, they’ll show up here. People love impulse decisions, especially when it’s eyeliner.
+            When pros open slots, they’ll show up here. Excellent timing remains undefeated.
           </div>
         )}
       </div>

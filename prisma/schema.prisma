@@ -114,17 +114,41 @@ enum ClientIntentType {
   VIEW_MEDIA
 }
 
-enum OpeningTier {
-  TIER1_WAITLIST_LAPSED
-  TIER2_FAVORITE_VIEWER
-  TIER3_PUBLIC
-}
-
 enum OpeningStatus {
   ACTIVE
   BOOKED
   EXPIRED
   CANCELLED
+}
+
+enum LastMinuteTier {
+  WAITLIST
+  REACTIVATION
+  DISCOVERY
+}
+
+enum LastMinuteOfferType {
+  NONE
+  PERCENT_OFF
+  AMOUNT_OFF
+  FREE_SERVICE
+  FREE_ADD_ON
+}
+
+enum LastMinuteRecipientStatus {
+  PLANNED
+  ENQUEUED
+  OPENED
+  CLICKED
+  BOOKED
+  SUPPRESSED
+  CANCELLED
+}
+
+enum LastMinuteVisibilityMode {
+  TARGETED_ONLY
+  PUBLIC_AT_DISCOVERY
+  PUBLIC_IMMEDIATE
 }
 
 enum ClientNoteVisibility {
@@ -194,7 +218,6 @@ enum BookingServiceItemType {
   BASE
   ADD_ON
 }
-
 
 enum NotificationPriority {
   LOW
@@ -382,14 +405,11 @@ model Notification {
   dispatches NotificationDispatch[] @relation("ProNotificationDispatches")
 
   @@unique([professionalId, dedupeKey])
-
   // main inbox query
   @@index([professionalId, archivedAt, readAt, createdAt])
-
   // filters
   @@index([professionalId, eventKey, archivedAt, createdAt])
   @@index([professionalId, priority, archivedAt, createdAt])
-
   @@index([bookingId])
   @@index([reviewId])
 }
@@ -405,13 +425,13 @@ model NotificationDispatch {
   //   booking:<bookingId>:reminder:24h
   sourceKey String @unique
 
-  eventKey NotificationEventKey
+  eventKey      NotificationEventKey
   recipientKind NotificationRecipientKind
-  priority NotificationPriority @default(NORMAL)
+  priority      NotificationPriority      @default(NORMAL)
 
-  userId String?
+  userId         String?
   professionalId String?
-  clientId String?
+  clientId       String?
 
   // durable recipient snapshot for delivery-time policy, audit, and retries
   recipientInAppTargetId String? @db.VarChar(64)
@@ -420,16 +440,16 @@ model NotificationDispatch {
   recipientTimeZone      String? @db.VarChar(64)
 
   // optional links back to product-facing inbox records
-  notificationId String?
+  notificationId       String?
   clientNotificationId String?
 
-  title String
-  body  String @default("")
-  href  String @default("")
+  title   String
+  body    String @default("")
+  href    String @default("")
   payload Json?
 
-  scheduledFor DateTime @default(now())
-  cancelledAt DateTime?
+  scheduledFor DateTime  @default(now())
+  cancelledAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -438,7 +458,7 @@ model NotificationDispatch {
   professional ProfessionalProfile? @relation("ProfessionalNotificationDispatches", fields: [professionalId], references: [id], onDelete: Cascade)
   client       ClientProfile?       @relation("ClientProfileNotificationDispatches", fields: [clientId], references: [id], onDelete: Cascade)
 
-  notification       Notification?      @relation("ProNotificationDispatches", fields: [notificationId], references: [id], onDelete: SetNull)
+  notification       Notification?       @relation("ProNotificationDispatches", fields: [notificationId], references: [id], onDelete: SetNull)
   clientNotification ClientNotification? @relation("ClientInboxNotificationDispatches", fields: [clientNotificationId], references: [id], onDelete: SetNull)
 
   deliveries NotificationDelivery[]
@@ -455,42 +475,42 @@ model NotificationDelivery {
   id String @id @default(cuid())
 
   dispatchId String
-  channel NotificationChannel
-  provider NotificationProvider
+  channel    NotificationChannel
+  provider   NotificationProvider
 
   status NotificationDeliveryStatus @default(PENDING)
 
   // destination snapshot used at send time
-  destination String?
-  templateKey String
-  templateVersion Int @default(1)
+  destination     String?
+  templateKey     String
+  templateVersion Int     @default(1)
 
   attemptCount Int @default(0)
-  maxAttempts Int @default(5)
+  maxAttempts  Int @default(5)
 
-  nextAttemptAt DateTime @default(now())
+  nextAttemptAt DateTime  @default(now())
   lastAttemptAt DateTime?
 
-  claimedAt DateTime?
+  claimedAt      DateTime?
   leaseExpiresAt DateTime?
-  leaseToken String?
+  leaseToken     String?
 
   providerMessageId String?
-  providerStatus String?
+  providerStatus    String?
 
-  lastErrorCode String?
+  lastErrorCode    String?
   lastErrorMessage String?
 
-  sentAt DateTime?
-  deliveredAt DateTime?
-  failedAt DateTime?
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  failedAt     DateTime?
   suppressedAt DateTime?
-  cancelledAt DateTime?
+  cancelledAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dispatch NotificationDispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  dispatch NotificationDispatch        @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
   events   NotificationDeliveryEvent[]
 
   @@unique([dispatchId, channel])
@@ -502,19 +522,19 @@ model NotificationDelivery {
 model NotificationDeliveryEvent {
   id String @id @default(cuid())
 
-  deliveryId String
+  deliveryId    String
   attemptNumber Int?
 
-  type NotificationDeliveryEventType
+  type       NotificationDeliveryEventType
   fromStatus NotificationDeliveryStatus?
-  toStatus NotificationDeliveryStatus?
+  toStatus   NotificationDeliveryStatus?
 
-  providerStatus String?
+  providerStatus    String?
   providerMessageId String?
 
-  errorCode String?
+  errorCode    String?
   errorMessage String?
-  message String?
+  message      String?
 
   payload Json?
 
@@ -527,9 +547,9 @@ model NotificationDeliveryEvent {
 }
 
 model ProfessionalNotificationPreference {
-  id String @id @default(cuid())
+  id             String               @id @default(cuid())
   professionalId String
-  eventKey NotificationEventKey
+  eventKey       NotificationEventKey
 
   inAppEnabled Boolean @default(true)
   smsEnabled   Boolean @default(false)
@@ -548,7 +568,7 @@ model ProfessionalNotificationPreference {
 }
 
 model ClientNotificationPreference {
-  id String @id @default(cuid())
+  id       String               @id @default(cuid())
   clientId String
   eventKey NotificationEventKey
 
@@ -702,11 +722,11 @@ model ClientProfile {
   addresses ClientAddress[]
 
   intentEvents            ClientIntentEvent[]
-  openingNotifications    OpeningNotification[]
+  lastMinuteRecipients    LastMinuteRecipient[]
   notificationSettings    ClientNotificationSettings?
-  notificationDispatches  NotificationDispatch[]          @relation("ClientProfileNotificationDispatches")
+  notificationDispatches  NotificationDispatch[]         @relation("ClientProfileNotificationDispatches")
   notificationPreferences ClientNotificationPreference[]
-  messageThreads          MessageThread[]                 @relation("ClientThreads")
+  messageThreads          MessageThread[]                @relation("ClientThreads")
   viralRequests           ViralServiceRequest[]
   alertBanner             String?
 
@@ -739,6 +759,8 @@ model ClientAddress {
 
   lat Decimal? @db.Decimal(10, 7)
   lng Decimal? @db.Decimal(10, 7)
+
+  radiusMiles Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -787,17 +809,17 @@ model ProfessionalProfile {
   bookings       Booking[]
   calendarBlocks CalendarBlock[]
 
-  notifications Notification[]
-  notificationDispatches   NotificationDispatch[]              @relation("ProfessionalNotificationDispatches")
-  notificationPreferences  ProfessionalNotificationPreference[]
+  notifications           Notification[]
+  notificationDispatches  NotificationDispatch[]               @relation("ProfessionalNotificationDispatches")
+  notificationPreferences ProfessionalNotificationPreference[]
   // Licensing / verification (unchanged)
-  professionType     ProfessionType?
-  licenseNumber      String?
-  licenseState       String?
-  licenseExpiry      DateTime?
-  licenseVerified    Boolean                @default(false)
-  verificationStatus VerificationStatus     @default(PENDING)
-  verificationDocs   VerificationDocument[]
+  professionType          ProfessionType?
+  licenseNumber           String?
+  licenseState            String?
+  licenseExpiry           DateTime?
+  licenseVerified         Boolean                              @default(false)
+  verificationStatus      VerificationStatus                   @default(PENDING)
+  verificationDocs        VerificationDocument[]
 
   // License verification metadata (new)
   licenseVerifiedAt     DateTime?
@@ -990,9 +1012,11 @@ model Service {
   isAddOnEligible        Boolean @default(false)
   addOnGroup             String? // optional: "Finish", "Treatment", etc.
 
-  intentEvents       ClientIntentEvent[]
-  lastMinuteOpenings LastMinuteOpening[] @relation("ServiceOpenings")
-  adminPermissions   AdminPermission[]
+  intentEvents                 ClientIntentEvent[]
+  lastMinuteOpeningServices    LastMinuteOpeningService[]
+  lastMinuteTierFreeAddOnPlans LastMinuteTierPlan[]       @relation("LastMinuteTierPlanFreeAddOnService")
+
+  adminPermissions AdminPermission[]
 
   category            ServiceCategory               @relation(fields: [categoryId], references: [id])
   offerings           ProfessionalServiceOffering[]
@@ -1081,11 +1105,12 @@ model ProfessionalServiceOffering {
   messageThreads      MessageThread[]      @relation("OfferingThreads")
   quotes              Quote[]              @relation("OfferingQuotes")
   intentEvents        ClientIntentEvent[]
-  lastMinuteOpenings  LastMinuteOpening[]  @relation("OfferingOpenings")
   bookingServiceItems BookingServiceItem[]
   holds               BookingHold[]
 
   addOns OfferingAddOn[]
+
+  lastMinuteOpeningServices LastMinuteOpeningService[]
 
   @@unique([professionalId, serviceId])
 }
@@ -1094,13 +1119,16 @@ model LastMinuteSettings {
   id             String @id @default(cuid())
   professionalId String @unique
 
-  enabled          Boolean @default(false)
-  discountsEnabled Boolean @default(false) // ✅ NEW
+  enabled Boolean @default(false)
 
-  windowSameDayPct Int @default(20)
-  window24hPct     Int @default(10)
+  minCollectedSubtotal Decimal? @db.Decimal(10, 2)
 
-  minPrice Decimal? @db.Decimal(10, 2)
+  defaultVisibilityMode LastMinuteVisibilityMode @default(PUBLIC_AT_DISCOVERY)
+
+  // local minutes in opening timezone
+  // 1140 = 19:00, 540 = 09:00
+  tier2NightBeforeMinutes Int @default(1140)
+  tier3DayOfMinutes       Int @default(540)
 
   disableMon Boolean @default(false)
   disableTue Boolean @default(false)
@@ -1124,7 +1152,7 @@ model LastMinuteServiceRule {
   serviceId  String
   enabled    Boolean @default(true)
 
-  minPrice Decimal? @db.Decimal(10, 2)
+  minCollectedSubtotal Decimal? @db.Decimal(10, 2)
 
   settings LastMinuteSettings @relation(fields: [settingsId], references: [id])
   service  Service            @relation("ServiceLastMinuteRules", fields: [serviceId], references: [id])
@@ -1147,10 +1175,8 @@ model LastMinuteBlock {
 }
 
 model LastMinuteOpening {
-  id             String  @id @default(cuid())
+  id             String @id @default(cuid())
   professionalId String
-  serviceId      String?
-  offeringId     String?
 
   locationType ServiceLocationType
   locationId   String
@@ -1163,45 +1189,110 @@ model LastMinuteOpening {
 
   status OpeningStatus @default(ACTIVE)
 
-  discountPct Int?
-  note        String?
+  visibilityMode     LastMinuteVisibilityMode @default(PUBLIC_AT_DISCOVERY)
+  launchAt           DateTime?
+  expiresAt          DateTime?
+  publicVisibleFrom  DateTime?
+  publicVisibleUntil DateTime?
+  bookedAt           DateTime?
+  cancelledAt        DateTime?
+
+  note String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  professional ProfessionalProfile          @relation("ProOpenings", fields: [professionalId], references: [id])
-  service      Service?                     @relation("ServiceOpenings", fields: [serviceId], references: [id])
-  offering     ProfessionalServiceOffering? @relation("OfferingOpenings", fields: [offeringId], references: [id])
+  professional ProfessionalProfile @relation("ProOpenings", fields: [professionalId], references: [id])
 
-  notifications OpeningNotification[]
+  services   LastMinuteOpeningService[]
+  tierPlans  LastMinuteTierPlan[]
+  recipients LastMinuteRecipient[]
+
+  bookedBooking Booking? @relation("BookingLastMinuteOpening")
 
   @@index([professionalId, startAt])
-  @@index([serviceId, startAt])
   @@index([status, startAt])
   @@index([professionalId, locationId, startAt])
+  @@index([visibilityMode, publicVisibleFrom, status, startAt])
 }
 
-model OpeningNotification {
+model LastMinuteOpeningService {
+  id         String @id @default(cuid())
+  openingId  String
+  serviceId  String
+  offeringId String
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  opening  LastMinuteOpening           @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  service  Service                     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  offering ProfessionalServiceOffering @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+
+  @@unique([openingId, offeringId])
+  @@index([openingId, sortOrder])
+  @@index([serviceId])
+}
+
+model LastMinuteTierPlan {
+  id        String @id @default(cuid())
+  openingId String
+
+  tier LastMinuteTier
+
+  scheduledFor DateTime
+  processedAt  DateTime?
+  cancelledAt  DateTime?
+  lastError    String?
+
+  offerType  LastMinuteOfferType @default(NONE)
+  percentOff Int?
+  amountOff  Decimal?            @db.Decimal(10, 2)
+
+  freeAddOnServiceId String?
+  freeAddOnService   Service? @relation("LastMinuteTierPlanFreeAddOnService", fields: [freeAddOnServiceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  opening LastMinuteOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+
+  @@unique([openingId, tier])
+  @@index([scheduledFor, processedAt, cancelledAt])
+}
+
+model LastMinuteRecipient {
   id        String @id @default(cuid())
   openingId String
   clientId  String
 
-  tier        OpeningTier
-  sentAt      DateTime    @default(now())
-  deliveredAt DateTime?
-  openedAt    DateTime?
-  clickedAt   DateTime?
-  bookedAt    DateTime?
+  firstMatchedTier LastMinuteTier
+  notifiedTier     LastMinuteTier?
 
-  // prevents spam + duplicates if you re-run jobs
-  dedupeKey String? @unique
+  status LastMinuteRecipientStatus @default(PLANNED)
 
-  opening LastMinuteOpening @relation(fields: [openingId], references: [id])
-  client  ClientProfile     @relation(fields: [clientId], references: [id])
+  matchedContext Json?
 
-  @@unique([openingId, clientId, tier])
-  @@index([clientId, sentAt])
-  @@index([openingId, sentAt])
+  sourceDispatchKey String?
+
+  notifiedAt   DateTime?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  bookedAt     DateTime?
+  suppressedAt DateTime?
+  cancelledAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  opening LastMinuteOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  client  ClientProfile     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([openingId, clientId])
+  @@index([clientId, status, createdAt])
+  @@index([openingId, firstMatchedTier, status])
+  @@index([openingId, notifiedTier])
 }
 
 model ClientIntentEvent {
@@ -1260,6 +1351,9 @@ model Booking {
   professionalId String
   serviceId      String
   offeringId     String?
+
+  lastMinuteOpeningId String?            @unique
+  lastMinuteOpening   LastMinuteOpening? @relation("BookingLastMinuteOpening", fields: [lastMinuteOpeningId], references: [id], onDelete: SetNull)
 
   scheduledFor DateTime
   status       BookingStatus @default(PENDING)
@@ -1336,8 +1430,7 @@ model Booking {
   overrideAuditLogs BookingOverrideAuditLog[]
   closeoutAuditLogs BookingCloseoutAuditLog[]
 
-  sessionStep           SessionStep      @default(NONE)
-
+  sessionStep SessionStep @default(NONE)
 
   startedAt  DateTime?
   finishedAt DateTime?
@@ -2000,9 +2093,9 @@ model ClientNotification {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @default(now()) @updatedAt
 
-  client    ClientProfile     @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  booking   Booking?          @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  aftercare AftercareSummary? @relation(fields: [aftercareId], references: [id], onDelete: SetNull)
+  client     ClientProfile          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  booking    Booking?               @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  aftercare  AftercareSummary?      @relation(fields: [aftercareId], references: [id], onDelete: SetNull)
   dispatches NotificationDispatch[] @relation("ClientInboxNotificationDispatches")
 
   @@unique([clientId, dedupeKey])
@@ -2020,7 +2113,7 @@ model ScheduledClientNotification {
 
   eventKey NotificationEventKey
   runAt    DateTime
-  href     String @default("")
+  href     String               @default("")
 
   // structured metadata used to render the final notification
   data Json?

@@ -3,19 +3,33 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { DEFAULT_TIME_ZONE, getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
+import {
+  DEFAULT_TIME_ZONE,
+  getZonedParts,
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'
-type Block = { id: string; startAt: string; endAt: string; reason: string | null }
+
+type VisibilityMode = 'TARGETED_ONLY' | 'PUBLIC_AT_DISCOVERY' | 'PUBLIC_IMMEDIATE'
+
+type Block = {
+  id: string
+  startAt: string
+  endAt: string
+  reason: string | null
+}
 
 type Initial = {
-  timeZone?: string | null // ✅ PRO timezone (schedule owner)
+  timeZone?: string | null
   settings: {
     id: string
     enabled: boolean
-    discountsEnabled: boolean
-    windowSameDayPct: number
-    window24hPct: number
-    minPrice: string | null
+    defaultVisibilityMode: VisibilityMode
+    minCollectedSubtotal: string | null
+    tier2NightBeforeMinutes: number
+    tier3DayOfMinutes: number
     disableMon: boolean
     disableTue: boolean
     disableWed: boolean
@@ -23,10 +37,19 @@ type Initial = {
     disableFri: boolean
     disableSat: boolean
     disableSun: boolean
-    serviceRules: { serviceId: string; enabled: boolean; minPrice: string | null }[]
+    serviceRules: {
+      serviceId: string
+      enabled: boolean
+      minCollectedSubtotal: string | null
+    }[]
     blocks: Block[]
   }
-  offerings: { id: string; serviceId: string; name: string; basePrice: string }[]
+  offerings: {
+    id: string
+    serviceId: string
+    name: string
+    basePrice: string
+  }[]
 }
 
 type DaysState = Pick<
@@ -35,11 +58,16 @@ type DaysState = Pick<
 >
 
 type SettingsPatch = Partial<
-  Pick<Initial['settings'], 'enabled' | 'discountsEnabled' | 'windowSameDayPct' | 'window24hPct' | 'minPrice'> &
+  Pick<
+    Initial['settings'],
+    'enabled' | 'defaultVisibilityMode' | 'minCollectedSubtotal' | 'tier2NightBeforeMinutes' | 'tier3DayOfMinutes'
+  > &
     DaysState
 >
 
-type RulePatch = Partial<Pick<Initial['settings']['serviceRules'][number], 'enabled' | 'minPrice'>>
+type RulePatch = Partial<
+  Pick<Initial['settings']['serviceRules'][number], 'enabled' | 'minCollectedSubtotal'>
+>
 
 function isMoney(v: string) {
   return /^\d+(\.\d{1,2})?$/.test(v.trim())
@@ -61,42 +89,44 @@ function messageFromUnknown(e: unknown): string {
   return 'Something went wrong'
 }
 
-function clampPct(n: number, min: number, max: number) {
+function clampMinutes(n: number): number | null {
   if (!Number.isFinite(n)) return null
   const v = Math.trunc(n)
-  return Math.max(min, Math.min(max, v))
+  if (v < 0 || v > 1439) return null
+  return v
 }
 
-/**
- * datetime-local has no timezone.
- * We treat it as a wall-clock time in `timeZone` (PRO TZ),
- * and convert using zonedTimeToUtc.
- */
 function parseDatetimeLocal(value: string) {
   const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
   if (!m) return null
+
   const year = Number(m[1])
   const month = Number(m[2])
   const day = Number(m[3])
   const hour = Number(m[4])
   const minute = Number(m[5])
+
   if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+
   return { year, month, day, hour, minute }
 }
 
 function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return ''
+
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(d, tz)
   const pad = (n: number) => String(n).padStart(2, '0')
+
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
 }
 
 function datetimeLocalToIso(value: string, timeZone: string) {
   const parts = parseDatetimeLocal(value)
   if (!parts) return null
+
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const utc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
   return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
@@ -125,6 +155,13 @@ function fmtRangeInTimeZone(startIsoUtc: string, endIsoUtc: string, timeZone: st
   return `${left} → ${right}`
 }
 
+function fmtMinutesAsTime(minutes: number) {
+  const safe = Math.max(0, Math.min(1439, Math.trunc(minutes)))
+  const hh = String(Math.floor(safe / 60)).padStart(2, '0')
+  const mm = String(safe % 60).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
 function TogglePill({
   on,
   disabled,
@@ -146,7 +183,9 @@ function TogglePill({
       className={[
         'rounded-full px-4 py-2 text-[12px] font-black transition border',
         disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass',
-        on ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary' : 'border-white/10 bg-bgPrimary text-textPrimary',
+        on
+          ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
+          : 'border-white/10 bg-bgPrimary text-textPrimary',
       ].join(' ')}
     >
       {on ? labelOn : labelOff}
@@ -154,16 +193,11 @@ function TogglePill({
   )
 }
 
-/**
- * Seed defaults in PRO TZ (not browser TZ):
- * take "now" in pro TZ, convert to UTC instant, add minutes, then format back to datetime-local in pro TZ.
- */
 function seedDatetimeLocalNowPlusMinutes(timeZone: string, plusMinutes: number) {
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const nowUtc = new Date()
   const p = getZonedParts(nowUtc, tz)
 
-  // snap to the top of the hour in PRO TZ (minutes=0, seconds=0)
   const baseUtc = zonedTimeToUtc({
     year: p.year,
     month: p.month,
@@ -184,11 +218,9 @@ function isBlock(v: unknown): v is Block {
   if (typeof v.startAt !== 'string' || !v.startAt.trim()) return false
   if (typeof v.endAt !== 'string' || !v.endAt.trim()) return false
   const r = v.reason
-  if (!(r === null || typeof r === 'string')) return false
-  return true
+  return r === null || typeof r === 'string'
 }
 
-// jsonOk/jsonFail contract
 function unwrapBlockFromApi(payload: unknown): Block | null {
   if (!isRecord(payload)) return null
   if (payload.ok !== true) return null
@@ -225,11 +257,15 @@ function dayPatch(key: keyof DaysState, value: boolean): SettingsPatch {
   }
 }
 
+function visibilityLabel(mode: VisibilityMode) {
+  if (mode === 'TARGETED_ONLY') return 'Targeted only'
+  if (mode === 'PUBLIC_IMMEDIATE') return 'Public immediately'
+  return 'Public at discovery'
+}
+
 export default function LastMinuteSettingsClient({ initial }: { initial: Initial }) {
   const router = useRouter()
 
-  // ✅ PRO TIMEZONE is truth. Browser TZ is not.
-  // ✅ Strict policy: never LA fallback. If missing/invalid, fall back to DEFAULT_TIME_ZONE (UTC).
   const timeZone = useMemo(() => {
     const raw = typeof initial?.timeZone === 'string' ? initial.timeZone.trim() : ''
     if (raw && isValidIanaTimeZone(raw)) return raw
@@ -242,11 +278,18 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   const [err, setErr] = useState<string | null>(null)
 
   const [enabled, setEnabled] = useState(initial.settings.enabled)
-  const [discountsEnabled, setDiscountsEnabled] = useState(initial.settings.discountsEnabled)
-
-  const [sameDay, setSameDay] = useState(String(initial.settings.windowSameDayPct))
-  const [w24, setW24] = useState(String(initial.settings.window24hPct))
-  const [minPrice, setMinPrice] = useState(initial.settings.minPrice ?? '')
+  const [defaultVisibilityMode, setDefaultVisibilityMode] = useState<VisibilityMode>(
+    initial.settings.defaultVisibilityMode,
+  )
+  const [minCollectedSubtotal, setMinCollectedSubtotal] = useState(
+    initial.settings.minCollectedSubtotal ?? '',
+  )
+  const [tier2NightBeforeMinutes, setTier2NightBeforeMinutes] = useState(
+    String(initial.settings.tier2NightBeforeMinutes),
+  )
+  const [tier3DayOfMinutes, setTier3DayOfMinutes] = useState(
+    String(initial.settings.tier3DayOfMinutes),
+  )
 
   const [days, setDays] = useState<DaysState>({
     disableMon: initial.settings.disableMon,
@@ -259,23 +302,31 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   })
 
   const [blocks, setBlocks] = useState<Block[]>(initial.settings.blocks ?? [])
-
-  // ✅ Seed defaults based on PRO TZ, not browser math
   const [blockStart, setBlockStart] = useState(() => seedDatetimeLocalNowPlusMinutes(timeZone, 60))
   const [blockEnd, setBlockEnd] = useState(() => seedDatetimeLocalNowPlusMinutes(timeZone, 120))
   const [blockReason, setBlockReason] = useState('')
 
   const ruleByService = useMemo(() => {
-    const m = new Map<string, { enabled: boolean; minPrice: string | null }>()
-    for (const r of initial.settings.serviceRules) m.set(r.serviceId, { enabled: r.enabled, minPrice: r.minPrice })
+    const m = new Map<string, { enabled: boolean; minCollectedSubtotal: string | null }>()
+    for (const r of initial.settings.serviceRules) {
+      m.set(r.serviceId, {
+        enabled: r.enabled,
+        minCollectedSubtotal: r.minCollectedSubtotal,
+      })
+    }
     return m
   }, [initial.settings.serviceRules])
 
-  // De-dupe offerings into one row per serviceId (rules are per service)
   const services = useMemo(() => {
     const m = new Map<string, { serviceId: string; name: string; basePrice: string }>()
     for (const o of initial.offerings) {
-      if (!m.has(o.serviceId)) m.set(o.serviceId, { serviceId: o.serviceId, name: o.name, basePrice: o.basePrice })
+      if (!m.has(o.serviceId)) {
+        m.set(o.serviceId, {
+          serviceId: o.serviceId,
+          name: o.name,
+          basePrice: o.basePrice,
+        })
+      }
     }
     return Array.from(m.values())
   }, [initial.offerings])
@@ -283,6 +334,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   async function saveSettings(patch: SettingsPatch) {
     setBusy(true)
     setErr(null)
+
     try {
       const res = await fetch('/api/pro/last-minute/settings', {
         method: 'PATCH',
@@ -302,6 +354,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   async function saveRule(serviceId: string, patch: RulePatch) {
     setBusy(true)
     setErr(null)
+
     try {
       const res = await fetch('/api/pro/last-minute/rules', {
         method: 'PATCH',
@@ -321,11 +374,17 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   async function addBlock() {
     setBusy(true)
     setErr(null)
+
     try {
       const startIso = datetimeLocalToIso(blockStart, timeZone)
       const endIso = datetimeLocalToIso(blockEnd, timeZone)
-      if (!startIso || !endIso) throw new Error('Pick valid start and end times.')
-      if (+new Date(endIso) <= +new Date(startIso)) throw new Error('Block end must be after start.')
+
+      if (!startIso || !endIso) {
+        throw new Error('Pick valid start and end times.')
+      }
+      if (+new Date(endIso) <= +new Date(startIso)) {
+        throw new Error('Block end must be after start.')
+      }
 
       const res = await fetch('/api/pro/last-minute/blocks', {
         method: 'POST',
@@ -343,13 +402,12 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
       const newBlock = unwrapBlockFromApi(data)
       if (!newBlock) throw new Error('Unexpected response while creating block.')
 
-      setBlocks((prev) => [...prev, newBlock].sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt)))
+      setBlocks((prev) =>
+        [...prev, newBlock].sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt)),
+      )
       setBlockReason('')
-
-      // nice UX: advance defaults forward again in PRO TZ
       setBlockStart(seedDatetimeLocalNowPlusMinutes(timeZone, 60))
       setBlockEnd(seedDatetimeLocalNowPlusMinutes(timeZone, 120))
-
       router.refresh()
     } catch (e) {
       setErr(messageFromUnknown(e))
@@ -361,8 +419,11 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   async function removeBlock(id: string) {
     setBusy(true)
     setErr(null)
+
     try {
-      const res = await fetch(`/api/pro/last-minute/blocks?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/pro/last-minute/blocks?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(apiErrorFrom(data) ?? `Remove failed (${res.status})`)
       setBlocks((prev) => prev.filter((b) => b.id !== id))
@@ -374,7 +435,6 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     }
   }
 
-  // Branding tokens
   const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
   const label = 'text-[12px] font-black text-textPrimary'
   const hint = 'text-[12px] font-semibold text-textSecondary'
@@ -387,12 +447,13 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
 
   return (
     <div className="grid gap-3">
-      {/* Main settings */}
       <section className={card}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-220px">
-            <div className="text-[14px] font-black text-textPrimary">Last-minute bookings</div>
-            <div className={`${hint} mt-1`}>Fill gaps without discount-begging. You control eligibility, windows, and blocks.</div>
+          <div className="min-w-[220px]">
+            <div className="text-[14px] font-black text-textPrimary">Last-minute defaults</div>
+            <div className={`${hint} mt-1`}>
+              Set the default visibility, floor protection, tier anchors, and blocked days for last-minute openings.
+            </div>
             <div className={`${hint} mt-2`}>
               Times are interpreted in <span className="font-black">{tzLabel}</span>
             </div>
@@ -410,86 +471,107 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
                 void saveSettings({ enabled: next })
               }}
             />
-
-            <TogglePill
-              on={discountsEnabled}
-              disabled={busy || !enabled}
-              labelOn="Discounts ON"
-              labelOff="Discounts OFF"
-              onClick={() => {
-                const next = !discountsEnabled
-                setDiscountsEnabled(next)
-                void saveSettings({ discountsEnabled: next })
-              }}
-            />
           </div>
         </div>
 
-        {/* Discount window inputs */}
-        {enabled && discountsEnabled ? (
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <label className="grid gap-2">
-              <span className={label}>Same-day %</span>
-              <input
-                value={sameDay}
-                disabled={busy}
-                inputMode="numeric"
-                onChange={(e) => setSameDay(e.target.value)}
-                onBlur={() => {
-                  const n = clampPct(Number(sameDay), 0, 50)
-                  if (n == null) return setErr('Same-day % must be a number.')
-                  setErr(null)
-                  void saveSettings({ windowSameDayPct: n })
-                }}
-                className={field}
-              />
-            </label>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <label className="grid gap-2">
+            <span className={label}>Default visibility</span>
+            <select
+              value={defaultVisibilityMode}
+              disabled={busy || !enabled}
+              onChange={(e) => {
+                const next = e.target.value as VisibilityMode
+                setDefaultVisibilityMode(next)
+                void saveSettings({ defaultVisibilityMode: next })
+              }}
+              className={field}
+            >
+              <option value="TARGETED_ONLY">{visibilityLabel('TARGETED_ONLY')}</option>
+              <option value="PUBLIC_AT_DISCOVERY">{visibilityLabel('PUBLIC_AT_DISCOVERY')}</option>
+              <option value="PUBLIC_IMMEDIATE">{visibilityLabel('PUBLIC_IMMEDIATE')}</option>
+            </select>
+          </label>
 
-            <label className="grid gap-2">
-              <span className={label}>Within 24h %</span>
-              <input
-                value={w24}
-                disabled={busy}
-                inputMode="numeric"
-                onChange={(e) => setW24(e.target.value)}
-                onBlur={() => {
-                  const n = clampPct(Number(w24), 0, 50)
-                  if (n == null) return setErr('24h % must be a number.')
-                  setErr(null)
-                  void saveSettings({ window24hPct: n })
-                }}
-                className={field}
-              />
-            </label>
+          <label className="grid gap-2">
+            <span className={label}>Minimum collected subtotal</span>
+            <input
+              value={minCollectedSubtotal}
+              disabled={busy || !enabled}
+              placeholder="e.g. 80 or 79.99"
+              inputMode="decimal"
+              onChange={(e) => setMinCollectedSubtotal(e.target.value)}
+              onBlur={() => {
+                const v = minCollectedSubtotal.trim()
+                if (!v) {
+                  void saveSettings({ minCollectedSubtotal: null })
+                  return
+                }
+                if (!isMoney(v)) {
+                  setErr('Minimum collected subtotal must be like 80 or 79.99')
+                  return
+                }
+                setErr(null)
+                void saveSettings({ minCollectedSubtotal: v })
+              }}
+              className={field}
+            />
+          </label>
 
-            <label className="grid gap-2">
-              <span className={label}>Global min price (optional)</span>
-              <input
-                value={minPrice}
-                disabled={busy}
-                placeholder="e.g. 80"
-                inputMode="decimal"
-                onChange={(e) => setMinPrice(e.target.value)}
-                onBlur={() => {
-                  const v = minPrice.trim()
-                  if (!v) return void saveSettings({ minPrice: null })
-                  if (!isMoney(v)) return setErr('Min price must be like 80 or 79.99')
-                  setErr(null)
-                  void saveSettings({ minPrice: v })
-                }}
-                className={field}
-              />
-            </label>
+          <div className="grid gap-2">
+            <span className={label}>Current mode</span>
+            <div className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] font-semibold text-textSecondary">
+              {visibilityLabel(defaultVisibilityMode)}
+            </div>
           </div>
-        ) : (
-          <div className={`${hint} mt-4`}>
-            {enabled
-              ? 'Discounts are OFF. Last-minute can still work as “access” without changing prices.'
-              : 'Last-minute is OFF. Turn it on to configure windows, discounts, and blocks.'}
-          </div>
-        )}
+        </div>
 
-        {/* Day disables */}
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="grid gap-2">
+            <span className={label}>Tier 2 night-before anchor (minutes after midnight)</span>
+            <input
+              value={tier2NightBeforeMinutes}
+              disabled={busy || !enabled}
+              inputMode="numeric"
+              onChange={(e) => setTier2NightBeforeMinutes(e.target.value)}
+              onBlur={() => {
+                const n = clampMinutes(Number(tier2NightBeforeMinutes))
+                if (n == null) {
+                  setErr('Tier 2 minutes must be a whole number from 0 to 1439.')
+                  return
+                }
+                setErr(null)
+                setTier2NightBeforeMinutes(String(n))
+                void saveSettings({ tier2NightBeforeMinutes: n })
+              }}
+              className={field}
+            />
+            <span className={hint}>Current local anchor: {fmtMinutesAsTime(Number(tier2NightBeforeMinutes) || 0)}</span>
+          </label>
+
+          <label className="grid gap-2">
+            <span className={label}>Tier 3 day-of anchor (minutes after midnight)</span>
+            <input
+              value={tier3DayOfMinutes}
+              disabled={busy || !enabled}
+              inputMode="numeric"
+              onChange={(e) => setTier3DayOfMinutes(e.target.value)}
+              onBlur={() => {
+                const n = clampMinutes(Number(tier3DayOfMinutes))
+                if (n == null) {
+                  setErr('Tier 3 minutes must be a whole number from 0 to 1439.')
+                  return
+                }
+                setErr(null)
+                setTier3DayOfMinutes(String(n))
+                void saveSettings({ tier3DayOfMinutes: n })
+              }}
+              className={field}
+            />
+            <span className={hint}>Current local anchor: {fmtMinutesAsTime(Number(tier3DayOfMinutes) || 0)}</span>
+          </label>
+        </div>
+
         <div className="mt-4">
           <div className={`${hint} mb-2`}>Disable last-minute on days</div>
           <div className="flex flex-wrap gap-2">
@@ -498,6 +580,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
               const classes = on
                 ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
                 : 'border-white/10 bg-bgPrimary text-textPrimary'
+
               return (
                 <button
                   key={key}
@@ -525,52 +608,40 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
         {err ? <div className="mt-3 text-[12px] font-black text-toneDanger">{err}</div> : null}
       </section>
 
-      {/* Eligible services */}
       <section className={card}>
-        <div className="text-[14px] font-black text-textPrimary">Eligible services</div>
+        <div className="text-[14px] font-black text-textPrimary">Service eligibility</div>
         <div className={`${hint} mt-1`}>
-          Toggle which services can be booked last-minute. (Rules are per service, not per offering.)
+          Last-minute rules are per service. Enable or disable each service and set an optional minimum collected subtotal.
         </div>
 
         <div className="mt-4 grid gap-3">
-          {services.map((s) => {
-            const rule = ruleByService.get(s.serviceId)
+          {services.map((service) => {
+            const rule = ruleByService.get(service.serviceId)
             const ruleEnabled = rule ? rule.enabled : true
+            const initialRuleMin = rule?.minCollectedSubtotal ?? ''
 
             return (
-              <div
-                key={s.serviceId}
-                className="rounded-card border border-white/10 bg-bgPrimary p-3 flex items-center justify-between gap-3"
-              >
-                <div className="min-w-0">
-                  <div className="text-[13px] font-black text-textPrimary truncate">{s.name}</div>
-                  <div className={hint}>Base price: ${s.basePrice}</div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={busy || !enabled}
-                  onClick={() => void saveRule(s.serviceId, { enabled: !ruleEnabled })}
-                  className={[
-                    'rounded-full border px-4 py-2 text-[12px] font-black transition',
-                    ruleEnabled
-                      ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-                      : 'border-white/10 bg-bgPrimary text-textPrimary',
-                    busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass',
-                  ].join(' ')}
-                >
-                  {ruleEnabled ? 'Enabled' : 'Disabled'}
-                </button>
-              </div>
+              <ServiceRuleRow
+                key={service.serviceId}
+                busy={busy}
+                enabled={enabled}
+                label={service.name}
+                basePrice={service.basePrice}
+                ruleEnabled={ruleEnabled}
+                initialMinCollectedSubtotal={initialRuleMin}
+                onToggle={() => void saveRule(service.serviceId, { enabled: !ruleEnabled })}
+                onSaveMinCollectedSubtotal={(value) => void saveRule(service.serviceId, { minCollectedSubtotal: value })}
+              />
             )
           })}
         </div>
       </section>
 
-      {/* Blocks */}
       <section className={card}>
         <div className="text-[14px] font-black text-textPrimary">Blocks</div>
-        <div className={`${hint} mt-1`}>Block specific time ranges from ever being offered as last-minute.</div>
+        <div className={`${hint} mt-1`}>
+          Block specific time ranges from ever being offered as last-minute openings.
+        </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="grid gap-2">
@@ -636,15 +707,83 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
 
         {err ? <div className="mt-3 text-[12px] font-black text-toneDanger">{err}</div> : null}
       </section>
+    </div>
+  )
+}
 
-      {/* Future */}
-      <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 opacity-90">
-        <div className="text-[14px] font-black text-textPrimary">Coming next</div>
-        <div className={`${hint} mt-1`}>
-          Waitlist-first notifications, hold timers, deposits, and visibility controls (public vs waitlist-only). Luxury
-          access, not a chaotic discount circus.
+function ServiceRuleRow({
+  busy,
+  enabled,
+  label,
+  basePrice,
+  ruleEnabled,
+  initialMinCollectedSubtotal,
+  onToggle,
+  onSaveMinCollectedSubtotal,
+}: {
+  busy: boolean
+  enabled: boolean
+  label: string
+  basePrice: string
+  ruleEnabled: boolean
+  initialMinCollectedSubtotal: string
+  onToggle: () => void
+  onSaveMinCollectedSubtotal: (value: string | null) => void
+}) {
+  const [minCollectedSubtotal, setMinCollectedSubtotal] = useState(initialMinCollectedSubtotal)
+
+  const hint = 'text-[12px] font-semibold text-textSecondary'
+  const field =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+
+  return (
+    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-black text-textPrimary truncate">{label}</div>
+          <div className={hint}>Base price: ${basePrice}</div>
         </div>
-      </section>
+
+        <button
+          type="button"
+          disabled={busy || !enabled}
+          onClick={onToggle}
+          className={[
+            'rounded-full border px-4 py-2 text-[12px] font-black transition',
+            ruleEnabled
+              ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
+              : 'border-white/10 bg-bgPrimary text-textPrimary',
+            busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass',
+          ].join(' ')}
+        >
+          {ruleEnabled ? 'Enabled' : 'Disabled'}
+        </button>
+      </div>
+
+      <div className="mt-3">
+        <label className="grid gap-2">
+          <span className="text-[12px] font-black text-textPrimary">Minimum collected subtotal</span>
+          <input
+            value={minCollectedSubtotal}
+            disabled={busy || !enabled}
+            placeholder="Leave blank to inherit global floor"
+            inputMode="decimal"
+            onChange={(e) => setMinCollectedSubtotal(e.target.value)}
+            onBlur={() => {
+              const v = minCollectedSubtotal.trim()
+              if (!v) {
+                onSaveMinCollectedSubtotal(null)
+                return
+              }
+              if (!isMoney(v)) {
+                return
+              }
+              onSaveMinCollectedSubtotal(v)
+            }}
+            className={field}
+          />
+        </label>
+      </div>
     </div>
   )
 }

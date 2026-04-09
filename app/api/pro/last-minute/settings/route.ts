@@ -1,17 +1,10 @@
 // app/api/pro/last-minute/settings/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { Prisma } from '@prisma/client'
+import { LastMinuteVisibilityMode, Prisma } from '@prisma/client'
 import { parseMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
-
-function clampPct(v: unknown): number | null {
-  const n = typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN
-  if (!Number.isFinite(n)) return null
-  const x = Math.trunc(n)
-  return Math.min(50, Math.max(0, x))
-}
 
 const DAY_FLAGS = [
   'disableMon',
@@ -24,6 +17,123 @@ const DAY_FLAGS = [
 ] as const
 
 type DayFlag = (typeof DAY_FLAGS)[number]
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function hasOwn(obj: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function readBool(obj: Record<string, unknown>, key: string): boolean | undefined {
+  const v = obj[key]
+  return typeof v === 'boolean' ? v : undefined
+}
+
+function readVisibilityMode(
+  obj: Record<string, unknown>,
+  key: string,
+):
+  | { ok: true; value: LastMinuteVisibilityMode }
+  | { ok: false; error: string }
+  | null {
+  if (!hasOwn(obj, key)) return null
+
+  const raw = obj[key]
+  const s = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
+
+  if (s === LastMinuteVisibilityMode.TARGETED_ONLY) {
+    return { ok: true, value: LastMinuteVisibilityMode.TARGETED_ONLY }
+  }
+  if (s === LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY) {
+    return { ok: true, value: LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY }
+  }
+  if (s === LastMinuteVisibilityMode.PUBLIC_IMMEDIATE) {
+    return { ok: true, value: LastMinuteVisibilityMode.PUBLIC_IMMEDIATE }
+  }
+
+  return { ok: false, error: 'defaultVisibilityMode must be TARGETED_ONLY, PUBLIC_AT_DISCOVERY, or PUBLIC_IMMEDIATE.' }
+}
+
+function readMinutesPatch(
+  obj: Record<string, unknown>,
+  key: 'tier2NightBeforeMinutes' | 'tier3DayOfMinutes',
+): { ok: true; value: number } | { ok: false; error: string } | null {
+  if (!hasOwn(obj, key)) return null
+
+  const raw = obj[key]
+  const n = typeof raw === 'number' || typeof raw === 'string' ? Number(raw) : NaN
+
+  if (!Number.isFinite(n)) {
+    return { ok: false, error: `${key} must be a whole number from 0 to 1439.` }
+  }
+
+  const value = Math.trunc(n)
+  if (value < 0 || value > 1439) {
+    return { ok: false, error: `${key} must be a whole number from 0 to 1439.` }
+  }
+
+  return { ok: true, value }
+}
+
+function readMoneyPatch(
+  obj: Record<string, unknown>,
+  key: 'minCollectedSubtotal',
+): { ok: true; value: Prisma.Decimal | null } | { ok: false; error: string } | null {
+  if (!hasOwn(obj, key)) return null
+
+  const raw = obj[key]
+  if (raw === null) {
+    return { ok: true, value: null }
+  }
+
+  try {
+    return { ok: true, value: parseMoney(raw) }
+  } catch {
+    return { ok: false, error: `${key} must be like 80 or 79.99 (or null).` }
+  }
+}
+
+function setDayFlag(args: {
+  key: DayFlag
+  value: boolean
+  updateData: Prisma.LastMinuteSettingsUpdateInput
+  createData: Prisma.LastMinuteSettingsUncheckedCreateInput
+}) {
+  const { key, value, updateData, createData } = args
+
+  switch (key) {
+    case 'disableMon':
+      updateData.disableMon = value
+      createData.disableMon = value
+      return
+    case 'disableTue':
+      updateData.disableTue = value
+      createData.disableTue = value
+      return
+    case 'disableWed':
+      updateData.disableWed = value
+      createData.disableWed = value
+      return
+    case 'disableThu':
+      updateData.disableThu = value
+      createData.disableThu = value
+      return
+    case 'disableFri':
+      updateData.disableFri = value
+      createData.disableFri = value
+      return
+    case 'disableSat':
+      updateData.disableSat = value
+      createData.disableSat = value
+      return
+    case 'disableSun':
+      updateData.disableSun = value
+      createData.disableSun = value
+      return
+  }
+}
 
 export async function GET() {
   try {
@@ -55,58 +165,58 @@ export async function PATCH(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
-    const body: unknown = await req.json().catch(() => ({}))
+    const rawBody: unknown = await req.json().catch(() => ({}))
+    const body = isRecord(rawBody) ? rawBody : {}
 
-    // ✅ Separate objects so Prisma UpdateInput unions never leak into CreateInput.
     const updateData: Prisma.LastMinuteSettingsUpdateInput = {}
     const createData: Prisma.LastMinuteSettingsUncheckedCreateInput = { professionalId }
 
-    if (typeof (body as { enabled?: unknown }).enabled === 'boolean') {
-      const enabled = (body as { enabled: boolean }).enabled
+    const enabled = readBool(body, 'enabled')
+    if (enabled !== undefined) {
       updateData.enabled = enabled
       createData.enabled = enabled
     }
 
-    if (typeof (body as { discountsEnabled?: unknown }).discountsEnabled === 'boolean') {
-      const discountsEnabled = (body as { discountsEnabled: boolean }).discountsEnabled
-      updateData.discountsEnabled = discountsEnabled
-      createData.discountsEnabled = discountsEnabled
+    const visibilityModePatch = readVisibilityMode(body, 'defaultVisibilityMode')
+    if (visibilityModePatch && !visibilityModePatch.ok) {
+      return jsonFail(400, visibilityModePatch.error)
+    }
+    if (visibilityModePatch && visibilityModePatch.ok) {
+      updateData.defaultVisibilityMode = visibilityModePatch.value
+      createData.defaultVisibilityMode = visibilityModePatch.value
     }
 
-    const sameDayPct = clampPct((body as { windowSameDayPct?: unknown }).windowSameDayPct)
-    if (sameDayPct != null) {
-      updateData.windowSameDayPct = sameDayPct
-      createData.windowSameDayPct = sameDayPct
+    const minCollectedSubtotalPatch = readMoneyPatch(body, 'minCollectedSubtotal')
+    if (minCollectedSubtotalPatch && !minCollectedSubtotalPatch.ok) {
+      return jsonFail(400, minCollectedSubtotalPatch.error)
+    }
+    if (minCollectedSubtotalPatch && minCollectedSubtotalPatch.ok) {
+      updateData.minCollectedSubtotal = minCollectedSubtotalPatch.value
+      createData.minCollectedSubtotal = minCollectedSubtotalPatch.value
     }
 
-    const within24Pct = clampPct((body as { window24hPct?: unknown }).window24hPct)
-    if (within24Pct != null) {
-      updateData.window24hPct = within24Pct
-      createData.window24hPct = within24Pct
+    const tier2Patch = readMinutesPatch(body, 'tier2NightBeforeMinutes')
+    if (tier2Patch && !tier2Patch.ok) {
+      return jsonFail(400, tier2Patch.error)
+    }
+    if (tier2Patch && tier2Patch.ok) {
+      updateData.tier2NightBeforeMinutes = tier2Patch.value
+      createData.tier2NightBeforeMinutes = tier2Patch.value
     }
 
-    // ✅ minPrice: accept null or money-ish; store as Prisma.Decimal
-    if (Object.prototype.hasOwnProperty.call(body, 'minPrice')) {
-      const raw = (body as { minPrice?: unknown }).minPrice
-      if (raw === null) {
-        updateData.minPrice = null
-        createData.minPrice = null
-      } else {
-        try {
-          const dec: Prisma.Decimal = parseMoney(raw)
-          updateData.minPrice = dec
-          createData.minPrice = dec
-        } catch {
-          return jsonFail(400, 'minPrice must be like 80 or 79.99 (or null).')
-        }
-      }
+    const tier3Patch = readMinutesPatch(body, 'tier3DayOfMinutes')
+    if (tier3Patch && !tier3Patch.ok) {
+      return jsonFail(400, tier3Patch.error)
+    }
+    if (tier3Patch && tier3Patch.ok) {
+      updateData.tier3DayOfMinutes = tier3Patch.value
+      createData.tier3DayOfMinutes = tier3Patch.value
     }
 
-    for (const k of DAY_FLAGS) {
-      const v = (body as Record<DayFlag, unknown>)[k]
-      if (typeof v === 'boolean') {
-        updateData[k] = v
-        createData[k] = v
+    for (const key of DAY_FLAGS) {
+      const value = readBool(body, key)
+      if (value !== undefined) {
+        setDayFlag({ key, value, updateData, createData })
       }
     }
 

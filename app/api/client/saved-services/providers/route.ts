@@ -2,27 +2,164 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { Prisma, OpeningStatus, VerificationStatus } from '@prisma/client'
+import {
+  LastMinuteOfferType,
+  LastMinuteTier,
+  LastMinuteVisibilityMode,
+  OpeningStatus,
+  Prisma,
+  VerificationStatus,
+} from '@prisma/client'
 import { getRedis } from '@/lib/redis'
 import { createHash } from 'crypto'
 
 export const dynamic = 'force-dynamic'
-// If you’re on Next “edge” runtime, remove crypto usage and I’ll adjust hashing.
-// export const runtime = 'nodejs'
 
-function parseFloatParam(v: string | null) {
+type SavedServiceProviderEntry = {
+  professional: {
+    id: string
+    businessName: string | null
+    handle: string | null
+    avatarUrl: string | null
+    professionType: string | null
+    location: string | null
+  }
+  opening: {
+    id: string
+    serviceId: string
+    offeringId: string
+    startAt: string
+    endAt: string | null
+    discountPct: number | null
+    note: string | null
+    timeZone: string
+    locationType: string
+    locationId: string
+    city: string | null
+    state: string | null
+    formattedAddress: string | null
+    publicIncentive: {
+      tier: LastMinuteTier
+      offerType: LastMinuteOfferType
+      label: string
+      percentOff: number | null
+      amountOff: string | null
+      freeAddOnService: { id: string; name: string } | null
+    } | null
+  }
+  distanceMiles: number
+}
+
+type SavedServiceProvidersPayload = {
+  ok: true
+  byServiceId: Record<string, SavedServiceProviderEntry[]>
+}
+
+const openingSelect = {
+  id: true,
+  professionalId: true,
+  startAt: true,
+  endAt: true,
+  note: true,
+  status: true,
+  visibilityMode: true,
+  publicVisibleFrom: true,
+  publicVisibleUntil: true,
+  bookedAt: true,
+  cancelledAt: true,
+  timeZone: true,
+  locationType: true,
+  locationId: true,
+
+  professional: {
+    select: {
+      id: true,
+      businessName: true,
+      handle: true,
+      avatarUrl: true,
+      professionType: true,
+      location: true,
+    },
+  },
+
+  location: {
+    select: {
+      city: true,
+      state: true,
+      formattedAddress: true,
+      lat: true,
+      lng: true,
+    },
+  },
+
+  services: {
+    where: {
+      offering: {
+        is: {
+          isActive: true,
+        },
+      },
+    },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      serviceId: true,
+      offeringId: true,
+      sortOrder: true,
+      service: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      offering: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  },
+
+  tierPlans: {
+    where: {
+      cancelledAt: null,
+    },
+    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
+    select: {
+      id: true,
+      tier: true,
+      scheduledFor: true,
+      offerType: true,
+      percentOff: true,
+      amountOff: true,
+      freeAddOnService: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.LastMinuteOpeningSelect
+
+type OpeningRow = Prisma.LastMinuteOpeningGetPayload<{
+  select: typeof openingSelect
+}>
+
+type PublicTierPlanRow = OpeningRow['tierPlans'][number]
+
+function parseFloatParam(v: string | null): number | null {
   if (!v) return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
 }
 
-function parseIntParam(v: string | null) {
+function parseIntParam(v: string | null): number | null {
   if (!v) return null
   const n = Number(v)
   return Number.isFinite(n) ? Math.trunc(n) : null
 }
 
-function parseCommaIds(v: string | null) {
+function parseCommaIds(v: string | null): string[] {
   if (!v) return []
   return v
     .split(',')
@@ -31,17 +168,17 @@ function parseCommaIds(v: string | null) {
     .slice(0, 25)
 }
 
-function clampFloat(n: number, min: number, max: number) {
+function clampFloat(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min
   return Math.min(Math.max(n, min), max)
 }
 
-function stableHash(input: unknown) {
+function stableHash(input: unknown): string {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 24)
 }
 
-// Redis helpers (fail-open)
 const redis = getRedis()
+
 async function cacheGetJson<T>(key: string): Promise<T | null> {
   if (!redis) return null
   try {
@@ -52,6 +189,7 @@ async function cacheGetJson<T>(key: string): Promise<T | null> {
     return null
   }
 }
+
 async function cacheSetJson(key: string, value: unknown, ttlSeconds: number): Promise<void> {
   if (!redis) return
   try {
@@ -63,14 +201,17 @@ async function cacheSetJson(key: string, value: unknown, ttlSeconds: number): Pr
 
 function decimalToNumber(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v
+
   if (v && typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
     const n = (v as { toNumber: () => number }).toNumber()
     return Number.isFinite(n) ? n : null
   }
+
   if (v && typeof v === 'object' && typeof (v as { toString?: unknown }).toString === 'function') {
     const n = Number(String((v as { toString: () => string }).toString()))
     return Number.isFinite(n) ? n : null
   }
+
   return null
 }
 
@@ -78,7 +219,7 @@ function toDecimal(n: number): Prisma.Decimal {
   return new Prisma.Decimal(String(n))
 }
 
-function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 3958.7613
   const toRad = (d: number) => (d * Math.PI) / 180
   const dLat = toRad(b.lat - a.lat)
@@ -105,6 +246,62 @@ function boundsForRadiusMiles(centerLat: number, centerLng: number, radiusMiles:
   return { minLat, maxLat, minLng, maxLng }
 }
 
+function pickPublicTierPlan(row: OpeningRow, now: Date): PublicTierPlanRow | null {
+  if (row.tierPlans.length === 0) return null
+
+  if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY) {
+    return row.tierPlans.find((plan) => plan.tier === LastMinuteTier.DISCOVERY) ?? null
+  }
+
+  if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_IMMEDIATE) {
+    const started = row.tierPlans.filter((plan) => plan.scheduledFor.getTime() <= now.getTime())
+    if (started.length > 0) {
+      return started[started.length - 1] ?? null
+    }
+    return row.tierPlans[0] ?? null
+  }
+
+  return null
+}
+
+function incentiveLabel(plan: PublicTierPlanRow): string {
+  if (plan.offerType === LastMinuteOfferType.PERCENT_OFF && plan.percentOff != null) {
+    return `${plan.percentOff}% off`
+  }
+
+  if (plan.offerType === LastMinuteOfferType.AMOUNT_OFF && plan.amountOff) {
+    return `$${plan.amountOff.toString()} off`
+  }
+
+  if (plan.offerType === LastMinuteOfferType.FREE_SERVICE) {
+    return 'Free service'
+  }
+
+  if (plan.offerType === LastMinuteOfferType.FREE_ADD_ON) {
+    return plan.freeAddOnService?.name || 'Free add-on'
+  }
+
+  return 'No incentive'
+}
+
+function mapPublicIncentive(plan: PublicTierPlanRow | null): SavedServiceProviderEntry['opening']['publicIncentive'] {
+  if (!plan) return null
+
+  return {
+    tier: plan.tier,
+    offerType: plan.offerType,
+    label: incentiveLabel(plan),
+    percentOff: plan.percentOff ?? null,
+    amountOff: plan.amountOff ? plan.amountOff.toString() : null,
+    freeAddOnService: plan.freeAddOnService
+      ? {
+          id: plan.freeAddOnService.id,
+          name: plan.freeAddOnService.name,
+        }
+      : null,
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
@@ -127,125 +324,117 @@ export async function GET(req: Request) {
     const days = Math.min(Math.max(daysRaw ?? 14, 1), 30)
     const perService = Math.min(Math.max(perServiceRaw ?? 10, 1), 20)
 
-    const cacheKey = ['client:savedSvcProviders:v1', stableHash({ serviceIds, lat, lng, radiusMiles, days, perService })].join(
-      ':',
-    )
-    const cached = await cacheGetJson<{ ok: true; byServiceId: Record<string, unknown> }>(cacheKey)
-    if (cached?.byServiceId) return jsonOk(cached)
+    const cacheKey = [
+      'client:savedSvcProviders:v2',
+      stableHash({ serviceIds, lat, lng, radiusMiles, days, perService }),
+    ].join(':')
+
+    const cached = await cacheGetJson<SavedServiceProvidersPayload>(cacheKey)
+    if (cached?.byServiceId) {
+      return jsonOk(cached)
+    }
 
     const now = new Date()
     const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
-
     const bounds = boundsForRadiusMiles(lat, lng, radiusMiles)
 
     const rows = await prisma.lastMinuteOpening.findMany({
       where: {
         status: OpeningStatus.ACTIVE,
+        bookedAt: null,
+        cancelledAt: null,
         startAt: { gte: now, lte: until },
-
-        // service match: either direct serviceId, or opening tied to an offering for that service
-        OR: [
-          { serviceId: { in: serviceIds } },
-          { offering: { is: { serviceId: { in: serviceIds } } } },
-        ],
-
+        publicVisibleFrom: { lte: now },
+        OR: [{ publicVisibleUntil: null }, { publicVisibleUntil: { gt: now } }],
+        services: {
+          some: {
+            serviceId: { in: serviceIds },
+            offering: {
+              is: {
+                isActive: true,
+              },
+            },
+          },
+        },
         professional: {
           verificationStatus: VerificationStatus.APPROVED,
         },
-
         location: {
           isBookable: true,
           lat: { not: null, gte: toDecimal(bounds.minLat), lte: toDecimal(bounds.maxLat) },
           lng: { not: null, gte: toDecimal(bounds.minLng), lte: toDecimal(bounds.maxLng) },
         },
       },
-      orderBy: { startAt: 'asc' },
+      orderBy: [{ startAt: 'asc' }, { id: 'asc' }],
       take: 800,
-      select: {
-        id: true,
-        startAt: true,
-        endAt: true,
-        discountPct: true,
-        note: true,
-        timeZone: true,
-        locationType: true,
-        locationId: true,
-        serviceId: true,
-
-        offering: { select: { serviceId: true } },
-
-        professional: {
-          select: {
-            id: true,
-            businessName: true,
-            handle: true,
-            avatarUrl: true,
-            professionType: true,
-            location: true,
-          },
-        },
-
-        location: {
-          select: {
-            city: true,
-            state: true,
-            formattedAddress: true,
-            lat: true,
-            lng: true,
-          },
-        },
-      },
+      select: openingSelect,
     })
 
     const center = { lat, lng }
+    const requestedServiceIds = new Set(serviceIds)
+    const byServiceId: Record<string, SavedServiceProviderEntry[]> = {}
 
-    // Build byServiceId with “one best opening per pro” (per service), then trim to perService
-    const byServiceId: Record<string, Array<any>> = {}
-
-    for (const r of rows) {
-      const resolvedServiceId = (r.serviceId ?? r.offering?.serviceId ?? '').trim()
-      if (!resolvedServiceId) continue
-
-      const locLat = decimalToNumber(r.location.lat)
-      const locLng = decimalToNumber(r.location.lng)
+    for (const row of rows) {
+      const locLat = decimalToNumber(row.location.lat)
+      const locLng = decimalToNumber(row.location.lng)
       if (locLat == null || locLng == null) continue
 
-      const d = haversineMiles(center, { lat: locLat, lng: locLng })
-      if (d > radiusMiles) continue
+      const distanceMiles = haversineMiles(center, { lat: locLat, lng: locLng })
+      if (distanceMiles > radiusMiles) continue
 
-      const entry = {
-        professional: {
-          id: r.professional.id,
-          businessName: r.professional.businessName ?? null,
-          handle: r.professional.handle ?? null,
-          avatarUrl: r.professional.avatarUrl ?? null,
-          professionType: r.professional.professionType ?? null,
-          location: r.professional.location ?? null,
-        },
-        opening: {
-          id: r.id,
-          startAt: r.startAt.toISOString(),
-          endAt: r.endAt ? r.endAt.toISOString() : null,
-          discountPct: typeof r.discountPct === 'number' ? r.discountPct : null,
-          note: r.note ?? null,
-          timeZone: r.timeZone,
-          locationType: String(r.locationType),
-          locationId: r.locationId,
-          city: r.location.city ?? null,
-          state: r.location.state ?? null,
-          formattedAddress: r.location.formattedAddress ?? null,
-        },
-        distanceMiles: Math.round(d * 10) / 10,
+      const publicPlan = pickPublicTierPlan(row, now)
+      const publicIncentive = mapPublicIncentive(publicPlan)
+      const derivedDiscountPct =
+        publicPlan?.offerType === LastMinuteOfferType.PERCENT_OFF ? publicPlan.percentOff ?? null : null
+
+      const matchedServices = row.services.filter((serviceRow) => requestedServiceIds.has(serviceRow.serviceId))
+
+      for (const serviceRow of matchedServices) {
+        const resolvedServiceId = serviceRow.serviceId.trim()
+        if (!resolvedServiceId) continue
+
+        const entry: SavedServiceProviderEntry = {
+          professional: {
+            id: row.professional.id,
+            businessName: row.professional.businessName ?? null,
+            handle: row.professional.handle ?? null,
+            avatarUrl: row.professional.avatarUrl ?? null,
+            professionType: row.professional.professionType ?? null,
+            location: row.professional.location ?? null,
+          },
+          opening: {
+            id: row.id,
+            serviceId: resolvedServiceId,
+            offeringId: serviceRow.offeringId,
+            startAt: row.startAt.toISOString(),
+            endAt: row.endAt ? row.endAt.toISOString() : null,
+            discountPct: derivedDiscountPct,
+            note: row.note ?? null,
+            timeZone: row.timeZone,
+            locationType: String(row.locationType),
+            locationId: row.locationId,
+            city: row.location.city ?? null,
+            state: row.location.state ?? null,
+            formattedAddress: row.location.formattedAddress ?? null,
+            publicIncentive,
+          },
+          distanceMiles: Math.round(distanceMiles * 10) / 10,
+        }
+
+        if (!byServiceId[resolvedServiceId]) {
+          byServiceId[resolvedServiceId] = []
+        }
+
+        const existingIdx = byServiceId[resolvedServiceId].findIndex(
+          (x) => x.professional.id === entry.professional.id,
+        )
+
+        if (existingIdx === -1) {
+          byServiceId[resolvedServiceId].push(entry)
+        }
       }
-
-      if (!byServiceId[resolvedServiceId]) byServiceId[resolvedServiceId] = []
-
-      // Dedupe per pro per service: keep earliest (rows are already sorted by startAt asc)
-      const existingIdx = byServiceId[resolvedServiceId].findIndex((x) => x.professional.id === entry.professional.id)
-      if (existingIdx === -1) byServiceId[resolvedServiceId].push(entry)
     }
 
-    // Sort inside each service: soonest first, then closer
     for (const sid of Object.keys(byServiceId)) {
       byServiceId[sid].sort((a, b) => {
         const ta = new Date(a.opening.startAt).getTime()
@@ -256,7 +445,7 @@ export async function GET(req: Request) {
       byServiceId[sid] = byServiceId[sid].slice(0, perService)
     }
 
-    const payload = { ok: true as const, byServiceId }
+    const payload: SavedServiceProvidersPayload = { ok: true, byServiceId }
     void cacheSetJson(cacheKey, payload, 30)
 
     return jsonOk(payload)

@@ -4,32 +4,50 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
+const MAX_REASON_LENGTH = 200
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-function toDateOrNull(v: unknown) {
+async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
+  const raw: unknown = await req.json().catch(() => ({}))
+  return isRecord(raw) ? raw : {}
+}
+
+function toDateOrNull(v: unknown): Date | null {
   const s = pickString(v)
   if (!s) return null
   const d = new Date(s)
   return Number.isFinite(d.getTime()) ? d : null
 }
 
+function cleanReason(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const trimmed = v.trim()
+  if (!trimmed) return null
+  return trimmed.slice(0, MAX_REASON_LENGTH)
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
-    const raw = (await req.json().catch(() => null)) as unknown
-    const body = isRecord(raw) ? raw : {}
+    const professionalId = auth.professionalId
+    const body = await readJsonObject(req)
 
     const startAt = toDateOrNull(body.startAt)
     const endAt = toDateOrNull(body.endAt)
-    const reason = pickString(body.reason)
+    const reason = cleanReason(body.reason)
 
-    if (!startAt || !endAt) return jsonFail(400, 'Invalid start/end.')
-    if (startAt >= endAt) return jsonFail(400, 'Block end must be after start.')
+    if (!startAt || !endAt) {
+      return jsonFail(400, 'Invalid startAt or endAt.')
+    }
+
+    if (startAt.getTime() >= endAt.getTime()) {
+      return jsonFail(400, 'Block end must be after start.')
+    }
 
     const settings = await prisma.lastMinuteSettings.upsert({
       where: { professionalId },
@@ -52,8 +70,18 @@ export async function POST(req: Request) {
     }
 
     const block = await prisma.lastMinuteBlock.create({
-      data: { settingsId: settings.id, startAt, endAt, reason: reason ?? null },
-      select: { id: true, startAt: true, endAt: true, reason: true },
+      data: {
+        settingsId: settings.id,
+        startAt,
+        endAt,
+        reason,
+      },
+      select: {
+        id: true,
+        startAt: true,
+        endAt: true,
+        reason: true,
+      },
     })
 
     return jsonOk(
@@ -77,23 +105,41 @@ export async function DELETE(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
+    const professionalId = auth.professionalId
     const { searchParams } = new URL(req.url)
     const id = pickString(searchParams.get('id'))
-    if (!id) return jsonFail(400, 'Missing id.')
+
+    if (!id) {
+      return jsonFail(400, 'Missing id.')
+    }
 
     const settings = await prisma.lastMinuteSettings.findUnique({
       where: { professionalId },
       select: { id: true },
     })
-    if (!settings) return jsonFail(404, 'No settings.')
 
-    const del = await prisma.lastMinuteBlock.deleteMany({
-      where: { id, settingsId: settings.id },
+    if (!settings) {
+      return jsonFail(404, 'Last-minute settings not found.')
+    }
+
+    const existing = await prisma.lastMinuteBlock.findFirst({
+      where: {
+        id,
+        settingsId: settings.id,
+      },
+      select: { id: true },
     })
 
-    return jsonOk({ ok: true, deleted: del.count }, 200)
+    if (!existing) {
+      return jsonFail(404, 'Block not found.')
+    }
+
+    await prisma.lastMinuteBlock.delete({
+      where: { id: existing.id },
+    })
+
+    return jsonOk({ ok: true, deleted: 1, id: existing.id }, 200)
   } catch (e) {
     console.error('DELETE /api/pro/last-minute/blocks error', e)
     return jsonFail(500, 'Failed to delete block.')

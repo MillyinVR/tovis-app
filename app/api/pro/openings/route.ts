@@ -1,10 +1,22 @@
 // app/api/pro/openings/route.ts
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, OpeningStatus, ServiceLocationType } from '@prisma/client'
+import {
+  CreateLastMinuteOpeningError,
+  createLastMinuteOpening,
+  type CreateLastMinuteOpeningTierInput,
+  type CreatedLastMinuteOpening,
+} from '@/lib/lastMinute/commands/createLastMinuteOpening'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
-import { pickBookableLocation } from '@/lib/booking/pickLocation'
-import { isValidIanaTimeZone } from '@/lib/timeZone'
+import {
+  LastMinuteOfferType,
+  LastMinuteRecipientStatus,
+  LastMinuteTier,
+  LastMinuteVisibilityMode,
+  OpeningStatus,
+  Prisma,
+  ServiceLocationType,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,10 +26,6 @@ const DEFAULT_HOURS = 48
 const MAX_LOOKAHEAD_HOURS = 24 * 14
 const DEFAULT_TAKE = 100
 const MAX_TAKE = 200
-const OPENING_FUTURE_BUFFER_MINUTES = 5
-const MAX_SLOT_DURATION_MINUTES = 12 * 60
-const MAX_BUFFER_MINUTES = 180
-const MAX_OTHER_OVERLAP_MINUTES = MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 const MAX_NOTE_LENGTH = 500
 
 async function readJsonObject(req: Request): Promise<JsonObject> {
@@ -25,10 +33,10 @@ async function readJsonObject(req: Request): Promise<JsonObject> {
   return isRecord(raw) ? raw : {}
 }
 
-function clampInt(n: number, min: number, max: number) {
-  const value = Math.trunc(Number(n))
-  if (!Number.isFinite(value)) return min
-  return Math.max(min, Math.min(max, value))
+function clampInt(value: number, min: number, max: number): number {
+  const n = Math.trunc(Number(value))
+  if (!Number.isFinite(n)) return min
+  return Math.max(min, Math.min(max, n))
 }
 
 function parseIntParam(v: string | null): number | null {
@@ -37,7 +45,6 @@ function parseIntParam(v: string | null): number | null {
 
   const n = Number(s)
   if (!Number.isFinite(n)) return null
-
   return Math.trunc(n)
 }
 
@@ -49,23 +56,32 @@ function parseIsoDate(v: unknown): Date | null {
   return Number.isFinite(d.getTime()) ? d : null
 }
 
-function addMinutes(d: Date, minutes: number) {
-  return new Date(d.getTime() + minutes * 60_000)
+function cleanOptionalString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
 }
 
-function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-  return aStart < bEnd && bStart < aEnd
+function parseNote(value: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true, value: null }
+  if (typeof value !== 'string') return { ok: false, error: 'Invalid note.' }
+
+  const trimmed = value.trim()
+  return {
+    ok: true,
+    value: trimmed ? trimmed.slice(0, MAX_NOTE_LENGTH) : null,
+  }
 }
 
-function normalizeLocationType(v: unknown): ServiceLocationType | null {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
-  if (s === 'SALON') return ServiceLocationType.SALON
-  if (s === 'MOBILE') return ServiceLocationType.MOBILE
+function normalizeLocationType(value: unknown): ServiceLocationType | null {
+  const s = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
+  if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
   return null
 }
 
-function parseOpeningStatus(v: unknown): OpeningStatus | null {
-  const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+function normalizeOpeningStatus(value: unknown): OpeningStatus | null {
+  const s = typeof value === 'string' ? value.trim().toUpperCase() : ''
   if (s === OpeningStatus.ACTIVE) return OpeningStatus.ACTIVE
   if (s === OpeningStatus.BOOKED) return OpeningStatus.BOOKED
   if (s === OpeningStatus.EXPIRED) return OpeningStatus.EXPIRED
@@ -73,190 +89,388 @@ function parseOpeningStatus(v: unknown): OpeningStatus | null {
   return null
 }
 
-function parseDiscountPctInput(
-  v: unknown,
-  mode: 'post' | 'patch',
-): { ok: true; isSet: boolean; value: number | null } | { ok: false } {
-  if (v === undefined) {
-    return mode === 'patch'
-      ? { ok: true, isSet: false, value: null }
-      : { ok: true, isSet: true, value: null }
-  }
-
-  if (v === null) {
-    return { ok: true, isSet: true, value: null }
-  }
-
-  if (typeof v === 'string' && v.trim() === '') {
-    return { ok: true, isSet: true, value: null }
-  }
-
-  const n = typeof v === 'number' ? v : Number(v)
-  if (!Number.isFinite(n)) return { ok: false }
-
-  const rounded = Math.round(n)
-  if (rounded < 0 || rounded > 90) return { ok: false }
-
-  return { ok: true, isSet: true, value: rounded }
+function normalizeVisibilityMode(value: unknown): LastMinuteVisibilityMode | null {
+  const s = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  if (s === LastMinuteVisibilityMode.TARGETED_ONLY) return LastMinuteVisibilityMode.TARGETED_ONLY
+  if (s === LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY) return LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY
+  if (s === LastMinuteVisibilityMode.PUBLIC_IMMEDIATE) return LastMinuteVisibilityMode.PUBLIC_IMMEDIATE
+  return null
 }
 
-function parseNoteInput(
-  v: unknown,
-  mode: 'post' | 'patch',
-): { ok: true; isSet: boolean; value: string | null } | { ok: false } {
-  if (v === undefined) {
-    return mode === 'patch'
-      ? { ok: true, isSet: false, value: null }
-      : { ok: true, isSet: true, value: null }
-  }
-
-  if (v === null) {
-    return { ok: true, isSet: true, value: null }
-  }
-
-  if (typeof v !== 'string') {
-    return { ok: false }
-  }
-
-  const trimmed = v.trim()
-  if (!trimmed) {
-    return { ok: true, isSet: true, value: null }
-  }
-
-  return {
-    ok: true,
-    isSet: true,
-    value: trimmed.slice(0, MAX_NOTE_LENGTH),
-  }
+function normalizeTier(value: unknown): LastMinuteTier | null {
+  const s = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  if (s === LastMinuteTier.WAITLIST) return LastMinuteTier.WAITLIST
+  if (s === LastMinuteTier.REACTIVATION) return LastMinuteTier.REACTIVATION
+  if (s === LastMinuteTier.DISCOVERY) return LastMinuteTier.DISCOVERY
+  return null
 }
 
-function resolveOpeningLocationType(args: {
-  requested: ServiceLocationType | null
-  offersInSalon: boolean
-  offersMobile: boolean
-}): { ok: true; locationType: ServiceLocationType } | { ok: false; error: string } {
-  const { requested, offersInSalon, offersMobile } = args
+function normalizeOfferType(value: unknown): LastMinuteOfferType | null {
+  const s = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  if (s === LastMinuteOfferType.NONE) return LastMinuteOfferType.NONE
+  if (s === LastMinuteOfferType.PERCENT_OFF) return LastMinuteOfferType.PERCENT_OFF
+  if (s === LastMinuteOfferType.AMOUNT_OFF) return LastMinuteOfferType.AMOUNT_OFF
+  if (s === LastMinuteOfferType.FREE_SERVICE) return LastMinuteOfferType.FREE_SERVICE
+  if (s === LastMinuteOfferType.FREE_ADD_ON) return LastMinuteOfferType.FREE_ADD_ON
+  return null
+}
 
-  if (requested === ServiceLocationType.SALON) {
-    if (!offersInSalon) {
-      return { ok: false, error: 'This offering does not support salon openings.' }
+function parseOfferingIds(value: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: 'offeringIds must be an array.' }
+  }
+
+  const offeringIds = Array.from(
+    new Set(
+      value
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter((entry) => entry.length > 0),
+    ),
+  )
+
+  if (offeringIds.length === 0) {
+    return { ok: false, error: 'Select at least one offering.' }
+  }
+
+  return { ok: true, value: offeringIds }
+}
+
+function parseTierPlans(
+  value: unknown,
+): { ok: true; value: CreateLastMinuteOpeningTierInput[] } | { ok: false; error: string } {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: 'tierPlans must be an array.' }
+  }
+
+  const plans: CreateLastMinuteOpeningTierInput[] = []
+
+  for (const raw of value) {
+    if (!isRecord(raw)) {
+      return { ok: false, error: 'Each tier plan must be an object.' }
     }
-    return { ok: true, locationType: ServiceLocationType.SALON }
-  }
 
-  if (requested === ServiceLocationType.MOBILE) {
-    if (!offersMobile) {
-      return { ok: false, error: 'This offering does not support mobile openings.' }
+    const tier = normalizeTier(raw.tier)
+    if (!tier) {
+      return { ok: false, error: 'Each tier plan must include a valid tier.' }
     }
-    return { ok: true, locationType: ServiceLocationType.MOBILE }
+
+    const offerTypeRaw = raw.offerType
+    const offerType =
+      offerTypeRaw === undefined || offerTypeRaw === null
+        ? undefined
+        : normalizeOfferType(offerTypeRaw)
+
+    if (offerTypeRaw !== undefined && offerTypeRaw !== null && !offerType) {
+      return { ok: false, error: `Invalid offerType for ${tier}.` }
+    }
+
+    let percentOff: number | null | undefined = undefined
+    if (raw.percentOff !== undefined && raw.percentOff !== null && raw.percentOff !== '') {
+      const n = Number(raw.percentOff)
+      if (!Number.isFinite(n)) {
+        return { ok: false, error: `percentOff for ${tier} must be numeric.` }
+      }
+      percentOff = Math.trunc(n)
+    } else if (raw.percentOff === null || raw.percentOff === '') {
+      percentOff = null
+    }
+
+    let amountOff: string | number | null | undefined = undefined
+    if (raw.amountOff !== undefined) {
+      if (
+        raw.amountOff === null ||
+        raw.amountOff === '' ||
+        typeof raw.amountOff === 'number' ||
+        typeof raw.amountOff === 'string'
+      ) {
+        amountOff = raw.amountOff as string | number | null
+      } else {
+        return { ok: false, error: `amountOff for ${tier} must be a string, number, or null.` }
+      }
+    }
+
+    const freeAddOnServiceId = cleanOptionalString(raw.freeAddOnServiceId)
+
+    plans.push({
+      tier,
+      offerType,
+      percentOff,
+      amountOff,
+      freeAddOnServiceId,
+    })
   }
 
-  if (offersInSalon && offersMobile) {
-    return { ok: false, error: 'Pick a locationType for this opening.' }
-  }
-
-  if (offersInSalon) {
-    return { ok: true, locationType: ServiceLocationType.SALON }
-  }
-
-  if (offersMobile) {
-    return { ok: true, locationType: ServiceLocationType.MOBILE }
-  }
-
-  return { ok: false, error: 'This offering is not available for salon or mobile openings.' }
+  return { ok: true, value: plans }
 }
 
-function computeDurationMinutes(args: {
-  locationType: ServiceLocationType
-  offering: {
-    salonDurationMinutes: number | null
-    mobileDurationMinutes: number | null
-    service: { defaultDurationMinutes: number }
-  }
-}) {
-  const { locationType, offering } = args
+const openingSelect = {
+  id: true,
+  professionalId: true,
+  locationType: true,
+  locationId: true,
+  timeZone: true,
+  startAt: true,
+  endAt: true,
+  status: true,
+  visibilityMode: true,
+  launchAt: true,
+  expiresAt: true,
+  publicVisibleFrom: true,
+  publicVisibleUntil: true,
+  bookedAt: true,
+  cancelledAt: true,
+  note: true,
+  createdAt: true,
+  updatedAt: true,
+  location: {
+    select: {
+      id: true,
+      type: true,
+      name: true,
+      city: true,
+      state: true,
+      formattedAddress: true,
+      timeZone: true,
+      lat: true,
+      lng: true,
+    },
+  },
+  services: {
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      openingId: true,
+      serviceId: true,
+      offeringId: true,
+      sortOrder: true,
+      createdAt: true,
+      service: {
+        select: {
+          id: true,
+          name: true,
+          minPrice: true,
+          defaultDurationMinutes: true,
+          isAddOnEligible: true,
+          addOnGroup: true,
+        },
+      },
+      offering: {
+        select: {
+          id: true,
+          title: true,
+          offersInSalon: true,
+          offersMobile: true,
+          salonPriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobilePriceStartingAt: true,
+          mobileDurationMinutes: true,
+        },
+      },
+    },
+  },
+  tierPlans: {
+    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
+    select: {
+      id: true,
+      openingId: true,
+      tier: true,
+      scheduledFor: true,
+      processedAt: true,
+      cancelledAt: true,
+      lastError: true,
+      offerType: true,
+      percentOff: true,
+      amountOff: true,
+      freeAddOnServiceId: true,
+      freeAddOnService: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
+  _count: {
+    select: {
+      recipients: true,
+    },
+  },
+} satisfies Prisma.LastMinuteOpeningSelect
 
-  const modeDuration =
-    locationType === ServiceLocationType.MOBILE
-      ? offering.mobileDurationMinutes
-      : offering.salonDurationMinutes
+type OpeningRow = Prisma.LastMinuteOpeningGetPayload<{
+  select: typeof openingSelect
+}>
 
-  const fallbackDuration = offering.service.defaultDurationMinutes || 60
-  const picked =
-    typeof modeDuration === 'number' && Number.isFinite(modeDuration) && modeDuration > 0
-      ? modeDuration
-      : fallbackDuration
-
-  return clampInt(picked, 15, MAX_SLOT_DURATION_MINUTES)
+function decimalToString(value: Prisma.Decimal | null): string | null {
+  return value ? value.toString() : null
 }
 
-function pickHoldDurationMinutes(args: {
-  locationType: ServiceLocationType
-  salonDurationMinutes: number | null
-  mobileDurationMinutes: number | null
-}) {
-  const raw =
-    args.locationType === ServiceLocationType.MOBILE
-      ? args.mobileDurationMinutes
-      : args.salonDurationMinutes
-
-  const n = Number(raw ?? 0)
-  if (!Number.isFinite(n) || n <= 0) return 60
-  return clampInt(n, 15, MAX_SLOT_DURATION_MINUTES)
-}
-
-function mapOpeningDto(opening: {
-  id: string
-  status: OpeningStatus
-  startAt: Date
-  endAt: Date | null
-  discountPct: number | null
-  note: string | null
-  offeringId: string | null
-  serviceId: string | null
-  locationType: ServiceLocationType
-  locationId: string
-  timeZone: string
-  _count?: { notifications: number }
-  offering?: { id: string; title: string | null; service: { id: string; name: string } | null } | null
-  service?: { id: string; name: string } | null
-}) {
+function mapOpeningDto(opening: OpeningRow) {
   return {
     id: opening.id,
+    professionalId: opening.professionalId,
     status: opening.status,
+    visibilityMode: opening.visibilityMode,
     startAt: opening.startAt.toISOString(),
     endAt: opening.endAt ? opening.endAt.toISOString() : null,
-    discountPct: opening.discountPct ?? null,
+    launchAt: opening.launchAt ? opening.launchAt.toISOString() : null,
+    expiresAt: opening.expiresAt ? opening.expiresAt.toISOString() : null,
+    publicVisibleFrom: opening.publicVisibleFrom ? opening.publicVisibleFrom.toISOString() : null,
+    publicVisibleUntil: opening.publicVisibleUntil ? opening.publicVisibleUntil.toISOString() : null,
+    bookedAt: opening.bookedAt ? opening.bookedAt.toISOString() : null,
+    cancelledAt: opening.cancelledAt ? opening.cancelledAt.toISOString() : null,
     note: opening.note ?? null,
-    offeringId: opening.offeringId ?? null,
-    serviceId: opening.serviceId ?? null,
 
     locationType: opening.locationType,
     locationId: opening.locationId,
     timeZone: opening.timeZone,
-
-    notificationsCount: opening._count?.notifications ?? 0,
-
-    offering: opening.offering
+    location: opening.location
       ? {
-          id: opening.offering.id,
-          title: opening.offering.title ?? null,
-          service: opening.offering.service
-            ? {
-                id: opening.offering.service.id,
-                name: opening.offering.service.name,
-              }
-            : null,
+          id: opening.location.id,
+          type: opening.location.type,
+          name: opening.location.name ?? null,
+          city: opening.location.city ?? null,
+          state: opening.location.state ?? null,
+          formattedAddress: opening.location.formattedAddress ?? null,
+          timeZone: opening.location.timeZone ?? null,
+          lat: opening.location.lat ? opening.location.lat.toString() : null,
+          lng: opening.location.lng ? opening.location.lng.toString() : null,
         }
       : null,
 
-    service: opening.service
-      ? {
-          id: opening.service.id,
-          name: opening.service.name,
-        }
-      : null,
+    recipientCount: opening._count.recipients,
+
+    services: opening.services.map((row) => ({
+      id: row.id,
+      openingId: row.openingId,
+      serviceId: row.serviceId,
+      offeringId: row.offeringId,
+      sortOrder: row.sortOrder,
+      createdAt: row.createdAt.toISOString(),
+      service: {
+        id: row.service.id,
+        name: row.service.name,
+        minPrice: row.service.minPrice.toString(),
+        defaultDurationMinutes: row.service.defaultDurationMinutes,
+        isAddOnEligible: row.service.isAddOnEligible,
+        addOnGroup: row.service.addOnGroup ?? null,
+      },
+      offering: {
+        id: row.offering.id,
+        title: row.offering.title ?? null,
+        offersInSalon: row.offering.offersInSalon,
+        offersMobile: row.offering.offersMobile,
+        salonPriceStartingAt: decimalToString(row.offering.salonPriceStartingAt),
+        salonDurationMinutes: row.offering.salonDurationMinutes,
+        mobilePriceStartingAt: decimalToString(row.offering.mobilePriceStartingAt),
+        mobileDurationMinutes: row.offering.mobileDurationMinutes,
+      },
+    })),
+
+    tierPlans: opening.tierPlans.map((plan) => ({
+      id: plan.id,
+      openingId: plan.openingId,
+      tier: plan.tier,
+      scheduledFor: plan.scheduledFor.toISOString(),
+      processedAt: plan.processedAt ? plan.processedAt.toISOString() : null,
+      cancelledAt: plan.cancelledAt ? plan.cancelledAt.toISOString() : null,
+      lastError: plan.lastError ?? null,
+      offerType: plan.offerType,
+      percentOff: plan.percentOff ?? null,
+      amountOff: decimalToString(plan.amountOff),
+      freeAddOnServiceId: plan.freeAddOnServiceId ?? null,
+      freeAddOnService: plan.freeAddOnService
+        ? {
+            id: plan.freeAddOnService.id,
+            name: plan.freeAddOnService.name,
+          }
+        : null,
+      createdAt: plan.createdAt.toISOString(),
+      updatedAt: plan.updatedAt.toISOString(),
+    })),
   }
+}
+
+function handleCreateError(error: unknown): Response | null {
+  if (error instanceof CreateLastMinuteOpeningError) {
+    return jsonFail(error.status, error.message, { code: error.code })
+  }
+  return null
+}
+
+async function cancelOpening(args: {
+  professionalId: string
+  openingId: string
+}): Promise<
+  | { ok: true; openingId: string; alreadyCancelled: boolean }
+  | { ok: false; status: number; error: string }
+> {
+  const { professionalId, openingId } = args
+
+  const existing = await prisma.lastMinuteOpening.findFirst({
+    where: {
+      id: openingId,
+      professionalId,
+    },
+    select: {
+      id: true,
+      status: true,
+      cancelledAt: true,
+      bookedAt: true,
+    },
+  })
+
+  if (!existing) {
+    return { ok: false, status: 404, error: 'Opening not found.' }
+  }
+
+  if (existing.status === OpeningStatus.BOOKED || existing.bookedAt) {
+    return { ok: false, status: 409, error: 'Booked openings cannot be cancelled.' }
+  }
+
+  if (existing.status === OpeningStatus.CANCELLED || existing.cancelledAt) {
+    return { ok: true, openingId: existing.id, alreadyCancelled: true }
+  }
+
+  const now = new Date()
+
+  await prisma.$transaction(async (tx) => {
+    await tx.lastMinuteOpening.update({
+      where: { id: existing.id },
+      data: {
+        status: OpeningStatus.CANCELLED,
+        cancelledAt: now,
+        publicVisibleUntil: now,
+      },
+    })
+
+    await tx.lastMinuteTierPlan.updateMany({
+      where: {
+        openingId: existing.id,
+        processedAt: null,
+        cancelledAt: null,
+      },
+      data: {
+        cancelledAt: now,
+      },
+    })
+
+    await tx.lastMinuteRecipient.updateMany({
+      where: {
+        openingId: existing.id,
+        status: { in: [LastMinuteRecipientStatus.PLANNED, LastMinuteRecipientStatus.ENQUEUED] },
+        cancelledAt: null,
+      },
+      data: {
+        status: LastMinuteRecipientStatus.CANCELLED,
+        cancelledAt: now,
+      },
+    })
+  })
+
+  return { ok: true, openingId: existing.id, alreadyCancelled: false }
 }
 
 export async function GET(req: Request) {
@@ -266,11 +480,10 @@ export async function GET(req: Request) {
     const professionalId = auth.professionalId
 
     const url = new URL(req.url)
-
     const hoursParam = parseIntParam(url.searchParams.get('hours'))
     const daysParam = parseIntParam(url.searchParams.get('days'))
     const takeParam = parseIntParam(url.searchParams.get('take'))
-    const statusParam = parseOpeningStatus(url.searchParams.get('status'))
+    const statusParam = normalizeOpeningStatus(url.searchParams.get('status'))
 
     let hours = DEFAULT_HOURS
     if (typeof hoursParam === 'number') {
@@ -282,7 +495,7 @@ export async function GET(req: Request) {
     const take = typeof takeParam === 'number' ? clampInt(takeParam, 1, MAX_TAKE) : DEFAULT_TAKE
 
     const now = new Date()
-    const horizon = addMinutes(now, hours * 60)
+    const horizon = new Date(now.getTime() + hours * 60 * 60_000)
 
     const openings = await prisma.lastMinuteOpening.findMany({
       where: {
@@ -290,30 +503,9 @@ export async function GET(req: Request) {
         ...(statusParam ? { status: statusParam } : {}),
         startAt: { gte: now, lte: horizon },
       },
-      orderBy: { startAt: 'asc' },
+      orderBy: [{ startAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       take,
-      select: {
-        id: true,
-        startAt: true,
-        endAt: true,
-        status: true,
-        discountPct: true,
-        note: true,
-        offeringId: true,
-        serviceId: true,
-        locationType: true,
-        locationId: true,
-        timeZone: true,
-        _count: { select: { notifications: true } },
-        offering: {
-          select: {
-            id: true,
-            title: true,
-            service: { select: { id: true, name: true } },
-          },
-        },
-        service: { select: { id: true, name: true } },
-      },
+      select: openingSelect,
     })
 
     return jsonOk(
@@ -336,279 +528,69 @@ export async function POST(req: Request) {
 
     const body = await readJsonObject(req)
 
-    const offeringId = pickString(body.offeringId)
+    const offeringIdsResult = parseOfferingIds(body.offeringIds)
+    if (!offeringIdsResult.ok) {
+      return jsonFail(400, offeringIdsResult.error)
+    }
+
     const startAt = parseIsoDate(body.startAt)
-    const endAtRaw = parseIsoDate(body.endAt)
-    const requestedLocationType = normalizeLocationType(body.locationType)
-    const requestedLocationId = pickString(body.locationId)
-
-    const noteInput = parseNoteInput(body.note, 'post')
-    if (!noteInput.ok) {
-      return jsonFail(400, 'Invalid note.')
+    if (!startAt) {
+      return jsonFail(400, 'Missing or invalid startAt.')
     }
 
-    const discountInput = parseDiscountPctInput(body.discountPct, 'post')
-    if (!discountInput.ok) {
-      return jsonFail(400, 'Invalid discountPct. Must be 0–90 (or null).')
+    const endAt = body.endAt === undefined || body.endAt === null ? null : parseIsoDate(body.endAt)
+    if (body.endAt !== undefined && body.endAt !== null && !endAt) {
+      return jsonFail(400, 'Invalid endAt.')
     }
 
-    const note = noteInput.value
-    const discountPct = discountInput.value
-
-    if (!offeringId || !startAt) {
-      return jsonFail(400, 'Missing offeringId or startAt.')
+    const launchAt = body.launchAt === undefined || body.launchAt === null ? null : parseIsoDate(body.launchAt)
+    if (body.launchAt !== undefined && body.launchAt !== null && !launchAt) {
+      return jsonFail(400, 'Invalid launchAt.')
     }
 
-    const now = new Date()
-    if (startAt.getTime() < addMinutes(now, OPENING_FUTURE_BUFFER_MINUTES).getTime()) {
-      return jsonFail(400, 'Please choose a future time.')
+    const locationType = normalizeLocationType(body.locationType)
+    if (!locationType) {
+      return jsonFail(400, 'Missing or invalid locationType.')
     }
 
-    const offering = await prisma.professionalServiceOffering.findFirst({
-      where: {
-        id: offeringId,
-        professionalId,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        professionalId: true,
-        serviceId: true,
-        offersInSalon: true,
-        offersMobile: true,
-        salonDurationMinutes: true,
-        mobileDurationMinutes: true,
-        service: {
-          select: {
-            id: true,
-            name: true,
-            defaultDurationMinutes: true,
-          },
-        },
-      },
-    })
+    const visibilityModeRaw = body.visibilityMode
+    const visibilityMode =
+      visibilityModeRaw === undefined || visibilityModeRaw === null
+        ? null
+        : normalizeVisibilityMode(visibilityModeRaw)
 
-    if (!offering) {
-      return jsonFail(404, 'Offering not found or inactive.')
+    if (visibilityModeRaw !== undefined && visibilityModeRaw !== null && !visibilityMode) {
+      return jsonFail(400, 'Invalid visibilityMode.')
     }
 
-    const locationTypeResult = resolveOpeningLocationType({
-      requested: requestedLocationType,
-      offersInSalon: Boolean(offering.offersInSalon),
-      offersMobile: Boolean(offering.offersMobile),
-    })
-
-    if (!locationTypeResult.ok) {
-      return jsonFail(400, locationTypeResult.error)
+    const noteResult = parseNote(body.note)
+    if (!noteResult.ok) {
+      return jsonFail(400, noteResult.error)
     }
 
-    const locationType = locationTypeResult.locationType
+    const tierPlansResult = parseTierPlans(body.tierPlans)
+    if (!tierPlansResult.ok) {
+      return jsonFail(400, tierPlansResult.error)
+    }
 
-    const loc = await pickBookableLocation({
+    const created = await createLastMinuteOpening({
       professionalId,
-      requestedLocationId: requestedLocationId || null,
+      offeringIds: offeringIdsResult.value,
+      startAt,
+      endAt,
       locationType,
-    })
-
-    if (!loc) {
-      return jsonFail(409, 'No bookable location found for this opening.')
-    }
-
-    const timeZone = typeof loc.timeZone === 'string' ? loc.timeZone.trim() : ''
-    if (!timeZone || !isValidIanaTimeZone(timeZone)) {
-      return jsonFail(
-        409,
-        'This location is missing a valid timezone. Set a timezone on your bookable location before creating openings.',
-      )
-    }
-
-    const durationMinutes = computeDurationMinutes({ locationType, offering })
-    const minimumEndAt = addMinutes(startAt, durationMinutes)
-
-    let endAt = minimumEndAt
-    if (endAtRaw) {
-      if (endAtRaw.getTime() <= startAt.getTime()) {
-        return jsonFail(400, 'End must be after start.')
-      }
-      if (endAtRaw.getTime() < minimumEndAt.getTime()) {
-        return jsonFail(400, `End must allow at least ${durationMinutes} minutes for this service.`)
-      }
-      endAt = endAtRaw
-    }
-
-    const overlapOpening = await prisma.lastMinuteOpening.findFirst({
-      where: {
-        professionalId,
-        status: OpeningStatus.ACTIVE,
-        startAt: { lt: endAt },
-        endAt: { gt: startAt },
-      },
-      select: { id: true },
-    })
-
-    if (overlapOpening) {
-      return jsonFail(409, 'You already have an active opening overlapping that time.')
-    }
-
-    const blockConflict = await prisma.calendarBlock.findFirst({
-      where: {
-        professionalId,
-        startsAt: { lt: endAt },
-        endsAt: { gt: startAt },
-        OR: [{ locationId: loc.id }, { locationId: null }],
-      },
-      select: { id: true },
-    })
-
-    if (blockConflict) {
-      return jsonFail(409, 'That time is blocked.')
-    }
-
-    const earliestStart = addMinutes(startAt, -MAX_OTHER_OVERLAP_MINUTES)
-
-    const nearbyBookings = await prisma.booking.findMany({
-      where: {
-        professionalId,
-        status: { in: [BookingStatus.PENDING, BookingStatus.ACCEPTED] },
-        scheduledFor: { gte: earliestStart, lt: endAt },
-      },
-      select: {
-        scheduledFor: true,
-        totalDurationMinutes: true,
-        bufferMinutes: true,
-      },
-      take: 2000,
-    })
-
-    const overlapsBooking = nearbyBookings.some((booking) => {
-      const bookingStart = booking.scheduledFor
-      const bookingDuration = clampInt(Number(booking.totalDurationMinutes ?? 0) || 60, 15, MAX_SLOT_DURATION_MINUTES)
-      const bookingBuffer = clampInt(Number(booking.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
-      const bookingEnd = addMinutes(bookingStart, bookingDuration + bookingBuffer)
-
-      return overlaps(startAt, endAt, bookingStart, bookingEnd)
-    })
-
-    if (overlapsBooking) {
-      return jsonFail(409, 'That time overlaps an existing booking.')
-    }
-
-    const activeHolds = await prisma.bookingHold.findMany({
-      where: {
-        professionalId,
-        expiresAt: { gt: now },
-        scheduledFor: { gte: earliestStart, lt: endAt },
-      },
-      select: {
-        id: true,
-        scheduledFor: true,
-        offeringId: true,
-        locationId: true,
-        locationType: true,
-      },
-      take: 2000,
-    })
-
-    if (activeHolds.length) {
-      const holdOfferingIds = Array.from(new Set(activeHolds.map((hold) => hold.offeringId)))
-
-      const holdOfferings = holdOfferingIds.length
-        ? await prisma.professionalServiceOffering.findMany({
-            where: { id: { in: holdOfferingIds } },
-            select: {
-              id: true,
-              salonDurationMinutes: true,
-              mobileDurationMinutes: true,
-            },
-            take: 2000,
-          })
-        : []
-
-      const holdOfferingById = new Map(holdOfferings.map((row) => [row.id, row]))
-
-      const holdLocationIds = Array.from(
-        new Set(
-          activeHolds
-            .map((hold) => hold.locationId)
-            .filter((value): value is string => typeof value === 'string' && value.length > 0),
-        ),
-      )
-
-      const holdLocations = holdLocationIds.length
-        ? await prisma.professionalLocation.findMany({
-            where: { id: { in: holdLocationIds } },
-            select: {
-              id: true,
-              bufferMinutes: true,
-            },
-            take: 2000,
-          })
-        : []
-
-      const holdBufferByLocationId = new Map(
-        holdLocations.map((row) => [row.id, clampInt(Number(row.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES)]),
-      )
-
-      const overlapsHold = activeHolds.some((hold) => {
-        const holdOffering = holdOfferingById.get(hold.offeringId)
-        const holdDuration = pickHoldDurationMinutes({
-          locationType: hold.locationType,
-          salonDurationMinutes: holdOffering?.salonDurationMinutes ?? null,
-          mobileDurationMinutes: holdOffering?.mobileDurationMinutes ?? null,
-        })
-
-        const holdStart = hold.scheduledFor
-        const holdBuffer = holdBufferByLocationId.get(hold.locationId) ?? 0
-        const holdEnd = addMinutes(holdStart, holdDuration + holdBuffer)
-
-        return overlaps(startAt, endAt, holdStart, holdEnd)
-      })
-
-      if (overlapsHold) {
-        return jsonFail(409, 'That time is currently being held by a client.')
-      }
-    }
-
-    const created = await prisma.lastMinuteOpening.create({
-      data: {
-        professionalId,
-        serviceId: offering.serviceId,
-        offeringId: offering.id,
-        locationType,
-        locationId: loc.id,
-        timeZone,
-        startAt,
-        endAt,
-        status: OpeningStatus.ACTIVE,
-        discountPct,
-        note,
-      },
-      select: {
-        id: true,
-        startAt: true,
-        endAt: true,
-        status: true,
-        discountPct: true,
-        note: true,
-        offeringId: true,
-        serviceId: true,
-        locationType: true,
-        locationId: true,
-        timeZone: true,
-        _count: { select: { notifications: true } },
-        offering: {
-          select: {
-            id: true,
-            title: true,
-            service: { select: { id: true, name: true } },
-          },
-        },
-        service: { select: { id: true, name: true } },
-      },
+      requestedLocationId: cleanOptionalString(body.locationId),
+      visibilityMode,
+      note: noteResult.value,
+      launchAt,
+      tierPlans: tierPlansResult.value,
     })
 
     return jsonOk({ opening: mapOpeningDto(created) }, 201)
   } catch (e) {
+    const handled = handleCreateError(e)
+    if (handled) return handled
+
     console.error('POST /api/pro/openings error', e)
     return jsonFail(500, 'Failed to create opening.')
   }
@@ -626,21 +608,26 @@ export async function DELETE(req: Request) {
       return jsonFail(400, 'Missing id.')
     }
 
-    const deleted = await prisma.lastMinuteOpening.deleteMany({
-      where: {
-        id,
-        professionalId,
-      },
+    const result = await cancelOpening({
+      professionalId,
+      openingId: id,
     })
 
-    if (deleted.count !== 1) {
-      return jsonFail(404, 'Opening not found.')
+    if (!result.ok) {
+      return jsonFail(result.status, result.error)
     }
 
-    return jsonOk({ ok: true, id }, 200)
+    return jsonOk(
+      {
+        ok: true,
+        id: result.openingId,
+        alreadyCancelled: result.alreadyCancelled,
+      },
+      200,
+    )
   } catch (e) {
     console.error('DELETE /api/pro/openings error', e)
-    return jsonFail(500, 'Failed to delete opening.')
+    return jsonFail(500, 'Failed to cancel opening.')
   }
 }
 
@@ -657,82 +644,45 @@ export async function PATCH(req: Request) {
       return jsonFail(400, 'Missing openingId.')
     }
 
-    let status: OpeningStatus | undefined
-    if (body.status !== undefined) {
-      const parsedStatus = parseOpeningStatus(body.status)
-      if (!parsedStatus) {
-        return jsonFail(400, 'Invalid status.')
+    const noteResult = parseNote(body.note)
+    if (!noteResult.ok) {
+      return jsonFail(400, noteResult.error)
+    }
+
+    const statusRaw = body.status
+    const status = statusRaw === undefined ? undefined : normalizeOpeningStatus(statusRaw)
+    if (statusRaw !== undefined && !status) {
+      return jsonFail(400, 'Invalid status.')
+    }
+
+    const wantsCancel = status === OpeningStatus.CANCELLED
+
+    if (status !== undefined && status !== OpeningStatus.CANCELLED) {
+      return jsonFail(
+        400,
+        'This route only supports cancelling openings or updating the note. Booking and expiry state must come from booking/rollout flows.',
+      )
+    }
+
+    if (wantsCancel) {
+      const result = await cancelOpening({
+        professionalId,
+        openingId,
+      })
+
+      if (!result.ok) {
+        return jsonFail(result.status, result.error)
       }
-      status = parsedStatus
     }
 
-    const noteInput = parseNoteInput(body.note, 'patch')
-    if (!noteInput.ok) {
-      return jsonFail(400, 'Invalid note.')
-    }
-
-    const discountInput = parseDiscountPctInput(body.discountPct, 'patch')
-    if (!discountInput.ok) {
-      return jsonFail(400, 'Invalid discountPct. Must be 0–90 (or null).')
-    }
-
-    const data: {
-      status?: OpeningStatus
-      note?: string | null
-      discountPct?: number | null
-    } = {}
-
-    if (status !== undefined) {
-      data.status = status
-    }
-
-    if (noteInput.isSet) {
-      data.note = noteInput.value
-    }
-
-    if (discountInput.isSet) {
-      data.discountPct = discountInput.value
-    }
-
-    if (Object.keys(data).length === 0) {
-      return jsonFail(400, 'No valid fields to update.')
-    }
-
-    const updated = await prisma.lastMinuteOpening.updateMany({
+    const opening = await prisma.lastMinuteOpening.findFirst({
       where: {
         id: openingId,
         professionalId,
       },
-      data,
-    })
-
-    if (updated.count !== 1) {
-      return jsonFail(404, 'Opening not found.')
-    }
-
-    const opening = await prisma.lastMinuteOpening.findUnique({
-      where: { id: openingId },
       select: {
         id: true,
-        startAt: true,
-        endAt: true,
-        status: true,
-        discountPct: true,
         note: true,
-        offeringId: true,
-        serviceId: true,
-        locationType: true,
-        locationId: true,
-        timeZone: true,
-        _count: { select: { notifications: true } },
-        offering: {
-          select: {
-            id: true,
-            title: true,
-            service: { select: { id: true, name: true } },
-          },
-        },
-        service: { select: { id: true, name: true } },
       },
     })
 
@@ -740,7 +690,26 @@ export async function PATCH(req: Request) {
       return jsonFail(404, 'Opening not found.')
     }
 
-    return jsonOk({ opening: mapOpeningDto(opening) }, 200)
+    const shouldUpdateNote = Object.prototype.hasOwnProperty.call(body, 'note')
+    if (shouldUpdateNote) {
+      await prisma.lastMinuteOpening.update({
+        where: { id: openingId },
+        data: {
+          note: noteResult.value,
+        },
+      })
+    }
+
+    const refreshed = await prisma.lastMinuteOpening.findUnique({
+      where: { id: openingId },
+      select: openingSelect,
+    })
+
+    if (!refreshed) {
+      return jsonFail(404, 'Opening not found.')
+    }
+
+    return jsonOk({ opening: mapOpeningDto(refreshed) }, 200)
   } catch (e) {
     console.error('PATCH /api/pro/openings error', e)
     return jsonFail(500, 'Failed to update opening.')

@@ -15,74 +15,98 @@ export default async function ProLastMinutePage() {
     redirect('/login?from=/pro/last-minute')
   }
 
-  const proId = user.professionalProfile.id
+  const professionalId = user.professionalProfile.id
 
-  // ✅ Pro profile tz (ONLY used to interpret datetime-local inputs in this settings UI)
-  // Strict: if invalid/missing => null (no LA fallback, no guessing)
-  const proProfile = await prisma.professionalProfile.findUnique({
-    where: { id: proId },
-    select: { timeZone: true },
-  })
-  const proTz = proProfile?.timeZone ? sanitizeTimeZone(proProfile.timeZone, '') : ''
-  const timeZone = proTz || null
+  const [proProfile, existingSettings, offerings] = await Promise.all([
+    prisma.professionalProfile.findUnique({
+      where: { id: professionalId },
+      select: { timeZone: true },
+    }),
 
-  // ✅ Don’t write on every render. Create settings row only if missing.
-  const existing = await prisma.lastMinuteSettings.findUnique({
-    where: { professionalId: proId },
-    include: { serviceRules: true, blocks: { orderBy: { startAt: 'asc' } } },
-  })
+    prisma.lastMinuteSettings.findUnique({
+      where: { professionalId },
+      include: {
+        serviceRules: {
+          orderBy: { serviceId: 'asc' },
+        },
+        blocks: {
+          orderBy: { startAt: 'asc' },
+        },
+      },
+    }),
+
+    prisma.professionalServiceOffering.findMany({
+      where: { professionalId, isActive: true },
+      include: { service: true },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ])
 
   const settings =
-    existing ??
+    existingSettings ??
     (await prisma.lastMinuteSettings.create({
-      data: { professionalId: proId },
-      include: { serviceRules: true, blocks: { orderBy: { startAt: 'asc' } } },
+      data: { professionalId },
+      include: {
+        serviceRules: {
+          orderBy: { serviceId: 'asc' },
+        },
+        blocks: {
+          orderBy: { startAt: 'asc' },
+        },
+      },
     }))
 
-  const offerings = await prisma.professionalServiceOffering.findMany({
-    where: { professionalId: proId, isActive: true },
-    include: { service: true },
-    orderBy: { createdAt: 'asc' },
+  const rawTimeZone = typeof proProfile?.timeZone === 'string' ? proProfile.timeZone.trim() : ''
+  const timeZone = rawTimeZone ? sanitizeTimeZone(rawTimeZone, '') || null : null
+
+  const offeringsPayload = offerings.map((offering) => {
+    const base =
+      offering.salonPriceStartingAt ??
+      offering.mobilePriceStartingAt ??
+      offering.service.minPrice ??
+      null
+
+    return {
+      id: offering.id,
+      serviceId: offering.serviceId,
+      name: offering.title || offering.service.name,
+      basePrice: base ? moneyToString(base) : '0.00',
+    }
   })
 
-  const payload = {
-    /**
-     * ✅ SettingsClient uses this to interpret datetime-local inputs.
-     * Keep it strict: null if missing/invalid so UI can block + prompt user to fix tz.
-     */
+  const settingsInitial = {
     timeZone,
-
     settings: {
-      ...settings,
-      minPrice: settings.minPrice ? moneyToString(settings.minPrice) : null,
-      serviceRules: settings.serviceRules.map((r) => ({
-        ...r,
-        minPrice: r.minPrice ? moneyToString(r.minPrice) : null,
+      id: settings.id,
+      enabled: settings.enabled,
+      defaultVisibilityMode: settings.defaultVisibilityMode,
+      minCollectedSubtotal: settings.minCollectedSubtotal
+        ? moneyToString(settings.minCollectedSubtotal)
+        : null,
+      tier2NightBeforeMinutes: settings.tier2NightBeforeMinutes,
+      tier3DayOfMinutes: settings.tier3DayOfMinutes,
+      disableMon: settings.disableMon,
+      disableTue: settings.disableTue,
+      disableWed: settings.disableWed,
+      disableThu: settings.disableThu,
+      disableFri: settings.disableFri,
+      disableSat: settings.disableSat,
+      disableSun: settings.disableSun,
+      serviceRules: settings.serviceRules.map((rule) => ({
+        serviceId: rule.serviceId,
+        enabled: rule.enabled,
+        minCollectedSubtotal: rule.minCollectedSubtotal
+          ? moneyToString(rule.minCollectedSubtotal)
+          : null,
       })),
-      blocks: settings.blocks.map((b) => ({
-        id: b.id,
-        startAt: new Date(b.startAt).toISOString(),
-        endAt: new Date(b.endAt).toISOString(),
-        reason: b.reason ?? null,
+      blocks: settings.blocks.map((block) => ({
+        id: block.id,
+        startAt: block.startAt.toISOString(),
+        endAt: block.endAt.toISOString(),
+        reason: block.reason ?? null,
       })),
     },
-
-    offerings: offerings.map((o) => {
-      const base = o.salonPriceStartingAt ?? o.mobilePriceStartingAt ?? o.service.minPrice ?? null
-      return {
-        id: o.id,
-        serviceId: o.serviceId,
-        name: o.title || o.service.name,
-        basePrice: base ? moneyToString(base) : '0.00',
-
-        offersInSalon: o.offersInSalon,
-        offersMobile: o.offersMobile,
-        salonPriceStartingAt: o.salonPriceStartingAt ? moneyToString(o.salonPriceStartingAt) : null,
-        mobilePriceStartingAt: o.mobilePriceStartingAt ? moneyToString(o.mobilePriceStartingAt) : null,
-        salonDurationMinutes: o.salonDurationMinutes ?? null,
-        mobileDurationMinutes: o.mobileDurationMinutes ?? null,
-      }
-    }),
+    offerings: offeringsPayload,
   }
 
   return (
@@ -90,22 +114,23 @@ export default async function ProLastMinutePage() {
       <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <h1 className="m-0 text-[18px] font-black text-textPrimary">Last Minute</h1>
         <p className="mt-2 text-[13px] font-semibold text-textSecondary">
-          Configure same-day and within-24-hours booking rules without wrecking your brand.
+          Configure your rollout defaults, protect your floor, and create structured last-minute openings without relying
+          on legacy discount logic.
         </p>
 
-        {payload.timeZone ? null : (
+        {timeZone ? null : (
           <div className="mt-3 rounded-card border border-white/10 bg-bgPrimary/25 p-3 text-[12px] font-semibold text-toneDanger">
-            Your timezone isn’t set yet. Set a valid timezone on your profile before configuring last-minute rules.
+            Your timezone is not set yet. Add a valid timezone on your profile before relying on last-minute scheduling.
           </div>
         )}
       </div>
 
       <div className="mt-4">
-        <LastMinuteSettingsClient initial={payload as any} />
+        <LastMinuteSettingsClient initial={settingsInitial} />
       </div>
 
       <div className="mt-4">
-        <OpeningsClient offerings={payload.offerings as any} />
+        <OpeningsClient offerings={offeringsPayload} />
       </div>
     </main>
   )
