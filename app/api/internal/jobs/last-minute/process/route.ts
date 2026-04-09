@@ -13,7 +13,7 @@ import {
 } from '@prisma/client'
 import { buildTier1WaitlistAudience } from '@/lib/lastMinute/audience/buildTier1WaitlistAudience'
 import { buildTier2ReactivationAudience } from '@/lib/lastMinute/audience/buildTier2ReactivationAudience'
-
+import { buildTier3DiscoveryAudience } from '@/lib/lastMinute/audience/buildTier3DiscoveryAudience'
 export const dynamic = 'force-dynamic'
 
 const DEFAULT_TAKE = 25
@@ -63,6 +63,13 @@ const dueTierPlanSelect = {
           id: true,
           businessName: true,
           handle: true,
+          mobileRadiusMiles: true,
+        },
+      },
+      location: {
+        select: {
+          lat: true,
+          lng: true,
         },
       },
       services: {
@@ -215,12 +222,16 @@ function buildNotificationContent(plan: DueTierPlanRow): {
   }
 }
 
-async function buildDiscoveryCandidates(_args: {
+async function buildDiscoveryCandidates(args: {
   tx: Prisma.TransactionClient
   plan: DueTierPlanRow
   now: Date
 }): Promise<Candidate[]> {
-  return []
+  return buildTier3DiscoveryAudience({
+    tx: args.tx,
+    opening: args.plan.opening,
+    now: args.now,
+  })
 }
 
 async function processTierPlan(plan: DueTierPlanRow): Promise<{
@@ -324,8 +335,6 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
         })
       } else {
         candidates = await buildDiscoveryCandidates({ tx, plan, now })
-        discoveryWarning =
-          'Discovery audience is not implemented yet. Add verified profile-view, service-interest, and radius helpers before enabling this tier.'
       }
 
       const notification = buildNotificationContent(plan)

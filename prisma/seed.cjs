@@ -428,13 +428,16 @@ async function tagLook(mediaId, serviceId) {
 async function main() {
   console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
 
+  const seedPassword = process.env.SEED_TEST_PASSWORD || 'password123'
+
   const proEmail = 'pro@test.com'
-  const proPassword = 'Password123!'
+  const proPassword = seedPassword
+
   const clientEmail = 'client@test.com'
-  const clientPassword = 'password123' // Option A alignment
+  const clientPassword = seedPassword
 
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@test.com'
-  const adminPassword = process.env.ADMIN_PASSWORD || 'Password123!'
+  const adminPassword = seedPassword
 
   const { professionalProfile } = await upsertProfessionalUser({
     email: proEmail,
