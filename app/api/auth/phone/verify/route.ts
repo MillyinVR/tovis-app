@@ -1,54 +1,63 @@
 // app/api/auth/phone/verify/route.ts
 import crypto from 'crypto'
-import { cookies } from 'next/headers'
+
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 function sha256(input: string) {
   return crypto.createHash('sha256').update(input).digest('hex')
 }
 
-/**
- * Compatible with both:
- * - cookies(): ReadonlyRequestCookies
- * - cookies(): Promise<ReadonlyRequestCookies>
- */
-async function readCookies() {
-  const c = cookies() as any
-  return typeof c?.then === 'function' ? await c : c
-}
-
-async function getUserIdFromCookie(): Promise<string | null> {
-  const cookieStore = await readCookies()
-  const token = cookieStore.get('tovis_token')?.value
-  if (!token) return null
-  const payload = verifyToken(token)
-  return payload?.userId ?? null
-}
-
 export async function POST(request: Request) {
   try {
-    const userId = await getUserIdFromCookie()
-    if (!userId) return jsonFail(401, 'Not authenticated.', { code: 'UNAUTHENTICATED' })
+    const auth = await requireUser({ allowVerificationSession: true })
+    if (!auth.ok) return auth.res
 
-    const body = (await request.json().catch(() => ({}))) as { code?: unknown }
+    const userId = auth.user.id
+
+    const raw: unknown = await request.json().catch(() => ({}))
+    const body = isRecord(raw) ? raw : {}
     const codeRaw = pickString(body.code)?.trim()
 
-    if (!codeRaw) return jsonFail(400, 'Verification code is required.', { code: 'CODE_REQUIRED' })
-    if (!/^\d{6}$/.test(codeRaw)) return jsonFail(400, 'Invalid code format.', { code: 'CODE_INVALID' })
+    if (!codeRaw) {
+      return jsonFail(400, 'Verification code is required.', {
+        code: 'CODE_REQUIRED',
+      })
+    }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, role: true, phone: true, phoneVerifiedAt: true },
-    })
-    if (!user) return jsonFail(404, 'User not found.', { code: 'USER_NOT_FOUND' })
+    if (!/^\d{6}$/.test(codeRaw)) {
+      return jsonFail(400, 'Invalid code format.', {
+        code: 'CODE_INVALID',
+      })
+    }
 
-    if (user.phoneVerifiedAt) return jsonOk({ ok: true, alreadyVerified: true }, 200)
-    if (!user.phone) return jsonFail(400, 'Phone number missing.', { code: 'PHONE_REQUIRED' })
+    if (auth.user.phoneVerifiedAt) {
+      return jsonOk(
+        {
+          ok: true,
+          alreadyVerified: true,
+          isPhoneVerified: true,
+          isEmailVerified: auth.user.isEmailVerified,
+          isFullyVerified: auth.user.isFullyVerified,
+        },
+        200,
+      )
+    }
+
+    const phone = auth.user.phone?.trim() ?? ''
+    if (!phone) {
+      return jsonFail(400, 'Phone number missing.', {
+        code: 'PHONE_REQUIRED',
+      })
+    }
 
     const now = new Date()
     const codeHash = sha256(codeRaw)
@@ -56,7 +65,7 @@ export async function POST(request: Request) {
     const match = await prisma.phoneVerification.findFirst({
       where: {
         userId,
-        phone: user.phone,
+        phone,
         usedAt: null,
         expiresAt: { gt: now },
         codeHash,
@@ -65,7 +74,11 @@ export async function POST(request: Request) {
       orderBy: { createdAt: 'desc' },
     })
 
-    if (!match) return jsonFail(400, 'Incorrect or expired code.', { code: 'CODE_MISMATCH' })
+    if (!match) {
+      return jsonFail(400, 'Incorrect or expired code.', {
+        code: 'CODE_MISMATCH',
+      })
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.phoneVerification.update({
@@ -78,7 +91,6 @@ export async function POST(request: Request) {
         data: { phoneVerifiedAt: now },
       })
 
-      // Keep profiles in sync (since you’re storing there too)
       await tx.clientProfile.updateMany({
         where: { userId },
         data: { phoneVerifiedAt: now },
@@ -90,9 +102,21 @@ export async function POST(request: Request) {
       })
     })
 
-    return jsonOk({ ok: true }, 200)
-  } catch (err: any) {
-    console.error('[phone/verify] error', err?.message || err)
+    const isEmailVerified = auth.user.isEmailVerified
+
+    return jsonOk(
+      {
+        ok: true,
+        isPhoneVerified: true,
+        isEmailVerified,
+        isFullyVerified: isEmailVerified,
+        requiresEmailVerification: !isEmailVerified,
+      },
+      200,
+    )
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[phone/verify] error', message)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

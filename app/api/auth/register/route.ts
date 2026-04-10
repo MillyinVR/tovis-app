@@ -1,7 +1,11 @@
 // app/api/auth/register/route.ts
 import { prisma } from '@/lib/prisma'
-import { hashPassword, createToken } from '@/lib/auth'
+import { hashPassword, createVerificationToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
+import {
+  getAppUrlFromRequest,
+  issueAndSendEmailVerification,
+} from '@/lib/auth/emailVerification'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { jsonFail, jsonOk, pickString, normalizeEmail, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
@@ -559,9 +563,20 @@ export async function POST(request: Request) {
       }
     }
 
-    const finalTimeZone = isValidIanaTimeZone(signupLocation.timeZoneId) ? signupLocation.timeZoneId : null
+    const finalTimeZone = isValidIanaTimeZone(signupLocation.timeZoneId)
+      ? signupLocation.timeZoneId
+      : null
     if (!finalTimeZone) {
-      return jsonFail(400, 'Unable to determine a valid time zone.', { code: 'TIMEZONE_REQUIRED' })
+      return jsonFail(400, 'Unable to determine a valid time zone.', {
+        code: 'TIMEZONE_REQUIRED',
+      })
+    }
+
+    const appUrl = getAppUrlFromRequest(request)
+    if (!appUrl) {
+      return jsonFail(500, 'App URL is not configured.', {
+        code: 'APP_URL_MISSING',
+      })
     }
 
     // pro profession
@@ -690,6 +705,7 @@ export async function POST(request: Request) {
           email,
           phone,
           phoneVerifiedAt: null,
+          emailVerifiedAt: null,
           password: passwordHash,
           role,
 
@@ -816,14 +832,33 @@ export async function POST(request: Request) {
       console.error('[phone-verification] failed to send', smsErr)
     }
 
+    let emailVerificationSent = false
+
+    try {
+      await issueAndSendEmailVerification({
+        userId: user.id,
+        email: user.email,
+        appUrl,
+      })
+      emailVerificationSent = true
+    } catch (emailErr) {
+      // eslint-disable-next-line no-console
+      console.error('[email-verification] failed to send', emailErr)
+    }
+
     const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
-    const token = createToken({ userId: user.id, role: user.role })
+    const token = createVerificationToken({ userId: user.id, role: user.role })
 
     const res = jsonOk(
       {
         user: { id: user.id, email: user.email, role: user.role },
         nextUrl: consumed?.nextUrl ?? null,
         requiresPhoneVerification: true,
+        requiresEmailVerification: true,
+        isPhoneVerified: false,
+        isEmailVerified: false,
+        isFullyVerified: false,
+        emailVerificationSent,
 
         // ✅ safe flags for the client UX
         needsManualLicenseUpload: role === 'PRO' ? needsManualLicenseUpload : false,

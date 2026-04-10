@@ -1,16 +1,20 @@
-// app/(auth)/_components/login/LoginClient.tsx
 'use client'
 
 import Link from 'next/link'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
+
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
 type UserRole = 'ADMIN' | 'PRO' | 'CLIENT'
-type LoginReason = 'PRO_REQUIRED' | 'PRO_SETUP_REQUIRED' | 'ADMIN_REQUIRED' | 'LOGIN_REQUIRED'
+type LoginReason =
+  | 'PRO_REQUIRED'
+  | 'PRO_SETUP_REQUIRED'
+  | 'ADMIN_REQUIRED'
+  | 'LOGIN_REQUIRED'
 
 const PRO_HOME = '/pro/calendar'
 
@@ -49,7 +53,7 @@ function sanitizeReason(raw: string | null): LoginReason | null {
     s === 'ADMIN_REQUIRED' ||
     s === 'LOGIN_REQUIRED'
   ) {
-    return s as LoginReason
+    return s
   }
   return null
 }
@@ -62,6 +66,11 @@ function readUserRole(data: unknown): UserRole | null {
   return role === 'ADMIN' || role === 'PRO' || role === 'CLIENT' ? role : null
 }
 
+function readBooleanField(data: unknown, key: string): boolean {
+  if (!isRecord(data)) return false
+  return data[key] === true
+}
+
 function roleIntentFromPath(path: string | null): UserRole | null {
   if (!path) return null
   if (path === '/admin' || path.startsWith('/admin/')) return 'ADMIN'
@@ -69,7 +78,6 @@ function roleIntentFromPath(path: string | null): UserRole | null {
   return null
 }
 
-// Normalize “generic pro root” to the real pro home.
 function normalizeLanding(path: string, role: UserRole): string {
   if (role === 'PRO') {
     if (path === '/pro' || path.startsWith('/pro?')) return PRO_HOME
@@ -77,8 +85,16 @@ function normalizeLanding(path: string, role: UserRole): string {
   return path
 }
 
+function buildVerificationHref(nextPath: string): string {
+  return `/verify-phone?next=${encodeURIComponent(nextPath)}`
+}
+
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs font-black tracking-wide text-textSecondary">{children}</span>
+  return (
+    <span className="text-xs font-black tracking-wide text-textSecondary">
+      {children}
+    </span>
+  )
 }
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
@@ -97,7 +113,13 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-function PrimaryButton({ children, loading }: { children: React.ReactNode; loading?: boolean }) {
+function PrimaryButton({
+  children,
+  loading,
+}: {
+  children: React.ReactNode
+  loading?: boolean
+}) {
   return (
     <button
       type="submit"
@@ -117,7 +139,10 @@ function PrimaryButton({ children, loading }: { children: React.ReactNode; loadi
       />
       <span className="relative inline-flex items-center gap-2">
         <span>{children}</span>
-        <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-0.5">
+        <span
+          aria-hidden="true"
+          className="inline-block transition-transform duration-200 group-hover:translate-x-0.5"
+        >
           →
         </span>
       </span>
@@ -125,7 +150,13 @@ function PrimaryButton({ children, loading }: { children: React.ReactNode; loadi
   )
 }
 
-function SecondaryLinkButton({ href, children }: { href: string; children: React.ReactNode }) {
+function SecondaryLinkButton({
+  href,
+  children,
+}: {
+  href: string
+  children: React.ReactNode
+}) {
   return (
     <Link
       href={href}
@@ -158,7 +189,6 @@ export default function LoginClient() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Infer a reason if guards didn’t attach one
   const inferredReason = useMemo<LoginReason | null>(() => {
     if (explicitReason) return explicitReason
     const intent = roleIntentFromPath(fromSafe)
@@ -169,13 +199,23 @@ export default function LoginClient() {
 
   const reasonCopy = useMemo(() => {
     if (!inferredReason) return null
+
     switch (inferredReason) {
       case 'LOGIN_REQUIRED':
-        return { title: 'Login required', body: 'Please log in to continue.' }
+        return {
+          title: 'Login required',
+          body: 'Please log in to continue.',
+        }
       case 'ADMIN_REQUIRED':
-        return { title: 'Admin account required', body: 'You tried to open an admin-only page. Log in with your admin account.' }
+        return {
+          title: 'Admin account required',
+          body: 'You tried to open an admin-only page. Log in with your admin account.',
+        }
       case 'PRO_REQUIRED':
-        return { title: 'Professional account required', body: 'You tried to open a Pro-only page. Log in with your Pro account (or create one).' }
+        return {
+          title: 'Professional account required',
+          body: 'You tried to open a Pro-only page. Log in with your Pro account (or create one).',
+        }
       case 'PRO_SETUP_REQUIRED':
         return {
           title: 'Professional setup required',
@@ -200,7 +240,6 @@ export default function LoginClient() {
         return
       }
 
-      // This drives your API’s expectedRole enforcement.
       const expectedRole = roleIntentFromPath(fromSafe)
 
       const res = await fetch('/api/auth/login', {
@@ -225,21 +264,43 @@ export default function LoginClient() {
 
       const role = readUserRole(data)
       if (!role) {
-        setError('Login succeeded, but your account role is missing. Please contact support.')
+        setError(
+          'Login succeeded, but your account role is missing. Please contact support.',
+        )
         return
       }
 
       const nextUrlRaw = readStringField(data, 'nextUrl')
-      const nextUrl = sanitizeRedirectTarget(sanitizeInternalPath(nextUrlRaw ?? null))
+      const nextUrl = sanitizeRedirectTarget(
+        sanitizeInternalPath(nextUrlRaw ?? null),
+      )
 
-      // Default landing by role
-      const roleDefault = role === 'ADMIN' ? '/admin' : role === 'PRO' ? PRO_HOME : '/looks'
+      const roleDefault =
+        role === 'ADMIN' ? '/admin' : role === 'PRO' ? PRO_HOME : '/looks'
 
-      // Destination preference: server nextUrl > from > role default
       const rawDest = nextUrl ?? fromSafe ?? roleDefault
       const dest = normalizeLanding(rawDest, role)
 
-      // Hard nav so server components + footers re-evaluate with new cookie (cookie-backed session).
+      const isPhoneVerified = readBooleanField(data, 'isPhoneVerified')
+      const isEmailVerified = readBooleanField(data, 'isEmailVerified')
+      const isFullyVerified = readBooleanField(data, 'isFullyVerified')
+
+      if (!isFullyVerified) {
+        if (role === 'ADMIN') {
+          setError(
+            'This account is not fully verified yet. Full app access is blocked until phone and email verification are complete.',
+          )
+          return
+        }
+
+        const verificationDest = buildVerificationHref(dest)
+
+        if (!isPhoneVerified || !isEmailVerified) {
+          window.location.assign(verificationDest)
+          return
+        }
+      }
+
       window.location.assign(dest)
     } catch (err) {
       console.error(err)
@@ -250,16 +311,22 @@ export default function LoginClient() {
   }
 
   const signupHref = ti ? `/signup?ti=${encodeURIComponent(ti)}` : '/signup'
-  const forgotHref = ti ? `/forgot-password?ti=${encodeURIComponent(ti)}` : '/forgot-password'
+  const forgotHref = ti
+    ? `/forgot-password?ti=${encodeURIComponent(ti)}`
+    : '/forgot-password'
 
   return (
-    <AuthShell title="Login" subtitle="Enter your credentials. Try not to be dramatic about it.">
-      {/* noValidate avoids silent browser validation blocking submit */}
+    <AuthShell
+      title="Login"
+      subtitle="Enter your credentials. Try not to be dramatic about it."
+    >
       <form noValidate onSubmit={handleSubmit} className="mt-1 grid gap-4">
         {reasonCopy ? (
           <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-semibold text-toneWarn">
             <div className="font-black">{reasonCopy.title}</div>
-            <div className="mt-0.5 text-[13px] font-semibold text-toneWarn/90">{reasonCopy.body}</div>
+            <div className="mt-0.5 text-[13px] font-semibold text-toneWarn/90">
+              {reasonCopy.body}
+            </div>
           </div>
         ) : null}
 
@@ -278,7 +345,10 @@ export default function LoginClient() {
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Password</FieldLabel>
-            <Link href={forgotHref} className="text-[11px] font-black text-textSecondary/80 hover:text-textPrimary">
+            <Link
+              href={forgotHref}
+              className="text-[11px] font-black text-textSecondary/80 hover:text-textPrimary"
+            >
               Forgot password?
             </Link>
           </div>
@@ -299,12 +369,20 @@ export default function LoginClient() {
         ) : null}
 
         <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading}>{loading ? 'Logging in…' : 'Login'}</PrimaryButton>
-          <SecondaryLinkButton href={signupHref}>Create an account</SecondaryLinkButton>
+          <PrimaryButton loading={loading}>
+            {loading ? 'Logging in…' : 'Login'}
+          </PrimaryButton>
+
+          <SecondaryLinkButton href={signupHref}>
+            Create an account
+          </SecondaryLinkButton>
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-textSecondary">
             <div className="text-textSecondary/70">No spam. Just bookings.</div>
-            <Link href="/support" className="font-black text-textSecondary hover:text-textPrimary">
+            <Link
+              href="/support"
+              className="font-black text-textSecondary hover:text-textPrimary"
+            >
               Need help?
             </Link>
           </div>

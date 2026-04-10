@@ -79,6 +79,7 @@ describe('lib/notifications/clientNotifications', () => {
       phoneVerifiedAt: null,
       user: {
         email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         phone: null,
         phoneVerifiedAt: null,
       },
@@ -155,6 +156,7 @@ describe('lib/notifications/clientNotifications', () => {
         phone: null,
         phoneVerifiedAt: null,
         email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         timeZone: 'America/Los_Angeles',
         preference: null,
       },
@@ -171,7 +173,9 @@ describe('lib/notifications/clientNotifications', () => {
   })
 
   it('uses aftercare booking timezone when booking lookup is unavailable', async () => {
-    mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_aftercare' })
+    mockPrisma.clientNotification.create.mockResolvedValue({
+      id: 'notif_aftercare',
+    })
     mockPrisma.booking.findUnique.mockResolvedValue(null)
     mockPrisma.aftercareSummary.findUnique.mockResolvedValue({
       booking: {
@@ -210,6 +214,7 @@ describe('lib/notifications/clientNotifications', () => {
       expect.objectContaining({
         recipient: expect.objectContaining({
           timeZone: 'America/Chicago',
+          emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
       }),
     )

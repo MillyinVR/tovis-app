@@ -186,15 +186,12 @@ function isWithinQuietHours(args: {
 
   if (start == null || end == null || current == null) return false
 
-  // Equal values mean "disabled / not configured", not 24-hour suppression.
   if (start === end) return false
 
-  // Same-day range, e.g. 09:00 -> 17:00
   if (start < end) {
     return current >= start && current < end
   }
 
-  // Overnight range, e.g. 22:00 -> 07:00
   return current >= start || current < end
 }
 
@@ -295,6 +292,7 @@ export function getRecipientChannelCapabilities(args: {
   phone?: string | null
   phoneVerifiedAt?: Date | null
   email?: string | null
+  emailVerifiedAt?: Date | null
 }): RecipientChannelCapabilities {
   const inAppTargetId =
     typeof args.inAppTargetId === 'string' ? args.inAppTargetId.trim() : ''
@@ -304,7 +302,7 @@ export function getRecipientChannelCapabilities(args: {
   return {
     hasInAppTarget: inAppTargetId.length > 0,
     hasSmsDestination: phone.length > 0 && Boolean(args.phoneVerifiedAt),
-    hasEmailDestination: email.length > 0,
+    hasEmailDestination: email.length > 0 && Boolean(args.emailVerifiedAt),
   }
 }
 

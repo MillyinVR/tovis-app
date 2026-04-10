@@ -107,9 +107,12 @@ function makeDispatchRecord(
     deliveries: ReturnType<typeof makeDelivery>[]
   }> = {},
 ) {
-  const scheduledFor = overrides.scheduledFor ?? new Date('2026-04-08T12:00:00.000Z')
-  const createdAt = overrides.createdAt ?? new Date('2026-04-08T12:00:00.000Z')
-  const updatedAt = overrides.updatedAt ?? new Date('2026-04-08T12:00:00.000Z')
+  const scheduledFor =
+    overrides.scheduledFor ?? new Date('2026-04-08T12:00:00.000Z')
+  const createdAt =
+    overrides.createdAt ?? new Date('2026-04-08T12:00:00.000Z')
+  const updatedAt =
+    overrides.updatedAt ?? new Date('2026-04-08T12:00:00.000Z')
 
   return {
     id: overrides.id ?? 'dispatch_1',
@@ -123,7 +126,8 @@ function makeDispatchRecord(
     recipientInAppTargetId: overrides.recipientInAppTargetId ?? 'client_1',
     recipientPhone: overrides.recipientPhone ?? '+15551234567',
     recipientEmail: overrides.recipientEmail ?? 'client@example.com',
-    recipientTimeZone: overrides.recipientTimeZone ?? 'America/Los_Angeles',
+    recipientTimeZone:
+      overrides.recipientTimeZone ?? 'America/Los_Angeles',
     notificationId: overrides.notificationId ?? null,
     clientNotificationId: overrides.clientNotificationId ?? 'notif_1',
     title: overrides.title ?? 'Appointment confirmed',
@@ -195,6 +199,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
         timeZone: 'America/Los_Angeles',
         preference: null,
       },
@@ -342,6 +347,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
         timeZone: 'America/Los_Angeles',
         preference: null,
       },
@@ -382,6 +388,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
         timeZone: 'America/Los_Angeles',
         preference: null,
       },
@@ -398,164 +405,281 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
   })
 
   it('creates suppressed delivery rows when a requested channel lacks capability', async () => {
-  const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+    const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
 
-  mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
-  mockPrisma.notificationDispatch.create.mockResolvedValue(
-    makeDispatchRecord({
-      sourceKey: 'client-notification:notif_sms_missing',
-      clientNotificationId: 'notif_sms_missing',
-      recipientPhone: null,
-      deliveries: [
-        makeDelivery({
-          id: 'delivery_in_app_suppressed',
-          channel: NotificationChannel.IN_APP,
-          provider: NotificationProvider.INTERNAL_REALTIME,
-          status: NotificationDeliveryStatus.SUPPRESSED,
-          destination: 'client_1',
-          maxAttempts: 3,
-          nextAttemptAt: scheduledFor,
-          suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
-        }),
-        makeDelivery({
-          id: 'delivery_sms_suppressed',
-          channel: NotificationChannel.SMS,
-          provider: NotificationProvider.TWILIO,
-          status: NotificationDeliveryStatus.SUPPRESSED,
-          destination: null,
-          maxAttempts: 5,
-          nextAttemptAt: scheduledFor,
-          suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
-        }),
-        makeDelivery({
-          id: 'delivery_email_suppressed',
-          channel: NotificationChannel.EMAIL,
-          provider: NotificationProvider.POSTMARK,
-          status: NotificationDeliveryStatus.SUPPRESSED,
-          destination: 'client@example.com',
-          maxAttempts: 6,
-          nextAttemptAt: scheduledFor,
-          suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
-        }),
-      ],
-    }),
-  )
-
-  const result = await enqueueDispatch({
-    key: NotificationEventKey.BOOKING_CONFIRMED,
-    sourceKey: 'client-notification:notif_sms_missing',
-    recipient: {
-      kind: NotificationRecipientKind.CLIENT,
-      clientId: 'client_1',
-      userId: 'user_1',
-      inAppTargetId: 'client_1',
-      phone: null,
-      phoneVerifiedAt: null,
-      email: 'client@example.com',
-      timeZone: 'America/Los_Angeles',
-      preference: null,
-    },
-    title: 'Appointment confirmed',
-    body: 'Your appointment has been confirmed.',
-    href: '/client/bookings/booking_1',
-    requestedChannels: [NotificationChannel.SMS],
-    scheduledFor,
-    clientNotificationId: 'notif_sms_missing',
-  })
-
-  expect(result.created).toBe(true)
-  expect(result.selectedChannels).toEqual([])
-
-  expect(mockPrisma.notificationDispatch.create).toHaveBeenCalledWith({
-    data: expect.objectContaining({
-      recipientPhone: null,
-      deliveries: {
-        create: expect.arrayContaining([
-          expect.objectContaining({
+    mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+    mockPrisma.notificationDispatch.create.mockResolvedValue(
+      makeDispatchRecord({
+        sourceKey: 'client-notification:notif_sms_missing',
+        clientNotificationId: 'notif_sms_missing',
+        recipientPhone: null,
+        deliveries: [
+          makeDelivery({
+            id: 'delivery_in_app_suppressed',
             channel: NotificationChannel.IN_APP,
             provider: NotificationProvider.INTERNAL_REALTIME,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: 'client_1',
             maxAttempts: 3,
             nextAttemptAt: scheduledFor,
-            suppressedAt: expect.any(Date),
-            events: {
-              create: [
-                expect.objectContaining({
-                  type: 'CREATED',
-                  toStatus: NotificationDeliveryStatus.SUPPRESSED,
-                }),
-                expect.objectContaining({
-                  type: 'SUPPRESSED',
-                  toStatus: NotificationDeliveryStatus.SUPPRESSED,
-                  message:
-                    'Delivery suppressed at enqueue: CHANNEL_NOT_REQUESTED',
-                  payload: {
-                    source: 'enqueueDispatch',
-                    suppressionReason: 'CHANNEL_NOT_REQUESTED',
-                  },
-                }),
-              ],
-            },
+            suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
           }),
-          expect.objectContaining({
+          makeDelivery({
+            id: 'delivery_sms_suppressed',
             channel: NotificationChannel.SMS,
             provider: NotificationProvider.TWILIO,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: null,
             maxAttempts: 5,
             nextAttemptAt: scheduledFor,
-            suppressedAt: expect.any(Date),
-            events: {
-              create: [
-                expect.objectContaining({
-                  type: 'CREATED',
-                  toStatus: NotificationDeliveryStatus.SUPPRESSED,
-                }),
-                expect.objectContaining({
-                  type: 'SUPPRESSED',
-                  toStatus: NotificationDeliveryStatus.SUPPRESSED,
-                  message:
-                    'Delivery suppressed at enqueue: MISSING_SMS_DESTINATION',
-                  payload: {
-                    source: 'enqueueDispatch',
-                    suppressionReason: 'MISSING_SMS_DESTINATION',
-                  },
-                }),
-              ],
-            },
+            suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
           }),
-          expect.objectContaining({
+          makeDelivery({
+            id: 'delivery_email_suppressed',
             channel: NotificationChannel.EMAIL,
             provider: NotificationProvider.POSTMARK,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: 'client@example.com',
             maxAttempts: 6,
             nextAttemptAt: scheduledFor,
-            suppressedAt: expect.any(Date),
-            events: {
-              create: [
-                expect.objectContaining({
-                  type: 'CREATED',
-                  toStatus: NotificationDeliveryStatus.SUPPRESSED,
-                }),
-                expect.objectContaining({
-                  type: 'SUPPRESSED',
-                  toStatus: NotificationDeliveryStatus.SUPPRESSED,
-                  message:
-                    'Delivery suppressed at enqueue: CHANNEL_NOT_REQUESTED',
-                  payload: {
-                    source: 'enqueueDispatch',
-                    suppressionReason: 'CHANNEL_NOT_REQUESTED',
-                  },
-                }),
-              ],
-            },
+            suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
           }),
-        ]),
+        ],
+      }),
+    )
+
+    const result = await enqueueDispatch({
+      key: NotificationEventKey.BOOKING_CONFIRMED,
+      sourceKey: 'client-notification:notif_sms_missing',
+      recipient: {
+        kind: NotificationRecipientKind.CLIENT,
+        clientId: 'client_1',
+        userId: 'user_1',
+        inAppTargetId: 'client_1',
+        phone: null,
+        phoneVerifiedAt: null,
+        email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
+        timeZone: 'America/Los_Angeles',
+        preference: null,
       },
-    }),
-    select: expect.any(Object),
+      title: 'Appointment confirmed',
+      body: 'Your appointment has been confirmed.',
+      href: '/client/bookings/booking_1',
+      requestedChannels: [NotificationChannel.SMS],
+      scheduledFor,
+      clientNotificationId: 'notif_sms_missing',
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.selectedChannels).toEqual([])
+
+    expect(mockPrisma.notificationDispatch.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        recipientPhone: null,
+        deliveries: {
+          create: expect.arrayContaining([
+            expect.objectContaining({
+              channel: NotificationChannel.IN_APP,
+              provider: NotificationProvider.INTERNAL_REALTIME,
+              status: NotificationDeliveryStatus.SUPPRESSED,
+              destination: 'client_1',
+              maxAttempts: 3,
+              nextAttemptAt: scheduledFor,
+              suppressedAt: expect.any(Date),
+              events: {
+                create: [
+                  expect.objectContaining({
+                    type: 'CREATED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                  }),
+                  expect.objectContaining({
+                    type: 'SUPPRESSED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                    message:
+                      'Delivery suppressed at enqueue: CHANNEL_NOT_REQUESTED',
+                    payload: {
+                      source: 'enqueueDispatch',
+                      suppressionReason: 'CHANNEL_NOT_REQUESTED',
+                    },
+                  }),
+                ],
+              },
+            }),
+            expect.objectContaining({
+              channel: NotificationChannel.SMS,
+              provider: NotificationProvider.TWILIO,
+              status: NotificationDeliveryStatus.SUPPRESSED,
+              destination: null,
+              maxAttempts: 5,
+              nextAttemptAt: scheduledFor,
+              suppressedAt: expect.any(Date),
+              events: {
+                create: [
+                  expect.objectContaining({
+                    type: 'CREATED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                  }),
+                  expect.objectContaining({
+                    type: 'SUPPRESSED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                    message:
+                      'Delivery suppressed at enqueue: MISSING_SMS_DESTINATION',
+                    payload: {
+                      source: 'enqueueDispatch',
+                      suppressionReason: 'MISSING_SMS_DESTINATION',
+                    },
+                  }),
+                ],
+              },
+            }),
+            expect.objectContaining({
+              channel: NotificationChannel.EMAIL,
+              provider: NotificationProvider.POSTMARK,
+              status: NotificationDeliveryStatus.SUPPRESSED,
+              destination: 'client@example.com',
+              maxAttempts: 6,
+              nextAttemptAt: scheduledFor,
+              suppressedAt: expect.any(Date),
+              events: {
+                create: [
+                  expect.objectContaining({
+                    type: 'CREATED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                  }),
+                  expect.objectContaining({
+                    type: 'SUPPRESSED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                    message:
+                      'Delivery suppressed at enqueue: CHANNEL_NOT_REQUESTED',
+                    payload: {
+                      source: 'enqueueDispatch',
+                      suppressionReason: 'CHANNEL_NOT_REQUESTED',
+                    },
+                  }),
+                ],
+              },
+            }),
+          ]),
+        },
+      }),
+      select: expect.any(Object),
+    })
   })
-})
+
+  it('suppresses EMAIL when the address exists but email ownership is not verified', async () => {
+    const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+    mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+    mockPrisma.notificationDispatch.create.mockResolvedValue(
+      makeDispatchRecord({
+        sourceKey: 'client-notification:notif_email_unverified',
+        clientNotificationId: 'notif_email_unverified',
+        deliveries: [
+          makeDelivery({
+            id: 'delivery_in_app_ok',
+            channel: NotificationChannel.IN_APP,
+            provider: NotificationProvider.INTERNAL_REALTIME,
+            status: NotificationDeliveryStatus.PENDING,
+            destination: 'client_1',
+            maxAttempts: 3,
+            nextAttemptAt: scheduledFor,
+          }),
+          makeDelivery({
+            id: 'delivery_sms_ok',
+            channel: NotificationChannel.SMS,
+            provider: NotificationProvider.TWILIO,
+            status: NotificationDeliveryStatus.PENDING,
+            destination: '+15551234567',
+            maxAttempts: 5,
+            nextAttemptAt: scheduledFor,
+          }),
+          makeDelivery({
+            id: 'delivery_email_suppressed_unverified',
+            channel: NotificationChannel.EMAIL,
+            provider: NotificationProvider.POSTMARK,
+            status: NotificationDeliveryStatus.SUPPRESSED,
+            destination: null,
+            maxAttempts: 6,
+            nextAttemptAt: scheduledFor,
+            suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
+          }),
+        ],
+      }),
+    )
+
+    const result = await enqueueDispatch({
+      key: NotificationEventKey.BOOKING_CONFIRMED,
+      sourceKey: 'client-notification:notif_email_unverified',
+      recipient: {
+        kind: NotificationRecipientKind.CLIENT,
+        clientId: 'client_1',
+        userId: 'user_1',
+        inAppTargetId: 'client_1',
+        phone: '+15551234567',
+        phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
+        email: 'client@example.com',
+        emailVerifiedAt: null,
+        timeZone: 'America/Los_Angeles',
+        preference: null,
+      },
+      title: 'Appointment confirmed',
+      body: 'Your appointment has been confirmed.',
+      href: '/client/bookings/booking_1',
+      scheduledFor,
+      clientNotificationId: 'notif_email_unverified',
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.selectedChannels).toEqual([
+      NotificationChannel.IN_APP,
+      NotificationChannel.SMS,
+    ])
+
+    expect(mockPrisma.notificationDispatch.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        recipientEmail: 'client@example.com',
+        deliveries: {
+          create: expect.arrayContaining([
+            expect.objectContaining({
+              channel: NotificationChannel.IN_APP,
+              status: NotificationDeliveryStatus.PENDING,
+              destination: 'client_1',
+            }),
+            expect.objectContaining({
+              channel: NotificationChannel.SMS,
+              status: NotificationDeliveryStatus.PENDING,
+              destination: '+15551234567',
+            }),
+            expect.objectContaining({
+              channel: NotificationChannel.EMAIL,
+              provider: NotificationProvider.POSTMARK,
+              status: NotificationDeliveryStatus.SUPPRESSED,
+              destination: null,
+              suppressedAt: expect.any(Date),
+              events: {
+                create: [
+                  expect.objectContaining({
+                    type: 'CREATED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                  }),
+                  expect.objectContaining({
+                    type: 'SUPPRESSED',
+                    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+                    message:
+                      'Delivery suppressed at enqueue: MISSING_EMAIL_DESTINATION',
+                    payload: {
+                      source: 'enqueueDispatch',
+                      suppressionReason: 'MISSING_EMAIL_DESTINATION',
+                    },
+                  }),
+                ],
+              },
+            }),
+          ]),
+        },
+      }),
+      select: expect.any(Object),
+    })
+  })
 })

@@ -1,6 +1,6 @@
-// app/pro/layout.tsx
 import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
+
 import { getCurrentUser } from '@/lib/currentUser'
 
 import ProHeader from './ProHeader'
@@ -10,7 +10,6 @@ import ProComplianceBanner from './ProComplianceBanner'
 export const dynamic = 'force-dynamic'
 
 const UI = { headerH: 48, tabsH: 56 } as const
-
 const PRO_HOME = '/pro/calendar'
 
 function loginHref(
@@ -21,6 +20,10 @@ function loginHref(
   return reason ? `${base}&reason=${encodeURIComponent(reason)}` : base
 }
 
+function verifyHref(next: string): string {
+  return `/verify-phone?next=${encodeURIComponent(next)}`
+}
+
 export default async function ProRootLayout({
   children,
   modal,
@@ -28,7 +31,7 @@ export default async function ProRootLayout({
   children: ReactNode
   modal: ReactNode
 }) {
-  const user = await getCurrentUser()
+  const user = await getCurrentUser().catch(() => null)
 
   if (!user) {
     redirect(loginHref(PRO_HOME))
@@ -40,6 +43,10 @@ export default async function ProRootLayout({
 
   if (!user.professionalProfile) {
     redirect(loginHref(PRO_HOME, 'PRO_SETUP_REQUIRED'))
+  }
+
+  if (user.sessionKind !== 'ACTIVE' || !user.isFullyVerified) {
+    redirect(verifyHref(PRO_HOME))
   }
 
   return (

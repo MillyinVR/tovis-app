@@ -41,7 +41,7 @@ function makePreference(
 
 describe('lib/notifications/channelPolicy', () => {
   describe('getRecipientChannelCapabilities', () => {
-    it('reports all capabilities when destinations are present and phone is verified', () => {
+    it('reports all capabilities when destinations are present and both phone/email are verified', () => {
       expect(
         getRecipientChannelCapabilities({
           recipientKind: NotificationRecipientKind.CLIENT,
@@ -49,6 +49,7 @@ describe('lib/notifications/channelPolicy', () => {
           phone: '+15551234567',
           phoneVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
           email: 'client@example.com',
+          emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
       ).toEqual({
         hasInAppTarget: true,
@@ -65,11 +66,29 @@ describe('lib/notifications/channelPolicy', () => {
           phone: '+15551234567',
           phoneVerifiedAt: null,
           email: 'client@example.com',
+          emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
       ).toEqual({
         hasInAppTarget: true,
         hasSmsDestination: false,
         hasEmailDestination: true,
+      })
+    })
+
+    it('requires a verified email for EMAIL capability', () => {
+      expect(
+        getRecipientChannelCapabilities({
+          recipientKind: NotificationRecipientKind.CLIENT,
+          inAppTargetId: 'client_1',
+          phone: '+15551234567',
+          phoneVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
+          email: 'client@example.com',
+          emailVerifiedAt: null,
+        }),
+      ).toEqual({
+        hasInAppTarget: true,
+        hasSmsDestination: true,
+        hasEmailDestination: false,
       })
     })
 
@@ -81,6 +100,7 @@ describe('lib/notifications/channelPolicy', () => {
           phone: '   ',
           phoneVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
           email: '   ',
+          emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
       ).toEqual({
         hasInAppTarget: false,

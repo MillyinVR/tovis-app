@@ -1,19 +1,16 @@
 // app/api/auth/phone/send/route.ts
 import crypto from 'crypto'
-import { cookies } from 'next/headers'
 import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
 import { safeJson } from '@/lib/http'
-import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type JsonObject = Record<string, unknown>
-
-function isRecord(v: unknown): v is JsonObject {
+function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
@@ -24,14 +21,6 @@ function sha256(input: string) {
 function generateSmsCode() {
   const n = crypto.randomInt(0, 1_000_000)
   return String(n).padStart(6, '0')
-}
-
-async function getUserIdFromCookie(): Promise<string | null> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('tovis_token')?.value ?? null
-  if (!token) return null
-  const payload = verifyToken(token)
-  return payload?.userId ?? null
 }
 
 function envOrThrow(key: string) {
@@ -111,26 +100,21 @@ async function enforceOtpLimits(userId: string) {
   return { ok: true as const, retryAfterSeconds: 0 }
 }
 
-export async function POST(request: Request) {
+export async function POST(_request: Request) {
   try {
-    const userId = await getUserIdFromCookie()
-    if (!userId) return jsonFail(401, 'Not authenticated.', { code: 'UNAUTHENTICATED' })
+    const auth = await requireUser({ allowVerificationSession: true })
+    if (!auth.ok) return auth.res
 
-    const raw: unknown = await request.json().catch(() => ({}))
-    const body: JsonObject = isRecord(raw) ? raw : {}
+    const userId = auth.user.id
 
-    const phoneOverride = pickString(body.phone)?.trim() || null
+    if (auth.user.phoneVerifiedAt) {
+      return jsonOk({ alreadyVerified: true }, 200)
+    }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, phone: true, phoneVerifiedAt: true },
-    })
-
-    if (!user) return jsonFail(404, 'User not found.', { code: 'USER_NOT_FOUND' })
-    if (user.phoneVerifiedAt) return jsonOk({ alreadyVerified: true }, 200)
-
-    const phone = (phoneOverride || user.phone || '').trim()
-    if (!phone) return jsonFail(400, 'Phone number missing.', { code: 'PHONE_REQUIRED' })
+    const phone = (auth.user.phone ?? '').trim()
+    if (!phone) {
+      return jsonFail(400, 'Phone number missing.', { code: 'PHONE_REQUIRED' })
+    }
 
     const limit = await enforceOtpLimits(userId)
     if (!limit.ok) {

@@ -1,12 +1,34 @@
-// app/(auth)/verify-phone/page.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+
 import AuthShell from '../_components/AuthShell'
+import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { cn } from '@/lib/utils'
-import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+
+type VerificationStatus = {
+  loaded: boolean
+  sessionKind: 'ACTIVE' | 'VERIFICATION' | null
+  isPhoneVerified: boolean
+  isEmailVerified: boolean
+  isFullyVerified: boolean
+  nextUrl: string | null
+  role: 'CLIENT' | 'PRO' | 'ADMIN' | null
+  email: string | null
+}
+
+const EMPTY_STATUS: VerificationStatus = {
+  loaded: false,
+  sessionKind: null,
+  isPhoneVerified: false,
+  isEmailVerified: false,
+  isFullyVerified: false,
+  nextUrl: null,
+  role: null,
+  email: null,
+}
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
@@ -92,7 +114,9 @@ function sanitizeNextUrl(raw: string | null) {
   return s
 }
 
-function readRetryAfterSeconds(data: Record<string, unknown> | null): number | null {
+function readRetryAfterSeconds(
+  data: Record<string, unknown> | null,
+): number | null {
   if (!data) return null
   const v = data.retryAfterSeconds
   if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -103,23 +127,136 @@ function readRetryAfterSeconds(data: Record<string, unknown> | null): number | n
   return null
 }
 
+function readBooleanField(
+  data: Record<string, unknown> | null,
+  key: string,
+): boolean {
+  return data?.[key] === true
+}
+
+function readRoleField(
+  data: Record<string, unknown> | null,
+): 'CLIENT' | 'PRO' | 'ADMIN' | null {
+  const user = data?.user
+  if (!user || typeof user !== 'object' || Array.isArray(user)) return null
+  const role = (user as Record<string, unknown>).role
+  return role === 'CLIENT' || role === 'PRO' || role === 'ADMIN' ? role : null
+}
+
+function readEmailField(data: Record<string, unknown> | null): string | null {
+  const user = data?.user
+  if (!user || typeof user !== 'object' || Array.isArray(user)) return null
+  const email = (user as Record<string, unknown>).email
+  return typeof email === 'string' && email.trim() ? email.trim() : null
+}
+
+function statusLabel(value: boolean): string {
+  return value ? 'Verified' : 'Pending'
+}
+
+function buildDefaultNextUrl(role: 'CLIENT' | 'PRO' | 'ADMIN' | null): string {
+  if (role === 'PRO') return '/pro/calendar'
+  if (role === 'ADMIN') return '/admin'
+  return '/looks'
+}
+
 export default function VerifyPhonePage() {
   const router = useRouter()
   const sp = useSearchParams()
 
-  const nextUrl = useMemo(() => sanitizeNextUrl(sp.get('next')), [sp])
+  const nextFromQuery = useMemo(() => sanitizeNextUrl(sp.get('next')), [sp])
+  const emailRetryRequested = useMemo(() => sp.get('email') === 'retry', [sp])
 
+  const [status, setStatus] = useState<VerificationStatus>(EMPTY_STATUS)
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [sending, setSending] = useState(false)
+  const [sendingPhone, setSendingPhone] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
 
-  async function resend() {
-    if (sending) return
+  const resolvedNextUrl = useMemo(() => {
+    return nextFromQuery ?? status.nextUrl ?? buildDefaultNextUrl(status.role)
+  }, [nextFromQuery, status.nextUrl, status.role])
+
+  async function refreshStatus() {
+    const res = await fetch('/api/auth/verification/status', {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'include',
+    })
+
+    const data = await safeJsonRecord(res)
+
+    if (!res.ok) {
+      throw new Error(
+        readErrorMessage(data) ?? 'Could not load verification status.',
+      )
+    }
+
+    const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+
+    setStatus({
+      loaded: true,
+      sessionKind:
+        data?.sessionKind === 'ACTIVE' || data?.sessionKind === 'VERIFICATION'
+          ? data.sessionKind
+          : null,
+      isPhoneVerified: readBooleanField(data, 'isPhoneVerified'),
+      isEmailVerified: readBooleanField(data, 'isEmailVerified'),
+      isFullyVerified: readBooleanField(data, 'isFullyVerified'),
+      nextUrl,
+      role: readRoleField(data),
+      email: readEmailField(data),
+    })
+
+    return {
+      isFullyVerified: readBooleanField(data, 'isFullyVerified'),
+      nextUrl,
+      role: readRoleField(data),
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      try {
+        setError(null)
+        const result = await refreshStatus()
+
+        if (cancelled) return
+
+        if (result.isFullyVerified) {
+          const dest =
+            nextFromQuery ??
+            result.nextUrl ??
+            buildDefaultNextUrl(result.role)
+          router.replace(dest)
+        }
+      } catch (e) {
+        if (cancelled) return
+        console.error(e)
+        setError(
+          e instanceof Error ? e.message : 'Could not load verification status.',
+        )
+        setStatus((prev) => ({ ...prev, loaded: true }))
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [router, nextFromQuery])
+
+  async function resendPhone() {
+    if (sendingPhone || status.isPhoneVerified) return
+
     setError(null)
     setInfo(null)
-    setSending(true)
+    setSendingPhone(true)
 
     try {
       const res = await fetch('/api/auth/phone/send', {
@@ -133,24 +270,67 @@ export default function VerifyPhonePage() {
       if (!res.ok) {
         const retryAfterSeconds = readRetryAfterSeconds(data)
         const retryMsg =
-          retryAfterSeconds != null ? ` Try again in ~${Math.ceil(retryAfterSeconds / 60)} min.` : ''
+          retryAfterSeconds != null
+            ? ` Try again in ~${Math.ceil(retryAfterSeconds / 60)} min.`
+            : ''
 
         setError((readErrorMessage(data) ?? 'Could not resend code.') + retryMsg)
         return
       }
 
-      setInfo('New code sent.')
+      await refreshStatus()
+      setInfo('New phone verification code sent.')
     } catch (e) {
       console.error(e)
       setError('Network error.')
     } finally {
-      setSending(false)
+      setSendingPhone(false)
+    }
+  }
+
+  async function resendEmail() {
+    if (sendingEmail || status.isEmailVerified) return
+
+    setError(null)
+    setInfo(null)
+    setSendingEmail(true)
+
+    try {
+      const res = await fetch('/api/auth/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+
+      const data = await safeJsonRecord(res)
+
+      if (!res.ok) {
+        const retryAfterSeconds = readRetryAfterSeconds(data)
+        const retryMsg =
+          retryAfterSeconds != null
+            ? ` Try again in ~${Math.ceil(retryAfterSeconds / 60)} min.`
+            : ''
+
+        setError(
+          (readErrorMessage(data) ?? 'Could not resend verification email.') +
+            retryMsg,
+        )
+        return
+      }
+
+      await refreshStatus()
+      setInfo('Verification email sent. Check your inbox.')
+    } catch (e) {
+      console.error(e)
+      setError('Network error.')
+    } finally {
+      setSendingEmail(false)
     }
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (loading) return
+    if (loading || status.isPhoneVerified) return
 
     setError(null)
     setInfo(null)
@@ -176,8 +356,21 @@ export default function VerifyPhonePage() {
         return
       }
 
+      const refreshed = await refreshStatus()
       router.refresh()
-      router.replace(nextUrl ?? '/looks') // ✅ fix: /client/looks was 404 in prod
+
+      if (refreshed.isFullyVerified) {
+        const dest =
+          nextFromQuery ??
+          refreshed.nextUrl ??
+          buildDefaultNextUrl(refreshed.role)
+        router.replace(dest)
+        return
+      }
+
+      setInfo(
+        'Phone verified. Email verification is still required before full app access.',
+      )
     } catch (e) {
       console.error(e)
       setError('Network error.')
@@ -187,27 +380,101 @@ export default function VerifyPhonePage() {
   }
 
   return (
-    <AuthShell title="Verify your phone" subtitle="Enter the 6-digit code we sent. This keeps bookings and reminders reliable.">
+    <AuthShell
+      title="Complete your verification"
+      subtitle="Both phone and email verification are required before full app access."
+    >
       <form onSubmit={onSubmit} className="grid gap-4">
-        <label className="grid gap-1.5">
-          <span className="text-xs font-black tracking-wide text-textSecondary">Verification code</span>
-
-          <Input
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, ''))}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="123456"
-            maxLength={6}
-          />
-
+        <div className="rounded-card border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-textSecondary/80">Didn’t get it?</span>
-            <TinyButton onClick={resend} disabled={sending || loading}>
-              {sending ? 'Sending…' : 'Resend code'}
-            </TinyButton>
+            <span>Phone</span>
+            <span className="font-black text-textPrimary">
+              {statusLabel(status.isPhoneVerified)}
+            </span>
           </div>
-        </label>
+
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span>Email</span>
+            <span className="font-black text-textPrimary">
+              {statusLabel(status.isEmailVerified)}
+            </span>
+          </div>
+
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span>Account</span>
+            <span className="font-black text-textPrimary">
+              {status.isFullyVerified ? 'Fully verified' : 'Verification incomplete'}
+            </span>
+          </div>
+
+          {status.email ? (
+            <div className="mt-3 text-xs text-textSecondary/80">
+              Verification email destination:{' '}
+              <span className="font-black text-textPrimary">{status.email}</span>
+            </div>
+          ) : null}
+        </div>
+
+        {emailRetryRequested && !status.isEmailVerified ? (
+          <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">
+            We could not send your verification email during signup. Use the resend button below to send it now.
+          </div>
+        ) : null}
+
+        {!status.isPhoneVerified ? (
+          <label className="grid gap-1.5">
+            <span className="text-xs font-black tracking-wide text-textSecondary">
+              Phone verification code
+            </span>
+
+            <Input
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, ''))}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="123456"
+              maxLength={6}
+              disabled={loading || sendingPhone}
+            />
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-textSecondary/80">
+                Didn’t get the text?
+              </span>
+              <TinyButton
+                onClick={resendPhone}
+                disabled={sendingPhone || loading || status.isPhoneVerified}
+              >
+                {sendingPhone ? 'Sending…' : 'Resend code'}
+              </TinyButton>
+            </div>
+          </label>
+        ) : (
+          <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
+            Your phone is verified.
+          </div>
+        )}
+
+        {!status.isEmailVerified ? (
+          <div className="rounded-card border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
+            <div className="font-black text-textPrimary">Verify your email</div>
+            <div className="mt-1 text-xs text-textSecondary/80">
+              Click the verification link we emailed you. You can resend it here if needed.
+            </div>
+            <div className="mt-3">
+              <TinyButton
+                onClick={resendEmail}
+                disabled={sendingEmail || status.isEmailVerified}
+              >
+                {sendingEmail ? 'Sending…' : 'Resend verification email'}
+              </TinyButton>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
+            Your email is verified.
+          </div>
+        )}
 
         {info ? (
           <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
@@ -221,12 +488,30 @@ export default function VerifyPhonePage() {
           </div>
         ) : null}
 
-        <PrimaryButton loading={loading} disabled={loading || sending}>
-          {loading ? 'Verifying…' : 'Verify phone'}
-        </PrimaryButton>
+        {!status.isPhoneVerified ? (
+          <PrimaryButton loading={loading} disabled={loading || sendingPhone}>
+            {loading ? 'Verifying…' : 'Verify phone'}
+          </PrimaryButton>
+        ) : status.isFullyVerified ? (
+          <Link
+            href={resolvedNextUrl}
+            className={cn(
+              'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
+              'border border-accentPrimary/35',
+              'bg-accentPrimary/26 text-textPrimary',
+              'hover:bg-accentPrimary/30 hover:border-accentPrimary/45',
+              'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
+            )}
+          >
+            Continue
+          </Link>
+        ) : null}
 
         <div className="text-center text-xs text-textSecondary/80">
-          <Link href="/login" className="font-black text-textPrimary hover:text-accentPrimary">
+          <Link
+            href="/login"
+            className="font-black text-textPrimary hover:text-accentPrimary"
+          >
             Back to sign in
           </Link>
         </div>

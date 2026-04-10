@@ -1,7 +1,10 @@
-import { requireUser } from './requireUser'
+// app/api/_utils/auth/requirePro.ts
+import { Role } from '@prisma/client'
+
 import { jsonFail } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
-import { Role } from '@prisma/client'
+
+import { requireUser } from './requireUser'
 
 type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
 

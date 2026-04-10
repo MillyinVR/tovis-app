@@ -32,6 +32,7 @@ const clientDispatchRecipientSelect = {
   user: {
     select: {
       email: true,
+      emailVerifiedAt: true,
       phone: true,
       phoneVerifiedAt: true,
     },
@@ -454,6 +455,7 @@ async function enqueueClientNotificationDispatch(args: {
       phone: preferredPhone.phone,
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
       email: recipient.client.user.email,
+      emailVerifiedAt: recipient.client.user.emailVerifiedAt,
       timeZone,
       preference: recipient.preference,
     },

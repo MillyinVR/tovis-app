@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import jwt, { type JwtPayload as JsonWebTokenPayload } from 'jsonwebtoken'
 
 const JWT_SECRET = process.env.JWT_SECRET
 
@@ -7,32 +7,94 @@ if (!JWT_SECRET) {
   throw new Error('JWT_SECRET is not set in environment variables')
 }
 
-type Role = 'CLIENT' | 'PRO' | 'ADMIN'
+const PASSWORD_SALT_ROUNDS = 10
+const TOKEN_EXPIRES_IN = '7d' as const
 
-type JwtPayload = {
+export type AuthRole = 'CLIENT' | 'PRO' | 'ADMIN'
+export type AuthSessionKind = 'ACTIVE' | 'VERIFICATION'
+
+type TokenSubject = {
   userId: string
-  role: Role
+  role: AuthRole
 }
 
+export type AuthTokenPayload = TokenSubject & {
+  sessionKind: AuthSessionKind
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isAuthRole(value: unknown): value is AuthRole {
+  return value === 'CLIENT' || value === 'PRO' || value === 'ADMIN'
+}
+
+function isAuthSessionKind(value: unknown): value is AuthSessionKind {
+  return value === 'ACTIVE' || value === 'VERIFICATION'
+}
+
+function normalizeDecodedToken(
+  decoded: string | JsonWebTokenPayload | null,
+): AuthTokenPayload | null {
+  if (!isRecord(decoded)) return null
+
+  const userId = decoded.userId
+  const role = decoded.role
+  const sessionKind = decoded.sessionKind
+
+  if (!isNonEmptyString(userId)) return null
+  if (!isAuthRole(role)) return null
+  if (!isAuthSessionKind(sessionKind)) return null
+
+  return {
+    userId,
+    role,
+    sessionKind,
+  }
+}
 
 export async function hashPassword(password: string): Promise<string> {
-  const saltRounds = 10
-  return bcrypt.hash(password, saltRounds)
+  return bcrypt.hash(password, PASSWORD_SALT_ROUNDS)
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  hash: string,
+): Promise<boolean> {
   return bcrypt.compare(password, hash)
 }
 
-export function createToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET!, {
-    expiresIn: '7d',
+export function createToken(payload: AuthTokenPayload): string {
+  return jwt.sign(payload, JWT_SECRET as string, {
+    expiresIn: TOKEN_EXPIRES_IN,
   })
 }
 
-export function verifyToken(token: string): JwtPayload | null {
+export function createActiveToken(payload: TokenSubject): string {
+  return createToken({
+    userId: payload.userId,
+    role: payload.role,
+    sessionKind: 'ACTIVE',
+  })
+}
+
+export function createVerificationToken(payload: TokenSubject): string {
+  return createToken({
+    userId: payload.userId,
+    role: payload.role,
+    sessionKind: 'VERIFICATION',
+  })
+}
+
+export function verifyToken(token: string): AuthTokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET!) as JwtPayload
+    const decoded = jwt.verify(token, JWT_SECRET as string)
+    return normalizeDecodedToken(decoded)
   } catch {
     return null
   }

@@ -90,6 +90,10 @@ enum VerificationDocumentType {
   MAKEUP_SECONDARY
 }
 
+enum AuthVerificationPurpose {
+  EMAIL_VERIFY
+}
+
 enum MediaType {
   IMAGE
   VIDEO
@@ -641,6 +645,7 @@ model User {
   email              String                     @unique
   phone              String?                    @unique @db.VarChar(32) // E.164 preferred: +16195551234
   phoneVerifiedAt    DateTime?
+  emailVerifiedAt    DateTime?
   password           String
   role               Role
   createdAt          DateTime                   @default(now())
@@ -678,12 +683,12 @@ model User {
   mediaComments MediaComment[]
 
   // opposite relation for MediaAsset.uploadedByUser
-  uploadedMedia       MediaAsset[]         @relation("UploadedMedia")
-  nfcCards            NfcCard[]
-  tapIntents          TapIntent[]
-  passwordResetTokens PasswordResetToken[]
-
-  phoneVerifications PhoneVerification[]
+  uploadedMedia           MediaAsset[]             @relation("UploadedMedia")
+  nfcCards                NfcCard[]
+  tapIntents              TapIntent[]
+  passwordResetTokens     PasswordResetToken[]
+  phoneVerifications      PhoneVerification[]
+  emailVerificationTokens EmailVerificationToken[]
 
   supportTicketsCreated SupportTicket[]        @relation("SupportTicketCreatedBy")
   supportTicketsHandled SupportTicket[]        @relation("SupportTicketHandledBy")
@@ -703,6 +708,23 @@ model PhoneVerification {
 
   @@index([userId])
   @@index([phone])
+  @@index([expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String                  @id @default(cuid())
+  userId    String
+  purpose   AuthVerificationPurpose @default(EMAIL_VERIFY)
+  email     String                  @db.VarChar(320)
+  tokenHash String                  @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime                @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt])
+  @@index([email, createdAt])
   @@index([expiresAt])
 }
 

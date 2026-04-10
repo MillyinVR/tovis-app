@@ -62,6 +62,7 @@ describe('lib/notifications/proNotifications', () => {
       timeZone: 'America/Los_Angeles',
       user: {
         email: 'pro@example.com',
+        emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
         phone: '+15557654321',
         phoneVerifiedAt: new Date('2026-04-08T08:00:00.000Z'),
       },
@@ -125,6 +126,7 @@ describe('lib/notifications/proNotifications', () => {
         user: {
           select: {
             email: true,
+            emailVerifiedAt: true,
             phone: true,
             phoneVerifiedAt: true,
           },
@@ -132,7 +134,9 @@ describe('lib/notifications/proNotifications', () => {
       },
     })
 
-    expect(mockPrisma.professionalNotificationPreference.findUnique).toHaveBeenCalledWith({
+    expect(
+      mockPrisma.professionalNotificationPreference.findUnique,
+    ).toHaveBeenCalledWith({
       where: {
         professionalId_eventKey: {
           professionalId: 'pro_1',
@@ -159,6 +163,7 @@ describe('lib/notifications/proNotifications', () => {
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T09:00:00.000Z'),
         email: 'pro@example.com',
+        emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
         timeZone: 'America/Los_Angeles',
         preference: null,
       },
@@ -185,6 +190,7 @@ describe('lib/notifications/proNotifications', () => {
       timeZone: 'America/Los_Angeles',
       user: {
         email: 'pro@example.com',
+        emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
         phone: '+15557654321',
         phoneVerifiedAt: new Date('2026-04-08T08:00:00.000Z'),
       },
@@ -203,6 +209,7 @@ describe('lib/notifications/proNotifications', () => {
         recipient: expect.objectContaining({
           phone: '+15557654321',
           phoneVerifiedAt: new Date('2026-04-08T08:00:00.000Z'),
+          emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
           timeZone: 'America/Los_Angeles',
         }),
       }),
@@ -271,6 +278,7 @@ describe('lib/notifications/proNotifications', () => {
         sourceKey: 'pro-notification:notif_existing',
         notificationId: 'notif_existing',
         recipient: expect.objectContaining({
+          emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
           timeZone: 'America/Los_Angeles',
         }),
       }),

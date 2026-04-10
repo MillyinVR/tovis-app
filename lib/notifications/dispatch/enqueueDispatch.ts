@@ -102,6 +102,7 @@ type EnqueueDispatchRecipientBase = {
   phone?: string | null
   phoneVerifiedAt?: Date | null
   email?: string | null
+  emailVerifiedAt?: Date | null
   timeZone?: string | null
   preference?: NotificationPreferenceLike | null
 }
@@ -168,6 +169,7 @@ type NormalizedEnqueueDispatchArgs = {
   phone: string | null
   phoneVerifiedAt: Date | null
   email: string | null
+  emailVerifiedAt: Date | null
   timeZone: string | null
   preference: NotificationPreferenceLike | null
 
@@ -327,6 +329,7 @@ function buildDeliveryRows(args: {
     phone: args.normalized.phone,
     phoneVerifiedAt: args.normalized.phoneVerifiedAt,
     email: args.normalized.email,
+    emailVerifiedAt: args.normalized.emailVerifiedAt,
   })
 
   return args.evaluations.map((evaluation) => {
@@ -481,6 +484,14 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     throw new Error('enqueueDispatch: invalid recipient.phoneVerifiedAt')
   }
 
+  if (
+    args.recipient.emailVerifiedAt != null &&
+    (!(args.recipient.emailVerifiedAt instanceof Date) ||
+      Number.isNaN(args.recipient.emailVerifiedAt.getTime()))
+  ) {
+    throw new Error('enqueueDispatch: invalid recipient.emailVerifiedAt')
+  }
+
   if (isProDispatchRecipient(args.recipient)) {
     const professionalId = normRequiredString(args.recipient.professionalId, MAX_ID)
 
@@ -499,6 +510,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
       phone,
       phoneVerifiedAt: args.recipient.phoneVerifiedAt ?? null,
       email,
+      emailVerifiedAt: args.recipient.emailVerifiedAt ?? null,
       timeZone,
       preference: args.recipient.preference ?? null,
       title,
@@ -519,7 +531,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     throw new Error('enqueueDispatch: missing recipient.clientId')
   }
 
-  return {
+   return {
     key: args.key,
     sourceKey,
     recipientKind: RECIPIENT_KIND.CLIENT,
@@ -530,6 +542,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     phone,
     phoneVerifiedAt: args.recipient.phoneVerifiedAt ?? null,
     email,
+    emailVerifiedAt: args.recipient.emailVerifiedAt ?? null,
     timeZone,
     preference: args.recipient.preference ?? null,
     title,
@@ -596,6 +609,7 @@ export async function enqueueDispatch(
     phone: normalized.phone,
     phoneVerifiedAt: normalized.phoneVerifiedAt,
     email: normalized.email,
+    emailVerifiedAt: normalized.emailVerifiedAt,
   })
 
   const policy = resolveChannelPolicy({
