@@ -66,6 +66,7 @@ function resolveIsHttps(request: Request): boolean {
 
 export async function POST(request: Request) {
   try {
+    console.log('LOGIN ROUTE DATABASE_URL =', process.env.DATABASE_URL?.slice(0, 120))
     const identity = await rateLimitIdentity()
     const rlRes = await enforceRateLimit({ bucket: 'auth:login', identity })
     if (rlRes) return rlRes
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
       return jsonFail(400, 'Missing email or password', { code: 'MISSING_CREDENTIALS' })
     }
 
-    const user = await prisma.user.findUnique({
+   const user = await prisma.user.findUnique({
       where: { email },
       select: {
         id: true,
@@ -93,10 +94,25 @@ export async function POST(request: Request) {
       },
     })
 
-    if (!user) return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+    console.log('LOGIN LOOKUP RESULT =', user ? {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      passwordHashPrefix: user.password.slice(0, 20),
+    } : null)
+
+    if (!user) {
+      console.log('LOGIN FAILURE REASON = USER_NOT_FOUND')
+      return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+    }
 
     const isValid = await verifyPassword(password, user.password)
-    if (!isValid) return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+    console.log('LOGIN PASSWORD MATCH =', isValid)
+
+    if (!isValid) {
+      console.log('LOGIN FAILURE REASON = PASSWORD_MISMATCH')
+      return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+    }
 
     // ✅ Role intent enforcement (prevents “login then bounce back to login” loops)
     if (expectedRole && user.role !== expectedRole) {

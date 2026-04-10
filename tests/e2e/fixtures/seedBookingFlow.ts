@@ -7,6 +7,8 @@ import {
   ServiceLocationType,
   VerificationStatus,
 } from '@prisma/client'
+import { hashPassword } from '@/lib/auth'
+import { normalizeEmail } from '@/app/api/_utils/email'
 
 export type SeedBookingFlowOptions = {
   withSavedAddress?: boolean
@@ -84,6 +86,14 @@ const FIXED_CLIENT_PASSWORD = 'password123'
 const DEFAULT_TIME_ZONE = 'America/Los_Angeles'
 const DEFAULT_OFFERING_TITLE = 'E2E Base Offering'
 
+function requireNormalizedEmail(value: unknown, label: string): string {
+  const email = normalizeEmail(value)
+  if (!email) {
+    throw new Error(`Invalid ${label}`)
+  }
+  return email
+}
+
 function makeTag(): string {
   return `e2e_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -125,7 +135,10 @@ export async function seedBookingFlow(
   const approvedAt = new Date()
 
   const categorySlug = `${tag}-category`
-  const professionalEmail = `${tag}_pro@example.com`
+  const professionalEmail = requireNormalizedEmail(
+    `${tag}_pro@example.com`,
+    'professional email',
+  )
   const professionalHandle = `${tag}-pro`
 
   const existingClientUser = await prisma.user.findUnique({
@@ -189,10 +202,12 @@ export async function seedBookingFlow(
       })
     : null
 
+  const professionalPasswordHash = await hashPassword(professionalPassword)
+
   const professionalUser = await prisma.user.create({
     data: {
       email: professionalEmail,
-      password: professionalPassword,
+      password: professionalPasswordHash,
       role: Role.PRO,
     },
     select: {

@@ -1,6 +1,7 @@
-// prisma/seed.cjs
 const path = require('path')
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
+const { loadEnvConfig } = require('@next/env')
+
+loadEnvConfig(path.join(__dirname, '..'))
 
 const {
   PrismaClient,
@@ -18,6 +19,23 @@ const bcrypt = require('bcrypt')
 const prisma = new PrismaClient()
 
 const DEFAULT_TIME_ZONE = 'America/Los_Angeles'
+
+function normalizeEmail(value) {
+  if (typeof value !== 'string') {
+    throw new Error('Email must be a string')
+  }
+
+  const email = value.trim().toLowerCase()
+  if (!email) {
+    throw new Error('Email is required')
+  }
+
+  if (!email.includes('@')) {
+    throw new Error(`Invalid email: ${value}`)
+  }
+
+  return email
+}
 
 function money(v) {
   if (typeof v === 'number') return new Prisma.Decimal(v.toFixed(2))
@@ -124,16 +142,18 @@ async function ensurePermission(serviceId, professionType, stateCode = null) {
 }
 
 async function upsertAdmin({ email, password }) {
+  const normalizedEmail = normalizeEmail(email)
   const adminHash = await bcrypt.hash(password, 10)
 
   const adminUser = await prisma.user.upsert({
-    where: { email },
+    where: { email: normalizedEmail },
     update: {
+      email: normalizedEmail,
       role: Role.ADMIN,
       password: adminHash,
     },
     create: {
-      email,
+      email: normalizedEmail,
       password: adminHash,
       role: Role.ADMIN,
     },
@@ -163,23 +183,25 @@ async function upsertAdmin({ email, password }) {
     })
   }
 
-  console.log('ADMIN login:', { email, password })
+  console.log('ADMIN login:', { email: adminUser.email, password })
   console.log('ADMIN user id:', adminUser.id)
 
   return adminUser
 }
 
 async function upsertClientUser({ email, password }) {
+  const normalizedEmail = normalizeEmail(email)
   const passwordHash = await bcrypt.hash(password, 10)
 
   const user = await prisma.user.upsert({
-    where: { email },
+    where: { email: normalizedEmail },
     update: {
+      email: normalizedEmail,
       password: passwordHash,
       role: Role.CLIENT,
     },
     create: {
-      email,
+      email: normalizedEmail,
       password: passwordHash,
       role: Role.CLIENT,
     },
@@ -207,16 +229,18 @@ async function upsertClientUser({ email, password }) {
 }
 
 async function upsertProfessionalUser({ email, password }) {
+  const normalizedEmail = normalizeEmail(email)
   const passwordHash = await bcrypt.hash(password, 10)
 
   const user = await prisma.user.upsert({
-    where: { email },
+    where: { email: normalizedEmail },
     update: {
+      email: normalizedEmail,
       password: passwordHash,
       role: Role.PRO,
     },
     create: {
-      email,
+      email: normalizedEmail,
       password: passwordHash,
       role: Role.PRO,
     },
@@ -430,26 +454,26 @@ async function main() {
 
   const seedPassword = process.env.SEED_TEST_PASSWORD || 'password123'
 
-  const proEmail = 'pro@test.com'
+  const proEmail = normalizeEmail('pro@test.com')
   const proPassword = seedPassword
 
-  const clientEmail = 'client@test.com'
+  const clientEmail = normalizeEmail('client@test.com')
   const clientPassword = seedPassword
 
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@test.com'
+  const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || 'admin@test.com')
   const adminPassword = seedPassword
 
-  const { professionalProfile } = await upsertProfessionalUser({
+  const { user: proUser, professionalProfile } = await upsertProfessionalUser({
     email: proEmail,
     password: proPassword,
   })
 
-  await upsertClientUser({
+  const { user: clientUser } = await upsertClientUser({
     email: clientEmail,
     password: clientPassword,
   })
 
-  await upsertAdmin({
+  const adminUser = await upsertAdmin({
     email: adminEmail,
     password: adminPassword,
   })
@@ -656,8 +680,9 @@ async function main() {
   })
 
   console.log('✅ Seed core data complete.')
-  console.log('PRO login:', { email: proEmail, password: proPassword })
-  console.log('CLIENT login:', { email: clientEmail, password: clientPassword })
+  console.log('PRO login:', { email: proUser.email, password: proPassword })
+  console.log('CLIENT login:', { email: clientUser.email, password: clientPassword })
+  console.log('ADMIN login:', { email: adminUser.email, password: adminPassword })
   console.log('PRO profile id:', professionalProfile.id)
 
   const look1 = await upsertMediaAsset({

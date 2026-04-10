@@ -1,5 +1,7 @@
 const path = require('path')
-require('dotenv').config({ path: path.join(process.cwd(), '.env') })
+const { loadEnvConfig } = require('@next/env')
+
+loadEnvConfig(process.cwd())
 
 const bcrypt = require('bcrypt')
 const { PrismaClient, Role } = require('@prisma/client')
@@ -7,32 +9,79 @@ const { PrismaClient, Role } = require('@prisma/client')
 const prisma = new PrismaClient()
 
 const TARGET_PASSWORD = process.env.AUTH_RESET_PASSWORD || 'password123'
+
+function normalizeEmail(value) {
+  if (typeof value !== 'string') return null
+
+  const email = value.trim().toLowerCase()
+  if (!email) return null
+  if (!email.includes('@')) return null
+
+  return email
+}
+
+function requireNormalizedEmail(value, label) {
+  const email = normalizeEmail(value)
+  if (!email) {
+    throw new Error(`Invalid ${label}`)
+  }
+  return email
+}
+
 const TARGET_EMAILS = {
-  client: process.env.AUTH_RESET_CLIENT_EMAIL || 'client@test.com',
-  pro: process.env.AUTH_RESET_PRO_EMAIL || 'pro@test.com',
-  admin: process.env.AUTH_RESET_ADMIN_EMAIL || process.env.ADMIN_EMAIL || 'admin@test.com',
+  client: requireNormalizedEmail(
+    process.env.AUTH_RESET_CLIENT_EMAIL || 'client@test.com',
+    'AUTH_RESET_CLIENT_EMAIL',
+  ),
+  pro: requireNormalizedEmail(
+    process.env.AUTH_RESET_PRO_EMAIL || 'pro@test.com',
+    'AUTH_RESET_PRO_EMAIL',
+  ),
+  admin: requireNormalizedEmail(
+    process.env.AUTH_RESET_ADMIN_EMAIL || process.env.ADMIN_EMAIL || 'admin@test.com',
+    'AUTH_RESET_ADMIN_EMAIL',
+  ),
+}
+
+async function findUserByEmailInsensitive(email) {
+  return prisma.user.findFirst({
+    where: {
+      email: {
+        equals: email,
+        mode: 'insensitive',
+      },
+    },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+    },
+  })
 }
 
 async function resetPassword(email, role, passwordHash) {
-  const user = await prisma.user.findUnique({
-    where: { email },
-    select: { id: true, email: true, role: true },
-  })
+  const normalizedEmail = requireNormalizedEmail(email, `${role} email`)
+
+  const user = await findUserByEmailInsensitive(normalizedEmail)
 
   if (!user) {
-    console.warn(`[skip] No user found for ${email}`)
+    console.warn(`[skip] No user found for ${normalizedEmail}`)
     return
   }
 
   await prisma.user.update({
-    where: { email },
+    where: { id: user.id },
     data: {
+      email: normalizedEmail,
       password: passwordHash,
       role,
     },
   })
 
-  console.log(`[ok] Updated ${role} password for ${email}`)
+  const emailChanged = user.email !== normalizedEmail
+  console.log(
+    `[ok] Updated ${role} password for ${user.email}${emailChanged ? ` -> ${normalizedEmail}` : ''}`,
+  )
 }
 
 async function main() {

@@ -1,17 +1,32 @@
-// scripts/create-super-admin.ts
 import { PrismaClient, Role, AdminPermissionRole } from '@prisma/client'
 import { hashPassword } from '../lib/auth'
+import { normalizeEmail } from '../app/api/_utils/email'
 
 const prisma = new PrismaClient()
 
+const DEFAULT_ADMIN_EMAIL = 'admin@test.com'
+const DEFAULT_ADMIN_PASSWORD = 'password123'
+
+function requireNormalizedEmail(value: unknown, label = 'email'): string {
+  const email = normalizeEmail(value)
+  if (!email) {
+    throw new Error(`Invalid ${label}`)
+  }
+  return email
+}
+
 async function main() {
-  const email = 'admin@test.com'
-  const rawPassword = 'password123'
+  const email = requireNormalizedEmail(
+    process.env.ADMIN_EMAIL ?? DEFAULT_ADMIN_EMAIL,
+    'ADMIN_EMAIL',
+  )
+  const rawPassword = process.env.ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD
   const hashedPassword = await hashPassword(rawPassword)
 
   const user = await prisma.user.upsert({
     where: { email },
     update: {
+      email,
       password: hashedPassword,
       role: Role.ADMIN,
     },
@@ -51,7 +66,7 @@ async function main() {
   }
 
   console.log('Super admin ensured:')
-  console.log(`email: ${email}`)
+  console.log(`email: ${user.email}`)
   console.log(`password: ${rawPassword}`)
   console.log(`role: ${user.role}`)
 }

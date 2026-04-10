@@ -14,6 +14,7 @@ import {
 import { buildTier1WaitlistAudience } from '@/lib/lastMinute/audience/buildTier1WaitlistAudience'
 import { buildTier2ReactivationAudience } from '@/lib/lastMinute/audience/buildTier2ReactivationAudience'
 import { buildTier3DiscoveryAudience } from '@/lib/lastMinute/audience/buildTier3DiscoveryAudience'
+
 export const dynamic = 'force-dynamic'
 
 const DEFAULT_TAKE = 25
@@ -26,6 +27,25 @@ type DueTierPlanRow = Prisma.LastMinuteTierPlanGetPayload<{
 type Candidate = {
   clientId: string
   matchedTier: LastMinuteTier
+}
+
+type PendingNotification = {
+  recipientId: string
+  clientId: string
+  dedupeKey: string
+  title: string
+  body: string
+  href: string
+  data: Prisma.InputJsonObject
+}
+
+type ProcessTierPlanResult = {
+  id: string
+  openingId: string
+  tier: LastMinuteTier
+  status: 'processed' | 'skipped' | 'failed'
+  createdRecipients: number
+  error?: string
 }
 
 const dueTierPlanSelect = {
@@ -234,18 +254,11 @@ async function buildDiscoveryCandidates(args: {
   })
 }
 
-async function processTierPlan(plan: DueTierPlanRow): Promise<{
-  id: string
-  openingId: string
-  tier: LastMinuteTier
-  status: 'processed' | 'skipped' | 'failed'
-  createdRecipients: number
-  error?: string
-}> {
+async function processTierPlan(plan: DueTierPlanRow): Promise<ProcessTierPlanResult> {
   const now = new Date()
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const transactionResult = await prisma.$transaction(async (tx) => {
       const current = await tx.lastMinuteTierPlan.findUnique({
         where: { id: plan.id },
         select: {
@@ -273,6 +286,7 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
         return {
           status: 'skipped' as const,
           createdRecipients: 0,
+          pendingNotifications: [] as PendingNotification[],
         }
       }
 
@@ -280,6 +294,7 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
         return {
           status: 'skipped' as const,
           createdRecipients: 0,
+          pendingNotifications: [] as PendingNotification[],
         }
       }
 
@@ -300,6 +315,7 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
         return {
           status: 'processed' as const,
           createdRecipients: 0,
+          pendingNotifications: [] as PendingNotification[],
         }
       }
 
@@ -315,11 +331,11 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
         return {
           status: 'processed' as const,
           createdRecipients: 0,
+          pendingNotifications: [] as PendingNotification[],
         }
       }
 
       let candidates: Candidate[] = []
-      let discoveryWarning: string | null = null
 
       if (plan.tier === LastMinuteTier.WAITLIST) {
         candidates = await buildTier1WaitlistAudience({
@@ -338,6 +354,7 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
       }
 
       const notification = buildNotificationContent(plan)
+      const pendingNotifications: PendingNotification[] = []
       let createdRecipients = 0
 
       for (const candidate of candidates) {
@@ -376,26 +393,16 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
           },
         })
 
-        const notificationData: Prisma.InputJsonObject = {
-          ...notification.data,
+        pendingNotifications.push({
           recipientId: recipient.id,
-        }
-
-        const clientNotification = await upsertClientNotification({
-          tx,
           clientId: candidate.clientId,
-          eventKey: NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
+          dedupeKey: `last-minute-opening:${plan.opening.id}:client:${candidate.clientId}`,
           title: notification.title,
           body: notification.body,
           href: notification.href,
-          dedupeKey: `last-minute-opening:${plan.opening.id}:client:${candidate.clientId}`,
-          data: notificationData,
-        })
-
-        await tx.lastMinuteRecipient.update({
-          where: { id: recipient.id },
           data: {
-            sourceDispatchKey: `client-notification:${clientNotification.id}`,
+            ...notification.data,
+            recipientId: recipient.id,
           },
         })
 
@@ -406,22 +413,52 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<{
         where: { id: plan.id },
         data: {
           processedAt: now,
-          lastError: discoveryWarning,
+          lastError: null,
         },
       })
 
       return {
         status: 'processed' as const,
         createdRecipients,
+        pendingNotifications,
       }
     })
+
+    if (transactionResult.status !== 'processed') {
+      return {
+        id: plan.id,
+        openingId: plan.openingId,
+        tier: plan.tier,
+        status: transactionResult.status,
+        createdRecipients: transactionResult.createdRecipients,
+      }
+    }
+
+    for (const pending of transactionResult.pendingNotifications) {
+      const clientNotification = await upsertClientNotification({
+        clientId: pending.clientId,
+        eventKey: NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
+        title: pending.title,
+        body: pending.body,
+        href: pending.href,
+        dedupeKey: pending.dedupeKey,
+        data: pending.data,
+      })
+
+      await prisma.lastMinuteRecipient.update({
+        where: { id: pending.recipientId },
+        data: {
+          sourceDispatchKey: `client-notification:${clientNotification.id}`,
+        },
+      })
+    }
 
     return {
       id: plan.id,
       openingId: plan.openingId,
       tier: plan.tier,
-      status: result.status,
-      createdRecipients: result.createdRecipients,
+      status: 'processed',
+      createdRecipients: transactionResult.createdRecipients,
     }
   } catch (err: unknown) {
     const message =
