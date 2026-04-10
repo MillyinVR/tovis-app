@@ -75,7 +75,7 @@ function resolveIsHttps(request: Request): boolean {
 
 export async function POST(request: Request) {
   try {
-    console.log('LOGIN ROUTE DATABASE_URL =', process.env.DATABASE_URL?.slice(0, 120))
+
 
     const identity = await rateLimitIdentity()
     const rlRes = await enforceRateLimit({ bucket: 'auth:login', identity })
@@ -108,30 +108,13 @@ export async function POST(request: Request) {
       },
     })
 
-    console.log(
-      'LOGIN LOOKUP RESULT =',
-      user
-        ? {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-            passwordHashPrefix: user.password.slice(0, 20),
-            phoneVerifiedAt: user.phoneVerifiedAt,
-            emailVerifiedAt: user.emailVerifiedAt,
-          }
-        : null,
-    )
-
     if (!user) {
-      console.log('LOGIN FAILURE REASON = USER_NOT_FOUND')
       return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
     }
 
     const isValid = await verifyPassword(password, user.password)
-    console.log('LOGIN PASSWORD MATCH =', isValid)
 
     if (!isValid) {
-      console.log('LOGIN FAILURE REASON = PASSWORD_MISMATCH')
       return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
     }
 

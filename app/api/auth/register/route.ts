@@ -21,25 +21,6 @@ import {
 export const dynamic = 'force-dynamic'
 
 /* =========================================================
-   Debug (optional) — dev only
-========================================================= */
-if (process.env.NODE_ENV !== 'production') {
-  // eslint-disable-next-line no-console
-  console.log(
-    '[register] DATABASE_URL host =',
-    (() => {
-      const u = process.env.DATABASE_URL
-      if (!u) return '(missing)'
-      try {
-        return new URL(u).host
-      } catch {
-        return '(invalid url)'
-      }
-    })(),
-  )
-}
-
-/* =========================================================
    Types
 ========================================================= */
 

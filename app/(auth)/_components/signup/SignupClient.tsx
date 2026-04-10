@@ -1,3 +1,4 @@
+// app/(auth)/_components/signup/SignupClient.tsx
 'use client'
 
 import Link from 'next/link'
@@ -11,6 +12,7 @@ import {
   readErrorMessage,
   readStringField,
 } from '@/lib/http'
+import { hardNavigate } from '@/lib/clientNavigation'
 
 function sanitizeRole(v: string | null): 'CLIENT' | 'PRO' {
   const s = (v ?? '').toUpperCase()
@@ -661,7 +663,7 @@ export default function SignupClient() {
         emailVerificationSent,
       })
 
-      window.location.assign(verifyPhoneUrl)
+      hardNavigate(verifyPhoneUrl)
     } catch (err) {
       console.error(err)
       setError('Network error.')
