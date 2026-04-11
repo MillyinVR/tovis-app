@@ -137,6 +137,17 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
+async function withClientNotificationTx<T>(
+  tx: Prisma.TransactionClient | undefined,
+  work: (db: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  if (tx) {
+    return work(tx)
+  }
+
+  return prisma.$transaction(work)
+}
+
 function normRequired(value: unknown, max: number): string {
   const s = typeof value === 'string' ? value.trim() : ''
   return s.slice(0, max)
@@ -460,7 +471,7 @@ async function resolveClientDispatchTimeZone(args: {
   return null
 }
 
-async function enqueueClientNotificationDispatch(args: {
+async function enqueueNewClientNotificationDispatch(args: {
   notificationId: string
   normalized: NormalizedCreateClientNotificationArgs
   tx?: Prisma.TransactionClient
@@ -507,82 +518,45 @@ async function enqueueClientNotificationDispatch(args: {
  * Creates a client notification inbox row.
  *
  * Contract:
- * - If dedupeKey is absent, always creates a new row.
- * - If dedupeKey is present, behaves as an idempotent upsert keyed by
+ * - If dedupeKey is absent, always creates a new row and enqueues delivery.
+ * - If dedupeKey is present, behaves as an idempotent inbox upsert keyed by
  *   (clientId, dedupeKey) and resets readAt to null.
+ *
+ * Important behavior:
+ * - A deduped update refreshes the existing inbox row only.
+ * - It does NOT enqueue a second delivery cycle for the same row.
+ * - To intentionally re-notify, callers must create a new row identity
+ *   (for example: new dedupeKey or no dedupeKey).
  *
  * Important:
  * - DB is the source of truth.
- * - No mock-only compatibility branches are preserved here.
- * - Delivery dispatch is enqueued after the inbox row is resolved.
+ * - Delivery dispatch is enqueued only for newly created inbox rows.
  */
 export async function createClientNotification(
   args: CreateClientNotificationArgs,
 ) {
-  const db = getDb(args.tx)
-  const normalized = normalizeCreateClientNotificationArgs(args)
+  return withClientNotificationTx(args.tx, async (tx) => {
+    const normalized = normalizeCreateClientNotificationArgs(args)
 
-  if (!normalized.dedupeKey) {
-    const created = await db.clientNotification.create({
-      data: buildClientNotificationCreateData({
-        ...normalized,
-        dedupeKey: null,
-      }),
-      select: clientNotificationIdSelect,
-    })
+    if (!normalized.dedupeKey) {
+      const created = await tx.clientNotification.create({
+        data: buildClientNotificationCreateData({
+          ...normalized,
+          dedupeKey: null,
+        }),
+        select: clientNotificationIdSelect,
+      })
 
-    await enqueueClientNotificationDispatch({
-      notificationId: created.id,
-      normalized,
-      tx: args.tx,
-    })
+      await enqueueNewClientNotificationDispatch({
+        notificationId: created.id,
+        normalized,
+        tx,
+      })
 
-    return created
-  }
-
-  const updated = await db.clientNotification.updateMany({
-    where: {
-      clientId: normalized.clientId,
-      dedupeKey: normalized.dedupeKey,
-    },
-    data: buildClientNotificationUpdateData(normalized),
-  })
-
-  if (updated.count > 0) {
-    const found = await findClientNotificationIdByDedupe({
-      clientId: normalized.clientId,
-      dedupeKey: normalized.dedupeKey,
-      tx: args.tx,
-    })
-
-    await enqueueClientNotificationDispatch({
-      notificationId: found.id,
-      normalized,
-      tx: args.tx,
-    })
-
-    return found
-  }
-
-  try {
-    const created = await db.clientNotification.create({
-      data: buildClientNotificationCreateData(normalized),
-      select: clientNotificationIdSelect,
-    })
-
-    await enqueueClientNotificationDispatch({
-      notificationId: created.id,
-      normalized,
-      tx: args.tx,
-    })
-
-    return created
-  } catch (error) {
-    if (!isUniqueConstraintError(error)) {
-      throw error
+      return created
     }
 
-    await db.clientNotification.updateMany({
+    const updated = await tx.clientNotification.updateMany({
       where: {
         clientId: normalized.clientId,
         dedupeKey: normalized.dedupeKey,
@@ -590,20 +564,47 @@ export async function createClientNotification(
       data: buildClientNotificationUpdateData(normalized),
     })
 
-    const found = await findClientNotificationIdByDedupe({
-      clientId: normalized.clientId,
-      dedupeKey: normalized.dedupeKey,
-      tx: args.tx,
-    })
+    if (updated.count > 0) {
+      return findClientNotificationIdByDedupe({
+        clientId: normalized.clientId,
+        dedupeKey: normalized.dedupeKey,
+        tx,
+      })
+    }
 
-    await enqueueClientNotificationDispatch({
-      notificationId: found.id,
-      normalized,
-      tx: args.tx,
-    })
+    try {
+      const created = await tx.clientNotification.create({
+        data: buildClientNotificationCreateData(normalized),
+        select: clientNotificationIdSelect,
+      })
 
-    return found
-  }
+      await enqueueNewClientNotificationDispatch({
+        notificationId: created.id,
+        normalized,
+        tx,
+      })
+
+      return created
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error
+      }
+
+      await tx.clientNotification.updateMany({
+        where: {
+          clientId: normalized.clientId,
+          dedupeKey: normalized.dedupeKey,
+        },
+        data: buildClientNotificationUpdateData(normalized),
+      })
+
+      return findClientNotificationIdByDedupe({
+        clientId: normalized.clientId,
+        dedupeKey: normalized.dedupeKey,
+        tx,
+      })
+    }
+  })
 }
 
 /**

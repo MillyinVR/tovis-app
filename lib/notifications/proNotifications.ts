@@ -125,6 +125,17 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
+async function withProNotificationTx<T>(
+  tx: Prisma.TransactionClient | undefined,
+  work: (db: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  if (tx) {
+    return work(tx)
+  }
+
+  return prisma.$transaction(work)
+}
+
 function buildUpdateData(
   normalized: NormalizedCreateArgs,
 ): Prisma.NotificationUncheckedUpdateManyInput {
@@ -296,7 +307,7 @@ function resolvePreferredPhone(
   }
 }
 
-async function enqueueProNotificationDispatch(args: {
+async function enqueueNewProNotificationDispatch(args: {
   notificationId: string
   normalized: NormalizedCreateArgs
   tx?: Prisma.TransactionClient
@@ -338,82 +349,45 @@ async function enqueueProNotificationDispatch(args: {
  * Idempotent pro notification creation.
  *
  * Contract:
- * - If dedupeKey is absent, always creates a new row.
- * - If dedupeKey is present, behaves as an idempotent upsert keyed by
+ * - If dedupeKey is absent, always creates a new row and enqueues delivery.
+ * - If dedupeKey is present, behaves as an idempotent inbox upsert keyed by
  *   (professionalId, dedupeKey) and resets unread state.
+ *
+ * Important behavior:
+ * - A deduped update refreshes the existing inbox row only.
+ * - It does NOT enqueue a second delivery cycle for the same row.
+ * - To intentionally re-notify, callers must create a new row identity
+ *   (for example: new dedupeKey or no dedupeKey).
  *
  * Important:
  * - DB is the source of truth.
- * - No mock-only compatibility branches are preserved here.
- * - Delivery dispatch is enqueued after the inbox row is resolved.
+ * - Delivery dispatch is enqueued only for newly created inbox rows.
  */
 export async function createProNotification(
   args: CreateProNotificationArgs,
 ): Promise<ProNotificationCreateResult> {
-  const db = getDb(args.tx)
-  const normalized = normalizeCreateArgs(args)
+  return withProNotificationTx(args.tx, async (tx) => {
+    const normalized = normalizeCreateArgs(args)
 
-  if (!normalized.dedupeKey) {
-    const created = await db.notification.create({
-      data: buildCreateData({
-        ...normalized,
-        dedupeKey: null,
-      }),
-      select: notificationIdSelect,
-    })
+    if (!normalized.dedupeKey) {
+      const created = await tx.notification.create({
+        data: buildCreateData({
+          ...normalized,
+          dedupeKey: null,
+        }),
+        select: notificationIdSelect,
+      })
 
-    await enqueueProNotificationDispatch({
-      notificationId: created.id,
-      normalized,
-      tx: args.tx,
-    })
+      await enqueueNewProNotificationDispatch({
+        notificationId: created.id,
+        normalized,
+        tx,
+      })
 
-    return created
-  }
-
-  const updated = await db.notification.updateMany({
-    where: {
-      professionalId: normalized.professionalId,
-      dedupeKey: normalized.dedupeKey,
-    },
-    data: buildUpdateData(normalized),
-  })
-
-  if (updated.count > 0) {
-    const found = await findNotificationIdByDedupe({
-      professionalId: normalized.professionalId,
-      dedupeKey: normalized.dedupeKey,
-      tx: args.tx,
-    })
-
-    await enqueueProNotificationDispatch({
-      notificationId: found.id,
-      normalized,
-      tx: args.tx,
-    })
-
-    return found
-  }
-
-  try {
-    const created = await db.notification.create({
-      data: buildCreateData(normalized),
-      select: notificationIdSelect,
-    })
-
-    await enqueueProNotificationDispatch({
-      notificationId: created.id,
-      normalized,
-      tx: args.tx,
-    })
-
-    return created
-  } catch (error) {
-    if (!isUniqueConstraintError(error)) {
-      throw error
+      return created
     }
 
-    await db.notification.updateMany({
+    const updated = await tx.notification.updateMany({
       where: {
         professionalId: normalized.professionalId,
         dedupeKey: normalized.dedupeKey,
@@ -421,18 +395,45 @@ export async function createProNotification(
       data: buildUpdateData(normalized),
     })
 
-    const found = await findNotificationIdByDedupe({
-      professionalId: normalized.professionalId,
-      dedupeKey: normalized.dedupeKey,
-      tx: args.tx,
-    })
+    if (updated.count > 0) {
+      return findNotificationIdByDedupe({
+        professionalId: normalized.professionalId,
+        dedupeKey: normalized.dedupeKey,
+        tx,
+      })
+    }
 
-    await enqueueProNotificationDispatch({
-      notificationId: found.id,
-      normalized,
-      tx: args.tx,
-    })
+    try {
+      const created = await tx.notification.create({
+        data: buildCreateData(normalized),
+        select: notificationIdSelect,
+      })
 
-    return found
-  }
+      await enqueueNewProNotificationDispatch({
+        notificationId: created.id,
+        normalized,
+        tx,
+      })
+
+      return created
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error
+      }
+
+      await tx.notification.updateMany({
+        where: {
+          professionalId: normalized.professionalId,
+          dedupeKey: normalized.dedupeKey,
+        },
+        data: buildUpdateData(normalized),
+      })
+
+      return findNotificationIdByDedupe({
+        professionalId: normalized.professionalId,
+        dedupeKey: normalized.dedupeKey,
+        tx,
+      })
+    }
+  })
 }

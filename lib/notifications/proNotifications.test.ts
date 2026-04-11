@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  NotificationEventKey,
-  Prisma,
-} from '@prisma/client'
+import { NotificationEventKey, Prisma } from '@prisma/client'
 
 const mockEnqueueDispatch = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
+  $transaction: vi.fn(),
   notification: {
     create: vi.fn(),
     updateMany: vi.fn(),
@@ -31,6 +29,13 @@ vi.mock('./dispatch/enqueueDispatch', () => ({
 import { createProNotification } from './proNotifications'
 import { getNotificationEventDefinition } from './eventKeys'
 
+const tx = {
+  notification: mockPrisma.notification,
+  professionalProfile: mockPrisma.professionalProfile,
+  professionalNotificationPreference:
+    mockPrisma.professionalNotificationPreference,
+}
+
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   for (const fn of Object.values(group)) {
     fn.mockReset()
@@ -53,10 +58,15 @@ function expectedPriorityFor(eventKey: NotificationEventKey) {
 
 describe('lib/notifications/proNotifications', () => {
   beforeEach(() => {
+    mockPrisma.$transaction.mockReset()
     resetMockGroup(mockPrisma.notification)
     resetMockGroup(mockPrisma.professionalProfile)
     resetMockGroup(mockPrisma.professionalNotificationPreference)
     mockEnqueueDispatch.mockReset()
+
+    mockPrisma.$transaction.mockImplementation(
+      async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
+    )
 
     mockPrisma.professionalProfile.findUnique.mockResolvedValue({
       id: 'pro_1',
@@ -98,6 +108,7 @@ describe('lib/notifications/proNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_1' })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
 
     expect(mockPrisma.notification.create).toHaveBeenCalledWith({
       data: {
@@ -184,7 +195,7 @@ describe('lib/notifications/proNotifications', () => {
       },
       priority: expectedPriority,
       notificationId: 'notif_1',
-      tx: undefined,
+      tx,
     })
   })
 
@@ -215,6 +226,7 @@ describe('lib/notifications/proNotifications', () => {
 
     expect(mockEnqueueDispatch).toHaveBeenCalledWith(
       expect.objectContaining({
+        tx,
         recipient: expect.objectContaining({
           phone: '+15557654321',
           phoneVerifiedAt: new Date('2026-04-08T08:00:00.000Z'),
@@ -249,6 +261,7 @@ describe('lib/notifications/proNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_existing' })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
 
     expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
       where: {
@@ -275,8 +288,6 @@ describe('lib/notifications/proNotifications', () => {
       },
     })
 
-    expect(mockPrisma.notification.create).not.toHaveBeenCalled()
-
     expect(mockPrisma.notification.findFirst).toHaveBeenCalledWith({
       where: {
         professionalId: 'pro_1',
@@ -285,17 +296,12 @@ describe('lib/notifications/proNotifications', () => {
       select: { id: true },
     })
 
-    expect(mockEnqueueDispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceKey: 'pro-notification:notif_existing',
-        notificationId: 'notif_existing',
-        priority: expectedPriority,
-        recipient: expect.objectContaining({
-          emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
-          timeZone: 'America/Los_Angeles',
-        }),
-      }),
-    )
+    expect(mockPrisma.notification.create).not.toHaveBeenCalled()
+    expect(mockEnqueueDispatch).not.toHaveBeenCalled()
+    expect(mockPrisma.professionalProfile.findUnique).not.toHaveBeenCalled()
+    expect(
+      mockPrisma.professionalNotificationPreference.findUnique,
+    ).not.toHaveBeenCalled()
   })
 
   it('retries with update after a create race on a deduped pro notification', async () => {
@@ -312,7 +318,6 @@ describe('lib/notifications/proNotifications', () => {
     })
 
     const eventKey = NotificationEventKey.BOOKING_RESCHEDULED
-    const expectedPriority = expectedPriorityFor(eventKey)
 
     const result = await createProNotification({
       professionalId: 'pro_1',
@@ -325,6 +330,7 @@ describe('lib/notifications/proNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_raced' })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
     expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1)
     expect(mockPrisma.notification.updateMany).toHaveBeenCalledTimes(2)
 
@@ -336,13 +342,11 @@ describe('lib/notifications/proNotifications', () => {
       select: { id: true },
     })
 
-    expect(mockEnqueueDispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceKey: 'pro-notification:notif_raced',
-        notificationId: 'notif_raced',
-        priority: expectedPriority,
-      }),
-    )
+    expect(mockEnqueueDispatch).not.toHaveBeenCalled()
+    expect(mockPrisma.professionalProfile.findUnique).not.toHaveBeenCalled()
+    expect(
+      mockPrisma.professionalNotificationPreference.findUnique,
+    ).not.toHaveBeenCalled()
   })
 
   it('throws when the professional cannot be loaded for dispatch enqueue', async () => {

@@ -4,6 +4,7 @@ import { NotificationEventKey, Prisma } from '@prisma/client'
 const mockEnqueueDispatch = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
+  $transaction: vi.fn(),
   clientNotification: {
     create: vi.fn(),
     updateMany: vi.fn(),
@@ -46,6 +47,15 @@ import {
   upsertClientNotification,
 } from './clientNotifications'
 
+const tx = {
+  clientNotification: mockPrisma.clientNotification,
+  scheduledClientNotification: mockPrisma.scheduledClientNotification,
+  clientProfile: mockPrisma.clientProfile,
+  clientNotificationPreference: mockPrisma.clientNotificationPreference,
+  booking: mockPrisma.booking,
+  aftercareSummary: mockPrisma.aftercareSummary,
+}
+
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   for (const fn of Object.values(group)) {
     fn.mockReset()
@@ -64,6 +74,7 @@ function makeUniqueConstraintError() {
 
 describe('lib/notifications/clientNotifications', () => {
   beforeEach(() => {
+    mockPrisma.$transaction.mockReset()
     resetMockGroup(mockPrisma.clientNotification)
     resetMockGroup(mockPrisma.scheduledClientNotification)
     resetMockGroup(mockPrisma.clientProfile)
@@ -71,6 +82,10 @@ describe('lib/notifications/clientNotifications', () => {
     resetMockGroup(mockPrisma.booking)
     resetMockGroup(mockPrisma.aftercareSummary)
     mockEnqueueDispatch.mockReset()
+
+    mockPrisma.$transaction.mockImplementation(
+      async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
+    )
 
     mockPrisma.clientProfile.findUnique.mockResolvedValue({
       id: 'client_1',
@@ -113,6 +128,8 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_1' })
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
 
     expect(mockPrisma.clientNotification.create).toHaveBeenCalledWith({
       data: {
@@ -168,7 +185,7 @@ describe('lib/notifications/clientNotifications', () => {
         aftercareId: 'aftercare_1',
       },
       clientNotificationId: 'notif_1',
-      tx: undefined,
+      tx,
     })
   })
 
@@ -212,6 +229,7 @@ describe('lib/notifications/clientNotifications', () => {
 
     expect(mockEnqueueDispatch).toHaveBeenCalledWith(
       expect.objectContaining({
+        tx,
         recipient: expect.objectContaining({
           timeZone: 'America/Chicago',
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -242,6 +260,8 @@ describe('lib/notifications/clientNotifications', () => {
 
     expect(result).toEqual({ id: 'notif_existing' })
 
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+
     expect(mockPrisma.clientNotification.updateMany).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
@@ -263,7 +283,19 @@ describe('lib/notifications/clientNotifications', () => {
       },
     })
 
+    expect(mockPrisma.clientNotification.findFirst).toHaveBeenCalledWith({
+      where: {
+        clientId: 'client_1',
+        dedupeKey: 'CONSULTATION_PROPOSAL:booking_1',
+      },
+      select: { id: true },
+    })
+
     expect(mockPrisma.clientNotification.create).not.toHaveBeenCalled()
+    expect(mockEnqueueDispatch).not.toHaveBeenCalled()
+    expect(mockPrisma.clientProfile.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.booking.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.aftercareSummary.findUnique).not.toHaveBeenCalled()
   })
 
   it('retries with update after a create race on a deduped notification', async () => {
@@ -290,6 +322,7 @@ describe('lib/notifications/clientNotifications', () => {
     })
 
     expect(result).toEqual({ id: 'notif_raced' })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
     expect(mockPrisma.clientNotification.create).toHaveBeenCalledTimes(1)
     expect(mockPrisma.clientNotification.updateMany).toHaveBeenCalledTimes(2)
 
@@ -300,6 +333,11 @@ describe('lib/notifications/clientNotifications', () => {
       },
       select: { id: true },
     })
+
+    expect(mockEnqueueDispatch).not.toHaveBeenCalled()
+    expect(mockPrisma.clientProfile.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.booking.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.aftercareSummary.findUnique).not.toHaveBeenCalled()
   })
 
   it('requires a dedupeKey for upsertClientNotification', async () => {
