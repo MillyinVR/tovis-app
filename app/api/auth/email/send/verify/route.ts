@@ -125,6 +125,7 @@ export async function POST(request: Request) {
           select: {
             id: true,
             role: true,
+            authVersion: true,
             phoneVerifiedAt: true,
             emailVerifiedAt: true,
           },
@@ -180,6 +181,7 @@ export async function POST(request: Request) {
             id: true,
             email: true,
             role: true,
+            authVersion: true,
             phoneVerifiedAt: true,
             emailVerifiedAt: true,
           },
@@ -208,8 +210,16 @@ export async function POST(request: Request) {
     const authenticatedUserId = await getAuthenticatedUserId()
     if (authenticatedUserId === result.id) {
       const sessionToken = isFullyVerified
-        ? createActiveToken({ userId: result.id, role: result.role })
-        : createVerificationToken({ userId: result.id, role: result.role })
+        ? createActiveToken({
+            userId: result.id,
+            role: result.role,
+            authVersion: result.authVersion,
+          })
+        : createVerificationToken({
+            userId: result.id,
+            role: result.role,
+            authVersion: result.authVersion,
+          })
 
       const hostname = getRequestHostname(request)
       const cookieDomain = resolveCookieDomain(hostname)

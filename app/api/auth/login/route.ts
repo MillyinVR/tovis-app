@@ -1,5 +1,4 @@
 // app/api/auth/login/route.ts
-// app/api/auth/login/route.ts
 import { prisma } from '@/lib/prisma'
 import { verifyPassword, createActiveToken, createVerificationToken } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
@@ -101,6 +100,7 @@ export async function POST(request: Request) {
         email: true,
         password: true,
         role: true,
+        authVersion: true,
         phoneVerifiedAt: true,
         emailVerifiedAt: true,
         professionalProfile: { select: { id: true } },
@@ -139,8 +139,16 @@ export async function POST(request: Request) {
     const isFullyVerified = Boolean(user.phoneVerifiedAt && user.emailVerifiedAt)
 
     const token = isFullyVerified
-      ? createActiveToken({ userId: user.id, role: user.role })
-      : createVerificationToken({ userId: user.id, role: user.role })
+      ? createActiveToken({
+          userId: user.id,
+          role: user.role,
+          authVersion: user.authVersion,
+        })
+      : createVerificationToken({
+          userId: user.id,
+          role: user.role,
+          authVersion: user.authVersion,
+        })
 
     const consumed = await consumeTapIntent({
       tapIntentId: tapIntentId ?? null,

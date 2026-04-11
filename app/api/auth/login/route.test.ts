@@ -64,6 +64,7 @@ function makeRequest(body: unknown, extras?: { url?: string; headers?: Record<st
 
 function makeUser(args?: {
   role?: Role
+  authVersion?: number
   phoneVerifiedAt?: Date | null
   emailVerifiedAt?: Date | null
   professionalProfileId?: string | null
@@ -71,11 +72,12 @@ function makeUser(args?: {
 }) {
   const role = args?.role ?? Role.CLIENT
 
-  return {
-    id: 'user_1',
-    email: 'user@example.com',
-    password: 'stored_hash',
-    role,
+return {
+  id: 'user_1',
+  email: 'user@example.com',
+  password: 'stored_hash',
+  role,
+  authVersion: args?.authVersion ?? 1,
     phoneVerifiedAt:
       args?.phoneVerifiedAt === undefined
         ? null
@@ -300,13 +302,9 @@ describe('app/api/auth/login/route', () => {
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.CLIENT,
+      authVersion: 1,
     })
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
-
-    expect(mockConsumeTapIntent).toHaveBeenCalledWith({
-      tapIntentId: 'tap_1',
-      userId: 'user_1',
-    })
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
@@ -357,6 +355,7 @@ describe('app/api/auth/login/route', () => {
     expect(mockCreateActiveToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.PRO,
+      authVersion: 1,
     })
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
 

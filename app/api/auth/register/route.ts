@@ -785,7 +785,7 @@ export async function POST(request: Request) {
                 }
               : undefined,
         },
-        select: { id: true, email: true, role: true, phone: true },
+          select: { id: true, email: true, role: true, phone: true, authVersion: true },
       })
 
       await tx.phoneVerification.updateMany({
@@ -828,7 +828,11 @@ export async function POST(request: Request) {
     }
 
     const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
-    const token = createVerificationToken({ userId: user.id, role: user.role })
+    const token = createVerificationToken({
+      userId: user.id,
+      role: user.role,
+      authVersion: user.authVersion,
+    })
 
     const res = jsonOk(
       {

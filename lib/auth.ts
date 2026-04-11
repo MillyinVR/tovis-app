@@ -16,6 +16,7 @@ export type AuthSessionKind = 'ACTIVE' | 'VERIFICATION'
 type TokenSubject = {
   userId: string
   role: AuthRole
+  authVersion: number
 }
 
 export type AuthTokenPayload = TokenSubject & {
@@ -38,6 +39,10 @@ function isAuthSessionKind(value: unknown): value is AuthSessionKind {
   return value === 'ACTIVE' || value === 'VERIFICATION'
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1
+}
+
 function normalizeDecodedToken(
   decoded: string | JsonWebTokenPayload | null,
 ): AuthTokenPayload | null {
@@ -46,15 +51,18 @@ function normalizeDecodedToken(
   const userId = decoded.userId
   const role = decoded.role
   const sessionKind = decoded.sessionKind
+  const authVersion = decoded.authVersion
 
   if (!isNonEmptyString(userId)) return null
   if (!isAuthRole(role)) return null
   if (!isAuthSessionKind(sessionKind)) return null
+  if (!isPositiveInteger(authVersion)) return null
 
   return {
     userId,
     role,
     sessionKind,
+    authVersion,
   }
 }
 
@@ -71,8 +79,8 @@ export async function verifyPassword(
 
 export function createToken(payload: AuthTokenPayload): string {
   return jwt.sign(payload, JWT_SECRET as string, {
-    expiresIn: TOKEN_EXPIRES_IN,
-  })
+  expiresIn: TOKEN_EXPIRES_IN,
+})
 }
 
 export function createActiveToken(payload: TokenSubject): string {
@@ -80,6 +88,7 @@ export function createActiveToken(payload: TokenSubject): string {
     userId: payload.userId,
     role: payload.role,
     sessionKind: 'ACTIVE',
+    authVersion: payload.authVersion,
   })
 }
 
@@ -88,6 +97,7 @@ export function createVerificationToken(payload: TokenSubject): string {
     userId: payload.userId,
     role: payload.role,
     sessionKind: 'VERIFICATION',
+    authVersion: payload.authVersion,
   })
 }
 

@@ -248,7 +248,10 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user_1' },
-      data: { password: 'hashed_password' },
+      data: {
+        password: 'hashed_password',
+        authVersion: { increment: 1 },
+      },
       select: { id: true },
     })
 

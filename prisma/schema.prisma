@@ -646,6 +646,7 @@ model User {
   phone              String?                    @unique @db.VarChar(32) // E.164 preferred: +16195551234
   phoneVerifiedAt    DateTime?
   emailVerifiedAt    DateTime?
+  authVersion        Int                        @default(1)
   password           String
   role               Role
   createdAt          DateTime                   @default(now())

@@ -188,6 +188,7 @@ describe('app/api/auth/register/route', () => {
           email: 'client@example.com',
           role: Role.CLIENT,
           phone: '+15551234567',
+          authVersion: 1,
         }),
       },
       phoneVerification: {
@@ -226,6 +227,7 @@ describe('app/api/auth/register/route', () => {
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.CLIENT,
+      authVersion: 1,
     })
 
     expect(tx.user.create).toHaveBeenCalledWith({
@@ -250,6 +252,7 @@ describe('app/api/auth/register/route', () => {
         email: true,
         role: true,
         phone: true,
+        authVersion: true,
       },
     })
 
@@ -303,6 +306,7 @@ describe('app/api/auth/register/route', () => {
           email: 'client@example.com',
           role: Role.CLIENT,
           phone: '+15551234567',
+          authVersion: 1,
         }),
       },
       phoneVerification: {
@@ -332,6 +336,7 @@ describe('app/api/auth/register/route', () => {
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_2',
       role: Role.CLIENT,
+      authVersion: 1,
     })
 
     const setCookie = result.headers.get('set-cookie')

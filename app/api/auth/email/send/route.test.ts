@@ -21,25 +21,23 @@ import { POST } from './route'
 function makeUser(args?: {
   role?: Role
   email?: string
+  authVersion?: number
   emailVerifiedAt?: Date | null
   phoneVerifiedAt?: Date | null
   sessionKind?: 'ACTIVE' | 'VERIFICATION'
 }) {
   const role = args?.role ?? Role.CLIENT
   const emailVerifiedAt =
-    args?.emailVerifiedAt === undefined
-      ? null
-      : args.emailVerifiedAt
+    args?.emailVerifiedAt === undefined ? null : args.emailVerifiedAt
   const phoneVerifiedAt =
-    args?.phoneVerifiedAt === undefined
-      ? null
-      : args.phoneVerifiedAt
+    args?.phoneVerifiedAt === undefined ? null : args.phoneVerifiedAt
 
   return {
     id: 'user_1',
     email: args?.email ?? 'user@example.com',
     phone: '+15551234567',
     role,
+    authVersion: args?.authVersion ?? 1,
     sessionKind: args?.sessionKind ?? 'VERIFICATION',
     phoneVerifiedAt,
     emailVerifiedAt,

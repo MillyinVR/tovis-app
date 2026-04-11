@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  AuthVerificationPurpose,
-  Role,
-} from '@prisma/client'
+import { AuthVerificationPurpose, Role } from '@prisma/client'
 
 const mockCookies = vi.hoisted(() => vi.fn())
 const mockVerifyToken = vi.hoisted(() => vi.fn())
@@ -48,22 +45,20 @@ function makeRequest(args: {
   body?: Record<string, unknown>
   headers?: Record<string, string>
 }) {
-  return new Request(
-    args.url ?? 'http://localhost/api/auth/email/verify',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(args.headers ?? {}),
-      },
-      body: JSON.stringify(args.body ?? {}),
+  return new Request(args.url ?? 'http://localhost/api/auth/email/verify', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(args.headers ?? {}),
     },
-  )
+    body: JSON.stringify(args.body ?? {}),
+  })
 }
 
 function makeRecord(args?: {
   userId?: string
   role?: Role
+  authVersion?: number
   usedAt?: Date | null
   expiresAt?: Date
   phoneVerifiedAt?: Date | null
@@ -73,20 +68,16 @@ function makeRecord(args?: {
     id: 'evt_1',
     userId: args?.userId ?? 'user_1',
     email: 'user@example.com',
-    expiresAt:
-      args?.expiresAt ?? new Date('2099-04-08T12:00:00.000Z'),
+    expiresAt: args?.expiresAt ?? new Date('2099-04-08T12:00:00.000Z'),
     usedAt: args?.usedAt === undefined ? null : args.usedAt,
     user: {
       id: args?.userId ?? 'user_1',
       role: args?.role ?? Role.CLIENT,
+      authVersion: args?.authVersion ?? 1,
       phoneVerifiedAt:
-        args?.phoneVerifiedAt === undefined
-          ? null
-          : args.phoneVerifiedAt,
+        args?.phoneVerifiedAt === undefined ? null : args.phoneVerifiedAt,
       emailVerifiedAt:
-        args?.emailVerifiedAt === undefined
-          ? null
-          : args.emailVerifiedAt,
+        args?.emailVerifiedAt === undefined ? null : args.emailVerifiedAt,
     },
   }
 }
@@ -152,6 +143,7 @@ describe('app/api/auth/email/verify/route', () => {
           select: {
             id: true,
             role: true,
+            authVersion: true,
             phoneVerifiedAt: true,
             emailVerifiedAt: true,
           },
@@ -221,6 +213,7 @@ describe('app/api/auth/email/verify/route', () => {
           id: 'user_1',
           email: 'user@example.com',
           role: Role.CLIENT,
+          authVersion: 1,
           phoneVerifiedAt: null,
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
@@ -271,6 +264,7 @@ describe('app/api/auth/email/verify/route', () => {
         id: true,
         email: true,
         role: true,
+        authVersion: true,
         phoneVerifiedAt: true,
         emailVerifiedAt: true,
       },
@@ -298,6 +292,7 @@ describe('app/api/auth/email/verify/route', () => {
       userId: 'user_1',
       role: Role.PRO,
       sessionKind: 'VERIFICATION',
+      authVersion: 1,
     })
 
     const tx = {
@@ -310,6 +305,7 @@ describe('app/api/auth/email/verify/route', () => {
           id: 'user_1',
           email: 'user@example.com',
           role: Role.PRO,
+          authVersion: 1,
           phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
@@ -347,6 +343,7 @@ describe('app/api/auth/email/verify/route', () => {
     expect(mockCreateActiveToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.PRO,
+      authVersion: 1,
     })
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
 
@@ -372,6 +369,7 @@ describe('app/api/auth/email/verify/route', () => {
       userId: 'user_1',
       role: Role.CLIENT,
       sessionKind: 'VERIFICATION',
+      authVersion: 1,
     })
 
     const tx = {
@@ -384,6 +382,7 @@ describe('app/api/auth/email/verify/route', () => {
           id: 'user_1',
           email: 'user@example.com',
           role: Role.CLIENT,
+          authVersion: 1,
           phoneVerifiedAt: null,
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
@@ -417,6 +416,7 @@ describe('app/api/auth/email/verify/route', () => {
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.CLIENT,
+      authVersion: 1,
     })
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
 
@@ -441,6 +441,7 @@ describe('app/api/auth/email/verify/route', () => {
       userId: 'user_1',
       role: Role.CLIENT,
       sessionKind: 'VERIFICATION',
+      authVersion: 1,
     })
 
     const tx = {
@@ -453,6 +454,7 @@ describe('app/api/auth/email/verify/route', () => {
           id: 'user_2',
           email: 'other@example.com',
           role: Role.CLIENT,
+          authVersion: 1,
           phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),

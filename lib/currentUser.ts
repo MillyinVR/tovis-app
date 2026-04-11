@@ -1,4 +1,3 @@
-// lib/currentUser.ts
 import { Prisma } from '@prisma/client'
 import { cookies } from 'next/headers'
 
@@ -10,6 +9,7 @@ export const currentUserSelect = {
   email: true,
   phone: true,
   role: true,
+  authVersion: true,
   phoneVerifiedAt: true,
   emailVerifiedAt: true,
 
@@ -78,6 +78,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   })
 
   if (!user) return null
+  if (user.authVersion !== payload.authVersion) return null
 
   return toCurrentUser(user, payload.sessionKind)
 }
