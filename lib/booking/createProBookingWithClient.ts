@@ -1,9 +1,11 @@
 import { ServiceLocationType } from '@prisma/client'
 
 import { createProBooking } from '@/lib/booking/writeBoundary'
-import { upsertProClient } from '@/lib/clients/upsertProClient'
+import {
+  resolveProBookingClient,
+  type ProBookingServiceAddressInput,
+} from '@/lib/booking/resolveProBookingClient'
 import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
 
 type NewClientInput = {
   firstName?: unknown
@@ -19,12 +21,13 @@ export type CreateProBookingWithClientArgs = {
 
   clientId?: string | null
   client?: NewClientInput | null
+  clientAddressId?: string | null
+  serviceAddress?: ProBookingServiceAddressInput | null
 
   offeringId: string
   locationId: string
   locationType: ServiceLocationType
   scheduledFor: Date
-  clientAddressId: string | null
   internalNotes: string | null
   requestedBufferMinutes: number | null
   requestedTotalDurationMinutes: number | null
@@ -41,6 +44,7 @@ export type CreateProBookingWithClientResult =
       clientId: string
       clientUserId: string | null
       clientEmail: string | null
+      clientAddressId: string | null
       bookingResult: CreateProBookingResult
     }
   | {
@@ -50,20 +54,10 @@ export type CreateProBookingWithClientResult =
       code: string
     }
 
-function normalizeOptionalString(value: unknown): string | null {
-  const normalized = pickString(value)
-  return normalized && normalized.trim() ? normalized.trim() : null
-}
-
-function hasMeaningfulValue(value: unknown): boolean {
-  if (typeof value === 'string') return value.trim().length > 0
-  return value != null
-}
-
-function normalizeNewClientInput(
+function normalizeClientInput(
   value: CreateProBookingWithClientArgs['client'],
-): NewClientInput {
-  if (!value) return {}
+): NewClientInput | null {
+  if (!value) return null
 
   if (isRecord(value)) {
     return {
@@ -74,82 +68,26 @@ function normalizeNewClientInput(
     }
   }
 
-  return {}
+  return null
 }
 
-function hasNewClientPayload(input: NewClientInput): boolean {
-  return (
-    hasMeaningfulValue(input.firstName) ||
-    hasMeaningfulValue(input.lastName) ||
-    hasMeaningfulValue(input.email) ||
-    hasMeaningfulValue(input.phone)
-  )
-}
-
-async function resolveClientForBooking(args: {
-  clientId?: string | null
-  client?: NewClientInput | null
-}): Promise<
-  | {
-      ok: true
-      clientId: string
-      clientUserId: string | null
-      clientEmail: string | null
-    }
-  | {
-      ok: false
-      status: number
-      error: string
-      code: string
-    }
-> {
-  const existingClientId = normalizeOptionalString(args.clientId)
-
-  if (existingClientId) {
-    return {
-      ok: true,
-      clientId: existingClientId,
-      clientUserId: null,
-      clientEmail: null,
-    }
-  }
-
-  const clientInput = normalizeNewClientInput(args.client)
-
-  if (!hasNewClientPayload(clientInput)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'clientId or client details are required.',
-      code: 'VALIDATION_ERROR',
-    }
-  }
-
-  const upserted = await upsertProClient({
-    firstName: clientInput.firstName,
-    lastName: clientInput.lastName,
-    email: clientInput.email,
-    phone: clientInput.phone,
-  })
-
-  if (!upserted.ok) {
-    return upserted
-  }
-
-  return {
-    ok: true,
-    clientId: upserted.clientId,
-    clientUserId: upserted.userId,
-    clientEmail: upserted.email,
-  }
+function normalizeServiceAddressInput(
+  value: CreateProBookingWithClientArgs['serviceAddress'],
+): ProBookingServiceAddressInput | null {
+  if (!value) return null
+  if (!isRecord(value)) return null
+  return value
 }
 
 export async function createProBookingWithClient(
   args: CreateProBookingWithClientArgs,
 ): Promise<CreateProBookingWithClientResult> {
-  const resolvedClient = await resolveClientForBooking({
+  const resolvedClient = await resolveProBookingClient({
+    locationType: args.locationType,
     clientId: args.clientId,
-    client: args.client,
+    client: normalizeClientInput(args.client),
+    clientAddressId: args.clientAddressId,
+    serviceAddress: normalizeServiceAddressInput(args.serviceAddress),
   })
 
   if (!resolvedClient.ok) {
@@ -165,7 +103,7 @@ export async function createProBookingWithClient(
     locationId: args.locationId,
     locationType: args.locationType,
     scheduledFor: args.scheduledFor,
-    clientAddressId: args.clientAddressId,
+    clientAddressId: resolvedClient.clientAddressId,
     internalNotes: args.internalNotes,
     requestedBufferMinutes: args.requestedBufferMinutes,
     requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
@@ -179,6 +117,7 @@ export async function createProBookingWithClient(
     clientId: resolvedClient.clientId,
     clientUserId: resolvedClient.clientUserId,
     clientEmail: resolvedClient.clientEmail,
+    clientAddressId: resolvedClient.clientAddressId,
     bookingResult,
   }
 }

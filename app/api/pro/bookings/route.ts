@@ -1,5 +1,5 @@
 // app/api/pro/bookings/route.ts
-import { Prisma, ServiceLocationType } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
@@ -62,6 +62,27 @@ function pickClientPayload(body: Record<string, unknown>) {
   }
 }
 
+function pickServiceAddressPayload(body: Record<string, unknown>) {
+  if (isRecord(body.serviceAddress)) {
+    return body.serviceAddress
+  }
+
+  return {
+    label: body.label,
+    formattedAddress: body.formattedAddress,
+    addressLine1: body.addressLine1,
+    addressLine2: body.addressLine2,
+    city: body.city,
+    state: body.state,
+    postalCode: body.postalCode,
+    countryCode: body.countryCode,
+    placeId: body.placeId,
+    lat: body.lat,
+    lng: body.lng,
+    isDefault: body.isDefault,
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
@@ -82,6 +103,7 @@ export async function POST(req: Request) {
 
     const clientId = pickString(body.clientId)
     const client = pickClientPayload(body)
+    const serviceAddress = pickServiceAddressPayload(body)
 
     const clientAddressId = pickString(body.clientAddressId)
     const scheduledFor = toDateOrNull(body.scheduledFor)
@@ -116,23 +138,18 @@ export async function POST(req: Request) {
       return bookingJsonFail('OFFERING_ID_REQUIRED')
     }
 
-    if (locationType === ServiceLocationType.MOBILE && !clientAddressId) {
-      return bookingJsonFail('CLIENT_SERVICE_ADDRESS_REQUIRED', {
-        userMessage: 'Mobile bookings require a saved client service address.',
-      })
-    }
-
     const result = await createProBookingWithClient({
       professionalId,
       actorUserId,
       overrideReason,
       clientId,
       client,
+      clientAddressId,
+      serviceAddress,
       offeringId,
       locationId,
       locationType,
       scheduledFor,
-      clientAddressId,
       internalNotes,
       requestedBufferMinutes,
       requestedTotalDurationMinutes,
@@ -158,7 +175,9 @@ export async function POST(req: Request) {
         booking: {
           id: bookingResult.booking.id,
           clientId: result.clientId,
-          scheduledFor: new Date(bookingResult.booking.scheduledFor).toISOString(),
+          scheduledFor: new Date(
+            bookingResult.booking.scheduledFor,
+          ).toISOString(),
           endsAt: endsAt.toISOString(),
           totalDurationMinutes: Number(bookingResult.booking.totalDurationMinutes),
           bufferMinutes: Number(bookingResult.booking.bufferMinutes),
