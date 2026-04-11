@@ -10,6 +10,11 @@ import {
 } from '@prisma/client'
 
 const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
+const BOOKING_ID = 'booking_1'
+const CLIENT_ID = 'client_1'
+const PROFESSIONAL_ID = 'pro_1'
+const LOCATION_TIME_ZONE = 'America/Los_Angeles'
+const SCHEDULED_FOR = new Date('2026-03-20T18:00:00.000Z')
 
 const mocks = vi.hoisted(() => ({
   prismaTransaction: vi.fn(),
@@ -98,18 +103,43 @@ const tx = {
   },
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasTrueFlag(
+  record: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  return record?.[key] === true
+}
+
+function hasServiceNameSelect(
+  record: Record<string, unknown> | undefined,
+): boolean {
+  if (!record) return false
+
+  const service = record.service
+  if (!isRecord(service)) return false
+
+  const nestedSelect = service.select
+  if (!isRecord(nestedSelect)) return false
+
+  return nestedSelect.name === true
+}
+
 function makePendingApprovalBooking(overrides?: {
   proposedServicesJson?: Prisma.JsonValue
   status?: ConsultationApprovalStatus
 }) {
   return {
-    id: 'booking_1',
-    clientId: 'client_1',
-    professionalId: 'pro_1',
+    id: BOOKING_ID,
+    clientId: CLIENT_ID,
+    professionalId: PROFESSIONAL_ID,
     locationType: ServiceLocationType.SALON,
     serviceId: null,
     offeringId: null,
-    scheduledFor: new Date('2026-03-20T18:00:00.000Z'),
+    scheduledFor: SCHEDULED_FOR,
     subtotalSnapshot: null,
     totalDurationMinutes: 60,
     consultationConfirmedAt: null,
@@ -141,8 +171,8 @@ function makePendingApprovalBooking(overrides?: {
 
 function makeCheckoutRollupBooking() {
   return {
-    id: 'booking_1',
-    professionalId: 'pro_1',
+    id: BOOKING_ID,
+    professionalId: PROFESSIONAL_ID,
     status: BookingStatus.ACCEPTED,
     sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
     finishedAt: null,
@@ -160,6 +190,53 @@ function makeCheckoutRollupBooking() {
     aftercareSummary: null,
     productSales: [],
   }
+}
+
+function makeReminderSyncBooking() {
+  return {
+    id: BOOKING_ID,
+    clientId: CLIENT_ID,
+    scheduledFor: SCHEDULED_FOR,
+    status: BookingStatus.ACCEPTED,
+    finishedAt: null,
+    locationTimeZone: LOCATION_TIME_ZONE,
+    service: {
+      name: 'Haircut',
+    },
+  }
+}
+
+function installHappyPathBookingFindUniqueMocks() {
+  const pendingApprovalBooking = makePendingApprovalBooking()
+  const checkoutRollupBooking = makeCheckoutRollupBooking()
+  const reminderSyncBooking = makeReminderSyncBooking()
+
+  mocks.txBookingFindUnique.mockImplementation(
+    async (args?: { select?: Record<string, unknown> }) => {
+      const select = isRecord(args?.select) ? args.select : undefined
+
+      if (isRecord(select?.consultationApproval)) {
+        return pendingApprovalBooking
+      }
+
+      if (hasTrueFlag(select, 'checkoutStatus')) {
+        return checkoutRollupBooking
+      }
+
+      if (hasServiceNameSelect(select)) {
+        return reminderSyncBooking
+      }
+
+      if (hasTrueFlag(select, 'id') && hasTrueFlag(select, 'clientId')) {
+        return {
+          id: BOOKING_ID,
+          clientId: CLIENT_ID,
+        }
+      }
+
+      return null
+    },
+  )
 }
 
 describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', () => {
@@ -186,7 +263,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
           now: Date
           professionalId: string
         }) => Promise<unknown>
-      }) => run({ tx, now: TEST_NOW, professionalId: 'pro_1' }),
+      }) => run({ tx, now: TEST_NOW, professionalId: PROFESSIONAL_ID }),
     )
 
     mocks.prismaTransaction.mockImplementation(
@@ -210,9 +287,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     const basePrice = new Prisma.Decimal(100)
     const addOnPrice = new Prisma.Decimal(25)
 
-    mocks.txBookingFindUnique
-      .mockResolvedValueOnce(makePendingApprovalBooking())
-      .mockResolvedValueOnce(makeCheckoutRollupBooking())
+    installHappyPathBookingFindUniqueMocks()
 
     mocks.txProfessionalServiceOfferingFindMany.mockResolvedValueOnce([
       {
@@ -226,6 +301,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
         mobilePriceStartingAt: null,
         service: {
           defaultDurationMinutes: 60,
+          name: 'Haircut',
         },
       },
       {
@@ -239,6 +315,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
         mobilePriceStartingAt: null,
         service: {
           defaultDurationMinutes: 15,
+          name: 'Haircut Add-On',
         },
       },
     ])
@@ -276,7 +353,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     })
 
     mocks.txBookingUpdate.mockResolvedValueOnce({
-      id: 'booking_1',
+      id: BOOKING_ID,
       serviceId: 'svc_base',
       offeringId: 'off_base',
       subtotalSnapshot: computedSubtotal,
@@ -292,16 +369,16 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     })
 
     const result = await approveConsultationAndMaterializeBooking({
-      bookingId: 'booking_1',
-      clientId: 'client_1',
-      professionalId: 'pro_1',
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
     })
 
     expect(
       mocks.withLockedClientOwnedBookingTransaction,
     ).toHaveBeenCalledWith({
-      bookingId: 'booking_1',
-      clientId: 'client_1',
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
       run: expect.any(Function),
     })
 
@@ -329,12 +406,12 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     ])
 
     expect(mocks.txBookingServiceItemDeleteMany).toHaveBeenCalledWith({
-      where: { bookingId: 'booking_1' },
+      where: { bookingId: BOOKING_ID },
     })
 
     expect(mocks.txBookingServiceItemCreate).toHaveBeenCalledWith({
       data: {
-        bookingId: 'booking_1',
+        bookingId: BOOKING_ID,
         serviceId: 'svc_base',
         offeringId: 'off_base',
         itemType: BookingServiceItemType.BASE,
@@ -349,7 +426,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     expect(mocks.txBookingServiceItemCreateMany).toHaveBeenCalledWith({
       data: [
         {
-          bookingId: 'booking_1',
+          bookingId: BOOKING_ID,
           serviceId: 'svc_addon',
           offeringId: 'off_addon',
           itemType: BookingServiceItemType.ADD_ON,
@@ -363,7 +440,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     })
 
     const bookingUpdateArgs = mocks.txBookingUpdate.mock.calls[0]?.[0]
-    expect(bookingUpdateArgs.where).toEqual({ id: 'booking_1' })
+    expect(bookingUpdateArgs.where).toEqual({ id: BOOKING_ID })
     expect(bookingUpdateArgs.data.serviceId).toBe('svc_base')
     expect(bookingUpdateArgs.data.offeringId).toBe('off_base')
     expect(bookingUpdateArgs.data.totalDurationMinutes).toBe(75)
@@ -377,13 +454,13 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     expect(bookingUpdateArgs.data.totalAmount.toString()).toBe('125')
 
     expect(mocks.txConsultationApprovalUpdate).toHaveBeenCalledWith({
-      where: { bookingId: 'booking_1' },
+      where: { bookingId: BOOKING_ID },
       data: {
         status: ConsultationApprovalStatus.APPROVED,
         approvedAt: TEST_NOW,
         rejectedAt: null,
-        clientId: 'client_1',
-        proId: 'pro_1',
+        clientId: CLIENT_ID,
+        proId: PROFESSIONAL_ID,
       },
       select: {
         id: true,
@@ -393,9 +470,34 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       },
     })
 
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).toHaveBeenCalledWith({
+      tx,
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      eventKeys: [expect.any(String)],
+      onlyPending: true,
+    })
+
+    expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
+    expect(mocks.scheduleClientNotification).toHaveBeenCalledWith({
+      tx,
+      clientId: CLIENT_ID,
+      bookingId: BOOKING_ID,
+      eventKey: expect.any(String),
+      runAt: expect.any(Date),
+      dedupeKey: expect.stringContaining(BOOKING_ID),
+      href: `/client/bookings/${BOOKING_ID}?step=overview`,
+      data: expect.objectContaining({
+        bookingId: BOOKING_ID,
+        serviceName: 'Haircut',
+      }),
+    })
+
     expect(result).toEqual({
       booking: {
-        id: 'booking_1',
+        id: BOOKING_ID,
         serviceId: 'svc_base',
         offeringId: 'off_base',
         subtotalSnapshot: computedSubtotal,
@@ -440,9 +542,9 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
 
       await expect(
         approveConsultationAndMaterializeBooking({
-          bookingId: 'booking_1',
-          clientId: 'client_1',
-          professionalId: 'pro_1',
+          bookingId: BOOKING_ID,
+          clientId: CLIENT_ID,
+          professionalId: PROFESSIONAL_ID,
         }),
       ).rejects.toMatchObject({
         code: 'INVALID_SERVICE_ITEMS',
@@ -452,6 +554,10 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       expect(mocks.txBookingServiceItemDeleteMany).not.toHaveBeenCalled()
       expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
       expect(mocks.txConsultationApprovalUpdate).not.toHaveBeenCalled()
+      expect(
+        mocks.cancelScheduledClientNotificationsForBooking,
+      ).not.toHaveBeenCalled()
+      expect(mocks.scheduleClientNotification).not.toHaveBeenCalled()
     },
   )
 
@@ -472,9 +578,9 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
 
     await expect(
       approveConsultationAndMaterializeBooking({
-        bookingId: 'booking_1',
-        clientId: 'client_1',
-        professionalId: 'pro_1',
+        bookingId: BOOKING_ID,
+        clientId: CLIENT_ID,
+        professionalId: PROFESSIONAL_ID,
       }),
     ).rejects.toMatchObject({
       code: 'INVALID_SERVICE_ITEMS',
@@ -484,6 +590,10 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     expect(mocks.txBookingServiceItemDeleteMany).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
     expect(mocks.txConsultationApprovalUpdate).not.toHaveBeenCalled()
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).not.toHaveBeenCalled()
+    expect(mocks.scheduleClientNotification).not.toHaveBeenCalled()
   })
 
   it('throws FORBIDDEN when the consultation approval is no longer pending', async () => {
@@ -495,9 +605,9 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
 
     await expect(
       approveConsultationAndMaterializeBooking({
-        bookingId: 'booking_1',
-        clientId: 'client_1',
-        professionalId: 'pro_1',
+        bookingId: BOOKING_ID,
+        clientId: CLIENT_ID,
+        professionalId: PROFESSIONAL_ID,
       }),
     ).rejects.toMatchObject({
       code: 'FORBIDDEN',
@@ -507,5 +617,9 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     expect(mocks.txBookingServiceItemDeleteMany).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
     expect(mocks.txConsultationApprovalUpdate).not.toHaveBeenCalled()
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).not.toHaveBeenCalled()
+    expect(mocks.scheduleClientNotification).not.toHaveBeenCalled()
   })
 })

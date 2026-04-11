@@ -11,6 +11,11 @@ const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
 const REQUESTED_START = new Date('2026-03-20T18:00:00.000Z')
 const REQUESTED_END = new Date('2026-03-20T19:15:00.000Z')
 
+const BOOKING_ID = 'booking_1'
+const CLIENT_ID = 'client_1'
+const PROFESSIONAL_ID = 'pro_1'
+const LOCATION_TIME_ZONE = 'America/Los_Angeles'
+
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
 
@@ -22,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   txClientProfileFindUnique: vi.fn(),
   txClientAddressFindFirst: vi.fn(),
   txProfessionalServiceOfferingFindFirst: vi.fn(),
+  txBookingFindUnique: vi.fn(),
   txBookingCreate: vi.fn(),
   txBookingServiceItemCreate: vi.fn(),
   txBookingOverrideAuditLogCreateMany: vi.fn(),
@@ -96,6 +102,7 @@ const tx = {
     findFirst: mocks.txProfessionalServiceOfferingFindFirst,
   },
   booking: {
+    findUnique: mocks.txBookingFindUnique,
     create: mocks.txBookingCreate,
   },
   bookingServiceItem: {
@@ -104,6 +111,68 @@ const tx = {
   bookingOverrideAuditLog: {
     createMany: mocks.txBookingOverrideAuditLogCreateMany,
   },
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasTrueFlag(
+  record: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  return record?.[key] === true
+}
+
+function hasServiceNameSelect(
+  record: Record<string, unknown> | undefined,
+): boolean {
+  if (!record) return false
+
+  const service = record.service
+  if (!isRecord(service)) return false
+
+  const nestedSelect = service.select
+  if (!isRecord(nestedSelect)) return false
+
+  return nestedSelect.name === true
+}
+
+function makeReminderSyncBooking() {
+  return {
+    id: BOOKING_ID,
+    clientId: CLIENT_ID,
+    scheduledFor: REQUESTED_START,
+    status: BookingStatus.ACCEPTED,
+    finishedAt: null,
+    locationTimeZone: LOCATION_TIME_ZONE,
+    service: {
+      name: 'Haircut',
+    },
+  }
+}
+
+function installReminderSyncBookingFindUniqueMock() {
+  const reminderSyncBooking = makeReminderSyncBooking()
+
+  mocks.txBookingFindUnique.mockImplementation(
+    async (args?: { select?: Record<string, unknown> }) => {
+      const select = isRecord(args?.select) ? args.select : undefined
+
+      if (hasServiceNameSelect(select)) {
+        return reminderSyncBooking
+      }
+
+      if (hasTrueFlag(select, 'id') && hasTrueFlag(select, 'clientId')) {
+        return {
+          id: BOOKING_ID,
+          clientId: CLIENT_ID,
+        }
+      }
+
+      return null
+    },
+  )
 }
 
 describe('lib/booking/writeBoundary override audit', () => {
@@ -122,7 +191,7 @@ describe('lib/booking/writeBoundary override audit', () => {
     mocks.getProCreatedBookingStatus.mockReturnValue(BookingStatus.ACCEPTED)
 
     mocks.txClientProfileFindUnique.mockResolvedValue({
-      id: 'client_1',
+      id: CLIENT_ID,
     })
 
     mocks.txClientAddressFindFirst.mockResolvedValue(null)
@@ -137,7 +206,7 @@ describe('lib/booking/writeBoundary override audit', () => {
       salonDurationMinutes: 60,
       mobileDurationMinutes: null,
       professional: {
-        timeZone: 'America/Los_Angeles',
+        timeZone: LOCATION_TIME_ZONE,
       },
       service: {
         id: 'service_1',
@@ -145,13 +214,15 @@ describe('lib/booking/writeBoundary override audit', () => {
       },
     })
 
+    installReminderSyncBookingFindUniqueMock()
+
     mocks.resolveValidatedBookingContext.mockResolvedValue({
       ok: true,
       durationMinutes: 60,
       priceStartingAt: new Prisma.Decimal('50.00'),
       context: {
         locationId: 'loc_1',
-        timeZone: 'America/Los_Angeles',
+        timeZone: LOCATION_TIME_ZONE,
         workingHours: {
           wed: { enabled: true, start: '09:00', end: '17:00' },
         },
@@ -174,7 +245,7 @@ describe('lib/booking/writeBoundary override audit', () => {
     })
 
     mocks.txBookingCreate.mockResolvedValue({
-      id: 'booking_1',
+      id: BOOKING_ID,
       scheduledFor: REQUESTED_START,
       totalDurationMinutes: 60,
       bufferMinutes: 15,
@@ -207,8 +278,8 @@ describe('lib/booking/writeBoundary override audit', () => {
   it('creates audit rows when an applied override is actually used', async () => {
     mocks.buildBookingOverrideAuditRows.mockReturnValue([
       {
-        bookingId: 'booking_1',
-        professionalId: 'pro_1',
+        bookingId: BOOKING_ID,
+        professionalId: PROFESSIONAL_ID,
         actorUserId: 'user_1',
         action: BookingOverrideAction.CREATE,
         rule: BookingOverrideRule.ADVANCE_NOTICE,
@@ -228,17 +299,17 @@ describe('lib/booking/writeBoundary override audit', () => {
         metadata: {
           source: 'booking_override_audit',
           appliedOverride: 'ADVANCE_NOTICE',
-          timeZone: 'America/Los_Angeles',
+          timeZone: LOCATION_TIME_ZONE,
         },
         createdAt: TEST_NOW,
       },
     ])
 
     const result = await createProBooking({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       actorUserId: 'user_1',
       overrideReason: 'approved by manager',
-      clientId: 'client_1',
+      clientId: CLIENT_ID,
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
@@ -254,13 +325,13 @@ describe('lib/booking/writeBoundary override audit', () => {
 
     expect(mocks.assertCanUseBookingOverride).toHaveBeenCalledWith({
       actorUserId: 'user_1',
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       rule: 'ADVANCE_NOTICE',
     })
 
     expect(mocks.buildBookingOverrideAuditRows).toHaveBeenCalledWith({
-      bookingId: 'booking_1',
-      professionalId: 'pro_1',
+      bookingId: BOOKING_ID,
+      professionalId: PROFESSIONAL_ID,
       actorUserId: 'user_1',
       action: 'CREATE',
       route: 'lib/booking/writeBoundary.ts:createProBooking',
@@ -273,21 +344,46 @@ describe('lib/booking/writeBoundary override audit', () => {
       workingHours: {
         wed: { enabled: true, start: '09:00', end: '17:00' },
       },
-      timeZone: 'America/Los_Angeles',
+      timeZone: LOCATION_TIME_ZONE,
     })
 
     expect(mocks.txBookingOverrideAuditLogCreateMany).toHaveBeenCalledWith({
       data: [
         expect.objectContaining({
-          bookingId: 'booking_1',
+          bookingId: BOOKING_ID,
           rule: BookingOverrideRule.ADVANCE_NOTICE,
         }),
       ],
     })
 
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).toHaveBeenCalledWith({
+      tx,
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      eventKeys: [expect.any(String)],
+      onlyPending: true,
+    })
+
+    expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
+    expect(mocks.scheduleClientNotification).toHaveBeenCalledWith({
+      tx,
+      clientId: CLIENT_ID,
+      bookingId: BOOKING_ID,
+      eventKey: expect.any(String),
+      runAt: expect.any(Date),
+      dedupeKey: expect.stringContaining(BOOKING_ID),
+      href: `/client/bookings/${BOOKING_ID}?step=overview`,
+      data: expect.objectContaining({
+        bookingId: BOOKING_ID,
+        serviceName: 'Haircut',
+      }),
+    })
+
     expect(result).toEqual({
       booking: {
-        id: 'booking_1',
+        id: BOOKING_ID,
         scheduledFor: REQUESTED_START,
         totalDurationMinutes: 60,
         bufferMinutes: 15,
@@ -295,7 +391,7 @@ describe('lib/booking/writeBoundary override audit', () => {
       },
       subtotalSnapshot: new Prisma.Decimal('50.00'),
       stepMinutes: 15,
-      appointmentTimeZone: 'America/Los_Angeles',
+      appointmentTimeZone: LOCATION_TIME_ZONE,
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
       clientAddressId: null,
@@ -317,10 +413,10 @@ describe('lib/booking/writeBoundary override audit', () => {
     })
 
     await createProBooking({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       actorUserId: 'user_1',
       overrideReason: null,
-      clientId: 'client_1',
+      clientId: CLIENT_ID,
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
@@ -337,56 +433,93 @@ describe('lib/booking/writeBoundary override audit', () => {
     expect(mocks.assertCanUseBookingOverride).not.toHaveBeenCalled()
     expect(mocks.buildBookingOverrideAuditRows).not.toHaveBeenCalled()
     expect(mocks.txBookingOverrideAuditLogCreateMany).not.toHaveBeenCalled()
+
+    expect(
+      mocks.cancelScheduledClientNotificationsForBooking,
+    ).toHaveBeenCalledWith({
+      tx,
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      eventKeys: [expect.any(String)],
+      onlyPending: true,
+    })
+
+    expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
   })
 
-  it('rolls back when audit persistence fails', async () => {
-    mocks.buildBookingOverrideAuditRows.mockReturnValue([
-      {
-        bookingId: 'booking_1',
-        professionalId: 'pro_1',
-        actorUserId: 'user_1',
-        action: BookingOverrideAction.CREATE,
-        rule: BookingOverrideRule.ADVANCE_NOTICE,
-        reason: 'approved by manager',
-        route: 'lib/booking/writeBoundary.ts:createProBooking',
-        requestId: null,
-        oldValue: { allowShortNotice: false, advanceNoticeMinutes: 30 },
-        newValue: { allowShortNotice: true, advanceNoticeMinutes: 30 },
-        bookingScheduledForBefore: null,
-        bookingScheduledForAfter: REQUESTED_START,
-        metadata: {
-          source: 'booking_override_audit',
-          appliedOverride: 'ADVANCE_NOTICE',
-          timeZone: 'America/Los_Angeles',
-        },
-        createdAt: TEST_NOW,
+it('rolls back when audit persistence fails', async () => {
+  mocks.buildBookingOverrideAuditRows.mockReturnValue([
+    {
+      bookingId: BOOKING_ID,
+      professionalId: PROFESSIONAL_ID,
+      actorUserId: 'user_1',
+      action: BookingOverrideAction.CREATE,
+      rule: BookingOverrideRule.ADVANCE_NOTICE,
+      reason: 'approved by manager',
+      route: 'lib/booking/writeBoundary.ts:createProBooking',
+      requestId: null,
+      oldValue: { allowShortNotice: false, advanceNoticeMinutes: 30 },
+      newValue: { allowShortNotice: true, advanceNoticeMinutes: 30 },
+      bookingScheduledForBefore: null,
+      bookingScheduledForAfter: REQUESTED_START,
+      metadata: {
+        source: 'booking_override_audit',
+        appliedOverride: 'ADVANCE_NOTICE',
+        timeZone: LOCATION_TIME_ZONE,
       },
-    ])
+      createdAt: TEST_NOW,
+    },
+  ])
 
-    mocks.txBookingOverrideAuditLogCreateMany.mockRejectedValueOnce(
-      new Error('audit write failed'),
-    )
+  mocks.txBookingOverrideAuditLogCreateMany.mockRejectedValueOnce(
+    new Error('audit write failed'),
+  )
 
-    await expect(
-      createProBooking({
-        professionalId: 'pro_1',
-        actorUserId: 'user_1',
-        overrideReason: 'approved by manager',
-        clientId: 'client_1',
-        offeringId: 'offering_1',
-        locationId: 'loc_1',
-        locationType: ServiceLocationType.SALON,
-        scheduledFor: REQUESTED_START,
-        clientAddressId: null,
-        internalNotes: null,
-        requestedBufferMinutes: null,
-        requestedTotalDurationMinutes: null,
-        allowOutsideWorkingHours: false,
-        allowShortNotice: true,
-        allowFarFuture: false,
-      }),
-    ).rejects.toThrow('audit write failed')
+  await expect(
+    createProBooking({
+      professionalId: PROFESSIONAL_ID,
+      actorUserId: 'user_1',
+      overrideReason: 'approved by manager',
+      clientId: CLIENT_ID,
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: REQUESTED_START,
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+    }),
+  ).rejects.toThrow('audit write failed')
 
-    expect(mocks.txBookingOverrideAuditLogCreateMany).toHaveBeenCalled()
+  expect(mocks.txBookingOverrideAuditLogCreateMany).toHaveBeenCalled()
+
+  expect(
+    mocks.cancelScheduledClientNotificationsForBooking,
+  ).toHaveBeenCalledWith({
+    tx,
+    bookingId: BOOKING_ID,
+    clientId: CLIENT_ID,
+    eventKeys: [expect.any(String)],
+    onlyPending: true,
   })
+
+  expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
+  expect(mocks.scheduleClientNotification).toHaveBeenCalledWith({
+    tx,
+    clientId: CLIENT_ID,
+    bookingId: BOOKING_ID,
+    eventKey: expect.any(String),
+    runAt: expect.any(Date),
+    dedupeKey: expect.stringContaining(BOOKING_ID),
+    href: `/client/bookings/${BOOKING_ID}?step=overview`,
+    data: expect.objectContaining({
+      bookingId: BOOKING_ID,
+      serviceName: 'Haircut',
+    }),
+  })
+})
 })
