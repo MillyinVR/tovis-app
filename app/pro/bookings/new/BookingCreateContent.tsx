@@ -6,14 +6,15 @@ import {
   Role,
 } from '@prisma/client'
 
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import NewBookingForm from './NewBookingForm'
 import {
   buildProBookingNewClientDTO,
   buildProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 import { getProClientVisibility } from '@/lib/clientVisibility'
+import { prisma } from '@/lib/prisma'
+
+import NewBookingForm from './NewBookingForm'
 
 export type BookingCreateSearchParams = {
   clientId?: string
@@ -143,7 +144,7 @@ export default async function BookingCreateContent(props: {
   searchParams: BookingCreateSearchParams
   isModal?: boolean
 }) {
-  const { searchParams } = props
+  const { searchParams, isModal = false } = props
 
   const requestedClientId = normalizeSearchParam(searchParams.clientId)
   const requestedOfferingId = normalizeSearchParam(searchParams.offeringId)
@@ -151,7 +152,9 @@ export default async function BookingCreateContent(props: {
   const requestedLocationType = normalizeLocationTypeParam(
     searchParams.locationType,
   )
-  const defaultScheduledAt = normalizeDatetimeLocalParam(searchParams.scheduledAt)
+  const defaultScheduledAt = normalizeDatetimeLocalParam(
+    searchParams.scheduledAt,
+  )
 
   const user = await getCurrentUser()
 
@@ -246,50 +249,45 @@ export default async function BookingCreateContent(props: {
     timeZone: location.timeZone,
   }))
 
-  /**
-   * Only load clients the pro is allowed to view.
-   * If you already have a stronger internal helper/query for this, use that instead.
-   */
-  const candidateClientsRaw = await prisma.clientProfile.findMany({
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      avatarUrl: true,
-      dateOfBirth: true,
-      user: {
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          phone: true,
-          phoneVerifiedAt: true,
+  let clients: ReturnType<typeof buildProBookingNewClientDTO>[] = []
+  let clientAddressesByClientId: ClientAddressesByClientId = {}
+  let validClientId: string | undefined
+
+  if (requestedClientId) {
+    const requestedClient = await prisma.clientProfile.findUnique({
+      where: { id: requestedClientId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        avatarUrl: true,
+        dateOfBirth: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            phone: true,
+            phoneVerifiedAt: true,
+          },
         },
       },
-    },
-    orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
-  })
+    })
 
-  const visibleClientRows = await Promise.all(
-    candidateClientsRaw.map(async (client) => {
-      const visibility = await getProClientVisibility(professionalId, client.id)
-      return visibility.canViewClient ? client : null
-    }),
-  )
+    if (requestedClient) {
+      const visibility = await getProClientVisibility(
+        professionalId,
+        requestedClient.id,
+      )
 
-  const clientsRaw = visibleClientRows.filter(
-    (client): client is NonNullable<(typeof visibleClientRows)[number]> =>
-      client !== null,
-  )
+      if (visibility.canViewClient) {
+        clients = [buildProBookingNewClientDTO(requestedClient)]
+        validClientId = requestedClient.id
 
-  const visibleClientIds = clientsRaw.map((client) => client.id)
-
-  const clientAddressesRaw =
-    visibleClientIds.length > 0
-      ? await prisma.clientAddress.findMany({
+        const clientAddressesRaw = await prisma.clientAddress.findMany({
           where: {
-            clientId: { in: visibleClientIds },
+            clientId: requestedClient.id,
             kind: ClientAddressKind.SERVICE_ADDRESS,
           },
           select: {
@@ -300,24 +298,21 @@ export default async function BookingCreateContent(props: {
             isDefault: true,
           },
           orderBy: [
-            { clientId: 'asc' },
             { isDefault: 'desc' },
             { updatedAt: 'desc' },
             { createdAt: 'asc' },
           ],
         })
-      : []
 
-  const clients = clientsRaw.map(buildProBookingNewClientDTO)
+        clientAddressesByClientId =
+          buildClientAddressesByClientId(clientAddressesRaw)
+      }
+    }
+  }
 
-  const clientAddressesByClientId =
-    buildClientAddressesByClientId(clientAddressesRaw)
-
-  const validClientId = clients.some((c) => c.id === requestedClientId)
-    ? requestedClientId
-    : undefined
-
-  const validOfferingId = offerings.some((o) => o.id === requestedOfferingId)
+  const validOfferingId = offerings.some(
+    (offering) => offering.id === requestedOfferingId,
+  )
     ? requestedOfferingId
     : undefined
 
@@ -328,9 +323,7 @@ export default async function BookingCreateContent(props: {
   const derivedLocationType = locationTypeFromLocation(validLocation)
 
   const validLocationType =
-    validLocationId != null
-      ? derivedLocationType
-      : requestedLocationType
+    validLocationId != null ? derivedLocationType : requestedLocationType
 
   return (
     <NewBookingForm
@@ -344,6 +337,7 @@ export default async function BookingCreateContent(props: {
       defaultLocationType={validLocationType}
       defaultScheduledAt={defaultScheduledAt}
       cancelHref="/pro/bookings"
+      cancelMode={isModal ? 'back' : 'href'}
     />
   )
 }
