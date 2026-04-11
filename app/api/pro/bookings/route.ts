@@ -198,6 +198,7 @@ export async function POST(req: Request) {
           userId: result.clientUserId,
           email: result.clientEmail,
         },
+        invite: result.invite,
       },
       201,
     )
