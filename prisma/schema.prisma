@@ -367,6 +367,17 @@ enum NotificationDeliveryEventType {
   WEBHOOK_UPDATE
 }
 
+enum ContactMethod {
+  EMAIL
+  SMS
+}
+
+enum ProClientInviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -739,6 +750,7 @@ model ClientProfile {
   avatarUrl       String?
 
   dateOfBirth DateTime?
+  preferredContactMethod ContactMethod?
 
   user User @relation(fields: [userId], references: [id])
 
@@ -810,7 +822,7 @@ model ProfessionalProfile {
   handle           String?
   handleNormalized String? @unique
   isPremium        Boolean @default(false)
-
+  clientInvites    ProClientInvite[]
   bio       String?
   avatarUrl String?
 
@@ -1374,6 +1386,8 @@ model Booking {
   professionalId String
   serviceId      String
   offeringId     String?
+  
+  proClientInvite ProClientInvite?
 
   lastMinuteOpeningId String?            @unique
   lastMinuteOpening   LastMinuteOpening? @relation("BookingLastMinuteOpening", fields: [lastMinuteOpeningId], references: [id], onDelete: SetNull)
@@ -1637,6 +1651,36 @@ model BookingHold {
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
   @@index([clientAddressId])
+}
+
+model ProClientInvite {
+  id                     String                @id @default(cuid())
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  professionalId         String
+  bookingId              String                @unique
+
+  invitedName            String
+  invitedEmail           String?
+  invitedPhone           String?
+
+  token                  String                @unique @default(cuid())
+
+  status                 ProClientInviteStatus @default(PENDING)
+  expiresAt              DateTime
+
+  acceptedAt             DateTime?
+  acceptedByUserId       String?
+
+  preferredContactMethod ContactMethod?
+
+  professional           ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  booking                Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+  @@index([token])
+  @@index([status, expiresAt])
 }
 
 model AftercareSummary {
