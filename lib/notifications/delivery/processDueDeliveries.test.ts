@@ -56,7 +56,8 @@ function makeClaimedDelivery(
     lastAttemptAt: null,
     claimedAt: now,
     leaseExpiresAt: new Date(now.getTime() + 60_000),
-    leaseToken: args.leaseToken === undefined ? 'lease_token_1' : args.leaseToken,
+    leaseToken:
+      args.leaseToken === undefined ? 'lease_token_1' : args.leaseToken,
     providerMessageId: null,
     providerStatus: null,
     lastErrorCode: null,

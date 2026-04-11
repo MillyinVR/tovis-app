@@ -3,7 +3,10 @@ import {
   NotificationChannel,
   NotificationDeliveryEventType,
   NotificationDeliveryStatus,
+  NotificationEventKey,
+  NotificationPriority,
   NotificationProvider,
+  NotificationRecipientKind,
   Prisma,
 } from '@prisma/client'
 
@@ -34,23 +37,26 @@ function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   }
 }
 
-function makeOwnedDelivery(overrides?: Partial<{
-  id: string
-  status: NotificationDeliveryStatus
-  attemptCount: number
-  maxAttempts: number
-  claimedAt: Date | null
-  leaseExpiresAt: Date | null
-  leaseToken: string | null
-  cancelledAt: Date | null
-  dispatchCancelledAt: Date | null
-}>) {
+function makeOwnedDelivery(
+  overrides?: Partial<{
+    id: string
+    status: NotificationDeliveryStatus
+    attemptCount: number
+    maxAttempts: number
+    claimedAt: Date | null
+    leaseExpiresAt: Date | null
+    leaseToken: string | null
+    cancelledAt: Date | null
+    dispatchCancelledAt: Date | null
+  }>,
+) {
   return {
     id: overrides?.id ?? 'delivery_1',
     status: overrides?.status ?? NotificationDeliveryStatus.PENDING,
     attemptCount: overrides?.attemptCount ?? 0,
     maxAttempts: overrides?.maxAttempts ?? 5,
-    claimedAt: overrides?.claimedAt ?? new Date('2026-04-09T12:00:00.000Z'),
+    claimedAt:
+      overrides?.claimedAt ?? new Date('2026-04-09T12:00:00.000Z'),
     leaseExpiresAt:
       overrides?.leaseExpiresAt ?? new Date('2026-04-09T12:01:00.000Z'),
     leaseToken: overrides?.leaseToken ?? 'lease_token_1',
@@ -61,24 +67,26 @@ function makeOwnedDelivery(overrides?: Partial<{
   }
 }
 
-function makeCompletedDelivery(overrides?: Partial<{
-  id: string
-  status: NotificationDeliveryStatus
-  attemptCount: number
-  maxAttempts: number
-  lastAttemptAt: Date | null
-  nextAttemptAt: Date
-  claimedAt: Date | null
-  leaseExpiresAt: Date | null
-  leaseToken: string | null
-  providerMessageId: string | null
-  providerStatus: string | null
-  lastErrorCode: string | null
-  lastErrorMessage: string | null
-  sentAt: Date | null
-  deliveredAt: Date | null
-  failedAt: Date | null
-}>) {
+function makeCompletedDelivery(
+  overrides?: Partial<{
+    id: string
+    status: NotificationDeliveryStatus
+    attemptCount: number
+    maxAttempts: number
+    lastAttemptAt: Date | null
+    nextAttemptAt: Date
+    claimedAt: Date | null
+    leaseExpiresAt: Date | null
+    leaseToken: string | null
+    providerMessageId: string | null
+    providerStatus: string | null
+    lastErrorCode: string | null
+    lastErrorMessage: string | null
+    sentAt: Date | null
+    deliveredAt: Date | null
+    failedAt: Date | null
+  }>,
+) {
   const now = new Date('2026-04-09T12:00:00.000Z')
 
   return {
@@ -111,9 +119,9 @@ function makeCompletedDelivery(overrides?: Partial<{
     dispatch: {
       id: 'dispatch_1',
       sourceKey: 'client-notification:notif_1',
-      eventKey: 'APPOINTMENT_REMINDER',
-      recipientKind: 'CLIENT',
-      priority: 'NORMAL',
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      recipientKind: NotificationRecipientKind.CLIENT,
+      priority: NotificationPriority.NORMAL,
       userId: 'user_1',
       professionalId: null,
       clientId: 'client_1',
@@ -141,9 +149,11 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
     resetMockGroup(mockTx.notificationDeliveryEvent)
     mockPrisma.$transaction.mockReset()
 
-    mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockTx) => Promise<unknown>) => {
-      return callback(mockTx)
-    })
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockTx) => Promise<unknown>) => {
+        return callback(mockTx)
+      },
+    )
   })
 
   it('completes a successful send and releases the lease', async () => {
@@ -626,7 +636,9 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
         leaseToken: 'wrong_token',
         attemptedAt: new Date('2026-04-09T12:00:00.000Z'),
       }),
-    ).rejects.toThrow('completeDeliveryAttempt: delivery not owned by active lease')
+    ).rejects.toThrow(
+      'completeDeliveryAttempt: delivery not owned by active lease',
+    )
 
     expect(mockTx.notificationDelivery.update).not.toHaveBeenCalled()
     expect(mockTx.notificationDeliveryEvent.createMany).not.toHaveBeenCalled()

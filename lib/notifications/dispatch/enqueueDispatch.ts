@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationChannel,
   NotificationDeliveryEventType,
@@ -19,6 +20,7 @@ import {
   getMaxAttemptsForChannel,
   getProviderForChannel,
 } from '../delivery/providerPolicy'
+import { getNotificationEventDefinition } from '../eventKeys'
 
 const RECIPIENT_KIND = {
   PRO: 'PRO',
@@ -33,7 +35,6 @@ const MAX_HREF = 2048
 const MAX_PHONE = 32
 const MAX_EMAIL = 320
 const MAX_TIME_ZONE = 64
-const MAX_TEMPLATE_KEY = 128
 
 const DEFAULT_TEMPLATE_VERSION = 1
 
@@ -124,17 +125,13 @@ export type EnqueueDispatchRecipient =
 export type EnqueueDispatchArgs = {
   key: NotificationEventKey
   sourceKey: string
-
   recipient: EnqueueDispatchRecipient
-
   title: string
   body?: string | null
   href?: string | null
   payload?: Prisma.InputJsonValue | null
-
   priority?: NotificationPriority | null
   scheduledFor?: Date | null
-
   notificationId?: string | null
   clientNotificationId?: string | null
 
@@ -172,18 +169,14 @@ type NormalizedEnqueueDispatchArgs = {
   emailVerifiedAt: Date | null
   timeZone: string | null
   preference: NotificationPreferenceLike | null
-
   title: string
   body: string
   href: string
   payload: Prisma.InputJsonValue | Prisma.NullTypes.JsonNull | undefined
-
   priority: NotificationPriority
   scheduledFor: Date
-
   notificationId: string | null
   clientNotificationId: string | null
-
   requestedChannels: readonly NotificationChannel[] | null
 }
 
@@ -240,6 +233,15 @@ function normalizeDate(value: unknown, fieldName: string): Date {
   return value
 }
 
+function normalizeRecipientTimeZone(
+  value: string | null | undefined,
+): string | null {
+  const normalized = pickTimeZoneOrNull(value)
+  if (!normalized) return null
+
+  return normalized.length <= MAX_TIME_ZONE ? normalized : null
+}
+
 function isProDispatchRecipient(
   recipient: EnqueueDispatchRecipient,
 ): recipient is EnqueueProDispatchRecipient {
@@ -247,7 +249,10 @@ function isProDispatchRecipient(
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  )
 }
 
 function resolveInAppTargetId(recipient: EnqueueDispatchRecipient): string | null {
@@ -290,16 +295,20 @@ function buildDeliveryEvents(args: {
   status: NotificationDeliveryStatus
   suppressionReason: string | null
 }): Prisma.NotificationDeliveryEventCreateWithoutDeliveryInput[] {
-  const createdEvent: Prisma.NotificationDeliveryEventCreateWithoutDeliveryInput = {
-    type: NotificationDeliveryEventType.CREATED,
-    toStatus: args.status,
-    message:
-      args.status === NotificationDeliveryStatus.SUPPRESSED
-        ? 'Delivery row created in suppressed state.'
-        : 'Delivery row enqueued.',
-  }
+  const createdEvent: Prisma.NotificationDeliveryEventCreateWithoutDeliveryInput =
+    {
+      type: NotificationDeliveryEventType.CREATED,
+      toStatus: args.status,
+      message:
+        args.status === NotificationDeliveryStatus.SUPPRESSED
+          ? 'Delivery row created in suppressed state.'
+          : 'Delivery row enqueued.',
+    }
 
-  if (args.status !== NotificationDeliveryStatus.SUPPRESSED || !args.suppressionReason) {
+  if (
+    args.status !== NotificationDeliveryStatus.SUPPRESSED ||
+    !args.suppressionReason
+  ) {
     return [createdEvent]
   }
 
@@ -318,10 +327,8 @@ function buildDeliveryRows(args: {
   normalized: NormalizedEnqueueDispatchArgs
   evaluations: ChannelEvaluation[]
 }): DeliveryCreateRow[] {
-  const templateKey = normRequiredString(
-    args.normalized.key.toString().toLowerCase(),
-    MAX_TEMPLATE_KEY,
-  )
+  const eventDefinition = getNotificationEventDefinition(args.normalized.key)
+  const templateKey = eventDefinition.templateKey
 
   const capabilities = getRecipientChannelCapabilities({
     recipientKind: args.normalized.recipientKind,
@@ -474,7 +481,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
   const inAppTargetId = resolveInAppTargetId(args.recipient)
   const phone = normNullableString(args.recipient.phone, MAX_PHONE)
   const email = normNullableString(args.recipient.email, MAX_EMAIL)
-  const timeZone = normNullableString(args.recipient.timeZone, MAX_TIME_ZONE)
+  const timeZone = normalizeRecipientTimeZone(args.recipient.timeZone)
 
   if (
     args.recipient.phoneVerifiedAt != null &&
@@ -493,7 +500,10 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
   }
 
   if (isProDispatchRecipient(args.recipient)) {
-    const professionalId = normRequiredString(args.recipient.professionalId, MAX_ID)
+    const professionalId = normRequiredString(
+      args.recipient.professionalId,
+      MAX_ID,
+    )
 
     if (!professionalId) {
       throw new Error('enqueueDispatch: missing recipient.professionalId')
@@ -531,7 +541,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     throw new Error('enqueueDispatch: missing recipient.clientId')
   }
 
-   return {
+  return {
     key: args.key,
     sourceKey,
     recipientKind: RECIPIENT_KIND.CLIENT,
@@ -596,6 +606,7 @@ async function findDispatchBySourceKeyOrThrow(args: {
  * - DB is the source of truth
  * - quiet hours are intentionally NOT enforced here
  * - worker/runtime delivery code can apply deferral rules later
+ * - recipientTimeZone is stored only when it is a valid IANA timezone
  */
 export async function enqueueDispatch(
   args: EnqueueDispatchArgs,

@@ -95,6 +95,31 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
     })
   })
 
+  it('returns SEND when recipient timezone is invalid', () => {
+    const now = new Date('2026-04-09T06:30:00.000Z')
+
+    const result = evaluateRuntimeDeliveryChannelPolicy({
+      key: NotificationEventKey.APPOINTMENT_REMINDER,
+      channel: NotificationChannel.SMS,
+      now,
+      recipientTimeZone: 'Mars/Olympus',
+      preference: buildPreference({
+        quietHoursStartMinutes: 22 * 60,
+        quietHoursEndMinutes: 8 * 60,
+      }),
+    })
+
+    expect(result).toEqual({
+      action: 'SEND',
+      reason: 'NO_RECIPIENT_TIME_ZONE',
+      allowQuietHoursBypass: false,
+      quietHoursStartMinutes: 22 * 60,
+      quietHoursEndMinutes: 8 * 60,
+      recipientLocalMinutes: null,
+      nextAttemptAt: null,
+    })
+  })
+
   it('returns SEND when outside an overnight quiet-hours window', () => {
     const now = new Date('2026-04-09T18:00:00.000Z') // 11:00 AM America/Los_Angeles
 
@@ -134,7 +159,6 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
       }),
     })
 
-    expect(result.action).toBe('DEFER')
     expect(result).toEqual({
       action: 'DEFER',
       reason: 'QUIET_HOURS',
@@ -160,7 +184,6 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
       }),
     })
 
-    expect(result.action).toBe('DEFER')
     expect(result).toEqual({
       action: 'DEFER',
       reason: 'QUIET_HOURS',
@@ -236,6 +259,22 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
     })
 
     expect(nextAttemptAt).toEqual(new Date('2026-04-09T15:00:00.000Z'))
+  })
+
+  it('computeQuietHoursResumeAt returns the first valid local time after a DST spring-forward gap', () => {
+    const now = new Date('2026-03-08T09:30:00.000Z') // 1:30 AM America/Los_Angeles, DST start day
+
+    const nextAttemptAt = computeQuietHoursResumeAt({
+      now,
+      recipientTimeZone: 'America/Los_Angeles',
+      quietHoursStartMinutes: 22 * 60,
+      quietHoursEndMinutes: 2 * 60 + 30,
+      recipientLocalMinutes: 1 * 60 + 30,
+    })
+
+    // 2:30 AM local does not exist on DST spring-forward day.
+    // The first valid local time at or after 2:30 AM is 3:00 AM PDT.
+    expect(nextAttemptAt).toEqual(new Date('2026-03-08T10:00:00.000Z'))
   })
 
   it('throws for invalid now', () => {

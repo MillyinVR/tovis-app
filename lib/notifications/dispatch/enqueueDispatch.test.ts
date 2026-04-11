@@ -120,21 +120,35 @@ function makeDispatchRecord(
     eventKey: overrides.eventKey ?? NotificationEventKey.BOOKING_CONFIRMED,
     recipientKind: overrides.recipientKind ?? NotificationRecipientKind.CLIENT,
     priority: overrides.priority ?? NotificationPriority.NORMAL,
-    userId: overrides.userId ?? 'user_1',
-    professionalId: overrides.professionalId ?? null,
-    clientId: overrides.clientId ?? 'client_1',
-    recipientInAppTargetId: overrides.recipientInAppTargetId ?? 'client_1',
-    recipientPhone: overrides.recipientPhone ?? '+15551234567',
-    recipientEmail: overrides.recipientEmail ?? 'client@example.com',
+    userId: 'userId' in overrides ? overrides.userId! : 'user_1',
+    professionalId:
+      'professionalId' in overrides ? overrides.professionalId! : null,
+    clientId: 'clientId' in overrides ? overrides.clientId! : 'client_1',
+    recipientInAppTargetId:
+      'recipientInAppTargetId' in overrides
+        ? overrides.recipientInAppTargetId!
+        : 'client_1',
+    recipientPhone:
+      'recipientPhone' in overrides ? overrides.recipientPhone! : '+15551234567',
+    recipientEmail:
+      'recipientEmail' in overrides
+        ? overrides.recipientEmail!
+        : 'client@example.com',
     recipientTimeZone:
-      overrides.recipientTimeZone ?? 'America/Los_Angeles',
-    notificationId: overrides.notificationId ?? null,
-    clientNotificationId: overrides.clientNotificationId ?? 'notif_1',
+      'recipientTimeZone' in overrides
+        ? overrides.recipientTimeZone!
+        : 'America/Los_Angeles',
+    notificationId:
+      'notificationId' in overrides ? overrides.notificationId! : null,
+    clientNotificationId:
+      'clientNotificationId' in overrides
+        ? overrides.clientNotificationId!
+        : 'notif_1',
     title: overrides.title ?? 'Appointment confirmed',
     body: overrides.body ?? 'Your appointment has been confirmed.',
     href: overrides.href ?? '/client/bookings/booking_1',
     scheduledFor,
-    cancelledAt: overrides.cancelledAt ?? null,
+    cancelledAt: 'cancelledAt' in overrides ? overrides.cancelledAt! : null,
     createdAt,
     updatedAt,
     deliveries:
@@ -146,6 +160,7 @@ function makeDispatchRecord(
           provider: NotificationProvider.INTERNAL_REALTIME,
           status: NotificationDeliveryStatus.PENDING,
           destination: 'client_1',
+          templateKey: 'booking_confirmed',
           maxAttempts: 3,
           nextAttemptAt: scheduledFor,
         }),
@@ -155,6 +170,7 @@ function makeDispatchRecord(
           provider: NotificationProvider.TWILIO,
           status: NotificationDeliveryStatus.PENDING,
           destination: '+15551234567',
+          templateKey: 'booking_confirmed',
           maxAttempts: 5,
           nextAttemptAt: scheduledFor,
         }),
@@ -164,6 +180,7 @@ function makeDispatchRecord(
           provider: NotificationProvider.POSTMARK,
           status: NotificationDeliveryStatus.PENDING,
           destination: 'client@example.com',
+          templateKey: 'booking_confirmed',
           maxAttempts: 6,
           nextAttemptAt: scheduledFor,
         }),
@@ -176,7 +193,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     resetMockGroup(mockPrisma.notificationDispatch)
   })
 
-  it('creates a dispatch and persists the recipient snapshot fields', async () => {
+  it('creates a dispatch and persists the normalized recipient snapshot fields', async () => {
     const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
 
     mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
@@ -200,7 +217,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
         emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
-        timeZone: 'America/Los_Angeles',
+        timeZone: ' America/Los_Angeles ',
         preference: null,
       },
       title: ' Appointment confirmed ',
@@ -327,6 +344,51 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     })
   })
 
+  it('stores recipientTimeZone as null when the provided timezone is invalid', async () => {
+    const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+    mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+    mockPrisma.notificationDispatch.create.mockResolvedValue(
+      makeDispatchRecord({
+        sourceKey: 'client-notification:notif_invalid_tz',
+        clientNotificationId: 'notif_invalid_tz',
+        recipientTimeZone: null,
+        scheduledFor,
+      }),
+    )
+
+    const result = await enqueueDispatch({
+      key: NotificationEventKey.BOOKING_CONFIRMED,
+      sourceKey: 'client-notification:notif_invalid_tz',
+      recipient: {
+        kind: NotificationRecipientKind.CLIENT,
+        clientId: 'client_1',
+        userId: 'user_1',
+        inAppTargetId: 'client_1',
+        phone: '+15551234567',
+        phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
+        email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
+        timeZone: 'Mars/Olympus',
+        preference: null,
+      },
+      title: 'Appointment confirmed',
+      body: 'Your appointment has been confirmed.',
+      href: '/client/bookings/booking_1',
+      scheduledFor,
+      clientNotificationId: 'notif_invalid_tz',
+    })
+
+    expect(mockPrisma.notificationDispatch.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        recipientTimeZone: null,
+      }),
+      select: expect.any(Object),
+    })
+
+    expect(result.dispatch.recipientTimeZone).toBeNull()
+  })
+
   it('returns the existing dispatch unchanged when sourceKey already exists', async () => {
     const existing = makeDispatchRecord({
       id: 'dispatch_existing',
@@ -420,6 +482,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.INTERNAL_REALTIME,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: 'client_1',
+            templateKey: 'booking_confirmed',
             maxAttempts: 3,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -430,6 +493,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.TWILIO,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: null,
+            templateKey: 'booking_confirmed',
             maxAttempts: 5,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -440,6 +504,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.POSTMARK,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: 'client@example.com',
+            templateKey: 'booking_confirmed',
             maxAttempts: 6,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -484,6 +549,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.INTERNAL_REALTIME,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: 'client_1',
+              templateKey: 'booking_confirmed',
               maxAttempts: 3,
               nextAttemptAt: scheduledFor,
               suppressedAt: expect.any(Date),
@@ -511,6 +577,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.TWILIO,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: null,
+              templateKey: 'booking_confirmed',
               maxAttempts: 5,
               nextAttemptAt: scheduledFor,
               suppressedAt: expect.any(Date),
@@ -538,6 +605,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.POSTMARK,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: 'client@example.com',
+              templateKey: 'booking_confirmed',
               maxAttempts: 6,
               nextAttemptAt: scheduledFor,
               suppressedAt: expect.any(Date),
@@ -582,6 +650,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.INTERNAL_REALTIME,
             status: NotificationDeliveryStatus.PENDING,
             destination: 'client_1',
+            templateKey: 'booking_confirmed',
             maxAttempts: 3,
             nextAttemptAt: scheduledFor,
           }),
@@ -591,6 +660,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.TWILIO,
             status: NotificationDeliveryStatus.PENDING,
             destination: '+15551234567',
+            templateKey: 'booking_confirmed',
             maxAttempts: 5,
             nextAttemptAt: scheduledFor,
           }),
@@ -600,6 +670,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.POSTMARK,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: null,
+            templateKey: 'booking_confirmed',
             maxAttempts: 6,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -656,6 +727,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.POSTMARK,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: null,
+              templateKey: 'booking_confirmed',
               suppressedAt: expect.any(Date),
               events: {
                 create: [
