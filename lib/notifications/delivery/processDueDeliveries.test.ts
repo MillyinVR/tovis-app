@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NotificationChannel,
+  NotificationDeliveryStatus,
   NotificationEventKey,
   NotificationPriority,
   NotificationProvider,
   NotificationRecipientKind,
-  type NotificationDeliveryStatus,
 } from '@prisma/client'
 
 import { EmailDeliveryProvider } from './sendEmail'
@@ -46,7 +46,7 @@ function makeClaimedDelivery(
     id: args.id ?? 'delivery_1',
     channel: args.channel ?? NotificationChannel.IN_APP,
     provider: args.provider ?? NotificationProvider.INTERNAL_REALTIME,
-    status: args.status ?? 'PENDING',
+    status: args.status ?? NotificationDeliveryStatus.PENDING,
     destination: args.destination ?? 'client_1',
     templateKey: args.templateKey ?? 'booking_confirmed',
     templateVersion: args.templateVersion ?? 1,
@@ -313,6 +313,75 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           deliveryId: 'delivery_sms_1',
           provider: NotificationProvider.TWILIO,
           channel: NotificationChannel.SMS,
+          result: 'SENT',
+        },
+      ],
+    })
+  })
+
+  it('processes a successful email delivery through the email provider', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, inAppSend, smsSend, emailSend } = makeProviders()
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_email_success',
+          channel: NotificationChannel.EMAIL,
+          provider: NotificationProvider.POSTMARK,
+          destination: 'client@example.com',
+          templateKey: 'booking_confirmed',
+          attemptCount: 0,
+          maxAttempts: 5,
+        }),
+      ],
+    })
+
+    emailSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'email_msg_1',
+      providerStatus: 'accepted',
+      responseMeta: {
+        source: 'sendEmail',
+      },
+    })
+
+    const result = await processDueDeliveries({
+      providers,
+      claim: { now },
+    })
+
+    expect(inAppSend).not.toHaveBeenCalled()
+    expect(smsSend).not.toHaveBeenCalled()
+    expect(emailSend).toHaveBeenCalledTimes(1)
+
+    expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
+      kind: 'SUCCESS',
+      deliveryId: 'delivery_email_success',
+      leaseToken: 'lease_token_1',
+      attemptedAt: now,
+      providerMessageId: 'email_msg_1',
+      providerStatus: 'accepted',
+      responseMeta: {
+        source: 'sendEmail',
+      },
+    })
+
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 1,
+      retryScheduledCount: 0,
+      finalFailureCount: 0,
+      orchestrationErrorCount: 0,
+      outcomes: [
+        {
+          deliveryId: 'delivery_email_success',
+          provider: NotificationProvider.POSTMARK,
+          channel: NotificationChannel.EMAIL,
           result: 'SENT',
         },
       ],

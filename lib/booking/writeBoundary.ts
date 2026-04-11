@@ -536,15 +536,7 @@ type UploadProBookingMediaResult = {
   meta: MutationMeta
 }
 
-type MarkBookingRemindersSentArgs = {
-  bookingIds: string[]
-  sentAt?: Date
-}
 
-type MarkBookingRemindersSentResult = {
-  count: number
-  meta: MutationMeta
-}
 type UpdateBookingLastMinuteDiscountArgs = {
   bookingId: string
   professionalId: string
@@ -7099,6 +7091,8 @@ async function performLockedUpdateProBooking(args: {
       locationAddressSnapshot: true,
       locationLatSnapshot: true,
       locationLngSnapshot: true,
+      serviceId: true,
+      offeringId: true,
       professionalId: true,
       professional: {
         select: { timeZone: true },
@@ -7441,6 +7435,11 @@ if (args.notifyClient) {
     finalBuffer !== existingBufferMinutes ||
     finalDuration !== existingDurationMinutes
 
+  const reminderStateChanged =
+    occupancyChanged ||
+    primaryServiceId !== existing.serviceId ||
+    primaryOfferingId !== existing.offeringId
+
   const schedulingDecision = await enforceUpdateBookingScheduling({
     tx: args.tx,
     now: args.now,
@@ -7578,7 +7577,7 @@ if (args.notifyClient) {
 
   if (
     updated.status === BookingStatus.ACCEPTED &&
-    (args.nextStatus === BookingStatus.ACCEPTED || occupancyChanged)
+    (args.nextStatus === BookingStatus.ACCEPTED || reminderStateChanged)
   ) {
     await syncBookingAppointmentReminders({
       tx: args.tx,
@@ -9170,25 +9169,6 @@ export async function uploadProBookingMedia(
         mediaType: args.mediaType,
       }),
   )
-}
-/**
- * Legacy compatibility shim.
- *
- * The old reminder flow used Booking.reminderSentAt as a write-back flag.
- * That field no longer exists on Booking, and reminder delivery is moving to
- * the scheduled notification pipeline instead.
- *
- * Keep this export for any remaining legacy imports, but do not mutate Booking.
- */
-export async function markBookingRemindersSent(
-  args: MarkBookingRemindersSentArgs,
-): Promise<MarkBookingRemindersSentResult> {
-  void args
-
-  return {
-    count: 0,
-    meta: buildMeta(false),
-  }
 }
 
 export async function upsertBookingAftercare(

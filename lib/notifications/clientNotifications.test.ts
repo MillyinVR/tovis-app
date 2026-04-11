@@ -315,6 +315,51 @@ describe('lib/notifications/clientNotifications', () => {
     ).rejects.toThrow('upsertClientNotification: missing dedupeKey')
   })
 
+  it('creates a non-deduped scheduled notification when no dedupeKey is provided', async () => {
+    const runAt = new Date('2026-04-13T10:00:00.000Z')
+    mockPrisma.scheduledClientNotification.create.mockResolvedValue({
+      id: 'scheduled_create_1',
+    })
+
+    const result = await scheduleClientNotification({
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      runAt,
+      href: ' /client/bookings/booking_1?step=overview ',
+      data: {
+        bookingId: 'booking_1',
+        reminderKind: 'DAY_BEFORE',
+      },
+    })
+
+    expect(result).toEqual({ id: 'scheduled_create_1' })
+
+    expect(mockPrisma.scheduledClientNotification.create).toHaveBeenCalledWith({
+      data: {
+        clientId: 'client_1',
+        dedupeKey: null,
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+        runAt,
+        href: '/client/bookings/booking_1?step=overview',
+        bookingId: 'booking_1',
+        processedAt: null,
+        cancelledAt: null,
+        failedAt: null,
+        lastError: null,
+        data: {
+          bookingId: 'booking_1',
+          reminderKind: 'DAY_BEFORE',
+        },
+      },
+      select: { id: true },
+    })
+
+    expect(
+      mockPrisma.scheduledClientNotification.updateMany,
+    ).not.toHaveBeenCalled()
+  })
+
   it('schedules a deduped client notification by updating an existing row', async () => {
     const runAt = new Date('2026-04-13T10:00:00.000Z')
 
@@ -362,6 +407,61 @@ describe('lib/notifications/clientNotifications', () => {
         },
       },
     })
+
+    expect(
+      mockPrisma.scheduledClientNotification.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        clientId: 'client_1',
+        dedupeKey: 'CLIENT_REMINDER:1W:booking_1',
+      },
+      select: { id: true },
+    })
+  })
+
+  it('retries scheduled notification update after a create race on a deduped row', async () => {
+    const runAt = new Date('2026-04-13T10:00:00.000Z')
+
+    mockPrisma.scheduledClientNotification.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+
+    mockPrisma.scheduledClientNotification.create.mockRejectedValueOnce(
+      makeUniqueConstraintError(),
+    )
+
+    mockPrisma.scheduledClientNotification.findFirst.mockResolvedValue({
+      id: 'scheduled_raced',
+    })
+
+    const result = await scheduleClientNotification({
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      runAt,
+      dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_1',
+      href: '/client/bookings/booking_1?step=overview',
+      data: {
+        bookingId: 'booking_1',
+        reminderKind: 'DAY_BEFORE',
+      },
+    })
+
+    expect(result).toEqual({ id: 'scheduled_raced' })
+    expect(mockPrisma.scheduledClientNotification.create).toHaveBeenCalledTimes(1)
+    expect(
+      mockPrisma.scheduledClientNotification.updateMany,
+    ).toHaveBeenCalledTimes(2)
+
+    expect(
+      mockPrisma.scheduledClientNotification.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        clientId: 'client_1',
+        dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_1',
+      },
+      select: { id: true },
+    })
   })
 
   it('cancels pending scheduled notifications for a booking', async () => {
@@ -386,6 +486,37 @@ describe('lib/notifications/clientNotifications', () => {
         eventKey: { in: [NotificationEventKey.APPOINTMENT_REMINDER] },
         cancelledAt: null,
         processedAt: null,
+      },
+      data: {
+        cancelledAt: expect.any(Date),
+        failedAt: null,
+        lastError: null,
+      },
+    })
+  })
+
+  it('can cancel scheduled notifications regardless of processed state when onlyPending is false', async () => {
+    mockPrisma.scheduledClientNotification.updateMany.mockResolvedValue({
+      count: 3,
+    })
+
+    const result = await cancelScheduledClientNotificationsForBooking({
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
+      onlyPending: false,
+    })
+
+    expect(result).toEqual({ count: 3 })
+
+    expect(
+      mockPrisma.scheduledClientNotification.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        clientId: 'client_1',
+        eventKey: { in: [NotificationEventKey.APPOINTMENT_REMINDER] },
+        cancelledAt: null,
       },
       data: {
         cancelledAt: expect.any(Date),

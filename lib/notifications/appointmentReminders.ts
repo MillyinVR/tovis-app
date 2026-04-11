@@ -16,16 +16,76 @@ import {
 
 export type AppointmentReminderKind = 'ONE_WEEK' | 'DAY_BEFORE'
 
+export type AppointmentReminderPayload = {
+  reminderKind: AppointmentReminderKind
+  bookingId: string
+  scheduledFor: string
+  timeZone: string
+  serviceName: string
+  professionalName: string | null
+}
+
+export type AppointmentReminderContent = {
+  title: string
+  body: string
+  data: Prisma.InputJsonValue
+}
+
+export type ValidateDueAppointmentReminderResult =
+  | {
+      action: 'PROCESS'
+      rowId: string
+      clientId: string
+      bookingId: string
+      dedupeKey: string
+      href: string
+      notification: AppointmentReminderContent
+    }
+  | {
+      action: 'SKIP'
+    }
+  | {
+      action: 'CANCEL'
+      reason: string
+    }
+
 type AppointmentReminderPlanItem = {
   kind: AppointmentReminderKind
   dedupeKey: string
   runAt: Date
+  payload: AppointmentReminderPayload
 }
 
-const APPOINTMENT_REMINDER_KINDS: AppointmentReminderKind[] = [
+type ZonedDateTimeParts = {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+}
+
+const APPOINTMENT_REMINDER_KINDS: readonly AppointmentReminderKind[] = [
   'ONE_WEEK',
   'DAY_BEFORE',
 ]
+
+const APPOINTMENT_REMINDER_OFFSET_DAYS: Record<
+  AppointmentReminderKind,
+  number
+> = {
+  ONE_WEEK: 7,
+  DAY_BEFORE: 1,
+}
+
+/**
+ * Be explicit.
+ * We do not silently schedule reminders for every non-terminal booking state.
+ * If product rules change later, change this constant intentionally.
+ */
+const REMINDER_ELIGIBLE_BOOKING_STATUSES = new Set<BookingStatus>([
+  BookingStatus.ACCEPTED,
+])
 
 const BOOKING_REMINDER_SELECT = {
   id: true,
@@ -34,7 +94,6 @@ const BOOKING_REMINDER_SELECT = {
   status: true,
   finishedAt: true,
   locationTimeZone: true,
-  clientTimeZoneAtBooking: true,
   service: {
     select: {
       name: true,
@@ -42,15 +101,81 @@ const BOOKING_REMINDER_SELECT = {
   },
 } satisfies Prisma.BookingSelect
 
+const DUE_APPOINTMENT_REMINDER_SELECT = {
+  id: true,
+  clientId: true,
+  bookingId: true,
+  eventKey: true,
+  runAt: true,
+  href: true,
+  dedupeKey: true,
+  data: true,
+  cancelledAt: true,
+  processedAt: true,
+} satisfies Prisma.ScheduledClientNotificationSelect
+
 type BookingReminderRecord = Prisma.BookingGetPayload<{
   select: typeof BOOKING_REMINDER_SELECT
 }>
 
-function makeAppointmentReminderDedupeKey(
-  bookingId: string,
-  kind: AppointmentReminderKind,
-): string {
-  return `CLIENT_REMINDER:${kind}:${bookingId}`
+type DueAppointmentReminderRow = Prisma.ScheduledClientNotificationGetPayload<{
+  select: typeof DUE_APPOINTMENT_REMINDER_SELECT
+}>
+
+const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
+function getZonedDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = zonedDateTimeFormatterCache.get(timeZone)
+  if (cached) return cached
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+
+  zonedDateTimeFormatterCache.set(timeZone, formatter)
+  return formatter
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function readDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  return null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeRequiredDate(value: Date): Date | null {
+  if (!(value instanceof Date)) return null
+  return Number.isNaN(value.getTime()) ? null : value
+}
+
+function normalizeOptionalString(
+  value: string | null | undefined,
+): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized.length > 0 ? normalized : null
 }
 
 function resolveAppointmentReminderTimeZone(
@@ -60,37 +185,375 @@ function resolveAppointmentReminderTimeZone(
   if (raw && isValidIanaTimeZone(raw)) {
     return sanitizeTimeZone(raw, DEFAULT_TIME_ZONE)
   }
+
   return DEFAULT_TIME_ZONE
 }
 
-function computeAppointmentReminderRunAt(args: {
-  scheduledFor: Date
-  kind: AppointmentReminderKind
-}): Date | null {
-  const offsetMs =
-    args.kind === 'ONE_WEEK'
-      ? 7 * 24 * 60 * 60 * 1000
-      : 24 * 60 * 60 * 1000
+function getZonedDateTimeParts(
+  date: Date,
+  timeZone: string,
+): ZonedDateTimeParts | null {
+  const normalizedDate = normalizeRequiredDate(date)
+  if (!normalizedDate) return null
 
-  const runAt = new Date(args.scheduledFor.getTime() - offsetMs)
-  return Number.isNaN(runAt.getTime()) ? null : runAt
+  try {
+    const parts = getZonedDateTimeFormatter(timeZone).formatToParts(
+      normalizedDate,
+    )
+
+    const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
+      const value = parts.find((part) => part.type === type)?.value ?? null
+      if (!value) return null
+
+      const parsed = Number.parseInt(value, 10)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+
+    const year = getPart('year')
+    const month = getPart('month')
+    const day = getPart('day')
+    const hour = getPart('hour')
+    const minute = getPart('minute')
+    const second = getPart('second')
+
+    if (
+      year == null ||
+      month == null ||
+      day == null ||
+      hour == null ||
+      minute == null ||
+      second == null
+    ) {
+      return null
+    }
+
+    return {
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+    }
+  } catch {
+    return null
+  }
+}
+
+function shiftLocalCalendarDate(args: {
+  year: number
+  month: number
+  day: number
+  daysToSubtract: number
+}): {
+  year: number
+  month: number
+  day: number
+} {
+  const shifted = new Date(
+    Date.UTC(args.year, args.month - 1, args.day, 0, 0, 0),
+  )
+
+  shifted.setUTCDate(shifted.getUTCDate() - args.daysToSubtract)
+
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  }
+}
+
+/**
+ * Convert a local wall-clock time in a specific IANA timezone into an actual Date.
+ *
+ * This preserves local time across DST boundaries.
+ */
+function buildDateForZonedLocalDateTime(args: {
+  timeZone: string
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+}): Date | null {
+  let candidate = new Date(
+    Date.UTC(
+      args.year,
+      args.month - 1,
+      args.day,
+      args.hour,
+      args.minute,
+      args.second,
+      0,
+    ),
+  )
+
+  for (let i = 0; i < 6; i += 1) {
+    const zoned = getZonedDateTimeParts(candidate, args.timeZone)
+    if (!zoned) return null
+
+    const desiredAsUtc = Date.UTC(
+      args.year,
+      args.month - 1,
+      args.day,
+      args.hour,
+      args.minute,
+      args.second,
+      0,
+    )
+
+    const actualAsUtc = Date.UTC(
+      zoned.year,
+      zoned.month - 1,
+      zoned.day,
+      zoned.hour,
+      zoned.minute,
+      zoned.second,
+      0,
+    )
+
+    const diffMs = desiredAsUtc - actualAsUtc
+    if (diffMs === 0) {
+      return candidate
+    }
+
+    candidate = new Date(candidate.getTime() + diffMs)
+  }
+
+  const finalParts = getZonedDateTimeParts(candidate, args.timeZone)
+  if (!finalParts) return null
+
+  const isExactMatch =
+    finalParts.year === args.year &&
+    finalParts.month === args.month &&
+    finalParts.day === args.day &&
+    finalParts.hour === args.hour &&
+    finalParts.minute === args.minute &&
+    finalParts.second === args.second
+
+  return isExactMatch ? candidate : null
+}
+
+function formatWhen(date: Date, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date)
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: DEFAULT_TIME_ZONE,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date)
+  }
+}
+
+function makeAppointmentReminderDedupeKey(
+  bookingId: string,
+  kind: AppointmentReminderKind,
+): string {
+  return `CLIENT_REMINDER:${kind}:${bookingId}`
+}
+
+function buildAppointmentReminderHref(bookingId: string): string {
+  return `/client/bookings/${bookingId}?step=overview`
+}
+
+export function buildAppointmentReminderPayload(args: {
+  bookingId: string
+  kind: AppointmentReminderKind
+  scheduledFor: Date
+  timeZone: string
+  serviceName?: string | null
+  professionalName?: string | null
+}): AppointmentReminderPayload {
+  const scheduledFor = normalizeRequiredDate(args.scheduledFor)
+  if (!scheduledFor) {
+    throw new Error('buildAppointmentReminderPayload: invalid scheduledFor')
+  }
+
+  return {
+    reminderKind: args.kind,
+    bookingId: args.bookingId,
+    scheduledFor: scheduledFor.toISOString(),
+    timeZone: resolveAppointmentReminderTimeZone(args.timeZone),
+    serviceName:
+      normalizeOptionalString(args.serviceName) ?? 'Appointment',
+    professionalName: normalizeOptionalString(args.professionalName),
+  }
+}
+
+export function parseAppointmentReminderPayload(
+  data: Prisma.JsonValue | null,
+): AppointmentReminderPayload | null {
+  if (!isRecord(data)) return null
+
+  const reminderKind = readString(data.reminderKind)
+  if (reminderKind !== 'ONE_WEEK' && reminderKind !== 'DAY_BEFORE') {
+    return null
+  }
+
+  const bookingId = readString(data.bookingId)
+  if (!bookingId) return null
+
+  const scheduledFor = readDate(data.scheduledFor)
+  if (!scheduledFor) return null
+
+  const rawTimeZone = readString(data.timeZone)
+  if (!rawTimeZone || !isValidIanaTimeZone(rawTimeZone)) {
+    return null
+  }
+
+  return {
+    reminderKind,
+    bookingId,
+    scheduledFor: scheduledFor.toISOString(),
+    timeZone: sanitizeTimeZone(rawTimeZone, DEFAULT_TIME_ZONE),
+    serviceName: readString(data.serviceName) ?? 'Appointment',
+    professionalName: readString(data.professionalName),
+  }
+}
+
+export function buildAppointmentReminderContent(
+  payload: AppointmentReminderPayload,
+): AppointmentReminderContent {
+  const scheduledFor = new Date(payload.scheduledFor)
+  if (Number.isNaN(scheduledFor.getTime())) {
+    throw new Error('buildAppointmentReminderContent: invalid scheduledFor')
+  }
+
+  const whenLabel = formatWhen(scheduledFor, payload.timeZone)
+  const subject = payload.serviceName
+    ? ` for ${payload.serviceName}`
+    : ''
+  const withPro = payload.professionalName
+    ? ` with ${payload.professionalName}`
+    : ''
+  const onWhen = whenLabel ? ` on ${whenLabel}` : ''
+
+  if (payload.reminderKind === 'ONE_WEEK') {
+    return {
+      title: 'Appointment reminder',
+      body: `Reminder: your appointment${subject} is in one week${onWhen}${withPro}.`,
+      data: payload,
+    }
+  }
+
+  return {
+    title: 'Appointment tomorrow',
+    body: `Reminder: your appointment${subject} is tomorrow${onWhen}${withPro}.`,
+    data: payload,
+  }
 }
 
 function isBookingEligibleForAppointmentReminders(
   booking: BookingReminderRecord,
 ): boolean {
   if (!booking.clientId) return false
-  if (!(booking.scheduledFor instanceof Date)) return false
-  if (Number.isNaN(booking.scheduledFor.getTime())) return false
 
-  if (booking.status === BookingStatus.CANCELLED) return false
-  if (booking.status === BookingStatus.COMPLETED) return false
+  const scheduledFor = normalizeRequiredDate(booking.scheduledFor)
+  if (!scheduledFor) return false
+
   if (booking.finishedAt) return false
+  if (!REMINDER_ELIGIBLE_BOOKING_STATUSES.has(booking.status)) return false
 
   return true
 }
 
-function planBookingAppointmentReminders(
+export function computeAppointmentReminderRunAt(args: {
+  scheduledFor: Date
+  timeZone: string
+  kind: AppointmentReminderKind
+}): Date | null {
+  const scheduledFor = normalizeRequiredDate(args.scheduledFor)
+  if (!scheduledFor) return null
+
+  const timeZone = resolveAppointmentReminderTimeZone(args.timeZone)
+  const zonedScheduledFor = getZonedDateTimeParts(scheduledFor, timeZone)
+  if (!zonedScheduledFor) return null
+
+  const shiftedDate = shiftLocalCalendarDate({
+    year: zonedScheduledFor.year,
+    month: zonedScheduledFor.month,
+    day: zonedScheduledFor.day,
+    daysToSubtract: APPOINTMENT_REMINDER_OFFSET_DAYS[args.kind],
+  })
+
+  return buildDateForZonedLocalDateTime({
+    timeZone,
+    year: shiftedDate.year,
+    month: shiftedDate.month,
+    day: shiftedDate.day,
+    hour: zonedScheduledFor.hour,
+    minute: zonedScheduledFor.minute,
+    second: zonedScheduledFor.second,
+  })
+}
+
+function payloadsMatch(
+  left: AppointmentReminderPayload,
+  right: AppointmentReminderPayload,
+): boolean {
+  return (
+    left.reminderKind === right.reminderKind &&
+    left.bookingId === right.bookingId &&
+    left.scheduledFor === right.scheduledFor &&
+    left.timeZone === right.timeZone &&
+    left.serviceName === right.serviceName &&
+    left.professionalName === right.professionalName
+  )
+}
+
+function buildReminderPlanItem(args: {
+  booking: BookingReminderRecord
+  kind: AppointmentReminderKind
+}): AppointmentReminderPlanItem | null {
+  const { booking, kind } = args
+
+  if (!isBookingEligibleForAppointmentReminders(booking)) {
+    return null
+  }
+
+  const scheduledFor = normalizeRequiredDate(booking.scheduledFor)
+  if (!scheduledFor) return null
+
+  const timeZone = resolveAppointmentReminderTimeZone(
+    booking.locationTimeZone,
+  )
+
+  const runAt = computeAppointmentReminderRunAt({
+    scheduledFor,
+    timeZone,
+    kind,
+  })
+
+  if (!runAt) return null
+
+  return {
+    kind,
+    dedupeKey: makeAppointmentReminderDedupeKey(booking.id, kind),
+    runAt,
+    payload: buildAppointmentReminderPayload({
+      bookingId: booking.id,
+      kind,
+      scheduledFor,
+      timeZone,
+      serviceName: booking.service?.name ?? 'Appointment',
+      professionalName: null,
+    }),
+  }
+}
+
+export function planBookingAppointmentReminders(
   booking: BookingReminderRecord,
 ): AppointmentReminderPlanItem[] {
   if (!isBookingEligibleForAppointmentReminders(booking)) {
@@ -101,19 +564,11 @@ function planBookingAppointmentReminders(
   const plan: AppointmentReminderPlanItem[] = []
 
   for (const kind of APPOINTMENT_REMINDER_KINDS) {
-    const runAt = computeAppointmentReminderRunAt({
-      scheduledFor: booking.scheduledFor,
-      kind,
-    })
+    const item = buildReminderPlanItem({ booking, kind })
+    if (!item) continue
+    if (item.runAt.getTime() <= now) continue
 
-    if (!runAt) continue
-    if (runAt.getTime() <= now) continue
-
-    plan.push({
-      kind,
-      dedupeKey: makeAppointmentReminderDedupeKey(booking.id, kind),
-      runAt,
-    })
+    plan.push(item)
   }
 
   return plan
@@ -135,6 +590,16 @@ async function loadBookingForReminderSync(args: {
   }
 
   return booking
+}
+
+async function loadDueAppointmentReminderRow(args: {
+  tx: Prisma.TransactionClient
+  scheduledClientNotificationId: string
+}): Promise<DueAppointmentReminderRow | null> {
+  return args.tx.scheduledClientNotification.findUnique({
+    where: { id: args.scheduledClientNotificationId },
+    select: DUE_APPOINTMENT_REMINDER_SELECT,
+  })
 }
 
 export async function cancelBookingAppointmentReminders(args: {
@@ -169,22 +634,15 @@ export async function syncBookingAppointmentReminders(args: {
     bookingId: args.bookingId,
   })
 
-  await cancelScheduledClientNotificationsForBooking({
+  await cancelBookingAppointmentReminders({
     tx: args.tx,
     bookingId: booking.id,
-    clientId: booking.clientId,
-    eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
-    onlyPending: true,
   })
 
   const plan = planBookingAppointmentReminders(booking)
   if (plan.length === 0) return
 
-  const href = `/client/bookings/${booking.id}?step=overview`
-  const timeZone = resolveAppointmentReminderTimeZone(
-    booking.locationTimeZone ?? booking.clientTimeZoneAtBooking,
-  )
-  const serviceName = booking.service?.name?.trim() || 'Appointment'
+  const href = buildAppointmentReminderHref(booking.id)
 
   for (const item of plan) {
     await scheduleClientNotification({
@@ -195,14 +653,144 @@ export async function syncBookingAppointmentReminders(args: {
       runAt: item.runAt,
       dedupeKey: item.dedupeKey,
       href,
-      data: {
-        reminderKind: item.kind,
-        bookingId: booking.id,
-        scheduledFor: booking.scheduledFor.toISOString(),
-        timeZone,
-        serviceName,
-        professionalName: null,
-      },
+      data: item.payload,
     })
   }
+}
+
+export async function validateDueAppointmentReminder(args: {
+  tx: Prisma.TransactionClient
+  scheduledClientNotificationId: string
+  now?: Date
+}): Promise<ValidateDueAppointmentReminderResult> {
+  const now = normalizeRequiredDate(args.now ?? new Date())
+  if (!now) {
+    throw new Error('validateDueAppointmentReminder: invalid now')
+  }
+
+  const row = await loadDueAppointmentReminderRow({
+    tx: args.tx,
+    scheduledClientNotificationId: args.scheduledClientNotificationId,
+  })
+
+  if (!row) {
+    return { action: 'SKIP' }
+  }
+
+  if (row.eventKey !== NotificationEventKey.APPOINTMENT_REMINDER) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled notification has the wrong event key.',
+    }
+  }
+
+  if (row.cancelledAt || row.processedAt) {
+    return { action: 'SKIP' }
+  }
+
+  if (row.runAt.getTime() > now.getTime()) {
+    return { action: 'SKIP' }
+  }
+
+  if (!row.bookingId) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder is missing bookingId.',
+    }
+  }
+
+  const booking = await args.tx.booking.findUnique({
+    where: { id: row.bookingId },
+    select: BOOKING_REMINDER_SELECT,
+  })
+
+  if (!booking) {
+    return {
+      action: 'CANCEL',
+      reason: 'Linked booking no longer exists.',
+    }
+  }
+
+  if (!isBookingEligibleForAppointmentReminders(booking)) {
+    return {
+      action: 'CANCEL',
+      reason: 'Linked booking is no longer eligible for appointment reminders.',
+    }
+  }
+
+  const parsedPayload = parseAppointmentReminderPayload(row.data)
+  if (!parsedPayload) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder payload is not in canonical format.',
+    }
+  }
+
+  if (parsedPayload.bookingId !== booking.id) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder payload bookingId does not match linked booking.',
+    }
+  }
+
+  const planned = buildReminderPlanItem({
+    booking,
+    kind: parsedPayload.reminderKind,
+  })
+
+  if (!planned) {
+    return {
+      action: 'CANCEL',
+      reason: 'Linked booking no longer has a valid canonical reminder plan.',
+    }
+  }
+
+  if (row.dedupeKey !== planned.dedupeKey) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder dedupeKey does not match canonical reminder state.',
+    }
+  }
+
+  if (row.runAt.getTime() !== planned.runAt.getTime()) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder runAt no longer matches canonical reminder state.',
+    }
+  }
+
+  if (!payloadsMatch(parsedPayload, planned.payload)) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder payload no longer matches canonical booking state.',
+    }
+  }
+
+  return {
+    action: 'PROCESS',
+    rowId: row.id,
+    clientId: row.clientId,
+    bookingId: booking.id,
+    dedupeKey: planned.dedupeKey,
+    href: buildAppointmentReminderHref(booking.id),
+    notification: buildAppointmentReminderContent(planned.payload),
+  }
+}
+
+export async function cancelDueAppointmentReminder(args: {
+  tx: Prisma.TransactionClient
+  scheduledClientNotificationId: string
+  reason: string
+}): Promise<void> {
+  await args.tx.scheduledClientNotification.updateMany({
+    where: {
+      id: args.scheduledClientNotificationId,
+      cancelledAt: null,
+      processedAt: null,
+    },
+    data: {
+      cancelledAt: new Date(),
+      lastError: args.reason,
+    },
+  })
 }

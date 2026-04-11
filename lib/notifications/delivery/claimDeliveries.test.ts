@@ -368,6 +368,18 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     ])
   })
 
+  it('uses the default batch size when none is provided', async () => {
+    mockTransaction.notificationDelivery.findMany.mockResolvedValueOnce([])
+
+    await claimDeliveries()
+
+    expect(mockTransaction.notificationDelivery.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 25,
+      }),
+    )
+  })
+
   it('clamps batchSize to the maximum allowed', async () => {
     mockTransaction.notificationDelivery.findMany.mockResolvedValueOnce([])
 
