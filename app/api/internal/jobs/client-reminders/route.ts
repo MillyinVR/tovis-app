@@ -5,7 +5,7 @@ import {
 } from '@/lib/notifications/appointmentReminders'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
-import { NotificationEventKey } from '@prisma/client'
+import { NotificationEventKey, Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -13,9 +13,19 @@ export const runtime = 'nodejs'
 const DEFAULT_TAKE = 100
 const MAX_TAKE = 250
 
-type DueReminderCandidate = {
-  id: string
-}
+const DUE_REMINDER_ORDER_BY = [
+  { runAt: 'asc' },
+  { createdAt: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.ScheduledClientNotificationOrderByWithRelationInput[]
+
+const dueReminderCandidateSelect = {
+  id: true,
+} satisfies Prisma.ScheduledClientNotificationSelect
+
+type DueReminderCandidate = Prisma.ScheduledClientNotificationGetPayload<{
+  select: typeof dueReminderCandidateSelect
+}>
 
 type ProcessReminderResult =
   | {
@@ -67,6 +77,53 @@ function isAuthorizedJobRequest(req: Request): boolean {
   return false
 }
 
+async function markReminderProcessedIfPending(args: {
+  tx: Prisma.TransactionClient
+  rowId: string
+  processedAt: Date
+}): Promise<boolean> {
+  const result = await args.tx.scheduledClientNotification.updateMany({
+    where: {
+      id: args.rowId,
+      cancelledAt: null,
+      processedAt: null,
+    },
+    data: {
+      processedAt: args.processedAt,
+      failedAt: null,
+      lastError: null,
+    },
+  })
+
+  return result.count === 1
+}
+
+async function markReminderFailedIfPending(args: {
+  rowId: string
+  failedAt: Date
+  error: string
+}): Promise<boolean> {
+  const result = await prisma.scheduledClientNotification.updateMany({
+    where: {
+      id: args.rowId,
+      cancelledAt: null,
+      processedAt: null,
+    },
+    data: {
+      failedAt: args.failedAt,
+      lastError: args.error,
+    },
+  })
+
+  return result.count === 1
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error
+    ? err.message
+    : 'Failed to process scheduled reminder'
+}
+
 async function processReminder(args: {
   rowId: string
   now: Date
@@ -91,6 +148,7 @@ async function processReminder(args: {
           tx,
           scheduledClientNotificationId: args.rowId,
           reason: validation.reason,
+          cancelledAt: args.now,
         })
 
         return {
@@ -112,14 +170,18 @@ async function processReminder(args: {
         data: validation.notification.data,
       })
 
-      await tx.scheduledClientNotification.update({
-        where: { id: validation.rowId },
-        data: {
-          processedAt: args.now,
-          failedAt: null,
-          lastError: null,
-        },
+      const markedProcessed = await markReminderProcessedIfPending({
+        tx,
+        rowId: validation.rowId,
+        processedAt: args.now,
       })
+
+      if (!markedProcessed) {
+        return {
+          id: validation.rowId,
+          status: 'skipped',
+        }
+      }
 
       return {
         id: validation.rowId,
@@ -127,20 +189,20 @@ async function processReminder(args: {
       }
     })
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : 'Failed to process scheduled reminder'
+    const message = getErrorMessage(err)
 
-    await prisma.scheduledClientNotification.updateMany({
-      where: {
-        id: args.rowId,
-        cancelledAt: null,
-        processedAt: null,
-      },
-      data: {
-        failedAt: new Date(),
-        lastError: message,
-      },
+    const markedFailed = await markReminderFailedIfPending({
+      rowId: args.rowId,
+      failedAt: args.now,
+      error: message,
     })
+
+    if (!markedFailed) {
+      return {
+        id: args.rowId,
+        status: 'skipped',
+      }
+    }
 
     return {
       id: args.rowId,
@@ -148,6 +210,26 @@ async function processReminder(args: {
       error: message,
     }
   }
+}
+
+async function loadDueRows(args: {
+  now: Date
+  take: number
+}): Promise<DueReminderCandidate[]> {
+  return prisma.scheduledClientNotification.findMany({
+    where: {
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      cancelledAt: null,
+      processedAt: null,
+      failedAt: null,
+      runAt: {
+        lte: args.now,
+      },
+    },
+    orderBy: DUE_REMINDER_ORDER_BY,
+    take: args.take,
+    select: dueReminderCandidateSelect,
+  })
 }
 
 async function runJob(req: Request) {
@@ -165,31 +247,17 @@ async function runJob(req: Request) {
 
   const now = new Date()
   const take = readTake(req)
-
-  const dueRows: DueReminderCandidate[] =
-    await prisma.scheduledClientNotification.findMany({
-      where: {
-        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
-        cancelledAt: null,
-        processedAt: null,
-        failedAt: null,
-        runAt: {
-          lte: now,
-        },
-      },
-      orderBy: [{ runAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      take,
-      select: {
-        id: true,
-      },
-    })
+  const dueRows = await loadDueRows({
+    now,
+    take,
+  })
 
   const results: ProcessReminderResult[] = []
 
   /**
    * Deliberately sequential:
    * - predictable database load
-   * - easier lock behavior reasoning
+   * - easier transaction behavior reasoning
    * - safer for internal cron jobs than blasting N transactions at once
    */
   for (const row of dueRows) {
@@ -236,22 +304,19 @@ async function runJob(req: Request) {
   })
 }
 
-export async function GET(req: Request) {
+async function handleJobRequest(req: Request, method: 'GET' | 'POST') {
   try {
     return await runJob(req)
   } catch (err: unknown) {
-    console.error('GET /api/internal/jobs/client-reminders error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    console.error(`${method} /api/internal/jobs/client-reminders error`, err)
+    return jsonFail(500, getErrorMessage(err))
   }
 }
 
+export async function GET(req: Request) {
+  return handleJobRequest(req, 'GET')
+}
+
 export async function POST(req: Request) {
-  try {
-    return await runJob(req)
-  } catch (err: unknown) {
-    console.error('POST /api/internal/jobs/client-reminders error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
-  }
+  return handleJobRequest(req, 'POST')
 }

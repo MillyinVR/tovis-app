@@ -10,8 +10,10 @@ import {
 } from '@/lib/notifications/clientNotifications'
 import {
   DEFAULT_TIME_ZONE,
+  getZonedParts,
   isValidIanaTimeZone,
   sanitizeTimeZone,
+  zonedTimeToUtc,
 } from '@/lib/timeZone'
 
 export type AppointmentReminderKind = 'ONE_WEEK' | 'DAY_BEFORE'
@@ -54,15 +56,6 @@ type AppointmentReminderPlanItem = {
   dedupeKey: string
   runAt: Date
   payload: AppointmentReminderPayload
-}
-
-type ZonedDateTimeParts = {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  second: number
 }
 
 const APPOINTMENT_REMINDER_KINDS: readonly AppointmentReminderKind[] = [
@@ -122,27 +115,6 @@ type DueAppointmentReminderRow = Prisma.ScheduledClientNotificationGetPayload<{
   select: typeof DUE_APPOINTMENT_REMINDER_SELECT
 }>
 
-const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
-
-function getZonedDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-  const cached = zonedDateTimeFormatterCache.get(timeZone)
-  if (cached) return cached
-
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-
-  zonedDateTimeFormatterCache.set(timeZone, formatter)
-  return formatter
-}
-
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
@@ -166,7 +138,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function normalizeRequiredDate(value: Date): Date | null {
+function normalizeDateOrNull(value: Date | null | undefined): Date | null {
   if (!(value instanceof Date)) return null
   return Number.isNaN(value.getTime()) ? null : value
 }
@@ -178,66 +150,19 @@ function normalizeOptionalString(
   return normalized.length > 0 ? normalized : null
 }
 
+function normalizeNowOrThrow(value: Date | undefined, fieldName: string): Date {
+  const normalized = value ?? new Date()
+  if (!(normalized instanceof Date) || Number.isNaN(normalized.getTime())) {
+    throw new Error(`appointmentReminders: invalid ${fieldName}`)
+  }
+
+  return normalized
+}
+
 function resolveAppointmentReminderTimeZone(
   value: string | null | undefined,
 ): string {
-  const raw = typeof value === 'string' ? value.trim() : ''
-  if (raw && isValidIanaTimeZone(raw)) {
-    return sanitizeTimeZone(raw, DEFAULT_TIME_ZONE)
-  }
-
-  return DEFAULT_TIME_ZONE
-}
-
-function getZonedDateTimeParts(
-  date: Date,
-  timeZone: string,
-): ZonedDateTimeParts | null {
-  const normalizedDate = normalizeRequiredDate(date)
-  if (!normalizedDate) return null
-
-  try {
-    const parts = getZonedDateTimeFormatter(timeZone).formatToParts(
-      normalizedDate,
-    )
-
-    const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
-      const value = parts.find((part) => part.type === type)?.value ?? null
-      if (!value) return null
-
-      const parsed = Number.parseInt(value, 10)
-      return Number.isFinite(parsed) ? parsed : null
-    }
-
-    const year = getPart('year')
-    const month = getPart('month')
-    const day = getPart('day')
-    const hour = getPart('hour')
-    const minute = getPart('minute')
-    const second = getPart('second')
-
-    if (
-      year == null ||
-      month == null ||
-      day == null ||
-      hour == null ||
-      minute == null ||
-      second == null
-    ) {
-      return null
-    }
-
-    return {
-      year,
-      month,
-      day,
-      hour,
-      minute,
-      second,
-    }
-  } catch {
-    return null
-  }
+  return sanitizeTimeZone(value, DEFAULT_TIME_ZONE)
 }
 
 function shiftLocalCalendarDate(args: {
@@ -251,7 +176,7 @@ function shiftLocalCalendarDate(args: {
   day: number
 } {
   const shifted = new Date(
-    Date.UTC(args.year, args.month - 1, args.day, 0, 0, 0),
+    Date.UTC(args.year, args.month - 1, args.day, 12, 0, 0, 0),
   )
 
   shifted.setUTCDate(shifted.getUTCDate() - args.daysToSubtract)
@@ -261,78 +186,6 @@ function shiftLocalCalendarDate(args: {
     month: shifted.getUTCMonth() + 1,
     day: shifted.getUTCDate(),
   }
-}
-
-/**
- * Convert a local wall-clock time in a specific IANA timezone into an actual Date.
- *
- * This preserves local time across DST boundaries.
- */
-function buildDateForZonedLocalDateTime(args: {
-  timeZone: string
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  second: number
-}): Date | null {
-  let candidate = new Date(
-    Date.UTC(
-      args.year,
-      args.month - 1,
-      args.day,
-      args.hour,
-      args.minute,
-      args.second,
-      0,
-    ),
-  )
-
-  for (let i = 0; i < 6; i += 1) {
-    const zoned = getZonedDateTimeParts(candidate, args.timeZone)
-    if (!zoned) return null
-
-    const desiredAsUtc = Date.UTC(
-      args.year,
-      args.month - 1,
-      args.day,
-      args.hour,
-      args.minute,
-      args.second,
-      0,
-    )
-
-    const actualAsUtc = Date.UTC(
-      zoned.year,
-      zoned.month - 1,
-      zoned.day,
-      zoned.hour,
-      zoned.minute,
-      zoned.second,
-      0,
-    )
-
-    const diffMs = desiredAsUtc - actualAsUtc
-    if (diffMs === 0) {
-      return candidate
-    }
-
-    candidate = new Date(candidate.getTime() + diffMs)
-  }
-
-  const finalParts = getZonedDateTimeParts(candidate, args.timeZone)
-  if (!finalParts) return null
-
-  const isExactMatch =
-    finalParts.year === args.year &&
-    finalParts.month === args.month &&
-    finalParts.day === args.day &&
-    finalParts.hour === args.hour &&
-    finalParts.minute === args.minute &&
-    finalParts.second === args.second
-
-  return isExactMatch ? candidate : null
 }
 
 function formatWhen(date: Date, timeZone: string): string {
@@ -376,7 +229,7 @@ export function buildAppointmentReminderPayload(args: {
   serviceName?: string | null
   professionalName?: string | null
 }): AppointmentReminderPayload {
-  const scheduledFor = normalizeRequiredDate(args.scheduledFor)
+  const scheduledFor = normalizeDateOrNull(args.scheduledFor)
   if (!scheduledFor) {
     throw new Error('buildAppointmentReminderPayload: invalid scheduledFor')
   }
@@ -386,8 +239,7 @@ export function buildAppointmentReminderPayload(args: {
     bookingId: args.bookingId,
     scheduledFor: scheduledFor.toISOString(),
     timeZone: resolveAppointmentReminderTimeZone(args.timeZone),
-    serviceName:
-      normalizeOptionalString(args.serviceName) ?? 'Appointment',
+    serviceName: normalizeOptionalString(args.serviceName) ?? 'Appointment',
     professionalName: normalizeOptionalString(args.professionalName),
   }
 }
@@ -460,7 +312,7 @@ function isBookingEligibleForAppointmentReminders(
 ): boolean {
   if (!booking.clientId) return false
 
-  const scheduledFor = normalizeRequiredDate(booking.scheduledFor)
+  const scheduledFor = normalizeDateOrNull(booking.scheduledFor)
   if (!scheduledFor) return false
 
   if (booking.finishedAt) return false
@@ -474,12 +326,11 @@ export function computeAppointmentReminderRunAt(args: {
   timeZone: string
   kind: AppointmentReminderKind
 }): Date | null {
-  const scheduledFor = normalizeRequiredDate(args.scheduledFor)
+  const scheduledFor = normalizeDateOrNull(args.scheduledFor)
   if (!scheduledFor) return null
 
   const timeZone = resolveAppointmentReminderTimeZone(args.timeZone)
-  const zonedScheduledFor = getZonedDateTimeParts(scheduledFor, timeZone)
-  if (!zonedScheduledFor) return null
+  const zonedScheduledFor = getZonedParts(scheduledFor, timeZone)
 
   const shiftedDate = shiftLocalCalendarDate({
     year: zonedScheduledFor.year,
@@ -488,7 +339,7 @@ export function computeAppointmentReminderRunAt(args: {
     daysToSubtract: APPOINTMENT_REMINDER_OFFSET_DAYS[args.kind],
   })
 
-  return buildDateForZonedLocalDateTime({
+  return zonedTimeToUtc({
     timeZone,
     year: shiftedDate.year,
     month: shiftedDate.month,
@@ -523,7 +374,7 @@ function buildReminderPlanItem(args: {
     return null
   }
 
-  const scheduledFor = normalizeRequiredDate(booking.scheduledFor)
+  const scheduledFor = normalizeDateOrNull(booking.scheduledFor)
   if (!scheduledFor) return null
 
   const timeZone = resolveAppointmentReminderTimeZone(
@@ -548,25 +399,34 @@ function buildReminderPlanItem(args: {
       scheduledFor,
       timeZone,
       serviceName: booking.service?.name ?? 'Appointment',
+      /**
+       * Intentionally null for now.
+       * This file should only include professionalName once booking-query truth
+       * provides a canonical source for it.
+       */
       professionalName: null,
     }),
   }
 }
 
-export function planBookingAppointmentReminders(
-  booking: BookingReminderRecord,
-): AppointmentReminderPlanItem[] {
-  if (!isBookingEligibleForAppointmentReminders(booking)) {
+export function planBookingAppointmentReminders(args: {
+  booking: BookingReminderRecord
+  now?: Date
+}): AppointmentReminderPlanItem[] {
+  if (!isBookingEligibleForAppointmentReminders(args.booking)) {
     return []
   }
 
-  const now = Date.now()
+  const now = normalizeNowOrThrow(args.now, 'now')
   const plan: AppointmentReminderPlanItem[] = []
 
   for (const kind of APPOINTMENT_REMINDER_KINDS) {
-    const item = buildReminderPlanItem({ booking, kind })
+    const item = buildReminderPlanItem({
+      booking: args.booking,
+      kind,
+    })
     if (!item) continue
-    if (item.runAt.getTime() <= now) continue
+    if (item.runAt.getTime() <= now.getTime()) continue
 
     plan.push(item)
   }
@@ -628,6 +488,7 @@ export async function cancelBookingAppointmentReminders(args: {
 export async function syncBookingAppointmentReminders(args: {
   tx: Prisma.TransactionClient
   bookingId: string
+  now?: Date
 }): Promise<void> {
   const booking = await loadBookingForReminderSync({
     tx: args.tx,
@@ -639,7 +500,11 @@ export async function syncBookingAppointmentReminders(args: {
     bookingId: booking.id,
   })
 
-  const plan = planBookingAppointmentReminders(booking)
+  const plan = planBookingAppointmentReminders({
+    booking,
+    now: args.now,
+  })
+
   if (plan.length === 0) return
 
   const href = buildAppointmentReminderHref(booking.id)
@@ -663,10 +528,7 @@ export async function validateDueAppointmentReminder(args: {
   scheduledClientNotificationId: string
   now?: Date
 }): Promise<ValidateDueAppointmentReminderResult> {
-  const now = normalizeRequiredDate(args.now ?? new Date())
-  if (!now) {
-    throw new Error('validateDueAppointmentReminder: invalid now')
-  }
+  const now = normalizeNowOrThrow(args.now, 'now')
 
   const row = await loadDueAppointmentReminderRow({
     tx: args.tx,
@@ -715,6 +577,13 @@ export async function validateDueAppointmentReminder(args: {
     return {
       action: 'CANCEL',
       reason: 'Linked booking is no longer eligible for appointment reminders.',
+    }
+  }
+
+  if (row.clientId !== booking.clientId) {
+    return {
+      action: 'CANCEL',
+      reason: 'Scheduled reminder clientId does not match linked booking.',
     }
   }
 
@@ -781,7 +650,10 @@ export async function cancelDueAppointmentReminder(args: {
   tx: Prisma.TransactionClient
   scheduledClientNotificationId: string
   reason: string
+  cancelledAt?: Date
 }): Promise<void> {
+  const cancelledAt = normalizeNowOrThrow(args.cancelledAt, 'cancelledAt')
+
   await args.tx.scheduledClientNotification.updateMany({
     where: {
       id: args.scheduledClientNotificationId,
@@ -789,7 +661,7 @@ export async function cancelDueAppointmentReminder(args: {
       processedAt: null,
     },
     data: {
-      cancelledAt: new Date(),
+      cancelledAt,
       lastError: args.reason,
     },
   })

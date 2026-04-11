@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationEventKey,
   NotificationPriority,
@@ -7,6 +8,7 @@ import {
 } from '@prisma/client'
 
 import { enqueueDispatch } from './dispatch/enqueueDispatch'
+import { getNotificationEventDefinition } from './eventKeys'
 
 const MAX_ID = 64
 const MAX_TITLE = 160
@@ -50,7 +52,7 @@ export type CreateProNotificationArgs = {
   title: string
   body?: string | null
   href?: string | null
-  data?: Prisma.InputJsonValue
+  data?: Prisma.InputJsonValue | null
 
   dedupeKey?: string | null
 
@@ -107,9 +109,15 @@ function normInternalHref(value: unknown, max: number): string {
   return s
 }
 
+function normalizeJsonField(value: Prisma.InputJsonValue | null | undefined) {
+  if (value === undefined) return undefined
+  return value === null ? Prisma.JsonNull : value
+}
+
 function isUniqueConstraintError(error: unknown): boolean {
   return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
   )
 }
 
@@ -117,17 +125,12 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
-function canFastPathProNotificationDedupe(db: DbClient): boolean {
-  return (
-    typeof db.notification.updateMany === 'function' &&
-    typeof db.notification.findFirst === 'function'
-  )
-}
-
 function buildUpdateData(
   normalized: NormalizedCreateArgs,
 ): Prisma.NotificationUncheckedUpdateManyInput {
-  const data: Prisma.NotificationUncheckedUpdateManyInput = {
+  const data = normalizeJsonField(normalized.data)
+
+  const update: Prisma.NotificationUncheckedUpdateManyInput = {
     eventKey: normalized.eventKey,
     priority: normalized.priority,
     title: normalized.title,
@@ -144,16 +147,18 @@ function buildUpdateData(
     archivedAt: null,
   }
 
-  if (normalized.data !== undefined) {
-    data.data = normalized.data
+  if (data !== undefined) {
+    update.data = data
   }
 
-  return data
+  return update
 }
 
 function buildCreateData(
   normalized: NormalizedCreateArgs,
 ): Prisma.NotificationUncheckedCreateInput {
+  const data = normalizeJsonField(normalized.data)
+
   return {
     professionalId: normalized.professionalId,
     eventKey: normalized.eventKey,
@@ -171,11 +176,12 @@ function buildCreateData(
     clickedAt: null,
     archivedAt: null,
 
-    ...(normalized.data !== undefined ? { data: normalized.data } : {}),
+    ...(data !== undefined ? { data } : {}),
   }
 }
 
 function normalizeCreateArgs(args: CreateProNotificationArgs) {
+  const definition = getNotificationEventDefinition(args.eventKey)
   const professionalId = normRequiredString(args.professionalId, MAX_ID)
   const title = normRequiredString(args.title, MAX_TITLE)
 
@@ -190,7 +196,7 @@ function normalizeCreateArgs(args: CreateProNotificationArgs) {
   return {
     professionalId,
     eventKey: args.eventKey,
-    priority: args.priority ?? NotificationPriority.NORMAL,
+    priority: args.priority ?? definition.defaultPriority,
 
     title,
     body: normDefaultString(args.body, MAX_BODY),
@@ -315,7 +321,7 @@ async function enqueueProNotificationDispatch(args: {
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
       email: professional.user.email,
       emailVerifiedAt: professional.user.emailVerifiedAt,
-      timeZone: professional.timeZone,
+      timeZone: pickTimeZoneOrNull(professional.timeZone),
       preference,
     },
     title: args.normalized.title,
@@ -332,13 +338,14 @@ async function enqueueProNotificationDispatch(args: {
  * Idempotent pro notification creation.
  *
  * Contract:
- * - If dedupeKey is present: behaves like upsert and resets unread state.
- * - If dedupeKey is absent: always creates a new row.
+ * - If dedupeKey is absent, always creates a new row.
+ * - If dedupeKey is present, behaves as an idempotent upsert keyed by
+ *   (professionalId, dedupeKey) and resets unread state.
  *
- * Notes:
- * - In production we prefer update-first for deduped rows.
- * - In some narrow unit-test transaction mocks, updateMany/findFirst may not exist.
- *   In that case we skip the fast path and fall back to create-only behavior.
+ * Important:
+ * - DB is the source of truth.
+ * - No mock-only compatibility branches are preserved here.
+ * - Delivery dispatch is enqueued after the inbox row is resolved.
  */
 export async function createProNotification(
   args: CreateProNotificationArgs,
@@ -348,12 +355,10 @@ export async function createProNotification(
 
   if (!normalized.dedupeKey) {
     const created = await db.notification.create({
-      data: {
-        ...buildCreateData({
-          ...normalized,
-          dedupeKey: null,
-        }),
-      },
+      data: buildCreateData({
+        ...normalized,
+        dedupeKey: null,
+      }),
       select: notificationIdSelect,
     })
 
@@ -366,32 +371,28 @@ export async function createProNotification(
     return created
   }
 
-  const canFastPath = canFastPathProNotificationDedupe(db)
+  const updated = await db.notification.updateMany({
+    where: {
+      professionalId: normalized.professionalId,
+      dedupeKey: normalized.dedupeKey,
+    },
+    data: buildUpdateData(normalized),
+  })
 
-  if (canFastPath) {
-    const updated = await db.notification.updateMany({
-      where: {
-        professionalId: normalized.professionalId,
-        dedupeKey: normalized.dedupeKey,
-      },
-      data: buildUpdateData(normalized),
+  if (updated.count > 0) {
+    const found = await findNotificationIdByDedupe({
+      professionalId: normalized.professionalId,
+      dedupeKey: normalized.dedupeKey,
+      tx: args.tx,
     })
 
-    if (updated.count > 0) {
-      const found = await findNotificationIdByDedupe({
-        professionalId: normalized.professionalId,
-        dedupeKey: normalized.dedupeKey,
-        tx: args.tx,
-      })
+    await enqueueProNotificationDispatch({
+      notificationId: found.id,
+      normalized,
+      tx: args.tx,
+    })
 
-      await enqueueProNotificationDispatch({
-        notificationId: found.id,
-        normalized,
-        tx: args.tx,
-      })
-
-      return found
-    }
+    return found
   }
 
   try {
@@ -409,10 +410,6 @@ export async function createProNotification(
     return created
   } catch (error) {
     if (!isUniqueConstraintError(error)) {
-      throw error
-    }
-
-    if (!canFastPath) {
       throw error
     }
 

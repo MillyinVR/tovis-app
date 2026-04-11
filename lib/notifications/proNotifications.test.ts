@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NotificationEventKey,
-  NotificationPriority,
   Prisma,
 } from '@prisma/client'
 
@@ -30,6 +29,7 @@ vi.mock('./dispatch/enqueueDispatch', () => ({
 }))
 
 import { createProNotification } from './proNotifications'
+import { getNotificationEventDefinition } from './eventKeys'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   for (const fn of Object.values(group)) {
@@ -45,6 +45,10 @@ function makeUniqueConstraintError() {
       clientVersion: 'test',
     },
   )
+}
+
+function expectedPriorityFor(eventKey: NotificationEventKey) {
+  return getNotificationEventDefinition(eventKey).defaultPriority
 }
 
 describe('lib/notifications/proNotifications', () => {
@@ -68,16 +72,21 @@ describe('lib/notifications/proNotifications', () => {
       },
     })
 
-    mockPrisma.professionalNotificationPreference.findUnique.mockResolvedValue(null)
+    mockPrisma.professionalNotificationPreference.findUnique.mockResolvedValue(
+      null,
+    )
     mockEnqueueDispatch.mockResolvedValue(undefined)
   })
 
   it('creates a new pro notification and passes timezone into enqueueDispatch', async () => {
     mockPrisma.notification.create.mockResolvedValue({ id: 'notif_1' })
 
+    const eventKey = NotificationEventKey.REVIEW_RECEIVED
+    const expectedPriority = expectedPriorityFor(eventKey)
+
     const result = await createProNotification({
       professionalId: 'pro_1',
-      eventKey: NotificationEventKey.REVIEW_RECEIVED,
+      eventKey,
       title: ' New review received ',
       body: ' A client left you a review. ',
       href: ' /pro/reviews/review_1 ',
@@ -93,8 +102,8 @@ describe('lib/notifications/proNotifications', () => {
     expect(mockPrisma.notification.create).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_1',
-        eventKey: NotificationEventKey.REVIEW_RECEIVED,
-        priority: NotificationPriority.NORMAL,
+        eventKey,
+        priority: expectedPriority,
         title: 'New review received',
         body: 'A client left you a review.',
         href: '/pro/reviews/review_1',
@@ -140,7 +149,7 @@ describe('lib/notifications/proNotifications', () => {
       where: {
         professionalId_eventKey: {
           professionalId: 'pro_1',
-          eventKey: NotificationEventKey.REVIEW_RECEIVED,
+          eventKey,
         },
       },
       select: {
@@ -153,7 +162,7 @@ describe('lib/notifications/proNotifications', () => {
     })
 
     expect(mockEnqueueDispatch).toHaveBeenCalledWith({
-      key: NotificationEventKey.REVIEW_RECEIVED,
+      key: eventKey,
       sourceKey: 'pro-notification:notif_1',
       recipient: {
         kind: 'PRO',
@@ -173,7 +182,7 @@ describe('lib/notifications/proNotifications', () => {
       payload: {
         reviewId: 'review_1',
       },
-      priority: NotificationPriority.NORMAL,
+      priority: expectedPriority,
       notificationId: 'notif_1',
       tx: undefined,
     })
@@ -222,9 +231,12 @@ describe('lib/notifications/proNotifications', () => {
       id: 'notif_existing',
     })
 
+    const eventKey = NotificationEventKey.BOOKING_CONFIRMED
+    const expectedPriority = expectedPriorityFor(eventKey)
+
     const result = await createProNotification({
       professionalId: 'pro_1',
-      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+      eventKey,
       title: 'Booking confirmed',
       body: 'Your booking has been confirmed.',
       href: '/pro/bookings/booking_1',
@@ -244,8 +256,8 @@ describe('lib/notifications/proNotifications', () => {
         dedupeKey: 'BOOKING_CONFIRMED:booking_1',
       },
       data: {
-        eventKey: NotificationEventKey.BOOKING_CONFIRMED,
-        priority: NotificationPriority.NORMAL,
+        eventKey,
+        priority: expectedPriority,
         title: 'Booking confirmed',
         body: 'Your booking has been confirmed.',
         href: '/pro/bookings/booking_1',
@@ -277,6 +289,7 @@ describe('lib/notifications/proNotifications', () => {
       expect.objectContaining({
         sourceKey: 'pro-notification:notif_existing',
         notificationId: 'notif_existing',
+        priority: expectedPriority,
         recipient: expect.objectContaining({
           emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
           timeZone: 'America/Los_Angeles',
@@ -298,9 +311,12 @@ describe('lib/notifications/proNotifications', () => {
       id: 'notif_raced',
     })
 
+    const eventKey = NotificationEventKey.BOOKING_RESCHEDULED
+    const expectedPriority = expectedPriorityFor(eventKey)
+
     const result = await createProNotification({
       professionalId: 'pro_1',
-      eventKey: NotificationEventKey.BOOKING_RESCHEDULED,
+      eventKey,
       title: 'Booking rescheduled',
       body: 'One of your bookings was rescheduled.',
       href: '/pro/bookings/booking_1',
@@ -324,6 +340,7 @@ describe('lib/notifications/proNotifications', () => {
       expect.objectContaining({
         sourceKey: 'pro-notification:notif_raced',
         notificationId: 'notif_raced',
+        priority: expectedPriority,
       }),
     )
   })

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationEventKey,
   NotificationRecipientKind,
@@ -14,7 +15,6 @@ const MAX_TITLE = 160
 const MAX_BODY = 4000
 const MAX_HREF = 2048
 const MAX_DEDUPE_KEY = 256
-const MAX_TIME_ZONE = 64
 
 const clientNotificationIdSelect = {
   id: true,
@@ -176,10 +176,13 @@ function normStringArray(
 ): string[] {
   if (!Array.isArray(values)) return []
 
-  return values
-    .map((value) => normNullableString(value, maxLen))
-    .filter((value): value is string => Boolean(value))
-    .slice(0, maxItems)
+  return Array.from(
+    new Set(
+      values
+        .map((value) => normNullableString(value, maxLen))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).slice(0, maxItems)
 }
 
 function normalizeJsonField(value: Prisma.InputJsonValue | null | undefined) {
@@ -195,23 +198,17 @@ function normalizeDate(value: unknown, fieldName: string): Date {
   return value
 }
 
+function normalizeEventKeysOrUndefined(
+  value: NotificationEventKey[] | undefined,
+): NotificationEventKey[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  return Array.from(new Set(value))
+}
+
 function isUniqueConstraintError(error: unknown): boolean {
   return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
-  )
-}
-
-function canFastPathClientNotificationDedupe(db: DbClient): boolean {
-  return (
-    typeof db.clientNotification.updateMany === 'function' &&
-    typeof db.clientNotification.findFirst === 'function'
-  )
-}
-
-function canFastPathScheduledClientNotificationDedupe(db: DbClient): boolean {
-  return (
-    typeof db.scheduledClientNotification.updateMany === 'function' &&
-    typeof db.scheduledClientNotification.findFirst === 'function'
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
   )
 }
 
@@ -308,6 +305,30 @@ async function findClientNotificationIdByDedupe(args: {
   return found
 }
 
+async function findScheduledClientNotificationIdByDedupe(args: {
+  clientId: string
+  dedupeKey: string
+  tx?: Prisma.TransactionClient
+}) {
+  const db = getDb(args.tx)
+
+  const found = await db.scheduledClientNotification.findFirst({
+    where: {
+      clientId: args.clientId,
+      dedupeKey: args.dedupeKey,
+    },
+    select: scheduledClientNotificationIdSelect,
+  })
+
+  if (!found) {
+    throw new Error(
+      'scheduleClientNotification: scheduled notification not found after dedupe update/create',
+    )
+  }
+
+  return found
+}
+
 async function getClientDispatchRecipient(args: {
   clientId: string
   eventKey: NotificationEventKey
@@ -337,7 +358,9 @@ async function getClientDispatchRecipient(args: {
   ])
 
   if (!client) {
-    throw new Error('createClientNotification: client not found for dispatch enqueue')
+    throw new Error(
+      'createClientNotification: client not found for dispatch enqueue',
+    )
   }
 
   return {
@@ -367,20 +390,32 @@ function resolvePreferredClientPhone(
   }
 }
 
+function pickFirstValidTimeZone(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    const normalized = pickTimeZoneOrNull(candidate)
+    if (normalized) {
+      return normalized
+    }
+  }
+
+  return null
+}
+
 function pickClientDispatchTimeZone(args: {
   clientTimeZoneAtBooking: string | null | undefined
   locationTimeZone: string | null | undefined
 }): string | null {
-  const clientTimeZoneAtBooking = normNullableString(
+  /**
+   * For client-facing delivery timing, prefer the client timezone snapshot that
+   * was captured at booking time. If that is absent/invalid, fall back to the
+   * booking location timezone.
+   */
+  return pickFirstValidTimeZone(
     args.clientTimeZoneAtBooking,
-    MAX_TIME_ZONE,
+    args.locationTimeZone,
   )
-
-  if (clientTimeZoneAtBooking) {
-    return clientTimeZoneAtBooking
-  }
-
-  return normNullableString(args.locationTimeZone, MAX_TIME_ZONE)
 }
 
 async function resolveClientDispatchTimeZone(args: {
@@ -469,16 +504,17 @@ async function enqueueClientNotificationDispatch(args: {
 }
 
 /**
- * Creates a client notification.
+ * Creates a client notification inbox row.
  *
  * Contract:
- * - If dedupeKey is provided: behaves like an idempotent upsert and resets readAt to null
- * - If no dedupeKey: always creates a new notification
+ * - If dedupeKey is absent, always creates a new row.
+ * - If dedupeKey is present, behaves as an idempotent upsert keyed by
+ *   (clientId, dedupeKey) and resets readAt to null.
  *
- * Notes:
- * - In production we prefer update-first for deduped rows.
- * - In some narrow unit-test transaction mocks, updateMany/findFirst may not exist.
- *   In that case we skip the fast path and fall back to create-only behavior.
+ * Important:
+ * - DB is the source of truth.
+ * - No mock-only compatibility branches are preserved here.
+ * - Delivery dispatch is enqueued after the inbox row is resolved.
  */
 export async function createClientNotification(
   args: CreateClientNotificationArgs,
@@ -504,32 +540,28 @@ export async function createClientNotification(
     return created
   }
 
-  const canFastPath = canFastPathClientNotificationDedupe(db)
+  const updated = await db.clientNotification.updateMany({
+    where: {
+      clientId: normalized.clientId,
+      dedupeKey: normalized.dedupeKey,
+    },
+    data: buildClientNotificationUpdateData(normalized),
+  })
 
-  if (canFastPath) {
-    const updated = await db.clientNotification.updateMany({
-      where: {
-        clientId: normalized.clientId,
-        dedupeKey: normalized.dedupeKey,
-      },
-      data: buildClientNotificationUpdateData(normalized),
+  if (updated.count > 0) {
+    const found = await findClientNotificationIdByDedupe({
+      clientId: normalized.clientId,
+      dedupeKey: normalized.dedupeKey,
+      tx: args.tx,
     })
 
-    if (updated.count > 0) {
-      const found = await findClientNotificationIdByDedupe({
-        clientId: normalized.clientId,
-        dedupeKey: normalized.dedupeKey,
-        tx: args.tx,
-      })
+    await enqueueClientNotificationDispatch({
+      notificationId: found.id,
+      normalized,
+      tx: args.tx,
+    })
 
-      await enqueueClientNotificationDispatch({
-        notificationId: found.id,
-        normalized,
-        tx: args.tx,
-      })
-
-      return found
-    }
+    return found
   }
 
   try {
@@ -547,10 +579,6 @@ export async function createClientNotification(
     return created
   } catch (error) {
     if (!isUniqueConstraintError(error)) {
-      throw error
-    }
-
-    if (!canFastPath) {
       throw error
     }
 
@@ -643,34 +671,20 @@ export async function scheduleClientNotification(
     })
   }
 
-  const canFastPath = canFastPathScheduledClientNotificationDedupe(db)
+  const updated = await db.scheduledClientNotification.updateMany({
+    where: {
+      clientId,
+      dedupeKey,
+    },
+    data: baseWrite,
+  })
 
-  if (canFastPath) {
-    const updated = await db.scheduledClientNotification.updateMany({
-      where: {
-        clientId,
-        dedupeKey,
-      },
-      data: baseWrite,
+  if (updated.count > 0) {
+    return findScheduledClientNotificationIdByDedupe({
+      clientId,
+      dedupeKey,
+      tx: args.tx,
     })
-
-    if (updated.count > 0) {
-      const found = await db.scheduledClientNotification.findFirst({
-        where: {
-          clientId,
-          dedupeKey,
-        },
-        select: scheduledClientNotificationIdSelect,
-      })
-
-      if (!found) {
-        throw new Error(
-          'scheduleClientNotification: scheduled notification not found after update',
-        )
-      }
-
-      return found
-    }
   }
 
   try {
@@ -687,10 +701,6 @@ export async function scheduleClientNotification(
       throw error
     }
 
-    if (!canFastPath) {
-      throw error
-    }
-
     await db.scheduledClientNotification.updateMany({
       where: {
         clientId,
@@ -699,21 +709,11 @@ export async function scheduleClientNotification(
       data: baseWrite,
     })
 
-    const found = await db.scheduledClientNotification.findFirst({
-      where: {
-        clientId,
-        dedupeKey,
-      },
-      select: scheduledClientNotificationIdSelect,
+    return findScheduledClientNotificationIdByDedupe({
+      clientId,
+      dedupeKey,
+      tx: args.tx,
     })
-
-    if (!found) {
-      throw new Error(
-        'scheduleClientNotification: scheduled notification not found after race retry',
-      )
-    }
-
-    return found
   }
 }
 
@@ -730,14 +730,13 @@ export async function cancelScheduledClientNotificationsForBooking(
 
   const bookingId = normRequired(args.bookingId, MAX_ID)
   if (!bookingId) {
-    throw new Error('cancelScheduledClientNotificationsForBooking: missing bookingId')
+    throw new Error(
+      'cancelScheduledClientNotificationsForBooking: missing bookingId',
+    )
   }
 
   const clientId = normId(args.clientId)
-  const eventKeys =
-    Array.isArray(args.eventKeys) && args.eventKeys.length > 0
-      ? args.eventKeys
-      : undefined
+  const eventKeys = normalizeEventKeysOrUndefined(args.eventKeys)
   const onlyPending = args.onlyPending ?? true
 
   return db.scheduledClientNotification.updateMany({
@@ -779,10 +778,7 @@ export async function markClientNotificationsRead(
     args.before instanceof Date && !Number.isNaN(args.before.getTime())
       ? args.before
       : undefined
-  const eventKeys =
-    Array.isArray(args.eventKeys) && args.eventKeys.length > 0
-      ? args.eventKeys
-      : undefined
+  const eventKeys = normalizeEventKeysOrUndefined(args.eventKeys)
 
   if (idsProvided && ids.length === 0) {
     return { count: 0 }
@@ -812,10 +808,7 @@ export async function getUnreadClientNotificationCount(
     throw new Error('getUnreadClientNotificationCount: missing clientId')
   }
 
-  const eventKeys =
-    Array.isArray(args.eventKeys) && args.eventKeys.length > 0
-      ? args.eventKeys
-      : undefined
+  const eventKeys = normalizeEventKeysOrUndefined(args.eventKeys)
 
   return db.clientNotification.count({
     where: {
