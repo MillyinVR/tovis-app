@@ -1,4 +1,8 @@
-import { ContactMethod, Prisma } from '@prisma/client'
+import {
+  ContactMethod,
+  Prisma,
+  ProClientInviteStatus,
+} from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 
@@ -12,6 +16,8 @@ function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 60 * 60 * 1000)
 }
 
+export const PRO_CLIENT_INVITE_EXPIRY_HOURS = 72
+
 export type CreateProClientInviteArgs = {
   professionalId: string
   bookingId: string
@@ -24,25 +30,20 @@ export type CreateProClientInviteArgs = {
 
 export async function createProClientInvite(args: CreateProClientInviteArgs) {
   const db = getDb(args.tx)
+  const now = new Date()
 
-  const existing = await db.proClientInvite.findUnique({
+  return db.proClientInvite.upsert({
     where: { bookingId: args.bookingId },
-  })
-
-  if (existing) {
-    return existing
-  }
-
-  return db.proClientInvite.create({
-    data: {
+    update: {},
+    create: {
       professionalId: args.professionalId,
       bookingId: args.bookingId,
       invitedName: args.invitedName,
       invitedEmail: args.invitedEmail ?? null,
       invitedPhone: args.invitedPhone ?? null,
       preferredContactMethod: args.preferredContactMethod ?? null,
-      expiresAt: addHours(new Date(), 72),
-      status: 'PENDING',
+      expiresAt: addHours(now, PRO_CLIENT_INVITE_EXPIRY_HOURS),
+      status: ProClientInviteStatus.PENDING,
     },
   })
 }

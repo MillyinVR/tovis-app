@@ -1,19 +1,21 @@
 // app/api/pro/bookings/route.ts
 import { Prisma, ServiceLocationType } from '@prisma/client'
+
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
-import { moneyToString } from '@/lib/money'
-import { pickBool, pickInt } from '@/lib/pick'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
-import { createProBooking } from '@/lib/booking/writeBoundary'
+import { isRecord } from '@/lib/guards'
+import { moneyToString } from '@/lib/money'
+import { pickBool, pickInt } from '@/lib/pick'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -47,6 +49,19 @@ function decimalToCents(value: Prisma.Decimal): number {
   return Math.max(0, Number(whole) * 100 + Number(frac || '0'))
 }
 
+function pickClientPayload(body: Record<string, unknown>) {
+  if (isRecord(body.client)) {
+    return body.client
+  }
+
+  return {
+    firstName: body.firstName,
+    lastName: body.lastName,
+    email: body.email,
+    phone: body.phone,
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
@@ -66,6 +81,8 @@ export async function POST(req: Request) {
     const body = isRecord(rawBody) ? rawBody : {}
 
     const clientId = pickString(body.clientId)
+    const client = pickClientPayload(body)
+
     const clientAddressId = pickString(body.clientAddressId)
     const scheduledFor = toDateOrNull(body.scheduledFor)
     const internalNotes = pickString(body.internalNotes)
@@ -82,10 +99,6 @@ export async function POST(req: Request) {
       pickBool(body.allowOutsideWorkingHours) ?? false
     const allowShortNotice = pickBool(body.allowShortNotice) ?? false
     const allowFarFuture = pickBool(body.allowFarFuture) ?? false
-
-    if (!clientId) {
-      return bookingJsonFail('CLIENT_ID_REQUIRED')
-    }
 
     if (!scheduledFor) {
       return bookingJsonFail('INVALID_SCHEDULED_FOR')
@@ -109,11 +122,12 @@ export async function POST(req: Request) {
       })
     }
 
-    const result = await createProBooking({
+    const result = await createProBookingWithClient({
       professionalId,
       actorUserId,
       overrideReason,
       clientId,
+      client,
       offeringId,
       locationId,
       locationType,
@@ -127,31 +141,43 @@ export async function POST(req: Request) {
       allowFarFuture,
     })
 
+    if (!result.ok) {
+      return jsonFail(result.status, result.error, { code: result.code })
+    }
+
+    const bookingResult = result.bookingResult
+
     const endsAt = computeRequestedEndUtc({
-      startUtc: new Date(result.booking.scheduledFor),
-      durationMinutes: Number(result.booking.totalDurationMinutes),
-      bufferMinutes: Number(result.booking.bufferMinutes),
+      startUtc: new Date(bookingResult.booking.scheduledFor),
+      durationMinutes: Number(bookingResult.booking.totalDurationMinutes),
+      bufferMinutes: Number(bookingResult.booking.bufferMinutes),
     })
 
     return jsonOk(
       {
         booking: {
-          id: result.booking.id,
-          scheduledFor: new Date(result.booking.scheduledFor).toISOString(),
+          id: bookingResult.booking.id,
+          clientId: result.clientId,
+          scheduledFor: new Date(bookingResult.booking.scheduledFor).toISOString(),
           endsAt: endsAt.toISOString(),
-          totalDurationMinutes: Number(result.booking.totalDurationMinutes),
-          bufferMinutes: Number(result.booking.bufferMinutes),
-          status: result.booking.status,
-          serviceName: result.serviceName,
+          totalDurationMinutes: Number(bookingResult.booking.totalDurationMinutes),
+          bufferMinutes: Number(bookingResult.booking.bufferMinutes),
+          status: bookingResult.booking.status,
+          serviceName: bookingResult.serviceName,
           subtotalSnapshot:
-            moneyToString(result.subtotalSnapshot) ??
-            result.subtotalSnapshot.toString(),
-          subtotalCents: decimalToCents(result.subtotalSnapshot),
-          locationId: result.locationId,
-          locationType: result.locationType,
-          clientAddressId: result.clientAddressId,
-          stepMinutes: result.stepMinutes,
-          timeZone: result.appointmentTimeZone,
+            moneyToString(bookingResult.subtotalSnapshot) ??
+            bookingResult.subtotalSnapshot.toString(),
+          subtotalCents: decimalToCents(bookingResult.subtotalSnapshot),
+          locationId: bookingResult.locationId,
+          locationType: bookingResult.locationType,
+          clientAddressId: bookingResult.clientAddressId,
+          stepMinutes: bookingResult.stepMinutes,
+          timeZone: bookingResult.appointmentTimeZone,
+        },
+        client: {
+          id: result.clientId,
+          userId: result.clientUserId,
+          email: result.clientEmail,
         },
       },
       201,

@@ -1,3 +1,7 @@
+import {
+  ProClientInviteStatus,
+} from '@prisma/client'
+
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 
@@ -32,28 +36,23 @@ export async function POST(_request: Request, ctx: Ctx) {
           bookingId: true,
           status: true,
           expiresAt: true,
-          acceptedAt: true,
-          acceptedByUserId: true,
           preferredContactMethod: true,
         },
       })
 
       if (!invite) {
-        return {
-          kind: 'not_found' as const,
-        }
+        return { kind: 'not_found' as const }
       }
 
-      if (invite.status === 'EXPIRED' || invite.expiresAt.getTime() < now.getTime()) {
-        return {
-          kind: 'expired' as const,
-        }
+      if (
+        invite.status === ProClientInviteStatus.EXPIRED ||
+        invite.expiresAt.getTime() <= now.getTime()
+      ) {
+        return { kind: 'expired' as const }
       }
 
-      if (invite.status === 'ACCEPTED') {
-        return {
-          kind: 'already_accepted' as const,
-        }
+      if (invite.status === ProClientInviteStatus.ACCEPTED) {
+        return { kind: 'already_accepted' as const }
       }
 
       const clientProfile = await tx.clientProfile.findUnique({
@@ -65,19 +64,50 @@ export async function POST(_request: Request, ctx: Ctx) {
       })
 
       if (!clientProfile) {
-        return {
-          kind: 'not_found' as const,
-        }
+        return { kind: 'client_not_found' as const }
       }
 
-      await tx.proClientInvite.update({
-        where: { id: invite.id },
+      const claimed = await tx.proClientInvite.updateMany({
+        where: {
+          id: invite.id,
+          status: ProClientInviteStatus.PENDING,
+          acceptedAt: null,
+          expiresAt: { gt: now },
+        },
         data: {
-          status: 'ACCEPTED',
+          status: ProClientInviteStatus.ACCEPTED,
           acceptedAt: now,
           acceptedByUserId: auth.user.id,
         },
       })
+
+      if (claimed.count !== 1) {
+        const current = await tx.proClientInvite.findUnique({
+          where: { id: invite.id },
+          select: {
+            status: true,
+            expiresAt: true,
+            bookingId: true,
+          },
+        })
+
+        if (!current) {
+          return { kind: 'not_found' as const }
+        }
+
+        if (
+          current.status === ProClientInviteStatus.EXPIRED ||
+          current.expiresAt.getTime() <= now.getTime()
+        ) {
+          return { kind: 'expired' as const }
+        }
+
+        if (current.status === ProClientInviteStatus.ACCEPTED) {
+          return { kind: 'already_accepted' as const }
+        }
+
+        return { kind: 'conflict' as const }
+      }
 
       if (
         invite.preferredContactMethod &&
@@ -108,6 +138,18 @@ export async function POST(_request: Request, ctx: Ctx) {
     if (result.kind === 'already_accepted') {
       return jsonFail(409, 'Invite already accepted.', {
         code: 'ALREADY_ACCEPTED',
+      })
+    }
+
+    if (result.kind === 'client_not_found') {
+      return jsonFail(404, 'Client profile not found.', {
+        code: 'CLIENT_NOT_FOUND',
+      })
+    }
+
+    if (result.kind === 'conflict') {
+      return jsonFail(409, 'Invite could not be accepted.', {
+        code: 'CONFLICT',
       })
     }
 
