@@ -12,6 +12,7 @@ import {
 
 import {
   type ChannelEvaluation,
+  type ChannelSuppressionReason,
   type NotificationPreferenceLike,
   getRecipientChannelCapabilities,
   resolveChannelPolicy,
@@ -126,12 +127,15 @@ export type EnqueueDispatchArgs = {
   key: NotificationEventKey
   sourceKey: string
   recipient: EnqueueDispatchRecipient
+
   title: string
   body?: string | null
   href?: string | null
   payload?: Prisma.InputJsonValue | null
+
   priority?: NotificationPriority | null
   scheduledFor?: Date | null
+
   notificationId?: string | null
   clientNotificationId?: string | null
 
@@ -169,14 +173,18 @@ type NormalizedEnqueueDispatchArgs = {
   emailVerifiedAt: Date | null
   timeZone: string | null
   preference: NotificationPreferenceLike | null
+
   title: string
   body: string
   href: string
   payload: Prisma.InputJsonValue | Prisma.NullTypes.JsonNull | undefined
+
   priority: NotificationPriority
   scheduledFor: Date
+
   notificationId: string | null
   clientNotificationId: string | null
+
   requestedChannels: readonly NotificationChannel[] | null
 }
 
@@ -255,7 +263,9 @@ function isUniqueConstraintError(error: unknown): boolean {
   )
 }
 
-function resolveInAppTargetId(recipient: EnqueueDispatchRecipient): string | null {
+function resolveInAppTargetId(
+  recipient: EnqueueDispatchRecipient,
+): string | null {
   const explicitTarget = normNullableString(recipient.inAppTargetId, MAX_ID)
   if (explicitTarget) return explicitTarget
 
@@ -323,26 +333,81 @@ function buildDeliveryEvents(args: {
   ]
 }
 
+function inferSuppressionReasonFromPersistedDelivery(args: {
+  channel: NotificationChannel
+  destination: string | null
+}): ChannelSuppressionReason | null {
+  if (args.destination != null) {
+    return null
+  }
+
+  if (args.channel === NotificationChannel.IN_APP) {
+    return 'MISSING_IN_APP_TARGET'
+  }
+
+  if (args.channel === NotificationChannel.SMS) {
+    return 'MISSING_SMS_DESTINATION'
+  }
+
+  return 'MISSING_EMAIL_DESTINATION'
+}
+
+function derivePolicyFromPersistedDispatch(
+  dispatch: EnqueuedDispatchRecord,
+): Pick<EnqueueDispatchResult, 'selectedChannels' | 'evaluations'> {
+  const evaluations: ChannelEvaluation[] = dispatch.deliveries.map((delivery) => {
+    const enabled = delivery.status !== NotificationDeliveryStatus.SUPPRESSED
+
+    return {
+      channel: delivery.channel,
+      enabled,
+      reason: enabled
+        ? null
+        : inferSuppressionReasonFromPersistedDelivery({
+            channel: delivery.channel,
+            destination: delivery.destination,
+          }),
+    }
+  })
+
+  return {
+    selectedChannels: evaluations
+      .filter((evaluation) => evaluation.enabled)
+      .map((evaluation) => evaluation.channel),
+    evaluations,
+  }
+}
+
+function buildCapabilities(args: {
+  recipientKind: NotificationRecipientKind
+  inAppTargetId: string | null
+  phone: string | null
+  phoneVerifiedAt: Date | null
+  email: string | null
+  emailVerifiedAt: Date | null
+}) {
+  return getRecipientChannelCapabilities({
+    recipientKind: args.recipientKind,
+    inAppTargetId: args.inAppTargetId,
+    phone: args.phone,
+    phoneVerifiedAt: args.phoneVerifiedAt,
+    email: args.email,
+    emailVerifiedAt: args.emailVerifiedAt,
+  })
+}
+
 function buildDeliveryRows(args: {
   normalized: NormalizedEnqueueDispatchArgs
   evaluations: ChannelEvaluation[]
+  capabilities: ReturnType<typeof getRecipientChannelCapabilities>
 }): DeliveryCreateRow[] {
   const eventDefinition = getNotificationEventDefinition(args.normalized.key)
   const templateKey = eventDefinition.templateKey
 
-  const capabilities = getRecipientChannelCapabilities({
-    recipientKind: args.normalized.recipientKind,
-    inAppTargetId: args.normalized.inAppTargetId,
-    phone: args.normalized.phone,
-    phoneVerifiedAt: args.normalized.phoneVerifiedAt,
-    email: args.normalized.email,
-    emailVerifiedAt: args.normalized.emailVerifiedAt,
-  })
-
   return args.evaluations.map((evaluation) => {
     const destination = getDestinationForChannel({
       channel: evaluation.channel,
-      capabilities,
+      capabilities: args.capabilities,
       inAppTargetId: args.normalized.inAppTargetId,
       phone: args.normalized.phone,
       email: args.normalized.email,
@@ -457,6 +522,7 @@ function buildDispatchCreateData(args: {
 }
 
 function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs {
+  const eventDefinition = getNotificationEventDefinition(args.key)
   const sourceKey = normRequiredString(args.sourceKey, MAX_SOURCE_KEY)
   const title = normRequiredString(args.title, MAX_TITLE)
 
@@ -469,7 +535,10 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
   }
 
   const notificationId = normNullableString(args.notificationId, MAX_ID)
-  const clientNotificationId = normNullableString(args.clientNotificationId, MAX_ID)
+  const clientNotificationId = normNullableString(
+    args.clientNotificationId,
+    MAX_ID,
+  )
 
   if (notificationId && clientNotificationId) {
     throw new Error(
@@ -527,8 +596,11 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
       body: normDefaultString(args.body, MAX_BODY),
       href: normInternalHref(args.href, MAX_HREF),
       payload: normalizeJsonField(args.payload),
-      priority: args.priority ?? NotificationPriority.NORMAL,
-      scheduledFor: normalizeDate(args.scheduledFor ?? new Date(), 'scheduledFor'),
+      priority: args.priority ?? eventDefinition.defaultPriority,
+      scheduledFor: normalizeDate(
+        args.scheduledFor ?? new Date(),
+        'scheduledFor',
+      ),
       notificationId,
       clientNotificationId,
       requestedChannels: args.requestedChannels ?? null,
@@ -559,8 +631,11 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     body: normDefaultString(args.body, MAX_BODY),
     href: normInternalHref(args.href, MAX_HREF),
     payload: normalizeJsonField(args.payload),
-    priority: args.priority ?? NotificationPriority.NORMAL,
-    scheduledFor: normalizeDate(args.scheduledFor ?? new Date(), 'scheduledFor'),
+    priority: args.priority ?? eventDefinition.defaultPriority,
+    scheduledFor: normalizeDate(
+      args.scheduledFor ?? new Date(),
+      'scheduledFor',
+    ),
     notificationId,
     clientNotificationId,
     requestedChannels: args.requestedChannels ?? null,
@@ -601,6 +676,8 @@ async function findDispatchBySourceKeyOrThrow(args: {
  * Idempotency contract:
  * - sourceKey is the stable unique key
  * - if the row already exists, this returns the existing dispatch unchanged
+ * - on idempotent returns, selectedChannels/evaluations are derived from the
+ *   persisted delivery rows, not recomputed from possibly newer caller input
  *
  * Important:
  * - DB is the source of truth
@@ -614,7 +691,7 @@ export async function enqueueDispatch(
   const db = getDb(args.tx)
   const normalized = normalizeArgs(args)
 
-  const capabilities = getRecipientChannelCapabilities({
+  const capabilities = buildCapabilities({
     recipientKind: normalized.recipientKind,
     inAppTargetId: normalized.inAppTargetId,
     phone: normalized.phone,
@@ -637,6 +714,7 @@ export async function enqueueDispatch(
   const deliveryRows = buildDeliveryRows({
     normalized,
     evaluations: policy.evaluations,
+    capabilities,
   })
 
   const existing = await findDispatchBySourceKey({
@@ -645,11 +723,13 @@ export async function enqueueDispatch(
   })
 
   if (existing) {
+    const persistedPolicy = derivePolicyFromPersistedDispatch(existing)
+
     return {
       created: false,
       dispatch: existing,
-      selectedChannels: policy.selectedChannels,
-      evaluations: policy.evaluations,
+      selectedChannels: persistedPolicy.selectedChannels,
+      evaluations: persistedPolicy.evaluations,
     }
   }
 
@@ -677,12 +757,13 @@ export async function enqueueDispatch(
       sourceKey: normalized.sourceKey,
       tx: args.tx,
     })
+    const persistedPolicy = derivePolicyFromPersistedDispatch(found)
 
     return {
       created: false,
       dispatch: found,
-      selectedChannels: policy.selectedChannels,
-      evaluations: policy.evaluations,
+      selectedChannels: persistedPolicy.selectedChannels,
+      evaluations: persistedPolicy.evaluations,
     }
   }
 }

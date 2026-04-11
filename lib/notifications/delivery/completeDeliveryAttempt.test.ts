@@ -13,7 +13,7 @@ import {
 const mockTx = vi.hoisted(() => ({
   notificationDelivery: {
     findFirst: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
     findUnique: vi.fn(),
   },
   notificationDeliveryEvent: {
@@ -169,7 +169,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       }),
     )
 
-    mockTx.notificationDelivery.update.mockResolvedValue(undefined)
+    mockTx.notificationDelivery.updateMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDeliveryEvent.createMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDelivery.findUnique.mockResolvedValue(
       makeCompletedDelivery({
@@ -228,9 +228,20 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       },
     })
 
-    expect(mockTx.notificationDelivery.update).toHaveBeenCalledWith({
+    expect(mockTx.notificationDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'delivery_1',
+        leaseToken: 'lease_token_1',
+        cancelledAt: null,
+        claimedAt: {
+          not: null,
+        },
+        leaseExpiresAt: {
+          gt: attemptedAt,
+        },
+        dispatch: {
+          cancelledAt: null,
+        },
       },
       data: {
         status: NotificationDeliveryStatus.SENT,
@@ -290,7 +301,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       }),
     )
 
-    mockTx.notificationDelivery.update.mockResolvedValue(undefined)
+    mockTx.notificationDelivery.updateMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDeliveryEvent.createMany.mockResolvedValue({ count: 2 })
     mockTx.notificationDelivery.findUnique.mockResolvedValue(
       makeCompletedDelivery({
@@ -318,9 +329,20 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       },
     })
 
-    expect(mockTx.notificationDelivery.update).toHaveBeenCalledWith({
+    expect(mockTx.notificationDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'delivery_1',
+        leaseToken: 'lease_token_1',
+        cancelledAt: null,
+        claimedAt: {
+          not: null,
+        },
+        leaseExpiresAt: {
+          gt: attemptedAt,
+        },
+        dispatch: {
+          cancelledAt: null,
+        },
       },
       data: {
         status: NotificationDeliveryStatus.DELIVERED,
@@ -386,7 +408,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       }),
     )
 
-    mockTx.notificationDelivery.update.mockResolvedValue(undefined)
+    mockTx.notificationDelivery.updateMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDeliveryEvent.createMany.mockResolvedValue({ count: 2 })
     mockTx.notificationDelivery.findUnique.mockResolvedValue(
       makeCompletedDelivery({
@@ -419,9 +441,20 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       },
     })
 
-    expect(mockTx.notificationDelivery.update).toHaveBeenCalledWith({
+    expect(mockTx.notificationDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'delivery_1',
+        leaseToken: 'lease_token_1',
+        cancelledAt: null,
+        claimedAt: {
+          not: null,
+        },
+        leaseExpiresAt: {
+          gt: attemptedAt,
+        },
+        dispatch: {
+          cancelledAt: null,
+        },
       },
       data: {
         status: NotificationDeliveryStatus.FAILED_RETRYABLE,
@@ -498,7 +531,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       }),
     )
 
-    mockTx.notificationDelivery.update.mockResolvedValue(undefined)
+    mockTx.notificationDelivery.updateMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDeliveryEvent.createMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDelivery.findUnique.mockResolvedValue(
       makeCompletedDelivery({
@@ -529,9 +562,20 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       },
     })
 
-    expect(mockTx.notificationDelivery.update).toHaveBeenCalledWith({
+    expect(mockTx.notificationDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'delivery_1',
+        leaseToken: 'lease_token_1',
+        cancelledAt: null,
+        claimedAt: {
+          not: null,
+        },
+        leaseExpiresAt: {
+          gt: attemptedAt,
+        },
+        dispatch: {
+          cancelledAt: null,
+        },
       },
       data: {
         status: NotificationDeliveryStatus.FAILED_FINAL,
@@ -589,7 +633,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       }),
     )
 
-    mockTx.notificationDelivery.update.mockResolvedValue(undefined)
+    mockTx.notificationDelivery.updateMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDeliveryEvent.createMany.mockResolvedValue({ count: 1 })
     mockTx.notificationDelivery.findUnique.mockResolvedValue(
       makeCompletedDelivery({
@@ -640,8 +684,34 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       'completeDeliveryAttempt: delivery not owned by active lease',
     )
 
-    expect(mockTx.notificationDelivery.update).not.toHaveBeenCalled()
+    expect(mockTx.notificationDelivery.updateMany).not.toHaveBeenCalled()
     expect(mockTx.notificationDeliveryEvent.createMany).not.toHaveBeenCalled()
+  })
+
+  it('throws when delivery loses lease ownership before finalization', async () => {
+    const attemptedAt = new Date('2026-04-09T12:00:00.000Z')
+
+    mockTx.notificationDelivery.findFirst.mockResolvedValue(
+      makeOwnedDelivery({
+        leaseToken: 'lease_token_1',
+      }),
+    )
+
+    mockTx.notificationDelivery.updateMany.mockResolvedValue({ count: 0 })
+
+    await expect(
+      completeDeliveryAttempt({
+        kind: 'SUCCESS',
+        deliveryId: 'delivery_1',
+        leaseToken: 'lease_token_1',
+        attemptedAt,
+      }),
+    ).rejects.toThrow(
+      'completeDeliveryAttempt: delivery lost lease ownership before finalization',
+    )
+
+    expect(mockTx.notificationDeliveryEvent.createMany).not.toHaveBeenCalled()
+    expect(mockTx.notificationDelivery.findUnique).not.toHaveBeenCalled()
   })
 
   it('throws when retryable failure would exceed remaining maxAttempts', async () => {
@@ -668,7 +738,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       'completeDeliveryAttempt: retryable failure exceeds remaining maxAttempts',
     )
 
-    expect(mockTx.notificationDelivery.update).not.toHaveBeenCalled()
+    expect(mockTx.notificationDelivery.updateMany).not.toHaveBeenCalled()
   })
 
   it('throws when retryable nextAttemptAt is not after attemptedAt', async () => {
@@ -697,7 +767,7 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
       'completeDeliveryAttempt: nextAttemptAt must be after attemptedAt',
     )
 
-    expect(mockTx.notificationDelivery.update).not.toHaveBeenCalled()
+    expect(mockTx.notificationDelivery.updateMany).not.toHaveBeenCalled()
   })
 
   it('throws for blank deliveryId', async () => {
@@ -747,6 +817,31 @@ describe('lib/notifications/delivery/completeDeliveryAttempt', () => {
         deliveredAt: new Date('invalid'),
       }),
     ).rejects.toThrow('completeDeliveryAttempt: invalid deliveredAt')
+  })
+
+  it('throws when deliveredAt is before attemptedAt', async () => {
+    const attemptedAt = new Date('2026-04-09T12:00:00.000Z')
+    const deliveredAt = new Date('2026-04-09T11:59:59.000Z')
+
+    mockTx.notificationDelivery.findFirst.mockResolvedValue(
+      makeOwnedDelivery({
+        leaseToken: 'lease_token_1',
+      }),
+    )
+
+    await expect(
+      completeDeliveryAttempt({
+        kind: 'SUCCESS',
+        deliveryId: 'delivery_1',
+        leaseToken: 'lease_token_1',
+        attemptedAt,
+        deliveredAt,
+      }),
+    ).rejects.toThrow(
+      'completeDeliveryAttempt: deliveredAt must be after or equal to attemptedAt',
+    )
+
+    expect(mockTx.notificationDelivery.updateMany).not.toHaveBeenCalled()
   })
 
   it('throws for invalid nextAttemptAt before transaction work continues', async () => {

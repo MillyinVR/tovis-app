@@ -15,7 +15,10 @@ import {
   type ClaimedNotificationDelivery,
 } from './claimDeliveries'
 import { completeDeliveryAttempt } from './completeDeliveryAttempt'
-import { buildProviderSendRequest } from './providerPolicy'
+import {
+  buildProviderSendRequest,
+  getRetryDelayMs,
+} from './providerPolicy'
 import { renderNotificationContent } from './renderNotificationContent'
 import {
   type EmailProviderSendRequest,
@@ -26,13 +29,6 @@ import {
   type SmsProviderSendRequest,
 } from './providerTypes'
 
-const RETRY_BACKOFF_MS = [
-  60_000,
-  5 * 60_000,
-  15 * 60_000,
-  60 * 60_000,
-  6 * 60 * 60_000,
-] as const
 
 export type ProcessDueDeliveriesArgs = ClaimDeliveriesArgs
 
@@ -118,11 +114,6 @@ function getTemplateKeyForDelivery(
   return expectedTemplateKey
 }
 
-function getRetryDelayMs(nextAttemptCount: number): number {
-  const index = Math.max(0, nextAttemptCount - 1)
-  return RETRY_BACKOFF_MS[Math.min(index, RETRY_BACKOFF_MS.length - 1)]
-}
-
 function buildNextAttemptAt(args: {
   attemptedAt: Date
   nextAttemptCount: number
@@ -188,7 +179,9 @@ async function sendWithProvider(args: {
   request: ProviderSendRequest
   providers: DeliveryProviderRegistry
 }): Promise<ProviderSendResult> {
-  switch (args.request.provider) {
+  const { provider, channel } = args.request
+
+  switch (provider) {
     case NotificationProvider.INTERNAL_REALTIME:
       return args.providers.inApp.send(args.request)
 
@@ -198,8 +191,11 @@ async function sendWithProvider(args: {
     case NotificationProvider.POSTMARK:
       return args.providers.email.send(args.request)
   }
-}
 
+  throw new Error(
+    `processDueDeliveries: unsupported provider ${provider} for channel ${channel}`,
+  )
+}
 async function finalizeOrchestrationFailure(args: {
   delivery: ClaimedNotificationDelivery
   leaseToken: string

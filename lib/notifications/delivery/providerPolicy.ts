@@ -11,6 +11,22 @@ import {
   assertProviderMatchesRenderedContent,
 } from './providerTypes'
 
+
+export const DELIVERY_RETRY_BACKOFF_MS = [
+  60_000,
+  5 * 60_000,
+  15 * 60_000,
+  60 * 60_000,
+  6 * 60 * 60_000,
+] as const
+
+export function getRetryDelayMs(nextAttemptCount: number): number {
+  const index = Math.max(0, nextAttemptCount - 1)
+  return DELIVERY_RETRY_BACKOFF_MS[
+    Math.min(index, DELIVERY_RETRY_BACKOFF_MS.length - 1)
+  ]
+}
+
 const IN_APP_BINDING: DeliveryProviderBinding = {
   channel: NotificationChannel.IN_APP,
   provider: NotificationProvider.INTERNAL_REALTIME,
@@ -43,6 +59,7 @@ export const DELIVERY_PROVIDER_BINDING_LIST: readonly DeliveryProviderBinding[] 
   SMS_BINDING,
   EMAIL_BINDING,
 ]
+
 
 function normalizeRequiredString(value: string, fieldName: string): string {
   const normalized = value.trim()

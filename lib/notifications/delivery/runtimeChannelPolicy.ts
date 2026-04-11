@@ -8,6 +8,7 @@ import {
   type NotificationPreferenceLike,
 } from '../channelPolicy'
 import { getNotificationEventDefinition } from '../eventKeys'
+import { pickTimeZoneOrNull } from '@/lib/timeZone'
 
 type ZonedDateTimeParts = {
   year: number
@@ -68,15 +69,7 @@ function normalizeNow(value: Date): Date {
 }
 
 function normalizeTimeZone(value: string | null | undefined): string | null {
-  const timeZone = typeof value === 'string' ? value.trim() : ''
-  if (!timeZone) return null
-
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date())
-    return timeZone
-  } catch {
-    return null
-  }
+  return pickTimeZoneOrNull(value)
 }
 
 function normalizeMinuteOfDay(value: number | null | undefined): number | null {
@@ -462,11 +455,17 @@ export function evaluateRuntimeDeliveryChannelPolicy(
     }
   }
 
-  const bypassQuietHours = args.bypassQuietHours ?? false
-  if (allowQuietHoursBypass && bypassQuietHours) {
+    const bypassQuietHours = args.bypassQuietHours ?? false
+  const withinQuietHours = isWithinQuietHours({
+    quietHoursStartMinutes: quietHoursWindow.quietHoursStartMinutes,
+    quietHoursEndMinutes: quietHoursWindow.quietHoursEndMinutes,
+    recipientLocalMinutes,
+  })
+
+  if (!withinQuietHours) {
     return {
       action: 'SEND',
-      reason: 'QUIET_HOURS_BYPASSED',
+      reason: 'OUTSIDE_QUIET_HOURS',
       allowQuietHoursBypass,
       quietHoursStartMinutes: quietHoursWindow.quietHoursStartMinutes,
       quietHoursEndMinutes: quietHoursWindow.quietHoursEndMinutes,
@@ -475,16 +474,10 @@ export function evaluateRuntimeDeliveryChannelPolicy(
     }
   }
 
-  if (
-    !isWithinQuietHours({
-      quietHoursStartMinutes: quietHoursWindow.quietHoursStartMinutes,
-      quietHoursEndMinutes: quietHoursWindow.quietHoursEndMinutes,
-      recipientLocalMinutes,
-    })
-  ) {
+  if (allowQuietHoursBypass && bypassQuietHours) {
     return {
       action: 'SEND',
-      reason: 'OUTSIDE_QUIET_HOURS',
+      reason: 'QUIET_HOURS_BYPASSED',
       allowQuietHoursBypass,
       quietHoursStartMinutes: quietHoursWindow.quietHoursStartMinutes,
       quietHoursEndMinutes: quietHoursWindow.quietHoursEndMinutes,

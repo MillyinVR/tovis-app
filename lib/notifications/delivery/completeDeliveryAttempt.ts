@@ -216,6 +216,29 @@ async function loadOwnedDelivery(args: {
   return delivery
 }
 
+async function updateOwnedDeliveryOrThrow(args: {
+  tx: Prisma.TransactionClient
+  deliveryId: string
+  leaseToken: string
+  attemptedAt: Date
+  data: Prisma.NotificationDeliveryUpdateManyMutationInput
+}): Promise<void> {
+  const result = await args.tx.notificationDelivery.updateMany({
+    where: buildOwnedWhere({
+      deliveryId: args.deliveryId,
+      leaseToken: args.leaseToken,
+      now: args.attemptedAt,
+    }),
+    data: args.data,
+  })
+
+  if (result.count !== 1) {
+    throw new Error(
+      'completeDeliveryAttempt: delivery lost lease ownership before finalization',
+    )
+  }
+}
+
 function buildSuccessEvents(args: {
   previousStatus: NotificationDeliveryStatus
   finalStatus: NotificationDeliveryStatus
@@ -246,7 +269,10 @@ function buildSuccessEvents(args: {
     },
   ]
 
-  if (args.finalStatus === NotificationDeliveryStatus.DELIVERED && args.deliveredAt) {
+  if (
+    args.finalStatus === NotificationDeliveryStatus.DELIVERED &&
+    args.deliveredAt
+  ) {
     events.push({
       deliveryId: '',
       attemptNumber: undefined,
@@ -364,7 +390,8 @@ export async function completeDeliveryAttempt(
 
   if (
     args.kind === 'RETRYABLE_FAILURE' &&
-    (!(args.nextAttemptAt instanceof Date) || Number.isNaN(args.nextAttemptAt.getTime()))
+    (!(args.nextAttemptAt instanceof Date) ||
+      Number.isNaN(args.nextAttemptAt.getTime()))
   ) {
     throw new Error('completeDeliveryAttempt: invalid nextAttemptAt')
   }
@@ -381,15 +408,23 @@ export async function completeDeliveryAttempt(
 
     if (args.kind === 'SUCCESS') {
       const deliveredAt = normalizeExplicitDate(args.deliveredAt, 'deliveredAt')
+
+      if (deliveredAt && deliveredAt.getTime() < attemptedAt.getTime()) {
+        throw new Error(
+          'completeDeliveryAttempt: deliveredAt must be after or equal to attemptedAt',
+        )
+      }
+
       const finalStatus =
         deliveredAt != null
           ? NotificationDeliveryStatus.DELIVERED
           : NotificationDeliveryStatus.SENT
 
-      await tx.notificationDelivery.update({
-        where: {
-          id: owned.id,
-        },
+      await updateOwnedDeliveryOrThrow({
+        tx,
+        deliveryId: owned.id,
+        leaseToken,
+        attemptedAt,
         data: {
           status: finalStatus,
           attemptCount: nextAttemptCount,
@@ -426,6 +461,9 @@ export async function completeDeliveryAttempt(
         data: events,
       })
     } else if (args.kind === 'RETRYABLE_FAILURE') {
+      const code = normalizeRequiredString(args.code, 'code')
+      const message = normalizeRequiredString(args.message, 'message')
+
       if (owned.attemptCount >= owned.maxAttempts - 1) {
         throw new Error(
           'completeDeliveryAttempt: retryable failure exceeds remaining maxAttempts',
@@ -438,10 +476,11 @@ export async function completeDeliveryAttempt(
         )
       }
 
-      await tx.notificationDelivery.update({
-        where: {
-          id: owned.id,
-        },
+      await updateOwnedDeliveryOrThrow({
+        tx,
+        deliveryId: owned.id,
+        leaseToken,
+        attemptedAt,
         data: {
           status: NotificationDeliveryStatus.FAILED_RETRYABLE,
           attemptCount: nextAttemptCount,
@@ -449,8 +488,8 @@ export async function completeDeliveryAttempt(
           nextAttemptAt: args.nextAttemptAt,
           providerMessageId,
           providerStatus,
-          lastErrorCode: normalizeRequiredString(args.code, 'code'),
-          lastErrorMessage: normalizeRequiredString(args.message, 'message'),
+          lastErrorCode: code,
+          lastErrorMessage: message,
           failedAt: null,
           claimedAt: null,
           leaseExpiresAt: null,
@@ -465,8 +504,8 @@ export async function completeDeliveryAttempt(
           previousStatus: owned.status,
           attemptedAt,
           nextAttemptAt: args.nextAttemptAt,
-          code: normalizeRequiredString(args.code, 'code'),
-          message: normalizeRequiredString(args.message, 'message'),
+          code,
+          message,
           providerStatus,
           providerMessageId,
           responseMeta: args.responseMeta,
@@ -477,18 +516,22 @@ export async function completeDeliveryAttempt(
         data: events,
       })
     } else {
-      await tx.notificationDelivery.update({
-        where: {
-          id: owned.id,
-        },
+      const code = normalizeRequiredString(args.code, 'code')
+      const message = normalizeRequiredString(args.message, 'message')
+
+      await updateOwnedDeliveryOrThrow({
+        tx,
+        deliveryId: owned.id,
+        leaseToken,
+        attemptedAt,
         data: {
           status: NotificationDeliveryStatus.FAILED_FINAL,
           attemptCount: nextAttemptCount,
           lastAttemptAt: attemptedAt,
           providerMessageId,
           providerStatus,
-          lastErrorCode: normalizeRequiredString(args.code, 'code'),
-          lastErrorMessage: normalizeRequiredString(args.message, 'message'),
+          lastErrorCode: code,
+          lastErrorMessage: message,
           failedAt: attemptedAt,
           claimedAt: null,
           leaseExpiresAt: null,
@@ -502,8 +545,8 @@ export async function completeDeliveryAttempt(
         buildFinalFailureEvents({
           previousStatus: owned.status,
           attemptedAt,
-          code: normalizeRequiredString(args.code, 'code'),
-          message: normalizeRequiredString(args.message, 'message'),
+          code,
+          message,
           providerStatus,
           providerMessageId,
           responseMeta: args.responseMeta,
