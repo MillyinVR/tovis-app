@@ -98,11 +98,11 @@ import {
   areAuditValuesEqual,
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
+import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import {
-  cancelScheduledClientNotificationsForBooking,
-  scheduleClientNotification,
-  upsertClientNotification,
-} from '@/lib/notifications/clientNotifications'
+  cancelBookingAppointmentReminders,
+  syncBookingAppointmentReminders,
+} from '@/lib/notifications/appointmentReminders'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 
 type MutationMeta = {
@@ -2537,102 +2537,6 @@ async function createUpdateClientNotification(args: {
   })
 }
 
-type AppointmentReminderKind = 'ONE_WEEK' | 'DAY_BEFORE'
-
-function makeAppointmentReminderDedupeKey(
-  bookingId: string,
-  kind: AppointmentReminderKind,
-): string {
-  return `CLIENT_REMINDER:${kind}:${bookingId}`
-}
-
-function resolveAppointmentReminderTimeZone(
-  value: string | null | undefined,
-): string {
-  const raw = typeof value === 'string' ? value.trim() : ''
-  if (raw && isValidIanaTimeZone(raw)) {
-    return sanitizeTimeZone(raw, DEFAULT_TIME_ZONE)
-  }
-  return DEFAULT_TIME_ZONE
-}
-
-function computeAppointmentReminderRunAt(args: {
-  scheduledFor: Date
-  kind: AppointmentReminderKind
-}): Date | null {
-  const offsetMs =
-    args.kind === 'ONE_WEEK'
-      ? 7 * 24 * 60 * 60 * 1000
-      : 24 * 60 * 60 * 1000
-
-  const runAt = new Date(args.scheduledFor.getTime() - offsetMs)
-  return Number.isNaN(runAt.getTime()) ? null : runAt
-}
-
-async function scheduleBookingAppointmentReminders(args: {
-  tx: Prisma.TransactionClient
-  bookingId: string
-  clientId: string
-  scheduledFor: Date
-  href?: string | null
-  timeZone?: string | null
-  serviceName?: string | null
-  professionalName?: string | null
-}): Promise<void> {
-  const href =
-    typeof args.href === 'string' && args.href.trim().length > 0
-      ? args.href.trim()
-      : `/client/bookings/${args.bookingId}?step=overview`
-
-  const timeZone = resolveAppointmentReminderTimeZone(args.timeZone)
-  const reminderKinds: AppointmentReminderKind[] = ['ONE_WEEK', 'DAY_BEFORE']
-  const now = Date.now()
-
-  for (const reminderKind of reminderKinds) {
-    const runAt = computeAppointmentReminderRunAt({
-      scheduledFor: args.scheduledFor,
-      kind: reminderKind,
-    })
-
-    if (!runAt) continue
-    if (runAt.getTime() <= now) continue
-
-    await scheduleClientNotification({
-      tx: args.tx,
-      clientId: args.clientId,
-      bookingId: args.bookingId,
-      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
-      runAt,
-      dedupeKey: makeAppointmentReminderDedupeKey(
-        args.bookingId,
-        reminderKind,
-      ),
-      href,
-      data: {
-        reminderKind,
-        bookingId: args.bookingId,
-        scheduledFor: args.scheduledFor.toISOString(),
-        timeZone,
-        serviceName: args.serviceName ?? null,
-        professionalName: args.professionalName ?? null,
-      },
-    })
-  }
-}
-
-async function cancelBookingAppointmentReminders(args: {
-  tx: Prisma.TransactionClient
-  bookingId: string
-  clientId: string
-}): Promise<void> {
-  await cancelScheduledClientNotificationsForBooking({
-    tx: args.tx,
-    bookingId: args.bookingId,
-    clientId: args.clientId,
-    eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
-    onlyPending: true,
-  })
-}
 
 async function resolveUpdateBookingSchedulingContext(args: {
   bookingLocationTimeZone?: unknown
@@ -3868,7 +3772,6 @@ async function performLockedCancel(args: {
   await cancelBookingAppointmentReminders({
     tx: args.tx,
     bookingId: booking.id,
-    clientId: booking.clientId,
   })
 
 await maybeCreateBookingCancelledNotification({
@@ -3884,6 +3787,7 @@ await maybeCreateBookingCancelledNotification({
     actor: args.actor,
     reason: args.reason,
   })
+  
 
   await bumpProfessionalScheduleVersion(booking.professionalId)
 
@@ -5585,8 +5489,13 @@ async function performLockedRescheduleBookingFromHold(args: {
     } satisfies Prisma.BookingSelect,
   })
 
-    await args.tx.bookingHold.delete({
+  await args.tx.bookingHold.delete({
     where: { id: hold.id },
+  })
+
+  await syncBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: updated.id,
   })
 
   await createProBookingRescheduledNotification({
@@ -5864,18 +5773,9 @@ const offeringIds = Array.from(
   },
 })
 
-await cancelBookingAppointmentReminders({
+await syncBookingAppointmentReminders({
   tx: args.tx,
   bookingId: booking.id,
-  clientId: booking.clientId,
-})
-
-await scheduleBookingAppointmentReminders({
-  tx: args.tx,
-  clientId: booking.clientId,
-  bookingId: booking.id,
-  scheduledFor: booking.scheduledFor,
-  href: `/client/bookings/${booking.id}?step=overview`,
 })
 
 await createBookingCloseoutAuditLog({
@@ -6359,8 +6259,12 @@ if (args.openingId) {
     where: { id: hold.id },
   })
 
-  await bumpProfessionalScheduleVersion(created.professionalId)
+  await syncBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: created.id,
+  })
 
+  await bumpProfessionalScheduleVersion(created.professionalId)
   return {
     booking: {
       id: created.id,
@@ -6693,14 +6597,9 @@ await createUpdateClientNotification({
   },
 })
 
-await scheduleBookingAppointmentReminders({
+await syncBookingAppointmentReminders({
   tx: args.tx,
-  clientId: args.clientId,
   bookingId: booking.id,
-  scheduledFor: requestedStart,
-  href: `/client/bookings/${booking.id}?step=overview`,
-  timeZone: locationContext.timeZone,
-  serviceName: offering.service.name || 'Appointment',
 })
   
 if (
@@ -7116,6 +7015,11 @@ async function performLockedCreateRebookedBooking(
     },
   })
 
+  await syncBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: createdBooking.id,
+  })
+
   await bumpProfessionalScheduleVersion(source.professionalId)
 
   return {
@@ -7282,7 +7186,6 @@ async function performLockedUpdateProBooking(args: {
   await cancelBookingAppointmentReminders({
     tx: args.tx,
     bookingId: updated.id,
-    clientId: existing.clientId,
   })
 
 if (args.notifyClient) {
@@ -7674,24 +7577,14 @@ if (args.notifyClient) {
 }
 
   if (
-  updated.status === BookingStatus.ACCEPTED &&
-  (args.nextStatus === BookingStatus.ACCEPTED || occupancyChanged)
-) {
-  await cancelBookingAppointmentReminders({
-    tx: args.tx,
-    bookingId: updated.id,
-    clientId: existing.clientId,
-  })
-
-  await scheduleBookingAppointmentReminders({
-    tx: args.tx,
-    clientId: existing.clientId,
-    bookingId: updated.id,
-    scheduledFor: new Date(updated.scheduledFor),
-    href: `/client/bookings/${updated.id}?step=overview`,
-    timeZone: appointmentTimeZone,
-  })
-}
+    updated.status === BookingStatus.ACCEPTED &&
+    (args.nextStatus === BookingStatus.ACCEPTED || occupancyChanged)
+  ) {
+    await syncBookingAppointmentReminders({
+      tx: args.tx,
+      bookingId: updated.id,
+    })
+  }
 
 if (args.notifyClient) {
   const isConfirm = args.nextStatus === BookingStatus.ACCEPTED

@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   txBookingUpdate: vi.fn(),
 
   upsertClientNotification: vi.fn(),
-  scheduleClientNotification: vi.fn(),
-  cancelScheduledClientNotificationsForBooking: vi.fn(),
+  cancelBookingAppointmentReminders: vi.fn(),
+  syncBookingAppointmentReminders: vi.fn(),
 
   createProNotification: vi.fn(),
 
@@ -49,9 +49,12 @@ vi.mock('@/lib/booking/scheduleLock', () => ({
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: mocks.upsertClientNotification,
-  scheduleClientNotification: mocks.scheduleClientNotification,
-  cancelScheduledClientNotificationsForBooking:
-    mocks.cancelScheduledClientNotificationsForBooking,
+}))
+
+vi.mock('@/lib/notifications/appointmentReminders', () => ({
+  cancelBookingAppointmentReminders:
+    mocks.cancelBookingAppointmentReminders,
+  syncBookingAppointmentReminders: mocks.syncBookingAppointmentReminders,
 }))
 
 vi.mock('@/lib/notifications/proNotifications', () => ({
@@ -103,6 +106,8 @@ describe('lib/booking/writeBoundary', () => {
     )
 
     mocks.createProNotification.mockResolvedValue(undefined)
+    mocks.cancelBookingAppointmentReminders.mockResolvedValue(undefined)
+    mocks.syncBookingAppointmentReminders.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -160,13 +165,10 @@ describe('lib/booking/writeBoundary', () => {
     })
 
     expect(
-      mocks.cancelScheduledClientNotificationsForBooking,
+      mocks.cancelBookingAppointmentReminders,
     ).toHaveBeenCalledWith({
       tx,
       bookingId: 'booking_1',
-      clientId: 'client_1',
-      eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
-      onlyPending: true,
     })
 
     expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
@@ -244,7 +246,7 @@ describe('lib/booking/writeBoundary', () => {
     expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
     expect(mocks.createProNotification).not.toHaveBeenCalled()
     expect(
-      mocks.cancelScheduledClientNotificationsForBooking,
+      mocks.cancelBookingAppointmentReminders,
     ).not.toHaveBeenCalled()
 
     expect(result).toEqual({

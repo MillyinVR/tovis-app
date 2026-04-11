@@ -151,6 +151,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         cancelledAt: null,
         processedAt: null,
+        failedAt: null,
         runAt: {
           lte: expect.any(Date),
         },
@@ -167,6 +168,16 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         dedupeKey: true,
         data: true,
       },
+    })
+
+    expect(mocks.txScheduledFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'sched_1',
+        cancelledAt: null,
+        processedAt: null,
+        failedAt: null,
+      },
+      select: { id: true },
     })
 
     expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
@@ -238,6 +249,16 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
       }),
     )
     const json = await response.json()
+
+    expect(mocks.txScheduledFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'sched_2',
+        cancelledAt: null,
+        processedAt: null,
+        failedAt: null,
+      },
+      select: { id: true },
+    })
 
     expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
     expect(mocks.txScheduledUpdate).not.toHaveBeenCalled()
@@ -312,6 +333,54 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
           error: 'Reminder delivery failed',
         },
       ],
+    })
+  })
+
+  it('does not pick already failed rows in the due query', async () => {
+    mocks.prismaScheduledFindMany.mockResolvedValue([])
+
+    const response = await GET(
+      makeRequest({
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer test-secret',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(mocks.prismaScheduledFindMany).toHaveBeenCalledWith({
+      where: {
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+        cancelledAt: null,
+        processedAt: null,
+        failedAt: null,
+        runAt: {
+          lte: expect.any(Date),
+        },
+      },
+      orderBy: [{ runAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      take: 100,
+      select: {
+        id: true,
+        clientId: true,
+        bookingId: true,
+        eventKey: true,
+        runAt: true,
+        href: true,
+        dedupeKey: true,
+        data: true,
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(json).toEqual({
+      ok: true,
+      scannedCount: 0,
+      processedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      failed: [],
     })
   })
 })

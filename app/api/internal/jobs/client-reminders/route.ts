@@ -21,6 +21,14 @@ type DueReminderRow = {
   data: Prisma.JsonValue | null
 }
 
+type ParsedReminderPayload = {
+  reminderKind: ReminderKind
+  scheduledFor: Date | null
+  timeZone: string | null
+  serviceName: string | null
+  professionalName: string | null
+}
+
 function readTake(req: Request): number {
   const url = new URL(req.url)
   const raw = url.searchParams.get('take')
@@ -96,13 +104,7 @@ function formatWhen(date: Date | null, timeZone: string | null): string | null {
   }
 }
 
-function parseReminderPayload(data: Prisma.JsonValue | null): {
-  reminderKind: ReminderKind
-  scheduledFor: Date | null
-  timeZone: string | null
-  serviceName: string | null
-  professionalName: string | null
-} {
+function parseReminderPayload(data: Prisma.JsonValue | null): ParsedReminderPayload {
   if (!isRecord(data)) {
     return {
       reminderKind: 'UNKNOWN',
@@ -213,6 +215,7 @@ async function processReminder(row: DueReminderRow): Promise<{
           id: row.id,
           cancelledAt: null,
           processedAt: null,
+          failedAt: null,
         },
         select: { id: true },
       })
@@ -293,6 +296,7 @@ async function runJob(req: Request) {
       eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
       cancelledAt: null,
       processedAt: null,
+      failedAt: null,
       runAt: {
         lte: now,
       },
