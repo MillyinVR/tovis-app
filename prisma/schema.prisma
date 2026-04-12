@@ -205,6 +205,21 @@ enum ConsultationApprovalStatus {
   REJECTED
 }
 
+enum ConsultationDecision {
+  APPROVED
+  REJECTED
+}
+
+enum ConsultationApprovalProofMethod {
+  REMOTE_SECURE_LINK
+  IN_PERSON_PRO_DEVICE
+}
+
+enum ClientActionTokenKind {
+  CONSULTATION_ACTION
+  AFTERCARE_ACCESS
+}
+
 enum NfcCardType {
   UNASSIGNED
   CLIENT_REFERRAL
@@ -303,6 +318,10 @@ enum BookingCloseoutAuditAction {
   CONSULTATION_PROPOSAL_SENT
   CONSULTATION_APPROVED
   CONSULTATION_REJECTED
+  CONSULTATION_APPROVED_REMOTE
+  CONSULTATION_REJECTED_REMOTE
+  CONSULTATION_APPROVED_IN_PERSON
+  CONSULTATION_REJECTED_IN_PERSON
   PAYMENT_METHOD_UPDATED
   PAYMENT_AUTHORIZED
   PAYMENT_COLLECTED
@@ -627,7 +646,99 @@ model ConsultationApproval {
   clientId String?
   proId    String?
 
+  proof              ConsultationApprovalProof?
+  clientActionTokens ClientActionToken[]
+
   @@index([status])
+}
+
+model ClientActionToken {
+  id String @id @default(cuid())
+
+  kind      ClientActionTokenKind
+  tokenHash String                @unique @db.VarChar(128)
+  singleUse Boolean               @default(true)
+
+  bookingId              String
+  consultationApprovalId String?
+  aftercareSummaryId     String?
+  clientId               String
+  professionalId         String
+
+  deliveryMethod         ContactMethod?
+  recipientEmailSnapshot String?        @db.VarChar(320)
+  recipientPhoneSnapshot String?        @db.VarChar(32)
+
+  issuedByUserId String?
+
+  expiresAt   DateTime
+  firstUsedAt DateTime?
+  lastUsedAt  DateTime?
+  useCount    Int       @default(0)
+
+  revokedAt    DateTime?
+  revokeReason String?
+
+  metadata Json?
+
+  booking              Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  consultationApproval ConsultationApproval? @relation(fields: [consultationApprovalId], references: [id], onDelete: Cascade)
+  aftercareSummary     AftercareSummary?     @relation(fields: [aftercareSummaryId], references: [id], onDelete: Cascade)
+  client               ClientProfile         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional         ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  issuedByUser         User?                 @relation("IssuedClientActionTokens", fields: [issuedByUserId], references: [id], onDelete: SetNull)
+
+  proof ConsultationApprovalProof? @relation("ConsultationProofActionToken")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, expiresAt])
+  @@index([bookingId, kind, createdAt])
+  @@index([consultationApprovalId, kind, createdAt])
+  @@index([aftercareSummaryId, kind, createdAt])
+  @@index([clientId, kind, createdAt])
+  @@index([professionalId, kind, createdAt])
+  @@index([issuedByUserId, createdAt])
+}
+
+model ConsultationApprovalProof {
+  id String @id @default(cuid())
+
+  consultationApprovalId String @unique
+  bookingId              String @unique
+  clientId               String
+  professionalId         String
+
+  decision ConsultationDecision
+  method   ConsultationApprovalProofMethod
+
+  actedAt DateTime @default(now())
+
+  recordedByUserId    String?
+  clientActionTokenId String? @unique
+
+  contactMethod       ContactMethod?
+  destinationSnapshot String?        @db.VarChar(320)
+  ipAddress           String?        @db.VarChar(64)
+  userAgent           String?
+  contextJson         Json?
+
+  consultationApproval ConsultationApproval @relation(fields: [consultationApprovalId], references: [id], onDelete: Cascade)
+  booking              Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  client               ClientProfile        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional         ProfessionalProfile  @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  recordedByUser       User?                @relation("RecordedConsultationApprovalProofs", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  clientActionToken    ClientActionToken?   @relation("ConsultationProofActionToken", fields: [clientActionTokenId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId, actedAt])
+  @@index([professionalId, actedAt])
+  @@index([method, actedAt])
+  @@index([decision, actedAt])
+  @@index([recordedByUserId, actedAt])
 }
 
 model AdminPermission {
@@ -674,11 +785,13 @@ model User {
   sentMessages       Message[]                  @relation("UserSentMessages")
   threadParticipants MessageThreadParticipant[] @relation("UserThreadParticipants")
 
-  notificationActor        Notification[]            @relation("NotificationActor")
-  notificationDispatches   NotificationDispatch[]    @relation("UserNotificationDispatches")
-  bookingOverrideAuditLogs BookingOverrideAuditLog[] @relation("BookingOverrideActor")
-  acceptedProClientInvites ProClientInvite[]         @relation("ProClientInviteAcceptedByUser")
-  revokedProClientInvites  ProClientInvite[]         @relation("ProClientInviteRevokedByUser")
+  notificationActor                  Notification[]              @relation("NotificationActor")
+  notificationDispatches             NotificationDispatch[]      @relation("UserNotificationDispatches")
+  issuedClientActionTokens           ClientActionToken[]         @relation("IssuedClientActionTokens")
+  recordedConsultationApprovalProofs ConsultationApprovalProof[] @relation("RecordedConsultationApprovalProofs")
+  bookingOverrideAuditLogs           BookingOverrideAuditLog[]   @relation("BookingOverrideActor")
+  acceptedProClientInvites           ProClientInvite[]           @relation("ProClientInviteAcceptedByUser")
+  revokedProClientInvites            ProClientInvite[]           @relation("ProClientInviteRevokedByUser")
 
   bookingOverridePermissionsGranted BookingOverridePermission[] @relation("BookingOverridePermissionGrantedBy")
   bookingOverridePermissionsRevoked BookingOverridePermission[] @relation("BookingOverridePermissionRevokedBy")
@@ -769,14 +882,16 @@ model ClientProfile {
 
   addresses ClientAddress[]
 
-  intentEvents            ClientIntentEvent[]
-  lastMinuteRecipients    LastMinuteRecipient[]
-  notificationSettings    ClientNotificationSettings?
-  notificationDispatches  NotificationDispatch[]         @relation("ClientProfileNotificationDispatches")
-  notificationPreferences ClientNotificationPreference[]
-  messageThreads          MessageThread[]                @relation("ClientThreads")
-  viralRequests           ViralServiceRequest[]
-  alertBanner             String?
+  intentEvents               ClientIntentEvent[]
+  lastMinuteRecipients       LastMinuteRecipient[]
+  notificationSettings       ClientNotificationSettings?
+  notificationDispatches     NotificationDispatch[]         @relation("ClientProfileNotificationDispatches")
+  notificationPreferences    ClientNotificationPreference[]
+  consultationApprovalProofs ConsultationApprovalProof[]
+  clientActionTokens         ClientActionToken[]
+  messageThreads             MessageThread[]                @relation("ClientThreads")
+  viralRequests              ViralServiceRequest[]
+  alertBanner                String?
 
   bookings               Booking[]
   proClientInvites       ProClientInvite[]
@@ -860,17 +975,19 @@ model ProfessionalProfile {
   bookings       Booking[]
   calendarBlocks CalendarBlock[]
 
-  notifications           Notification[]
-  notificationDispatches  NotificationDispatch[]               @relation("ProfessionalNotificationDispatches")
-  notificationPreferences ProfessionalNotificationPreference[]
+  notifications              Notification[]
+  notificationDispatches     NotificationDispatch[]               @relation("ProfessionalNotificationDispatches")
+  notificationPreferences    ProfessionalNotificationPreference[]
+  consultationApprovalProofs ConsultationApprovalProof[]
+  clientActionTokens         ClientActionToken[]
   // Licensing / verification (unchanged)
-  professionType          ProfessionType?
-  licenseNumber           String?
-  licenseState            String?
-  licenseExpiry           DateTime?
-  licenseVerified         Boolean                              @default(false)
-  verificationStatus      VerificationStatus                   @default(PENDING)
-  verificationDocs        VerificationDocument[]
+  professionType             ProfessionType?
+  licenseNumber              String?
+  licenseState               String?
+  licenseExpiry              DateTime?
+  licenseVerified            Boolean                              @default(false)
+  verificationStatus         VerificationStatus                   @default(PENDING)
+  verificationDocs           VerificationDocument[]
 
   // License verification metadata (new)
   licenseVerifiedAt     DateTime?
@@ -1467,11 +1584,13 @@ model Booking {
   rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
   rebooks  Booking[] @relation("RebookChain")
 
-  consultation            BookingConsultation?
-  consultationNotes       String?
-  consultationPrice       Decimal?              @db.Decimal(10, 2)
-  consultationConfirmedAt DateTime?
-  consultationApproval    ConsultationApproval?
+  consultation              BookingConsultation?
+  consultationNotes         String?
+  consultationPrice         Decimal?                   @db.Decimal(10, 2)
+  consultationConfirmedAt   DateTime?
+  consultationApproval      ConsultationApproval?
+  consultationApprovalProof ConsultationApprovalProof?
+  clientActionTokens        ClientActionToken[]
 
   aftercareSummary             AftercareSummary?
   clientNotifications          ClientNotification[]
@@ -1734,6 +1853,7 @@ model AftercareSummary {
 
   recommendedProducts ProductRecommendation[]
   clientNotifications ClientNotification[]
+  clientActionTokens  ClientActionToken[]
 }
 
 model Product {
