@@ -142,6 +142,46 @@ function inferPreferredContactMethod(args: {
   return null
 }
 
+async function tryCreateInvite(args: {
+  professionalId: string
+  bookingId: string
+  normalizedClient: NewClientInput | null
+}): Promise<CreatedInviteResult | null> {
+  const invitedName = buildInvitedName(args.normalizedClient)
+  const invitedEmail = normalizeOptionalString(args.normalizedClient?.email)
+  const invitedPhone = normalizeOptionalString(args.normalizedClient?.phone)
+
+  if (!invitedName || (!invitedEmail && !invitedPhone)) {
+    return null
+  }
+
+  try {
+    const createdInvite = await createProClientInvite({
+      professionalId: args.professionalId,
+      bookingId: args.bookingId,
+      invitedName,
+      invitedEmail,
+      invitedPhone,
+      preferredContactMethod: inferPreferredContactMethod({
+        email: invitedEmail,
+        phone: invitedPhone,
+      }),
+    })
+
+    return {
+      id: createdInvite.id,
+      token: createdInvite.token,
+    }
+  } catch (error: unknown) {
+    console.error('createProBookingWithClient invite creation failed', {
+      professionalId: args.professionalId,
+      bookingId: args.bookingId,
+      error,
+    })
+    return null
+  }
+}
+
 export async function createProBookingWithClient(
   args: CreateProBookingWithClientArgs,
 ): Promise<CreateProBookingWithClientResult> {
@@ -189,28 +229,11 @@ export async function createProBookingWithClient(
       resolvedClientClaimStatus: resolvedClient.clientClaimStatus,
     })
   ) {
-    const invitedName = buildInvitedName(normalizedClient)
-    const invitedEmail = normalizeOptionalString(normalizedClient?.email)
-    const invitedPhone = normalizeOptionalString(normalizedClient?.phone)
-
-    if (invitedName && (invitedEmail || invitedPhone)) {
-      const createdInvite = await createProClientInvite({
-        professionalId: args.professionalId,
-        bookingId: bookingResult.booking.id,
-        invitedName,
-        invitedEmail,
-        invitedPhone,
-        preferredContactMethod: inferPreferredContactMethod({
-          email: invitedEmail,
-          phone: invitedPhone,
-        }),
-      })
-
-      invite = {
-        id: createdInvite.id,
-        token: createdInvite.token,
-      }
-    }
+    invite = await tryCreateInvite({
+      professionalId: args.professionalId,
+      bookingId: bookingResult.booking.id,
+      normalizedClient,
+    })
   }
 
   return {

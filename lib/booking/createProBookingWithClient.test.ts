@@ -535,4 +535,69 @@ describe('createProBookingWithClient', () => {
       invite: null,
     })
   })
+  it('still succeeds when invite creation throws and returns invite as null', async () => {
+  mocks.resolveProBookingClient.mockResolvedValueOnce(
+    makeResolvedClient({
+      clientId: 'client_unclaimed_1',
+      clientUserId: null,
+      clientEmail: 'newclient@example.com',
+      clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+    }),
+  )
+
+  mocks.createProClientInvite.mockRejectedValueOnce(
+    new Error('invite creation failed'),
+  )
+
+  const consoleErrorSpy = vi
+    .spyOn(console, 'error')
+    .mockImplementation(() => undefined)
+
+  try {
+    const result = await createProBookingWithClient({
+      professionalId: 'pro_1',
+      actorUserId: 'user_1',
+      overrideReason: null,
+      client: {
+        firstName: 'New',
+        lastName: 'Client',
+        email: 'newclient@example.com',
+      },
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
+    expect(mocks.createProClientInvite).toHaveBeenCalledTimes(1)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'createProBookingWithClient invite creation failed',
+      expect.objectContaining({
+        professionalId: 'pro_1',
+        bookingId: 'booking_1',
+        error: expect.any(Error),
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      clientId: 'client_unclaimed_1',
+      clientUserId: null,
+      clientEmail: 'newclient@example.com',
+      clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+      clientAddressId: null,
+      bookingResult: makeBookingResult(),
+      invite: null,
+    })
+  } finally {
+    consoleErrorSpy.mockRestore()
+  }
+})
 })
