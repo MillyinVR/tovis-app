@@ -1,3 +1,4 @@
+// app/api/pro/bookings/route.ts
 import { Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'

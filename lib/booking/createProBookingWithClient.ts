@@ -1,6 +1,8 @@
 import {
   ClientClaimStatus,
   ContactMethod,
+  Prisma,
+  ProClientInviteStatus,
   ServiceLocationType,
 } from '@prisma/client'
 
@@ -11,6 +13,7 @@ import {
 import { createProBooking } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
 import { createProClientInvite } from '@/lib/invites/proClientInvite'
+import { prisma } from '@/lib/prisma'
 
 type NewClientInput = {
   firstName?: unknown
@@ -18,6 +21,19 @@ type NewClientInput = {
   email?: unknown
   phone?: unknown
 }
+
+const inviteClientSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  claimStatus: true,
+} satisfies Prisma.ClientProfileSelect
+
+type InviteClientSnapshot = Prisma.ClientProfileGetPayload<{
+  select: typeof inviteClientSelect
+}>
 
 export type CreateProBookingWithClientArgs = {
   professionalId: string
@@ -94,36 +110,13 @@ function normalizeOptionalString(value: unknown): string | null {
   return normalized ? normalized : null
 }
 
-function hasMeaningfulValue(value: unknown): boolean {
-  if (typeof value === 'string') return value.trim().length > 0
-  return value != null
-}
-
 function shouldAutoCreateInvite(args: {
-  rawClientId?: string | null
-  normalizedClient: NewClientInput | null
   resolvedClientClaimStatus: ClientClaimStatus
 }): boolean {
-  if (typeof args.rawClientId === 'string' && args.rawClientId.trim()) {
-    return false
-  }
-
-  if (args.resolvedClientClaimStatus !== ClientClaimStatus.UNCLAIMED) {
-    return false
-  }
-
-  const client = args.normalizedClient
-  if (!client) return false
-
-  return (
-    hasMeaningfulValue(client.firstName) ||
-    hasMeaningfulValue(client.lastName) ||
-    hasMeaningfulValue(client.email) ||
-    hasMeaningfulValue(client.phone)
-  )
+  return args.resolvedClientClaimStatus === ClientClaimStatus.UNCLAIMED
 }
 
-function buildInvitedName(client: NewClientInput | null): string | null {
+function buildInvitedName(client: InviteClientSnapshot | null): string | null {
   if (!client) return null
 
   const firstName = normalizeOptionalString(client.firstName)
@@ -142,14 +135,38 @@ function inferPreferredContactMethod(args: {
   return null
 }
 
+async function loadInviteClientSnapshot(
+  clientId: string,
+): Promise<InviteClientSnapshot | null> {
+  return prisma.clientProfile.findUnique({
+    where: { id: clientId },
+    select: inviteClientSelect,
+  })
+}
+
 async function tryCreateInvite(args: {
   professionalId: string
   bookingId: string
-  normalizedClient: NewClientInput | null
+  clientId: string
 }): Promise<CreatedInviteResult | null> {
-  const invitedName = buildInvitedName(args.normalizedClient)
-  const invitedEmail = normalizeOptionalString(args.normalizedClient?.email)
-  const invitedPhone = normalizeOptionalString(args.normalizedClient?.phone)
+  const clientSnapshot = await loadInviteClientSnapshot(args.clientId)
+
+  if (!clientSnapshot) {
+    console.error('createProBookingWithClient invite client lookup failed', {
+      professionalId: args.professionalId,
+      bookingId: args.bookingId,
+      clientId: args.clientId,
+    })
+    return null
+  }
+
+  if (clientSnapshot.claimStatus !== ClientClaimStatus.UNCLAIMED) {
+    return null
+  }
+
+  const invitedName = buildInvitedName(clientSnapshot)
+  const invitedEmail = normalizeOptionalString(clientSnapshot.email)
+  const invitedPhone = normalizeOptionalString(clientSnapshot.phone)
 
   if (!invitedName || (!invitedEmail && !invitedPhone)) {
     return null
@@ -168,6 +185,14 @@ async function tryCreateInvite(args: {
       }),
     })
 
+    if (
+      createdInvite.status !== ProClientInviteStatus.PENDING ||
+      createdInvite.acceptedAt != null ||
+      createdInvite.revokedAt != null
+    ) {
+      return null
+    }
+
     return {
       id: createdInvite.id,
       token: createdInvite.token,
@@ -176,6 +201,7 @@ async function tryCreateInvite(args: {
     console.error('createProBookingWithClient invite creation failed', {
       professionalId: args.professionalId,
       bookingId: args.bookingId,
+      clientId: args.clientId,
       error,
     })
     return null
@@ -224,15 +250,13 @@ export async function createProBookingWithClient(
 
   if (
     shouldAutoCreateInvite({
-      rawClientId: args.clientId,
-      normalizedClient,
       resolvedClientClaimStatus: resolvedClient.clientClaimStatus,
     })
   ) {
     invite = await tryCreateInvite({
       professionalId: args.professionalId,
       bookingId: bookingResult.booking.id,
-      normalizedClient,
+      clientId: resolvedClient.clientId,
     })
   }
 

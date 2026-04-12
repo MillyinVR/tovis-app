@@ -13,6 +13,8 @@ const {
   ProfessionType,
   ProfessionalLocationType,
   VerificationStatus,
+  ClientClaimStatus,
+  ContactMethod,
 } = require('@prisma/client')
 const bcrypt = require('bcrypt')
 
@@ -226,6 +228,116 @@ async function upsertClientUser({ email, password }) {
   })
 
   return { user, clientProfile }
+}
+
+function normalizeOptionalPhone(value) {
+  if (value == null) return null
+  if (typeof value !== 'string') {
+    throw new Error('Phone must be a string')
+  }
+
+  const phone = value.trim()
+  return phone || null
+}
+
+async function upsertUnclaimedClientProfile({
+  firstName,
+  lastName,
+  email = null,
+  phone = null,
+  preferredContactMethod = null,
+}) {
+  const normalizedFirstName =
+    typeof firstName === 'string' ? firstName.trim() : ''
+  const normalizedLastName =
+    typeof lastName === 'string' ? lastName.trim() : ''
+  const normalizedEmail = email == null ? null : normalizeEmail(email)
+  const normalizedPhone = normalizeOptionalPhone(phone)
+
+  if (!normalizedFirstName || !normalizedLastName) {
+    throw new Error('Unclaimed client firstName and lastName are required')
+  }
+
+  if (!normalizedEmail && !normalizedPhone) {
+    throw new Error(
+      'Unclaimed client requires either email or phone',
+    )
+  }
+
+  const existing = normalizedEmail
+    ? await prisma.clientProfile.findUnique({
+        where: { email: normalizedEmail },
+        select: {
+          id: true,
+          userId: true,
+          claimStatus: true,
+          email: true,
+          phone: true,
+        },
+      })
+    : await prisma.clientProfile.findUnique({
+        where: { phone: normalizedPhone },
+        select: {
+          id: true,
+          userId: true,
+          claimStatus: true,
+          email: true,
+          phone: true,
+        },
+      })
+
+  if (existing) {
+    if (existing.userId || existing.claimStatus === ClientClaimStatus.CLAIMED) {
+      throw new Error(
+        `Refusing to overwrite claimed client profile ${existing.id} with unclaimed seed data.`,
+      )
+    }
+
+    return prisma.clientProfile.update({
+      where: { id: existing.id },
+      data: {
+        userId: null,
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+        claimedAt: null,
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        preferredContactMethod,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        claimStatus: true,
+        preferredContactMethod: true,
+      },
+    })
+  }
+
+  return prisma.clientProfile.create({
+    data: {
+      userId: null,
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      claimedAt: null,
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
+      preferredContactMethod,
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      claimStatus: true,
+      preferredContactMethod: true,
+    },
+  })
 }
 
 async function upsertProfessionalUser({ email, password }) {
@@ -478,6 +590,22 @@ async function main() {
     password: adminPassword,
   })
 
+    const unclaimedEmailClient = await upsertUnclaimedClientProfile({
+    firstName: 'Email',
+    lastName: 'Only',
+    email: 'unclaimed-email@test.com',
+    phone: null,
+    preferredContactMethod: ContactMethod.EMAIL,
+  })
+
+  const unclaimedPhoneClient = await upsertUnclaimedClientProfile({
+    firstName: 'Phone',
+    lastName: 'Only',
+    email: null,
+    phone: '+15555550101',
+    preferredContactMethod: ContactMethod.SMS,
+  })
+
   await ensureProfessionalLocation(professionalProfile.id)
 
   const hair = await upsertServiceCategory({
@@ -684,6 +812,8 @@ async function main() {
   console.log('CLIENT login:', { email: clientUser.email, password: clientPassword })
   console.log('ADMIN login:', { email: adminUser.email, password: adminPassword })
   console.log('PRO profile id:', professionalProfile.id)
+  console.log('UNCLAIMED email client:', unclaimedEmailClient)
+  console.log('UNCLAIMED phone client:', unclaimedPhoneClient) 
 
   const look1 = await upsertMediaAsset({
     professionalId: professionalProfile.id,

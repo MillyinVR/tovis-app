@@ -427,4 +427,120 @@ describe('upsertProClient', () => {
       claimStatus: ClientClaimStatus.UNCLAIMED,
     })
   })
+    it('returns IDENTITY_CONFLICT when email and phone match different user accounts', async () => {
+    mocks.prisma.clientProfile.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+
+    mocks.prisma.user.findMany.mockResolvedValueOnce([
+      makeUser({
+        id: 'user_email_1',
+        role: Role.CLIENT,
+        email: 'tori@example.com',
+        phone: null,
+      }),
+      makeUser({
+        id: 'user_phone_1',
+        role: Role.CLIENT,
+        email: null,
+        phone: '+16195551234',
+      }),
+    ])
+
+    const result = await upsertProClient({
+      firstName: 'Tori',
+      lastName: 'Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error:
+        'That email and phone match different user accounts. Please double check with the client before continuing.',
+      code: 'IDENTITY_CONFLICT',
+    })
+  })
+
+  it('does not overwrite populated fields on a matched client profile', async () => {
+    const existingProfile = makeProfile({
+      id: 'client_1',
+      userId: null,
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      claimedAt: null,
+      firstName: 'Existing',
+      lastName: 'Client',
+      email: 'existing@example.com',
+      phone: '+16195550000',
+      user: null,
+    })
+
+    mocks.prisma.clientProfile.findUnique
+      .mockResolvedValueOnce(existingProfile)
+      .mockResolvedValueOnce(null)
+
+    const result = await upsertProClient({
+      firstName: 'New',
+      lastName: 'Name',
+      email: 'existing@example.com',
+      phone: '+16195559999',
+    })
+
+    expect(mocks.prisma.clientProfile.update).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: true,
+      clientId: 'client_1',
+      userId: null,
+      email: 'existing@example.com',
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+    })
+  })
+
+  it('creates a new unclaimed client profile when only phone is provided and no match exists', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValueOnce(null)
+    mocks.prisma.user.findMany.mockResolvedValueOnce([])
+
+    mocks.prisma.clientProfile.create.mockResolvedValueOnce(
+      makeProfile({
+        id: 'client_phone_only_1',
+        userId: null,
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+        claimedAt: null,
+        firstName: 'Phone',
+        lastName: 'Only',
+        email: null,
+        phone: '+16195551234',
+        user: null,
+      }),
+    )
+
+    const result = await upsertProClient({
+      firstName: 'Phone',
+      lastName: 'Only',
+      phone: '+16195551234',
+    })
+
+    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith({
+      data: {
+        userId: null,
+        firstName: 'Phone',
+        lastName: 'Only',
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+        claimedAt: null,
+        email: null,
+        phone: '+16195551234',
+      },
+      select: expect.any(Object),
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      clientId: 'client_phone_only_1',
+      userId: null,
+      email: null,
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+    })
+  })
 })
