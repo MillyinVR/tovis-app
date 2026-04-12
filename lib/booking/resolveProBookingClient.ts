@@ -1,5 +1,6 @@
 import {
   ClientAddressKind,
+  ClientClaimStatus,
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
@@ -8,6 +9,22 @@ import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
+
+const RESOLVED_CLIENT_SELECT = {
+  id: true,
+  userId: true,
+  claimStatus: true,
+  email: true,
+  user: {
+    select: {
+      email: true,
+    },
+  },
+} satisfies Prisma.ClientProfileSelect
+
+type ResolvedClientRecord = Prisma.ClientProfileGetPayload<{
+  select: typeof RESOLVED_CLIENT_SELECT
+}>
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
@@ -138,6 +155,7 @@ export type ResolveProBookingClientResult =
       clientId: string
       clientUserId: string | null
       clientEmail: string | null
+      clientClaimStatus: ClientClaimStatus
       clientAddressId: string | null
     }
   | {
@@ -295,6 +313,18 @@ async function loadOwnedServiceAddress(args: {
   })
 }
 
+async function loadResolvedClientById(args: {
+  db: DbClient
+  clientId: string
+}): Promise<ResolvedClientRecord | null> {
+  return args.db.clientProfile.findUnique({
+    where: {
+      id: args.clientId,
+    },
+    select: RESOLVED_CLIENT_SELECT,
+  })
+}
+
 async function createServiceAddressInDb(args: {
   db: DbClient
   clientId: string
@@ -378,6 +408,7 @@ async function resolveClientIdentity(args: {
       clientId: string
       clientUserId: string | null
       clientEmail: string | null
+      clientClaimStatus: ClientClaimStatus
     }
   | {
       ok: false
@@ -389,11 +420,27 @@ async function resolveClientIdentity(args: {
   const existingClientId = normalizeOptionalId(args.clientId)
 
   if (existingClientId) {
+    const db = getDb(args.tx)
+    const existingClient = await loadResolvedClientById({
+      db,
+      clientId: existingClientId,
+    })
+
+    if (!existingClient) {
+      return {
+        ok: false,
+        status: 404,
+        error: 'Client not found.',
+        code: 'CLIENT_NOT_FOUND',
+      }
+    }
+
     return {
       ok: true,
-      clientId: existingClientId,
-      clientUserId: null,
-      clientEmail: null,
+      clientId: existingClient.id,
+      clientUserId: existingClient.userId,
+      clientEmail: existingClient.email ?? existingClient.user?.email ?? null,
+      clientClaimStatus: existingClient.claimStatus,
     }
   }
 
@@ -425,6 +472,7 @@ async function resolveClientIdentity(args: {
     clientId: upserted.clientId,
     clientUserId: upserted.userId,
     clientEmail: upserted.email,
+    clientClaimStatus: upserted.claimStatus,
   }
 }
 
@@ -450,6 +498,7 @@ export async function resolveProBookingClient(
       clientUserId: resolvedClient.clientUserId,
       clientEmail: resolvedClient.clientEmail,
       clientAddressId: null,
+      clientClaimStatus: resolvedClient.clientClaimStatus,
     }
   }
 
@@ -476,6 +525,7 @@ export async function resolveProBookingClient(
       clientId: resolvedClient.clientId,
       clientUserId: resolvedClient.clientUserId,
       clientEmail: resolvedClient.clientEmail,
+      clientClaimStatus: resolvedClient.clientClaimStatus,
       clientAddressId: ownedAddress.id,
     }
   }
@@ -511,6 +561,7 @@ export async function resolveProBookingClient(
     clientId: resolvedClient.clientId,
     clientUserId: resolvedClient.clientUserId,
     clientEmail: resolvedClient.clientEmail,
+    clientClaimStatus: resolvedClient.clientClaimStatus,
     clientAddressId: createdAddress.id,
   }
 }

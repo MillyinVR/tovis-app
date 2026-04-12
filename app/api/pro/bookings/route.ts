@@ -1,15 +1,14 @@
-// app/api/pro/bookings/route.ts
 import { Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
+import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
-import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
 import { isRecord } from '@/lib/guards'
 import { moneyToString } from '@/lib/money'
 import { pickBool, pickInt } from '@/lib/pick'
@@ -179,7 +178,9 @@ export async function POST(req: Request) {
             bookingResult.booking.scheduledFor,
           ).toISOString(),
           endsAt: endsAt.toISOString(),
-          totalDurationMinutes: Number(bookingResult.booking.totalDurationMinutes),
+          totalDurationMinutes: Number(
+            bookingResult.booking.totalDurationMinutes,
+          ),
           bufferMinutes: Number(bookingResult.booking.bufferMinutes),
           status: bookingResult.booking.status,
           serviceName: bookingResult.serviceName,
@@ -197,6 +198,7 @@ export async function POST(req: Request) {
           id: result.clientId,
           userId: result.clientUserId,
           email: result.clientEmail,
+          claimStatus: result.clientClaimStatus,
         },
         invite: result.invite,
       },

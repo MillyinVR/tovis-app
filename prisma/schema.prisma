@@ -372,6 +372,11 @@ enum ContactMethod {
   SMS
 }
 
+enum ClientClaimStatus {
+  UNCLAIMED
+  CLAIMED
+}
+
 enum ProClientInviteStatus {
   PENDING
   ACCEPTED
@@ -653,7 +658,7 @@ model AdminPermission {
 
 model User {
   id                 String                     @id @default(cuid())
-  email              String                     @unique
+  email              String?                    @unique @db.VarChar(320)
   phone              String?                    @unique @db.VarChar(32) // E.164 preferred: +16195551234
   phoneVerifiedAt    DateTime?
   emailVerifiedAt    DateTime?
@@ -741,18 +746,24 @@ model EmailVerificationToken {
 }
 
 model ClientProfile {
-  id              String    @id @default(cuid())
-  userId          String    @unique
-  firstName       String    @default("")
-  lastName        String    @default("")
-  phone           String?
+  id              String            @id @default(cuid())
+  userId          String?           @unique
+
+  firstName       String            @default("")
+  lastName        String            @default("")
+
+  claimStatus     ClientClaimStatus @default(UNCLAIMED)
+  claimedAt       DateTime?
+
+  email           String?           @unique @db.VarChar(320)
+  phone           String?           @unique @db.VarChar(32)
   phoneVerifiedAt DateTime?
   avatarUrl       String?
 
   dateOfBirth DateTime?
   preferredContactMethod ContactMethod?
 
-  user User @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   addresses ClientAddress[]
 
@@ -774,6 +785,8 @@ model ClientProfile {
   notifications          ClientNotification[]
   scheduledNotifications ScheduledClientNotification[]
   waitlistEntries        WaitlistEntry[]
+  
+  @@index([claimStatus])
 }
 
 model ClientAddress {

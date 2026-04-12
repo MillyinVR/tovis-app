@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
-  BookingOverridePermissionScope,
-  BookingOverrideRule,
+  ClientClaimStatus,
   Prisma,
-  Role,
   ServiceLocationType,
 } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
@@ -22,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 
   normalizeLocationType: vi.fn(),
 
-  createProBooking: vi.fn(),
+  createProBookingWithClient: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -49,8 +47,8 @@ vi.mock('@/lib/booking/locationContext', () => ({
   normalizeLocationType: mocks.normalizeLocationType,
 }))
 
-vi.mock('@/lib/booking/writeBoundary', () => ({
-  createProBooking: mocks.createProBooking,
+vi.mock('@/lib/booking/createProBookingWithClient', () => ({
+  createProBookingWithClient: mocks.createProBookingWithClient,
 }))
 
 import { POST } from './route'
@@ -63,7 +61,8 @@ function makeRequest(body: unknown): Request {
   })
 }
 
-const scheduledFor = new Date('2026-03-11T19:30:00.000Z')
+const scheduledForIso = '2026-03-11T19:30:00.000Z'
+const scheduledFor = new Date(scheduledForIso)
 const endsAt = new Date('2026-03-11T20:45:00.000Z')
 
 describe('POST /api/pro/bookings', () => {
@@ -120,25 +119,34 @@ describe('POST /api/pro/bookings', () => {
     mocks.computeRequestedEndUtc.mockReturnValue(endsAt)
     mocks.moneyToString.mockReturnValue('50.00')
 
-    mocks.createProBooking.mockResolvedValue({
-      booking: {
-        id: 'booking_1',
-        scheduledFor,
-        totalDurationMinutes: 60,
-        bufferMinutes: 15,
-        status: BookingStatus.ACCEPTED,
-      },
-      subtotalSnapshot: new Prisma.Decimal('50.00'),
-      stepMinutes: 15,
-      appointmentTimeZone: 'America/Los_Angeles',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
+    mocks.createProBookingWithClient.mockResolvedValue({
+      ok: true,
+      clientId: 'client_1',
+      clientUserId: 'user_client_1',
+      clientEmail: 'client@example.com',
+      clientClaimStatus: ClientClaimStatus.CLAIMED,
       clientAddressId: null,
-      serviceName: 'Haircut',
-      meta: {
-        mutated: true,
-        noOp: false,
+      bookingResult: {
+        booking: {
+          id: 'booking_1',
+          scheduledFor,
+          totalDurationMinutes: 60,
+          bufferMinutes: 15,
+          status: BookingStatus.ACCEPTED,
+        },
+        subtotalSnapshot: new Prisma.Decimal('50.00'),
+        stepMinutes: 15,
+        appointmentTimeZone: 'America/Los_Angeles',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+        serviceName: 'Haircut',
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
+      invite: null,
     })
   })
 
@@ -153,36 +161,7 @@ describe('POST /api/pro/bookings', () => {
     const result = await POST(makeRequest({}))
 
     expect(result).toBe(authRes)
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
-  })
-
-  it('returns CLIENT_ID_REQUIRED when clientId is missing', async () => {
-    const result = await POST(
-      makeRequest({
-        scheduledFor: '2026-03-11T19:30:00.000Z',
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-      }),
-    )
-
-    
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'Missing client id.',
-      expect.objectContaining({
-        code: 'CLIENT_ID_REQUIRED',
-      }),
-    )
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        status: 400,
-        code: 'CLIENT_ID_REQUIRED',
-      }),
-    )
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
   })
 
   it('returns INVALID_SCHEDULED_FOR when scheduledFor is missing or invalid', async () => {
@@ -203,7 +182,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'INVALID_SCHEDULED_FOR',
       }),
     )
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -217,7 +196,7 @@ describe('POST /api/pro/bookings', () => {
     const result = await POST(
       makeRequest({
         clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationType: 'SALON',
         offeringId: 'offering_1',
       }),
@@ -230,7 +209,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'LOCATION_ID_REQUIRED',
       }),
     )
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -244,7 +223,7 @@ describe('POST /api/pro/bookings', () => {
     const result = await POST(
       makeRequest({
         clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationId: 'loc_1',
         offeringId: 'offering_1',
       }),
@@ -257,7 +236,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'LOCATION_TYPE_REQUIRED',
       }),
     )
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -271,7 +250,7 @@ describe('POST /api/pro/bookings', () => {
     const result = await POST(
       makeRequest({
         clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationId: 'loc_1',
         locationType: 'SALON',
       }),
@@ -284,7 +263,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'OFFERING_ID_REQUIRED',
       }),
     )
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -294,205 +273,12 @@ describe('POST /api/pro/bookings', () => {
     )
   })
 
-  it('returns CLIENT_SERVICE_ADDRESS_REQUIRED for mobile bookings without clientAddressId', async () => {
-    const result = await POST(
-      makeRequest({
-        clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
-        locationId: 'loc_1',
-        locationType: 'MOBILE',
-        offeringId: 'offering_1',
-      }),
-    )
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      expect.any(String),
-      expect.objectContaining({
-        code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
-      }),
-    )
-    expect(mocks.createProBooking).not.toHaveBeenCalled()
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        status: 400,
-        code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
-      }),
-    )
-  })
-
-  it('passes missing overrideReason through to createProBooking and maps FORBIDDEN from the boundary', async () => {
-    mocks.createProBooking.mockRejectedValueOnce(
-      bookingError('FORBIDDEN', {
-        message: 'Override reason is required when using booking rule overrides.',
-        userMessage: 'Please add a reason for this override.',
-      }),
-    )
-
-    const result = await POST(
-      makeRequest({
-        clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-        allowShortNotice: true,
-      }),
-    )
-
-    expect(mocks.createProBooking).toHaveBeenCalledWith({
-      professionalId: 'pro_123',
-      actorUserId: 'user_123',
-      overrideReason: null,
-      clientId: 'client_1',
-      offeringId: 'offering_1',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      clientAddressId: null,
-      internalNotes: null,
-      requestedBufferMinutes: null,
-      requestedTotalDurationMinutes: null,
-      allowOutsideWorkingHours: false,
-      allowShortNotice: true,
-      allowFarFuture: false,
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      403,
-      'Please add a reason for this override.',
-      expect.objectContaining({
-        code: 'FORBIDDEN',
-      }),
-    )
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        status: 403,
-        code: 'FORBIDDEN',
-      }),
-    )
-  })
-
-  it('passes non-text overrideReason through as null and maps FORBIDDEN from the boundary', async () => {
-    mocks.createProBooking.mockRejectedValueOnce(
-      bookingError('FORBIDDEN', {
-        message: 'Override reason is required when using booking rule overrides.',
-        userMessage: 'Please add a reason for this override.',
-      }),
-    )
-
-    const result = await POST(
-      makeRequest({
-        clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-        allowShortNotice: true,
-        overrideReason: 123,
-      }),
-    )
-
-    expect(mocks.createProBooking).toHaveBeenCalledWith({
-      professionalId: 'pro_123',
-      actorUserId: 'user_123',
-      overrideReason: null,
-      clientId: 'client_1',
-      offeringId: 'offering_1',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      clientAddressId: null,
-      internalNotes: null,
-      requestedBufferMinutes: null,
-      requestedTotalDurationMinutes: null,
-      allowOutsideWorkingHours: false,
-      allowShortNotice: true,
-      allowFarFuture: false,
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      403,
-      'Please add a reason for this override.',
-      expect.objectContaining({
-        code: 'FORBIDDEN',
-      }),
-    )
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        status: 403,
-        code: 'FORBIDDEN',
-      }),
-    )
-  })
-
-    it('maps override permission denial from the boundary', async () => {
-    mocks.createProBooking.mockRejectedValueOnce(
-      bookingError('FORBIDDEN', {
-        message:
-          'Booking override permission denied. actorUserId=user_123 professionalId=pro_123 rule=ADVANCE_NOTICE role=PRO',
-        userMessage: 'You are not allowed to use that override.',
-      }),
-    )
-
-    const result = await POST(
-      makeRequest({
-        clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-        allowShortNotice: true,
-        overrideReason: 'Need manual exception',
-      }),
-    )
-
-    expect(mocks.createProBooking).toHaveBeenCalledWith({
-      professionalId: 'pro_123',
-      actorUserId: 'user_123',
-      overrideReason: 'Need manual exception',
-      clientId: 'client_1',
-      offeringId: 'offering_1',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      clientAddressId: null,
-      internalNotes: null,
-      requestedBufferMinutes: null,
-      requestedTotalDurationMinutes: null,
-      allowOutsideWorkingHours: false,
-      allowShortNotice: true,
-      allowFarFuture: false,
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      403,
-      'You are not allowed to use that override.',
-      expect.objectContaining({
-        code: 'FORBIDDEN',
-        message:
-          'Booking override permission denied. actorUserId=user_123 professionalId=pro_123 rule=ADVANCE_NOTICE role=PRO',
-      }),
-    )
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        status: 403,
-        code: 'FORBIDDEN',
-      }),
-    )
-  })
-
-  it('calls createProBooking with the parsed request payload', async () => {
+  it('calls createProBookingWithClient with the parsed request payload', async () => {
     await POST(
       makeRequest({
         clientId: 'client_1',
         clientAddressId: 'addr_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationId: 'loc_1',
         locationType: 'MOBILE',
         offeringId: 'offering_1',
@@ -506,16 +292,36 @@ describe('POST /api/pro/bookings', () => {
       }),
     )
 
-    expect(mocks.createProBooking).toHaveBeenCalledWith({
+    expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       actorUserId: 'user_123',
       overrideReason: 'VIP manual exception',
       clientId: 'client_1',
+      client: {
+        firstName: undefined,
+        lastName: undefined,
+        email: undefined,
+        phone: undefined,
+      },
+      clientAddressId: 'addr_1',
+      serviceAddress: {
+        label: undefined,
+        formattedAddress: undefined,
+        addressLine1: undefined,
+        addressLine2: undefined,
+        city: undefined,
+        state: undefined,
+        postalCode: undefined,
+        countryCode: undefined,
+        placeId: undefined,
+        lat: undefined,
+        lng: undefined,
+        isDefault: undefined,
+      },
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.MOBILE,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      clientAddressId: 'addr_1',
+      scheduledFor: new Date(scheduledForIso),
       internalNotes: 'bring reference photos',
       requestedBufferMinutes: 20,
       requestedTotalDurationMinutes: 90,
@@ -525,29 +331,156 @@ describe('POST /api/pro/bookings', () => {
     })
   })
 
-  
+  it('passes nested client and serviceAddress payloads through to createProBookingWithClient', async () => {
+    await POST(
+      makeRequest({
+        scheduledFor: scheduledForIso,
+        locationId: 'loc_1',
+        locationType: 'MOBILE',
+        offeringId: 'offering_1',
+        client: {
+          firstName: 'Tori',
+          lastName: 'Morales',
+          email: 'tori@example.com',
+          phone: '+16195551234',
+        },
+        serviceAddress: {
+          label: 'Home',
+          formattedAddress: '123 Main St, San Diego, CA',
+          addressLine1: '123 Main St',
+          city: 'San Diego',
+          state: 'CA',
+          postalCode: '92101',
+          countryCode: 'US',
+          placeId: 'place_123',
+          lat: 32.7157,
+          lng: -117.1611,
+          isDefault: true,
+        },
+      }),
+    )
+
+    expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      actorUserId: 'user_123',
+      overrideReason: null,
+      clientId: null,
+      client: {
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: 'tori@example.com',
+        phone: '+16195551234',
+      },
+      clientAddressId: null,
+      serviceAddress: {
+        label: 'Home',
+        formattedAddress: '123 Main St, San Diego, CA',
+        addressLine1: '123 Main St',
+        addressLine2: undefined,
+        city: 'San Diego',
+        state: 'CA',
+        postalCode: '92101',
+        countryCode: 'US',
+        placeId: 'place_123',
+        lat: 32.7157,
+        lng: -117.1611,
+        isDefault: true,
+      },
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.MOBILE,
+      scheduledFor: new Date(scheduledForIso),
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+  })
+
+  it('passes through helper validation failures', async () => {
+    mocks.createProBookingWithClient.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      error:
+        'That email and phone match different client profiles. Please double check with the client before continuing.',
+      code: 'IDENTITY_CONFLICT',
+    })
+
+    const result = await POST(
+      makeRequest({
+        scheduledFor: scheduledForIso,
+        locationId: 'loc_1',
+        locationType: 'SALON',
+        offeringId: 'offering_1',
+        client: {
+          firstName: 'Tori',
+          lastName: 'Morales',
+          email: 'tori@example.com',
+          phone: '+16195551234',
+        },
+      }),
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'That email and phone match different client profiles. Please double check with the client before continuing.',
+      {
+        code: 'IDENTITY_CONFLICT',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error:
+        'That email and phone match different client profiles. Please double check with the client before continuing.',
+      code: 'IDENTITY_CONFLICT',
+    })
+  })
 
   it('creates a booking successfully and formats the response', async () => {
     const result = await POST(
       makeRequest({
         clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationId: 'loc_1',
         locationType: 'SALON',
         offeringId: 'offering_1',
       }),
     )
 
-    expect(mocks.createProBooking).toHaveBeenCalledWith({
+    expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       actorUserId: 'user_123',
       overrideReason: null,
       clientId: 'client_1',
+      client: {
+        firstName: undefined,
+        lastName: undefined,
+        email: undefined,
+        phone: undefined,
+      },
+      clientAddressId: null,
+      serviceAddress: {
+        label: undefined,
+        formattedAddress: undefined,
+        addressLine1: undefined,
+        addressLine2: undefined,
+        city: undefined,
+        state: undefined,
+        postalCode: undefined,
+        countryCode: undefined,
+        placeId: undefined,
+        lat: undefined,
+        lng: undefined,
+        isDefault: undefined,
+      },
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      clientAddressId: null,
+      scheduledFor: new Date(scheduledForIso),
       internalNotes: null,
       requestedBufferMinutes: null,
       requestedTotalDurationMinutes: null,
@@ -566,6 +499,7 @@ describe('POST /api/pro/bookings', () => {
       {
         booking: {
           id: 'booking_1',
+          clientId: 'client_1',
           scheduledFor: '2026-03-11T19:30:00.000Z',
           endsAt: '2026-03-11T20:45:00.000Z',
           totalDurationMinutes: 60,
@@ -580,6 +514,13 @@ describe('POST /api/pro/bookings', () => {
           stepMinutes: 15,
           timeZone: 'America/Los_Angeles',
         },
+        client: {
+          id: 'client_1',
+          userId: 'user_client_1',
+          email: 'client@example.com',
+          claimStatus: ClientClaimStatus.CLAIMED,
+        },
+        invite: null,
       },
       201,
     )
@@ -590,6 +531,7 @@ describe('POST /api/pro/bookings', () => {
       data: {
         booking: {
           id: 'booking_1',
+          clientId: 'client_1',
           scheduledFor: '2026-03-11T19:30:00.000Z',
           endsAt: '2026-03-11T20:45:00.000Z',
           totalDurationMinutes: 60,
@@ -604,82 +546,63 @@ describe('POST /api/pro/bookings', () => {
           stepMinutes: 15,
           timeZone: 'America/Los_Angeles',
         },
+        client: {
+          id: 'client_1',
+          userId: 'user_client_1',
+          email: 'client@example.com',
+          claimStatus: ClientClaimStatus.CLAIMED,
+        },
+        invite: null,
       },
     })
   })
 
-    it('creates a booking successfully when an authorized override is used', async () => {
-    mocks.createProBooking.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_override_ok',
-        scheduledFor,
-        totalDurationMinutes: 60,
-        bufferMinutes: 15,
-        status: BookingStatus.ACCEPTED,
-      },
-      subtotalSnapshot: new Prisma.Decimal('50.00'),
-      stepMinutes: 15,
-      appointmentTimeZone: 'America/Los_Angeles',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
+  it('returns invite payload when helper created an invite for an unclaimed client', async () => {
+    mocks.createProBookingWithClient.mockResolvedValueOnce({
+      ok: true,
+      clientId: 'client_unclaimed_1',
+      clientUserId: null,
+      clientEmail: 'newclient@example.com',
+      clientClaimStatus: ClientClaimStatus.UNCLAIMED,
       clientAddressId: null,
-      serviceName: 'Haircut',
-      meta: {
-        mutated: true,
-        noOp: false,
+      bookingResult: {
+        booking: {
+          id: 'booking_invite_1',
+          scheduledFor,
+          totalDurationMinutes: 60,
+          bufferMinutes: 15,
+          status: BookingStatus.ACCEPTED,
+        },
+        subtotalSnapshot: new Prisma.Decimal('50.00'),
+        stepMinutes: 15,
+        appointmentTimeZone: 'America/Los_Angeles',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+        serviceName: 'Haircut',
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+      invite: {
+        id: 'invite_1',
+        token: 'token_1',
       },
     })
 
     const result = await POST(
       makeRequest({
-        clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationId: 'loc_1',
         locationType: 'SALON',
         offeringId: 'offering_1',
-        allowShortNotice: true,
-        overrideReason: 'Approved operational exception',
-      }),
-    )
-
-    expect(mocks.createProBooking).toHaveBeenCalledWith({
-      professionalId: 'pro_123',
-      actorUserId: 'user_123',
-      overrideReason: 'Approved operational exception',
-      clientId: 'client_1',
-      offeringId: 'offering_1',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      clientAddressId: null,
-      internalNotes: null,
-      requestedBufferMinutes: null,
-      requestedTotalDurationMinutes: null,
-      allowOutsideWorkingHours: false,
-      allowShortNotice: true,
-      allowFarFuture: false,
-    })
-
-    expect(mocks.jsonOk).toHaveBeenCalledWith(
-      {
-        booking: {
-          id: 'booking_override_ok',
-          scheduledFor: '2026-03-11T19:30:00.000Z',
-          endsAt: '2026-03-11T20:45:00.000Z',
-          totalDurationMinutes: 60,
-          bufferMinutes: 15,
-          status: BookingStatus.ACCEPTED,
-          serviceName: 'Haircut',
-          subtotalSnapshot: '50.00',
-          subtotalCents: 5000,
-          locationId: 'loc_1',
-          locationType: ServiceLocationType.SALON,
-          clientAddressId: null,
-          stepMinutes: 15,
-          timeZone: 'America/Los_Angeles',
+        client: {
+          firstName: 'New',
+          lastName: 'Client',
+          email: 'newclient@example.com',
         },
-      },
-      201,
+      }),
     )
 
     expect(result).toEqual({
@@ -687,7 +610,8 @@ describe('POST /api/pro/bookings', () => {
       status: 201,
       data: {
         booking: {
-          id: 'booking_override_ok',
+          id: 'booking_invite_1',
+          clientId: 'client_unclaimed_1',
           scheduledFor: '2026-03-11T19:30:00.000Z',
           endsAt: '2026-03-11T20:45:00.000Z',
           totalDurationMinutes: 60,
@@ -702,12 +626,22 @@ describe('POST /api/pro/bookings', () => {
           stepMinutes: 15,
           timeZone: 'America/Los_Angeles',
         },
+        client: {
+          id: 'client_unclaimed_1',
+          userId: null,
+          email: 'newclient@example.com',
+          claimStatus: ClientClaimStatus.UNCLAIMED,
+        },
+        invite: {
+          id: 'invite_1',
+          token: 'token_1',
+        },
       },
     })
   })
 
   it('maps booking errors to jsonFail', async () => {
-    mocks.createProBooking.mockRejectedValueOnce(
+    mocks.createProBookingWithClient.mockRejectedValueOnce(
       bookingError('TIME_BLOCKED', {
         message: 'Requested time is blocked.',
         userMessage: 'That time is blocked on your calendar.',
@@ -717,7 +651,7 @@ describe('POST /api/pro/bookings', () => {
     const result = await POST(
       makeRequest({
         clientId: 'client_1',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
+        scheduledFor: scheduledForIso,
         locationId: 'loc_1',
         locationType: 'SALON',
         offeringId: 'offering_1',

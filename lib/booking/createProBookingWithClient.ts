@@ -1,12 +1,16 @@
-import { ContactMethod, ServiceLocationType } from '@prisma/client'
+import {
+  ClientClaimStatus,
+  ContactMethod,
+  ServiceLocationType,
+} from '@prisma/client'
 
-import { createProBooking } from '@/lib/booking/writeBoundary'
 import {
   resolveProBookingClient,
   type ProBookingServiceAddressInput,
 } from '@/lib/booking/resolveProBookingClient'
-import { createProClientInvite } from '@/lib/invites/proClientInvite'
+import { createProBooking } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
+import { createProClientInvite } from '@/lib/invites/proClientInvite'
 
 type NewClientInput = {
   firstName?: unknown
@@ -50,6 +54,7 @@ export type CreateProBookingWithClientResult =
       clientId: string
       clientUserId: string | null
       clientEmail: string | null
+      clientClaimStatus: ClientClaimStatus
       clientAddressId: string | null
       bookingResult: CreateProBookingResult
       invite: CreatedInviteResult | null
@@ -65,17 +70,14 @@ function normalizeClientInput(
   value: CreateProBookingWithClientArgs['client'],
 ): NewClientInput | null {
   if (!value) return null
+  if (!isRecord(value)) return null
 
-  if (isRecord(value)) {
-    return {
-      firstName: value.firstName,
-      lastName: value.lastName,
-      email: value.email,
-      phone: value.phone,
-    }
+  return {
+    firstName: value.firstName,
+    lastName: value.lastName,
+    email: value.email,
+    phone: value.phone,
   }
-
-  return null
 }
 
 function normalizeServiceAddressInput(
@@ -100,8 +102,13 @@ function hasMeaningfulValue(value: unknown): boolean {
 function shouldAutoCreateInvite(args: {
   rawClientId?: string | null
   normalizedClient: NewClientInput | null
+  resolvedClientClaimStatus: ClientClaimStatus
 }): boolean {
   if (typeof args.rawClientId === 'string' && args.rawClientId.trim()) {
+    return false
+  }
+
+  if (args.resolvedClientClaimStatus !== ClientClaimStatus.UNCLAIMED) {
     return false
   }
 
@@ -139,13 +146,16 @@ export async function createProBookingWithClient(
   args: CreateProBookingWithClientArgs,
 ): Promise<CreateProBookingWithClientResult> {
   const normalizedClient = normalizeClientInput(args.client)
+  const normalizedServiceAddress = normalizeServiceAddressInput(
+    args.serviceAddress,
+  )
 
   const resolvedClient = await resolveProBookingClient({
     locationType: args.locationType,
     clientId: args.clientId,
     client: normalizedClient,
     clientAddressId: args.clientAddressId,
-    serviceAddress: normalizeServiceAddressInput(args.serviceAddress),
+    serviceAddress: normalizedServiceAddress,
   })
 
   if (!resolvedClient.ok) {
@@ -176,6 +186,7 @@ export async function createProBookingWithClient(
     shouldAutoCreateInvite({
       rawClientId: args.clientId,
       normalizedClient,
+      resolvedClientClaimStatus: resolvedClient.clientClaimStatus,
     })
   ) {
     const invitedName = buildInvitedName(normalizedClient)
@@ -207,6 +218,7 @@ export async function createProBookingWithClient(
     clientId: resolvedClient.clientId,
     clientUserId: resolvedClient.clientUserId,
     clientEmail: resolvedClient.clientEmail,
+    clientClaimStatus: resolvedClient.clientClaimStatus,
     clientAddressId: resolvedClient.clientAddressId,
     bookingResult,
     invite,
