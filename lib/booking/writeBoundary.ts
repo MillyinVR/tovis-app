@@ -6,8 +6,13 @@ import {
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
+  ClientActionTokenKind,
+  ClientClaimStatus,
   ClientAddressKind,
+  ConsultationApprovalProofMethod,
   ConsultationApprovalStatus,
+  ConsultationDecision,
+  ContactMethod,
   LastMinuteRecipientStatus,
   MediaPhase,
   MediaType,
@@ -104,6 +109,15 @@ import {
   syncBookingAppointmentReminders,
 } from '@/lib/notifications/appointmentReminders'
 import { createProNotification } from '@/lib/notifications/proNotifications'
+import {
+  consumeConsultationActionToken,
+  revokeConsultationActionTokensForBooking,
+} from '@/lib/consultation/clientActionTokens'
+import {
+  buildConsultationApprovalProofSnapshot,
+  createConsultationApprovalProof,
+} from '@/lib/consultation/consultationConfirmationProof'
+
 
 type MutationMeta = {
   mutated: boolean
@@ -124,14 +138,46 @@ type CancelActor =
       professionalId?: string | null
     }
 
+type ConsultationDecisionProvenance =
+  | {
+      method: 'REMOTE_SECURE_LINK'
+      recordedByUserId: null
+      clientActionTokenId: string | null
+      contactMethod: ContactMethod | null
+      destinationSnapshot: string | null
+      ipAddress: string | null
+      userAgent: string | null
+    }
+  | {
+      method: 'IN_PERSON_PRO_DEVICE'
+      recordedByUserId: string
+      clientActionTokenId: null
+      contactMethod: null
+      destinationSnapshot: null
+      ipAddress: null
+      userAgent: string | null
+    }
+
 type ApproveConsultationMaterializationArgs = {
   tx: Prisma.TransactionClient
   bookingId: string
   clientId: string
   professionalId: string
   now: Date
+  provenance: ConsultationDecisionProvenance
   requestId?: string | null
   idempotencyKey?: string | null
+}
+
+type ConsultationProofResult = {
+  id: string
+  decision: ConsultationDecision
+  method: ConsultationApprovalProofMethod
+  actedAt: Date
+  recordedByUserId: string | null
+  clientActionTokenId: string | null
+  contactMethod: ContactMethod | null
+  destinationSnapshot: string | null
 }
 
 type ApproveConsultationMaterializationResult = {
@@ -149,7 +195,45 @@ type ApproveConsultationMaterializationResult = {
     approvedAt: Date | null
     rejectedAt: Date | null
   }
+  proof: ConsultationProofResult
   meta: MutationMeta
+}
+
+type ApproveConsultationByClientActionTokenArgs = {
+  rawToken: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+  ipAddress?: string | null
+  userAgent?: string | null
+}
+
+type RejectConsultationByClientActionTokenArgs = {
+  rawToken: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+  ipAddress?: string | null
+  userAgent?: string | null
+}
+
+type RejectConsultationResult = {
+  approval: {
+    id: string
+    status: ConsultationApprovalStatus
+    approvedAt: Date | null
+    rejectedAt: Date | null
+  }
+  proof: ConsultationProofResult
+  meta: MutationMeta
+}
+
+type RecordInPersonConsultationDecisionArgs = {
+  bookingId: string
+  professionalId: string
+  recordedByUserId: string
+  decision: ConsultationDecision
+  requestId?: string | null
+  idempotencyKey?: string | null
+  userAgent?: string | null
 }
 
 type CancelBookingArgs = {
@@ -802,6 +886,20 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
       notes: true,
       approvedAt: true,
       rejectedAt: true,
+      clientId: true,
+      proId: true,
+      proof: {
+        select: {
+          id: true,
+          decision: true,
+          method: true,
+          actedAt: true,
+          recordedByUserId: true,
+          clientActionTokenId: true,
+          contactMethod: true,
+          destinationSnapshot: true,
+        },
+      },
     },
   },
 } satisfies Prisma.BookingSelect
@@ -1614,6 +1712,9 @@ function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
   return t >= start && t <= end
 }
 
+// Legacy Phase 4 compatibility:
+// AftercareSummary.publicToken is still active for already-issued links.
+// New public access should resolve through token helpers first.
 function newPublicToken(): string {
   return crypto.randomBytes(16).toString('hex')
 }
@@ -1633,6 +1734,28 @@ function makeAftercareReminderDedupeKey(
 
 function makeAftercareClientNotifDedupeKey(bookingId: string): string {
   return `client_aftercare:${bookingId}`
+}
+
+function getConsultationApprovalAuditAction(
+  decision: ConsultationDecision,
+  method: ConsultationApprovalProofMethod,
+): BookingCloseoutAuditAction {
+  if (decision === ConsultationDecision.APPROVED) {
+    return method === ConsultationApprovalProofMethod.REMOTE_SECURE_LINK
+      ? BookingCloseoutAuditAction.CONSULTATION_APPROVED_REMOTE
+      : BookingCloseoutAuditAction.CONSULTATION_APPROVED_IN_PERSON
+  }
+
+  return method === ConsultationApprovalProofMethod.REMOTE_SECURE_LINK
+    ? BookingCloseoutAuditAction.CONSULTATION_REJECTED_REMOTE
+    : BookingCloseoutAuditAction.CONSULTATION_REJECTED_IN_PERSON
+}
+
+function buildConsultationProofDestinationSnapshot(args: {
+  contactMethod: ContactMethod | null
+  destinationSnapshot: string | null
+}): string | null {
+  return args.destinationSnapshot ?? null
 }
 
 function resolveAftercareTimeZone(args: {
@@ -5600,6 +5723,13 @@ async function performLockedApproveConsultationMaterialization(
     })
   }
 
+  if (approval.proof?.id) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Consultation approval already has proof recorded.',
+      userMessage: 'Consultation proposal is no longer pending.',
+    })
+  }
+
   const proposedItems = parseConsultationProposedItems(
     approval.proposedServicesJson,
   )
@@ -5748,74 +5878,281 @@ const offeringIds = Array.from(
     },
   })
 
-  const updatedApproval = await args.tx.consultationApproval.update({
-  where: { bookingId: booking.id },
-  data: {
-    status: ConsultationApprovalStatus.APPROVED,
-    approvedAt: args.now,
-    rejectedAt: null,
+    const updatedApproval = await args.tx.consultationApproval.update({
+    where: { bookingId: booking.id },
+    data: {
+      status: ConsultationApprovalStatus.APPROVED,
+      approvedAt: args.now,
+      rejectedAt: null,
+      clientId: args.clientId,
+      proId: args.professionalId,
+    },
+    select: {
+      id: true,
+      status: true,
+      approvedAt: true,
+      rejectedAt: true,
+    },
+  })
+
+  const createdProof = await createConsultationApprovalProof({
+    tx: args.tx,
+    consultationApprovalId: approval.id,
+    bookingId: booking.id,
     clientId: args.clientId,
-    proId: args.professionalId,
-  },
-  select: {
-    id: true,
-    status: true,
-    approvedAt: true,
-    rejectedAt: true,
-  },
-})
+    professionalId: args.professionalId,
+    decision: ConsultationDecision.APPROVED,
+    method: args.provenance.method,
+    recordedByUserId: args.provenance.recordedByUserId,
+    clientActionTokenId: args.provenance.clientActionTokenId,
+    contactMethod: args.provenance.contactMethod,
+    destinationSnapshot: buildConsultationProofDestinationSnapshot({
+      contactMethod: args.provenance.contactMethod,
+      destinationSnapshot: args.provenance.destinationSnapshot,
+    }),
+    ipAddress: args.provenance.ipAddress,
+    userAgent: args.provenance.userAgent,
+    contextJson: {
+      bookingId: booking.id,
+      requestId: args.requestId ?? null,
+      idempotencyKey: args.idempotencyKey ?? null,
+      source: 'approveConsultationAndMaterializeBooking',
+    },
+    actedAt: args.now,
+  })
 
-await syncBookingAppointmentReminders({
-  tx: args.tx,
-  bookingId: booking.id,
-})
+  await syncBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: booking.id,
+  })
 
-await createBookingCloseoutAuditLog({
-  tx: args.tx,
-  bookingId: booking.id,
-  professionalId: args.professionalId,
-  action: BookingCloseoutAuditAction.CONSULTATION_APPROVED,
-  route: 'lib/booking/writeBoundary.ts:approveConsultationAndMaterializeBooking',
-  requestId: args.requestId,
-  idempotencyKey: args.idempotencyKey,
-  oldValue: {
-    consultationApproval: {
-      status: approval.status,
-      approvedAt: normalizeDateCmp(approval.approvedAt),
-      rejectedAt: normalizeDateCmp(approval.rejectedAt),
-      proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: getConsultationApprovalAuditAction(
+      ConsultationDecision.APPROVED,
+      args.provenance.method,
+    ),
+    route: 'lib/booking/writeBoundary.ts:approveConsultationAndMaterializeBooking',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      consultationApproval: {
+        status: approval.status,
+        approvedAt: normalizeDateCmp(approval.approvedAt),
+        rejectedAt: normalizeDateCmp(approval.rejectedAt),
+        proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+      },
+      booking: {
+        serviceId: booking.serviceId,
+        offeringId: booking.offeringId,
+        subtotalSnapshot: normalizeDecimalCmp(booking.subtotalSnapshot),
+        totalDurationMinutes: booking.totalDurationMinutes ?? 0,
+        consultationConfirmedAt: normalizeDateCmp(
+          booking.consultationConfirmedAt,
+        ),
+      },
+      proof: approval.proof
+        ? buildConsultationApprovalProofSnapshot(approval.proof)
+        : null,
     },
-    booking: {
-      serviceId: booking.serviceId,
-      offeringId: booking.offeringId,
-      subtotalSnapshot: normalizeDecimalCmp(booking.subtotalSnapshot),
-      totalDurationMinutes: booking.totalDurationMinutes ?? 0,
-      consultationConfirmedAt: normalizeDateCmp(booking.consultationConfirmedAt),
+    newValue: {
+      consultationApproval: {
+        status: updatedApproval.status,
+        approvedAt: normalizeDateCmp(updatedApproval.approvedAt),
+        rejectedAt: normalizeDateCmp(updatedApproval.rejectedAt),
+        proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+      },
+      booking: {
+        serviceId: updatedBooking.serviceId,
+        offeringId: updatedBooking.offeringId,
+        subtotalSnapshot: normalizeDecimalCmp(updatedBooking.subtotalSnapshot),
+        totalDurationMinutes: updatedBooking.totalDurationMinutes ?? 0,
+        consultationConfirmedAt: normalizeDateCmp(
+          updatedBooking.consultationConfirmedAt,
+        ),
+      },
+      proof: buildConsultationApprovalProofSnapshot(createdProof),
     },
-  },
-  newValue: {
-    consultationApproval: {
-      status: updatedApproval.status,
-      approvedAt: normalizeDateCmp(updatedApproval.approvedAt),
-      rejectedAt: normalizeDateCmp(updatedApproval.rejectedAt),
-      proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+    metadata: {
+      proposalItemCount: proposedItems.length,
+      proofMethod: createdProof.method,
+      clientActionTokenId: createdProof.clientActionTokenId,
     },
-    booking: {
-      serviceId: updatedBooking.serviceId,
-      offeringId: updatedBooking.offeringId,
-      subtotalSnapshot: normalizeDecimalCmp(updatedBooking.subtotalSnapshot),
-      totalDurationMinutes: updatedBooking.totalDurationMinutes ?? 0,
-      consultationConfirmedAt: normalizeDateCmp(updatedBooking.consultationConfirmedAt),
-    },
-  },
-  metadata: {
-    proposalItemCount: proposedItems.length,
-  },
-})
+  })
+
+  await revokeConsultationActionTokensForBooking({
+    tx: args.tx,
+    bookingId: booking.id,
+    revokeReason: 'Consultation decision completed.',
+    revokedAt: args.now,
+  })
 
   return {
     booking: updatedBooking,
     approval: updatedApproval,
+    proof: {
+      id: createdProof.id,
+      decision: createdProof.decision,
+      method: createdProof.method,
+      actedAt: createdProof.actedAt,
+      recordedByUserId: createdProof.recordedByUserId,
+      clientActionTokenId: createdProof.clientActionTokenId,
+      contactMethod: createdProof.contactMethod,
+      destinationSnapshot: createdProof.destinationSnapshot,
+    },
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedRejectConsultationDecision(
+  args: ApproveConsultationMaterializationArgs,
+): Promise<RejectConsultationResult> {
+  const booking = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: APPROVE_CONSULTATION_BOOKING_SELECT,
+  })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.clientId !== args.clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  const approval = booking.consultationApproval
+
+  if (!approval) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Consultation proposal was not found for this booking.',
+      userMessage: 'Consultation proposal is no longer available.',
+    })
+  }
+
+  if (approval.status !== ConsultationApprovalStatus.PENDING) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Consultation proposal is no longer pending.',
+      userMessage: 'Consultation proposal is no longer pending.',
+    })
+  }
+
+  if (approval.proof?.id) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Consultation decision already has proof recorded.',
+      userMessage: 'Consultation proposal is no longer pending.',
+    })
+  }
+
+  const updatedApproval = await args.tx.consultationApproval.update({
+    where: { bookingId: booking.id },
+    data: {
+      status: ConsultationApprovalStatus.REJECTED,
+      approvedAt: null,
+      rejectedAt: args.now,
+      clientId: args.clientId,
+      proId: args.professionalId,
+    },
+    select: {
+      id: true,
+      status: true,
+      approvedAt: true,
+      rejectedAt: true,
+    },
+  })
+
+  const createdProof = await createConsultationApprovalProof({
+    tx: args.tx,
+    consultationApprovalId: approval.id,
+    bookingId: booking.id,
+    clientId: args.clientId,
+    professionalId: args.professionalId,
+    decision: ConsultationDecision.REJECTED,
+    method: args.provenance.method,
+    recordedByUserId: args.provenance.recordedByUserId,
+    clientActionTokenId: args.provenance.clientActionTokenId,
+    contactMethod: args.provenance.contactMethod,
+    destinationSnapshot: buildConsultationProofDestinationSnapshot({
+      contactMethod: args.provenance.contactMethod,
+      destinationSnapshot: args.provenance.destinationSnapshot,
+    }),
+    ipAddress: args.provenance.ipAddress,
+    userAgent: args.provenance.userAgent,
+    contextJson: {
+      bookingId: booking.id,
+      requestId: args.requestId ?? null,
+      idempotencyKey: args.idempotencyKey ?? null,
+      source: 'rejectConsultationDecision',
+    },
+    actedAt: args.now,
+  })
+
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    action: getConsultationApprovalAuditAction(
+      ConsultationDecision.REJECTED,
+      args.provenance.method,
+    ),
+    route: 'lib/booking/writeBoundary.ts:rejectConsultationDecision',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      consultationApproval: {
+        status: approval.status,
+        approvedAt: normalizeDateCmp(approval.approvedAt),
+        rejectedAt: normalizeDateCmp(approval.rejectedAt),
+        proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+      },
+      proof: approval.proof
+        ? buildConsultationApprovalProofSnapshot(approval.proof)
+        : null,
+    },
+    newValue: {
+      consultationApproval: {
+        status: updatedApproval.status,
+        approvedAt: normalizeDateCmp(updatedApproval.approvedAt),
+        rejectedAt: normalizeDateCmp(updatedApproval.rejectedAt),
+        proposedTotal: normalizeDecimalCmp(approval.proposedTotal),
+      },
+      proof: buildConsultationApprovalProofSnapshot(createdProof),
+    },
+    metadata: {
+      proofMethod: createdProof.method,
+      clientActionTokenId: createdProof.clientActionTokenId,
+    },
+  })
+
+  await revokeConsultationActionTokensForBooking({
+    tx: args.tx,
+    bookingId: booking.id,
+    revokeReason: 'Consultation decision completed.',
+    revokedAt: args.now,
+  })
+
+  return {
+    approval: {
+      id: updatedApproval.id,
+      status: updatedApproval.status,
+      approvedAt: updatedApproval.approvedAt,
+      rejectedAt: updatedApproval.rejectedAt,
+    },
+    proof: {
+      id: createdProof.id,
+      decision: createdProof.decision,
+      method: createdProof.method,
+      actedAt: createdProof.actedAt,
+      recordedByUserId: createdProof.recordedByUserId,
+      clientActionTokenId: createdProof.clientActionTokenId,
+      contactMethod: createdProof.contactMethod,
+      destinationSnapshot: createdProof.destinationSnapshot,
+    },
     meta: buildMeta(true),
   }
 }
@@ -9109,10 +9446,150 @@ export async function approveConsultationAndMaterializeBooking(args: {
         clientId: args.clientId,
         professionalId: args.professionalId,
         now,
+        provenance: {
+          method: 'REMOTE_SECURE_LINK',
+          recordedByUserId: null,
+          clientActionTokenId: null,
+          contactMethod: null,
+          destinationSnapshot: null,
+          ipAddress: null,
+          userAgent: null,
+        },
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),
   })
+}
+
+export async function approveConsultationByClientActionToken(
+  args: ApproveConsultationByClientActionTokenArgs,
+): Promise<ApproveConsultationMaterializationResult> {
+  const consumed = await consumeConsultationActionToken({
+    rawToken: args.rawToken,
+  })
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: consumed.bookingId,
+    clientId: consumed.clientId,
+    run: async ({ tx, now }) =>
+      performLockedApproveConsultationMaterialization({
+        tx,
+        bookingId: consumed.bookingId,
+        clientId: consumed.clientId,
+        professionalId: consumed.professionalId,
+        now,
+        provenance: {
+          method: 'REMOTE_SECURE_LINK',
+          recordedByUserId: null,
+          clientActionTokenId: consumed.id,
+          contactMethod: consumed.deliveryMethod,
+          destinationSnapshot: consumed.destinationSnapshot,
+          ipAddress: normalizeReason(args.ipAddress),
+          userAgent: normalizeReason(args.userAgent),
+        },
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  })
+}
+
+export async function rejectConsultationByClientActionToken(
+  args: RejectConsultationByClientActionTokenArgs,
+): Promise<RejectConsultationResult> {
+  const consumed = await consumeConsultationActionToken({
+    rawToken: args.rawToken,
+  })
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: consumed.bookingId,
+    clientId: consumed.clientId,
+    run: async ({ tx, now }) =>
+      performLockedRejectConsultationDecision({
+        tx,
+        bookingId: consumed.bookingId,
+        clientId: consumed.clientId,
+        professionalId: consumed.professionalId,
+        now,
+        provenance: {
+          method: 'REMOTE_SECURE_LINK',
+          recordedByUserId: null,
+          clientActionTokenId: consumed.id,
+          contactMethod: consumed.deliveryMethod,
+          destinationSnapshot: consumed.destinationSnapshot,
+          ipAddress: normalizeReason(args.ipAddress),
+          userAgent: normalizeReason(args.userAgent),
+        },
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  })
+}
+
+export async function recordInPersonConsultationDecision(
+  args: RecordInPersonConsultationDecisionArgs,
+): Promise<ApproveConsultationMaterializationResult | RejectConsultationResult> {
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: args.bookingId },
+        select: {
+          id: true,
+          clientId: true,
+          professionalId: true,
+        } satisfies Prisma.BookingSelect,
+      })
+
+      if (!booking) {
+        throw bookingError('BOOKING_NOT_FOUND')
+      }
+
+      if (booking.professionalId !== args.professionalId) {
+        throw bookingError('FORBIDDEN')
+      }
+
+      if (!booking.clientId) {
+        throw bookingError('FORBIDDEN', {
+          message: 'Booking is missing client ownership.',
+          userMessage: 'This consultation cannot be recorded.',
+        })
+      }
+
+      const provenance: ConsultationDecisionProvenance = {
+        method: 'IN_PERSON_PRO_DEVICE',
+        recordedByUserId: args.recordedByUserId,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
+        ipAddress: null,
+        userAgent: normalizeReason(args.userAgent),
+      }
+
+      if (args.decision === ConsultationDecision.APPROVED) {
+        return performLockedApproveConsultationMaterialization({
+          tx,
+          bookingId: booking.id,
+          clientId: booking.clientId,
+          professionalId: booking.professionalId,
+          now,
+          provenance,
+          requestId: args.requestId ?? null,
+          idempotencyKey: args.idempotencyKey ?? null,
+        })
+      }
+
+      return performLockedRejectConsultationDecision({
+        tx,
+        bookingId: booking.id,
+        clientId: booking.clientId,
+        professionalId: booking.professionalId,
+        now,
+        provenance,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      })
+    },
+  )
 }
 
 export function canBookingAcceptClientReview(args: {

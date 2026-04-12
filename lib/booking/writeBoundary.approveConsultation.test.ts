@@ -3,6 +3,7 @@ import {
   BookingCheckoutStatus,
   BookingServiceItemType,
   BookingStatus,
+  ClientActionTokenKind,
   ConsultationApprovalStatus,
   Prisma,
   ServiceLocationType,
@@ -39,6 +40,8 @@ const mocks = vi.hoisted(() => ({
 
   txConsultationApprovalUpdate: vi.fn(),
   txBookingCloseoutAuditLogCreate: vi.fn(),
+  txConsultationApprovalProofCreate: vi.fn(),
+  txClientActionTokenUpdateMany: vi.fn(),
 
   createProNotification: vi.fn(),
   upsertClientNotification: vi.fn(),
@@ -97,6 +100,12 @@ const tx = {
   },
   consultationApproval: {
     update: mocks.txConsultationApprovalUpdate,
+  },
+  consultationApprovalProof: {
+    create: mocks.txConsultationApprovalProofCreate,
+  },
+  clientActionToken: {
+    updateMany: mocks.txClientActionTokenUpdateMany,
   },
   bookingCloseoutAuditLog: {
     create: mocks.txBookingCloseoutAuditLogCreate,
@@ -165,6 +174,9 @@ function makePendingApprovalBooking(overrides?: {
       notes: null,
       approvedAt: null,
       rejectedAt: null,
+      clientId: null,
+      proId: null,
+      proof: null,
     },
   }
 }
@@ -368,6 +380,30 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       rejectedAt: null,
     })
 
+        mocks.txConsultationApprovalProofCreate.mockResolvedValueOnce({
+      id: 'proof_1',
+      consultationApprovalId: 'approval_1',
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
+      decision: 'APPROVED',
+      method: 'REMOTE_SECURE_LINK',
+      actedAt: TEST_NOW,
+      recordedByUserId: null,
+      clientActionTokenId: null,
+      contactMethod: null,
+      destinationSnapshot: null,
+      ipAddress: null,
+      userAgent: null,
+      contextJson: null,
+      createdAt: TEST_NOW,
+      updatedAt: TEST_NOW,
+    })
+
+    mocks.txClientActionTokenUpdateMany.mockResolvedValueOnce({
+      count: 0,
+    })
+
     const result = await approveConsultationAndMaterializeBooking({
       bookingId: BOOKING_ID,
       clientId: CLIENT_ID,
@@ -470,6 +506,44 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       },
     })
 
+        expect(mocks.txConsultationApprovalProofCreate).toHaveBeenCalledWith({
+      data: {
+        consultationApprovalId: 'approval_1',
+        bookingId: BOOKING_ID,
+        clientId: CLIENT_ID,
+        professionalId: PROFESSIONAL_ID,
+        decision: 'APPROVED',
+        method: 'REMOTE_SECURE_LINK',
+        recordedByUserId: null,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
+        ipAddress: null,
+        userAgent: null,
+        contextJson: {
+          bookingId: BOOKING_ID,
+          requestId: null,
+          idempotencyKey: null,
+          source: 'approveConsultationAndMaterializeBooking',
+        },
+        actedAt: TEST_NOW,
+      },
+      select: expect.any(Object),
+    })
+
+        expect(mocks.txClientActionTokenUpdateMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: BOOKING_ID,
+        kind: ClientActionTokenKind.CONSULTATION_ACTION,
+        revokedAt: null,
+        firstUsedAt: null,
+      },
+      data: {
+        revokedAt: TEST_NOW,
+        revokeReason: 'Consultation decision completed.',
+      },
+    })
+
     expect(
       mocks.cancelScheduledClientNotificationsForBooking,
     ).toHaveBeenCalledWith({
@@ -509,6 +583,16 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
         status: ConsultationApprovalStatus.APPROVED,
         approvedAt: TEST_NOW,
         rejectedAt: null,
+      },
+      proof: {
+        id: 'proof_1',
+        decision: 'APPROVED',
+        method: 'REMOTE_SECURE_LINK',
+        actedAt: TEST_NOW,
+        recordedByUserId: null,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
       },
       meta: {
         mutated: true,
