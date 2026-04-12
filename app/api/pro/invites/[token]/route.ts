@@ -1,3 +1,5 @@
+import { ProClientInviteStatus } from '@prisma/client'
+
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 
@@ -8,6 +10,17 @@ type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
 function asTrimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function isInviteExpired(args: {
+  status: ProClientInviteStatus
+  expiresAt: Date
+  now: Date
+}): boolean {
+  return (
+    args.status === ProClientInviteStatus.EXPIRED ||
+    args.expiresAt.getTime() <= args.now.getTime()
+  )
 }
 
 export async function GET(_request: Request, ctx: Ctx) {
@@ -38,16 +51,20 @@ export async function GET(_request: Request, ctx: Ctx) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })
     }
 
-    const now = new Date()
-
-    if (invite.status === 'EXPIRED' || invite.expiresAt.getTime() < now.getTime()) {
-      return jsonFail(410, 'Invite has expired.', { code: 'EXPIRED' })
-    }
-
-    if (invite.status === 'ACCEPTED') {
+    if (invite.status === ProClientInviteStatus.ACCEPTED) {
       return jsonFail(409, 'Invite already accepted.', {
         code: 'ALREADY_ACCEPTED',
       })
+    }
+
+    if (
+      isInviteExpired({
+        status: invite.status,
+        expiresAt: invite.expiresAt,
+        now: new Date(),
+      })
+    ) {
+      return jsonFail(410, 'Invite has expired.', { code: 'EXPIRED' })
     }
 
     return jsonOk(
