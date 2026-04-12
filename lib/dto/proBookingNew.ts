@@ -32,7 +32,7 @@ export type ProBookingNewClientDTO = {
   dateOfBirth: string | null
   user: {
     id: string
-    email: string
+    email: string | null
     role: Role
     phone: string | null
     phoneVerifiedAt: string | null
@@ -81,7 +81,7 @@ export type ProBookingNewClientRow = {
   dateOfBirth: Date | null
   user: {
     id: string
-    email: string
+    email: string | null
     role: Role
     phone: string | null
     phoneVerifiedAt: Date | null

@@ -1,6 +1,4 @@
-import {
-  ProClientInviteStatus,
-} from '@prisma/client'
+import { ProClientInviteStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
@@ -10,8 +8,45 @@ export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
+type InviteAcceptanceResult =
+  | { kind: 'not_found' }
+  | { kind: 'expired' }
+  | { kind: 'already_accepted' }
+  | { kind: 'client_not_found' }
+  | { kind: 'conflict' }
+  | { kind: 'ok'; bookingId: string }
+
+const ACCEPT_INVITE_SELECT = {
+  id: true,
+  bookingId: true,
+  status: true,
+  acceptedAt: true,
+  expiresAt: true,
+  preferredContactMethod: true,
+} as const
+
 function asTrimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function isInviteExpired(args: {
+  status: ProClientInviteStatus
+  expiresAt: Date
+  now: Date
+}): boolean {
+  return (
+    args.status === ProClientInviteStatus.EXPIRED ||
+    args.expiresAt.getTime() <= args.now.getTime()
+  )
+}
+
+function isInviteAccepted(args: {
+  status: ProClientInviteStatus
+  acceptedAt: Date | null
+}): boolean {
+  return (
+    args.status === ProClientInviteStatus.ACCEPTED || args.acceptedAt != null
+  )
 }
 
 export async function POST(_request: Request, ctx: Ctx) {
@@ -28,104 +63,117 @@ export async function POST(_request: Request, ctx: Ctx) {
 
     const now = new Date()
 
-    const result = await prisma.$transaction(async (tx) => {
-      const invite = await tx.proClientInvite.findUnique({
-        where: { token },
-        select: {
-          id: true,
-          bookingId: true,
-          status: true,
-          expiresAt: true,
-          preferredContactMethod: true,
-        },
-      })
-
-      if (!invite) {
-        return { kind: 'not_found' as const }
-      }
-
-      if (
-        invite.status === ProClientInviteStatus.EXPIRED ||
-        invite.expiresAt.getTime() <= now.getTime()
-      ) {
-        return { kind: 'expired' as const }
-      }
-
-      if (invite.status === ProClientInviteStatus.ACCEPTED) {
-        return { kind: 'already_accepted' as const }
-      }
-
-      const clientProfile = await tx.clientProfile.findUnique({
-        where: { id: auth.clientId },
-        select: {
-          id: true,
-          preferredContactMethod: true,
-        },
-      })
-
-      if (!clientProfile) {
-        return { kind: 'client_not_found' as const }
-      }
-
-      const claimed = await tx.proClientInvite.updateMany({
-        where: {
-          id: invite.id,
-          status: ProClientInviteStatus.PENDING,
-          acceptedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: {
-          status: ProClientInviteStatus.ACCEPTED,
-          acceptedAt: now,
-          acceptedByUserId: auth.user.id,
-        },
-      })
-
-      if (claimed.count !== 1) {
-        const current = await tx.proClientInvite.findUnique({
-          where: { id: invite.id },
-          select: {
-            status: true,
-            expiresAt: true,
-            bookingId: true,
-          },
+    const result = await prisma.$transaction<InviteAcceptanceResult>(
+      async (tx) => {
+        const invite = await tx.proClientInvite.findUnique({
+          where: { token },
+          select: ACCEPT_INVITE_SELECT,
         })
 
-        if (!current) {
-          return { kind: 'not_found' as const }
+        if (!invite) {
+          return { kind: 'not_found' }
         }
 
         if (
-          current.status === ProClientInviteStatus.EXPIRED ||
-          current.expiresAt.getTime() <= now.getTime()
+          isInviteAccepted({
+            status: invite.status,
+            acceptedAt: invite.acceptedAt,
+          })
         ) {
-          return { kind: 'expired' as const }
+          return { kind: 'already_accepted' }
         }
 
-        if (current.status === ProClientInviteStatus.ACCEPTED) {
-          return { kind: 'already_accepted' as const }
+        if (
+          isInviteExpired({
+            status: invite.status,
+            expiresAt: invite.expiresAt,
+            now,
+          })
+        ) {
+          return { kind: 'expired' }
         }
 
-        return { kind: 'conflict' as const }
-      }
-
-      if (
-        invite.preferredContactMethod &&
-        clientProfile.preferredContactMethod == null
-      ) {
-        await tx.clientProfile.update({
-          where: { id: clientProfile.id },
-          data: {
-            preferredContactMethod: invite.preferredContactMethod,
+        const clientProfile = await tx.clientProfile.findUnique({
+          where: { id: auth.clientId },
+          select: {
+            id: true,
+            preferredContactMethod: true,
           },
         })
-      }
 
-      return {
-        kind: 'ok' as const,
-        bookingId: invite.bookingId,
-      }
-    })
+        if (!clientProfile) {
+          return { kind: 'client_not_found' }
+        }
+
+        const claimed = await tx.proClientInvite.updateMany({
+          where: {
+            id: invite.id,
+            status: ProClientInviteStatus.PENDING,
+            acceptedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: {
+            status: ProClientInviteStatus.ACCEPTED,
+            acceptedAt: now,
+            acceptedByUserId: auth.user.id,
+          },
+        })
+
+        if (claimed.count !== 1) {
+          const current = await tx.proClientInvite.findUnique({
+            where: { id: invite.id },
+            select: {
+              status: true,
+              acceptedAt: true,
+              expiresAt: true,
+              bookingId: true,
+            },
+          })
+
+          if (!current) {
+            return { kind: 'not_found' }
+          }
+
+          if (
+            isInviteAccepted({
+              status: current.status,
+              acceptedAt: current.acceptedAt,
+            })
+          ) {
+            return { kind: 'already_accepted' }
+          }
+
+          if (
+            isInviteExpired({
+              status: current.status,
+              expiresAt: current.expiresAt,
+              now,
+            })
+          ) {
+            return { kind: 'expired' }
+          }
+
+          return { kind: 'conflict' }
+        }
+
+        if (
+          invite.preferredContactMethod &&
+          clientProfile.preferredContactMethod == null
+        ) {
+          await tx.clientProfile.update({
+            where: { id: clientProfile.id },
+            data: {
+              preferredContactMethod: invite.preferredContactMethod,
+            },
+          })
+        }
+
+        return {
+          kind: 'ok',
+          bookingId: invite.bookingId,
+        }
+      },
+    )
 
     if (result.kind === 'not_found') {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })

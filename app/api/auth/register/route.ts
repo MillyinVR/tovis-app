@@ -813,19 +813,23 @@ export async function POST(request: Request) {
       console.error('[phone-verification] failed to send', smsErr)
     }
 
-    let emailVerificationSent = false
+let emailVerificationSent = false
 
-    try {
-      await issueAndSendEmailVerification({
-        userId: user.id,
-        email: user.email,
-        appUrl,
-      })
-      emailVerificationSent = true
-    } catch (emailErr) {
-      // eslint-disable-next-line no-console
-      console.error('[email-verification] failed to send', emailErr)
-    }
+const verificationEmail = normalizeEmail(user.email)
+
+if (verificationEmail) {
+  try {
+    await issueAndSendEmailVerification({
+      userId: user.id,
+      email: verificationEmail,
+      appUrl,
+    })
+    emailVerificationSent = true
+  } catch (emailErr) {
+    // eslint-disable-next-line no-console
+    console.error('[email-verification] failed to send', emailErr)
+  }
+}
 
     const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
     const token = createVerificationToken({

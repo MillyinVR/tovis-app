@@ -1,3 +1,4 @@
+// app/api/auth/email/send/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import {
@@ -8,6 +9,12 @@ import {
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+function normalizeEmail(value: string | null): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized ? normalized : null
+}
 
 export async function POST(request: Request) {
   try {
@@ -26,7 +33,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const email = auth.user.email.trim()
+    const email = normalizeEmail(auth.user.email)
     if (!email) {
       return jsonFail(400, 'Email address missing.', {
         code: 'EMAIL_REQUIRED',

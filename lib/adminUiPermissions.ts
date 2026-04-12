@@ -10,26 +10,36 @@ export type AdminUiPerms = {
   canViewLogs: boolean
 }
 
-export async function getAdminUiPerms(): Promise<{ userId: string; email: string; perms: AdminUiPerms } | null> {
+export async function getAdminUiPerms(): Promise<{
+  userId: string
+  email: string | null
+  perms: AdminUiPerms
+} | null> {
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'ADMIN') return null
 
-  const [canReviewPros, canManageCatalog, canManagePermissions] = await Promise.all([
-    hasAdminPermission({
-      adminUserId: user.id,
-      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER],
-    }),
-    hasAdminPermission({
-      adminUserId: user.id,
-      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
-    }),
-    hasAdminPermission({
-      adminUserId: user.id,
-      allowedRoles: [AdminPermissionRole.SUPER_ADMIN],
-    }),
-  ])
+  const [canReviewPros, canManageCatalog, canManagePermissions] =
+    await Promise.all([
+      hasAdminPermission({
+        adminUserId: user.id,
+        allowedRoles: [
+          AdminPermissionRole.SUPER_ADMIN,
+          AdminPermissionRole.REVIEWER,
+        ],
+      }),
+      hasAdminPermission({
+        adminUserId: user.id,
+        allowedRoles: [
+          AdminPermissionRole.SUPER_ADMIN,
+          AdminPermissionRole.SUPPORT,
+        ],
+      }),
+      hasAdminPermission({
+        adminUserId: user.id,
+        allowedRoles: [AdminPermissionRole.SUPER_ADMIN],
+      }),
+    ])
 
-  // Logs: keep it SUPER_ADMIN-only for now (you can relax later)
   const canViewLogs = canManagePermissions
 
   return {

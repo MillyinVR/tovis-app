@@ -167,6 +167,11 @@ export async function seedBookingFlow(
     )
   }
 
+  const existingClientEmail = requireNormalizedEmail(
+    existingClientUser.email,
+    'existing client email',
+  )
+
   const clientProfile =
     existingClientUser.clientProfile ??
     (await prisma.clientProfile.create({
@@ -215,6 +220,11 @@ export async function seedBookingFlow(
       email: true,
     },
   })
+
+  const professionalUserEmail = requireNormalizedEmail(
+    professionalUser.email,
+    'professional user email',
+  )
 
   const professionalProfile = await prisma.professionalProfile.create({
     data: {
@@ -392,14 +402,14 @@ export async function seedBookingFlow(
     tag,
     credentials: {
       client: {
-        email: existingClientUser.email,
+        email: existingClientEmail,
         password: FIXED_CLIENT_PASSWORD,
         userId: existingClientUser.id,
         clientId: clientProfile.id,
         managedBySeed: false,
       },
       professional: {
-        email: professionalUser.email,
+        email: professionalUserEmail,
         password: professionalPassword,
         userId: professionalUser.id,
         professionalId: professionalProfile.id,

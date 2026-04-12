@@ -394,10 +394,10 @@ function resolvePreferredClientPhone(
     }
   }
 
-  const userPhone = normNullableString(client.user.phone, 64)
+  const userPhone = normNullableString(client.user?.phone, 64)
   return {
     phone: userPhone,
-    phoneVerifiedAt: client.user.phoneVerifiedAt ?? null,
+    phoneVerifiedAt: client.user?.phoneVerifiedAt ?? null,
   }
 }
 
@@ -500,8 +500,8 @@ async function enqueueNewClientNotificationDispatch(args: {
       inAppTargetId: recipient.client.id,
       phone: preferredPhone.phone,
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
-      email: recipient.client.user.email,
-      emailVerifiedAt: recipient.client.user.emailVerifiedAt,
+      email: recipient.client.user?.email ?? null,
+      emailVerifiedAt: recipient.client.user?.emailVerifiedAt ?? null,
       timeZone,
       preference: recipient.preference,
     },

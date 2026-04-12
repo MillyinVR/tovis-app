@@ -52,10 +52,14 @@ export async function POST(req: Request) {
 
     const contextType = asContextType(body.contextType)
     const contextId = pickString(body.contextId)
-    const createIfMissing = asBool(body.createIfMissing) // default false
+    const createIfMissing = asBool(body.createIfMissing)
 
     if (!contextType || !contextId) {
-      console.warn('[messages/resolve] missing context', { debugId, contextType, contextId })
+      console.warn('[messages/resolve] missing context', {
+        debugId,
+        contextType,
+        contextId,
+      })
       return jsonFail(400, 'Missing contextType/contextId.')
     }
 
@@ -72,7 +76,13 @@ export async function POST(req: Request) {
 
       const b = await prisma.booking.findUnique({
         where: { id: bookingId },
-        select: { id: true, clientId: true, professionalId: true, serviceId: true, offeringId: true },
+        select: {
+          id: true,
+          clientId: true,
+          professionalId: true,
+          serviceId: true,
+          offeringId: true,
+        },
       })
       if (!b) return jsonFail(404, 'Booking not found.')
 
@@ -82,7 +92,8 @@ export async function POST(req: Request) {
       offeringId = b.offeringId ?? null
 
       const allowed =
-        (viewerClientId && viewerClientId === clientId) || (viewerProId && viewerProId === professionalId)
+        (viewerClientId && viewerClientId === clientId) ||
+        (viewerProId && viewerProId === professionalId)
       if (!allowed) return jsonFail(403, 'Forbidden.')
     }
 
@@ -91,7 +102,9 @@ export async function POST(req: Request) {
       if (!viewerClientId) return jsonFail(403, 'Clients only.')
 
       const proId = pickString(body.professionalId)
-      if (!proId) return jsonFail(400, 'Missing professionalId for SERVICE thread.')
+      if (!proId) {
+        return jsonFail(400, 'Missing professionalId for SERVICE thread.')
+      }
 
       clientId = viewerClientId
       professionalId = proId
@@ -120,26 +133,48 @@ export async function POST(req: Request) {
       if (viewerClientId) {
         clientId = viewerClientId
       } else {
-        // Pro is opening it — do NOT allow spoofing another pro’s profile
         if (viewerProId !== professionalId) return jsonFail(403, 'Forbidden.')
 
         const cid = pickString(body.clientId)
-        if (!cid) return jsonFail(400, 'Missing clientId for PRO_PROFILE when opened by pro.')
+        if (!cid) {
+          return jsonFail(
+            400,
+            'Missing clientId for PRO_PROFILE when opened by pro.',
+          )
+        }
         clientId = cid
       }
     }
 
-    if (!clientId || !professionalId) return jsonFail(400, 'Could not resolve thread participants.')
+    if (!clientId || !professionalId) {
+      return jsonFail(400, 'Could not resolve thread participants.')
+    }
 
-    // Validate both profiles exist (prevents “threads to nowhere”)
     const [clientProfile, proProfile] = await Promise.all([
-      prisma.clientProfile.findUnique({ where: { id: clientId }, select: { id: true, userId: true } }),
-      prisma.professionalProfile.findUnique({ where: { id: professionalId }, select: { id: true, userId: true } }),
+      prisma.clientProfile.findUnique({
+        where: { id: clientId },
+        select: { id: true, userId: true },
+      }),
+      prisma.professionalProfile.findUnique({
+        where: { id: professionalId },
+        select: { id: true, userId: true },
+      }),
     ])
-    if (!clientProfile?.userId) return jsonFail(404, 'Client profile missing.')
+
+    if (!clientProfile) return jsonFail(404, 'Client profile missing.')
     if (!proProfile?.userId) return jsonFail(404, 'Professional profile missing.')
 
-    // Find existing thread first (do NOT create by default)
+    // Unclaimed clients do not have a user account yet, so they cannot participate
+    // in message threads that require MessageThreadParticipant.userId.
+    if (!clientProfile.userId) {
+      return jsonFail(409, 'Client account has not been claimed yet.', {
+        code: 'CLIENT_UNCLAIMED',
+      })
+    }
+
+    const clientUserId = clientProfile.userId
+    const proUserId = proProfile.userId
+
     const existing = await prisma.messageThread.findUnique({
       where: {
         clientId_professionalId_contextType_contextId: {
@@ -153,17 +188,34 @@ export async function POST(req: Request) {
     })
 
     if (existing?.id) {
-      // Ensure both participants exist (idempotent)
       await prisma.$transaction([
         prisma.messageThreadParticipant.upsert({
-          where: { threadId_userId: { threadId: existing.id, userId: clientProfile.userId } },
+          where: {
+            threadId_userId: {
+              threadId: existing.id,
+              userId: clientUserId,
+            },
+          },
           update: {},
-          create: { threadId: existing.id, userId: clientProfile.userId, role: Role.CLIENT },
+          create: {
+            threadId: existing.id,
+            userId: clientUserId,
+            role: Role.CLIENT,
+          },
         }),
         prisma.messageThreadParticipant.upsert({
-          where: { threadId_userId: { threadId: existing.id, userId: proProfile.userId } },
+          where: {
+            threadId_userId: {
+              threadId: existing.id,
+              userId: proUserId,
+            },
+          },
           update: {},
-          create: { threadId: existing.id, userId: proProfile.userId, role: Role.PRO },
+          create: {
+            threadId: existing.id,
+            userId: proUserId,
+            role: Role.PRO,
+          },
         }),
       ])
 
@@ -171,7 +223,11 @@ export async function POST(req: Request) {
     }
 
     if (!createIfMissing) {
-      console.info('[messages/resolve] no existing thread; not creating', { debugId, contextType, contextId })
+      console.info('[messages/resolve] no existing thread; not creating', {
+        debugId,
+        contextType,
+        contextId,
+      })
       return jsonOk({ thread: null })
     }
 
@@ -191,8 +247,8 @@ export async function POST(req: Request) {
 
       await tx.messageThreadParticipant.createMany({
         data: [
-          { threadId: t.id, userId: clientProfile.userId, role: Role.CLIENT },
-          { threadId: t.id, userId: proProfile.userId, role: Role.PRO },
+          { threadId: t.id, userId: clientUserId, role: Role.CLIENT },
+          { threadId: t.id, userId: proUserId, role: Role.PRO },
         ],
         skipDuplicates: true,
       })

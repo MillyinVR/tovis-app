@@ -1,5 +1,12 @@
+// app/api/auth/password-reset/request/route.ts
+
 import { prisma } from '@/lib/prisma'
-import { jsonOk, normalizeEmail, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
+import {
+  enforceRateLimit,
+  jsonOk,
+  normalizeEmail,
+  rateLimitIdentity,
+} from '@/app/api/_utils'
 import {
   getPasswordResetAppUrlFromRequest,
   getPasswordResetRequestIp,
@@ -33,6 +40,11 @@ export async function POST(req: Request) {
     // Still return OK even if not found
     if (!user) return jsonOk({ ok: true }, 200)
 
+    const userEmail = normalizeEmail(user.email)
+
+    // Still return OK if the matched user record no longer has a usable email
+    if (!userEmail) return jsonOk({ ok: true }, 200)
+
     const appUrl = getPasswordResetAppUrlFromRequest(req)
     if (!appUrl) {
       console.error(
@@ -46,7 +58,7 @@ export async function POST(req: Request) {
 
     await issueAndSendPasswordReset({
       userId: user.id,
-      email: user.email,
+      email: userEmail,
       appUrl,
       ip,
       userAgent,
