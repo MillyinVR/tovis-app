@@ -1,5 +1,5 @@
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import { acceptProClientClaimLink } from '@/lib/claims/proClientClaim'
+import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -22,7 +22,7 @@ export async function POST(_request: Request, ctx: Ctx) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })
     }
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token,
       actingUserId: auth.user.id,
       actingClientId: auth.clientId,

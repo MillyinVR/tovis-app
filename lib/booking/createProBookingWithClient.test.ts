@@ -11,7 +11,7 @@ import {
 const mocks = vi.hoisted(() => ({
   resolveProBookingClient: vi.fn(),
   createProBooking: vi.fn(),
-  createProClientInvite: vi.fn(),
+  upsertClientClaimLink: vi.fn(),
   clientProfileFindUnique: vi.fn(),
 }))
 
@@ -23,8 +23,8 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   createProBooking: mocks.createProBooking,
 }))
 
-vi.mock('@/lib/invites/proClientInvite', () => ({
-  createProClientInvite: mocks.createProClientInvite,
+vi.mock('@/lib/clients/clientClaimLinks', () => ({
+  upsertClientClaimLink: mocks.upsertClientClaimLink,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -139,7 +139,7 @@ describe('createProBookingWithClient', () => {
     mocks.resolveProBookingClient.mockResolvedValue(makeResolvedClient())
     mocks.createProBooking.mockResolvedValue(makeBookingResult())
     mocks.clientProfileFindUnique.mockResolvedValue(makeInviteClientSnapshot())
-    mocks.createProClientInvite.mockResolvedValue(makeInviteResult())
+    mocks.upsertClientClaimLink.mockResolvedValue(makeInviteResult())
   })
 
   it('passes through resolveProBookingClient failures unchanged', async () => {
@@ -182,7 +182,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createProBooking).not.toHaveBeenCalled()
-    expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
   })
 
@@ -375,7 +375,7 @@ describe('createProBookingWithClient', () => {
       },
     })
 
-    expect(mocks.createProClientInvite).toHaveBeenCalledWith({
+    expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       clientId: 'client_existing_1',
       bookingId: 'booking_1',
@@ -432,7 +432,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
-    expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_claimed_1',
@@ -487,7 +487,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.createProClientInvite).toHaveBeenCalledWith({
+    expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
@@ -554,7 +554,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.createProClientInvite).toHaveBeenCalledWith({
+    expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
@@ -608,7 +608,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.createProClientInvite).toHaveBeenCalledWith({
+    expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
@@ -659,7 +659,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',
@@ -713,7 +713,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',
@@ -747,7 +747,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.createProClientInvite.mockResolvedValueOnce(
+    mocks.upsertClientClaimLink.mockResolvedValueOnce(
       makeInviteResult({
         status: ProClientInviteStatus.ACCEPTED,
         acceptedAt: new Date('2026-03-11T20:00:00.000Z'),
@@ -808,7 +808,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.createProClientInvite.mockResolvedValueOnce(
+    mocks.upsertClientClaimLink.mockResolvedValueOnce(
       makeInviteResult({
         status: ProClientInviteStatus.REVOKED,
         revokedAt: new Date('2026-03-11T20:00:00.000Z'),
@@ -887,7 +887,7 @@ describe('createProBookingWithClient', () => {
       })
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
-      expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+      expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'createProBookingWithClient invite client lookup failed',
         {
@@ -933,7 +933,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.createProClientInvite.mockRejectedValueOnce(
+    mocks.upsertClientClaimLink.mockRejectedValueOnce(
       new Error('invite creation failed'),
     )
 
@@ -964,7 +964,7 @@ describe('createProBookingWithClient', () => {
       })
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
-      expect(mocks.createProClientInvite).toHaveBeenCalledTimes(1)
+      expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'createProBookingWithClient invite creation failed',
         expect.objectContaining({

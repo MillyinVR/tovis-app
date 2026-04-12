@@ -1,11 +1,10 @@
-// app/api/pro/invites/[token]/accept/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
-  acceptProClientClaimLink: vi.fn(),
+  acceptClientClaimFromLink: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -14,8 +13,8 @@ vi.mock('@/app/api/_utils', () => ({
   jsonOk: mocks.jsonOk,
 }))
 
-vi.mock('@/lib/claims/proClientClaim', () => ({
-  acceptProClientClaimLink: mocks.acceptProClientClaimLink,
+vi.mock('@/lib/clients/clientClaim', () => ({
+  acceptClientClaimFromLink: mocks.acceptClientClaimFromLink,
 }))
 
 import { POST } from './route'
@@ -53,7 +52,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       data,
     }))
 
-    mocks.acceptProClientClaimLink.mockResolvedValue({
+    mocks.acceptClientClaimFromLink.mockResolvedValue({
       kind: 'ok',
       bookingId: 'booking_1',
     })
@@ -72,7 +71,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
 
     expect(result).toBe(authRes)
-    expect(mocks.acceptProClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.acceptClientClaimFromLink).not.toHaveBeenCalled()
   })
 
   it('returns NOT_FOUND when token is missing', async () => {
@@ -91,7 +90,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       code: 'NOT_FOUND',
     })
 
-    expect(mocks.acceptProClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.acceptClientClaimFromLink).not.toHaveBeenCalled()
   })
 
   it('passes token and acting client identity to the claim service', async () => {
@@ -99,7 +98,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       params: { token: 'token_1' },
     })
 
-    expect(mocks.acceptProClientClaimLink).toHaveBeenCalledWith({
+    expect(mocks.acceptClientClaimFromLink).toHaveBeenCalledWith({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -107,7 +106,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns NOT_FOUND when claim service returns not_found', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'not_found',
     })
 
@@ -128,7 +127,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns REVOKED when claim service returns revoked', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'revoked',
     })
 
@@ -153,7 +152,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns ALREADY_CLAIMED when claim service returns already_claimed', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'already_claimed',
     })
 
@@ -178,7 +177,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns CLIENT_NOT_FOUND when claim service returns client_not_found', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'client_not_found',
     })
 
@@ -203,7 +202,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns CLIENT_MISMATCH when claim service returns client_mismatch', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'client_mismatch',
     })
 
@@ -228,7 +227,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns CONFLICT when claim service returns conflict', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'conflict',
     })
 
@@ -253,7 +252,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns bookingId when claim succeeds', async () => {
-    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'ok',
       bookingId: 'booking_1',
     })
@@ -274,7 +273,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
   })
 
   it('returns INTERNAL_ERROR when claim service throws', async () => {
-    mocks.acceptProClientClaimLink.mockRejectedValueOnce(
+    mocks.acceptClientClaimFromLink.mockRejectedValueOnce(
       new Error('claim service exploded'),
     )
 

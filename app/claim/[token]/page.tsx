@@ -1,4 +1,3 @@
-// app/claim/[token]/page.tsx
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import {
@@ -7,7 +6,7 @@ import {
   ProClientInviteStatus,
 } from '@prisma/client'
 
-import { acceptProClientClaimLink } from '@/lib/claims/proClientClaim'
+import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { getCurrentUser } from '@/lib/currentUser'
 import { pickString } from '@/lib/pick'
@@ -144,7 +143,9 @@ function isClientClaimed(
   return invite.client?.claimStatus === ClientClaimStatus.CLAIMED
 }
 
-function buildLocationLabel(booking: ClaimInviteRecord['booking']): string | null {
+function buildLocationLabel(
+  booking: ClaimInviteRecord['booking'],
+): string | null {
   const formattedAddress = booking.location?.formattedAddress?.trim()
   if (formattedAddress) return formattedAddress
 
@@ -213,10 +214,10 @@ function StatusCard(props: {
 }
 
 export default async function ClaimInvitePage(props: PageProps) {
-const resolvedParams = await Promise.resolve(props.params)
-const rawToken = pickString(resolvedParams?.token)
-if (!rawToken) notFound()
-const token: string = rawToken
+  const resolvedParams = await Promise.resolve(props.params)
+  const rawToken = pickString(resolvedParams?.token)
+  if (!rawToken) notFound()
+  const token: string = rawToken
 
   const resolvedSearchParams =
     (await Promise.resolve(props.searchParams).catch(() => undefined)) ?? {}
@@ -272,7 +273,7 @@ const token: string = rawToken
       redirect(verifyHref(token))
     }
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token,
       actingUserId: freshUser.id,
       actingClientId: freshUser.clientProfile.id,
@@ -337,25 +338,33 @@ const token: string = rawToken
 
         {appointmentLabel ? (
           <div className="mt-3 text-sm text-textSecondary">
-            Appointment: <span className="font-black text-textPrimary">{appointmentLabel}</span>
+            Appointment:{' '}
+            <span className="font-black text-textPrimary">
+              {appointmentLabel}
+            </span>
           </div>
         ) : null}
 
         {locationLabel ? (
           <div className="mt-1 text-sm text-textSecondary">
-            Location: <span className="font-black text-textPrimary">{locationLabel}</span>
+            Location:{' '}
+            <span className="font-black text-textPrimary">
+              {locationLabel}
+            </span>
           </div>
         ) : null}
       </header>
 
       <section className="mt-6 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
-        <div className="text-xs font-black text-textSecondary">What this claim keeps together</div>
+        <div className="text-xs font-black text-textSecondary">
+          What this claim keeps together
+        </div>
         <div className="mt-2 text-sm text-textSecondary">
-          Your booking history, aftercare, payments, and rebook context stay attached
-          to the same client identity.
+          Your booking history, aftercare, payments, and rebook context stay
+          attached to the same client identity.
         </div>
 
-        {(invite.invitedEmail || invite.invitedPhone) ? (
+        {invite.invitedEmail || invite.invitedPhone ? (
           <div className="mt-3 text-xs text-textSecondary/80">
             {invite.invitedEmail ? (
               <div>Email on file: {invite.invitedEmail}</div>
@@ -454,7 +463,8 @@ const token: string = rawToken
             ) : needsVerification ? (
               <>
                 <div className="mt-2 text-sm text-textSecondary">
-                  Verify your account first, then come right back here to finish the claim.
+                  Verify your account first, then come right back here to finish
+                  the claim.
                 </div>
 
                 <div className="mt-4">
@@ -484,7 +494,8 @@ const token: string = rawToken
             ) : (
               <>
                 <div className="mt-2 text-sm text-textSecondary">
-                  This link is valid, but it does not match the client account currently signed in.
+                  This link is valid, but it does not match the client account
+                  currently signed in.
                 </div>
 
                 <div className="mt-4">

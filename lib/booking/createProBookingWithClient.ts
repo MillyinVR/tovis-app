@@ -11,8 +11,8 @@ import {
   type ProBookingServiceAddressInput,
 } from '@/lib/booking/resolveProBookingClient'
 import { createProBooking } from '@/lib/booking/writeBoundary'
+import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { isRecord } from '@/lib/guards'
-import { createProClientInvite } from '@/lib/invites/proClientInvite'
 import { prisma } from '@/lib/prisma'
 
 type NewClientInput = {
@@ -173,7 +173,7 @@ async function tryCreateInvite(args: {
   }
 
   try {
-    const createdInvite = await createProClientInvite({
+    const createdInvite = await upsertClientClaimLink({
       professionalId: args.professionalId,
       clientId: args.clientId,
       bookingId: args.bookingId,

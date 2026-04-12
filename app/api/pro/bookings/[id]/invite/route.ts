@@ -1,7 +1,7 @@
 import { ContactMethod } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { createProClientInvite } from '@/lib/invites/proClientInvite'
+import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -133,7 +133,7 @@ export async function POST(request: Request, ctx: Ctx) {
       return jsonFail(403, 'Forbidden.', { code: 'FORBIDDEN' })
     }
 
-    const invite = await createProClientInvite({
+    const invite = await upsertClientClaimLink({
       professionalId: auth.professionalId,
       clientId: booking.clientId,
       bookingId: booking.id,

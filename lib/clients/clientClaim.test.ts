@@ -7,10 +7,6 @@ import {
 
 const mocks = vi.hoisted(() => {
   const tx = {
-    proClientInvite: {
-      findUnique: vi.fn(),
-      updateMany: vi.fn(),
-    },
     clientProfile: {
       findUnique: vi.fn(),
       updateMany: vi.fn(),
@@ -22,6 +18,8 @@ const mocks = vi.hoisted(() => {
       $transaction: vi.fn(),
     },
     tx,
+    getClientClaimLinkByToken: vi.fn(),
+    markClientClaimLinkAcceptedAudit: vi.fn(),
   }
 })
 
@@ -29,7 +27,12 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
-import { acceptProClientClaimLink } from './proClientClaim'
+vi.mock('./clientClaimLinks', () => ({
+  getClientClaimLinkByToken: mocks.getClientClaimLinkByToken,
+  markClientClaimLinkAcceptedAudit: mocks.markClientClaimLinkAcceptedAudit,
+}))
+
+import { acceptClientClaimFromLink } from './clientClaim'
 
 function makeInvite(overrides?: {
   id?: string
@@ -43,21 +46,32 @@ function makeInvite(overrides?: {
     id?: string
     userId?: string | null
     claimStatus?: ClientClaimStatus
+    claimedAt?: Date | null
     preferredContactMethod?: ContactMethod | null
   } | null
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
-    bookingId: overrides?.bookingId ?? 'booking_1',
+    token: 'token_1',
+    professionalId: 'pro_1',
     clientId: overrides?.clientId ?? 'client_1',
-    status: overrides?.status ?? ProClientInviteStatus.PENDING,
-    acceptedAt:
-      overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
-    revokedAt: overrides?.revokedAt !== undefined ? overrides.revokedAt : null,
+    bookingId: overrides?.bookingId ?? 'booking_1',
+    invitedName: 'Tori Morales',
+    invitedEmail: 'tori@example.com',
+    invitedPhone: null,
     preferredContactMethod:
       overrides?.preferredContactMethod !== undefined
         ? overrides.preferredContactMethod
         : ContactMethod.EMAIL,
+    status: overrides?.status ?? ProClientInviteStatus.PENDING,
+    acceptedAt:
+      overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
+    acceptedByUserId: null,
+    revokedAt: overrides?.revokedAt !== undefined ? overrides.revokedAt : null,
+    revokedByUserId: null,
+    revokeReason: null,
+    createdAt: new Date('2026-04-12T10:00:00.000Z'),
+    updatedAt: new Date('2026-04-12T10:00:00.000Z'),
     client:
       overrides?.client !== undefined
         ? overrides.client
@@ -65,6 +79,7 @@ function makeInvite(overrides?: {
             id: 'client_1',
             userId: null,
             claimStatus: ClientClaimStatus.UNCLAIMED,
+            claimedAt: null,
             preferredContactMethod: null,
           },
   }
@@ -74,6 +89,7 @@ function makeActingClient(overrides?: {
   id?: string
   userId?: string | null
   claimStatus?: ClientClaimStatus
+  claimedAt?: Date | null
   preferredContactMethod?: ContactMethod | null
 }) {
   return {
@@ -81,6 +97,8 @@ function makeActingClient(overrides?: {
     userId: overrides?.userId !== undefined ? overrides.userId : null,
     claimStatus:
       overrides?.claimStatus ?? ClientClaimStatus.UNCLAIMED,
+    claimedAt:
+      overrides?.claimedAt !== undefined ? overrides.claimedAt : null,
     preferredContactMethod:
       overrides?.preferredContactMethod !== undefined
         ? overrides.preferredContactMethod
@@ -88,7 +106,7 @@ function makeActingClient(overrides?: {
   }
 }
 
-describe('acceptProClientClaimLink', () => {
+describe('acceptClientClaimFromLink', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
@@ -99,10 +117,10 @@ describe('acceptProClientClaimLink', () => {
         callback(mocks.tx),
     )
 
-    mocks.tx.proClientInvite.findUnique.mockResolvedValue(makeInvite())
-    mocks.tx.proClientInvite.updateMany.mockResolvedValue({ count: 1 })
+    mocks.getClientClaimLinkByToken.mockResolvedValue(makeInvite())
     mocks.tx.clientProfile.findUnique.mockResolvedValue(makeActingClient())
     mocks.tx.clientProfile.updateMany.mockResolvedValue({ count: 1 })
+    mocks.markClientClaimLinkAcceptedAudit.mockResolvedValue('ok')
   })
 
   afterEach(() => {
@@ -111,60 +129,62 @@ describe('acceptProClientClaimLink', () => {
 
   it('throws when token is blank after trimming', async () => {
     await expect(
-      acceptProClientClaimLink({
+      acceptClientClaimFromLink({
         token: '   ',
         actingUserId: 'user_1',
         actingClientId: 'client_1',
       }),
-    ).rejects.toThrow('acceptProClientClaimLink: token is required.')
+    ).rejects.toThrow('clientClaim: token is required.')
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('throws when actingUserId is blank after trimming', async () => {
     await expect(
-      acceptProClientClaimLink({
+      acceptClientClaimFromLink({
         token: 'token_1',
         actingUserId: '   ',
         actingClientId: 'client_1',
       }),
-    ).rejects.toThrow('acceptProClientClaimLink: actingUserId is required.')
+    ).rejects.toThrow('clientClaim: actingUserId is required.')
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('throws when actingClientId is blank after trimming', async () => {
     await expect(
-      acceptProClientClaimLink({
+      acceptClientClaimFromLink({
         token: 'token_1',
         actingUserId: 'user_1',
         actingClientId: '   ',
       }),
-    ).rejects.toThrow('acceptProClientClaimLink: actingClientId is required.')
+    ).rejects.toThrow('clientClaim: actingClientId is required.')
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('returns not_found when invite does not exist', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(null)
+  it('returns not_found when link does not exist', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(null)
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
     })
 
     expect(result).toEqual({ kind: 'not_found' })
+    expect(mocks.getClientClaimLinkByToken).toHaveBeenCalledWith({
+      token: 'token_1',
+      tx: mocks.tx,
+    })
   })
 
-  it('returns not_found when invite exists but linked client identity is missing', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
-      makeInvite({
-        client: null,
-      }),
+  it('returns not_found when link exists but linked client identity is missing', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
+      makeInvite({ client: null }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -173,14 +193,14 @@ describe('acceptProClientClaimLink', () => {
     expect(result).toEqual({ kind: 'not_found' })
   })
 
-  it('returns revoked when invite status is REVOKED', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+  it('returns revoked when link status is REVOKED', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         status: ProClientInviteStatus.REVOKED,
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -191,14 +211,14 @@ describe('acceptProClientClaimLink', () => {
   })
 
   it('returns revoked when revokedAt is already set even if status is still PENDING', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         status: ProClientInviteStatus.PENDING,
         revokedAt: new Date('2026-04-12T11:00:00.000Z'),
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -210,7 +230,7 @@ describe('acceptProClientClaimLink', () => {
   it('returns client_not_found when acting client profile does not exist', async () => {
     mocks.tx.clientProfile.findUnique.mockResolvedValueOnce(null)
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -219,19 +239,20 @@ describe('acceptProClientClaimLink', () => {
     expect(result).toEqual({ kind: 'client_not_found' })
   })
 
-  it('returns client_mismatch when invite belongs to a different unclaimed client identity', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+  it('returns client_mismatch when link belongs to a different unclaimed client identity', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         client: {
           id: 'client_other',
           userId: null,
           claimStatus: ClientClaimStatus.UNCLAIMED,
+          claimedAt: null,
           preferredContactMethod: null,
         },
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -239,22 +260,23 @@ describe('acceptProClientClaimLink', () => {
 
     expect(result).toEqual({ kind: 'client_mismatch' })
     expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
-    expect(mocks.tx.proClientInvite.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
-  it('returns already_claimed when invite belongs to a different claimed client identity', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+  it('returns already_claimed when link belongs to a different claimed client identity', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         client: {
           id: 'client_other',
           userId: 'user_other',
           claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: new Date('2026-04-12T09:00:00.000Z'),
           preferredContactMethod: null,
         },
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -265,18 +287,19 @@ describe('acceptProClientClaimLink', () => {
   })
 
   it('returns already_claimed when linked client identity is already claimed', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         client: {
           id: 'client_1',
           userId: null,
           claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: new Date('2026-04-12T09:00:00.000Z'),
           preferredContactMethod: null,
         },
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -287,18 +310,19 @@ describe('acceptProClientClaimLink', () => {
   })
 
   it('returns already_claimed when linked client has a different linked user already', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         client: {
           id: 'client_1',
           userId: 'user_other',
           claimStatus: ClientClaimStatus.UNCLAIMED,
+          claimedAt: null,
           preferredContactMethod: null,
         },
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -309,7 +333,7 @@ describe('acceptProClientClaimLink', () => {
   })
 
   it('claims the client identity successfully and writes preferredContactMethod when acting client does not have one', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         id: 'invite_1',
         bookingId: 'booking_1',
@@ -318,6 +342,7 @@ describe('acceptProClientClaimLink', () => {
           id: 'client_1',
           userId: null,
           claimStatus: ClientClaimStatus.UNCLAIMED,
+          claimedAt: null,
           preferredContactMethod: null,
         },
       }),
@@ -332,7 +357,7 @@ describe('acceptProClientClaimLink', () => {
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -350,16 +375,11 @@ describe('acceptProClientClaimLink', () => {
       },
     })
 
-    expect(mocks.tx.proClientInvite.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'invite_1',
-        revokedAt: null,
-      },
-      data: {
-        status: ProClientInviteStatus.ACCEPTED,
-        acceptedAt: new Date('2026-04-12T12:00:00.000Z'),
-        acceptedByUserId: 'user_1',
-      },
+    expect(mocks.markClientClaimLinkAcceptedAudit).toHaveBeenCalledWith({
+      inviteId: 'invite_1',
+      actingUserId: 'user_1',
+      acceptedAt: new Date('2026-04-12T12:00:00.000Z'),
+      tx: mocks.tx,
     })
 
     expect(result).toEqual({
@@ -369,7 +389,7 @@ describe('acceptProClientClaimLink', () => {
   })
 
   it('claims successfully without overwriting an existing preferredContactMethod', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         preferredContactMethod: ContactMethod.EMAIL,
       }),
@@ -382,7 +402,7 @@ describe('acceptProClientClaimLink', () => {
       }),
     )
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -405,29 +425,24 @@ describe('acceptProClientClaimLink', () => {
     })
   })
 
-  it('preserves an existing invite acceptedAt timestamp when writing audit acceptance', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(
+  it('preserves an existing invite acceptedAt timestamp when writing acceptance audit', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
         acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
       }),
     )
 
-    await acceptProClientClaimLink({
+    await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
     })
 
-    expect(mocks.tx.proClientInvite.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'invite_1',
-        revokedAt: null,
-      },
-      data: {
-        status: ProClientInviteStatus.ACCEPTED,
-        acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
-        acceptedByUserId: 'user_1',
-      },
+    expect(mocks.markClientClaimLinkAcceptedAudit).toHaveBeenCalledWith({
+      inviteId: 'invite_1',
+      actingUserId: 'user_1',
+      acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
+      tx: mocks.tx,
     })
   })
 
@@ -441,14 +456,14 @@ describe('acceptProClientClaimLink', () => {
         claimStatus: ClientClaimStatus.CLAIMED,
       })
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
     })
 
     expect(result).toEqual({ kind: 'already_claimed' })
-    expect(mocks.tx.proClientInvite.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns client_not_found when client claim update loses a race to deletion', async () => {
@@ -457,14 +472,14 @@ describe('acceptProClientClaimLink', () => {
       .mockResolvedValueOnce(makeActingClient())
       .mockResolvedValueOnce(null)
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
     })
 
     expect(result).toEqual({ kind: 'client_not_found' })
-    expect(mocks.tx.proClientInvite.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns conflict when client claim update does not succeed and client is still unclaimed', async () => {
@@ -477,27 +492,20 @@ describe('acceptProClientClaimLink', () => {
         claimStatus: ClientClaimStatus.UNCLAIMED,
       })
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
     })
 
     expect(result).toEqual({ kind: 'conflict' })
-    expect(mocks.tx.proClientInvite.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
-  it('returns revoked when invite audit update loses a race to revocation', async () => {
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 0 })
-    mocks.tx.proClientInvite.findUnique
-      .mockResolvedValueOnce(makeInvite())
-      .mockResolvedValueOnce({
-        id: 'invite_1',
-        status: ProClientInviteStatus.REVOKED,
-        revokedAt: new Date('2026-04-12T12:00:00.000Z'),
-      })
+  it('returns revoked when acceptance audit loses a race to revocation', async () => {
+    mocks.markClientClaimLinkAcceptedAudit.mockResolvedValueOnce('revoked')
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -506,13 +514,10 @@ describe('acceptProClientClaimLink', () => {
     expect(result).toEqual({ kind: 'revoked' })
   })
 
-  it('returns not_found when invite audit update loses a race to deletion', async () => {
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 0 })
-    mocks.tx.proClientInvite.findUnique
-      .mockResolvedValueOnce(makeInvite())
-      .mockResolvedValueOnce(null)
+  it('returns not_found when acceptance audit loses a race to deletion', async () => {
+    mocks.markClientClaimLinkAcceptedAudit.mockResolvedValueOnce('not_found')
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
@@ -521,17 +526,10 @@ describe('acceptProClientClaimLink', () => {
     expect(result).toEqual({ kind: 'not_found' })
   })
 
-  it('returns conflict when invite audit update does not succeed and invite is still not revoked', async () => {
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 0 })
-    mocks.tx.proClientInvite.findUnique
-      .mockResolvedValueOnce(makeInvite())
-      .mockResolvedValueOnce({
-        id: 'invite_1',
-        status: ProClientInviteStatus.PENDING,
-        revokedAt: null,
-      })
+  it('returns conflict when acceptance audit does not succeed and link is still not revoked', async () => {
+    mocks.markClientClaimLinkAcceptedAudit.mockResolvedValueOnce('conflict')
 
-    const result = await acceptProClientClaimLink({
+    const result = await acceptClientClaimFromLink({
       token: 'token_1',
       actingUserId: 'user_1',
       actingClientId: 'client_1',

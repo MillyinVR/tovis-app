@@ -8,7 +8,7 @@ import {
 const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
-  findUnique: vi.fn(),
+  getClientClaimLinkPublicState: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -16,18 +16,15 @@ vi.mock('@/app/api/_utils', () => ({
   jsonOk: mocks.jsonOk,
 }))
 
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    proClientInvite: {
-      findUnique: mocks.findUnique,
-    },
-  },
+vi.mock('@/lib/clients/clientClaimLinks', () => ({
+  getClientClaimLinkPublicState: mocks.getClientClaimLinkPublicState,
 }))
 
 import { GET } from './route'
 
-function makeInvite(overrides?: {
+function makeLink(overrides?: {
   id?: string
+  token?: string
   professionalId?: string
   clientId?: string
   bookingId?: string
@@ -36,14 +33,24 @@ function makeInvite(overrides?: {
   invitedPhone?: string | null
   preferredContactMethod?: ContactMethod | null
   status?: ProClientInviteStatus
+  acceptedAt?: Date | null
+  acceptedByUserId?: string | null
   revokedAt?: Date | null
+  revokedByUserId?: string | null
+  revokeReason?: string | null
+  createdAt?: Date
+  updatedAt?: Date
   client?: {
     id?: string
+    userId?: string | null
     claimStatus?: ClientClaimStatus
+    claimedAt?: Date | null
+    preferredContactMethod?: ContactMethod | null
   } | null
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
+    token: overrides?.token ?? 'token_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
     clientId: overrides?.clientId ?? 'client_1',
     bookingId: overrides?.bookingId ?? 'booking_1',
@@ -61,13 +68,32 @@ function makeInvite(overrides?: {
         ? overrides.preferredContactMethod
         : ContactMethod.EMAIL,
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
+    acceptedAt:
+      overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
+    acceptedByUserId:
+      overrides?.acceptedByUserId !== undefined
+        ? overrides.acceptedByUserId
+        : null,
     revokedAt: overrides?.revokedAt !== undefined ? overrides.revokedAt : null,
+    revokedByUserId:
+      overrides?.revokedByUserId !== undefined
+        ? overrides.revokedByUserId
+        : null,
+    revokeReason:
+      overrides?.revokeReason !== undefined ? overrides.revokeReason : null,
+    createdAt:
+      overrides?.createdAt ?? new Date('2026-04-12T10:00:00.000Z'),
+    updatedAt:
+      overrides?.updatedAt ?? new Date('2026-04-12T10:00:00.000Z'),
     client:
       overrides?.client !== undefined
         ? overrides.client
         : {
             id: 'client_1',
+            userId: null,
             claimStatus: ClientClaimStatus.UNCLAIMED,
+            claimedAt: null,
+            preferredContactMethod: null,
           },
   }
 }
@@ -91,7 +117,9 @@ describe('GET /api/pro/invites/[token]', () => {
       data,
     }))
 
-    mocks.findUnique.mockResolvedValue(null)
+    mocks.getClientClaimLinkPublicState.mockResolvedValue({
+      kind: 'not_found',
+    })
   })
 
   it('returns NOT_FOUND when token is missing', async () => {
@@ -99,7 +127,7 @@ describe('GET /api/pro/invites/[token]', () => {
       params: { token: '   ' },
     })
 
-    expect(mocks.findUnique).not.toHaveBeenCalled()
+    expect(mocks.getClientClaimLinkPublicState).not.toHaveBeenCalled()
     expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Invite not found.', {
       code: 'NOT_FOUND',
     })
@@ -113,7 +141,9 @@ describe('GET /api/pro/invites/[token]', () => {
   })
 
   it('returns NOT_FOUND when invite does not exist', async () => {
-    mocks.findUnique.mockResolvedValueOnce(null)
+    mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+      kind: 'not_found',
+    })
 
     const result = await GET(
       new Request('http://localhost/api/pro/invites/token_1'),
@@ -122,26 +152,8 @@ describe('GET /api/pro/invites/[token]', () => {
       },
     )
 
-    expect(mocks.findUnique).toHaveBeenCalledWith({
-      where: { token: 'token_1' },
-      select: {
-        id: true,
-        professionalId: true,
-        clientId: true,
-        bookingId: true,
-        invitedName: true,
-        invitedEmail: true,
-        invitedPhone: true,
-        preferredContactMethod: true,
-        status: true,
-        revokedAt: true,
-        client: {
-          select: {
-            id: true,
-            claimStatus: true,
-          },
-        },
-      },
+    expect(mocks.getClientClaimLinkPublicState).toHaveBeenCalledWith({
+      token: 'token_1',
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Invite not found.', {
@@ -156,38 +168,13 @@ describe('GET /api/pro/invites/[token]', () => {
     })
   })
 
-  it('returns NOT_FOUND when linked client identity is missing', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
-        client: null,
-      }),
-    )
-
-    const result = await GET(
-      new Request('http://localhost/api/pro/invites/token_1'),
-      {
-        params: { token: 'token_1' },
-      },
-    )
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Invite not found.', {
-      code: 'NOT_FOUND',
-    })
-
-    expect(result).toEqual({
-      ok: false,
-      status: 404,
-      error: 'Invite not found.',
-      code: 'NOT_FOUND',
-    })
-  })
-
-  it('returns REVOKED when invite status is REVOKED', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
+  it('returns REVOKED when claim link state is revoked', async () => {
+    mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+      kind: 'revoked',
+      link: makeLink({
         status: ProClientInviteStatus.REVOKED,
       }),
-    )
+    })
 
     const result = await GET(
       new Request('http://localhost/api/pro/invites/token_1'),
@@ -212,81 +199,20 @@ describe('GET /api/pro/invites/[token]', () => {
     })
   })
 
-  it('returns REVOKED when revokedAt is already set even if status is still PENDING', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
-        status: ProClientInviteStatus.PENDING,
-        revokedAt: new Date('2026-04-12T12:00:00.000Z'),
-      }),
-    )
-
-    const result = await GET(
-      new Request('http://localhost/api/pro/invites/token_1'),
-      {
-        params: { token: 'token_1' },
-      },
-    )
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      410,
-      'Invite is no longer available.',
-      {
-        code: 'REVOKED',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 410,
-      error: 'Invite is no longer available.',
-      code: 'REVOKED',
-    })
-  })
-
-  it('returns ALREADY_CLAIMED when linked client identity is claimed even if invite row is still pending', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
-        status: ProClientInviteStatus.PENDING,
-        client: {
-          id: 'client_1',
-          claimStatus: ClientClaimStatus.CLAIMED,
-        },
-      }),
-    )
-
-    const result = await GET(
-      new Request('http://localhost/api/pro/invites/token_1'),
-      {
-        params: { token: 'token_1' },
-      },
-    )
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'Invite already claimed.',
-      {
-        code: 'ALREADY_CLAIMED',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'Invite already claimed.',
-      code: 'ALREADY_CLAIMED',
-    })
-  })
-
-  it('returns ALREADY_CLAIMED when invite row is ACCEPTED and linked client identity is claimed', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
+  it('returns ALREADY_CLAIMED when claim link state is already_claimed', async () => {
+    mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+      kind: 'already_claimed',
+      link: makeLink({
         status: ProClientInviteStatus.ACCEPTED,
         client: {
           id: 'client_1',
+          userId: 'user_1',
           claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: new Date('2026-04-12T12:00:00.000Z'),
+          preferredContactMethod: null,
         },
       }),
-    )
+    })
 
     const result = await GET(
       new Request('http://localhost/api/pro/invites/token_1'),
@@ -311,9 +237,10 @@ describe('GET /api/pro/invites/[token]', () => {
     })
   })
 
-  it('returns invite payload when invite is pending, not revoked, and linked client is unclaimed', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
+  it('returns invite payload when claim link state is ready', async () => {
+    mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+      kind: 'ready',
+      link: makeLink({
         id: 'invite_1',
         professionalId: 'pro_123',
         clientId: 'client_123',
@@ -326,10 +253,13 @@ describe('GET /api/pro/invites/[token]', () => {
         revokedAt: null,
         client: {
           id: 'client_123',
+          userId: null,
           claimStatus: ClientClaimStatus.UNCLAIMED,
+          claimedAt: null,
+          preferredContactMethod: null,
         },
       }),
-    )
+    })
 
     const result = await GET(
       new Request('http://localhost/api/pro/invites/token_1'),
@@ -367,7 +297,9 @@ describe('GET /api/pro/invites/[token]', () => {
   })
 
   it('returns INTERNAL_ERROR when the lookup throws', async () => {
-    mocks.findUnique.mockRejectedValueOnce(new Error('db blew up'))
+    mocks.getClientClaimLinkPublicState.mockRejectedValueOnce(
+      new Error('lookup blew up'),
+    )
 
     const consoleErrorSpy = vi
       .spyOn(console, 'error')

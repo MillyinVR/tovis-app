@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   bookingFindFirst: vi.fn(),
-  createProClientInvite: vi.fn(),
+  upsertClientClaimLink: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -23,8 +23,8 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/invites/proClientInvite', () => ({
-  createProClientInvite: mocks.createProClientInvite,
+vi.mock('@/lib/clients/clientClaimLinks', () => ({
+  upsertClientClaimLink: mocks.upsertClientClaimLink,
 }))
 
 import { POST } from './route'
@@ -69,7 +69,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       clientId: 'client_123',
     })
 
-    mocks.createProClientInvite.mockResolvedValue({
+    mocks.upsertClientClaimLink.mockResolvedValue({
       id: 'invite_1',
       token: 'token_1',
       status: ProClientInviteStatus.PENDING,
@@ -94,7 +94,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
 
     expect(result).toBe(authRes)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
-    expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
   })
 
   it('returns VALIDATION_ERROR when booking id is missing', async () => {
@@ -279,7 +279,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       code: 'FORBIDDEN',
     })
 
-    expect(mocks.createProClientInvite).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
   })
 
   it('creates or updates an invite successfully and returns the invite payload', async () => {
@@ -294,7 +294,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       },
     )
 
-    expect(mocks.createProClientInvite).toHaveBeenCalledWith({
+    expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       clientId: 'client_123',
       bookingId: 'booking_1',
@@ -337,7 +337,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
   })
 
   it('returns INTERNAL_ERROR when invite creation throws', async () => {
-    mocks.createProClientInvite.mockRejectedValueOnce(
+    mocks.upsertClientClaimLink.mockRejectedValueOnce(
       new Error('invite helper exploded'),
     )
 

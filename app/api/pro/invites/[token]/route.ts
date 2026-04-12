@@ -1,57 +1,13 @@
-import {
-  ClientClaimStatus,
-  Prisma,
-  ProClientInviteStatus,
-} from '@prisma/client'
-
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { prisma } from '@/lib/prisma'
+import { getClientClaimLinkPublicState } from '@/lib/clients/clientClaimLinks'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
-const publicProClientInviteSelect = {
-  id: true,
-  professionalId: true,
-  clientId: true,
-  bookingId: true,
-  invitedName: true,
-  invitedEmail: true,
-  invitedPhone: true,
-  preferredContactMethod: true,
-  status: true,
-  revokedAt: true,
-  client: {
-    select: {
-      id: true,
-      claimStatus: true,
-    },
-  },
-} satisfies Prisma.ProClientInviteSelect
-
-type PublicProClientInvite = Prisma.ProClientInviteGetPayload<{
-  select: typeof publicProClientInviteSelect
-}>
-
 function asTrimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function isInviteRevoked(
-  invite: Pick<PublicProClientInvite, 'status' | 'revokedAt'>,
-): boolean {
-  return (
-    invite.status === ProClientInviteStatus.REVOKED ||
-    invite.revokedAt != null
-  )
-}
-
-function isClientClaimed(
-  invite: Pick<PublicProClientInvite, 'client'>,
-): boolean {
-  return invite.client?.claimStatus === ClientClaimStatus.CLAIMED
 }
 
 export async function GET(_request: Request, ctx: Ctx) {
@@ -63,26 +19,25 @@ export async function GET(_request: Request, ctx: Ctx) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })
     }
 
-    const invite = await prisma.proClientInvite.findUnique({
-      where: { token },
-      select: publicProClientInviteSelect,
-    })
+    const result = await getClientClaimLinkPublicState({ token })
 
-    if (!invite || !invite.client) {
+    if (result.kind === 'not_found') {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })
     }
 
-    if (isInviteRevoked(invite)) {
+    if (result.kind === 'revoked') {
       return jsonFail(410, 'Invite is no longer available.', {
         code: 'REVOKED',
       })
     }
 
-    if (isClientClaimed(invite)) {
+    if (result.kind === 'already_claimed') {
       return jsonFail(409, 'Invite already claimed.', {
         code: 'ALREADY_CLAIMED',
       })
     }
+
+    const invite = result.link
 
     return jsonOk(
       {
