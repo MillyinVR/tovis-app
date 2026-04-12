@@ -1,8 +1,6 @@
 // app/api/client/rebook/[token]/route.ts
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import {
-  requireClient,
   pickIsoDate,
   pickString,
   jsonFail,
@@ -15,76 +13,13 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { createClientRebookedBookingFromAftercare } from '@/lib/booking/writeBoundary'
-import { AftercareRebookMode, Prisma } from '@prisma/client'
+import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
+import { AftercareRebookMode } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
-
-const REBOOK_GET_SELECT = {
-  id: true,
-  bookingId: true,
-  notes: true,
-  rebookMode: true,
-  rebookedFor: true,
-  rebookWindowStart: true,
-  rebookWindowEnd: true,
-  publicToken: true,
-  sentToClientAt: true,
-  booking: {
-    select: {
-      id: true,
-      clientId: true,
-      professionalId: true,
-      serviceId: true,
-      offeringId: true,
-      scheduledFor: true,
-      status: true,
-      locationType: true,
-      locationId: true,
-      subtotalSnapshot: true,
-      totalDurationMinutes: true,
-      service: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      professional: {
-        select: {
-          id: true,
-          businessName: true,
-          timeZone: true,
-          location: true,
-        },
-      },
-    },
-  },
-} satisfies Prisma.AftercareSummarySelect
-
-type RebookGetRecord = Prisma.AftercareSummaryGetPayload<{
-  select: typeof REBOOK_GET_SELECT
-}>
-
-const REBOOK_POST_SELECT = {
-  id: true,
-  bookingId: true,
-  rebookMode: true,
-  rebookWindowStart: true,
-  rebookWindowEnd: true,
-  sentToClientAt: true,
-  booking: {
-    select: {
-      id: true,
-      clientId: true,
-      professionalId: true,
-    },
-  },
-} satisfies Prisma.AftercareSummarySelect
-
-type RebookPostRecord = Prisma.AftercareSummaryGetPayload<{
-  select: typeof REBOOK_POST_SELECT
-}>
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -102,76 +37,112 @@ async function getToken(ctx: Ctx): Promise<string | null> {
   return pickString(params?.token)
 }
 
-function toGetResponse(aftercare: RebookGetRecord) {
-  const booking = aftercare.booking
+function readHeaderValue(req: Request, name: string): string | null {
+  return pickString(req.headers.get(name))
+}
+
+function readRequestMeta(req: Request): {
+  requestId: string | null
+  idempotencyKey: string | null
+} {
+  const requestId =
+    readHeaderValue(req, 'x-request-id') ??
+    readHeaderValue(req, 'request-id') ??
+    null
+
+  const idempotencyKey =
+    readHeaderValue(req, 'idempotency-key') ??
+    readHeaderValue(req, 'x-idempotency-key') ??
+    null
 
   return {
-    aftercare: {
-      id: aftercare.id,
-      bookingId: aftercare.bookingId,
-      notes: aftercare.notes,
-      rebookMode: aftercare.rebookMode,
-      rebookedFor: aftercare.rebookedFor
-        ? aftercare.rebookedFor.toISOString()
-        : null,
-      rebookWindowStart: aftercare.rebookWindowStart
-        ? aftercare.rebookWindowStart.toISOString()
-        : null,
-      rebookWindowEnd: aftercare.rebookWindowEnd
-        ? aftercare.rebookWindowEnd.toISOString()
-        : null,
-      publicToken: aftercare.publicToken,
-      sentToClientAt: aftercare.sentToClientAt
-        ? aftercare.sentToClientAt.toISOString()
-        : null,
-      isFinalized: Boolean(aftercare.sentToClientAt),
-    },
-    booking: booking
+    requestId,
+    idempotencyKey,
+  }
+}
+
+function toGetResponse(
+  resolved: Awaited<ReturnType<typeof resolveAftercareAccessByToken>>,
+) {
+  return {
+    accessSource: resolved.accessSource,
+    token: resolved.token
       ? {
-          id: booking.id,
-          status: booking.status,
-          scheduledFor: booking.scheduledFor.toISOString(),
-          totalDurationMinutes: booking.totalDurationMinutes,
-          subtotalSnapshot: booking.subtotalSnapshot,
-          service: booking.service,
-          professional: booking.professional,
+          id: resolved.token.id,
+          expiresAt: resolved.token.expiresAt.toISOString(),
+          firstUsedAt: resolved.token.firstUsedAt
+            ? resolved.token.firstUsedAt.toISOString()
+            : null,
+          lastUsedAt: resolved.token.lastUsedAt
+            ? resolved.token.lastUsedAt.toISOString()
+            : null,
+          useCount: resolved.token.useCount,
+          singleUse: resolved.token.singleUse,
         }
       : null,
+    aftercare: {
+      id: resolved.aftercare.id,
+      bookingId: resolved.aftercare.bookingId,
+      notes: resolved.aftercare.notes,
+      rebookMode: resolved.aftercare.rebookMode,
+      rebookedFor: resolved.aftercare.rebookedFor
+        ? resolved.aftercare.rebookedFor.toISOString()
+        : null,
+      rebookWindowStart: resolved.aftercare.rebookWindowStart
+        ? resolved.aftercare.rebookWindowStart.toISOString()
+        : null,
+      rebookWindowEnd: resolved.aftercare.rebookWindowEnd
+        ? resolved.aftercare.rebookWindowEnd.toISOString()
+        : null,
+      publicToken: resolved.aftercare.publicToken,
+      draftSavedAt: resolved.aftercare.draftSavedAt
+        ? resolved.aftercare.draftSavedAt.toISOString()
+        : null,
+      sentToClientAt: resolved.aftercare.sentToClientAt
+        ? resolved.aftercare.sentToClientAt.toISOString()
+        : null,
+      lastEditedAt: resolved.aftercare.lastEditedAt
+        ? resolved.aftercare.lastEditedAt.toISOString()
+        : null,
+      version: resolved.aftercare.version,
+      isFinalized: Boolean(resolved.aftercare.sentToClientAt),
+    },
+    booking: {
+      id: resolved.booking.id,
+      clientId: resolved.booking.clientId,
+      professionalId: resolved.booking.professionalId,
+      serviceId: resolved.booking.serviceId,
+      offeringId: resolved.booking.offeringId,
+      status: resolved.booking.status,
+      scheduledFor: resolved.booking.scheduledFor.toISOString(),
+      locationType: resolved.booking.locationType,
+      locationId: resolved.booking.locationId,
+      totalDurationMinutes: resolved.booking.totalDurationMinutes,
+      subtotalSnapshot: resolved.booking.subtotalSnapshot,
+      service: resolved.booking.service,
+      professional: resolved.booking.professional,
+    },
   }
 }
 
 export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
-    const auth = await requireClient()
-    if (!auth.ok) return auth.res
-
     const token = await getToken(ctx)
     if (!token) return jsonFail(400, 'Missing token.')
 
-    const aftercare: RebookGetRecord | null =
-      await prisma.aftercareSummary.findUnique({
-        where: { publicToken: token },
-        select: REBOOK_GET_SELECT,
-      })
+    const resolved = await resolveAftercareAccessByToken({
+      rawToken: token,
+    })
 
-    if (!aftercare) {
-      return jsonFail(404, 'Invalid rebook link.')
-    }
-
-    if (!aftercare.booking) {
-      return jsonFail(409, 'Rebook link is missing booking context.')
-    }
-
-    if (!aftercare.sentToClientAt) {
-      return jsonFail(404, 'Invalid rebook link.')
-    }
-
-    if (aftercare.booking.clientId !== auth.clientId) {
-      return jsonFail(403, 'Forbidden.')
-    }
-
-    return jsonOk(toGetResponse(aftercare), 200)
+    return jsonOk(toGetResponse(resolved), 200)
   } catch (error: unknown) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
+
     console.error('GET /api/client/rebook/[token] error:', error)
     return jsonFail(500, 'Internal server error')
   }
@@ -179,9 +150,6 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const auth = await requireClient()
-    if (!auth.ok) return auth.res
-
     const token = await getToken(ctx)
     if (!token) return jsonFail(400, 'Missing token.')
 
@@ -197,31 +165,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return jsonFail(400, 'Pick a future time.')
     }
 
-    const aftercare: RebookPostRecord | null =
-      await prisma.aftercareSummary.findUnique({
-        where: { publicToken: token },
-        select: REBOOK_POST_SELECT,
-      })
+    const resolved = await resolveAftercareAccessByToken({
+      rawToken: token,
+    })
 
-    if (!aftercare) {
-      return jsonFail(404, 'Invalid rebook link.')
-    }
-
-    if (!aftercare.booking) {
-      return jsonFail(409, 'Rebook link is missing booking context.')
-    }
-
-    if (!aftercare.sentToClientAt) {
-      return jsonFail(404, 'Invalid rebook link.')
-    }
-
-    if (aftercare.booking.clientId !== auth.clientId) {
-      return jsonFail(403, 'Forbidden.')
-    }
-
-    if (aftercare.rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
-      const windowStart = aftercare.rebookWindowStart
-      const windowEnd = aftercare.rebookWindowEnd
+    if (
+      resolved.aftercare.rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW
+    ) {
+      const windowStart = resolved.aftercare.rebookWindowStart
+      const windowEnd = resolved.aftercare.rebookWindowEnd
 
       if (windowStart && windowEnd) {
         const requestedTime = scheduledFor.getTime()
@@ -237,11 +189,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
     }
 
+    const { requestId, idempotencyKey } = readRequestMeta(req)
+
     const result = await createClientRebookedBookingFromAftercare({
-      aftercareId: aftercare.id,
-      bookingId: aftercare.booking.id,
-      clientId: auth.clientId,
+      aftercareId: resolved.aftercare.id,
+      bookingId: resolved.booking.id,
+      clientId: resolved.booking.clientId,
       scheduledFor,
+      requestId,
+      idempotencyKey,
     })
 
     return jsonOk(
@@ -251,7 +207,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           status: result.booking.status,
           scheduledFor: result.booking.scheduledFor.toISOString(),
         },
-        aftercare: result.aftercare,
+        aftercare: {
+          id: result.aftercare.id,
+          rebookMode: result.aftercare.rebookMode,
+          rebookedFor: result.aftercare.rebookedFor
+            ? result.aftercare.rebookedFor.toISOString()
+            : null,
+        },
+        meta: result.meta,
       },
       201,
     )
