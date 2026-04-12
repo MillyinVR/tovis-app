@@ -148,13 +148,13 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
-  it('returns EXPIRED when invite status is EXPIRED', async () => {
+  it('returns REVOKED when invite status is REVOKED', async () => {
     mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
       id: 'invite_1',
       bookingId: 'booking_1',
-      status: ProClientInviteStatus.EXPIRED,
+      status: ProClientInviteStatus.REVOKED,
       acceptedAt: null,
-      expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+      revokedAt: null,
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
@@ -162,25 +162,29 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       params: { token: 'token_1' },
     })
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(410, 'Invite has expired.', {
-      code: 'EXPIRED',
-    })
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      410,
+      'Invite is no longer available.',
+      {
+        code: 'REVOKED',
+      },
+    )
 
     expect(result).toEqual({
       ok: false,
       status: 410,
-      error: 'Invite has expired.',
-      code: 'EXPIRED',
+      error: 'Invite is no longer available.',
+      code: 'REVOKED',
     })
   })
 
-  it('returns EXPIRED when expiresAt is exactly now', async () => {
+  it('returns REVOKED when revokedAt is already set even if status is still PENDING', async () => {
     mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
       id: 'invite_1',
       bookingId: 'booking_1',
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
-      expiresAt: new Date('2026-04-12T12:00:00.000Z'),
+      revokedAt: new Date('2026-04-12T11:00:00.000Z'),
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
@@ -188,15 +192,19 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       params: { token: 'token_1' },
     })
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(410, 'Invite has expired.', {
-      code: 'EXPIRED',
-    })
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      410,
+      'Invite is no longer available.',
+      {
+        code: 'REVOKED',
+      },
+    )
 
     expect(result).toEqual({
       ok: false,
       status: 410,
-      error: 'Invite has expired.',
-      code: 'EXPIRED',
+      error: 'Invite is no longer available.',
+      code: 'REVOKED',
     })
   })
 
@@ -206,7 +214,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       bookingId: 'booking_1',
       status: ProClientInviteStatus.ACCEPTED,
       acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
-      expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+      revokedAt: null,
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
@@ -236,7 +244,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       bookingId: 'booking_1',
       status: ProClientInviteStatus.PENDING,
       acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
-      expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+      revokedAt: null,
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
@@ -266,7 +274,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       bookingId: 'booking_1',
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
-      expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+      revokedAt: null,
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
@@ -299,13 +307,13 @@ describe('POST /api/pro/invites/[token]/accept', () => {
         bookingId: 'booking_1',
         status: ProClientInviteStatus.PENDING,
         acceptedAt: null,
-        expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+        revokedAt: null,
         preferredContactMethod: ContactMethod.EMAIL,
       })
       .mockResolvedValueOnce({
         status: ProClientInviteStatus.PENDING,
         acceptedAt: null,
-        expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+        revokedAt: null,
         bookingId: 'booking_1',
       })
 
@@ -331,13 +339,52 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
+  it('returns REVOKED when claim update loses a race to revocation', async () => {
+    mocks.tx.proClientInvite.findUnique
+      .mockResolvedValueOnce({
+        id: 'invite_1',
+        bookingId: 'booking_1',
+        status: ProClientInviteStatus.PENDING,
+        acceptedAt: null,
+        revokedAt: null,
+        preferredContactMethod: ContactMethod.EMAIL,
+      })
+      .mockResolvedValueOnce({
+        status: ProClientInviteStatus.REVOKED,
+        acceptedAt: null,
+        revokedAt: new Date('2026-04-12T12:00:00.000Z'),
+        bookingId: 'booking_1',
+      })
+
+    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 0 })
+
+    const result = await POST(makeRequest(), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      410,
+      'Invite is no longer available.',
+      {
+        code: 'REVOKED',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 410,
+      error: 'Invite is no longer available.',
+      code: 'REVOKED',
+    })
+  })
+
   it('accepts the invite successfully and writes preferredContactMethod when client profile does not have one', async () => {
     mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
       id: 'invite_1',
       bookingId: 'booking_1',
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
-      expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+      revokedAt: null,
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
@@ -357,7 +404,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
         id: 'invite_1',
         status: ProClientInviteStatus.PENDING,
         acceptedAt: null,
-        expiresAt: { gt: new Date('2026-04-12T12:00:00.000Z') },
+        revokedAt: null,
       },
       data: {
         status: ProClientInviteStatus.ACCEPTED,
@@ -390,7 +437,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       bookingId: 'booking_1',
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
-      expiresAt: new Date('2026-04-13T12:00:00.000Z'),
+      revokedAt: null,
       preferredContactMethod: ContactMethod.EMAIL,
     })
 

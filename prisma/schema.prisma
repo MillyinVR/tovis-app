@@ -380,7 +380,7 @@ enum ClientClaimStatus {
 enum ProClientInviteStatus {
   PENDING
   ACCEPTED
-  EXPIRED
+  REVOKED
 }
 
 // =======================
@@ -677,6 +677,8 @@ model User {
   notificationActor        Notification[]            @relation("NotificationActor")
   notificationDispatches   NotificationDispatch[]    @relation("UserNotificationDispatches")
   bookingOverrideAuditLogs BookingOverrideAuditLog[] @relation("BookingOverrideActor")
+  acceptedProClientInvites ProClientInvite[]         @relation("ProClientInviteAcceptedByUser")
+  revokedProClientInvites  ProClientInvite[]         @relation("ProClientInviteRevokedByUser")
 
   bookingOverridePermissionsGranted BookingOverridePermission[] @relation("BookingOverridePermissionGrantedBy")
   bookingOverridePermissionsRevoked BookingOverridePermission[] @relation("BookingOverridePermissionRevokedBy")
@@ -746,21 +748,21 @@ model EmailVerificationToken {
 }
 
 model ClientProfile {
-  id              String            @id @default(cuid())
-  userId          String?           @unique
+  id     String  @id @default(cuid())
+  userId String? @unique
 
-  firstName       String            @default("")
-  lastName        String            @default("")
+  firstName String @default("")
+  lastName  String @default("")
 
-  claimStatus     ClientClaimStatus @default(UNCLAIMED)
-  claimedAt       DateTime?
+  claimStatus ClientClaimStatus @default(UNCLAIMED)
+  claimedAt   DateTime?
 
-  email           String?           @unique @db.VarChar(320)
-  phone           String?           @unique @db.VarChar(32)
+  email           String?   @unique @db.VarChar(320)
+  phone           String?   @unique @db.VarChar(32)
   phoneVerifiedAt DateTime?
   avatarUrl       String?
 
-  dateOfBirth DateTime?
+  dateOfBirth            DateTime?
   preferredContactMethod ContactMethod?
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -785,7 +787,7 @@ model ClientProfile {
   notifications          ClientNotification[]
   scheduledNotifications ScheduledClientNotification[]
   waitlistEntries        WaitlistEntry[]
-  
+
   @@index([claimStatus])
 }
 
@@ -833,11 +835,11 @@ model ProfessionalProfile {
 
   businessName     String?
   handle           String?
-  handleNormalized String? @unique
-  isPremium        Boolean @default(false)
+  handleNormalized String?           @unique
+  isPremium        Boolean           @default(false)
   clientInvites    ProClientInvite[]
-  bio       String?
-  avatarUrl String?
+  bio              String?
+  avatarUrl        String?
 
   // Display-only (public profile)
   location String @default("") // e.g. "San Diego, CA"
@@ -1399,7 +1401,7 @@ model Booking {
   professionalId String
   serviceId      String
   offeringId     String?
-  
+
   proClientInvite ProClientInvite?
 
   lastMinuteOpeningId String?            @unique
@@ -1667,33 +1669,40 @@ model BookingHold {
 }
 
 model ProClientInvite {
-  id                     String                @id @default(cuid())
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  professionalId         String
-  bookingId              String                @unique
+  professionalId String
+  bookingId      String @unique
 
-  invitedName            String
-  invitedEmail           String?
-  invitedPhone           String?
+  invitedName  String
+  invitedEmail String?
+  invitedPhone String?
 
-  token                  String                @unique @default(cuid())
+  token String @unique @default(cuid())
 
-  status                 ProClientInviteStatus @default(PENDING)
-  expiresAt              DateTime
+  status ProClientInviteStatus @default(PENDING)
 
-  acceptedAt             DateTime?
-  acceptedByUserId       String?
+  acceptedAt       DateTime?
+  acceptedByUserId String?
+  acceptedByUser   User?     @relation("ProClientInviteAcceptedByUser", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  revokedAt       DateTime?
+  revokedByUserId String?
+  revokedByUser   User?     @relation("ProClientInviteRevokedByUser", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  revokeReason    String?
 
   preferredContactMethod ContactMethod?
 
-  professional           ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  booking                Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  booking      Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([professionalId])
   @@index([token])
-  @@index([status, expiresAt])
+  @@index([status, createdAt])
+  @@index([acceptedByUserId])
+  @@index([revokedByUserId])
 }
 
 model AftercareSummary {

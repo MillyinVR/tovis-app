@@ -18,10 +18,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
-import {
-  createProClientInvite,
-  PRO_CLIENT_INVITE_EXPIRY_HOURS,
-} from './proClientInvite'
+import { createProClientInvite } from './proClientInvite'
 
 function makeInvite(overrides?: {
   id?: string
@@ -34,7 +31,10 @@ function makeInvite(overrides?: {
   preferredContactMethod?: ContactMethod | null
   status?: ProClientInviteStatus
   acceptedAt?: Date | null
-  expiresAt?: Date
+  acceptedByUserId?: string | null
+  revokedAt?: Date | null
+  revokedByUserId?: string | null
+  revokeReason?: string | null
   createdAt?: Date
   updatedAt?: Date
 }) {
@@ -59,13 +59,41 @@ function makeInvite(overrides?: {
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
     acceptedAt:
       overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
-    expiresAt:
-      overrides?.expiresAt ?? new Date('2026-04-15T00:00:00.000Z'),
+    acceptedByUserId:
+      overrides?.acceptedByUserId !== undefined
+        ? overrides.acceptedByUserId
+        : null,
+    revokedAt: overrides?.revokedAt !== undefined ? overrides.revokedAt : null,
+    revokedByUserId:
+      overrides?.revokedByUserId !== undefined
+        ? overrides.revokedByUserId
+        : null,
+    revokeReason:
+      overrides?.revokeReason !== undefined ? overrides.revokeReason : null,
     createdAt:
       overrides?.createdAt ?? new Date('2026-04-12T00:00:00.000Z'),
     updatedAt:
       overrides?.updatedAt ?? new Date('2026-04-12T00:00:00.000Z'),
   }
+}
+
+const expectedSelect = {
+  id: true,
+  token: true,
+  professionalId: true,
+  bookingId: true,
+  invitedName: true,
+  invitedEmail: true,
+  invitedPhone: true,
+  preferredContactMethod: true,
+  status: true,
+  acceptedAt: true,
+  acceptedByUserId: true,
+  revokedAt: true,
+  revokedByUserId: true,
+  revokeReason: true,
+  createdAt: true,
+  updatedAt: true,
 }
 
 describe('createProClientInvite', () => {
@@ -78,13 +106,14 @@ describe('createProClientInvite', () => {
   })
 
   it('creates a new pending invite when none exists for the booking', async () => {
-    const now = new Date('2026-04-12T12:00:00.000Z')
-    vi.setSystemTime(now)
-
     const createdInvite = makeInvite({
-      expiresAt: new Date(
-        now.getTime() + PRO_CLIENT_INVITE_EXPIRY_HOURS * 60 * 60 * 1000,
-      ),
+      professionalId: 'pro_1',
+      bookingId: 'booking_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      status: ProClientInviteStatus.PENDING,
     })
 
     mocks.prisma.proClientInvite.create.mockResolvedValueOnce(createdInvite)
@@ -100,21 +129,7 @@ describe('createProClientInvite', () => {
 
     expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledWith({
       where: { bookingId: 'booking_1' },
-      select: {
-        id: true,
-        token: true,
-        professionalId: true,
-        bookingId: true,
-        invitedName: true,
-        invitedEmail: true,
-        invitedPhone: true,
-        preferredContactMethod: true,
-        status: true,
-        acceptedAt: true,
-        expiresAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: expectedSelect,
     })
 
     expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith({
@@ -125,22 +140,19 @@ describe('createProClientInvite', () => {
         invitedEmail: 'tori@example.com',
         invitedPhone: null,
         preferredContactMethod: ContactMethod.EMAIL,
-        expiresAt: new Date(
-          now.getTime() + PRO_CLIENT_INVITE_EXPIRY_HOURS * 60 * 60 * 1000,
-        ),
         status: ProClientInviteStatus.PENDING,
       },
+      select: expectedSelect,
     })
 
     expect(result).toEqual(createdInvite)
-
-    vi.useRealTimers()
   })
 
   it('returns an accepted invite unchanged', async () => {
     const acceptedInvite = makeInvite({
       status: ProClientInviteStatus.ACCEPTED,
       acceptedAt: new Date('2026-04-12T13:00:00.000Z'),
+      acceptedByUserId: 'user_1',
       invitedName: 'Accepted Client',
       invitedEmail: 'accepted@example.com',
       preferredContactMethod: ContactMethod.EMAIL,
@@ -176,11 +188,36 @@ describe('createProClientInvite', () => {
       bookingId: 'booking_1',
       invitedName: 'Changed Name',
       invitedEmail: 'changed@example.com',
+      invitedPhone: '+16195551234',
     })
 
     expect(mocks.prisma.proClientInvite.update).not.toHaveBeenCalled()
     expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
     expect(result).toEqual(acceptedInvite)
+  })
+
+  it('returns a revoked invite unchanged', async () => {
+    const revokedInvite = makeInvite({
+      status: ProClientInviteStatus.REVOKED,
+      revokedAt: new Date('2026-04-12T14:00:00.000Z'),
+      revokedByUserId: 'admin_1',
+      revokeReason: 'Admin revoked link',
+    })
+
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(revokedInvite)
+
+    const result = await createProClientInvite({
+      professionalId: 'pro_2',
+      bookingId: 'booking_1',
+      invitedName: 'Changed Name',
+      invitedEmail: 'changed@example.com',
+      invitedPhone: '+16195551234',
+      preferredContactMethod: ContactMethod.SMS,
+    })
+
+    expect(mocks.prisma.proClientInvite.update).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+    expect(result).toEqual(revokedInvite)
   })
 
   it('updates a pending invite when its fields changed', async () => {
@@ -194,6 +231,7 @@ describe('createProClientInvite', () => {
       preferredContactMethod: ContactMethod.EMAIL,
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
+      revokedAt: null,
     })
 
     const updatedInvite = makeInvite({
@@ -206,6 +244,7 @@ describe('createProClientInvite', () => {
       preferredContactMethod: ContactMethod.SMS,
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
+      revokedAt: null,
     })
 
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingInvite)
@@ -229,6 +268,7 @@ describe('createProClientInvite', () => {
         invitedPhone: '+16195551234',
         preferredContactMethod: ContactMethod.SMS,
       },
+      select: expectedSelect,
     })
 
     expect(result).toEqual(updatedInvite)
@@ -245,6 +285,7 @@ describe('createProClientInvite', () => {
       preferredContactMethod: ContactMethod.EMAIL,
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
+      revokedAt: null,
     })
 
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingInvite)
@@ -263,7 +304,7 @@ describe('createProClientInvite', () => {
     expect(result).toEqual(existingInvite)
   })
 
-  it('normalizes blank optional strings to null before comparing/updating', async () => {
+  it('normalizes blank optional email to null when a phone channel still exists', async () => {
     const existingInvite = makeInvite({
       id: 'invite_existing_1',
       invitedName: 'Tori Morales',
@@ -272,16 +313,18 @@ describe('createProClientInvite', () => {
       preferredContactMethod: ContactMethod.SMS,
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
+      revokedAt: null,
     })
 
     const updatedInvite = makeInvite({
       id: 'invite_existing_1',
       invitedName: 'Tori Morales',
       invitedEmail: null,
-      invitedPhone: null,
-      preferredContactMethod: null,
+      invitedPhone: '+16195551234',
+      preferredContactMethod: ContactMethod.SMS,
       status: ProClientInviteStatus.PENDING,
       acceptedAt: null,
+      revokedAt: null,
     })
 
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingInvite)
@@ -292,8 +335,8 @@ describe('createProClientInvite', () => {
       bookingId: 'booking_1',
       invitedName: 'Tori Morales',
       invitedEmail: '   ',
-      invitedPhone: '   ',
-      preferredContactMethod: null,
+      invitedPhone: '  +16195551234  ',
+      preferredContactMethod: ContactMethod.SMS,
     })
 
     expect(mocks.prisma.proClientInvite.update).toHaveBeenCalledWith({
@@ -302,9 +345,10 @@ describe('createProClientInvite', () => {
         professionalId: 'pro_1',
         invitedName: 'Tori Morales',
         invitedEmail: null,
-        invitedPhone: null,
-        preferredContactMethod: null,
+        invitedPhone: '+16195551234',
+        preferredContactMethod: ContactMethod.SMS,
       },
+      select: expectedSelect,
     })
 
     expect(result).toEqual(updatedInvite)
@@ -322,5 +366,52 @@ describe('createProClientInvite', () => {
 
     expect(mocks.prisma.proClientInvite.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+  })
+
+  it('throws when both invitedEmail and invitedPhone are missing', async () => {
+    await expect(
+      createProClientInvite({
+        professionalId: 'pro_1',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: '   ',
+        invitedPhone: '   ',
+      }),
+    ).rejects.toThrow(
+      'createProClientInvite: invitedEmail or invitedPhone is required.',
+    )
+
+    expect(mocks.prisma.proClientInvite.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+  })
+
+  it('throws when preferredContactMethod is EMAIL without invitedEmail', async () => {
+    await expect(
+      createProClientInvite({
+        professionalId: 'pro_1',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: null,
+        invitedPhone: '+16195551234',
+        preferredContactMethod: ContactMethod.EMAIL,
+      }),
+    ).rejects.toThrow(
+      'createProClientInvite: invitedEmail is required when preferredContactMethod is EMAIL.',
+    )
+  })
+
+  it('throws when preferredContactMethod is SMS without invitedPhone', async () => {
+    await expect(
+      createProClientInvite({
+        professionalId: 'pro_1',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+        invitedPhone: null,
+        preferredContactMethod: ContactMethod.SMS,
+      }),
+    ).rejects.toThrow(
+      'createProClientInvite: invitedPhone is required when preferredContactMethod is SMS.',
+    )
   })
 })

@@ -1,3 +1,4 @@
+// lib/invites/proClientInvite.ts
 import {
   ContactMethod,
   Prisma,
@@ -8,12 +9,31 @@ import { prisma } from '@/lib/prisma'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
+const proClientInviteSelect = {
+  id: true,
+  token: true,
+  professionalId: true,
+  bookingId: true,
+  invitedName: true,
+  invitedEmail: true,
+  invitedPhone: true,
+  preferredContactMethod: true,
+  status: true,
+  acceptedAt: true,
+  acceptedByUserId: true,
+  revokedAt: true,
+  revokedByUserId: true,
+  revokeReason: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ProClientInviteSelect
+
+type SelectedProClientInvite = Prisma.ProClientInviteGetPayload<{
+  select: typeof proClientInviteSelect
+}>
+
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
-}
-
-function addHours(date: Date, hours: number): Date {
-  return new Date(date.getTime() + hours * 60 * 60 * 1000)
 }
 
 function normalizeRequiredString(value: string): string {
@@ -30,7 +50,49 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return normalized ? normalized : null
 }
 
-export const PRO_CLIENT_INVITE_EXPIRY_HOURS = 72
+function validateInviteChannels(args: {
+  invitedEmail: string | null
+  invitedPhone: string | null
+  preferredContactMethod: ContactMethod | null
+}) {
+  if (!args.invitedEmail && !args.invitedPhone) {
+    throw new Error(
+      'createProClientInvite: invitedEmail or invitedPhone is required.',
+    )
+  }
+
+  if (
+    args.preferredContactMethod === ContactMethod.EMAIL &&
+    !args.invitedEmail
+  ) {
+    throw new Error(
+      'createProClientInvite: invitedEmail is required when preferredContactMethod is EMAIL.',
+    )
+  }
+
+  if (
+    args.preferredContactMethod === ContactMethod.SMS &&
+    !args.invitedPhone
+  ) {
+    throw new Error(
+      'createProClientInvite: invitedPhone is required when preferredContactMethod is SMS.',
+    )
+  }
+}
+
+function isAcceptedInvite(invite: Pick<SelectedProClientInvite, 'status' | 'acceptedAt'>): boolean {
+  return (
+    invite.status === ProClientInviteStatus.ACCEPTED ||
+    invite.acceptedAt != null
+  )
+}
+
+function isRevokedInvite(invite: Pick<SelectedProClientInvite, 'status' | 'revokedAt'>): boolean {
+  return (
+    invite.status === ProClientInviteStatus.REVOKED ||
+    invite.revokedAt != null
+  )
+}
 
 export type CreateProClientInviteArgs = {
   professionalId: string
@@ -50,23 +112,15 @@ export async function createProClientInvite(args: CreateProClientInviteArgs) {
   const invitedPhone = normalizeOptionalString(args.invitedPhone)
   const preferredContactMethod = args.preferredContactMethod ?? null
 
+  validateInviteChannels({
+    invitedEmail,
+    invitedPhone,
+    preferredContactMethod,
+  })
+
   const existing = await db.proClientInvite.findUnique({
     where: { bookingId: args.bookingId },
-    select: {
-      id: true,
-      token: true,
-      professionalId: true,
-      bookingId: true,
-      invitedName: true,
-      invitedEmail: true,
-      invitedPhone: true,
-      preferredContactMethod: true,
-      status: true,
-      acceptedAt: true,
-      expiresAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: proClientInviteSelect,
   })
 
   if (!existing) {
@@ -78,16 +132,13 @@ export async function createProClientInvite(args: CreateProClientInviteArgs) {
         invitedEmail,
         invitedPhone,
         preferredContactMethod,
-        expiresAt: addHours(new Date(), PRO_CLIENT_INVITE_EXPIRY_HOURS),
         status: ProClientInviteStatus.PENDING,
       },
+      select: proClientInviteSelect,
     })
   }
 
-  if (
-    existing.status === ProClientInviteStatus.ACCEPTED ||
-    existing.acceptedAt != null
-  ) {
+  if (isAcceptedInvite(existing) || isRevokedInvite(existing)) {
     return existing
   }
 
@@ -111,5 +162,6 @@ export async function createProClientInvite(args: CreateProClientInviteArgs) {
       invitedPhone,
       preferredContactMethod,
     },
+    select: proClientInviteSelect,
   })
 }

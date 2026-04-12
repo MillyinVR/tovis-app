@@ -1,4 +1,4 @@
-import { ProClientInviteStatus } from '@prisma/client'
+import { Prisma, ProClientInviteStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
@@ -8,18 +8,42 @@ export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
+const publicProClientInviteSelect = {
+  id: true,
+  professionalId: true,
+  bookingId: true,
+  invitedName: true,
+  invitedEmail: true,
+  invitedPhone: true,
+  preferredContactMethod: true,
+  status: true,
+  acceptedAt: true,
+  revokedAt: true,
+} satisfies Prisma.ProClientInviteSelect
+
+type PublicProClientInvite = Prisma.ProClientInviteGetPayload<{
+  select: typeof publicProClientInviteSelect
+}>
+
 function asTrimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function isInviteExpired(args: {
-  status: ProClientInviteStatus
-  expiresAt: Date
-  now: Date
-}): boolean {
+function isInviteAccepted(
+  invite: Pick<PublicProClientInvite, 'status' | 'acceptedAt'>,
+): boolean {
   return (
-    args.status === ProClientInviteStatus.EXPIRED ||
-    args.expiresAt.getTime() <= args.now.getTime()
+    invite.status === ProClientInviteStatus.ACCEPTED ||
+    invite.acceptedAt != null
+  )
+}
+
+function isInviteRevoked(
+  invite: Pick<PublicProClientInvite, 'status' | 'revokedAt'>,
+): boolean {
+  return (
+    invite.status === ProClientInviteStatus.REVOKED ||
+    invite.revokedAt != null
   )
 }
 
@@ -34,37 +58,23 @@ export async function GET(_request: Request, ctx: Ctx) {
 
     const invite = await prisma.proClientInvite.findUnique({
       where: { token },
-      select: {
-        id: true,
-        professionalId: true,
-        bookingId: true,
-        invitedName: true,
-        invitedEmail: true,
-        invitedPhone: true,
-        preferredContactMethod: true,
-        expiresAt: true,
-        status: true,
-      },
+      select: publicProClientInviteSelect,
     })
 
     if (!invite) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })
     }
 
-    if (invite.status === ProClientInviteStatus.ACCEPTED) {
+    if (isInviteAccepted(invite)) {
       return jsonFail(409, 'Invite already accepted.', {
         code: 'ALREADY_ACCEPTED',
       })
     }
 
-    if (
-      isInviteExpired({
-        status: invite.status,
-        expiresAt: invite.expiresAt,
-        now: new Date(),
+    if (isInviteRevoked(invite)) {
+      return jsonFail(410, 'Invite is no longer available.', {
+        code: 'REVOKED',
       })
-    ) {
-      return jsonFail(410, 'Invite has expired.', { code: 'EXPIRED' })
     }
 
     return jsonOk(
@@ -76,7 +86,6 @@ export async function GET(_request: Request, ctx: Ctx) {
         invitedEmail: invite.invitedEmail,
         invitedPhone: invite.invitedPhone,
         preferredContactMethod: invite.preferredContactMethod,
-        expiresAt: invite.expiresAt,
       },
       200,
     )

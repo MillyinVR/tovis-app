@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
@@ -30,8 +30,9 @@ function makeInvite(overrides?: {
   invitedEmail?: string | null
   invitedPhone?: string | null
   preferredContactMethod?: ContactMethod | null
-  expiresAt?: Date
   status?: ProClientInviteStatus
+  acceptedAt?: Date | null
+  revokedAt?: Date | null
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
@@ -50,16 +51,16 @@ function makeInvite(overrides?: {
       overrides?.preferredContactMethod !== undefined
         ? overrides.preferredContactMethod
         : ContactMethod.EMAIL,
-    expiresAt:
-      overrides?.expiresAt ?? new Date('2026-04-15T00:00:00.000Z'),
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
+    acceptedAt:
+      overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
+    revokedAt: overrides?.revokedAt !== undefined ? overrides.revokedAt : null,
   }
 }
 
 describe('GET /api/pro/invites/[token]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.setSystemTime(new Date('2026-04-12T12:00:00.000Z'))
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: unknown) => ({
@@ -77,10 +78,6 @@ describe('GET /api/pro/invites/[token]', () => {
     }))
 
     mocks.findUnique.mockResolvedValue(null)
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
   })
 
   it('returns NOT_FOUND when token is missing', async () => {
@@ -121,8 +118,9 @@ describe('GET /api/pro/invites/[token]', () => {
         invitedEmail: true,
         invitedPhone: true,
         preferredContactMethod: true,
-        expiresAt: true,
         status: true,
+        acceptedAt: true,
+        revokedAt: true,
       },
     })
 
@@ -168,38 +166,11 @@ describe('GET /api/pro/invites/[token]', () => {
     })
   })
 
-  it('returns EXPIRED when invite status is EXPIRED', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
-        status: ProClientInviteStatus.EXPIRED,
-        expiresAt: new Date('2026-04-20T00:00:00.000Z'),
-      }),
-    )
-
-    const result = await GET(
-      new Request('http://localhost/api/pro/invites/token_1'),
-      {
-        params: { token: 'token_1' },
-      },
-    )
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(410, 'Invite has expired.', {
-      code: 'EXPIRED',
-    })
-
-    expect(result).toEqual({
-      ok: false,
-      status: 410,
-      error: 'Invite has expired.',
-      code: 'EXPIRED',
-    })
-  })
-
-  it('returns EXPIRED when expiresAt is exactly now', async () => {
+  it('returns ALREADY_ACCEPTED when acceptedAt is already set even if status is still PENDING', async () => {
     mocks.findUnique.mockResolvedValueOnce(
       makeInvite({
         status: ProClientInviteStatus.PENDING,
-        expiresAt: new Date('2026-04-12T12:00:00.000Z'),
+        acceptedAt: new Date('2026-04-12T12:00:00.000Z'),
       }),
     )
 
@@ -210,19 +181,84 @@ describe('GET /api/pro/invites/[token]', () => {
       },
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(410, 'Invite has expired.', {
-      code: 'EXPIRED',
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'Invite already accepted.',
+      {
+        code: 'ALREADY_ACCEPTED',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Invite already accepted.',
+      code: 'ALREADY_ACCEPTED',
     })
+  })
+
+  it('returns REVOKED when invite status is REVOKED', async () => {
+    mocks.findUnique.mockResolvedValueOnce(
+      makeInvite({
+        status: ProClientInviteStatus.REVOKED,
+      }),
+    )
+
+    const result = await GET(
+      new Request('http://localhost/api/pro/invites/token_1'),
+      {
+        params: { token: 'token_1' },
+      },
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      410,
+      'Invite is no longer available.',
+      {
+        code: 'REVOKED',
+      },
+    )
 
     expect(result).toEqual({
       ok: false,
       status: 410,
-      error: 'Invite has expired.',
-      code: 'EXPIRED',
+      error: 'Invite is no longer available.',
+      code: 'REVOKED',
     })
   })
 
-  it('returns invite payload when invite is pending and still valid', async () => {
+  it('returns REVOKED when revokedAt is already set even if status is still PENDING', async () => {
+    mocks.findUnique.mockResolvedValueOnce(
+      makeInvite({
+        status: ProClientInviteStatus.PENDING,
+        revokedAt: new Date('2026-04-12T12:00:00.000Z'),
+      }),
+    )
+
+    const result = await GET(
+      new Request('http://localhost/api/pro/invites/token_1'),
+      {
+        params: { token: 'token_1' },
+      },
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      410,
+      'Invite is no longer available.',
+      {
+        code: 'REVOKED',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 410,
+      error: 'Invite is no longer available.',
+      code: 'REVOKED',
+    })
+  })
+
+  it('returns invite payload when invite is pending and available', async () => {
     mocks.findUnique.mockResolvedValueOnce(
       makeInvite({
         id: 'invite_1',
@@ -232,8 +268,9 @@ describe('GET /api/pro/invites/[token]', () => {
         invitedEmail: 'tori@example.com',
         invitedPhone: '+16195551234',
         preferredContactMethod: ContactMethod.SMS,
-        expiresAt: new Date('2026-04-15T00:00:00.000Z'),
         status: ProClientInviteStatus.PENDING,
+        acceptedAt: null,
+        revokedAt: null,
       }),
     )
 
@@ -253,7 +290,6 @@ describe('GET /api/pro/invites/[token]', () => {
         invitedEmail: 'tori@example.com',
         invitedPhone: '+16195551234',
         preferredContactMethod: ContactMethod.SMS,
-        expiresAt: new Date('2026-04-15T00:00:00.000Z'),
       },
       200,
     )
@@ -269,7 +305,6 @@ describe('GET /api/pro/invites/[token]', () => {
         invitedEmail: 'tori@example.com',
         invitedPhone: '+16195551234',
         preferredContactMethod: ContactMethod.SMS,
-        expiresAt: new Date('2026-04-15T00:00:00.000Z'),
       },
     })
   })
