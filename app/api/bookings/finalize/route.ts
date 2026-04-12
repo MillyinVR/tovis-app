@@ -19,8 +19,10 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
+import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 const FINALIZE_OFFERING_SELECT = {
   id: true,
@@ -137,7 +139,7 @@ function getFinalizeProNotificationMeta(status: BookingStatus): {
 async function createFinalizeProNotification(args: {
   professionalId: string
   bookingId: string
-  actorUserId: string
+  actorUserId?: string | null
   bookingStatus: BookingStatus
   source: BookingSource
   locationType: ServiceLocationType
@@ -150,7 +152,7 @@ async function createFinalizeProNotification(args: {
     title: meta.title,
     body: '',
     href: `/pro/bookings/${args.bookingId}`,
-    actorUserId: args.actorUserId,
+    actorUserId: args.actorUserId ?? null,
     bookingId: args.bookingId,
     dedupeKey: `PRO_NOTIF:${meta.eventKey}:${args.bookingId}`,
     data: {
@@ -164,11 +166,6 @@ async function createFinalizeProNotification(args: {
 
 export async function POST(request: Request) {
   try {
-    const auth = await requireClient()
-    if (!auth.ok) return auth.res
-
-    const { clientId, user } = auth
-
     const rawBody: unknown = await request.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
@@ -219,6 +216,8 @@ export async function POST(request: Request) {
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = getClientSubmittedBookingStatus(autoAccept)
 
+    let clientId: string
+    let actorUserId: string | null = null
     let rebookOfBookingId: string | null = null
 
     if (source === BookingSource.AFTERCARE) {
@@ -226,34 +225,14 @@ export async function POST(request: Request) {
         return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
       }
 
-      const aftercare = await prisma.aftercareSummary.findUnique({
-        where: { publicToken: aftercareToken },
-        select: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              clientId: true,
-              professionalId: true,
-              serviceId: true,
-              offeringId: true,
-            },
-          },
-        },
+      const resolved = await resolveAftercareAccessByToken({
+        rawToken: aftercareToken,
       })
 
-      if (!aftercare?.booking) {
-        return bookingJsonFail('AFTERCARE_TOKEN_INVALID')
-      }
-
-      const original = aftercare.booking
+      const original = resolved.booking
 
       if (original.status !== BookingStatus.COMPLETED) {
         return bookingJsonFail('AFTERCARE_NOT_COMPLETED')
-      }
-
-      if (original.clientId !== clientId) {
-        return bookingJsonFail('AFTERCARE_CLIENT_MISMATCH')
       }
 
       const matchesOffering =
@@ -265,10 +244,17 @@ export async function POST(request: Request) {
         return bookingJsonFail('AFTERCARE_OFFERING_MISMATCH')
       }
 
+      clientId = original.clientId
       rebookOfBookingId =
         requestedRebookOfBookingId && requestedRebookOfBookingId === original.id
           ? requestedRebookOfBookingId
           : original.id
+    } else {
+      const auth = await requireClient()
+      if (!auth.ok) return auth.res
+
+      clientId = auth.clientId
+      actorUserId = auth.user.id
     }
 
     const result = await finalizeBookingFromHold({
@@ -288,7 +274,7 @@ export async function POST(request: Request) {
       await createFinalizeProNotification({
         professionalId: result.booking.professionalId,
         bookingId: result.booking.id,
-        actorUserId: user.id,
+        actorUserId,
         bookingStatus: result.booking.status,
         source,
         locationType,

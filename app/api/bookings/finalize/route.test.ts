@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
 
   professionalServiceOfferingFindUnique: vi.fn(),
-  aftercareSummaryFindUnique: vi.fn(),
+  resolveAftercareAccessByToken: vi.fn(),
 
   finalizeBookingFromHold: vi.fn(),
   createProNotification: vi.fn(),
@@ -44,9 +44,6 @@ vi.mock('@/lib/prisma', () => ({
     professionalServiceOffering: {
       findUnique: mocks.professionalServiceOfferingFindUnique,
     },
-    aftercareSummary: {
-      findUnique: mocks.aftercareSummaryFindUnique,
-    },
   },
 }))
 
@@ -66,6 +63,10 @@ vi.mock('@/lib/booking/locationContext', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   finalizeBookingFromHold: mocks.finalizeBookingFromHold,
+}))
+
+vi.mock('@/lib/aftercare/unclaimedAftercareAccess', () => ({
+  resolveAftercareAccessByToken: mocks.resolveAftercareAccessByToken,
 }))
 
 import { POST } from './route'
@@ -93,6 +94,66 @@ const offering = {
     autoAcceptBookings: false,
     timeZone: 'America/Los_Angeles',
   },
+}
+
+function makeResolvedAftercareAccess(overrides?: {
+  status?: BookingStatus
+  clientId?: string
+  professionalId?: string
+  serviceId?: string
+  offeringId?: string | null
+}) {
+  return {
+    accessSource: 'clientActionToken' as const,
+    token: {
+      id: 'token_row_1',
+      expiresAt: new Date('2026-03-20T19:00:00.000Z'),
+      firstUsedAt: null,
+      lastUsedAt: null,
+      useCount: 0,
+      singleUse: false,
+    },
+    aftercare: {
+      id: 'aftercare_1',
+      bookingId: 'booking_old',
+      notes: 'Aftercare note',
+      rebookMode: 'BOOKED_NEXT_APPOINTMENT',
+      rebookedFor: new Date('2026-04-01T19:00:00.000Z'),
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      publicToken: 'legacy_public_token',
+      draftSavedAt: new Date('2026-03-11T18:00:00.000Z'),
+      sentToClientAt: new Date('2026-03-11T18:30:00.000Z'),
+      lastEditedAt: new Date('2026-03-11T18:15:00.000Z'),
+      version: 2,
+    },
+    booking: {
+      id: 'booking_old',
+      clientId: overrides?.clientId ?? 'client_1',
+      professionalId: overrides?.professionalId ?? 'pro_123',
+      serviceId: overrides?.serviceId ?? 'service_1',
+      offeringId:
+        overrides && 'offeringId' in overrides
+          ? (overrides.offeringId ?? null)
+          : 'offering_1',
+      status: overrides?.status ?? BookingStatus.COMPLETED,
+      scheduledFor: HOLD_START,
+      locationType: ServiceLocationType.SALON,
+      locationId: 'loc_1',
+      totalDurationMinutes: 60,
+      subtotalSnapshot: '100.00',
+      service: {
+        id: 'service_1',
+        name: 'Haircut',
+      },
+      professional: {
+        id: 'pro_123',
+        businessName: 'TOVIS Studio',
+        timeZone: 'America/Los_Angeles',
+        location: null,
+      },
+    },
+  }
 }
 
 describe('POST /api/bookings/finalize', () => {
@@ -124,7 +185,10 @@ describe('POST /api/bookings/finalize', () => {
     }))
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
-    mocks.aftercareSummaryFindUnique.mockResolvedValue(null)
+
+    mocks.resolveAftercareAccessByToken.mockResolvedValue(
+      makeResolvedAftercareAccess(),
+    )
 
     mocks.finalizeBookingFromHold.mockResolvedValue({
       booking: {
@@ -144,26 +208,6 @@ describe('POST /api/bookings/finalize', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-  })
-
-  it('returns auth response when auth fails', async () => {
-    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
-    mocks.requireClient.mockResolvedValueOnce({
-      ok: false,
-      res: authRes,
-    })
-
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-      }),
-    )
-
-    expect(result).toBe(authRes)
-    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
   it('returns LOCATION_TYPE_REQUIRED when locationType is missing', async () => {
@@ -196,6 +240,9 @@ describe('POST /api/bookings/finalize', () => {
       uiAction: descriptor.uiAction,
       message: descriptor.message,
     })
+
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.requireClient).not.toHaveBeenCalled()
   })
 
   it('returns OFFERING_ID_REQUIRED when offeringId is missing', async () => {
@@ -218,7 +265,8 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.requireClient).not.toHaveBeenCalled()
   })
 
   it('returns HOLD_ID_REQUIRED when holdId is missing', async () => {
@@ -241,7 +289,8 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.requireClient).not.toHaveBeenCalled()
   })
 
   it('returns ADDONS_INVALID when addOnIds contains duplicates', async () => {
@@ -266,7 +315,8 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.requireClient).not.toHaveBeenCalled()
   })
 
   it('returns MISSING_MEDIA_ID when source is discovery without mediaId', async () => {
@@ -291,7 +341,8 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.requireClient).not.toHaveBeenCalled()
   })
 
   it('returns OFFERING_NOT_FOUND when offering is missing', async () => {
@@ -316,6 +367,7 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.requireClient).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
@@ -344,6 +396,32 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+  })
+
+  it('returns auth response when auth fails for non-aftercare finalize', async () => {
+    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
+    mocks.requireClient.mockResolvedValueOnce({
+      ok: false,
+      res: authRes,
+    })
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+      }),
+    )
+
+    expect(mocks.professionalServiceOfferingFindUnique).toHaveBeenCalledWith({
+      where: { id: 'offering_1' },
+      select: expect.any(Object),
+    })
+    expect(mocks.requireClient).toHaveBeenCalledTimes(1)
+    expect(result).toBe(authRes)
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
@@ -369,48 +447,19 @@ describe('POST /api/bookings/finalize', () => {
       message: descriptor.message,
     })
 
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
-  })
-
-  it('returns AFTERCARE_TOKEN_INVALID when token does not resolve', async () => {
-    const descriptor = getBookingErrorDescriptor('AFTERCARE_TOKEN_INVALID')
-    mocks.aftercareSummaryFindUnique.mockResolvedValueOnce(null)
-
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-        source: 'AFTERCARE',
-        aftercareToken: 'bad_token',
-      }),
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: descriptor.httpStatus,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
-
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
   it('returns AFTERCARE_NOT_COMPLETED when aftercare booking is not completed', async () => {
     const descriptor = getBookingErrorDescriptor('AFTERCARE_NOT_COMPLETED')
-    mocks.aftercareSummaryFindUnique.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_old',
+
+    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+      makeResolvedAftercareAccess({
         status: BookingStatus.PENDING,
-        clientId: 'client_1',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offeringId: 'offering_1',
-      },
-    })
+      }),
+    )
 
     const result = await POST(
       makeRequest({
@@ -422,39 +471,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
-      ok: false,
-      status: descriptor.httpStatus,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
+    expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
+      rawToken: 'token_1',
     })
-  })
-
-  it('returns AFTERCARE_CLIENT_MISMATCH when aftercare booking belongs to another client', async () => {
-    const descriptor = getBookingErrorDescriptor('AFTERCARE_CLIENT_MISMATCH')
-    mocks.aftercareSummaryFindUnique.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_old',
-        status: BookingStatus.COMPLETED,
-        clientId: 'client_other',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offeringId: 'offering_1',
-      },
-    })
-
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-        source: 'AFTERCARE',
-        aftercareToken: 'token_1',
-      }),
-    )
 
     expect(result).toEqual({
       ok: false,
@@ -469,16 +488,14 @@ describe('POST /api/bookings/finalize', () => {
 
   it('returns AFTERCARE_OFFERING_MISMATCH when aftercare booking does not match offering', async () => {
     const descriptor = getBookingErrorDescriptor('AFTERCARE_OFFERING_MISMATCH')
-    mocks.aftercareSummaryFindUnique.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_old',
-        status: BookingStatus.COMPLETED,
-        clientId: 'client_1',
+
+    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+      makeResolvedAftercareAccess({
         professionalId: 'pro_other',
         serviceId: 'service_other',
         offeringId: 'offering_other',
-      },
-    })
+      }),
+    )
 
     const result = await POST(
       makeRequest({
@@ -501,17 +518,12 @@ describe('POST /api/bookings/finalize', () => {
     })
   })
 
-  it('calls finalizeBookingFromHold with normalized args', async () => {
-    mocks.aftercareSummaryFindUnique.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_old',
-        status: BookingStatus.COMPLETED,
-        clientId: 'client_1',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offeringId: 'offering_1',
-      },
-    })
+  it('calls finalizeBookingFromHold with token-resolved client ownership for aftercare', async () => {
+    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+      makeResolvedAftercareAccess({
+        clientId: 'client_from_token',
+      }),
+    )
 
     await POST(
       makeRequest({
@@ -526,8 +538,10 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
-      clientId: 'client_1',
+      clientId: 'client_from_token',
       holdId: 'hold_1',
       openingId: 'opening_1',
       addOnIds: ['addon_1', 'addon_2'],
@@ -551,7 +565,27 @@ describe('POST /api/bookings/finalize', () => {
     })
   })
 
-  it('creates the booking through the boundary and notifies the pro when valid', async () => {
+  it('uses original booking id as fallback rebookOfBookingId for aftercare', async () => {
+    await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'AFTERCARE',
+        aftercareToken: 'token_1',
+      }),
+    )
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client_1',
+        source: BookingSource.AFTERCARE,
+        rebookOfBookingId: 'booking_old',
+      }),
+    )
+  })
+
+  it('creates the booking through the boundary and notifies the pro for standard requested flow', async () => {
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -560,6 +594,8 @@ describe('POST /api/bookings/finalize', () => {
         source: 'REQUESTED',
       }),
     )
+
+    expect(mocks.requireClient).toHaveBeenCalledTimes(1)
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
       clientId: 'client_1',
@@ -620,6 +656,35 @@ describe('POST /api/bookings/finalize', () => {
     })
   })
 
+  it('creates pro notification with null actorUserId for aftercare finalize', async () => {
+    await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'AFTERCARE',
+        aftercareToken: 'token_1',
+      }),
+    )
+
+    expect(mocks.createProNotification).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
+      title: 'New booking request',
+      body: '',
+      href: '/pro/bookings/booking_1',
+      actorUserId: null,
+      bookingId: 'booking_1',
+      dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST_CREATED:booking_1',
+      data: {
+        bookingId: 'booking_1',
+        bookingStatus: BookingStatus.PENDING,
+        source: BookingSource.AFTERCARE,
+        locationType: ServiceLocationType.SALON,
+      },
+    })
+  })
+
   it('uses booking confirmed event when booking is auto-confirmed', async () => {
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce({
       ...offering,
@@ -665,6 +730,37 @@ describe('POST /api/bookings/finalize', () => {
         source: BookingSource.REQUESTED,
         locationType: ServiceLocationType.SALON,
       },
+    })
+  })
+
+  it('maps BookingError from resolveAftercareAccessByToken', async () => {
+    const descriptor = getBookingErrorDescriptor('FORBIDDEN')
+
+    mocks.resolveAftercareAccessByToken.mockRejectedValueOnce(
+      new BookingError('FORBIDDEN', {
+        message: 'That aftercare link is invalid or expired.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'AFTERCARE',
+        aftercareToken: 'bad_token',
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: 'That aftercare link is invalid or expired.',
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: 'That aftercare link is invalid or expired.',
     })
   })
 

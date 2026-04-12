@@ -3,8 +3,9 @@ import {
   BookingCheckoutStatus,
   BookingServiceItemType,
   BookingStatus,
-  ClientActionTokenKind,
   ConsultationApprovalStatus,
+  ConsultationDecision,
+  ContactMethod,
   Prisma,
   ServiceLocationType,
   SessionStep,
@@ -14,8 +15,12 @@ const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
 const BOOKING_ID = 'booking_1'
 const CLIENT_ID = 'client_1'
 const PROFESSIONAL_ID = 'pro_1'
+const RECORDED_BY_USER_ID = 'user_pro_1'
 const LOCATION_TIME_ZONE = 'America/Los_Angeles'
 const SCHEDULED_FOR = new Date('2026-03-20T18:00:00.000Z')
+const RAW_TOKEN = 'raw_consultation_token'
+const TOKEN_ID = 'client_action_token_1'
+const DESTINATION_EMAIL = 'client@example.com'
 
 const mocks = vi.hoisted(() => ({
   prismaTransaction: vi.fn(),
@@ -40,13 +45,18 @@ const mocks = vi.hoisted(() => ({
 
   txConsultationApprovalUpdate: vi.fn(),
   txBookingCloseoutAuditLogCreate: vi.fn(),
-  txConsultationApprovalProofCreate: vi.fn(),
-  txClientActionTokenUpdateMany: vi.fn(),
 
   createProNotification: vi.fn(),
   upsertClientNotification: vi.fn(),
-  scheduleClientNotification: vi.fn(),
-  cancelScheduledClientNotificationsForBooking: vi.fn(),
+
+  syncBookingAppointmentReminders: vi.fn(),
+  cancelBookingAppointmentReminders: vi.fn(),
+
+  consumeConsultationActionToken: vi.fn(),
+  revokeConsultationActionTokensForBooking: vi.fn(),
+
+  createConsultationApprovalProof: vi.fn(),
+  buildConsultationApprovalProofSnapshot: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -78,12 +88,31 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: mocks.upsertClientNotification,
-  scheduleClientNotification: mocks.scheduleClientNotification,
-  cancelScheduledClientNotificationsForBooking:
-    mocks.cancelScheduledClientNotificationsForBooking,
 }))
 
-import { approveConsultationAndMaterializeBooking } from './writeBoundary'
+vi.mock('@/lib/notifications/appointmentReminders', () => ({
+  syncBookingAppointmentReminders: mocks.syncBookingAppointmentReminders,
+  cancelBookingAppointmentReminders: mocks.cancelBookingAppointmentReminders,
+}))
+
+vi.mock('@/lib/consultation/clientActionTokens', () => ({
+  consumeConsultationActionToken: mocks.consumeConsultationActionToken,
+  revokeConsultationActionTokensForBooking:
+    mocks.revokeConsultationActionTokensForBooking,
+}))
+
+vi.mock('@/lib/consultation/consultationConfirmationProof', () => ({
+  createConsultationApprovalProof: mocks.createConsultationApprovalProof,
+  buildConsultationApprovalProofSnapshot:
+    mocks.buildConsultationApprovalProofSnapshot,
+}))
+
+import {
+  approveConsultationAndMaterializeBooking,
+  approveConsultationByClientActionToken,
+  rejectConsultationByClientActionToken,
+  recordInPersonConsultationDecision,
+} from './writeBoundary'
 
 const tx = {
   booking: {
@@ -100,12 +129,6 @@ const tx = {
   },
   consultationApproval: {
     update: mocks.txConsultationApprovalUpdate,
-  },
-  consultationApprovalProof: {
-    create: mocks.txConsultationApprovalProofCreate,
-  },
-  clientActionToken: {
-    updateMany: mocks.txClientActionTokenUpdateMany,
   },
   bookingCloseoutAuditLog: {
     create: mocks.txBookingCloseoutAuditLogCreate,
@@ -137,9 +160,16 @@ function hasServiceNameSelect(
   return nestedSelect.name === true
 }
 
+function hasConsultationApprovalSelect(
+  record: Record<string, unknown> | undefined,
+): boolean {
+  return isRecord(record?.consultationApproval)
+}
+
 function makePendingApprovalBooking(overrides?: {
   proposedServicesJson?: Prisma.JsonValue
   status?: ConsultationApprovalStatus
+  proof?: Record<string, unknown> | null
 }) {
   return {
     id: BOOKING_ID,
@@ -176,7 +206,7 @@ function makePendingApprovalBooking(overrides?: {
       rejectedAt: null,
       clientId: null,
       proId: null,
-      proof: null,
+      proof: overrides?.proof ?? null,
     },
   }
 }
@@ -218,17 +248,70 @@ function makeReminderSyncBooking() {
   }
 }
 
-function installHappyPathBookingFindUniqueMocks() {
-  const pendingApprovalBooking = makePendingApprovalBooking()
+function makeInPersonOwnershipBooking() {
+  return {
+    id: BOOKING_ID,
+    clientId: CLIENT_ID,
+    professionalId: PROFESSIONAL_ID,
+  }
+}
+
+function makeProofResult(args?: {
+  decision?: ConsultationDecision
+  method?: 'REMOTE_SECURE_LINK' | 'IN_PERSON_PRO_DEVICE'
+  recordedByUserId?: string | null
+  clientActionTokenId?: string | null
+  contactMethod?: ContactMethod | null
+  destinationSnapshot?: string | null
+  ipAddress?: string | null
+  userAgent?: string | null
+}) {
+  return {
+    id: 'proof_1',
+    consultationApprovalId: 'approval_1',
+    bookingId: BOOKING_ID,
+    clientId: CLIENT_ID,
+    professionalId: PROFESSIONAL_ID,
+    decision: args?.decision ?? ConsultationDecision.APPROVED,
+    method: args?.method ?? 'REMOTE_SECURE_LINK',
+    actedAt: TEST_NOW,
+    recordedByUserId: args?.recordedByUserId ?? null,
+    clientActionTokenId: args?.clientActionTokenId ?? null,
+    contactMethod: args?.contactMethod ?? null,
+    destinationSnapshot: args?.destinationSnapshot ?? null,
+    ipAddress: args?.ipAddress ?? null,
+    userAgent: args?.userAgent ?? null,
+    contextJson: null,
+    createdAt: TEST_NOW,
+    updatedAt: TEST_NOW,
+  }
+}
+
+function installBookingFindUniqueMocks(args?: {
+  consultationBooking?: ReturnType<typeof makePendingApprovalBooking>
+  includeInPersonOwnershipLookup?: boolean
+}) {
+  const consultationBooking = args?.consultationBooking ?? makePendingApprovalBooking()
   const checkoutRollupBooking = makeCheckoutRollupBooking()
   const reminderSyncBooking = makeReminderSyncBooking()
+  const inPersonOwnershipBooking = makeInPersonOwnershipBooking()
 
   mocks.txBookingFindUnique.mockImplementation(
-    async (args?: { select?: Record<string, unknown> }) => {
-      const select = isRecord(args?.select) ? args.select : undefined
+    async (callArgs?: { select?: Record<string, unknown> }) => {
+      const select = isRecord(callArgs?.select) ? callArgs.select : undefined
 
-      if (isRecord(select?.consultationApproval)) {
-        return pendingApprovalBooking
+      if (
+        args?.includeInPersonOwnershipLookup &&
+        hasTrueFlag(select, 'id') &&
+        hasTrueFlag(select, 'clientId') &&
+        hasTrueFlag(select, 'professionalId') &&
+        !hasConsultationApprovalSelect(select)
+      ) {
+        return inPersonOwnershipBooking
+      }
+
+      if (hasConsultationApprovalSelect(select)) {
+        return consultationBooking
       }
 
       if (hasTrueFlag(select, 'checkoutStatus')) {
@@ -239,19 +322,101 @@ function installHappyPathBookingFindUniqueMocks() {
         return reminderSyncBooking
       }
 
-      if (hasTrueFlag(select, 'id') && hasTrueFlag(select, 'clientId')) {
-        return {
-          id: BOOKING_ID,
-          clientId: CLIENT_ID,
-        }
-      }
-
       return null
     },
   )
 }
 
-describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', () => {
+function installApprovedMutationMocks() {
+  const computedSubtotal = new Prisma.Decimal(125)
+  const basePrice = new Prisma.Decimal(100)
+  const addOnPrice = new Prisma.Decimal(25)
+
+  mocks.txProfessionalServiceOfferingFindMany.mockResolvedValueOnce([
+    {
+      id: 'off_base',
+      serviceId: 'svc_base',
+      offersInSalon: true,
+      offersMobile: false,
+      salonDurationMinutes: 60,
+      mobileDurationMinutes: null,
+      salonPriceStartingAt: basePrice,
+      mobilePriceStartingAt: null,
+      service: {
+        defaultDurationMinutes: 60,
+        name: 'Haircut',
+      },
+    },
+    {
+      id: 'off_addon',
+      serviceId: 'svc_addon',
+      offersInSalon: true,
+      offersMobile: false,
+      salonDurationMinutes: 15,
+      mobileDurationMinutes: null,
+      salonPriceStartingAt: addOnPrice,
+      mobilePriceStartingAt: null,
+      service: {
+        defaultDurationMinutes: 15,
+        name: 'Haircut Add-On',
+      },
+    },
+  ])
+
+  mocks.buildNormalizedBookingItemsFromRequestedOfferings.mockReturnValueOnce([
+    {
+      serviceId: 'svc_base',
+      offeringId: 'off_base',
+      priceSnapshot: basePrice,
+      durationMinutesSnapshot: 60,
+    },
+    {
+      serviceId: 'svc_addon',
+      offeringId: 'off_addon',
+      priceSnapshot: addOnPrice,
+      durationMinutesSnapshot: 15,
+    },
+  ])
+
+  mocks.computeBookingItemLikeTotals.mockReturnValueOnce({
+    primaryServiceId: 'svc_base',
+    primaryOfferingId: 'off_base',
+    computedDurationMinutes: 75,
+    computedSubtotal,
+  })
+
+  mocks.txBookingServiceItemDeleteMany.mockResolvedValueOnce({ count: 0 })
+  mocks.txBookingServiceItemCreate.mockResolvedValueOnce({
+    id: 'bsi_base_1',
+  })
+  mocks.txBookingServiceItemCreateMany.mockResolvedValueOnce({
+    count: 1,
+  })
+
+  mocks.txBookingUpdate.mockResolvedValueOnce({
+    id: BOOKING_ID,
+    serviceId: 'svc_base',
+    offeringId: 'off_base',
+    subtotalSnapshot: computedSubtotal,
+    totalDurationMinutes: 75,
+    consultationConfirmedAt: TEST_NOW,
+  })
+
+  mocks.txConsultationApprovalUpdate.mockResolvedValueOnce({
+    id: 'approval_1',
+    status: ConsultationApprovalStatus.APPROVED,
+    approvedAt: TEST_NOW,
+    rejectedAt: null,
+  })
+
+  return {
+    computedSubtotal,
+    basePrice,
+    addOnPrice,
+  }
+}
+
+describe('lib/booking/writeBoundary consultation decisions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
@@ -284,10 +449,48 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
 
     mocks.createProNotification.mockResolvedValue(undefined)
     mocks.upsertClientNotification.mockResolvedValue({ id: 'client_notif_1' })
-    mocks.scheduleClientNotification.mockResolvedValue({ id: 'scheduled_1' })
-    mocks.cancelScheduledClientNotificationsForBooking.mockResolvedValue({
+
+    mocks.syncBookingAppointmentReminders.mockResolvedValue(undefined)
+    mocks.cancelBookingAppointmentReminders.mockResolvedValue(undefined)
+
+    mocks.revokeConsultationActionTokensForBooking.mockResolvedValue({
       count: 0,
     })
+
+    mocks.buildConsultationApprovalProofSnapshot.mockImplementation((proof) => {
+      if (!isRecord(proof)) return null
+      return {
+        decision: proof.decision ?? null,
+        method: proof.method ?? null,
+        actedAt: proof.actedAt ?? null,
+        recordedByUserId: proof.recordedByUserId ?? null,
+        clientActionTokenId: proof.clientActionTokenId ?? null,
+        contactMethod: proof.contactMethod ?? null,
+        destinationSnapshot: proof.destinationSnapshot ?? null,
+      }
+    })
+
+    mocks.createConsultationApprovalProof.mockImplementation(
+      async (args: Record<string, unknown>) =>
+        makeProofResult({
+          decision:
+            (args.decision as ConsultationDecision | undefined) ??
+            ConsultationDecision.APPROVED,
+          method:
+            (args.method as 'REMOTE_SECURE_LINK' | 'IN_PERSON_PRO_DEVICE' | undefined) ??
+            'REMOTE_SECURE_LINK',
+          recordedByUserId:
+            (args.recordedByUserId as string | null | undefined) ?? null,
+          clientActionTokenId:
+            (args.clientActionTokenId as string | null | undefined) ?? null,
+          contactMethod:
+            (args.contactMethod as ContactMethod | null | undefined) ?? null,
+          destinationSnapshot:
+            (args.destinationSnapshot as string | null | undefined) ?? null,
+          ipAddress: (args.ipAddress as string | null | undefined) ?? null,
+          userAgent: (args.userAgent as string | null | undefined) ?? null,
+        }),
+    )
   })
 
   afterEach(() => {
@@ -295,114 +498,10 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
   })
 
   it('materializes approved consultation from proposedServicesJson.items into canonical booking state', async () => {
-    const computedSubtotal = new Prisma.Decimal(125)
-    const basePrice = new Prisma.Decimal(100)
-    const addOnPrice = new Prisma.Decimal(25)
+    const { computedSubtotal, basePrice, addOnPrice } =
+      installApprovedMutationMocks()
 
-    installHappyPathBookingFindUniqueMocks()
-
-    mocks.txProfessionalServiceOfferingFindMany.mockResolvedValueOnce([
-      {
-        id: 'off_base',
-        serviceId: 'svc_base',
-        offersInSalon: true,
-        offersMobile: false,
-        salonDurationMinutes: 60,
-        mobileDurationMinutes: null,
-        salonPriceStartingAt: basePrice,
-        mobilePriceStartingAt: null,
-        service: {
-          defaultDurationMinutes: 60,
-          name: 'Haircut',
-        },
-      },
-      {
-        id: 'off_addon',
-        serviceId: 'svc_addon',
-        offersInSalon: true,
-        offersMobile: false,
-        salonDurationMinutes: 15,
-        mobileDurationMinutes: null,
-        salonPriceStartingAt: addOnPrice,
-        mobilePriceStartingAt: null,
-        service: {
-          defaultDurationMinutes: 15,
-          name: 'Haircut Add-On',
-        },
-      },
-    ])
-
-    mocks.buildNormalizedBookingItemsFromRequestedOfferings.mockReturnValueOnce([
-      {
-        serviceId: 'svc_base',
-        offeringId: 'off_base',
-        priceSnapshot: basePrice,
-        durationMinutesSnapshot: 60,
-      },
-      {
-        serviceId: 'svc_addon',
-        offeringId: 'off_addon',
-        priceSnapshot: addOnPrice,
-        durationMinutesSnapshot: 15,
-      },
-    ])
-
-    mocks.computeBookingItemLikeTotals.mockReturnValueOnce({
-      primaryServiceId: 'svc_base',
-      primaryOfferingId: 'off_base',
-      computedDurationMinutes: 75,
-      computedSubtotal,
-    })
-
-    mocks.txBookingServiceItemDeleteMany.mockResolvedValueOnce({ count: 0 })
-
-    mocks.txBookingServiceItemCreate.mockResolvedValueOnce({
-      id: 'bsi_base_1',
-    })
-
-    mocks.txBookingServiceItemCreateMany.mockResolvedValueOnce({
-      count: 1,
-    })
-
-    mocks.txBookingUpdate.mockResolvedValueOnce({
-      id: BOOKING_ID,
-      serviceId: 'svc_base',
-      offeringId: 'off_base',
-      subtotalSnapshot: computedSubtotal,
-      totalDurationMinutes: 75,
-      consultationConfirmedAt: TEST_NOW,
-    })
-
-    mocks.txConsultationApprovalUpdate.mockResolvedValueOnce({
-      id: 'approval_1',
-      status: ConsultationApprovalStatus.APPROVED,
-      approvedAt: TEST_NOW,
-      rejectedAt: null,
-    })
-
-        mocks.txConsultationApprovalProofCreate.mockResolvedValueOnce({
-      id: 'proof_1',
-      consultationApprovalId: 'approval_1',
-      bookingId: BOOKING_ID,
-      clientId: CLIENT_ID,
-      professionalId: PROFESSIONAL_ID,
-      decision: 'APPROVED',
-      method: 'REMOTE_SECURE_LINK',
-      actedAt: TEST_NOW,
-      recordedByUserId: null,
-      clientActionTokenId: null,
-      contactMethod: null,
-      destinationSnapshot: null,
-      ipAddress: null,
-      userAgent: null,
-      contextJson: null,
-      createdAt: TEST_NOW,
-      updatedAt: TEST_NOW,
-    })
-
-    mocks.txClientActionTokenUpdateMany.mockResolvedValueOnce({
-      count: 0,
-    })
+    installBookingFindUniqueMocks()
 
     const result = await approveConsultationAndMaterializeBooking({
       bookingId: BOOKING_ID,
@@ -506,67 +605,41 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       },
     })
 
-        expect(mocks.txConsultationApprovalProofCreate).toHaveBeenCalledWith({
-      data: {
-        consultationApprovalId: 'approval_1',
+    expect(mocks.createConsultationApprovalProof).toHaveBeenCalledWith({
+      tx,
+      consultationApprovalId: 'approval_1',
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
+      decision: ConsultationDecision.APPROVED,
+      method: 'REMOTE_SECURE_LINK',
+      recordedByUserId: null,
+      clientActionTokenId: null,
+      contactMethod: null,
+      destinationSnapshot: null,
+      ipAddress: null,
+      userAgent: null,
+      contextJson: {
         bookingId: BOOKING_ID,
-        clientId: CLIENT_ID,
-        professionalId: PROFESSIONAL_ID,
-        decision: 'APPROVED',
-        method: 'REMOTE_SECURE_LINK',
-        recordedByUserId: null,
-        clientActionTokenId: null,
-        contactMethod: null,
-        destinationSnapshot: null,
-        ipAddress: null,
-        userAgent: null,
-        contextJson: {
-          bookingId: BOOKING_ID,
-          requestId: null,
-          idempotencyKey: null,
-          source: 'approveConsultationAndMaterializeBooking',
-        },
-        actedAt: TEST_NOW,
+        requestId: null,
+        idempotencyKey: null,
+        source: 'approveConsultationAndMaterializeBooking',
       },
-      select: expect.any(Object),
+      actedAt: TEST_NOW,
     })
 
-        expect(mocks.txClientActionTokenUpdateMany).toHaveBeenCalledWith({
-      where: {
-        bookingId: BOOKING_ID,
-        kind: ClientActionTokenKind.CONSULTATION_ACTION,
-        revokedAt: null,
-        firstUsedAt: null,
-      },
-      data: {
-        revokedAt: TEST_NOW,
-        revokeReason: 'Consultation decision completed.',
-      },
+    expect(mocks.syncBookingAppointmentReminders).toHaveBeenCalledWith({
+      tx,
+      bookingId: BOOKING_ID,
     })
 
     expect(
-      mocks.cancelScheduledClientNotificationsForBooking,
+      mocks.revokeConsultationActionTokensForBooking,
     ).toHaveBeenCalledWith({
       tx,
       bookingId: BOOKING_ID,
-      clientId: CLIENT_ID,
-      eventKeys: [expect.any(String)],
-      onlyPending: true,
-    })
-
-    expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
-    expect(mocks.scheduleClientNotification).toHaveBeenCalledWith({
-      tx,
-      clientId: CLIENT_ID,
-      bookingId: BOOKING_ID,
-      eventKey: expect.any(String),
-      runAt: expect.any(Date),
-      dedupeKey: expect.stringContaining(BOOKING_ID),
-      href: `/client/bookings/${BOOKING_ID}?step=overview`,
-      data: expect.objectContaining({
-        bookingId: BOOKING_ID,
-        serviceName: 'Haircut',
-      }),
+      revokeReason: 'Consultation decision completed.',
+      revokedAt: TEST_NOW,
     })
 
     expect(result).toEqual({
@@ -586,7 +659,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       },
       proof: {
         id: 'proof_1',
-        decision: 'APPROVED',
+        decision: ConsultationDecision.APPROVED,
         method: 'REMOTE_SECURE_LINK',
         actedAt: TEST_NOW,
         recordedByUserId: null,
@@ -618,11 +691,11 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
   ])(
     'throws INVALID_SERVICE_ITEMS when proposedServicesJson has $label',
     async ({ proposedServicesJson }) => {
-      mocks.txBookingFindUnique.mockResolvedValueOnce(
-        makePendingApprovalBooking({
+      installBookingFindUniqueMocks({
+        consultationBooking: makePendingApprovalBooking({
           proposedServicesJson,
         }),
-      )
+      })
 
       await expect(
         approveConsultationAndMaterializeBooking({
@@ -638,16 +711,17 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
       expect(mocks.txBookingServiceItemDeleteMany).not.toHaveBeenCalled()
       expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
       expect(mocks.txConsultationApprovalUpdate).not.toHaveBeenCalled()
+      expect(mocks.createConsultationApprovalProof).not.toHaveBeenCalled()
+      expect(mocks.syncBookingAppointmentReminders).not.toHaveBeenCalled()
       expect(
-        mocks.cancelScheduledClientNotificationsForBooking,
+        mocks.revokeConsultationActionTokensForBooking,
       ).not.toHaveBeenCalled()
-      expect(mocks.scheduleClientNotification).not.toHaveBeenCalled()
     },
   )
 
   it('throws INVALID_SERVICE_ITEMS when a proposed item is missing offeringId', async () => {
-    mocks.txBookingFindUnique.mockResolvedValueOnce(
-      makePendingApprovalBooking({
+    installBookingFindUniqueMocks({
+      consultationBooking: makePendingApprovalBooking({
         proposedServicesJson: {
           currency: 'USD',
           items: [
@@ -658,7 +732,7 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
           ],
         } satisfies Prisma.JsonObject,
       }),
-    )
+    })
 
     await expect(
       approveConsultationAndMaterializeBooking({
@@ -674,18 +748,15 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     expect(mocks.txBookingServiceItemDeleteMany).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
     expect(mocks.txConsultationApprovalUpdate).not.toHaveBeenCalled()
-    expect(
-      mocks.cancelScheduledClientNotificationsForBooking,
-    ).not.toHaveBeenCalled()
-    expect(mocks.scheduleClientNotification).not.toHaveBeenCalled()
+    expect(mocks.createConsultationApprovalProof).not.toHaveBeenCalled()
   })
 
   it('throws FORBIDDEN when the consultation approval is no longer pending', async () => {
-    mocks.txBookingFindUnique.mockResolvedValueOnce(
-      makePendingApprovalBooking({
+    installBookingFindUniqueMocks({
+      consultationBooking: makePendingApprovalBooking({
         status: ConsultationApprovalStatus.APPROVED,
       }),
-    )
+    })
 
     await expect(
       approveConsultationAndMaterializeBooking({
@@ -701,9 +772,325 @@ describe('lib/booking/writeBoundary approveConsultationAndMaterializeBooking', (
     expect(mocks.txBookingServiceItemDeleteMany).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
     expect(mocks.txConsultationApprovalUpdate).not.toHaveBeenCalled()
-    expect(
-      mocks.cancelScheduledClientNotificationsForBooking,
-    ).not.toHaveBeenCalled()
-    expect(mocks.scheduleClientNotification).not.toHaveBeenCalled()
+    expect(mocks.createConsultationApprovalProof).not.toHaveBeenCalled()
+  })
+
+  it('approves consultation through a client action token', async () => {
+    const { computedSubtotal } = installApprovedMutationMocks()
+    installBookingFindUniqueMocks()
+
+    mocks.consumeConsultationActionToken.mockResolvedValueOnce({
+      id: TOKEN_ID,
+      bookingId: BOOKING_ID,
+      consultationApprovalId: 'approval_1',
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
+      deliveryMethod: ContactMethod.EMAIL,
+      destinationSnapshot: DESTINATION_EMAIL,
+      expiresAt: new Date('2026-03-21T16:00:00.000Z'),
+      firstUsedAt: TEST_NOW,
+      lastUsedAt: TEST_NOW,
+      useCount: 1,
+    })
+
+    const result = await approveConsultationByClientActionToken({
+      rawToken: RAW_TOKEN,
+      requestId: 'req_approve_token',
+      idempotencyKey: 'idem_approve_token',
+      ipAddress: '127.0.0.1',
+      userAgent: 'Mozilla/5.0',
+    })
+
+    expect(mocks.consumeConsultationActionToken).toHaveBeenCalledWith({
+      rawToken: RAW_TOKEN,
+    })
+
+    expect(mocks.createConsultationApprovalProof).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tx,
+        consultationApprovalId: 'approval_1',
+        bookingId: BOOKING_ID,
+        clientId: CLIENT_ID,
+        professionalId: PROFESSIONAL_ID,
+        decision: ConsultationDecision.APPROVED,
+        method: 'REMOTE_SECURE_LINK',
+        recordedByUserId: null,
+        clientActionTokenId: TOKEN_ID,
+        contactMethod: ContactMethod.EMAIL,
+        destinationSnapshot: DESTINATION_EMAIL,
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+      }),
+    )
+
+    expect(result.approval.status).toBe(ConsultationApprovalStatus.APPROVED)
+    expect(result.proof.clientActionTokenId).toBe(TOKEN_ID)
+    expect(result.proof.contactMethod).toBe(ContactMethod.EMAIL)
+    expect(result.proof.destinationSnapshot).toBe(DESTINATION_EMAIL)
+    expect(result.booking.subtotalSnapshot).toEqual(computedSubtotal)
+  })
+
+  it('rejects consultation through a client action token', async () => {
+    installBookingFindUniqueMocks()
+
+    mocks.consumeConsultationActionToken.mockResolvedValueOnce({
+      id: TOKEN_ID,
+      bookingId: BOOKING_ID,
+      consultationApprovalId: 'approval_1',
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
+      deliveryMethod: ContactMethod.EMAIL,
+      destinationSnapshot: DESTINATION_EMAIL,
+      expiresAt: new Date('2026-03-21T16:00:00.000Z'),
+      firstUsedAt: TEST_NOW,
+      lastUsedAt: TEST_NOW,
+      useCount: 1,
+    })
+
+    mocks.txConsultationApprovalUpdate.mockResolvedValueOnce({
+      id: 'approval_1',
+      status: ConsultationApprovalStatus.REJECTED,
+      approvedAt: null,
+      rejectedAt: TEST_NOW,
+    })
+
+    mocks.createConsultationApprovalProof.mockResolvedValueOnce(
+      makeProofResult({
+        decision: ConsultationDecision.REJECTED,
+        method: 'REMOTE_SECURE_LINK',
+        clientActionTokenId: TOKEN_ID,
+        contactMethod: ContactMethod.EMAIL,
+        destinationSnapshot: DESTINATION_EMAIL,
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+      }),
+    )
+
+    const result = await rejectConsultationByClientActionToken({
+      rawToken: RAW_TOKEN,
+      requestId: 'req_reject_token',
+      idempotencyKey: 'idem_reject_token',
+      ipAddress: '127.0.0.1',
+      userAgent: 'Mozilla/5.0',
+    })
+
+    expect(mocks.consumeConsultationActionToken).toHaveBeenCalledWith({
+      rawToken: RAW_TOKEN,
+    })
+
+    expect(mocks.txConsultationApprovalUpdate).toHaveBeenCalledWith({
+      where: { bookingId: BOOKING_ID },
+      data: {
+        status: ConsultationApprovalStatus.REJECTED,
+        approvedAt: null,
+        rejectedAt: TEST_NOW,
+        clientId: CLIENT_ID,
+        proId: PROFESSIONAL_ID,
+      },
+      select: {
+        id: true,
+        status: true,
+        approvedAt: true,
+        rejectedAt: true,
+      },
+    })
+
+    expect(mocks.createConsultationApprovalProof).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tx,
+        consultationApprovalId: 'approval_1',
+        bookingId: BOOKING_ID,
+        clientId: CLIENT_ID,
+        professionalId: PROFESSIONAL_ID,
+        decision: ConsultationDecision.REJECTED,
+        method: 'REMOTE_SECURE_LINK',
+        recordedByUserId: null,
+        clientActionTokenId: TOKEN_ID,
+        contactMethod: ContactMethod.EMAIL,
+        destinationSnapshot: DESTINATION_EMAIL,
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+      }),
+    )
+
+    expect(mocks.syncBookingAppointmentReminders).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      approval: {
+        id: 'approval_1',
+        status: ConsultationApprovalStatus.REJECTED,
+        approvedAt: null,
+        rejectedAt: TEST_NOW,
+      },
+      proof: {
+        id: 'proof_1',
+        decision: ConsultationDecision.REJECTED,
+        method: 'REMOTE_SECURE_LINK',
+        actedAt: TEST_NOW,
+        recordedByUserId: null,
+        clientActionTokenId: TOKEN_ID,
+        contactMethod: ContactMethod.EMAIL,
+        destinationSnapshot: DESTINATION_EMAIL,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
+  })
+
+  it('records an in-person approved consultation decision on the pro device', async () => {
+    const { computedSubtotal } = installApprovedMutationMocks()
+    installBookingFindUniqueMocks({
+      includeInPersonOwnershipLookup: true,
+    })
+
+    mocks.createConsultationApprovalProof.mockResolvedValueOnce(
+      makeProofResult({
+        decision: ConsultationDecision.APPROVED,
+        method: 'IN_PERSON_PRO_DEVICE',
+        recordedByUserId: RECORDED_BY_USER_ID,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
+        userAgent: 'iPad kiosk',
+      }),
+    )
+
+const result = await recordInPersonConsultationDecision({
+  bookingId: BOOKING_ID,
+  professionalId: PROFESSIONAL_ID,
+  recordedByUserId: RECORDED_BY_USER_ID,
+  decision: ConsultationDecision.APPROVED,
+  requestId: 'req_in_person_approve',
+  idempotencyKey: 'idem_in_person_approve',
+  userAgent: 'iPad kiosk',
+})
+
+expect(mocks.withLockedProfessionalTransaction).toHaveBeenCalledWith(
+  PROFESSIONAL_ID,
+  expect.any(Function),
+)
+
+expect(mocks.createConsultationApprovalProof).toHaveBeenCalledWith(
+  expect.objectContaining({
+    tx,
+    consultationApprovalId: 'approval_1',
+    bookingId: BOOKING_ID,
+    clientId: CLIENT_ID,
+    professionalId: PROFESSIONAL_ID,
+    decision: ConsultationDecision.APPROVED,
+    method: 'IN_PERSON_PRO_DEVICE',
+    recordedByUserId: RECORDED_BY_USER_ID,
+    clientActionTokenId: null,
+    contactMethod: null,
+    destinationSnapshot: null,
+    ipAddress: null,
+    userAgent: 'iPad kiosk',
+  }),
+)
+
+expect(result.proof.method).toBe('IN_PERSON_PRO_DEVICE')
+expect(result.proof.recordedByUserId).toBe(RECORDED_BY_USER_ID)
+expect('booking' in result).toBe(true)
+
+if (!('booking' in result)) {
+  throw new Error('Expected approved in-person consultation result to include booking.')
+}
+
+expect(result.booking.subtotalSnapshot).toEqual(computedSubtotal)
+  })
+
+  it('records an in-person rejected consultation decision on the pro device', async () => {
+    installBookingFindUniqueMocks({
+      includeInPersonOwnershipLookup: true,
+    })
+
+    mocks.txConsultationApprovalUpdate.mockResolvedValueOnce({
+      id: 'approval_1',
+      status: ConsultationApprovalStatus.REJECTED,
+      approvedAt: null,
+      rejectedAt: TEST_NOW,
+    })
+
+    mocks.createConsultationApprovalProof.mockResolvedValueOnce(
+      makeProofResult({
+        decision: ConsultationDecision.REJECTED,
+        method: 'IN_PERSON_PRO_DEVICE',
+        recordedByUserId: RECORDED_BY_USER_ID,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
+        userAgent: 'iPad kiosk',
+      }),
+    )
+
+    const result = await recordInPersonConsultationDecision({
+      bookingId: BOOKING_ID,
+      professionalId: PROFESSIONAL_ID,
+      recordedByUserId: RECORDED_BY_USER_ID,
+      decision: ConsultationDecision.REJECTED,
+      requestId: 'req_in_person_reject',
+      idempotencyKey: 'idem_in_person_reject',
+      userAgent: 'iPad kiosk',
+    })
+
+    expect(mocks.txConsultationApprovalUpdate).toHaveBeenCalledWith({
+      where: { bookingId: BOOKING_ID },
+      data: {
+        status: ConsultationApprovalStatus.REJECTED,
+        approvedAt: null,
+        rejectedAt: TEST_NOW,
+        clientId: CLIENT_ID,
+        proId: PROFESSIONAL_ID,
+      },
+      select: {
+        id: true,
+        status: true,
+        approvedAt: true,
+        rejectedAt: true,
+      },
+    })
+
+    expect(mocks.createConsultationApprovalProof).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tx,
+        consultationApprovalId: 'approval_1',
+        bookingId: BOOKING_ID,
+        clientId: CLIENT_ID,
+        professionalId: PROFESSIONAL_ID,
+        decision: ConsultationDecision.REJECTED,
+        method: 'IN_PERSON_PRO_DEVICE',
+        recordedByUserId: RECORDED_BY_USER_ID,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
+        ipAddress: null,
+        userAgent: 'iPad kiosk',
+      }),
+    )
+
+    expect(result).toEqual({
+      approval: {
+        id: 'approval_1',
+        status: ConsultationApprovalStatus.REJECTED,
+        approvedAt: null,
+        rejectedAt: TEST_NOW,
+      },
+      proof: {
+        id: 'proof_1',
+        decision: ConsultationDecision.REJECTED,
+        method: 'IN_PERSON_PRO_DEVICE',
+        actedAt: TEST_NOW,
+        recordedByUserId: RECORDED_BY_USER_ID,
+        clientActionTokenId: null,
+        contactMethod: null,
+        destinationSnapshot: null,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
   })
 })

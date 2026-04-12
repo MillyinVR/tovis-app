@@ -15,23 +15,34 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
-import { AftercareRebookMode, BookingStatus } from '@prisma/client'
+import { AftercareRebookMode, BookingStatus, Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 type RebookMode = 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
-function newPublicToken(): string {
+const AFTERCARE_REBOOK_SELECT = {
+  id: true,
+  rebookMode: true,
+  rebookWindowStart: true,
+  rebookWindowEnd: true,
+  rebookedFor: true,
+  sentToClientAt: true,
+  version: true,
+} satisfies Prisma.AftercareSummarySelect
+
+type AftercareRebookRecord = Prisma.AftercareSummaryGetPayload<{
+  select: typeof AFTERCARE_REBOOK_SELECT
+}>
+
+function newLegacyPublicToken(): string {
   return crypto.randomUUID()
-} 
+}
 
 function isMode(value: unknown): value is RebookMode {
-  return (
-    value === 'BOOK' ||
-    value === 'RECOMMEND_WINDOW' ||
-    value === 'CLEAR'
-  )
+  return value === 'BOOK' || value === 'RECOMMEND_WINDOW' || value === 'CLEAR'
 }
 
 function bookingJsonFail(
@@ -43,6 +54,56 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function toAftercareResponse(aftercare: AftercareRebookRecord) {
+  return {
+    id: aftercare.id,
+    rebookMode: aftercare.rebookMode,
+    rebookWindowStart: aftercare.rebookWindowStart
+      ? aftercare.rebookWindowStart.toISOString()
+      : null,
+    rebookWindowEnd: aftercare.rebookWindowEnd
+      ? aftercare.rebookWindowEnd.toISOString()
+      : null,
+    rebookedFor: aftercare.rebookedFor
+      ? aftercare.rebookedFor.toISOString()
+      : null,
+    sentToClientAt: aftercare.sentToClientAt
+      ? aftercare.sentToClientAt.toISOString()
+      : null,
+    version: aftercare.version,
+    isFinalized: Boolean(aftercare.sentToClientAt),
+  }
+}
+
+async function upsertAftercareRebookState(args: {
+  bookingId: string
+  mode: AftercareRebookMode
+  windowStart?: Date | null
+  windowEnd?: Date | null
+  rebookedFor?: Date | null
+}): Promise<AftercareRebookRecord> {
+  return prisma.aftercareSummary.upsert({
+    where: { bookingId: args.bookingId },
+    create: {
+      bookingId: args.bookingId,
+      // Legacy compatibility:
+      // publicToken is still required on create for older aftercare access flows.
+      publicToken: newLegacyPublicToken(),
+      rebookMode: args.mode,
+      rebookWindowStart: args.windowStart ?? null,
+      rebookWindowEnd: args.windowEnd ?? null,
+      rebookedFor: args.rebookedFor ?? null,
+    },
+    update: {
+      rebookMode: args.mode,
+      rebookWindowStart: args.windowStart ?? null,
+      rebookWindowEnd: args.windowEnd ?? null,
+      rebookedFor: args.rebookedFor ?? null,
+    },
+    select: AFTERCARE_REBOOK_SELECT,
+  })
 }
 
 export async function POST(req: Request, ctx: Ctx) {
@@ -83,33 +144,18 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     if (mode === 'CLEAR') {
-      const aftercare = await prisma.aftercareSummary.upsert({
-        where: { bookingId: existing.id },
-        create: {
-          bookingId: existing.id,
-          publicToken: newPublicToken(),
-          rebookMode: AftercareRebookMode.NONE,
-          rebookedFor: null,
-          rebookWindowStart: null,
-          rebookWindowEnd: null,
-        },
-        update: {
-          rebookMode: AftercareRebookMode.NONE,
-          rebookedFor: null,
-          rebookWindowStart: null,
-          rebookWindowEnd: null,
-        },
-        select: {
-          id: true,
-          rebookMode: true,
-        },
+      const aftercare = await upsertAftercareRebookState({
+        bookingId: existing.id,
+        mode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+        windowStart: null,
+        windowEnd: null,
       })
 
       return jsonOk(
         {
           mode,
-          aftercareId: aftercare.id,
-          rebookMode: aftercare.rebookMode,
+          aftercare: toAftercareResponse(aftercare),
         },
         200,
       )
@@ -130,32 +176,21 @@ export async function POST(req: Request, ctx: Ctx) {
         return jsonFail(400, 'windowEnd must be after windowStart.')
       }
 
-      const aftercare = await prisma.aftercareSummary.upsert({
-        where: { bookingId: existing.id },
-        create: {
-          bookingId: existing.id,
-          publicToken: newPublicToken(),
-          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-          rebookWindowStart: windowStart,
-          rebookWindowEnd: windowEnd,
-          rebookedFor: null,
-        },
-        update: {
-          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-          rebookWindowStart: windowStart,
-          rebookWindowEnd: windowEnd,
-          rebookedFor: null,
-        },
-        select: {
-          id: true,
-          rebookMode: true,
-          rebookWindowStart: true,
-          rebookWindowEnd: true,
-          rebookedFor: true,
-        },
+      const aftercare = await upsertAftercareRebookState({
+        bookingId: existing.id,
+        mode: AftercareRebookMode.RECOMMENDED_WINDOW,
+        windowStart,
+        windowEnd,
+        rebookedFor: null,
       })
 
-      return jsonOk({ mode, aftercare }, 200)
+      return jsonOk(
+        {
+          mode,
+          aftercare: toAftercareResponse(aftercare),
+        },
+        200,
+      )
     }
 
     const scheduledFor = pickIsoDate(body.scheduledFor)
