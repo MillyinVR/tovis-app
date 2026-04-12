@@ -5,10 +5,14 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ConsultationForm from '../ConsultationForm'
 import { moneyToFixed2String } from '@/lib/money'
-import { transitionSessionStep } from '@/lib/booking/writeBoundary'
+import {
+  recordInPersonConsultationDecision,
+  transitionSessionStep,
+} from '@/lib/booking/writeBoundary'
 import {
   BookingStatus,
   ConsultationApprovalStatus,
+  ConsultationDecision,
   MediaPhase,
   Role,
   SessionStep,
@@ -31,6 +35,28 @@ function labelForStep(step: SessionStep | string) {
   if (s === 'AFTER_PHOTOS') return 'Wrap-up (aftercare + photos)'
   if (s === 'DONE') return 'Done'
   return s
+}
+
+function labelForConsultationStatus(status: ConsultationApprovalStatus | string | null) {
+  const s = upper(status)
+  if (s === 'PENDING') return 'Pending'
+  if (s === 'APPROVED') return 'Approved'
+  if (s === 'REJECTED') return 'Rejected'
+  return status ? String(status) : 'NONE'
+}
+
+function labelForProofMethod(method: unknown) {
+  const s = upper(method)
+  if (s === 'REMOTE_SECURE_LINK') return 'Remote secure link'
+  if (s === 'IN_PERSON_PRO_DEVICE') return 'In-person on pro device'
+  return s || 'Unknown'
+}
+
+function labelForDecision(decision: unknown) {
+  const s = upper(decision)
+  if (s === 'APPROVED') return 'Approved'
+  if (s === 'REJECTED') return 'Rejected'
+  return s || 'Unknown'
 }
 
 function isTerminal(status: BookingStatus, finishedAt?: Date | null) {
@@ -111,6 +137,11 @@ function formatMoneyFromUnknown(v: unknown): string {
   }
 
   return ''
+}
+
+function formatDateTime(value: Date | null | undefined) {
+  if (!value) return null
+  return value.toLocaleString()
 }
 
 function WaitingForClientBanner() {
@@ -197,6 +228,45 @@ async function transitionAction(bookingId: string, next: SessionStep) {
   redirect(bookingHubHref(bookingId))
 }
 
+async function inPersonDecisionAction(
+  bookingId: string,
+  decision: ConsultationDecision,
+) {
+  'use server'
+
+  const u = await getCurrentUser().catch(() => null)
+  const maybeProId =
+    u?.role === 'PRO' ? u.professionalProfile?.id ?? null : null
+  const recordedByUserId = u?.id ?? null
+
+  if (!maybeProId || !recordedByUserId) {
+    redirect(`/login?from=${encodeURIComponent(bookingHubHref(bookingId))}`)
+  }
+
+  const proId = maybeProId
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { id: true, professionalId: true, status: true, finishedAt: true },
+  })
+
+  if (!booking) notFound()
+  if (booking.professionalId !== proId) redirect('/pro')
+  if (isTerminal(booking.status, booking.finishedAt)) {
+    redirect(bookingHubHref(bookingId))
+  }
+
+  await recordInPersonConsultationDecision({
+    bookingId,
+    professionalId: proId,
+    recordedByUserId,
+    decision,
+    userAgent: 'pro_session_server_action',
+  })
+
+  redirect(bookingHubHref(bookingId))
+}
+
 export default async function ProBookingSessionPage(props: PageProps) {
   const { id } = await props.params
   const bookingId = String(id || '').trim()
@@ -240,6 +310,21 @@ export default async function ProBookingSessionPage(props: PageProps) {
         select: {
           status: true,
           proposedTotal: true,
+          notes: true,
+          approvedAt: true,
+          rejectedAt: true,
+          proof: {
+            select: {
+              id: true,
+              decision: true,
+              method: true,
+              actedAt: true,
+              recordedByUserId: true,
+              clientActionTokenId: true,
+              contactMethod: true,
+              destinationSnapshot: true,
+            },
+          },
         },
       },
     },
@@ -265,6 +350,11 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const approvalStatus = booking.consultationApproval?.status ?? null
   const consultApproved =
     approvalStatus === ConsultationApprovalStatus.APPROVED
+  const consultRejected =
+    approvalStatus === ConsultationApprovalStatus.REJECTED
+
+  const consultationProof = booking.consultationApproval?.proof ?? null
+  const hasConsultationProof = Boolean(consultationProof?.id)
 
   const initialPrice =
     formatMoneyFromUnknown(booking.consultationApproval?.proposedTotal) ||
@@ -310,6 +400,17 @@ export default async function ProBookingSessionPage(props: PageProps) {
       return SessionStep.CONSULTATION
     }
 
+    if (approvalStatus === ConsultationApprovalStatus.REJECTED) {
+      return SessionStep.CONSULTATION
+    }
+
+    if (
+      approvalStatus === ConsultationApprovalStatus.APPROVED &&
+      rawStep === SessionStep.CONSULTATION_PENDING_CLIENT
+    ) {
+      return SessionStep.BEFORE_PHOTOS
+    }
+
     if (!consultApproved) {
       if (
         rawStep === SessionStep.BEFORE_PHOTOS ||
@@ -349,6 +450,16 @@ export default async function ProBookingSessionPage(props: PageProps) {
     null,
     bookingId,
     SessionStep.AFTER_PHOTOS,
+  )
+  const approveInPerson = inPersonDecisionAction.bind(
+    null,
+    bookingId,
+    ConsultationDecision.APPROVED,
+  )
+  const rejectInPerson = inPersonDecisionAction.bind(
+    null,
+    bookingId,
+    ConsultationDecision.REJECTED,
   )
 
   async function completeSession() {
@@ -408,7 +519,24 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const showWrapUp = effectiveStep === SessionStep.AFTER_PHOTOS
   const showDone = effectiveStep === SessionStep.DONE
 
-  const showWaitingBanner = showWaiting && !hasBeforePhoto
+  const showWaitingBanner =
+    showWaiting &&
+    approvalStatus === ConsultationApprovalStatus.PENDING &&
+    !hasBeforePhoto
+
+  const canUseInPersonFallback =
+    showWaiting &&
+    approvalStatus === ConsultationApprovalStatus.PENDING &&
+    !hasConsultationProof
+
+  const proofMethodLabel = consultationProof
+    ? labelForProofMethod(consultationProof.method)
+    : null
+  const proofDecisionLabel = consultationProof
+    ? labelForDecision(consultationProof.decision)
+    : null
+  const proofActedAtLabel = formatDateTime(consultationProof?.actedAt)
+  const proofDestination = consultationProof?.destinationSnapshot?.trim() || null
 
   const primaryLinkClass =
     'inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover'
@@ -416,6 +544,8 @@ export default async function ProBookingSessionPage(props: PageProps) {
     'inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover'
   const secondaryBtnClass =
     'inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass'
+  const dangerBtnClass =
+    'inline-flex items-center rounded-full border border-red-400/25 bg-red-400/10 px-4 py-2 text-xs font-black text-red-200 hover:bg-red-400/15'
 
   return (
     <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
@@ -431,8 +561,55 @@ export default async function ProBookingSessionPage(props: PageProps) {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <StepPill step={labelForStep(effectiveStep)} />
         <Badge label={`Booking: ${bookingStatus}`} />
-        <Badge label={`Consultation: ${approvalStatus ?? 'NONE'}`} />
+        <Badge label={`Consultation: ${labelForConsultationStatus(approvalStatus)}`} />
+        {proofMethodLabel ? <Badge label={`Proof: ${proofMethodLabel}`} /> : null}
       </div>
+
+      {consultationProof ? (
+        <Card>
+          <div className="text-sm font-black text-textPrimary">
+            Consultation proof recorded
+          </div>
+          <div className="mt-2 grid gap-1 text-sm text-textSecondary">
+            <div>
+              Decision:{' '}
+              <span className="font-black text-textPrimary">
+                {proofDecisionLabel}
+              </span>
+            </div>
+            <div>
+              Method:{' '}
+              <span className="font-black text-textPrimary">
+                {proofMethodLabel}
+              </span>
+            </div>
+            {proofActedAtLabel ? (
+              <div>
+                Recorded:{' '}
+                <span className="font-black text-textPrimary">
+                  {proofActedAtLabel}
+                </span>
+              </div>
+            ) : null}
+            {proofDestination ? (
+              <div>
+                Destination:{' '}
+                <span className="font-black text-textPrimary">
+                  {proofDestination}
+                </span>
+              </div>
+            ) : null}
+            {consultationProof.recordedByUserId ? (
+              <div>
+                Recorded by user:{' '}
+                <span className="font-black text-textPrimary">
+                  {consultationProof.recordedByUserId}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {isCancelled ? (
         <Card>
@@ -468,6 +645,29 @@ export default async function ProBookingSessionPage(props: PageProps) {
           </p>
 
           <div className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
+            {consultRejected ? (
+              <div className="mb-4 rounded-card border border-red-400/20 bg-red-400/5 p-3">
+                <div className="text-sm font-black text-textPrimary">
+                  Consultation needs changes
+                </div>
+                <div className="mt-1 text-xs font-semibold text-textSecondary">
+                  The last decision was{' '}
+                  <span className="font-black text-textPrimary">
+                    rejected
+                  </span>
+                  {proofMethodLabel ? (
+                    <>
+                      {' '}via{' '}
+                      <span className="font-black text-textPrimary">
+                        {proofMethodLabel}
+                      </span>
+                    </>
+                  ) : null}
+                  . Update the proposal and resend it when ready.
+                </div>
+              </div>
+            ) : null}
+
             <ConsultationForm
               bookingId={booking.id}
               initialNotes={booking.consultationNotes ?? ''}
@@ -514,9 +714,35 @@ export default async function ProBookingSessionPage(props: PageProps) {
             <div className="text-sm font-semibold text-textSecondary">
               Status:{' '}
               <span className="font-black text-textPrimary">
-                {approvalStatus ?? 'NONE'}
+                {labelForConsultationStatus(approvalStatus)}
               </span>
             </div>
+
+            <div className="mt-2 text-xs font-semibold text-textSecondary">
+              Remote approval stays the default path. Only use the in-person
+              fallback when the client is physically with you and cannot access
+              their secure link. It will be recorded honestly as{' '}
+              <span className="font-black text-textPrimary">
+                in-person on pro device
+              </span>
+              .
+            </div>
+
+            {canUseInPersonFallback ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <form action={approveInPerson}>
+                  <button type="submit" className={primaryBtnClass}>
+                    Record in-person approval
+                  </button>
+                </form>
+
+                <form action={rejectInPerson}>
+                  <button type="submit" className={dangerBtnClass}>
+                    Record in-person decline
+                  </button>
+                </form>
+              </div>
+            ) : null}
 
             <form action={toConsult} className="mt-3">
               <button type="submit" className={secondaryBtnClass}>
@@ -639,18 +865,18 @@ export default async function ProBookingSessionPage(props: PageProps) {
             <div className="mt-4">
               <form action={completeSession}>
                 <button
-                      type="submit"
-                      className={[
-                        primaryBtnClass,
-                        !(hasAfterPhoto && hasFinalizedAftercare)
-                          ? 'pointer-events-none cursor-not-allowed opacity-60'
-                          : '',
-                      ].join(' ')}
-                      disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
-                      aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
-                    >
-                      Complete session (requires finalized aftercare)
-                    </button>
+                  type="submit"
+                  className={[
+                    primaryBtnClass,
+                    !(hasAfterPhoto && hasFinalizedAftercare)
+                      ? 'pointer-events-none cursor-not-allowed opacity-60'
+                      : '',
+                  ].join(' ')}
+                  disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
+                  aria-disabled={!(hasAfterPhoto && hasFinalizedAftercare)}
+                >
+                  Complete session (requires finalized aftercare)
+                </button>
               </form>
             </div>
           </Card>
