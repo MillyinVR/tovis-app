@@ -377,6 +377,7 @@ describe('createProBookingWithClient', () => {
 
     expect(mocks.createProClientInvite).toHaveBeenCalledWith({
       professionalId: 'pro_1',
+      clientId: 'client_existing_1',
       bookingId: 'booking_1',
       invitedName: 'Existing Unclaimed',
       invitedEmail: 'existing-unclaimed@example.com',
@@ -488,6 +489,7 @@ describe('createProBookingWithClient', () => {
 
     expect(mocks.createProClientInvite).toHaveBeenCalledWith({
       professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
       invitedName: 'New Client',
       invitedEmail: 'newclient@example.com',
@@ -554,6 +556,7 @@ describe('createProBookingWithClient', () => {
 
     expect(mocks.createProClientInvite).toHaveBeenCalledWith({
       professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
       invitedName: 'Phone Only',
       invitedEmail: null,
@@ -607,6 +610,7 @@ describe('createProBookingWithClient', () => {
 
     expect(mocks.createProClientInvite).toHaveBeenCalledWith({
       professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
       invitedName: 'Both Channels',
       invitedEmail: 'both@example.com',

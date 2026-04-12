@@ -24,6 +24,7 @@ function makeInvite(overrides?: {
   id?: string
   token?: string
   professionalId?: string
+  clientId?: string
   bookingId?: string
   invitedName?: string
   invitedEmail?: string | null
@@ -42,6 +43,7 @@ function makeInvite(overrides?: {
     id: overrides?.id ?? 'invite_1',
     token: overrides?.token ?? 'token_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
+    clientId: overrides?.clientId ?? 'client_1',
     bookingId: overrides?.bookingId ?? 'booking_1',
     invitedName: overrides?.invitedName ?? 'Tori Morales',
     invitedEmail:
@@ -81,6 +83,7 @@ const expectedSelect = {
   id: true,
   token: true,
   professionalId: true,
+  clientId: true,
   bookingId: true,
   invitedName: true,
   invitedEmail: true,
@@ -108,6 +111,7 @@ describe('createProClientInvite', () => {
   it('creates a new pending invite when none exists for the booking', async () => {
     const createdInvite = makeInvite({
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: 'Tori Morales',
       invitedEmail: 'tori@example.com',
@@ -120,6 +124,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: '  Tori Morales  ',
       invitedEmail: 'tori@example.com',
@@ -135,6 +140,7 @@ describe('createProClientInvite', () => {
     expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_1',
+        clientId: 'client_1',
         bookingId: 'booking_1',
         invitedName: 'Tori Morales',
         invitedEmail: 'tori@example.com',
@@ -162,6 +168,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: 'Changed Name',
       invitedEmail: 'changed@example.com',
@@ -185,6 +192,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: 'Changed Name',
       invitedEmail: 'changed@example.com',
@@ -208,6 +216,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_2',
+      clientId: 'client_2',
       bookingId: 'booking_1',
       invitedName: 'Changed Name',
       invitedEmail: 'changed@example.com',
@@ -224,6 +233,7 @@ describe('createProClientInvite', () => {
     const existingInvite = makeInvite({
       id: 'invite_existing_1',
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: 'Old Name',
       invitedEmail: 'old@example.com',
@@ -237,6 +247,7 @@ describe('createProClientInvite', () => {
     const updatedInvite = makeInvite({
       id: 'invite_existing_1',
       professionalId: 'pro_2',
+      clientId: 'client_2',
       bookingId: 'booking_1',
       invitedName: 'New Name',
       invitedEmail: null,
@@ -252,6 +263,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_2',
+      clientId: 'client_2',
       bookingId: 'booking_1',
       invitedName: '  New Name  ',
       invitedEmail: null,
@@ -263,6 +275,7 @@ describe('createProClientInvite', () => {
       where: { id: 'invite_existing_1' },
       data: {
         professionalId: 'pro_2',
+        clientId: 'client_2',
         invitedName: 'New Name',
         invitedEmail: null,
         invitedPhone: '+16195551234',
@@ -278,6 +291,7 @@ describe('createProClientInvite', () => {
     const existingInvite = makeInvite({
       id: 'invite_existing_1',
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: 'Tori Morales',
       invitedEmail: 'tori@example.com',
@@ -292,6 +306,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: '  Tori Morales  ',
       invitedEmail: 'tori@example.com',
@@ -307,6 +322,8 @@ describe('createProClientInvite', () => {
   it('normalizes blank optional email to null when a phone channel still exists', async () => {
     const existingInvite = makeInvite({
       id: 'invite_existing_1',
+      professionalId: 'pro_1',
+      clientId: 'client_1',
       invitedName: 'Tori Morales',
       invitedEmail: 'tori@example.com',
       invitedPhone: '+16195551234',
@@ -318,6 +335,8 @@ describe('createProClientInvite', () => {
 
     const updatedInvite = makeInvite({
       id: 'invite_existing_1',
+      professionalId: 'pro_1',
+      clientId: 'client_1',
       invitedName: 'Tori Morales',
       invitedEmail: null,
       invitedPhone: '+16195551234',
@@ -332,6 +351,7 @@ describe('createProClientInvite', () => {
 
     const result = await createProClientInvite({
       professionalId: 'pro_1',
+      clientId: 'client_1',
       bookingId: 'booking_1',
       invitedName: 'Tori Morales',
       invitedEmail: '   ',
@@ -343,6 +363,7 @@ describe('createProClientInvite', () => {
       where: { id: 'invite_existing_1' },
       data: {
         professionalId: 'pro_1',
+        clientId: 'client_1',
         invitedName: 'Tori Morales',
         invitedEmail: null,
         invitedPhone: '+16195551234',
@@ -354,10 +375,114 @@ describe('createProClientInvite', () => {
     expect(result).toEqual(updatedInvite)
   })
 
+  it('updates a pending invite when only clientId changed', async () => {
+    const existingInvite = makeInvite({
+      id: 'invite_existing_1',
+      professionalId: 'pro_1',
+      clientId: 'client_old',
+      bookingId: 'booking_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      status: ProClientInviteStatus.PENDING,
+      acceptedAt: null,
+      revokedAt: null,
+    })
+
+    const updatedInvite = makeInvite({
+      id: 'invite_existing_1',
+      professionalId: 'pro_1',
+      clientId: 'client_new',
+      bookingId: 'booking_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      status: ProClientInviteStatus.PENDING,
+      acceptedAt: null,
+      revokedAt: null,
+    })
+
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingInvite)
+    mocks.prisma.proClientInvite.update.mockResolvedValueOnce(updatedInvite)
+
+    const result = await createProClientInvite({
+      professionalId: 'pro_1',
+      clientId: 'client_new',
+      bookingId: 'booking_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+    })
+
+    expect(mocks.prisma.proClientInvite.update).toHaveBeenCalledWith({
+      where: { id: 'invite_existing_1' },
+      data: {
+        professionalId: 'pro_1',
+        clientId: 'client_new',
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+        invitedPhone: null,
+        preferredContactMethod: ContactMethod.EMAIL,
+      },
+      select: expectedSelect,
+    })
+
+    expect(result).toEqual(updatedInvite)
+  })
+
+  it('throws when professionalId is blank after trimming', async () => {
+    await expect(
+      createProClientInvite({
+        professionalId: '   ',
+        clientId: 'client_1',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+      }),
+    ).rejects.toThrow('createProClientInvite: professionalId is required.')
+
+    expect(mocks.prisma.proClientInvite.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+  })
+
+  it('throws when clientId is blank after trimming', async () => {
+    await expect(
+      createProClientInvite({
+        professionalId: 'pro_1',
+        clientId: '   ',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+      }),
+    ).rejects.toThrow('createProClientInvite: clientId is required.')
+
+    expect(mocks.prisma.proClientInvite.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+  })
+
+  it('throws when bookingId is blank after trimming', async () => {
+    await expect(
+      createProClientInvite({
+        professionalId: 'pro_1',
+        clientId: 'client_1',
+        bookingId: '   ',
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+      }),
+    ).rejects.toThrow('createProClientInvite: bookingId is required.')
+
+    expect(mocks.prisma.proClientInvite.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+  })
+
   it('throws when invitedName is blank after trimming', async () => {
     await expect(
       createProClientInvite({
         professionalId: 'pro_1',
+        clientId: 'client_1',
         bookingId: 'booking_1',
         invitedName: '   ',
         invitedEmail: 'tori@example.com',
@@ -372,6 +497,7 @@ describe('createProClientInvite', () => {
     await expect(
       createProClientInvite({
         professionalId: 'pro_1',
+        clientId: 'client_1',
         bookingId: 'booking_1',
         invitedName: 'Tori Morales',
         invitedEmail: '   ',
@@ -389,6 +515,7 @@ describe('createProClientInvite', () => {
     await expect(
       createProClientInvite({
         professionalId: 'pro_1',
+        clientId: 'client_1',
         bookingId: 'booking_1',
         invitedName: 'Tori Morales',
         invitedEmail: null,
@@ -404,6 +531,7 @@ describe('createProClientInvite', () => {
     await expect(
       createProClientInvite({
         professionalId: 'pro_1',
+        clientId: 'client_1',
         bookingId: 'booking_1',
         invitedName: 'Tori Morales',
         invitedEmail: 'tori@example.com',

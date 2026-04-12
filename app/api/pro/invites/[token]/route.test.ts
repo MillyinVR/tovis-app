@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
+import {
+  ClientClaimStatus,
+  ContactMethod,
+  ProClientInviteStatus,
+} from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
@@ -25,18 +29,23 @@ import { GET } from './route'
 function makeInvite(overrides?: {
   id?: string
   professionalId?: string
+  clientId?: string
   bookingId?: string
   invitedName?: string
   invitedEmail?: string | null
   invitedPhone?: string | null
   preferredContactMethod?: ContactMethod | null
   status?: ProClientInviteStatus
-  acceptedAt?: Date | null
   revokedAt?: Date | null
+  client?: {
+    id?: string
+    claimStatus?: ClientClaimStatus
+  } | null
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
+    clientId: overrides?.clientId ?? 'client_1',
     bookingId: overrides?.bookingId ?? 'booking_1',
     invitedName: overrides?.invitedName ?? 'Tori Morales',
     invitedEmail:
@@ -52,9 +61,14 @@ function makeInvite(overrides?: {
         ? overrides.preferredContactMethod
         : ContactMethod.EMAIL,
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
-    acceptedAt:
-      overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
     revokedAt: overrides?.revokedAt !== undefined ? overrides.revokedAt : null,
+    client:
+      overrides?.client !== undefined
+        ? overrides.client
+        : {
+            id: 'client_1',
+            claimStatus: ClientClaimStatus.UNCLAIMED,
+          },
   }
 }
 
@@ -113,14 +127,20 @@ describe('GET /api/pro/invites/[token]', () => {
       select: {
         id: true,
         professionalId: true,
+        clientId: true,
         bookingId: true,
         invitedName: true,
         invitedEmail: true,
         invitedPhone: true,
         preferredContactMethod: true,
         status: true,
-        acceptedAt: true,
         revokedAt: true,
+        client: {
+          select: {
+            id: true,
+            claimStatus: true,
+          },
+        },
       },
     })
 
@@ -136,10 +156,10 @@ describe('GET /api/pro/invites/[token]', () => {
     })
   })
 
-  it('returns ALREADY_ACCEPTED when invite status is ACCEPTED', async () => {
+  it('returns NOT_FOUND when linked client identity is missing', async () => {
     mocks.findUnique.mockResolvedValueOnce(
       makeInvite({
-        status: ProClientInviteStatus.ACCEPTED,
+        client: null,
       }),
     )
 
@@ -150,50 +170,15 @@ describe('GET /api/pro/invites/[token]', () => {
       },
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'Invite already accepted.',
-      {
-        code: 'ALREADY_ACCEPTED',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'Invite already accepted.',
-      code: 'ALREADY_ACCEPTED',
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Invite not found.', {
+      code: 'NOT_FOUND',
     })
-  })
-
-  it('returns ALREADY_ACCEPTED when acceptedAt is already set even if status is still PENDING', async () => {
-    mocks.findUnique.mockResolvedValueOnce(
-      makeInvite({
-        status: ProClientInviteStatus.PENDING,
-        acceptedAt: new Date('2026-04-12T12:00:00.000Z'),
-      }),
-    )
-
-    const result = await GET(
-      new Request('http://localhost/api/pro/invites/token_1'),
-      {
-        params: { token: 'token_1' },
-      },
-    )
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'Invite already accepted.',
-      {
-        code: 'ALREADY_ACCEPTED',
-      },
-    )
 
     expect(result).toEqual({
       ok: false,
-      status: 409,
-      error: 'Invite already accepted.',
-      code: 'ALREADY_ACCEPTED',
+      status: 404,
+      error: 'Invite not found.',
+      code: 'NOT_FOUND',
     })
   })
 
@@ -258,19 +243,91 @@ describe('GET /api/pro/invites/[token]', () => {
     })
   })
 
-  it('returns invite payload when invite is pending and available', async () => {
+  it('returns ALREADY_CLAIMED when linked client identity is claimed even if invite row is still pending', async () => {
+    mocks.findUnique.mockResolvedValueOnce(
+      makeInvite({
+        status: ProClientInviteStatus.PENDING,
+        client: {
+          id: 'client_1',
+          claimStatus: ClientClaimStatus.CLAIMED,
+        },
+      }),
+    )
+
+    const result = await GET(
+      new Request('http://localhost/api/pro/invites/token_1'),
+      {
+        params: { token: 'token_1' },
+      },
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'Invite already claimed.',
+      {
+        code: 'ALREADY_CLAIMED',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Invite already claimed.',
+      code: 'ALREADY_CLAIMED',
+    })
+  })
+
+  it('returns ALREADY_CLAIMED when invite row is ACCEPTED and linked client identity is claimed', async () => {
+    mocks.findUnique.mockResolvedValueOnce(
+      makeInvite({
+        status: ProClientInviteStatus.ACCEPTED,
+        client: {
+          id: 'client_1',
+          claimStatus: ClientClaimStatus.CLAIMED,
+        },
+      }),
+    )
+
+    const result = await GET(
+      new Request('http://localhost/api/pro/invites/token_1'),
+      {
+        params: { token: 'token_1' },
+      },
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'Invite already claimed.',
+      {
+        code: 'ALREADY_CLAIMED',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Invite already claimed.',
+      code: 'ALREADY_CLAIMED',
+    })
+  })
+
+  it('returns invite payload when invite is pending, not revoked, and linked client is unclaimed', async () => {
     mocks.findUnique.mockResolvedValueOnce(
       makeInvite({
         id: 'invite_1',
         professionalId: 'pro_123',
+        clientId: 'client_123',
         bookingId: 'booking_123',
         invitedName: 'Tori Morales',
         invitedEmail: 'tori@example.com',
         invitedPhone: '+16195551234',
         preferredContactMethod: ContactMethod.SMS,
         status: ProClientInviteStatus.PENDING,
-        acceptedAt: null,
         revokedAt: null,
+        client: {
+          id: 'client_123',
+          claimStatus: ClientClaimStatus.UNCLAIMED,
+        },
       }),
     )
 

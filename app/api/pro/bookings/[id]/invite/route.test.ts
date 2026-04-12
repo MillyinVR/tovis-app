@@ -66,6 +66,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
 
     mocks.bookingFindFirst.mockResolvedValue({
       id: 'booking_1',
+      clientId: 'client_123',
     })
 
     mocks.createProClientInvite.mockResolvedValue({
@@ -261,6 +262,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       },
       select: {
         id: true,
+        clientId: true,
       },
     })
 
@@ -294,6 +296,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
 
     expect(mocks.createProClientInvite).toHaveBeenCalledWith({
       professionalId: 'pro_123',
+      clientId: 'client_123',
       bookingId: 'booking_1',
       invitedName: 'Tori Morales',
       invitedEmail: 'tori@example.com',

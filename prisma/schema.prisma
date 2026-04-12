@@ -779,6 +779,7 @@ model ClientProfile {
   alertBanner             String?
 
   bookings               Booking[]
+  proClientInvites       ProClientInvite[]
   bookingHolds           BookingHold[]
   notes                  ClientProfessionalNote[]
   allergies              ClientAllergy[]
@@ -1674,6 +1675,7 @@ model ProClientInvite {
   updatedAt DateTime @updatedAt
 
   professionalId String
+  clientId       String
   bookingId      String @unique
 
   invitedName  String
@@ -1696,11 +1698,14 @@ model ProClientInvite {
   preferredContactMethod ContactMethod?
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   booking      Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([professionalId])
+  @@index([clientId])
   @@index([token])
   @@index([status, createdAt])
+  @@index([clientId, status, createdAt])
   @@index([acceptedByUserId])
   @@index([revokedByUserId])
 }

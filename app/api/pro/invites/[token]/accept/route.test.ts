@@ -1,31 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ContactMethod,
-  ProClientInviteStatus,
-} from '@prisma/client'
+// app/api/pro/invites/[token]/accept/route.test.ts
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => {
-  const tx = {
-    proClientInvite: {
-      findUnique: vi.fn(),
-      updateMany: vi.fn(),
-    },
-    clientProfile: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
-  }
-
-  return {
-    requireClient: vi.fn(),
-    jsonFail: vi.fn(),
-    jsonOk: vi.fn(),
-    prisma: {
-      $transaction: vi.fn(),
-    },
-    tx,
-  }
-})
+const mocks = vi.hoisted(() => ({
+  requireClient: vi.fn(),
+  jsonFail: vi.fn(),
+  jsonOk: vi.fn(),
+  acceptProClientClaimLink: vi.fn(),
+}))
 
 vi.mock('@/app/api/_utils', () => ({
   requireClient: mocks.requireClient,
@@ -33,8 +14,8 @@ vi.mock('@/app/api/_utils', () => ({
   jsonOk: mocks.jsonOk,
 }))
 
-vi.mock('@/lib/prisma', () => ({
-  prisma: mocks.prisma,
+vi.mock('@/lib/claims/proClientClaim', () => ({
+  acceptProClientClaimLink: mocks.acceptProClientClaimLink,
 }))
 
 import { POST } from './route'
@@ -48,7 +29,6 @@ function makeRequest(): Request {
 describe('POST /api/pro/invites/[token]/accept', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.setSystemTime(new Date('2026-04-12T12:00:00.000Z'))
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -73,25 +53,10 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       data,
     }))
 
-    mocks.prisma.$transaction.mockImplementation(
-      async (callback: (tx: typeof mocks.tx) => Promise<unknown>) =>
-        callback(mocks.tx),
-    )
-
-    mocks.tx.proClientInvite.findUnique.mockResolvedValue(null)
-    mocks.tx.proClientInvite.updateMany.mockResolvedValue({ count: 1 })
-    mocks.tx.clientProfile.findUnique.mockResolvedValue({
-      id: 'client_1',
-      preferredContactMethod: null,
+    mocks.acceptProClientClaimLink.mockResolvedValue({
+      kind: 'ok',
+      bookingId: 'booking_1',
     })
-    mocks.tx.clientProfile.update.mockResolvedValue({
-      id: 'client_1',
-      preferredContactMethod: ContactMethod.EMAIL,
-    })
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
   })
 
   it('returns auth response when requireClient fails', async () => {
@@ -107,7 +72,7 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
 
     expect(result).toBe(authRes)
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.acceptProClientClaimLink).not.toHaveBeenCalled()
   })
 
   it('returns NOT_FOUND when token is missing', async () => {
@@ -126,11 +91,25 @@ describe('POST /api/pro/invites/[token]/accept', () => {
       code: 'NOT_FOUND',
     })
 
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.acceptProClientClaimLink).not.toHaveBeenCalled()
   })
 
-  it('returns NOT_FOUND when invite does not exist', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce(null)
+  it('passes token and acting client identity to the claim service', async () => {
+    await POST(makeRequest(), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.acceptProClientClaimLink).toHaveBeenCalledWith({
+      token: 'token_1',
+      actingUserId: 'user_1',
+      actingClientId: 'client_1',
+    })
+  })
+
+  it('returns NOT_FOUND when claim service returns not_found', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'not_found',
+    })
 
     const result = await POST(makeRequest(), {
       params: { token: 'token_1' },
@@ -148,14 +127,9 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
-  it('returns REVOKED when invite status is REVOKED', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
-      bookingId: 'booking_1',
-      status: ProClientInviteStatus.REVOKED,
-      acceptedAt: null,
-      revokedAt: null,
-      preferredContactMethod: ContactMethod.EMAIL,
+  it('returns REVOKED when claim service returns revoked', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'revoked',
     })
 
     const result = await POST(makeRequest(), {
@@ -178,44 +152,9 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
-  it('returns REVOKED when revokedAt is already set even if status is still PENDING', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
-      bookingId: 'booking_1',
-      status: ProClientInviteStatus.PENDING,
-      acceptedAt: null,
-      revokedAt: new Date('2026-04-12T11:00:00.000Z'),
-      preferredContactMethod: ContactMethod.EMAIL,
-    })
-
-    const result = await POST(makeRequest(), {
-      params: { token: 'token_1' },
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      410,
-      'Invite is no longer available.',
-      {
-        code: 'REVOKED',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 410,
-      error: 'Invite is no longer available.',
-      code: 'REVOKED',
-    })
-  })
-
-  it('returns ALREADY_ACCEPTED when invite status is ACCEPTED', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
-      bookingId: 'booking_1',
-      status: ProClientInviteStatus.ACCEPTED,
-      acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
-      revokedAt: null,
-      preferredContactMethod: ContactMethod.EMAIL,
+  it('returns ALREADY_CLAIMED when claim service returns already_claimed', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'already_claimed',
     })
 
     const result = await POST(makeRequest(), {
@@ -224,61 +163,24 @@ describe('POST /api/pro/invites/[token]/accept', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
-      'Invite already accepted.',
+      'Invite already claimed.',
       {
-        code: 'ALREADY_ACCEPTED',
+        code: 'ALREADY_CLAIMED',
       },
     )
 
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'Invite already accepted.',
-      code: 'ALREADY_ACCEPTED',
+      error: 'Invite already claimed.',
+      code: 'ALREADY_CLAIMED',
     })
   })
 
-  it('returns ALREADY_ACCEPTED when acceptedAt is already set even if status is still PENDING', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
-      bookingId: 'booking_1',
-      status: ProClientInviteStatus.PENDING,
-      acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
-      revokedAt: null,
-      preferredContactMethod: ContactMethod.EMAIL,
+  it('returns CLIENT_NOT_FOUND when claim service returns client_not_found', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'client_not_found',
     })
-
-    const result = await POST(makeRequest(), {
-      params: { token: 'token_1' },
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'Invite already accepted.',
-      {
-        code: 'ALREADY_ACCEPTED',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'Invite already accepted.',
-      code: 'ALREADY_ACCEPTED',
-    })
-  })
-
-  it('returns CLIENT_NOT_FOUND when authenticated client profile is missing', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
-      bookingId: 'booking_1',
-      status: ProClientInviteStatus.PENDING,
-      acceptedAt: null,
-      revokedAt: null,
-      preferredContactMethod: ContactMethod.EMAIL,
-    })
-
-    mocks.tx.clientProfile.findUnique.mockResolvedValueOnce(null)
 
     const result = await POST(makeRequest(), {
       params: { token: 'token_1' },
@@ -300,24 +202,10 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
-  it('returns CONFLICT when claim update does not succeed and invite is still pending', async () => {
-    mocks.tx.proClientInvite.findUnique
-      .mockResolvedValueOnce({
-        id: 'invite_1',
-        bookingId: 'booking_1',
-        status: ProClientInviteStatus.PENDING,
-        acceptedAt: null,
-        revokedAt: null,
-        preferredContactMethod: ContactMethod.EMAIL,
-      })
-      .mockResolvedValueOnce({
-        status: ProClientInviteStatus.PENDING,
-        acceptedAt: null,
-        revokedAt: null,
-        bookingId: 'booking_1',
-      })
-
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 0 })
+  it('returns CLIENT_MISMATCH when claim service returns client_mismatch', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'client_mismatch',
+    })
 
     const result = await POST(makeRequest(), {
       params: { token: 'token_1' },
@@ -325,7 +213,32 @@ describe('POST /api/pro/invites/[token]/accept', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
-      'Invite could not be accepted.',
+      'Invite does not belong to this client.',
+      {
+        code: 'CLIENT_MISMATCH',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Invite does not belong to this client.',
+      code: 'CLIENT_MISMATCH',
+    })
+  })
+
+  it('returns CONFLICT when claim service returns conflict', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'conflict',
+    })
+
+    const result = await POST(makeRequest(), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'Invite could not be claimed.',
       {
         code: 'CONFLICT',
       },
@@ -334,90 +247,19 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     expect(result).toEqual({
       ok: false,
       status: 409,
-      error: 'Invite could not be accepted.',
+      error: 'Invite could not be claimed.',
       code: 'CONFLICT',
     })
   })
 
-  it('returns REVOKED when claim update loses a race to revocation', async () => {
-    mocks.tx.proClientInvite.findUnique
-      .mockResolvedValueOnce({
-        id: 'invite_1',
-        bookingId: 'booking_1',
-        status: ProClientInviteStatus.PENDING,
-        acceptedAt: null,
-        revokedAt: null,
-        preferredContactMethod: ContactMethod.EMAIL,
-      })
-      .mockResolvedValueOnce({
-        status: ProClientInviteStatus.REVOKED,
-        acceptedAt: null,
-        revokedAt: new Date('2026-04-12T12:00:00.000Z'),
-        bookingId: 'booking_1',
-      })
-
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 0 })
-
-    const result = await POST(makeRequest(), {
-      params: { token: 'token_1' },
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      410,
-      'Invite is no longer available.',
-      {
-        code: 'REVOKED',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 410,
-      error: 'Invite is no longer available.',
-      code: 'REVOKED',
-    })
-  })
-
-  it('accepts the invite successfully and writes preferredContactMethod when client profile does not have one', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
+  it('returns bookingId when claim succeeds', async () => {
+    mocks.acceptProClientClaimLink.mockResolvedValueOnce({
+      kind: 'ok',
       bookingId: 'booking_1',
-      status: ProClientInviteStatus.PENDING,
-      acceptedAt: null,
-      revokedAt: null,
-      preferredContactMethod: ContactMethod.EMAIL,
     })
-
-    mocks.tx.clientProfile.findUnique.mockResolvedValueOnce({
-      id: 'client_1',
-      preferredContactMethod: null,
-    })
-
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 1 })
 
     const result = await POST(makeRequest(), {
       params: { token: 'token_1' },
-    })
-
-    expect(mocks.tx.proClientInvite.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'invite_1',
-        status: ProClientInviteStatus.PENDING,
-        acceptedAt: null,
-        revokedAt: null,
-      },
-      data: {
-        status: ProClientInviteStatus.ACCEPTED,
-        acceptedAt: new Date('2026-04-12T12:00:00.000Z'),
-        acceptedByUserId: 'user_1',
-      },
-    })
-
-    expect(mocks.tx.clientProfile.update).toHaveBeenCalledWith({
-      where: { id: 'client_1' },
-      data: {
-        preferredContactMethod: ContactMethod.EMAIL,
-      },
     })
 
     expect(mocks.jsonOk).toHaveBeenCalledWith({ bookingId: 'booking_1' }, 200)
@@ -431,39 +273,10 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
-  it('accepts the invite successfully without overwriting an existing preferredContactMethod', async () => {
-    mocks.tx.proClientInvite.findUnique.mockResolvedValueOnce({
-      id: 'invite_1',
-      bookingId: 'booking_1',
-      status: ProClientInviteStatus.PENDING,
-      acceptedAt: null,
-      revokedAt: null,
-      preferredContactMethod: ContactMethod.EMAIL,
-    })
-
-    mocks.tx.clientProfile.findUnique.mockResolvedValueOnce({
-      id: 'client_1',
-      preferredContactMethod: ContactMethod.SMS,
-    })
-
-    mocks.tx.proClientInvite.updateMany.mockResolvedValueOnce({ count: 1 })
-
-    const result = await POST(makeRequest(), {
-      params: { token: 'token_1' },
-    })
-
-    expect(mocks.tx.clientProfile.update).not.toHaveBeenCalled()
-    expect(result).toEqual({
-      ok: true,
-      status: 200,
-      data: {
-        bookingId: 'booking_1',
-      },
-    })
-  })
-
-  it('returns INTERNAL_ERROR when transaction throws', async () => {
-    mocks.prisma.$transaction.mockRejectedValueOnce(new Error('db exploded'))
+  it('returns INTERNAL_ERROR when claim service throws', async () => {
+    mocks.acceptProClientClaimLink.mockRejectedValueOnce(
+      new Error('claim service exploded'),
+    )
 
     const consoleErrorSpy = vi
       .spyOn(console, 'error')

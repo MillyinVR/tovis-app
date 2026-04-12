@@ -125,6 +125,7 @@ export async function POST(request: Request, ctx: Ctx) {
       },
       select: {
         id: true,
+        clientId: true,
       },
     })
 
@@ -134,6 +135,7 @@ export async function POST(request: Request, ctx: Ctx) {
 
     const invite = await createProClientInvite({
       professionalId: auth.professionalId,
+      clientId: booking.clientId,
       bookingId: booking.id,
       invitedName: input.name,
       invitedEmail: input.email,

@@ -13,6 +13,7 @@ const proClientInviteSelect = {
   id: true,
   token: true,
   professionalId: true,
+  clientId: true,
   bookingId: true,
   invitedName: true,
   invitedEmail: true,
@@ -36,10 +37,10 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
-function normalizeRequiredString(value: string): string {
+function normalizeRequiredString(value: string, fieldName: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new Error('createProClientInvite: invitedName is required.')
+    throw new Error(`createProClientInvite: ${fieldName} is required.`)
   }
   return normalized
 }
@@ -80,14 +81,18 @@ function validateInviteChannels(args: {
   }
 }
 
-function isAcceptedInvite(invite: Pick<SelectedProClientInvite, 'status' | 'acceptedAt'>): boolean {
+function isAcceptedInvite(
+  invite: Pick<SelectedProClientInvite, 'status' | 'acceptedAt'>,
+): boolean {
   return (
     invite.status === ProClientInviteStatus.ACCEPTED ||
     invite.acceptedAt != null
   )
 }
 
-function isRevokedInvite(invite: Pick<SelectedProClientInvite, 'status' | 'revokedAt'>): boolean {
+function isRevokedInvite(
+  invite: Pick<SelectedProClientInvite, 'status' | 'revokedAt'>,
+): boolean {
   return (
     invite.status === ProClientInviteStatus.REVOKED ||
     invite.revokedAt != null
@@ -96,6 +101,7 @@ function isRevokedInvite(invite: Pick<SelectedProClientInvite, 'status' | 'revok
 
 export type CreateProClientInviteArgs = {
   professionalId: string
+  clientId: string
   bookingId: string
   invitedName: string
   invitedEmail?: string | null
@@ -107,7 +113,13 @@ export type CreateProClientInviteArgs = {
 export async function createProClientInvite(args: CreateProClientInviteArgs) {
   const db = getDb(args.tx)
 
-  const invitedName = normalizeRequiredString(args.invitedName)
+  const professionalId = normalizeRequiredString(
+    args.professionalId,
+    'professionalId',
+  )
+  const clientId = normalizeRequiredString(args.clientId, 'clientId')
+  const bookingId = normalizeRequiredString(args.bookingId, 'bookingId')
+  const invitedName = normalizeRequiredString(args.invitedName, 'invitedName')
   const invitedEmail = normalizeOptionalString(args.invitedEmail)
   const invitedPhone = normalizeOptionalString(args.invitedPhone)
   const preferredContactMethod = args.preferredContactMethod ?? null
@@ -119,15 +131,16 @@ export async function createProClientInvite(args: CreateProClientInviteArgs) {
   })
 
   const existing = await db.proClientInvite.findUnique({
-    where: { bookingId: args.bookingId },
+    where: { bookingId },
     select: proClientInviteSelect,
   })
 
   if (!existing) {
     return db.proClientInvite.create({
       data: {
-        professionalId: args.professionalId,
-        bookingId: args.bookingId,
+        professionalId,
+        clientId,
+        bookingId,
         invitedName,
         invitedEmail,
         invitedPhone,
@@ -143,7 +156,8 @@ export async function createProClientInvite(args: CreateProClientInviteArgs) {
   }
 
   const needsUpdate =
-    existing.professionalId !== args.professionalId ||
+    existing.professionalId !== professionalId ||
+    existing.clientId !== clientId ||
     existing.invitedName !== invitedName ||
     existing.invitedEmail !== invitedEmail ||
     existing.invitedPhone !== invitedPhone ||
@@ -156,7 +170,8 @@ export async function createProClientInvite(args: CreateProClientInviteArgs) {
   return db.proClientInvite.update({
     where: { id: existing.id },
     data: {
-      professionalId: args.professionalId,
+      professionalId,
+      clientId,
       invitedName,
       invitedEmail,
       invitedPhone,

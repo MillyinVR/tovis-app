@@ -175,6 +175,7 @@ async function tryCreateInvite(args: {
   try {
     const createdInvite = await createProClientInvite({
       professionalId: args.professionalId,
+      clientId: args.clientId,
       bookingId: args.bookingId,
       invitedName,
       invitedEmail,
