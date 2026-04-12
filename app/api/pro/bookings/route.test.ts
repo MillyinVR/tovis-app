@@ -640,6 +640,83 @@ describe('POST /api/pro/bookings', () => {
     })
   })
 
+  it('still returns booking success for an unclaimed client when invite is null', async () => {
+  mocks.createProBookingWithClient.mockResolvedValueOnce({
+    ok: true,
+    clientId: 'client_unclaimed_2',
+    clientUserId: null,
+    clientEmail: 'nudgefree@example.com',
+    clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+    clientAddressId: null,
+    bookingResult: {
+      booking: {
+        id: 'booking_no_invite_1',
+        scheduledFor,
+        totalDurationMinutes: 60,
+        bufferMinutes: 15,
+        status: BookingStatus.ACCEPTED,
+      },
+      subtotalSnapshot: new Prisma.Decimal('50.00'),
+      stepMinutes: 15,
+      appointmentTimeZone: 'America/Los_Angeles',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+      serviceName: 'Haircut',
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    },
+    invite: null,
+  })
+
+  const result = await POST(
+    makeRequest({
+      scheduledFor: scheduledForIso,
+      locationId: 'loc_1',
+      locationType: 'SALON',
+      offeringId: 'offering_1',
+      client: {
+        firstName: 'No',
+        lastName: 'Invite',
+        email: 'nudgefree@example.com',
+      },
+    }),
+  )
+
+  expect(result).toEqual({
+    ok: true,
+    status: 201,
+    data: {
+      booking: {
+        id: 'booking_no_invite_1',
+        clientId: 'client_unclaimed_2',
+        scheduledFor: '2026-03-11T19:30:00.000Z',
+        endsAt: '2026-03-11T20:45:00.000Z',
+        totalDurationMinutes: 60,
+        bufferMinutes: 15,
+        status: BookingStatus.ACCEPTED,
+        serviceName: 'Haircut',
+        subtotalSnapshot: '50.00',
+        subtotalCents: 5000,
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+        stepMinutes: 15,
+        timeZone: 'America/Los_Angeles',
+      },
+      client: {
+        id: 'client_unclaimed_2',
+        userId: null,
+        email: 'nudgefree@example.com',
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+      },
+      invite: null,
+    },
+  })
+})
+
   it('maps booking errors to jsonFail', async () => {
     mocks.createProBookingWithClient.mockRejectedValueOnce(
       bookingError('TIME_BLOCKED', {
