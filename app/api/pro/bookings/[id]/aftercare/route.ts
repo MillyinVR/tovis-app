@@ -1,5 +1,5 @@
 // app/api/pro/bookings/[id]/aftercare/route.ts
-import { AftercareRebookMode } from '@prisma/client'
+import { AftercareRebookMode, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { isRecord } from '@/lib/guards'
@@ -13,6 +13,7 @@ import {
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 type Ctx = {
   params: { id: string } | Promise<{ id: string }>
@@ -358,6 +359,52 @@ function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
 
+function buildClientAftercareHref(publicToken: string | null | undefined): string | null {
+  const token = trimmedString(publicToken)
+  if (!token) return null
+  return `/client/rebook/${encodeURIComponent(token)}`
+}
+
+function buildPublicAccess(publicToken: string | null | undefined) {
+  const clientAftercareHref = buildClientAftercareHref(publicToken)
+
+  return {
+    accessMode: clientAftercareHref ? 'LEGACY_PUBLIC_TOKEN' : 'NONE',
+    hasPublicAccess: Boolean(clientAftercareHref),
+    clientAftercareHref,
+  } as const
+}
+
+function mapRecommendedProduct(product: {
+  id: string
+  note: string | null
+  productId: string | null
+  externalName: string | null
+  externalUrl: string | null
+  product: {
+    id: string
+    name: string
+    brand: string | null
+    retailPrice: Prisma.Decimal | null
+  } | null
+}) {
+  return {
+    id: product.id,
+    note: product.note,
+    productId: product.productId,
+    externalName: product.externalName,
+    externalUrl: product.externalUrl,
+    product: product.product
+      ? {
+          id: product.product.id,
+          name: product.product.name,
+          brand: product.product.brand,
+          retailPrice: product.product.retailPrice?.toString() ?? null,
+        }
+      : null,
+  }
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
@@ -445,7 +492,6 @@ export async function GET(_req: Request, ctx: Ctx) {
                 rebookWindowEnd: toIsoOrNull(
                   booking.aftercareSummary.rebookWindowEnd,
                 ),
-                publicToken: booking.aftercareSummary.publicToken,
                 draftSavedAt: toIsoOrNull(booking.aftercareSummary.draftSavedAt),
                 sentToClientAt: toIsoOrNull(
                   booking.aftercareSummary.sentToClientAt,
@@ -455,23 +501,13 @@ export async function GET(_req: Request, ctx: Ctx) {
                 ),
                 version: booking.aftercareSummary.version,
                 isFinalized: Boolean(booking.aftercareSummary.sentToClientAt),
+                publicAccess: buildPublicAccess(
+                  booking.aftercareSummary.publicToken,
+                ),
                 recommendedProducts:
-                  booking.aftercareSummary.recommendedProducts.map((product) => ({
-                    id: product.id,
-                    note: product.note,
-                    productId: product.productId,
-                    externalName: product.externalName,
-                    externalUrl: product.externalUrl,
-                    product: product.product
-                      ? {
-                          id: product.product.id,
-                          name: product.product.name,
-                          brand: product.product.brand,
-                          retailPrice:
-                            product.product.retailPrice?.toString() ?? null,
-                        }
-                      : null,
-                  })),
+                  booking.aftercareSummary.recommendedProducts.map(
+                    mapRecommendedProduct,
+                  ),
               }
             : null,
         },
@@ -580,7 +616,6 @@ export async function POST(req: Request, ctx: Ctx) {
       {
         aftercare: {
           id: result.aftercare.id,
-          publicToken: result.aftercare.publicToken,
           rebookMode: result.aftercare.rebookMode,
           rebookedFor: toIsoOrNull(result.aftercare.rebookedFor),
           rebookWindowStart: toIsoOrNull(result.aftercare.rebookWindowStart),
@@ -590,6 +625,7 @@ export async function POST(req: Request, ctx: Ctx) {
           lastEditedAt: toIsoOrNull(result.aftercare.lastEditedAt),
           version: result.aftercare.version,
           isFinalized: Boolean(result.aftercare.sentToClientAt),
+          publicAccess: buildPublicAccess(result.aftercare.publicToken),
         },
         remindersTouched: result.remindersTouched,
         clientNotified: result.clientNotified,

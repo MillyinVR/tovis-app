@@ -69,6 +69,34 @@ function pickMediaPhaseOrOther(value: unknown): MediaPhase {
   return isMediaPhase(value) ? value : 'OTHER'
 }
 
+function toLocalString(value: Date | null | undefined): string | null {
+  return value ? value.toLocaleString() : null
+}
+
+function buildPublicAccessSummary(args: {
+  hasDraft: boolean
+  isFinalized: boolean
+}) {
+  if (args.isFinalized) {
+    return {
+      label: '✅ secure client access ready',
+      help: 'Client-facing aftercare access is available through the secure aftercare link flow.',
+    }
+  }
+
+  if (args.hasDraft) {
+    return {
+      label: '📝 draft only',
+      help: 'The aftercare draft exists, but client access is not live until you send/finalize it.',
+    }
+  }
+
+  return {
+    label: '❌ not ready',
+    help: 'No client-facing aftercare access exists yet.',
+  }
+}
+
 const SIGNED_URL_TTL_SECONDS = 60 * 10
 
 async function signObjectUrl(
@@ -131,19 +159,15 @@ export default async function ProAftercarePage(props: {
       aftercareSummary: {
         select: {
           id: true,
-          publicToken: true,
           notes: true,
           rebookedFor: true,
           rebookMode: true,
           rebookWindowStart: true,
           rebookWindowEnd: true,
-
-          // Step 5 explicit state
           draftSavedAt: true,
           sentToClientAt: true,
           lastEditedAt: true,
           version: true,
-
           recommendedProducts: {
             orderBy: { id: 'asc' },
             select: {
@@ -267,6 +291,11 @@ export default async function ProAftercarePage(props: {
   const hasAftercareDraft = Boolean(aftercare?.id)
   const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
 
+  const publicAccess = buildPublicAccessSummary({
+    hasDraft: hasAftercareDraft,
+    isFinalized: hasFinalizedAftercare,
+  })
+
   return (
     <main className="mx-auto mt-20 w-full max-w-3xl px-4 pb-10 text-textPrimary">
       <Link
@@ -300,11 +329,22 @@ export default async function ProAftercarePage(props: {
             </span>
           </div>
 
+          <div className="text-textSecondary">
+            Client access:{' '}
+            <span className="font-black text-textPrimary">
+              {publicAccess.label}
+            </span>
+          </div>
+
+          <div className="text-xs font-semibold text-textSecondary">
+            {publicAccess.help}
+          </div>
+
           {aftercare?.lastEditedAt ? (
             <div className="text-textSecondary">
               Last edited:{' '}
               <span className="font-black text-textPrimary">
-                {aftercare.lastEditedAt.toLocaleString()}
+                {toLocalString(aftercare.lastEditedAt)}
               </span>
             </div>
           ) : null}
@@ -313,7 +353,7 @@ export default async function ProAftercarePage(props: {
             <div className="text-textSecondary">
               Draft saved:{' '}
               <span className="font-black text-textPrimary">
-                {aftercare.draftSavedAt.toLocaleString()}
+                {toLocalString(aftercare.draftSavedAt)}
               </span>
             </div>
           ) : null}
@@ -322,7 +362,16 @@ export default async function ProAftercarePage(props: {
             <div className="text-textSecondary">
               Sent to client:{' '}
               <span className="font-black text-textPrimary">
-                {aftercare.sentToClientAt.toLocaleString()}
+                {toLocalString(aftercare.sentToClientAt)}
+              </span>
+            </div>
+          ) : null}
+
+          {aftercare?.version != null ? (
+            <div className="text-textSecondary">
+              Version:{' '}
+              <span className="font-black text-textPrimary">
+                {aftercare.version}
               </span>
             </div>
           ) : null}
