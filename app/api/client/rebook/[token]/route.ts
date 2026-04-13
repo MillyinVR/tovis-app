@@ -21,6 +21,18 @@ export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
+type PublicAccess =
+  | {
+      accessMode: 'SECURE_LINK'
+      hasPublicAccess: true
+      clientAftercareHref: string
+    }
+  | {
+      accessMode: 'NONE'
+      hasPublicAccess: false
+      clientAftercareHref: null
+    }
+
 function bookingJsonFail(
   code: BookingErrorCode,
   overrides?: {
@@ -61,6 +73,27 @@ function readRequestMeta(req: Request): {
   }
 }
 
+function buildPublicAccess(tokenValue: string | null | undefined): PublicAccess {
+  const token =
+    typeof tokenValue === 'string' && tokenValue.trim().length > 0
+      ? tokenValue.trim()
+      : null
+
+  if (!token) {
+    return {
+      accessMode: 'NONE',
+      hasPublicAccess: false,
+      clientAftercareHref: null,
+    }
+  }
+
+  return {
+    accessMode: 'SECURE_LINK',
+    hasPublicAccess: true,
+    clientAftercareHref: `/client/rebook/${encodeURIComponent(token)}`,
+  }
+}
+
 function toGetResponse(
   resolved: Awaited<ReturnType<typeof resolveAftercareAccessByToken>>,
 ) {
@@ -94,7 +127,6 @@ function toGetResponse(
       rebookWindowEnd: resolved.aftercare.rebookWindowEnd
         ? resolved.aftercare.rebookWindowEnd.toISOString()
         : null,
-      publicToken: resolved.aftercare.publicToken,
       draftSavedAt: resolved.aftercare.draftSavedAt
         ? resolved.aftercare.draftSavedAt.toISOString()
         : null,
@@ -106,6 +138,7 @@ function toGetResponse(
         : null,
       version: resolved.aftercare.version,
       isFinalized: Boolean(resolved.aftercare.sentToClientAt),
+      publicAccess: buildPublicAccess(resolved.aftercare.publicToken),
     },
     booking: {
       id: resolved.booking.id,

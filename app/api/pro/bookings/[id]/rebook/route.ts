@@ -1,4 +1,3 @@
-// app/api/pro/bookings/[id]/rebook/route.ts
 import crypto from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import {
@@ -37,7 +36,7 @@ type AftercareRebookRecord = Prisma.AftercareSummaryGetPayload<{
   select: typeof AFTERCARE_REBOOK_SELECT
 }>
 
-function newLegacyPublicToken(): string {
+function createAftercarePublicToken(): string {
   return crypto.randomUUID()
 }
 
@@ -88,9 +87,8 @@ async function upsertAftercareRebookState(args: {
     where: { bookingId: args.bookingId },
     create: {
       bookingId: args.bookingId,
-      // Legacy compatibility:
-      // publicToken is still required on create for older aftercare access flows.
-      publicToken: newLegacyPublicToken(),
+      // Current schema still requires a token-backed public access record on create.
+      publicToken: createAftercarePublicToken(),
       rebookMode: args.mode,
       rebookWindowStart: args.windowStart ?? null,
       rebookWindowEnd: args.windowEnd ?? null,

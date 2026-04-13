@@ -123,7 +123,7 @@ function makeGetBooking(overrides?: {
 
 function makeUpsertResult(overrides?: {
   publicAccess?: {
-    accessMode: 'LEGACY_PUBLIC_TOKEN' | 'NONE'
+    accessMode: 'SECURE_LINK' | 'NONE'
     hasPublicAccess: boolean
     clientAftercareHref: string | null
   }
@@ -136,14 +136,14 @@ function makeUpsertResult(overrides?: {
 }) {
   return {
     aftercare: {
-    id: 'aftercare_1',
-    publicAccess:
+      id: 'aftercare_1',
+      publicAccess:
         overrides?.publicAccess ?? {
-        accessMode: 'LEGACY_PUBLIC_TOKEN',
-        hasPublicAccess: true,
-        clientAftercareHref: '/client/rebook/public_1',
+          accessMode: 'SECURE_LINK',
+          hasPublicAccess: true,
+          clientAftercareHref: '/client/rebook/public_1',
         },
-    rebookMode:
+      rebookMode:
         overrides?.rebookMode ?? AftercareRebookMode.RECOMMENDED_WINDOW,
       rebookedFor: overrides?.rebookedFor ?? null,
       rebookWindowStart:
@@ -286,7 +286,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
-  it('GET returns normalized aftercare payload with publicAccess and without publicToken leakage', async () => {
+  it('GET returns normalized aftercare payload with secure public access contract', async () => {
     const result = await GET(new Request('http://localhost/test'), makeCtx())
 
     expect(mocks.bookingFindUnique).toHaveBeenCalledWith({
@@ -318,7 +318,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
             version: 3,
             isFinalized: true,
             publicAccess: {
-              accessMode: 'LEGACY_PUBLIC_TOKEN',
+              accessMode: 'SECURE_LINK',
               hasPublicAccess: true,
               clientAftercareHref: '/client/rebook/public_1',
             },
@@ -349,7 +349,6 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
         },
       },
     })
-
   })
 
   it('POST returns 400 for invalid request body', async () => {
@@ -434,7 +433,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
   })
 
-  it('POST calls upsertBookingAftercare with normalized values and returns publicAccess payload', async () => {
+  it('POST calls upsertBookingAftercare with normalized values and returns secure public access payload', async () => {
     const result = await POST(
       makeRequest({
         notes: '  Use cool water.  ',
@@ -509,7 +508,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
           version: 4,
           isFinalized: true,
           publicAccess: {
-            accessMode: 'LEGACY_PUBLIC_TOKEN',
+            accessMode: 'SECURE_LINK',
             hasPublicAccess: true,
             clientAftercareHref: '/client/rebook/public_1',
           },
@@ -531,7 +530,6 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
         },
       },
     })
-
   })
 
   it('POST maps BookingError through bookingJsonFail', async () => {

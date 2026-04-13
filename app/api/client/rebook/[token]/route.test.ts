@@ -66,20 +66,17 @@ function makeRequest(args?: {
   body?: unknown
   headers?: Record<string, string>
 }): NextRequest {
-  return new Request(
-    'http://localhost/api/client/rebook/token_1',
-    {
-      method: args?.method ?? 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(args?.headers ?? {}),
-      },
-      body:
-        args?.method === 'GET'
-          ? undefined
-          : JSON.stringify(args?.body ?? {}),
+  return new Request('http://localhost/api/client/rebook/token_1', {
+    method: args?.method ?? 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(args?.headers ?? {}),
     },
-  ) as unknown as NextRequest
+    body:
+      args?.method === 'GET'
+        ? undefined
+        : JSON.stringify(args?.body ?? {}),
+  }) as unknown as NextRequest
 }
 
 function makeResolvedAftercareAccess(overrides?: {
@@ -87,6 +84,7 @@ function makeResolvedAftercareAccess(overrides?: {
   rebookMode?: AftercareRebookMode
   rebookWindowStart?: Date | null
   rebookWindowEnd?: Date | null
+  publicToken?: string | null
 }) {
   return {
     accessSource: overrides?.accessSource ?? 'clientActionToken',
@@ -102,7 +100,8 @@ function makeResolvedAftercareAccess(overrides?: {
       id: 'aftercare_1',
       bookingId: 'booking_1',
       notes: 'Use a sulfate-free shampoo.',
-      rebookMode: overrides?.rebookMode ?? AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+      rebookMode:
+        overrides?.rebookMode ?? AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
       rebookedFor: new Date('2026-05-01T18:00:00.000Z'),
       rebookWindowStart:
         overrides?.rebookWindowStart ??
@@ -110,7 +109,10 @@ function makeResolvedAftercareAccess(overrides?: {
       rebookWindowEnd:
         overrides?.rebookWindowEnd ??
         new Date('2026-04-30T18:00:00.000Z'),
-      publicToken: 'legacy_public_token',
+      publicToken:
+        overrides && 'publicToken' in overrides
+          ? overrides.publicToken
+          : 'legacy_public_token',
       draftSavedAt: new Date('2026-04-12T17:00:00.000Z'),
       sentToClientAt: new Date('2026-04-12T17:30:00.000Z'),
       lastEditedAt: new Date('2026-04-12T17:15:00.000Z'),
@@ -169,12 +171,11 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
         }),
     )
 
-    mocks.jsonOk.mockImplementation(
-      (data: unknown, status = 200) =>
-        makeJsonResponse(status, {
-          ok: true,
-          data,
-        }),
+    mocks.jsonOk.mockImplementation((data: unknown, status = 200) =>
+      makeJsonResponse(status, {
+        ok: true,
+        data,
+      }),
     )
 
     mocks.isRecord.mockImplementation(
@@ -215,14 +216,17 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
   })
 
-  it('GET resolves aftercare access by token and returns the public payload', async () => {
+  it('GET resolves aftercare access by token and returns the secure-link payload', async () => {
     mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
       makeResolvedAftercareAccess({
         accessSource: 'legacyPublicToken',
       }),
     )
 
-    const response = await GET(makeRequest({ method: 'GET' }), makeCtx('token_1'))
+    const response = await GET(
+      makeRequest({ method: 'GET' }),
+      makeCtx('token_1'),
+    )
 
     expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
       rawToken: 'token_1',
@@ -249,12 +253,16 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
           rebookedFor: '2026-05-01T18:00:00.000Z',
           rebookWindowStart: '2026-04-20T18:00:00.000Z',
           rebookWindowEnd: '2026-04-30T18:00:00.000Z',
-          publicToken: 'legacy_public_token',
           draftSavedAt: '2026-04-12T17:00:00.000Z',
           sentToClientAt: '2026-04-12T17:30:00.000Z',
           lastEditedAt: '2026-04-12T17:15:00.000Z',
           version: 2,
           isFinalized: true,
+          publicAccess: {
+            accessMode: 'SECURE_LINK',
+            hasPublicAccess: true,
+            clientAftercareHref: '/client/rebook/legacy_public_token',
+          },
         },
         booking: {
           id: 'booking_1',
@@ -283,6 +291,33 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     })
   })
 
+  it('GET returns NONE public access when the resolved aftercare has no token value', async () => {
+    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+      makeResolvedAftercareAccess({
+        publicToken: null,
+      }),
+    )
+
+    const response = await GET(
+      makeRequest({ method: 'GET' }),
+      makeCtx('token_1'),
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        aftercare: expect.objectContaining({
+          publicAccess: {
+            accessMode: 'NONE',
+            hasPublicAccess: false,
+            clientAftercareHref: null,
+          },
+        }),
+      }),
+    })
+  })
+
   it('POST returns 400 when token is missing', async () => {
     const response = await POST(
       makeRequest({
@@ -298,7 +333,9 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     })
 
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
-    expect(mocks.createClientRebookedBookingFromAftercare).not.toHaveBeenCalled()
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).not.toHaveBeenCalled()
   })
 
   it('POST returns 400 when scheduledFor is missing or invalid', async () => {
@@ -316,7 +353,9 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     })
 
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
-    expect(mocks.createClientRebookedBookingFromAftercare).not.toHaveBeenCalled()
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).not.toHaveBeenCalled()
   })
 
   it('POST returns 400 when scheduledFor is in the past', async () => {
@@ -362,7 +401,9 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       error: 'Selected time is outside the recommended rebook window.',
     })
 
-    expect(mocks.createClientRebookedBookingFromAftercare).not.toHaveBeenCalled()
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).not.toHaveBeenCalled()
   })
 
   it('POST creates a rebooked booking using token-resolved ownership and request metadata', async () => {
@@ -455,7 +496,10 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       },
     })
 
-    const response = await GET(makeRequest({ method: 'GET' }), makeCtx('token_1'))
+    const response = await GET(
+      makeRequest({ method: 'GET' }),
+      makeCtx('token_1'),
+    )
 
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
       message: 'That aftercare link is invalid or expired.',
@@ -514,7 +558,10 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
   it('returns 500 for unexpected GET errors', async () => {
     mocks.resolveAftercareAccessByToken.mockRejectedValueOnce(new Error('boom'))
 
-    const response = await GET(makeRequest({ method: 'GET' }), makeCtx('token_1'))
+    const response = await GET(
+      makeRequest({ method: 'GET' }),
+      makeCtx('token_1'),
+    )
 
     expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual({

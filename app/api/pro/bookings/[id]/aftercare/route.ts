@@ -1,4 +1,3 @@
-// app/api/pro/bookings/[id]/aftercare/route.ts
 import { AftercareRebookMode, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -18,6 +17,18 @@ export const runtime = 'nodejs'
 type Ctx = {
   params: { id: string } | Promise<{ id: string }>
 }
+
+type PublicAccess =
+  | {
+      accessMode: 'SECURE_LINK'
+      hasPublicAccess: true
+      clientAftercareHref: string
+    }
+  | {
+      accessMode: 'NONE'
+      hasPublicAccess: false
+      clientAftercareHref: null
+    }
 
 type NormalizedRecommendedProduct =
   | {
@@ -359,20 +370,32 @@ function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
 
-function buildClientAftercareHref(publicToken: string | null | undefined): string | null {
-  const token = trimmedString(publicToken)
+function buildClientAftercareHref(
+  tokenValue: string | null | undefined,
+): string | null {
+  const token = trimmedString(tokenValue)
   if (!token) return null
   return `/client/rebook/${encodeURIComponent(token)}`
 }
 
-function buildPublicAccess(publicToken: string | null | undefined) {
-  const clientAftercareHref = buildClientAftercareHref(publicToken)
+function buildPublicAccess(
+  tokenValue: string | null | undefined,
+): PublicAccess {
+  const clientAftercareHref = buildClientAftercareHref(tokenValue)
+
+  if (!clientAftercareHref) {
+    return {
+      accessMode: 'NONE',
+      hasPublicAccess: false,
+      clientAftercareHref: null,
+    }
+  }
 
   return {
-    accessMode: clientAftercareHref ? 'LEGACY_PUBLIC_TOKEN' : 'NONE',
-    hasPublicAccess: Boolean(clientAftercareHref),
+    accessMode: 'SECURE_LINK',
+    hasPublicAccess: true,
     clientAftercareHref,
-  } as const
+  }
 }
 
 function mapRecommendedProduct(product: {

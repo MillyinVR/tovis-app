@@ -125,7 +125,7 @@ type MutationMeta = {
 }
 
 type AftercarePublicAccessSummary = {
-  accessMode: 'LEGACY_PUBLIC_TOKEN' | 'NONE'
+  accessMode: 'SECURE_LINK' | 'NONE'
   hasPublicAccess: boolean
   clientAftercareHref: string | null
 }
@@ -1744,7 +1744,7 @@ function buildAftercarePublicAccess(
   const clientAftercareHref = buildClientAftercareHref(publicToken)
 
   return {
-    accessMode: clientAftercareHref ? 'LEGACY_PUBLIC_TOKEN' : 'NONE',
+    accessMode: clientAftercareHref ? 'SECURE_LINK' : 'NONE',
     hasPublicAccess: Boolean(clientAftercareHref),
     clientAftercareHref,
   }
@@ -8153,7 +8153,7 @@ if (
 }
 
 
-  const tokenToUse = booking.aftercareSummary?.publicToken ?? newPublicToken()
+
   const now = new Date()
   const nextVersion = (booking.aftercareSummary?.version ?? 0) + 1
 
@@ -8161,7 +8161,7 @@ if (
     where: { bookingId: booking.id },
     create: {
       bookingId: booking.id,
-      publicToken: tokenToUse,
+      publicToken: newPublicToken(),
       notes: args.notes,
       rebookMode: args.rebookMode,
       rebookedFor: args.rebookedFor,
@@ -8173,7 +8173,6 @@ if (
       version: 1,
     },
     update: {
-      publicToken: tokenToUse,
       notes: args.notes,
       rebookMode: args.rebookMode,
       rebookedFor: args.rebookedFor,

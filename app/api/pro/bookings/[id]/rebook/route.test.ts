@@ -160,7 +160,6 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     )
 
     mocks.bookingFindFirst.mockResolvedValue(makeCompletedBooking())
-
     mocks.aftercareSummaryUpsert.mockResolvedValue(makeAftercareState())
 
     mocks.createRebookedBookingFromCompletedBooking.mockResolvedValue({
@@ -197,7 +196,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     expect(result).toBe(authRes)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
-    expect(mocks.createRebookedBookingFromCompletedBooking).not.toHaveBeenCalled()
+    expect(
+      mocks.createRebookedBookingFromCompletedBooking,
+    ).not.toHaveBeenCalled()
   })
 
   it('returns 400 when booking id is missing', async () => {
@@ -216,7 +217,10 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
   it('returns 404 when booking is not found', async () => {
     mocks.bookingFindFirst.mockResolvedValueOnce(null)
 
-    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx('booking_1'))
+    const result = await POST(
+      makeRequest({ mode: 'CLEAR' }),
+      makeCtx('booking_1'),
+    )
 
     expect(mocks.bookingFindFirst).toHaveBeenCalledWith({
       where: {
@@ -242,7 +246,10 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       makeCompletedBooking({ status: BookingStatus.PENDING }),
     )
 
-    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx('booking_1'))
+    const result = await POST(
+      makeRequest({ mode: 'CLEAR' }),
+      makeCtx('booking_1'),
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -255,7 +262,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     })
 
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
-    expect(mocks.createRebookedBookingFromCompletedBooking).not.toHaveBeenCalled()
+    expect(
+      mocks.createRebookedBookingFromCompletedBooking,
+    ).not.toHaveBeenCalled()
   })
 
   it('clears rebook state and returns normalized aftercare payload', async () => {
@@ -270,7 +279,10 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       }),
     )
 
-    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx('booking_1'))
+    const result = await POST(
+      makeRequest({ mode: 'CLEAR' }),
+      makeCtx('booking_1'),
+    )
 
     expect(mocks.aftercareSummaryUpsert).toHaveBeenCalledWith({
       where: { bookingId: 'booking_1' },
@@ -366,7 +378,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     const windowStart = new Date('2026-04-20T18:00:00.000Z')
     const windowEnd = new Date('2026-04-30T18:00:00.000Z')
 
-    mocks.pickIsoDate.mockReturnValueOnce(windowStart).mockReturnValueOnce(windowEnd)
+    mocks.pickIsoDate
+      .mockReturnValueOnce(windowStart)
+      .mockReturnValueOnce(windowEnd)
 
     mocks.aftercareSummaryUpsert.mockResolvedValueOnce(
       makeAftercareState({
@@ -447,7 +461,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       error: 'scheduledFor is required (ISO string) for BOOK mode.',
     })
 
-    expect(mocks.createRebookedBookingFromCompletedBooking).not.toHaveBeenCalled()
+    expect(
+      mocks.createRebookedBookingFromCompletedBooking,
+    ).not.toHaveBeenCalled()
   })
 
   it('creates a rebooked booking in BOOK mode', async () => {
@@ -462,7 +478,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       makeCtx('booking_1'),
     )
 
-    expect(mocks.createRebookedBookingFromCompletedBooking).toHaveBeenCalledWith({
+    expect(
+      mocks.createRebookedBookingFromCompletedBooking,
+    ).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       professionalId: 'pro_1',
       scheduledFor,
@@ -527,7 +545,10 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
   it('returns 500 for unexpected errors', async () => {
     mocks.aftercareSummaryUpsert.mockRejectedValueOnce(new Error('boom'))
 
-    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx('booking_1'))
+    const result = await POST(
+      makeRequest({ mode: 'CLEAR' }),
+      makeCtx('booking_1'),
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
     expect(result).toEqual({
