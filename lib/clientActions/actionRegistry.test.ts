@@ -40,7 +40,7 @@ describe('lib/clientActions/actionRegistry', () => {
         delivery: {
           allowedContactMethods: [ContactMethod.EMAIL, ContactMethod.SMS],
           preferredContactMethod: null,
-          notificationEventKey: null,
+          notificationEventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
           notificationRecipientKind: NotificationRecipientKind.CLIENT,
           createFreshDeliveryOnResend: true,
         },

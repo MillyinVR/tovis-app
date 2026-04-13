@@ -5,6 +5,7 @@ import {
   ClientActionTokenKind,
   ContactMethod,
   NotificationEventKey,
+  NotificationRecipientKind,
 } from '@prisma/client'
 
 import { CONSULTATION_ACTION_TOKEN_EXPIRY_MS } from '@/lib/consultation/clientActionTokens'
@@ -61,7 +62,9 @@ describe('lib/clientActions/policies', () => {
     })
 
     it('returns the configured notification event key for each action type', () => {
-      expect(getClientActionNotificationEventKey('CLIENT_CLAIM_INVITE')).toBeNull()
+      expect(getClientActionNotificationEventKey('CLIENT_CLAIM_INVITE')).toBe(
+        NotificationEventKey.CLIENT_CLAIM_INVITE,
+      )
       expect(getClientActionNotificationEventKey('AFTERCARE_ACCESS')).toBe(
         NotificationEventKey.AFTERCARE_READY,
       )
@@ -311,8 +314,8 @@ describe('lib/clientActions/policies', () => {
         value: {
           method: ContactMethod.SMS,
           destinationSnapshot: '+1 (555) 123-4567',
-          notificationEventKey: null,
-          notificationRecipientKind: 'CLIENT',
+          notificationEventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
+          notificationRecipientKind: NotificationRecipientKind.CLIENT,
         },
       })
     })
@@ -329,7 +332,7 @@ describe('lib/clientActions/policies', () => {
           method: ContactMethod.EMAIL,
           destinationSnapshot: 'Client@Example.com',
           notificationEventKey: NotificationEventKey.AFTERCARE_READY,
-          notificationRecipientKind: 'CLIENT',
+          notificationRecipientKind: NotificationRecipientKind.CLIENT,
         },
       })
     })

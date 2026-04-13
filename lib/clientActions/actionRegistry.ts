@@ -15,16 +15,13 @@ import {
 } from './types'
 
 /**
- * Phase 1 registry:
- * - central source of truth for client-action rules
- * - no route logic here
- * - no DB writes here
+ * Central source of truth for client-action rules.
  *
  * Important:
  * CLIENT_CLAIM_INVITE is a client-action type, but not a ClientActionTokenKind.
- * Claim invites currently ride on ProClientInvite.token, so its token.kind is null.
+ * Claim invites currently use ProClientInvite.token, so token.kind remains null
+ * even though the delivery side now maps to NotificationEventKey.CLIENT_CLAIM_INVITE.
  */
-
 export const AFTERCARE_ACCESS_TOKEN_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 7 // 7 days
 
@@ -117,9 +114,13 @@ export const CLIENT_ACTION_REGISTRY: Record<
       revokeOutstandingOnResend: false,
     },
     delivery: {
+      /**
+       * Claim invites are snapshot-based delivery for often-unclaimed clients,
+       * so this stays EMAIL/SMS only and intentionally does not default to IN_APP.
+       */
       allowedContactMethods: EMAIL_OR_SMS_CONTACT_METHODS,
       preferredContactMethod: null,
-      notificationEventKey: null,
+      notificationEventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
       notificationRecipientKind: NotificationRecipientKind.CLIENT,
       createFreshDeliveryOnResend: true,
     },
@@ -177,8 +178,7 @@ export const CLIENT_ACTION_REGISTRY: Record<
        */
       allowedContactMethods: EMAIL_ONLY_CONTACT_METHODS,
       preferredContactMethod: ContactMethod.EMAIL,
-      notificationEventKey:
-        NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
+      notificationEventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       notificationRecipientKind: NotificationRecipientKind.CLIENT,
       createFreshDeliveryOnResend: true,
     },

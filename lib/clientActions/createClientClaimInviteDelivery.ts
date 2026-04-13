@@ -1,10 +1,6 @@
 // lib/clientActions/createClientClaimInviteDelivery.ts
 
-import {
-  ContactMethod,
-  NotificationEventKey,
-  Prisma,
-} from '@prisma/client'
+import { ContactMethod, Prisma } from '@prisma/client'
 
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
@@ -132,7 +128,6 @@ export async function createClientClaimInviteDelivery(
       invitedName: normalizeOptionalString(args.invitedName),
     }),
     payload: buildInvitePayload(args),
-    eventKeyOverride: NotificationEventKey.CLIENT_CLAIM_INVITE,
     tx: args.tx,
   })
 

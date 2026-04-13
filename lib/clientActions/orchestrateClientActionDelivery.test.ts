@@ -106,7 +106,7 @@ describe('lib/clientActions/orchestrateClientActionDelivery', () => {
       resolvedDelivery: {
         method: ContactMethod.SMS,
         destinationSnapshot: '+1 (555) 123-4567',
-        notificationEventKey: null,
+        notificationEventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
         notificationRecipientKind: NotificationRecipientKind.CLIENT,
       },
       link: {
