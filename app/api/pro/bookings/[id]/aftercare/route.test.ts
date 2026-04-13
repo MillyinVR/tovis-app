@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AftercareRebookMode, BookingStatus } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  BookingStatus,
+  ContactMethod,
+} from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -15,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 
   bookingFindUnique: vi.fn(),
   upsertBookingAftercare: vi.fn(),
+  createAftercareAccessDelivery: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -47,6 +52,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   upsertBookingAftercare: mocks.upsertBookingAftercare,
+}))
+
+vi.mock('@/lib/clientActions/createAftercareAccessDelivery', () => ({
+  createAftercareAccessDelivery: mocks.createAftercareAccessDelivery,
 }))
 
 import { GET, POST } from './route'
@@ -133,6 +142,71 @@ function makeGetBooking(overrides?: {
               },
             ],
           },
+  }
+}
+
+function makeAftercareDeliveryBooking(overrides?: {
+  professionalId?: string
+  clientId?: string
+  clientTimeZoneAtBooking?: string | null
+  locationTimeZone?: string | null
+  email?: string | null
+  phone?: string | null
+  preferredContactMethod?: ContactMethod | null
+  userId?: string | null
+  userEmail?: string | null
+  userPhone?: string | null
+}) {
+  return {
+    id: 'booking_1',
+    professionalId: overrides?.professionalId ?? 'pro_1',
+    clientId: overrides?.clientId ?? 'client_1',
+    locationTimeZone: overrides?.locationTimeZone ?? 'America/Los_Angeles',
+    clientTimeZoneAtBooking:
+      overrides?.clientTimeZoneAtBooking ?? 'America/Los_Angeles',
+    client: {
+      id: overrides?.clientId ?? 'client_1',
+      userId: overrides?.userId ?? null,
+      email:
+        overrides && 'email' in overrides
+          ? overrides.email
+          : 'client@example.com',
+      phone: overrides?.phone ?? null,
+      preferredContactMethod: overrides?.preferredContactMethod ?? null,
+      user: {
+        email: overrides?.userEmail ?? null,
+        phone: overrides?.userPhone ?? null,
+      },
+    },
+  }
+}
+
+function makeAftercareAccessDeliveryResult() {
+  return {
+    plan: {
+      idempotency: {
+        baseKey: 'aftercare_base_1',
+        sendKey: 'aftercare_send_1',
+      },
+    },
+    token: {
+      id: 'token_1',
+      rawToken: 'raw_aftercare_token_1',
+      expiresAt: new Date('2026-04-20T20:00:00.000Z'),
+    },
+    link: {
+      target: 'AFTERCARE',
+      href: '/client/rebook/raw_aftercare_token_1',
+      tokenIncluded: true,
+    },
+    dispatch: {
+      created: true,
+      selectedChannels: [],
+      evaluations: [],
+      dispatch: {
+        id: 'dispatch_1',
+      },
+    },
   }
 }
 
@@ -258,8 +332,18 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       }),
     )
 
-    mocks.bookingFindUnique.mockResolvedValue(makeGetBooking())
+    mocks.bookingFindUnique.mockImplementation(async (args?: { select?: Record<string, unknown> }) => {
+      if (args?.select && 'client' in args.select) {
+        return makeAftercareDeliveryBooking()
+      }
+
+      return makeGetBooking()
+    })
+
     mocks.upsertBookingAftercare.mockResolvedValue(makeUpsertResult())
+    mocks.createAftercareAccessDelivery.mockResolvedValue(
+      makeAftercareAccessDeliveryResult(),
+    )
   })
 
   it('GET returns auth response when requirePro fails', async () => {
@@ -593,6 +677,19 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       idempotencyKey: 'idem_1',
     })
 
+    expect(mocks.createAftercareAccessDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      aftercareId: 'aftercare_1',
+      aftercareVersion: 4,
+      recipientUserId: null,
+      recipientEmail: 'client@example.com',
+      recipientPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      recipientTimeZone: 'America/Los_Angeles',
+    })
+
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
@@ -615,6 +712,11 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       },
       remindersTouched: 1,
       clientNotified: true,
+      aftercareAccessDelivery: {
+        attempted: true,
+        queued: true,
+        href: '/client/rebook/raw_aftercare_token_1',
+      },
       timeZoneUsed: 'America/Los_Angeles',
       clientTimeZoneReceived: 'America/Los_Angeles',
       bookingFinished: true,
@@ -631,42 +733,101 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
-  it('POST returns null clientTimeZoneReceived when the submitted time zone is invalid', async () => {
-  const result = await POST(
-    makeRequest({
-      body: {
-        rebookMode: AftercareRebookMode.NONE,
-        timeZone: 'Mars/Olympus_Mons',
+  it('POST does not attempt aftercare access delivery when sendToClient is false', async () => {
+    const result = await POST(
+      makeRequest({
+        body: {
+          rebookMode: AftercareRebookMode.NONE,
+          sendToClient: false,
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toMatchObject({
+      ok: true,
+      aftercareAccessDelivery: {
+        attempted: false,
+        queued: false,
+        href: null,
       },
-    }),
-    makeCtx(),
-  )
-
-  expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith({
-    bookingId: 'booking_1',
-    professionalId: 'pro_1',
-    notes: null,
-    rebookMode: AftercareRebookMode.NONE,
-    rebookedFor: null,
-    rebookWindowStart: null,
-    rebookWindowEnd: null,
-    createRebookReminder: false,
-    rebookReminderDaysBefore: 2,
-    createProductReminder: false,
-    productReminderDaysAfter: 7,
-    recommendedProducts: [],
-    sendToClient: false,
-    version: null,
-    requestId: null,
-    idempotencyKey: null,
+    })
   })
 
-  expect(result.status).toBe(200)
-  await expect(result.json()).resolves.toMatchObject({
-    ok: true,
-    clientTimeZoneReceived: null,
+  it('POST does not attempt aftercare access delivery when aftercare was not actually sent', async () => {
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        sentToClientAt: null,
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        body: {
+          rebookMode: AftercareRebookMode.NONE,
+          sendToClient: true,
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toMatchObject({
+      ok: true,
+      aftercareAccessDelivery: {
+        attempted: false,
+        queued: false,
+        href: null,
+      },
+    })
   })
-})
+
+  it('POST returns null clientTimeZoneReceived when the submitted time zone is invalid', async () => {
+    const result = await POST(
+      makeRequest({
+        body: {
+          rebookMode: AftercareRebookMode.NONE,
+          timeZone: 'Mars/Olympus_Mons',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+      notes: null,
+      rebookMode: AftercareRebookMode.NONE,
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      createRebookReminder: false,
+      rebookReminderDaysBefore: 2,
+      createProductReminder: false,
+      productReminderDaysAfter: 7,
+      recommendedProducts: [],
+      sendToClient: false,
+      version: null,
+      requestId: null,
+      idempotencyKey: null,
+    })
+
+    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toMatchObject({
+      ok: true,
+      clientTimeZoneReceived: null,
+      aftercareAccessDelivery: {
+        attempted: false,
+        queued: false,
+        href: null,
+      },
+    })
+  })
 
   it('POST maps BookingError through bookingJsonFail', async () => {
     mocks.upsertBookingAftercare.mockRejectedValueOnce({

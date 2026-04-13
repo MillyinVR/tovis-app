@@ -1,4 +1,4 @@
-import { AftercareRebookMode, Prisma } from '@prisma/client'
+import { AftercareRebookMode, ContactMethod, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { isRecord } from '@/lib/guards'
@@ -10,6 +10,7 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
+import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -76,6 +77,25 @@ type RequestMeta = {
   idempotencyKey: string | null
 }
 
+type ParsedPostBody = {
+  notes: string | null
+  sendToClient: boolean
+  recommendedProducts: NormalizedRecommendedProduct[]
+  normalizedRebook: NormalizedRebook
+  createRebookReminder: boolean
+  rebookReminderDaysBefore: number
+  createProductReminder: boolean
+  productReminderDaysAfter: number
+  clientTimeZoneReceived: string | null
+  version: number | null
+}
+
+type AftercareAccessDeliverySummary = {
+  attempted: boolean
+  queued: boolean
+  href: string | null
+}
+
 const NOTES_MAX = 4000
 const MAX_PRODUCTS = 10
 const PRODUCT_ID_MAX = 191
@@ -126,26 +146,40 @@ const GET_BOOKING_SELECT = {
   },
 } satisfies Prisma.BookingSelect
 
+const AFTERCARE_DELIVERY_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  clientId: true,
+  locationTimeZone: true,
+  clientTimeZoneAtBooking: true,
+  client: {
+    select: {
+      id: true,
+      userId: true,
+      email: true,
+      phone: true,
+      preferredContactMethod: true,
+      user: {
+        select: {
+          email: true,
+          phone: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
 type GetBookingRecord = Prisma.BookingGetPayload<{
   select: typeof GET_BOOKING_SELECT
+}>
+
+type AftercareDeliveryBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof AFTERCARE_DELIVERY_BOOKING_SELECT
 }>
 
 type GetRecommendedProductRecord = NonNullable<
   GetBookingRecord['aftercareSummary']
 >['recommendedProducts'][number]
-
-type ParsedPostBody = {
-  notes: string | null
-  sendToClient: boolean
-  recommendedProducts: NormalizedRecommendedProduct[]
-  normalizedRebook: NormalizedRebook
-  createRebookReminder: boolean
-  rebookReminderDaysBefore: number
-  createProductReminder: boolean
-  productReminderDaysAfter: number
-  clientTimeZoneReceived: string | null
-  version: number | null
-}
 
 function trimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -550,7 +584,9 @@ async function getBookingIdFromContext(ctx: Ctx): Promise<string | null> {
   return pickString(params?.id)
 }
 
-function parsePostBody(rawBody: unknown): { ok: true; value: ParsedPostBody } | { ok: false; error: string } {
+function parsePostBody(
+  rawBody: unknown,
+): { ok: true; value: ParsedPostBody } | { ok: false; error: string } {
   if (!isRecord(rawBody)) {
     return { ok: false, error: 'Invalid request body.' }
   }
@@ -613,6 +649,150 @@ function parsePostBody(rawBody: unknown): { ok: true; value: ParsedPostBody } | 
       clientTimeZoneReceived,
       version: parseOptionalVersion(rawBody.version),
     },
+  }
+}
+
+function pickFirstNonEmpty(
+  ...values: Array<string | null | undefined>
+): string | null {
+  for (const value of values) {
+    const normalized = trimmedString(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function inferPreferredContactMethod(args: {
+  email: string | null
+  phone: string | null
+  existingPreference: ContactMethod | null | undefined
+}): ContactMethod | null {
+  if (args.existingPreference) return args.existingPreference
+  if (args.email && !args.phone) return ContactMethod.EMAIL
+  if (args.phone && !args.email) return ContactMethod.SMS
+  return null
+}
+
+function resolveAftercareRecipientTimeZone(
+  booking: AftercareDeliveryBookingRecord,
+): string | null {
+  const clientTimeZoneAtBooking = trimmedString(booking.clientTimeZoneAtBooking)
+  if (clientTimeZoneAtBooking && isValidIanaTimeZone(clientTimeZoneAtBooking)) {
+    return clientTimeZoneAtBooking
+  }
+
+  const locationTimeZone = trimmedString(booking.locationTimeZone)
+  if (locationTimeZone && isValidIanaTimeZone(locationTimeZone)) {
+    return locationTimeZone
+  }
+
+  return null
+}
+
+async function maybeQueueAftercareAccessDelivery(args: {
+  bookingId: string
+  professionalId: string
+  aftercareId: string
+  aftercareVersion: number
+  shouldAttempt: boolean
+}): Promise<AftercareAccessDeliverySummary> {
+  if (!args.shouldAttempt) {
+    return {
+      attempted: false,
+      queued: false,
+      href: null,
+    }
+  }
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: args.bookingId },
+    select: AFTERCARE_DELIVERY_BOOKING_SELECT,
+  })
+
+  if (!booking || booking.professionalId !== args.professionalId) {
+    console.error(
+      'POST /api/pro/bookings/[id]/aftercare delivery context lookup failed',
+      {
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        aftercareId: args.aftercareId,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
+
+  const recipientEmail = pickFirstNonEmpty(
+    booking.client.email,
+    booking.client.user?.email ?? null,
+  )
+  const recipientPhone = pickFirstNonEmpty(
+    booking.client.phone,
+    booking.client.user?.phone ?? null,
+  )
+
+  if (!recipientEmail && !recipientPhone) {
+    console.error(
+      'POST /api/pro/bookings/[id]/aftercare delivery skipped: no client destination',
+      {
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        aftercareId: args.aftercareId,
+        clientId: booking.clientId,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
+
+  try {
+    const delivery = await createAftercareAccessDelivery({
+      professionalId: args.professionalId,
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      aftercareId: args.aftercareId,
+      aftercareVersion: args.aftercareVersion,
+      recipientUserId: booking.client.userId ?? null,
+      recipientEmail,
+      recipientPhone,
+      preferredContactMethod: inferPreferredContactMethod({
+        email: recipientEmail,
+        phone: recipientPhone,
+        existingPreference: booking.client.preferredContactMethod,
+      }),
+      recipientTimeZone: resolveAftercareRecipientTimeZone(booking),
+    })
+
+    return {
+      attempted: true,
+      queued: true,
+      href: delivery.link.href,
+    }
+  } catch (error: unknown) {
+    console.error(
+      'POST /api/pro/bookings/[id]/aftercare access delivery enqueue failed',
+      {
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        aftercareId: args.aftercareId,
+        clientId: booking.clientId,
+        error,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
   }
 }
 
@@ -705,6 +885,15 @@ export async function POST(req: Request, ctx: Ctx) {
       idempotencyKey: requestMeta.idempotencyKey,
     })
 
+    const aftercareAccessDelivery = await maybeQueueAftercareAccessDelivery({
+      bookingId,
+      professionalId: auth.professionalId,
+      aftercareId: result.aftercare.id,
+      aftercareVersion: result.aftercare.version,
+      shouldAttempt:
+        parsedBody.value.sendToClient && Boolean(result.aftercare.sentToClientAt),
+    })
+
     return jsonOk(
       {
         aftercare: {
@@ -722,6 +911,7 @@ export async function POST(req: Request, ctx: Ctx) {
         },
         remindersTouched: result.remindersTouched,
         clientNotified: result.clientNotified,
+        aftercareAccessDelivery,
         timeZoneUsed: result.timeZoneUsed,
         clientTimeZoneReceived: parsedBody.value.clientTimeZoneReceived,
         bookingFinished: result.bookingFinished,
