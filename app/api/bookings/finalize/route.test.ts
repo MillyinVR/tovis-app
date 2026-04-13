@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  AftercareRebookMode,
   BookingSource,
   BookingStatus,
   NotificationEventKey,
@@ -71,6 +72,15 @@ vi.mock('@/lib/aftercare/unclaimedAftercareAccess', () => ({
 
 import { POST } from './route'
 
+function makeJsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+    },
+  })
+}
+
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/bookings/finalize', {
     method: 'POST',
@@ -117,11 +127,11 @@ function makeResolvedAftercareAccess(overrides?: {
       id: 'aftercare_1',
       bookingId: 'booking_old',
       notes: 'Aftercare note',
-      rebookMode: 'BOOKED_NEXT_APPOINTMENT',
+      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
       rebookedFor: new Date('2026-04-01T19:00:00.000Z'),
       rebookWindowStart: null,
       rebookWindowEnd: null,
-      publicToken: 'legacy_public_token',
+      publicToken: 'legacy_public_token_should_not_drive_contract',
       draftSavedAt: new Date('2026-03-11T18:00:00.000Z'),
       sentToClientAt: new Date('2026-03-11T18:30:00.000Z'),
       lastEditedAt: new Date('2026-03-11T18:15:00.000Z'),
@@ -141,7 +151,7 @@ function makeResolvedAftercareAccess(overrides?: {
       locationType: ServiceLocationType.SALON,
       locationId: 'loc_1',
       totalDurationMinutes: 60,
-      subtotalSnapshot: '100.00',
+      subtotalSnapshot: new Prisma.Decimal('100.00'),
       service: {
         id: 'service_1',
         name: 'Haircut',
@@ -160,7 +170,6 @@ describe('POST /api/bookings/finalize', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
-
     vi.clearAllMocks()
 
     mocks.requireClient.mockResolvedValue({
@@ -170,19 +179,21 @@ describe('POST /api/bookings/finalize', () => {
     })
 
     mocks.jsonFail.mockImplementation(
-      (status: number, error: string, extra?: unknown) => ({
-        ok: false,
-        status,
-        error,
-        ...(extra && typeof extra === 'object' ? extra : {}),
-      }),
+      (status: number, error: string, extra?: Record<string, unknown>) =>
+        makeJsonResponse(status, {
+          ok: false,
+          error,
+          ...(extra ?? {}),
+        }),
     )
 
-    mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
-      ok: true,
-      status,
-      data,
-    }))
+    mocks.jsonOk.mockImplementation(
+      (data: Record<string, unknown>, status = 200) =>
+        makeJsonResponse(status, {
+          ok: true,
+          ...(data ?? {}),
+        }),
+    )
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
 
@@ -220,20 +231,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      descriptor.httpStatus,
-      descriptor.userMessage,
-      {
-        code: descriptor.code,
-        retryable: descriptor.retryable,
-        uiAction: descriptor.uiAction,
-        message: descriptor.message,
-      },
-    )
-
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -255,9 +255,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -279,9 +279,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -305,9 +305,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -331,9 +331,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -357,9 +357,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -386,9 +386,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -401,7 +401,11 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('returns auth response when auth fails for non-aftercare finalize', async () => {
-    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
+    const authRes = makeJsonResponse(401, {
+      ok: false,
+      error: 'Unauthorized',
+    })
+
     mocks.requireClient.mockResolvedValueOnce({
       ok: false,
       res: authRes,
@@ -437,9 +441,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -450,6 +454,31 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.requireClient).not.toHaveBeenCalled()
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+  })
+
+  it('treats aftercareToken as authoritative even when source claims REQUESTED', async () => {
+    await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+        aftercareToken: 'token_1',
+      }),
+    )
+
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
+      rawToken: 'token_1',
+    })
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client_1',
+        source: BookingSource.AFTERCARE,
+        rebookOfBookingId: 'booking_old',
+      }),
+    )
   })
 
   it('returns AFTERCARE_NOT_COMPLETED when aftercare booking is not completed', async () => {
@@ -475,9 +504,9 @@ describe('POST /api/bookings/finalize', () => {
       rawToken: 'token_1',
     })
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -507,9 +536,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -638,20 +667,18 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    expect(result).toEqual({
+    expect(result.status).toBe(201)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
-      status: 201,
-      data: {
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.PENDING,
-          scheduledFor: HOLD_START,
-          professionalId: 'pro_123',
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.PENDING,
+        scheduledFor: HOLD_START.toISOString(),
+        professionalId: 'pro_123',
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
       },
     })
   })
@@ -733,12 +760,12 @@ describe('POST /api/bookings/finalize', () => {
     })
   })
 
-  it('maps BookingError from resolveAftercareAccessByToken', async () => {
-    const descriptor = getBookingErrorDescriptor('FORBIDDEN')
+  it('maps BookingError from resolveAftercareAccessByToken using the aftercare-specific code', async () => {
+    const descriptor = getBookingErrorDescriptor('AFTERCARE_TOKEN_INVALID')
 
     mocks.resolveAftercareAccessByToken.mockRejectedValueOnce(
-      new BookingError('FORBIDDEN', {
-        message: 'That aftercare link is invalid or expired.',
+      new BookingError('AFTERCARE_TOKEN_INVALID', {
+        message: 'Aftercare access token was not found.',
         userMessage: 'That aftercare link is invalid or expired.',
       }),
     )
@@ -753,14 +780,14 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: 'That aftercare link is invalid or expired.',
       code: descriptor.code,
       retryable: descriptor.retryable,
       uiAction: descriptor.uiAction,
-      message: 'That aftercare link is invalid or expired.',
+      message: 'Aftercare access token was not found.',
     })
   })
 
@@ -779,9 +806,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(descriptor.httpStatus)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: descriptor.httpStatus,
       error: descriptor.userMessage,
       code: descriptor.code,
       retryable: descriptor.retryable,
@@ -801,9 +828,9 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result).toEqual({
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 500,
       error: 'Internal server error',
       code: 'INTERNAL_ERROR',
       retryable: false,

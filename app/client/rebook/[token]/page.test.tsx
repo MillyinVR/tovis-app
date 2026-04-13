@@ -36,8 +36,7 @@ vi.mock('next/link', () => ({
     href: string
     children: React.ReactNode
     className?: string
-  }) =>
-    React.createElement('a', { href, className }, children),
+  }) => React.createElement('a', { href, className }, children),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -89,23 +88,38 @@ function renderMarkup(node: React.ReactNode): string {
 }
 
 function makeResolvedAftercareAccess(overrides?: {
-  accessSource?: 'clientActionToken' | 'legacyPublicToken'
   offeringId?: string | null
   rebookMode?: AftercareRebookMode
   rebookedFor?: Date | null
   rebookWindowStart?: Date | null
   rebookWindowEnd?: Date | null
   notes?: string | null
+  token?: Partial<{
+    id: string
+    expiresAt: Date
+    firstUsedAt: Date | null
+    lastUsedAt: Date | null
+    useCount: number
+    singleUse: boolean
+  }>
 }) {
   return {
-    accessSource: overrides?.accessSource ?? 'clientActionToken',
+    accessSource: 'clientActionToken' as const,
     token: {
-      id: 'token_row_1',
-      expiresAt: new Date('2026-04-20T18:00:00.000Z'),
-      firstUsedAt: null,
-      lastUsedAt: null,
-      useCount: 0,
-      singleUse: false,
+      id: overrides?.token?.id ?? 'token_row_1',
+      expiresAt:
+        overrides?.token?.expiresAt ??
+        new Date('2026-04-20T18:00:00.000Z'),
+      firstUsedAt:
+        overrides?.token?.firstUsedAt === undefined
+          ? null
+          : overrides.token.firstUsedAt,
+      lastUsedAt:
+        overrides?.token?.lastUsedAt === undefined
+          ? null
+          : overrides.token.lastUsedAt,
+      useCount: overrides?.token?.useCount ?? 0,
+      singleUse: overrides?.token?.singleUse ?? false,
     },
     aftercare: {
       id: 'aftercare_1',
@@ -119,8 +133,9 @@ function makeResolvedAftercareAccess(overrides?: {
         overrides?.rebookWindowStart ??
         new Date('2026-04-20T18:00:00.000Z'),
       rebookWindowEnd:
-        overrides?.rebookWindowEnd ?? new Date('2026-04-30T18:00:00.000Z'),
-      publicToken: 'legacy_public_token',
+        overrides?.rebookWindowEnd ??
+        new Date('2026-04-30T18:00:00.000Z'),
+      publicToken: 'legacy_public_token_should_not_drive_ui',
       draftSavedAt: new Date('2026-04-12T17:00:00.000Z'),
       sentToClientAt: new Date('2026-04-12T17:30:00.000Z'),
       lastEditedAt: new Date('2026-04-12T17:15:00.000Z'),
@@ -133,8 +148,8 @@ function makeResolvedAftercareAccess(overrides?: {
       serviceId: 'service_1',
       offeringId:
         overrides && 'offeringId' in overrides
-            ? (overrides.offeringId ?? null)
-            : 'offering_1',
+          ? (overrides.offeringId ?? null)
+          : 'offering_1',
       status: BookingStatus.COMPLETED,
       scheduledFor: new Date('2026-04-10T18:00:00.000Z'),
       locationType: 'SALON',
@@ -230,8 +245,8 @@ describe('app/client/rebook/[token]/page.tsx', () => {
 
   it('calls notFound when token resolution fails with a BookingError', async () => {
     mocks.resolveAftercareAccessByToken.mockRejectedValueOnce({
-      code: 'FORBIDDEN',
-      message: 'That aftercare link is invalid or expired.',
+      code: 'AFTERCARE_TOKEN_INVALID',
+      message: 'Aftercare access token was not found.',
       userMessage: 'That aftercare link is invalid or expired.',
     })
     mocks.isBookingError.mockReturnValueOnce(true)
@@ -249,11 +264,14 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     })
   })
 
-  it('renders the token-based aftercare page without account-only dead ends', async () => {
+  it('renders the token-based aftercare page without legacy access-source UI', async () => {
     const page = await renderPage({
       resolved: makeResolvedAftercareAccess({
-        accessSource: 'legacyPublicToken',
         offeringId: 'offering_1',
+        token: {
+          useCount: 2,
+          singleUse: true,
+        },
       }),
       nextBooking: {
         id: 'booking_2',
@@ -267,18 +285,24 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain('Secure aftercare link')
     expect(markup).toContain('Aftercare for Haircut')
     expect(markup).toContain(
-      'No account required to view aftercare and rebook from this link.',
+      'No account required to view aftercare and rebook from this secure link.',
     )
     expect(markup).toContain('Your next appointment is already booked')
-    expect(markup).toContain('Legacy public token')
-    expect(markup).toContain('href="/professionals/pro_1"')
+    expect(markup).toContain('Access type:')
+    expect(markup).toContain('Client action token')
+    expect(markup).toContain('Single use:')
+    expect(markup).toContain('Yes')
+    expect(markup).toContain('Access count:')
+    expect(markup).toContain('2')
+    expect(markup).toContain(`href="/professionals/pro_1"`)
+    expect(markup).toContain(`/client/rebook/${TOKEN}`)
+    expect(markup).not.toContain('Legacy public token')
     expect(markup).not.toContain('/client/bookings/')
   })
 
   it('builds a booking link from a fallback offering and computed recommended window', async () => {
     const page = await renderPage({
       resolved: makeResolvedAftercareAccess({
-        accessSource: 'clientActionToken',
         offeringId: null,
         rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
         rebookWindowStart: new Date('2026-04-20T18:00:00.000Z'),
@@ -304,7 +328,7 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     )
     expect(markup).toContain('href="/offerings/offering_fallback_1?')
     expect(markup).toContain('source=AFTERCARE')
-    expect(markup).toContain('token=token_1')
+    expect(markup).toContain(`token=${TOKEN}`)
     expect(markup).toContain('rebookOfBookingId=booking_1')
     expect(markup).toContain('windowStart=2026-04-20T18%3A00%3A00.000Z')
     expect(markup).toContain('windowEnd=2026-04-30T18%3A00%3A00.000Z')
@@ -336,13 +360,29 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).not.toContain('windowEnd=2026-04-30T18%3A00%3A00.000Z')
   })
 
+  it('shows no recommendation text when rebook mode is NONE', async () => {
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+      }),
+      nextBooking: null,
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('No rebook recommendation yet.')
+    expect(markup).toContain('Book your next appointment')
+  })
+
   it('shows the unavailable state when no active offering can be found', async () => {
     const page = await renderPage({
-    resolved: makeResolvedAftercareAccess({
+      resolved: makeResolvedAftercareAccess({
         offeringId: null,
         rebookMode: AftercareRebookMode.NONE,
-        rebookedFor: new Date('2026-05-01T18:00:00.000Z'),
-    }),
+        rebookedFor: null,
+      }),
       nextBooking: null,
       fallbackOffering: null,
     })

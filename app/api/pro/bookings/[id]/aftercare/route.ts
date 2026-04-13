@@ -50,23 +50,31 @@ type ProductsParse =
 
 type NormalizedRebook =
   | {
-      rebookMode: typeof AftercareRebookMode.NONE
+      mode: 'NONE'
+      rebookMode: AftercareRebookMode
       rebookedFor: null
       rebookWindowStart: null
       rebookWindowEnd: null
     }
   | {
-      rebookMode: typeof AftercareRebookMode.BOOKED_NEXT_APPOINTMENT
+      mode: 'BOOKED_NEXT_APPOINTMENT'
+      rebookMode: AftercareRebookMode
       rebookedFor: Date
       rebookWindowStart: null
       rebookWindowEnd: null
     }
   | {
-      rebookMode: typeof AftercareRebookMode.RECOMMENDED_WINDOW
+      mode: 'RECOMMENDED_WINDOW'
+      rebookMode: AftercareRebookMode
       rebookedFor: null
       rebookWindowStart: Date
       rebookWindowEnd: Date
     }
+
+type RequestMeta = {
+  requestId: string | null
+  idempotencyKey: string | null
+}
 
 const NOTES_MAX = 4000
 const MAX_PRODUCTS = 10
@@ -74,6 +82,70 @@ const PRODUCT_ID_MAX = 191
 const PRODUCT_NAME_MAX = 80
 const PRODUCT_NOTE_MAX = 140
 const PRODUCT_URL_MAX = 2048
+
+const GET_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  sessionStep: true,
+  scheduledFor: true,
+  finishedAt: true,
+  locationTimeZone: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      notes: true,
+      rebookMode: true,
+      rebookedFor: true,
+      rebookWindowStart: true,
+      rebookWindowEnd: true,
+      publicToken: true,
+      draftSavedAt: true,
+      sentToClientAt: true,
+      lastEditedAt: true,
+      version: true,
+      recommendedProducts: {
+        select: {
+          id: true,
+          note: true,
+          productId: true,
+          externalName: true,
+          externalUrl: true,
+          product: {
+            select: {
+              id: true,
+              name: true,
+              brand: true,
+              retailPrice: true,
+            },
+          },
+        },
+        orderBy: { id: 'asc' },
+      },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type GetBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof GET_BOOKING_SELECT
+}>
+
+type GetRecommendedProductRecord = NonNullable<
+  GetBookingRecord['aftercareSummary']
+>['recommendedProducts'][number]
+
+type ParsedPostBody = {
+  notes: string | null
+  sendToClient: boolean
+  recommendedProducts: NormalizedRecommendedProduct[]
+  normalizedRebook: NormalizedRebook
+  createRebookReminder: boolean
+  rebookReminderDaysBefore: number
+  createProductReminder: boolean
+  productReminderDaysAfter: number
+  clientTimeZoneReceived: string | null
+  version: number | null
+}
 
 function trimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -84,14 +156,14 @@ function toBool(value: unknown): boolean {
 }
 
 function toInt(value: unknown, fallback: number): number {
-  const n =
+  const parsed =
     typeof value === 'number'
       ? value
       : typeof value === 'string'
         ? Number.parseInt(value.trim(), 10)
         : Number.NaN
 
-  return Number.isFinite(n) ? n : fallback
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -102,8 +174,21 @@ function parseOptionalISODate(value: unknown): Date | null | 'invalid' {
   if (value === null || value === undefined || value === '') return null
   if (typeof value !== 'string') return 'invalid'
 
-  const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? 'invalid' : d
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? 'invalid' : parsed
+}
+
+function parseOptionalVersion(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value)
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return null
 }
 
 function parseRequestedRebookMode(
@@ -111,7 +196,7 @@ function parseRequestedRebookMode(
 ):
   | { ok: true; value: AftercareRebookMode }
   | { ok: false; error: string } {
-  const raw = trimmedString(value)
+  const raw = trimmedString(value)?.toUpperCase()
   if (!raw) {
     return { ok: true, value: AftercareRebookMode.NONE }
   }
@@ -132,12 +217,12 @@ function parseRequestedRebookMode(
 }
 
 function isValidHttpUrl(raw: string): boolean {
-  const s = raw.trim()
-  if (!s || s.length > PRODUCT_URL_MAX) return false
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed.length > PRODUCT_URL_MAX) return false
 
   try {
-    const u = new URL(s)
-    return u.protocol === 'http:' || u.protocol === 'https:'
+    const url = new URL(trimmed)
+    return url.protocol === 'http:' || url.protocol === 'https:'
   } catch {
     return false
   }
@@ -154,7 +239,7 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
     return { ok: false, error: `recommendedProducts max is ${MAX_PRODUCTS}.` }
   }
 
-  const out: NormalizedRecommendedProduct[] = []
+  const normalized: NormalizedRecommendedProduct[] = []
 
   for (const row of input) {
     if (!isRecord(row)) {
@@ -186,7 +271,9 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
     const noteRaw = typeof row.note === 'string' ? row.note.trim() : ''
     const note = noteRaw ? noteRaw.slice(0, PRODUCT_NOTE_MAX) : null
 
-    if (!productId && !externalName && !externalUrl && !note) continue
+    if (!productId && !externalName && !externalUrl && !note) {
+      continue
+    }
 
     const hasProductId = productId.length > 0
     const hasExternalName = externalName.length > 0
@@ -202,7 +289,7 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
     }
 
     if (hasProductId) {
-      out.push({
+      normalized.push({
         productId,
         externalName: null,
         externalUrl: null,
@@ -240,7 +327,7 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
       }
     }
 
-    out.push({
+    normalized.push({
       productId: null,
       externalName,
       externalUrl,
@@ -248,7 +335,7 @@ function normalizeRecommendedProducts(input: unknown): ProductsParse {
     })
   }
 
-  return { ok: true, value: out }
+  return { ok: true, value: normalized }
 }
 
 function normalizeRebookFields(args: {
@@ -287,6 +374,7 @@ function normalizeRebookFields(args: {
     return {
       ok: true,
       value: {
+        mode: 'NONE',
         rebookMode: AftercareRebookMode.NONE,
         rebookedFor: null,
         rebookWindowStart: null,
@@ -314,6 +402,7 @@ function normalizeRebookFields(args: {
     return {
       ok: true,
       value: {
+        mode: 'BOOKED_NEXT_APPOINTMENT',
         rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
         rebookedFor: rebookedForParsed,
         rebookWindowStart: null,
@@ -347,6 +436,7 @@ function normalizeRebookFields(args: {
   return {
     ok: true,
     value: {
+      mode: 'RECOMMENDED_WINDOW',
       rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
       rebookedFor: null,
       rebookWindowStart: windowStartParsed,
@@ -398,19 +488,7 @@ function buildPublicAccess(
   }
 }
 
-function mapRecommendedProduct(product: {
-  id: string
-  note: string | null
-  productId: string | null
-  externalName: string | null
-  externalUrl: string | null
-  product: {
-    id: string
-    name: string
-    brand: string | null
-    retailPrice: Prisma.Decimal | null
-  } | null
-}) {
+function mapRecommendedProduct(product: GetRecommendedProductRecord) {
   return {
     id: product.id,
     note: product.note,
@@ -428,70 +506,137 @@ function mapRecommendedProduct(product: {
   }
 }
 
+function mapAftercareSummaryForGet(
+  aftercare: NonNullable<GetBookingRecord['aftercareSummary']>,
+) {
+  return {
+    id: aftercare.id,
+    notes: aftercare.notes,
+    rebookMode: aftercare.rebookMode,
+    rebookedFor: toIsoOrNull(aftercare.rebookedFor),
+    rebookWindowStart: toIsoOrNull(aftercare.rebookWindowStart),
+    rebookWindowEnd: toIsoOrNull(aftercare.rebookWindowEnd),
+    draftSavedAt: toIsoOrNull(aftercare.draftSavedAt),
+    sentToClientAt: toIsoOrNull(aftercare.sentToClientAt),
+    lastEditedAt: toIsoOrNull(aftercare.lastEditedAt),
+    version: aftercare.version,
+    isFinalized: Boolean(aftercare.sentToClientAt),
+    publicAccess: buildPublicAccess(aftercare.publicToken),
+    recommendedProducts: aftercare.recommendedProducts.map(
+      mapRecommendedProduct,
+    ),
+  }
+}
+
+function readHeaderValue(req: Request, name: string): string | null {
+  return trimmedString(req.headers.get(name))
+}
+
+function readRequestMeta(req: Request): RequestMeta {
+  return {
+    requestId:
+      readHeaderValue(req, 'x-request-id') ??
+      readHeaderValue(req, 'request-id') ??
+      null,
+    idempotencyKey:
+      readHeaderValue(req, 'idempotency-key') ??
+      readHeaderValue(req, 'x-idempotency-key') ??
+      null,
+  }
+}
+
+async function getBookingIdFromContext(ctx: Ctx): Promise<string | null> {
+  const params = await Promise.resolve(ctx.params)
+  return pickString(params?.id)
+}
+
+function parsePostBody(rawBody: unknown): { ok: true; value: ParsedPostBody } | { ok: false; error: string } {
+  if (!isRecord(rawBody)) {
+    return { ok: false, error: 'Invalid request body.' }
+  }
+
+  const notes =
+    typeof rawBody.notes === 'string'
+      ? rawBody.notes.trim().slice(0, NOTES_MAX) || null
+      : null
+
+  const productsParsed = normalizeRecommendedProducts(
+    rawBody.recommendedProducts,
+  )
+  if (!productsParsed.ok) {
+    return productsParsed
+  }
+
+  const requestedModeResult = parseRequestedRebookMode(rawBody.rebookMode)
+  if (!requestedModeResult.ok) {
+    return requestedModeResult
+  }
+
+  const normalizedRebook = normalizeRebookFields({
+    requestedMode: requestedModeResult.value,
+    rebookedForParsed: parseOptionalISODate(rawBody.rebookedFor),
+    windowStartParsed: parseOptionalISODate(rawBody.rebookWindowStart),
+    windowEndParsed: parseOptionalISODate(rawBody.rebookWindowEnd),
+  })
+
+  if (!normalizedRebook.ok) {
+    return normalizedRebook
+  }
+
+  const clientTimeZoneRaw =
+    typeof rawBody.timeZone === 'string' ? rawBody.timeZone.trim() : ''
+
+  const clientTimeZoneReceived =
+    clientTimeZoneRaw && isValidIanaTimeZone(clientTimeZoneRaw)
+      ? clientTimeZoneRaw
+      : null
+
+  return {
+    ok: true,
+    value: {
+      notes,
+      sendToClient: toBool(rawBody.sendToClient),
+      recommendedProducts: productsParsed.value,
+      normalizedRebook: normalizedRebook.value,
+      createRebookReminder: toBool(rawBody.createRebookReminder),
+      rebookReminderDaysBefore: clamp(
+        toInt(rawBody.rebookReminderDaysBefore, 2),
+        1,
+        30,
+      ),
+      createProductReminder: toBool(rawBody.createProductReminder),
+      productReminderDaysAfter: clamp(
+        toInt(rawBody.productReminderDaysAfter, 7),
+        1,
+        180,
+      ),
+      clientTimeZoneReceived,
+      version: parseOptionalVersion(rawBody.version),
+    },
+  }
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const params = await Promise.resolve(ctx.params)
-    const bookingId = pickString(params?.id)
-
+    const bookingId = await getBookingIdFromContext(ctx)
     if (!bookingId) {
       return jsonFail(400, 'Missing booking id.')
     }
 
-    const booking = await prisma.booking.findUnique({
+    const booking: GetBookingRecord | null = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        status: true,
-        sessionStep: true,
-        scheduledFor: true,
-        finishedAt: true,
-        locationTimeZone: true,
-        aftercareSummary: {
-          select: {
-            id: true,
-            notes: true,
-            rebookMode: true,
-            rebookedFor: true,
-            rebookWindowStart: true,
-            rebookWindowEnd: true,
-            publicToken: true,
-            draftSavedAt: true,
-            sentToClientAt: true,
-            lastEditedAt: true,
-            version: true,
-            recommendedProducts: {
-              select: {
-                id: true,
-                note: true,
-                productId: true,
-                externalName: true,
-                externalUrl: true,
-                product: {
-                  select: {
-                    id: true,
-                    name: true,
-                    brand: true,
-                    retailPrice: true,
-                  },
-                },
-              },
-              orderBy: { id: 'asc' },
-            },
-          },
-        },
-      },
+      select: GET_BOOKING_SELECT,
     })
 
     if (!booking) {
-      return jsonFail(404, 'Booking not found.')
+      return bookingJsonFail('BOOKING_NOT_FOUND')
     }
 
     if (booking.professionalId !== auth.professionalId) {
-      return jsonFail(403, 'Forbidden.')
+      return bookingJsonFail('FORBIDDEN')
     }
 
     return jsonOk(
@@ -504,40 +649,20 @@ export async function GET(_req: Request, ctx: Ctx) {
           finishedAt: toIsoOrNull(booking.finishedAt),
           locationTimeZone: booking.locationTimeZone,
           aftercareSummary: booking.aftercareSummary
-            ? {
-                id: booking.aftercareSummary.id,
-                notes: booking.aftercareSummary.notes,
-                rebookMode: booking.aftercareSummary.rebookMode,
-                rebookedFor: toIsoOrNull(booking.aftercareSummary.rebookedFor),
-                rebookWindowStart: toIsoOrNull(
-                  booking.aftercareSummary.rebookWindowStart,
-                ),
-                rebookWindowEnd: toIsoOrNull(
-                  booking.aftercareSummary.rebookWindowEnd,
-                ),
-                draftSavedAt: toIsoOrNull(booking.aftercareSummary.draftSavedAt),
-                sentToClientAt: toIsoOrNull(
-                  booking.aftercareSummary.sentToClientAt,
-                ),
-                lastEditedAt: toIsoOrNull(
-                  booking.aftercareSummary.lastEditedAt,
-                ),
-                version: booking.aftercareSummary.version,
-                isFinalized: Boolean(booking.aftercareSummary.sentToClientAt),
-                publicAccess: buildPublicAccess(
-                  booking.aftercareSummary.publicToken,
-                ),
-                recommendedProducts:
-                  booking.aftercareSummary.recommendedProducts.map(
-                    mapRecommendedProduct,
-                  ),
-              }
+            ? mapAftercareSummaryForGet(booking.aftercareSummary)
             : null,
         },
       },
       200,
     )
   } catch (error: unknown) {
+    if (isBookingError(error)) {
+      return bookingJsonFail(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+    }
+
     console.error('GET /api/pro/bookings/[id]/aftercare error', error)
     return jsonFail(500, 'Internal server error.')
   }
@@ -548,91 +673,36 @@ export async function POST(req: Request, ctx: Ctx) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const params = await Promise.resolve(ctx.params)
-    const bookingId = pickString(params?.id)
-
+    const bookingId = await getBookingIdFromContext(ctx)
     if (!bookingId) {
       return jsonFail(400, 'Missing booking id.')
     }
 
     const rawBody: unknown = await req.json().catch(() => null)
-    if (!isRecord(rawBody)) {
-      return jsonFail(400, 'Invalid request body.')
+    const parsedBody = parsePostBody(rawBody)
+    if (!parsedBody.ok) {
+      return jsonFail(400, parsedBody.error)
     }
 
-    const notes =
-      typeof rawBody.notes === 'string'
-        ? rawBody.notes.trim().slice(0, NOTES_MAX)
-        : ''
-
-    const sendToClient = toBool(rawBody.sendToClient)
-
-    const productsParsed = normalizeRecommendedProducts(
-      rawBody.recommendedProducts,
-    )
-    if (!productsParsed.ok) {
-      return jsonFail(400, productsParsed.error)
-    }
-
-    const requestedModeResult = parseRequestedRebookMode(rawBody.rebookMode)
-    if (!requestedModeResult.ok) {
-      return jsonFail(400, requestedModeResult.error)
-    }
-
-    const normalizedRebook = normalizeRebookFields({
-      requestedMode: requestedModeResult.value,
-      rebookedForParsed: parseOptionalISODate(rawBody.rebookedFor),
-      windowStartParsed: parseOptionalISODate(rawBody.rebookWindowStart),
-      windowEndParsed: parseOptionalISODate(rawBody.rebookWindowEnd),
-    })
-
-    if (!normalizedRebook.ok) {
-      return jsonFail(400, normalizedRebook.error)
-    }
-
-    const createRebookReminder = toBool(rawBody.createRebookReminder)
-    const createProductReminder = toBool(rawBody.createProductReminder)
-
-    const rebookReminderDaysBefore = clamp(
-      toInt(rawBody.rebookReminderDaysBefore, 2),
-      1,
-      30,
-    )
-
-    const productReminderDaysAfter = clamp(
-      toInt(rawBody.productReminderDaysAfter, 7),
-      1,
-      180,
-    )
-
-    const clientTimeZoneRaw =
-      typeof rawBody.timeZone === 'string' ? rawBody.timeZone.trim() : ''
-
-    const clientTimeZoneReceived =
-      clientTimeZoneRaw && isValidIanaTimeZone(clientTimeZoneRaw)
-        ? clientTimeZoneRaw
-        : null
-
-    const version =
-      typeof rawBody.version === 'number' && Number.isFinite(rawBody.version)
-        ? rawBody.version
-        : null
+    const requestMeta = readRequestMeta(req)
 
     const result = await upsertBookingAftercare({
       bookingId,
       professionalId: auth.professionalId,
-      notes: notes || null,
-      rebookMode: normalizedRebook.value.rebookMode,
-      rebookedFor: normalizedRebook.value.rebookedFor,
-      rebookWindowStart: normalizedRebook.value.rebookWindowStart,
-      rebookWindowEnd: normalizedRebook.value.rebookWindowEnd,
-      createRebookReminder,
-      rebookReminderDaysBefore,
-      createProductReminder,
-      productReminderDaysAfter,
-      recommendedProducts: productsParsed.value,
-      sendToClient,
-      version,
+      notes: parsedBody.value.notes,
+      rebookMode: parsedBody.value.normalizedRebook.rebookMode,
+      rebookedFor: parsedBody.value.normalizedRebook.rebookedFor,
+      rebookWindowStart: parsedBody.value.normalizedRebook.rebookWindowStart,
+      rebookWindowEnd: parsedBody.value.normalizedRebook.rebookWindowEnd,
+      createRebookReminder: parsedBody.value.createRebookReminder,
+      rebookReminderDaysBefore: parsedBody.value.rebookReminderDaysBefore,
+      createProductReminder: parsedBody.value.createProductReminder,
+      productReminderDaysAfter: parsedBody.value.productReminderDaysAfter,
+      recommendedProducts: parsedBody.value.recommendedProducts,
+      sendToClient: parsedBody.value.sendToClient,
+      version: parsedBody.value.version,
+      requestId: requestMeta.requestId,
+      idempotencyKey: requestMeta.idempotencyKey,
     })
 
     return jsonOk(
@@ -653,7 +723,7 @@ export async function POST(req: Request, ctx: Ctx) {
         remindersTouched: result.remindersTouched,
         clientNotified: result.clientNotified,
         timeZoneUsed: result.timeZoneUsed,
-        clientTimeZoneReceived,
+        clientTimeZoneReceived: parsedBody.value.clientTimeZoneReceived,
         bookingFinished: result.bookingFinished,
         booking: result.booking
           ? {

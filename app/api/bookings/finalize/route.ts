@@ -47,6 +47,37 @@ type FinalizeOfferingRecord = Prisma.ProfessionalServiceOfferingGetPayload<{
   select: typeof FINALIZE_OFFERING_SELECT
 }>
 
+type FinalizeOfferingForBoundary = {
+  id: string
+  professionalId: string
+  serviceId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonPriceStartingAt: Prisma.Decimal | null
+  salonDurationMinutes: number | null
+  mobilePriceStartingAt: Prisma.Decimal | null
+  mobileDurationMinutes: number | null
+  professionalTimeZone: string | null
+}
+
+type ParsedFinalizeBody = {
+  offeringId: string | null
+  holdId: string | null
+  mediaId: string | null
+  openingId: string | null
+  aftercareToken: string | null
+  requestedRebookOfBookingId: string | null
+  locationType: ServiceLocationType | null
+  addOnIds: string[]
+  source: BookingSource
+}
+
+type FinalizeOwnershipContext = {
+  clientId: string
+  actorUserId: string | null
+  rebookOfBookingId: string | null
+}
+
 function bookingJsonFail(
   code: BookingErrorCode,
   overrides?: {
@@ -56,26 +87,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function normalizeSourceLoose(args: {
-  sourceRaw: unknown
-  mediaId: string | null
-  aftercareToken: string | null
-}): BookingSource {
-  const raw =
-    typeof args.sourceRaw === 'string' ? args.sourceRaw.trim().toUpperCase() : ''
-
-  if (raw === BookingSource.AFTERCARE) return BookingSource.AFTERCARE
-  if (raw === BookingSource.DISCOVERY) return BookingSource.DISCOVERY
-  if (raw === BookingSource.REQUESTED) return BookingSource.REQUESTED
-
-  if (raw === 'PROFILE') return BookingSource.REQUESTED
-  if (raw === 'UNKNOWN') return BookingSource.REQUESTED
-
-  if (args.aftercareToken) return BookingSource.AFTERCARE
-  if (args.mediaId) return BookingSource.DISCOVERY
-  return BookingSource.REQUESTED
 }
 
 function pickStringArray(value: unknown): string[] {
@@ -91,20 +102,91 @@ function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length
 }
 
+function normalizeSourceFromRequest(args: {
+  sourceRaw: unknown
+  mediaId: string | null
+  aftercareToken: string | null
+}): BookingSource {
+  if (args.aftercareToken) {
+    return BookingSource.AFTERCARE
+  }
+
+  const raw =
+    typeof args.sourceRaw === 'string' ? args.sourceRaw.trim().toUpperCase() : ''
+
+  if (raw === BookingSource.AFTERCARE) return BookingSource.AFTERCARE
+  if (raw === BookingSource.DISCOVERY) return BookingSource.DISCOVERY
+  if (raw === BookingSource.REQUESTED) return BookingSource.REQUESTED
+
+  if (raw === 'PROFILE') return BookingSource.REQUESTED
+  if (raw === 'UNKNOWN') return BookingSource.REQUESTED
+
+  if (args.mediaId) return BookingSource.DISCOVERY
+  return BookingSource.REQUESTED
+}
+
+function parseFinalizeBody(rawBody: unknown): ParsedFinalizeBody {
+  const body = isRecord(rawBody) ? rawBody : {}
+
+  const offeringId = pickString(body.offeringId)
+  const holdId = pickString(body.holdId)
+  const mediaId = pickString(body.mediaId)
+  const openingId = pickString(body.openingId)
+  const aftercareToken = pickString(body.aftercareToken)
+  const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
+  const locationType = normalizeLocationType(body.locationType)
+  const addOnIds = pickStringArray(body.addOnIds)
+
+  const source = normalizeSourceFromRequest({
+    sourceRaw: body.source,
+    mediaId,
+    aftercareToken,
+  })
+
+  return {
+    offeringId,
+    holdId,
+    mediaId,
+    openingId,
+    aftercareToken,
+    requestedRebookOfBookingId,
+    locationType,
+    addOnIds,
+    source,
+  }
+}
+
+function validateParsedFinalizeBody(body: ParsedFinalizeBody): Response | null {
+  if (hasDuplicates(body.addOnIds)) {
+    return bookingJsonFail('ADDONS_INVALID')
+  }
+
+  if (!body.locationType) {
+    return bookingJsonFail('LOCATION_TYPE_REQUIRED')
+  }
+
+  if (!body.offeringId) {
+    return bookingJsonFail('OFFERING_ID_REQUIRED')
+  }
+
+  if (!body.holdId) {
+    return bookingJsonFail('HOLD_ID_REQUIRED')
+  }
+
+  if (body.source === BookingSource.DISCOVERY && !body.mediaId) {
+    return bookingJsonFail('MISSING_MEDIA_ID')
+  }
+
+  if (body.source === BookingSource.AFTERCARE && !body.aftercareToken) {
+    return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
+  }
+
+  return null
+}
+
 function toFinalizeOffering(
   offering: FinalizeOfferingRecord,
-): {
-  id: string
-  professionalId: string
-  serviceId: string
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonPriceStartingAt: Prisma.Decimal | null
-  salonDurationMinutes: number | null
-  mobilePriceStartingAt: Prisma.Decimal | null
-  mobileDurationMinutes: number | null
-  professionalTimeZone: string | null
-} {
+): FinalizeOfferingForBoundary {
   return {
     id: offering.id,
     professionalId: offering.professionalId,
@@ -164,108 +246,107 @@ async function createFinalizeProNotification(args: {
   })
 }
 
+async function getOfferingOrFail(
+  offeringId: string,
+): Promise<FinalizeOfferingRecord | Response> {
+  const offering = await prisma.professionalServiceOffering.findUnique({
+    where: { id: offeringId },
+    select: FINALIZE_OFFERING_SELECT,
+  })
+
+  if (!offering || !offering.isActive) {
+    return bookingJsonFail('OFFERING_NOT_FOUND')
+  }
+
+  return offering
+}
+
+async function resolveFinalizeOwnershipContext(args: {
+  source: BookingSource
+  aftercareToken: string | null
+  requestedRebookOfBookingId: string | null
+  offering: FinalizeOfferingRecord
+}): Promise<FinalizeOwnershipContext | Response> {
+  if (args.source === BookingSource.AFTERCARE) {
+    const resolved = await resolveAftercareAccessByToken({
+      rawToken: args.aftercareToken!,
+    })
+
+    const original = resolved.booking
+
+    if (original.status !== BookingStatus.COMPLETED) {
+      return bookingJsonFail('AFTERCARE_NOT_COMPLETED')
+    }
+
+    const matchesOffering =
+      (original.offeringId && original.offeringId === args.offering.id) ||
+      (original.professionalId === args.offering.professionalId &&
+        original.serviceId === args.offering.serviceId)
+
+    if (!matchesOffering) {
+      return bookingJsonFail('AFTERCARE_OFFERING_MISMATCH')
+    }
+
+    return {
+      clientId: original.clientId,
+      actorUserId: null,
+      rebookOfBookingId:
+        args.requestedRebookOfBookingId === original.id
+          ? args.requestedRebookOfBookingId
+          : original.id,
+    }
+  }
+
+  const auth = await requireClient()
+  if (!auth.ok) {
+    return auth.res
+  }
+
+  return {
+    clientId: auth.clientId,
+    actorUserId: auth.user.id,
+    rebookOfBookingId: null,
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const rawBody: unknown = await request.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = parseFinalizeBody(rawBody)
 
-    const offeringId = pickString(body.offeringId)
-    const holdId = pickString(body.holdId)
-    const mediaId = pickString(body.mediaId)
-    const openingId = pickString(body.openingId)
-    const aftercareToken = pickString(body.aftercareToken)
-    const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
-    const locationType = normalizeLocationType(body.locationType)
-
-    const addOnIds = pickStringArray(body.addOnIds)
-    if (hasDuplicates(addOnIds)) {
-      return bookingJsonFail('ADDONS_INVALID')
+    const validationError = validateParsedFinalizeBody(body)
+    if (validationError) {
+      return validationError
     }
 
-    if (!locationType) {
-      return bookingJsonFail('LOCATION_TYPE_REQUIRED')
+    const offeringOrFail = await getOfferingOrFail(body.offeringId!)
+    if (offeringOrFail instanceof Response) {
+      return offeringOrFail
     }
-
-    if (!offeringId) {
-      return bookingJsonFail('OFFERING_ID_REQUIRED')
-    }
-
-    if (!holdId) {
-      return bookingJsonFail('HOLD_ID_REQUIRED')
-    }
-
-    const source = normalizeSourceLoose({
-      sourceRaw: body.source,
-      mediaId,
-      aftercareToken,
-    })
-
-    if (source === BookingSource.DISCOVERY && !mediaId) {
-      return bookingJsonFail('MISSING_MEDIA_ID')
-    }
-
-    const offering = await prisma.professionalServiceOffering.findUnique({
-      where: { id: offeringId },
-      select: FINALIZE_OFFERING_SELECT,
-    })
-
-    if (!offering || !offering.isActive) {
-      return bookingJsonFail('OFFERING_NOT_FOUND')
-    }
+    const offering = offeringOrFail
 
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
     const initialStatus = getClientSubmittedBookingStatus(autoAccept)
 
-    let clientId: string
-    let actorUserId: string | null = null
-    let rebookOfBookingId: string | null = null
-
-    if (source === BookingSource.AFTERCARE) {
-      if (!aftercareToken) {
-        return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
-      }
-
-      const resolved = await resolveAftercareAccessByToken({
-        rawToken: aftercareToken,
-      })
-
-      const original = resolved.booking
-
-      if (original.status !== BookingStatus.COMPLETED) {
-        return bookingJsonFail('AFTERCARE_NOT_COMPLETED')
-      }
-
-      const matchesOffering =
-        (original.offeringId && original.offeringId === offering.id) ||
-        (original.professionalId === offering.professionalId &&
-          original.serviceId === offering.serviceId)
-
-      if (!matchesOffering) {
-        return bookingJsonFail('AFTERCARE_OFFERING_MISMATCH')
-      }
-
-      clientId = original.clientId
-      rebookOfBookingId =
-        requestedRebookOfBookingId && requestedRebookOfBookingId === original.id
-          ? requestedRebookOfBookingId
-          : original.id
-    } else {
-      const auth = await requireClient()
-      if (!auth.ok) return auth.res
-
-      clientId = auth.clientId
-      actorUserId = auth.user.id
+    const ownershipOrFail = await resolveFinalizeOwnershipContext({
+      source: body.source,
+      aftercareToken: body.aftercareToken,
+      requestedRebookOfBookingId: body.requestedRebookOfBookingId,
+      offering,
+    })
+    if (ownershipOrFail instanceof Response) {
+      return ownershipOrFail
     }
 
     const result = await finalizeBookingFromHold({
-      clientId,
-      holdId,
-      openingId,
-      addOnIds,
-      locationType,
-      source,
+      clientId: ownershipOrFail.clientId,
+      holdId: body.holdId!,
+      openingId: body.openingId,
+      addOnIds: body.addOnIds,
+      locationType: body.locationType!,
+      source: body.source,
       initialStatus,
-      rebookOfBookingId,
+      rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
       offering: toFinalizeOffering(offering),
       fallbackTimeZone: 'UTC',
     })
@@ -274,10 +355,10 @@ export async function POST(request: Request) {
       await createFinalizeProNotification({
         professionalId: result.booking.professionalId,
         bookingId: result.booking.id,
-        actorUserId,
+        actorUserId: ownershipOrFail.actorUserId,
         bookingStatus: result.booking.status,
-        source,
-        locationType,
+        source: body.source,
+        locationType: body.locationType!,
       })
     } catch (notificationError: unknown) {
       console.error(

@@ -80,25 +80,31 @@ function makeRequest(args?: {
 }
 
 function makeResolvedAftercareAccess(overrides?: {
-  accessSource?: 'clientActionToken' | 'legacyPublicToken'
   rebookMode?: AftercareRebookMode
   rebookWindowStart?: Date | null
   rebookWindowEnd?: Date | null
-  publicToken?: string | null
+  firstUsedAt?: Date | null
+  lastUsedAt?: Date | null
+  useCount?: number
+  singleUse?: boolean
+  subtotalSnapshot?: string
 }) {
   return {
-    accessSource: overrides?.accessSource ?? 'clientActionToken',
+    accessSource: 'clientActionToken' as const,
     token: {
       id: 'token_row_1',
       expiresAt: new Date('2026-04-20T18:00:00.000Z'),
-      firstUsedAt: null,
-      lastUsedAt: null,
-      useCount: 0,
-      singleUse: false,
+      firstUsedAt:
+        overrides?.firstUsedAt === undefined ? null : overrides.firstUsedAt,
+      lastUsedAt:
+        overrides?.lastUsedAt === undefined ? null : overrides.lastUsedAt,
+      useCount: overrides?.useCount ?? 0,
+      singleUse: overrides?.singleUse ?? false,
     },
     aftercare: {
       id: 'aftercare_1',
       bookingId: 'booking_1',
+      publicToken: 'legacy_public_token_should_not_drive_response',
       notes: 'Use a sulfate-free shampoo.',
       rebookMode:
         overrides?.rebookMode ?? AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
@@ -109,10 +115,6 @@ function makeResolvedAftercareAccess(overrides?: {
       rebookWindowEnd:
         overrides?.rebookWindowEnd ??
         new Date('2026-04-30T18:00:00.000Z'),
-      publicToken:
-        overrides && 'publicToken' in overrides
-          ? overrides.publicToken
-          : 'legacy_public_token',
       draftSavedAt: new Date('2026-04-12T17:00:00.000Z'),
       sentToClientAt: new Date('2026-04-12T17:30:00.000Z'),
       lastEditedAt: new Date('2026-04-12T17:15:00.000Z'),
@@ -129,7 +131,7 @@ function makeResolvedAftercareAccess(overrides?: {
       locationType: 'SALON',
       locationId: 'location_1',
       totalDurationMinutes: 75,
-      subtotalSnapshot: '125.00',
+      subtotalSnapshot: overrides?.subtotalSnapshot ?? '125.00',
       service: {
         id: 'service_1',
         name: 'Haircut',
@@ -171,11 +173,12 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
         }),
     )
 
-    mocks.jsonOk.mockImplementation((data: unknown, status = 200) =>
-      makeJsonResponse(status, {
-        ok: true,
-        data,
-      }),
+    mocks.jsonOk.mockImplementation(
+      (data: Record<string, unknown>, status = 200) =>
+        makeJsonResponse(status, {
+          ok: true,
+          ...(data ?? {}),
+        }),
     )
 
     mocks.isRecord.mockImplementation(
@@ -190,7 +193,12 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
         code: string,
         overrides?: { message?: string; userMessage?: string },
       ) => ({
-        httpStatus: code === 'FORBIDDEN' ? 403 : 409,
+        httpStatus:
+          code === 'AFTERCARE_TOKEN_MISSING'
+            ? 400
+            : code === 'AFTERCARE_TOKEN_INVALID'
+              ? 400
+              : 409,
         userMessage: overrides?.userMessage ?? code,
         extra: {
           code,
@@ -204,121 +212,106 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     vi.useRealTimers()
   })
 
-  it('GET returns 400 when token is missing', async () => {
+  it('GET maps missing route token through bookingJsonFail', async () => {
     const response = await GET(makeRequest({ method: 'GET' }), makeCtx('   '))
+
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'AFTERCARE_TOKEN_MISSING',
+      {
+        message: 'Aftercare access token is missing from route params.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      },
+    )
 
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      error: 'Missing token.',
+      error: 'That aftercare link is invalid or expired.',
+      code: 'AFTERCARE_TOKEN_MISSING',
+      message: 'Aftercare access token is missing from route params.',
     })
 
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
   })
 
-  it('GET resolves aftercare access by token and returns the secure-link payload', async () => {
+  it('GET resolves token-backed access and returns the secure-link payload using the route token', async () => {
     mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
       makeResolvedAftercareAccess({
-        accessSource: 'legacyPublicToken',
+        firstUsedAt: new Date('2026-04-12T17:55:00.000Z'),
+        lastUsedAt: new Date('2026-04-12T17:58:00.000Z'),
+        useCount: 2,
+        singleUse: true,
+        subtotalSnapshot: '125.00',
       }),
     )
 
     const response = await GET(
       makeRequest({ method: 'GET' }),
-      makeCtx('token_1'),
+      makeCtx('token_from_route'),
     )
 
     expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
-      rawToken: 'token_1',
+      rawToken: 'token_from_route',
     })
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      data: {
-        accessSource: 'legacyPublicToken',
-        token: {
-          id: 'token_row_1',
-          expiresAt: '2026-04-20T18:00:00.000Z',
-          firstUsedAt: null,
-          lastUsedAt: null,
-          useCount: 0,
-          singleUse: false,
+      accessSource: 'clientActionToken',
+      token: {
+        id: 'token_row_1',
+        expiresAt: '2026-04-20T18:00:00.000Z',
+        firstUsedAt: '2026-04-12T17:55:00.000Z',
+        lastUsedAt: '2026-04-12T17:58:00.000Z',
+        useCount: 2,
+        singleUse: true,
+      },
+      aftercare: {
+        id: 'aftercare_1',
+        bookingId: 'booking_1',
+        notes: 'Use a sulfate-free shampoo.',
+        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+        rebookedFor: '2026-05-01T18:00:00.000Z',
+        rebookWindowStart: '2026-04-20T18:00:00.000Z',
+        rebookWindowEnd: '2026-04-30T18:00:00.000Z',
+        draftSavedAt: '2026-04-12T17:00:00.000Z',
+        sentToClientAt: '2026-04-12T17:30:00.000Z',
+        lastEditedAt: '2026-04-12T17:15:00.000Z',
+        version: 2,
+        isFinalized: true,
+        publicAccess: {
+          accessMode: 'SECURE_LINK',
+          hasPublicAccess: true,
+          clientAftercareHref: '/client/rebook/token_from_route',
         },
-        aftercare: {
-          id: 'aftercare_1',
-          bookingId: 'booking_1',
-          notes: 'Use a sulfate-free shampoo.',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor: '2026-05-01T18:00:00.000Z',
-          rebookWindowStart: '2026-04-20T18:00:00.000Z',
-          rebookWindowEnd: '2026-04-30T18:00:00.000Z',
-          draftSavedAt: '2026-04-12T17:00:00.000Z',
-          sentToClientAt: '2026-04-12T17:30:00.000Z',
-          lastEditedAt: '2026-04-12T17:15:00.000Z',
-          version: 2,
-          isFinalized: true,
-          publicAccess: {
-            accessMode: 'SECURE_LINK',
-            hasPublicAccess: true,
-            clientAftercareHref: '/client/rebook/legacy_public_token',
-          },
+      },
+      booking: {
+        id: 'booking_1',
+        clientId: 'client_1',
+        professionalId: 'pro_1',
+        serviceId: 'service_1',
+        offeringId: 'offering_1',
+        status: 'COMPLETED',
+        scheduledFor: '2026-04-10T18:00:00.000Z',
+        locationType: 'SALON',
+        locationId: 'location_1',
+        totalDurationMinutes: 75,
+        subtotalSnapshot: '125.00',
+        service: {
+          id: 'service_1',
+          name: 'Haircut',
         },
-        booking: {
-          id: 'booking_1',
-          clientId: 'client_1',
-          professionalId: 'pro_1',
-          serviceId: 'service_1',
-          offeringId: 'offering_1',
-          status: 'COMPLETED',
-          scheduledFor: '2026-04-10T18:00:00.000Z',
-          locationType: 'SALON',
-          locationId: 'location_1',
-          totalDurationMinutes: 75,
-          subtotalSnapshot: '125.00',
-          service: {
-            id: 'service_1',
-            name: 'Haircut',
-          },
-          professional: {
-            id: 'pro_1',
-            businessName: 'TOVIS Studio',
-            timeZone: 'America/Los_Angeles',
-            location: null,
-          },
+        professional: {
+          id: 'pro_1',
+          businessName: 'TOVIS Studio',
+          timeZone: 'America/Los_Angeles',
+          location: null,
         },
       },
     })
   })
 
-  it('GET returns NONE public access when the resolved aftercare has no token value', async () => {
-    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
-      makeResolvedAftercareAccess({
-        publicToken: null,
-      }),
-    )
-
-    const response = await GET(
-      makeRequest({ method: 'GET' }),
-      makeCtx('token_1'),
-    )
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      data: expect.objectContaining({
-        aftercare: expect.objectContaining({
-          publicAccess: {
-            accessMode: 'NONE',
-            hasPublicAccess: false,
-            clientAftercareHref: null,
-          },
-        }),
-      }),
-    })
-  })
-
-  it('POST returns 400 when token is missing', async () => {
+  it('POST maps missing route token through bookingJsonFail', async () => {
     const response = await POST(
       makeRequest({
         body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
@@ -326,10 +319,20 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       makeCtx('   '),
     )
 
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'AFTERCARE_TOKEN_MISSING',
+      {
+        message: 'Aftercare access token is missing from route params.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      },
+    )
+
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      error: 'Missing token.',
+      error: 'That aftercare link is invalid or expired.',
+      code: 'AFTERCARE_TOKEN_MISSING',
+      message: 'Aftercare access token is missing from route params.',
     })
 
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
@@ -459,40 +462,38 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     expect(response.status).toBe(201)
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      data: {
-        booking: {
-          id: 'booking_2',
-          status: 'PENDING',
-          scheduledFor: '2026-04-25T18:00:00.000Z',
-        },
-        aftercare: {
-          id: 'aftercare_1',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor: '2026-05-01T18:00:00.000Z',
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
+      booking: {
+        id: 'booking_2',
+        status: 'PENDING',
+        scheduledFor: '2026-04-25T18:00:00.000Z',
+      },
+      aftercare: {
+        id: 'aftercare_1',
+        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+        rebookedFor: '2026-05-01T18:00:00.000Z',
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
       },
     })
   })
 
   it('maps BookingError through bookingJsonFail for GET', async () => {
     const bookingError = {
-      code: 'FORBIDDEN',
-      message: 'That aftercare link is invalid or expired.',
+      code: 'AFTERCARE_TOKEN_INVALID',
+      message: 'Aftercare access token was not found.',
       userMessage: 'That aftercare link is invalid or expired.',
     }
 
     mocks.resolveAftercareAccessByToken.mockRejectedValueOnce(bookingError)
     mocks.isBookingError.mockReturnValueOnce(true)
     mocks.getBookingFailPayload.mockReturnValueOnce({
-      httpStatus: 403,
+      httpStatus: 400,
       userMessage: 'That aftercare link is invalid or expired.',
       extra: {
-        code: 'FORBIDDEN',
-        message: 'That aftercare link is invalid or expired.',
+        code: 'AFTERCARE_TOKEN_INVALID',
+        message: 'Aftercare access token was not found.',
       },
     })
 
@@ -501,17 +502,20 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       makeCtx('token_1'),
     )
 
-    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
-      message: 'That aftercare link is invalid or expired.',
-      userMessage: 'That aftercare link is invalid or expired.',
-    })
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'AFTERCARE_TOKEN_INVALID',
+      {
+        message: 'Aftercare access token was not found.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      },
+    )
 
-    expect(response.status).toBe(403)
+    expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({
       ok: false,
       error: 'That aftercare link is invalid or expired.',
-      code: 'FORBIDDEN',
-      message: 'That aftercare link is invalid or expired.',
+      code: 'AFTERCARE_TOKEN_INVALID',
+      message: 'Aftercare access token was not found.',
     })
   })
 
@@ -521,9 +525,10 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     )
 
     const bookingError = {
-      code: 'FORBIDDEN',
-      message: 'Selected time is no longer available.',
-      userMessage: 'Selected time is no longer available.',
+      code: 'TIME_NOT_AVAILABLE',
+      message: 'Requested time is no longer available.',
+      userMessage:
+        'That time is no longer available. Please refresh and select a different slot.',
     }
 
     mocks.createClientRebookedBookingFromAftercare.mockRejectedValueOnce(
@@ -531,11 +536,12 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     )
     mocks.isBookingError.mockReturnValueOnce(true)
     mocks.getBookingFailPayload.mockReturnValueOnce({
-      httpStatus: 403,
-      userMessage: 'Selected time is no longer available.',
+      httpStatus: 409,
+      userMessage:
+        'That time is no longer available. Please refresh and select a different slot.',
       extra: {
-        code: 'FORBIDDEN',
-        message: 'Selected time is no longer available.',
+        code: 'TIME_NOT_AVAILABLE',
+        message: 'Requested time is no longer available.',
       },
     })
 
@@ -546,12 +552,22 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       makeCtx('token_1'),
     )
 
-    expect(response.status).toBe(403)
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'TIME_NOT_AVAILABLE',
+      {
+        message: 'Requested time is no longer available.',
+        userMessage:
+          'That time is no longer available. Please refresh and select a different slot.',
+      },
+    )
+
+    expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      error: 'Selected time is no longer available.',
-      code: 'FORBIDDEN',
-      message: 'Selected time is no longer available.',
+      error:
+        'That time is no longer available. Please refresh and select a different slot.',
+      code: 'TIME_NOT_AVAILABLE',
+      message: 'Requested time is no longer available.',
     })
   })
 

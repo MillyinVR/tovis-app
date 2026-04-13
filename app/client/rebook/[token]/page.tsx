@@ -1,7 +1,12 @@
-// app/client/rebook/[token]/page.tsx
+import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { BookingSource, BookingStatus } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  BookingSource,
+  BookingStatus,
+} from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import {
@@ -24,47 +29,59 @@ type PageProps = {
 }
 
 type RebookInfo =
-  | { mode: 'BOOKED_NEXT_APPOINTMENT'; label: string; bookedAt: Date }
+  | {
+      mode: 'BOOKED_NEXT_APPOINTMENT'
+      label: string
+      bookedAt: Date
+    }
   | {
       mode: 'RECOMMENDED_WINDOW'
       label: string
       windowStart: Date
       windowEnd: Date
     }
-  | { mode: 'RECOMMENDED_DATE'; label: string; recommendedAt: Date }
-  | { mode: 'NONE'; label: null }
+  | {
+      mode: 'NONE'
+      label: null
+    }
 
-function toDate(v: unknown): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(String(v))
-  return Number.isNaN(d.getTime()) ? null : d
+function toDate(value: unknown): Date | null {
+  if (!value) return null
+  const parsed = value instanceof Date ? value : new Date(String(value))
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
-function pickSearchParam(v: string | string[] | undefined): string | null {
-  if (Array.isArray(v)) return pickString(v[0] ?? null)
-  return pickString(v ?? null)
+function pickSearchParam(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return pickString(value[0] ?? null)
+  return pickString(value ?? null)
 }
 
-function formatMoneyFromUnknown(v: unknown): string | null {
-  if (v == null) return null
+function formatMoneyFromUnknown(value: unknown): string | null {
+  if (value == null) return null
 
-  if (typeof v === 'number' && Number.isFinite(v)) {
-    return `$${v.toFixed(2)}`
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `$${value.toFixed(2)}`
   }
 
-  if (typeof v === 'string') {
-    const s = v.trim()
-    if (!s) return null
-    const n = Number(s)
-    if (Number.isFinite(n)) return `$${n.toFixed(2)}`
-    return s.startsWith('$') ? s : `$${s}`
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) {
+      return `$${parsed.toFixed(2)}`
+    }
+
+    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
   }
 
-  if (typeof v === 'object' && v !== null) {
-    const maybeToString = v.toString
+  if (typeof value === 'object' && value !== null) {
+    const maybeToString = value.toString
     if (typeof maybeToString === 'function') {
-      const result = maybeToString.call(v)
-      if (typeof result === 'string') return formatMoneyFromUnknown(result)
+      const rendered = maybeToString.call(value)
+      if (typeof rendered === 'string') {
+        return formatMoneyFromUnknown(rendered)
+      }
     }
   }
 
@@ -73,74 +90,73 @@ function formatMoneyFromUnknown(v: unknown): string | null {
 
 function computeRebookInfo(
   aftercare: {
-    rebookMode: string
+    rebookMode: AftercareRebookMode
     rebookedFor: Date | null
     rebookWindowStart: Date | null
     rebookWindowEnd: Date | null
   },
   timeZone: string,
 ): RebookInfo {
-  const mode = String(aftercare.rebookMode || '').toUpperCase()
-
-  if (mode === 'BOOKED_NEXT_APPOINTMENT') {
-    const d = toDate(aftercare.rebookedFor)
-    if (!d) return { mode: 'NONE', label: null }
-
-    return {
-      mode: 'BOOKED_NEXT_APPOINTMENT',
-      label: `Next appointment booked: ${formatAppointmentWhen(d, timeZone)}`,
-      bookedAt: d,
-    }
-  }
-
-  if (mode === 'RECOMMENDED_WINDOW') {
-    const s = toDate(aftercare.rebookWindowStart)
-    const e = toDate(aftercare.rebookWindowEnd)
-
-    if (s && e) {
+  if (aftercare.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
+    const bookedAt = toDate(aftercare.rebookedFor)
+    if (!bookedAt) {
       return {
-        mode: 'RECOMMENDED_WINDOW',
-        label: `Recommended rebook window: ${formatRangeInTimeZone(
-          s,
-          e,
-          timeZone,
-        )}`,
-        windowStart: s,
-        windowEnd: e,
+        mode: 'NONE',
+        label: null,
       }
     }
 
-    return { mode: 'NONE', label: null }
-  }
-
-  const legacy = toDate(aftercare.rebookedFor)
-  if (legacy) {
     return {
-      mode: 'RECOMMENDED_DATE',
-      label: `Recommended next visit: ${formatAppointmentWhen(
-        legacy,
-        timeZone,
-      )}`,
-      recommendedAt: legacy,
+      mode: 'BOOKED_NEXT_APPOINTMENT',
+      label: `Next appointment booked: ${formatAppointmentWhen(bookedAt, timeZone)}`,
+      bookedAt,
     }
   }
 
-  return { mode: 'NONE', label: null }
+  if (aftercare.rebookMode === AftercareRebookMode.RECOMMENDED_WINDOW) {
+    const windowStart = toDate(aftercare.rebookWindowStart)
+    const windowEnd = toDate(aftercare.rebookWindowEnd)
+
+    if (!windowStart || !windowEnd) {
+      return {
+        mode: 'NONE',
+        label: null,
+      }
+    }
+
+    return {
+      mode: 'RECOMMENDED_WINDOW',
+      label: `Recommended rebook window: ${formatRangeInTimeZone(
+        windowStart,
+        windowEnd,
+        timeZone,
+      )}`,
+      windowStart,
+      windowEnd,
+    }
+  }
+
+  return {
+    mode: 'NONE',
+    label: null,
+  }
 }
 
 function statusLabel(value: BookingStatus | string | null | undefined): string {
-  const s = typeof value === 'string' ? value.trim().toUpperCase() : ''
-  if (s === 'PENDING') return 'Pending'
-  if (s === 'ACCEPTED') return 'Accepted'
-  if (s === 'COMPLETED') return 'Completed'
-  if (s === 'CANCELLED') return 'Cancelled'
-  return s || 'Unknown'
+  const normalized =
+    typeof value === 'string' ? value.trim().toUpperCase() : ''
+
+  if (normalized === 'PENDING') return 'Pending'
+  if (normalized === 'ACCEPTED') return 'Accepted'
+  if (normalized === 'COMPLETED') return 'Completed'
+  if (normalized === 'CANCELLED') return 'Cancelled'
+  return normalized || 'Unknown'
 }
 
 function SectionCard(props: {
   title: string
   subtitle?: string | null
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
@@ -153,10 +169,117 @@ function SectionCard(props: {
   )
 }
 
+function buildBaseBookParams(args: {
+  routeToken: string
+  bookingId: string
+}): URLSearchParams {
+  return new URLSearchParams({
+    source: 'AFTERCARE',
+    token: args.routeToken,
+    rebookOfBookingId: args.bookingId,
+  })
+}
+
+function applyRebookRecommendationParams(args: {
+  params: URLSearchParams
+  rebookInfo: RebookInfo
+  recommendedAtFromUrl: string | null
+  windowStartFromUrl: string | null
+  windowEndFromUrl: string | null
+}): URLSearchParams {
+  const {
+    params,
+    rebookInfo,
+    recommendedAtFromUrl,
+    windowStartFromUrl,
+    windowEndFromUrl,
+  } = args
+
+  if (recommendedAtFromUrl) {
+    params.set('recommendedAt', recommendedAtFromUrl)
+  }
+
+  if (windowStartFromUrl) {
+    params.set('windowStart', windowStartFromUrl)
+  }
+
+  if (windowEndFromUrl) {
+    params.set('windowEnd', windowEndFromUrl)
+  }
+
+  const hasExplicitUrlOverrides =
+    Boolean(recommendedAtFromUrl) ||
+    Boolean(windowStartFromUrl) ||
+    Boolean(windowEndFromUrl)
+
+  if (hasExplicitUrlOverrides) {
+    return params
+  }
+
+  if (rebookInfo.mode === 'RECOMMENDED_WINDOW') {
+    params.set('windowStart', rebookInfo.windowStart.toISOString())
+    params.set('windowEnd', rebookInfo.windowEnd.toISOString())
+  }
+
+  return params
+}
+
+async function getActiveOfferingId(args: {
+  professionalId: string
+  serviceId: string | null
+  offeringId: string | null
+}): Promise<string | null> {
+  const explicitOfferingId = pickString(args.offeringId)
+  if (explicitOfferingId) {
+    return explicitOfferingId
+  }
+
+  if (!args.serviceId) {
+    return null
+  }
+
+  const fallbackOffering = await prisma.professionalServiceOffering.findFirst({
+    where: {
+      professionalId: args.professionalId,
+      serviceId: args.serviceId,
+      isActive: true,
+    },
+    select: { id: true },
+  })
+
+  return fallbackOffering?.id ?? null
+}
+
+async function getNextAftercareBooking(args: {
+  bookingId: string
+}): Promise<{
+  id: string
+  scheduledFor: Date
+  status: BookingStatus
+} | null> {
+  try {
+    return await prisma.booking.findFirst({
+      where: {
+        rebookOfBookingId: args.bookingId,
+        source: BookingSource.AFTERCARE,
+        status: { not: BookingStatus.CANCELLED },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      select: {
+        id: true,
+        scheduledFor: true,
+        status: true,
+      },
+    })
+  } catch {
+    return null
+  }
+}
+
 export default async function ClientRebookFromAftercarePage(props: PageProps) {
   const resolvedParams = await Promise.resolve(props.params)
-  const publicToken = pickString(resolvedParams?.token)
-  if (!publicToken) notFound()
+  const routeToken = pickString(resolvedParams?.token)
+  if (!routeToken) notFound()
 
   const resolvedSearchParams =
     (await Promise.resolve(props.searchParams).catch(() => undefined)) ?? {}
@@ -170,7 +293,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   let resolved: Awaited<ReturnType<typeof resolveAftercareAccessByToken>>
   try {
     resolved = await resolveAftercareAccessByToken({
-      rawToken: publicToken,
+      rawToken: routeToken,
     })
   } catch (error) {
     if (isBookingError(error)) notFound()
@@ -179,19 +302,19 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
 
   const booking = resolved.booking
   const aftercare = resolved.aftercare
+  const accessToken = resolved.token
 
-  const appointmentTz = sanitizeTimeZone(
+  const appointmentTimeZone = sanitizeTimeZone(
     booking.professional?.timeZone ?? 'UTC',
     'UTC',
   )
 
   const serviceTitle = booking.service?.name || 'Service'
-  const proLabel =
+  const professionalLabel =
     booking.professional?.businessName || 'your professional'
-  const proId = booking.professional?.id || booking.professionalId
+  const professionalId = booking.professional?.id || booking.professionalId
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
-  const locationLabel =
-    booking.professional?.location?.trim() || null
+  const locationLabel = booking.professional?.location?.trim() || null
 
   const rebookInfo = computeRebookInfo(
     {
@@ -200,67 +323,29 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
       rebookWindowStart: aftercare.rebookWindowStart,
       rebookWindowEnd: aftercare.rebookWindowEnd,
     },
-    appointmentTz,
+    appointmentTimeZone,
   )
 
-  let offeringId = pickString(booking.offeringId)
-  if (!offeringId && booking.serviceId) {
-    const fallbackOffering = await prisma.professionalServiceOffering.findFirst({
-      where: {
-        professionalId: booking.professionalId,
-        serviceId: booking.serviceId,
-        isActive: true,
-      },
-      select: { id: true },
-    })
-
-    offeringId = fallbackOffering?.id ?? null
-  }
-
-  let nextBooking: {
-    id: string
-    scheduledFor: Date
-    status: BookingStatus
-  } | null = null
-
-  try {
-    nextBooking = await prisma.booking.findFirst({
-      where: {
-        rebookOfBookingId: booking.id,
-        source: BookingSource.AFTERCARE,
-        status: { not: BookingStatus.CANCELLED },
-      },
-      orderBy: { scheduledFor: 'asc' },
-      select: {
-        id: true,
-        scheduledFor: true,
-        status: true,
-      },
-    })
-  } catch {
-    nextBooking = null
-  }
-
-  const baseParams = new URLSearchParams({
-    source: 'AFTERCARE',
-    token: publicToken,
-    rebookOfBookingId: booking.id,
+  const offeringId = await getActiveOfferingId({
+    professionalId: booking.professionalId,
+    serviceId: booking.serviceId,
+    offeringId: booking.offeringId,
   })
 
-  const bookParams = new URLSearchParams(baseParams)
+  const nextBooking = await getNextAftercareBooking({
+    bookingId: booking.id,
+  })
 
-  if (recommendedAtFromUrl) bookParams.set('recommendedAt', recommendedAtFromUrl)
-  if (windowStartFromUrl) bookParams.set('windowStart', windowStartFromUrl)
-  if (windowEndFromUrl) bookParams.set('windowEnd', windowEndFromUrl)
-
-  if (!recommendedAtFromUrl && !windowStartFromUrl && !windowEndFromUrl) {
-    if (rebookInfo.mode === 'RECOMMENDED_DATE') {
-      bookParams.set('recommendedAt', rebookInfo.recommendedAt.toISOString())
-    } else if (rebookInfo.mode === 'RECOMMENDED_WINDOW') {
-      bookParams.set('windowStart', rebookInfo.windowStart.toISOString())
-      bookParams.set('windowEnd', rebookInfo.windowEnd.toISOString())
-    }
-  }
+  const bookParams = applyRebookRecommendationParams({
+    params: buildBaseBookParams({
+      routeToken,
+      bookingId: booking.id,
+    }),
+    rebookInfo,
+    recommendedAtFromUrl,
+    windowStartFromUrl,
+    windowEndFromUrl,
+  })
 
   const bookHref = offeringId
     ? `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
@@ -268,15 +353,14 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
 
   const sourceAppointmentLabel = formatAppointmentWhen(
     booking.scheduledFor,
-    appointmentTz,
+    appointmentTimeZone,
   )
 
   const nextBookingLabel = nextBooking
-    ? formatAppointmentWhen(nextBooking.scheduledFor, appointmentTz)
+    ? formatAppointmentWhen(nextBooking.scheduledFor, appointmentTimeZone)
     : null
 
-  const subtotalLabel =
-    formatMoneyFromUnknown(booking.subtotalSnapshot) || null
+  const subtotalLabel = formatMoneyFromUnknown(booking.subtotalSnapshot)
 
   return (
     <main className="mx-auto w-full max-w-[720px] px-4 pb-14 pt-16 text-textPrimary">
@@ -289,15 +373,15 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
 
         <div className="mt-2 text-sm text-textSecondary">
           With{' '}
-          {proId ? (
+          {professionalId ? (
             <Link
-              href={`/professionals/${encodeURIComponent(proId)}`}
+              href={`/professionals/${encodeURIComponent(professionalId)}`}
               className="font-black hover:underline underline-offset-4"
             >
-              {proLabel}
+              {professionalLabel}
             </Link>
           ) : (
-            <span className="font-black">{proLabel}</span>
+            <span className="font-black">{professionalLabel}</span>
           )}
           {locationLabel ? (
             <span className="opacity-80"> · {locationLabel}</span>
@@ -309,11 +393,11 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           <span className="font-black text-textPrimary">
             {sourceAppointmentLabel}
           </span>
-          <span className="opacity-70"> · {appointmentTz}</span>
+          <span className="opacity-70"> · {appointmentTimeZone}</span>
         </div>
 
         <div className="mt-2 text-xs text-textSecondary/80">
-          No account required to view aftercare and rebook from this link.
+          No account required to view aftercare and rebook from this secure link.
         </div>
       </header>
 
@@ -341,12 +425,14 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 {statusLabel(booking.status)}
               </span>
             </div>
+
             <div>
               Duration:{' '}
               <span className="font-black text-textPrimary">
                 {booking.totalDurationMinutes} min
               </span>
             </div>
+
             {subtotalLabel ? (
               <div>
                 Total:{' '}
@@ -362,7 +448,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           {rebookInfo.label ? (
             <div className="text-sm text-textSecondary">
               {rebookInfo.label}{' '}
-              <span className="opacity-70">· {appointmentTz}</span>
+              <span className="opacity-70">· {appointmentTimeZone}</span>
             </div>
           ) : (
             <div className="text-sm text-textSecondary/75">
@@ -375,10 +461,12 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
               <div className="text-sm font-black text-textPrimary">
                 Your next appointment is already booked
               </div>
+
               <div className="mt-1 text-sm text-textSecondary">
                 {nextBookingLabel ? `${nextBookingLabel} · ` : null}
                 {statusLabel(nextBooking.status)}
               </div>
+
               <div className="mt-3 text-xs text-textSecondary/75">
                 This secure page avoids account-only booking screens. If you need
                 changes, contact your professional directly or claim your account
@@ -392,7 +480,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 className={cn(
                   'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black text-bgPrimary transition',
                   'bg-accentPrimary hover:bg-accentPrimaryHover',
-                  rebookInfo.mode === 'NONE' && 'opacity-70',
+                  rebookInfo.mode === AftercareRebookMode.NONE && 'opacity-70',
                 )}
               >
                 Book your next appointment
@@ -408,6 +496,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
               <div className="text-sm font-black text-textPrimary">
                 Rebooking is not available right now
               </div>
+
               <div className="mt-1 text-sm text-textSecondary">
                 We could not find an active offering for this service. Contact
                 your professional to reopen booking access.
@@ -419,26 +508,34 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
         <SectionCard title="Secure link details">
           <div className="grid gap-2 text-xs text-textSecondary/75">
             <div>
-              Access source:{' '}
+              Access type:{' '}
               <span className="font-black text-textPrimary">
-                {resolved.accessSource === 'clientActionToken'
-                  ? 'Client action token'
-                  : 'Legacy public token'}
+                Client action token
               </span>
             </div>
 
-            {resolved.token?.expiresAt ? (
-              <div>
-                Token expires:{' '}
-                <span className="font-black text-textPrimary">
-                  {resolved.token.expiresAt.toLocaleString()}
-                </span>
-              </div>
-            ) : null}
-
-            <div className="break-all">
-              /client/rebook/{publicToken}
+            <div>
+              Token expires:{' '}
+              <span className="font-black text-textPrimary">
+                {accessToken.expiresAt.toLocaleString()}
+              </span>
             </div>
+
+            <div>
+              Single use:{' '}
+              <span className="font-black text-textPrimary">
+                {accessToken.singleUse ? 'Yes' : 'No'}
+              </span>
+            </div>
+
+            <div>
+              Access count:{' '}
+              <span className="font-black text-textPrimary">
+                {accessToken.useCount}
+              </span>
+            </div>
+
+            <div className="break-all">/client/rebook/{routeToken}</div>
           </div>
         </SectionCard>
       </div>

@@ -51,17 +51,32 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 import { GET, POST } from './route'
 
+function makeJsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+    },
+  })
+}
+
 function makeCtx(id = 'booking_1') {
   return {
     params: Promise.resolve({ id }),
   }
 }
 
-function makeRequest(body?: unknown): Request {
+function makeRequest(args?: {
+  body?: unknown
+  headers?: Record<string, string>
+}): Request {
   return new Request('http://localhost/api/pro/bookings/booking_1/aftercare', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: {
+      'content-type': 'application/json',
+      ...(args?.headers ?? {}),
+    },
+    body: args?.body === undefined ? undefined : JSON.stringify(args.body),
   })
 }
 
@@ -158,7 +173,7 @@ function makeUpsertResult(overrides?: {
       lastEditedAt: new Date('2026-04-12T20:08:00.000Z'),
       version: 4,
     },
-    remindersTouched: true,
+    remindersTouched: 1,
     clientNotified: true,
     timeZoneUsed: 'America/Los_Angeles',
     bookingFinished: overrides?.bookingFinished ?? true,
@@ -185,19 +200,21 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
 
     mocks.jsonFail.mockImplementation(
-      (status: number, error: string, extra?: Record<string, unknown>) => ({
-        ok: false,
-        status,
-        error,
-        ...(extra ?? {}),
-      }),
+      (status: number, error: string, extra?: Record<string, unknown>) =>
+        makeJsonResponse(status, {
+          ok: false,
+          error,
+          ...(extra ?? {}),
+        }),
     )
 
-    mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
-      ok: true,
-      status,
-      data,
-    }))
+    mocks.jsonOk.mockImplementation(
+      (data: Record<string, unknown>, status = 200) =>
+        makeJsonResponse(status, {
+          ok: true,
+          ...(data ?? {}),
+        }),
+    )
 
     mocks.pickString.mockImplementation((value: unknown) => {
       if (typeof value !== 'string') return null
@@ -221,8 +238,19 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
         code: string,
         overrides?: { message?: string; userMessage?: string },
       ) => ({
-        httpStatus: code === 'FORBIDDEN' ? 403 : 409,
-        userMessage: overrides?.userMessage ?? overrides?.message ?? code,
+        httpStatus:
+          code === 'BOOKING_NOT_FOUND'
+            ? 404
+            : code === 'FORBIDDEN'
+              ? 403
+              : 409,
+        userMessage:
+          overrides?.userMessage ??
+          (code === 'BOOKING_NOT_FOUND'
+            ? 'Booking not found.'
+            : code === 'FORBIDDEN'
+              ? 'Forbidden.'
+              : code),
         extra: {
           code,
           ...(overrides?.message ? { message: overrides.message } : {}),
@@ -235,7 +263,11 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
   })
 
   it('GET returns auth response when requirePro fails', async () => {
-    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
+    const authRes = makeJsonResponse(401, {
+      ok: false,
+      error: 'Unauthorized',
+    })
+
     mocks.requirePro.mockResolvedValueOnce({
       ok: false,
       res: authRes,
@@ -250,39 +282,72 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
   it('GET returns 400 when booking id is missing', async () => {
     const result = await GET(new Request('http://localhost/test'), makeCtx('   '))
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing booking id.')
-    expect(result).toEqual({
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 400,
       error: 'Missing booking id.',
     })
+
+    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
   })
 
-  it('GET returns 404 when booking is not found', async () => {
+  it('GET maps BOOKING_NOT_FOUND through bookingJsonFail', async () => {
     mocks.bookingFindUnique.mockResolvedValueOnce(null)
 
     const result = await GET(new Request('http://localhost/test'), makeCtx())
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Booking not found.')
-    expect(result).toEqual({
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'BOOKING_NOT_FOUND',
+      undefined,
+    )
+
+    expect(result.status).toBe(404)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 404,
       error: 'Booking not found.',
+      code: 'BOOKING_NOT_FOUND',
     })
   })
 
-  it('GET returns 403 when booking belongs to another professional', async () => {
+  it('GET maps FORBIDDEN through bookingJsonFail when booking belongs to another professional', async () => {
     mocks.bookingFindUnique.mockResolvedValueOnce(
       makeGetBooking({ professionalId: 'pro_other' }),
     )
 
     const result = await GET(new Request('http://localhost/test'), makeCtx())
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(403, 'Forbidden.')
-    expect(result).toEqual({
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'FORBIDDEN',
+      undefined,
+    )
+
+    expect(result.status).toBe(403)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 403,
       error: 'Forbidden.',
+      code: 'FORBIDDEN',
+    })
+  })
+
+  it('GET returns null aftercareSummary when the booking has no aftercare yet', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce(
+      makeGetBooking({ aftercareSummary: null }),
+    )
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.COMPLETED,
+        sessionStep: 'AFTER_PHOTOS',
+        scheduledFor: '2026-04-12T18:00:00.000Z',
+        finishedAt: '2026-04-12T20:00:00.000Z',
+        locationTimeZone: 'America/Los_Angeles',
+        aftercareSummary: null,
+      },
     })
   })
 
@@ -294,70 +359,101 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       select: expect.any(Object),
     })
 
-    expect(result).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
-      status: 200,
-      data: {
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.COMPLETED,
-          sessionStep: 'AFTER_PHOTOS',
-          scheduledFor: '2026-04-12T18:00:00.000Z',
-          finishedAt: '2026-04-12T20:00:00.000Z',
-          locationTimeZone: 'America/Los_Angeles',
-          aftercareSummary: {
-            id: 'aftercare_1',
-            notes: 'Use a sulfate-free shampoo.',
-            rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-            rebookedFor: null,
-            rebookWindowStart: '2026-05-01T18:00:00.000Z',
-            rebookWindowEnd: '2026-05-15T18:00:00.000Z',
-            draftSavedAt: '2026-04-12T20:05:00.000Z',
-            sentToClientAt: '2026-04-12T20:10:00.000Z',
-            lastEditedAt: '2026-04-12T20:08:00.000Z',
-            version: 3,
-            isFinalized: true,
-            publicAccess: {
-              accessMode: 'SECURE_LINK',
-              hasPublicAccess: true,
-              clientAftercareHref: '/client/rebook/public_1',
-            },
-            recommendedProducts: [
-              {
-                id: 'rp_1',
-                note: 'Use twice weekly',
-                productId: 'prod_1',
-                externalName: null,
-                externalUrl: null,
-                product: {
-                  id: 'prod_1',
-                  name: 'Repair Mask',
-                  brand: 'TOVIS',
-                  retailPrice: '19.99',
-                },
-              },
-              {
-                id: 'rp_2',
-                note: 'Nightly',
-                productId: null,
-                externalName: 'Silk Pillowcase',
-                externalUrl: 'https://example.com/pillowcase',
-                product: null,
-              },
-            ],
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.COMPLETED,
+        sessionStep: 'AFTER_PHOTOS',
+        scheduledFor: '2026-04-12T18:00:00.000Z',
+        finishedAt: '2026-04-12T20:00:00.000Z',
+        locationTimeZone: 'America/Los_Angeles',
+        aftercareSummary: {
+          id: 'aftercare_1',
+          notes: 'Use a sulfate-free shampoo.',
+          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
+          rebookedFor: null,
+          rebookWindowStart: '2026-05-01T18:00:00.000Z',
+          rebookWindowEnd: '2026-05-15T18:00:00.000Z',
+          draftSavedAt: '2026-04-12T20:05:00.000Z',
+          sentToClientAt: '2026-04-12T20:10:00.000Z',
+          lastEditedAt: '2026-04-12T20:08:00.000Z',
+          version: 3,
+          isFinalized: true,
+          publicAccess: {
+            accessMode: 'SECURE_LINK',
+            hasPublicAccess: true,
+            clientAftercareHref: '/client/rebook/public_1',
           },
+          recommendedProducts: [
+            {
+              id: 'rp_1',
+              note: 'Use twice weekly',
+              productId: 'prod_1',
+              externalName: null,
+              externalUrl: null,
+              product: {
+                id: 'prod_1',
+                name: 'Repair Mask',
+                brand: 'TOVIS',
+                retailPrice: '19.99',
+              },
+            },
+            {
+              id: 'rp_2',
+              note: 'Nightly',
+              productId: null,
+              externalName: 'Silk Pillowcase',
+              externalUrl: 'https://example.com/pillowcase',
+              product: null,
+            },
+          ],
         },
       },
     })
   })
 
-  it('POST returns 400 for invalid request body', async () => {
-    const result = await POST(makeRequest([]), makeCtx())
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Invalid request body.')
-    expect(result).toEqual({
+  it('POST returns auth response when requirePro fails', async () => {
+    const authRes = makeJsonResponse(401, {
       ok: false,
-      status: 400,
+      error: 'Unauthorized',
+    })
+
+    mocks.requirePro.mockResolvedValueOnce({
+      ok: false,
+      res: authRes,
+    })
+
+    const result = await POST(makeRequest({ body: {} }), makeCtx())
+
+    expect(result).toBe(authRes)
+    expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
+  })
+
+  it('POST returns 400 when booking id is missing', async () => {
+    const result = await POST(
+      makeRequest({
+        body: { rebookMode: AftercareRebookMode.NONE },
+      }),
+      makeCtx('   '),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Missing booking id.',
+    })
+
+    expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
+  })
+
+  it('POST returns 400 for invalid request body', async () => {
+    const result = await POST(makeRequest({ body: [] }), makeCtx())
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
       error: 'Invalid request body.',
     })
 
@@ -367,24 +463,22 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
   it('POST returns 400 for invalid recommendedProducts payload', async () => {
     const result = await POST(
       makeRequest({
-        notes: 'hello',
-        recommendedProducts: [
-          {
-            productId: 'prod_1',
-            externalName: 'Also external',
-          },
-        ],
+        body: {
+          notes: 'hello',
+          recommendedProducts: [
+            {
+              productId: 'prod_1',
+              externalName: 'Also external',
+            },
+          ],
+        },
       }),
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'Each recommended product must be either an internal product or an external link, not both.',
-    )
-    expect(result).toEqual({
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 400,
       error:
         'Each recommended product must be either an internal product or an external link, not both.',
     })
@@ -392,18 +486,19 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
   })
 
-  it('POST returns 400 for invalid rebook mode', async () => {
+  it('POST returns 400 for invalid rebookMode', async () => {
     const result = await POST(
       makeRequest({
-        rebookMode: 'SOMETHING_WILD',
+        body: {
+          rebookMode: 'SOMETHING_WILD',
+        },
       }),
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Invalid rebookMode.')
-    expect(result).toEqual({
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 400,
       error: 'Invalid rebookMode.',
     })
 
@@ -413,51 +508,55 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
   it('POST returns 400 for invalid rebook date combination', async () => {
     const result = await POST(
       makeRequest({
-        rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-        rebookWindowStart: '2026-05-15T18:00:00.000Z',
-        rebookWindowEnd: '2026-05-01T18:00:00.000Z',
+        body: {
+          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
+          rebookWindowStart: '2026-05-15T18:00:00.000Z',
+          rebookWindowEnd: '2026-05-01T18:00:00.000Z',
+        },
       }),
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'rebookWindowEnd must be after rebookWindowStart.',
-    )
-    expect(result).toEqual({
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 400,
       error: 'rebookWindowEnd must be after rebookWindowStart.',
     })
 
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
   })
 
-  it('POST calls upsertBookingAftercare with normalized values and returns secure public access payload', async () => {
+  it('POST calls upsertBookingAftercare with normalized values and forwarded request metadata', async () => {
     const result = await POST(
       makeRequest({
-        notes: '  Use cool water.  ',
-        sendToClient: true,
-        rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-        rebookWindowStart: '2026-05-01T18:00:00.000Z',
-        rebookWindowEnd: '2026-05-15T18:00:00.000Z',
-        createRebookReminder: true,
-        rebookReminderDaysBefore: 99,
-        createProductReminder: 'true',
-        productReminderDaysAfter: 0,
-        recommendedProducts: [
-          {
-            productId: 'prod_1',
-            note: '  Use twice weekly  ',
-          },
-          {
-            externalName: 'Silk Pillowcase',
-            externalUrl: 'https://example.com/pillowcase',
-            note: '  Nightly  ',
-          },
-        ],
-        timeZone: 'America/Los_Angeles',
-        version: 2,
+        headers: {
+          'x-request-id': 'req_1',
+          'idempotency-key': 'idem_1',
+        },
+        body: {
+          notes: '  Use cool water.  ',
+          sendToClient: true,
+          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
+          rebookWindowStart: '2026-05-01T18:00:00.000Z',
+          rebookWindowEnd: '2026-05-15T18:00:00.000Z',
+          createRebookReminder: true,
+          rebookReminderDaysBefore: 99,
+          createProductReminder: 'true',
+          productReminderDaysAfter: 0,
+          recommendedProducts: [
+            {
+              productId: 'prod_1',
+              note: '  Use twice weekly  ',
+            },
+            {
+              externalName: 'Silk Pillowcase',
+              externalUrl: 'https://example.com/pillowcase',
+              note: '  Nightly  ',
+            },
+          ],
+          timeZone: 'America/Los_Angeles',
+          version: 2,
+        },
       }),
       makeCtx(),
     )
@@ -490,47 +589,84 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       ],
       sendToClient: true,
       version: 2,
+      requestId: 'req_1',
+      idempotencyKey: 'idem_1',
     })
 
-    expect(result).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
-      status: 200,
-      data: {
-        aftercare: {
-          id: 'aftercare_1',
-          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-          rebookedFor: null,
-          rebookWindowStart: '2026-05-01T18:00:00.000Z',
-          rebookWindowEnd: '2026-05-15T18:00:00.000Z',
-          draftSavedAt: '2026-04-12T20:05:00.000Z',
-          sentToClientAt: '2026-04-12T20:10:00.000Z',
-          lastEditedAt: '2026-04-12T20:08:00.000Z',
-          version: 4,
-          isFinalized: true,
-          publicAccess: {
-            accessMode: 'SECURE_LINK',
-            hasPublicAccess: true,
-            clientAftercareHref: '/client/rebook/public_1',
-          },
+      aftercare: {
+        id: 'aftercare_1',
+        rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
+        rebookedFor: null,
+        rebookWindowStart: '2026-05-01T18:00:00.000Z',
+        rebookWindowEnd: '2026-05-15T18:00:00.000Z',
+        draftSavedAt: '2026-04-12T20:05:00.000Z',
+        sentToClientAt: '2026-04-12T20:10:00.000Z',
+        lastEditedAt: '2026-04-12T20:08:00.000Z',
+        version: 4,
+        isFinalized: true,
+        publicAccess: {
+          accessMode: 'SECURE_LINK',
+          hasPublicAccess: true,
+          clientAftercareHref: '/client/rebook/public_1',
         },
-        remindersTouched: true,
-        clientNotified: true,
-        timeZoneUsed: 'America/Los_Angeles',
-        clientTimeZoneReceived: 'America/Los_Angeles',
-        bookingFinished: true,
-        booking: {
-          status: BookingStatus.COMPLETED,
-          sessionStep: 'DONE',
-          finishedAt: '2026-04-12T20:00:00.000Z',
-        },
-        redirectTo: '/pro/calendar',
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
+      },
+      remindersTouched: 1,
+      clientNotified: true,
+      timeZoneUsed: 'America/Los_Angeles',
+      clientTimeZoneReceived: 'America/Los_Angeles',
+      bookingFinished: true,
+      booking: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: 'DONE',
+        finishedAt: '2026-04-12T20:00:00.000Z',
+      },
+      redirectTo: '/pro/calendar',
+      meta: {
+        mutated: true,
+        noOp: false,
       },
     })
   })
+
+  it('POST returns null clientTimeZoneReceived when the submitted time zone is invalid', async () => {
+  const result = await POST(
+    makeRequest({
+      body: {
+        rebookMode: AftercareRebookMode.NONE,
+        timeZone: 'Mars/Olympus_Mons',
+      },
+    }),
+    makeCtx(),
+  )
+
+  expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith({
+    bookingId: 'booking_1',
+    professionalId: 'pro_1',
+    notes: null,
+    rebookMode: AftercareRebookMode.NONE,
+    rebookedFor: null,
+    rebookWindowStart: null,
+    rebookWindowEnd: null,
+    createRebookReminder: false,
+    rebookReminderDaysBefore: 2,
+    createProductReminder: false,
+    productReminderDaysAfter: 7,
+    recommendedProducts: [],
+    sendToClient: false,
+    version: null,
+    requestId: null,
+    idempotencyKey: null,
+  })
+
+  expect(result.status).toBe(200)
+  await expect(result.json()).resolves.toMatchObject({
+    ok: true,
+    clientTimeZoneReceived: null,
+  })
+})
 
   it('POST maps BookingError through bookingJsonFail', async () => {
     mocks.upsertBookingAftercare.mockRejectedValueOnce({
@@ -550,7 +686,9 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
 
     const result = await POST(
       makeRequest({
-        rebookMode: AftercareRebookMode.NONE,
+        body: {
+          rebookMode: AftercareRebookMode.NONE,
+        },
       }),
       makeCtx(),
     )
@@ -560,9 +698,9 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       userMessage: 'Not allowed.',
     })
 
-    expect(result).toEqual({
+    expect(result.status).toBe(403)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 403,
       error: 'Not allowed.',
       code: 'FORBIDDEN',
       message: 'Not allowed.',
@@ -574,15 +712,16 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
 
     const result = await POST(
       makeRequest({
-        rebookMode: AftercareRebookMode.NONE,
+        body: {
+          rebookMode: AftercareRebookMode.NONE,
+        },
       }),
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error.')
-    expect(result).toEqual({
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
-      status: 500,
       error: 'Internal server error.',
     })
   })
