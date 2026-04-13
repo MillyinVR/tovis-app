@@ -6,6 +6,7 @@ import {
   BookingServiceItemType,
   BookingStatus,
   ConsultationApprovalStatus,
+  ContactMethod,
   NotificationEventKey,
   Prisma,
   SessionStep,
@@ -16,6 +17,7 @@ import {
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
+import { createConsultationActionDelivery } from '@/lib/clientActions/createConsultationActionDelivery'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,6 +71,39 @@ type TxOk = {
 }
 
 type TxResult = TxFail | TxOk
+
+type ConsultationActionDeliverySummary = {
+  attempted: boolean
+  queued: boolean
+  href: string | null
+}
+
+const CONSULTATION_DELIVERY_BOOKING_SELECT = {
+  id: true,
+  professionalId: true,
+  clientId: true,
+  clientTimeZoneAtBooking: true,
+  locationTimeZone: true,
+  client: {
+    select: {
+      id: true,
+      userId: true,
+      email: true,
+      phone: true,
+      preferredContactMethod: true,
+      user: {
+        select: {
+          email: true,
+          phone: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type ConsultationDeliveryBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof CONSULTATION_DELIVERY_BOOKING_SELECT
+}>
 
 function parseMoneyToCents(v: unknown): number | null {
   if (v == null) return null
@@ -153,7 +188,9 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value ?? null)
 }
 
-function normalizeDecimalText(value: Prisma.Decimal | null | undefined): string | null {
+function normalizeDecimalText(
+  value: Prisma.Decimal | null | undefined,
+): string | null {
   return value ? value.toFixed(2) : null
 }
 
@@ -162,6 +199,43 @@ function readHeaderValue(req: Request, name: string): string | null {
   if (!value) return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function trimmedString(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function pickFirstNonEmpty(
+  ...values: Array<string | null | undefined>
+): string | null {
+  for (const value of values) {
+    const normalized = trimmedString(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function inferPreferredContactMethod(args: {
+  email: string | null
+  phone: string | null
+  existingPreference: ContactMethod | null | undefined
+}): ContactMethod | null {
+  if (args.existingPreference) return args.existingPreference
+  if (args.email && !args.phone) return ContactMethod.EMAIL
+  if (args.phone && !args.email) return ContactMethod.SMS
+  return null
+}
+
+function resolveConsultationRecipientTimeZone(
+  booking: ConsultationDeliveryBookingRecord,
+): string | null {
+  return (
+    trimmedString(booking.clientTimeZoneAtBooking) ??
+    trimmedString(booking.locationTimeZone) ??
+    null
+  )
 }
 
 function buildConsultationProposalAuditSnapshot(args: {
@@ -254,6 +328,111 @@ function canProSendProposal(step: SessionStep | null): boolean {
     step === SessionStep.CONSULTATION ||
     step === SessionStep.CONSULTATION_PENDING_CLIENT
   )
+}
+
+async function maybeQueueConsultationActionDelivery(args: {
+  bookingId: string
+  professionalId: string
+  consultationApprovalId: string
+  shouldAttempt: boolean
+}): Promise<ConsultationActionDeliverySummary> {
+  if (!args.shouldAttempt) {
+    return {
+      attempted: false,
+      queued: false,
+      href: null,
+    }
+  }
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: args.bookingId },
+    select: CONSULTATION_DELIVERY_BOOKING_SELECT,
+  })
+
+  if (!booking || booking.professionalId !== args.professionalId) {
+    console.error(
+      'POST /api/pro/bookings/[id]/consultation-proposal delivery context lookup failed',
+      {
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        consultationApprovalId: args.consultationApprovalId,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
+
+  const recipientEmail = pickFirstNonEmpty(
+    booking.client.email,
+    booking.client.user?.email ?? null,
+  )
+  const recipientPhone = pickFirstNonEmpty(
+    booking.client.phone,
+    booking.client.user?.phone ?? null,
+  )
+
+  if (!recipientEmail && !recipientPhone) {
+    console.error(
+      'POST /api/pro/bookings/[id]/consultation-proposal delivery skipped: no client destination',
+      {
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        consultationApprovalId: args.consultationApprovalId,
+        clientId: booking.clientId,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
+
+  try {
+    const delivery = await createConsultationActionDelivery({
+      professionalId: args.professionalId,
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      consultationApprovalId: args.consultationApprovalId,
+      recipientUserId: booking.client.userId ?? null,
+      recipientEmail,
+      recipientPhone,
+      preferredContactMethod: inferPreferredContactMethod({
+        email: recipientEmail,
+        phone: recipientPhone,
+        existingPreference: booking.client.preferredContactMethod,
+      }),
+      recipientTimeZone: resolveConsultationRecipientTimeZone(booking),
+    })
+
+    return {
+      attempted: true,
+      queued: true,
+      href: delivery.link.href,
+    }
+  } catch (error: unknown) {
+    console.error(
+      'POST /api/pro/bookings/[id]/consultation-proposal action delivery enqueue failed',
+      {
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        consultationApprovalId: args.consultationApprovalId,
+        clientId: booking.clientId,
+        error,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
 }
 
 export async function POST(req: Request, ctx: Ctx) {
@@ -451,7 +630,8 @@ export async function POST(req: Request, ctx: Ctx) {
             return {
               ok: false,
               status: 400,
-              error: 'Proposal includes an invalid parent offering reference on an add-on.',
+              error:
+                'Proposal includes an invalid parent offering reference on an add-on.',
             }
           }
         }
@@ -604,11 +784,20 @@ export async function POST(req: Request, ctx: Ctx) {
       )
     }
 
+    const consultationActionDelivery =
+      await maybeQueueConsultationActionDelivery({
+        bookingId,
+        professionalId: proId,
+        consultationApprovalId: txResult.approval.id,
+        shouldAttempt: txResult.meta.mutated && !txResult.meta.noOp,
+      })
+
     return jsonOk(
       {
         approval: txResult.approval,
         sessionStep: txResult.sessionStep,
         proposedCents: txResult.proposedCents,
+        consultationActionDelivery,
         meta: txResult.meta,
       },
       200,
