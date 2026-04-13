@@ -625,7 +625,7 @@ export async function POST(req: Request, ctx: Ctx) {
           lastEditedAt: toIsoOrNull(result.aftercare.lastEditedAt),
           version: result.aftercare.version,
           isFinalized: Boolean(result.aftercare.sentToClientAt),
-          publicAccess: buildPublicAccess(result.aftercare.publicToken),
+          publicAccess: result.aftercare.publicAccess,
         },
         remindersTouched: result.remindersTouched,
         clientNotified: result.clientNotified,

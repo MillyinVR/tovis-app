@@ -122,7 +122,11 @@ function makeGetBooking(overrides?: {
 }
 
 function makeUpsertResult(overrides?: {
-  publicToken?: string | null
+  publicAccess?: {
+    accessMode: 'LEGACY_PUBLIC_TOKEN' | 'NONE'
+    hasPublicAccess: boolean
+    clientAftercareHref: string | null
+  }
   rebookMode?: AftercareRebookMode
   rebookedFor?: Date | null
   rebookWindowStart?: Date | null
@@ -132,10 +136,14 @@ function makeUpsertResult(overrides?: {
 }) {
   return {
     aftercare: {
-      id: 'aftercare_1',
-      publicToken:
-        overrides && 'publicToken' in overrides ? overrides.publicToken : 'public_1',
-      rebookMode:
+    id: 'aftercare_1',
+    publicAccess:
+        overrides?.publicAccess ?? {
+        accessMode: 'LEGACY_PUBLIC_TOKEN',
+        hasPublicAccess: true,
+        clientAftercareHref: '/client/rebook/public_1',
+        },
+    rebookMode:
         overrides?.rebookMode ?? AftercareRebookMode.RECOMMENDED_WINDOW,
       rebookedFor: overrides?.rebookedFor ?? null,
       rebookWindowStart:

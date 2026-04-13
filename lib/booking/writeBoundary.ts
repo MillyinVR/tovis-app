@@ -124,6 +124,12 @@ type MutationMeta = {
   noOp: boolean
 }
 
+type AftercarePublicAccessSummary = {
+  accessMode: 'LEGACY_PUBLIC_TOKEN' | 'NONE'
+  hasPublicAccess: boolean
+  clientAftercareHref: string | null
+}
+
 type CancelActor =
   | {
       kind: 'client'
@@ -721,7 +727,7 @@ type CreateClientRebookedBookingFromAftercareResult =
 type UpsertBookingAftercareResult = {
   aftercare: {
     id: string
-    publicToken: string
+    publicAccess: AftercarePublicAccessSummary
     rebookMode: AftercareRebookMode
     rebookedFor: Date | null
     rebookWindowStart: Date | null
@@ -1021,7 +1027,6 @@ const FINAL_REVIEW_BOOKING_SELECT = {
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
-      publicToken: true,
       recommendedProducts: {
         select: {
           productId: true,
@@ -1712,11 +1717,37 @@ function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
   return t >= start && t <= end
 }
 
-// Legacy Phase 4 compatibility:
-// AftercareSummary.publicToken is still active for already-issued links.
-// New public access should resolve through token helpers first.
+// Legacy compatibility only:
+// AftercareSummary.publicToken still exists for already-issued links and for
+// first-time aftercare summary creation. Service-layer return values should
+// expose publicAccess instead of the raw token.
 function newPublicToken(): string {
   return crypto.randomBytes(16).toString('hex')
+}
+
+function buildClientAftercareHref(
+  publicToken: string | null | undefined,
+): string | null {
+  const token =
+    typeof publicToken === 'string' && publicToken.trim().length > 0
+      ? publicToken.trim()
+      : null
+
+  return token
+    ? `/client/rebook/${encodeURIComponent(token)}`
+    : null
+}
+
+function buildAftercarePublicAccess(
+  publicToken: string | null | undefined,
+): AftercarePublicAccessSummary {
+  const clientAftercareHref = buildClientAftercareHref(publicToken)
+
+  return {
+    accessMode: clientAftercareHref ? 'LEGACY_PUBLIC_TOKEN' : 'NONE',
+    hasPublicAccess: Boolean(clientAftercareHref),
+    clientAftercareHref,
+  }
 }
 
 function addDaysByMs(base: Date, days: number): Date | null {
@@ -4468,8 +4499,7 @@ async function performLockedConfirmBookingFinalReview(args: {
     nextServiceSubtotal: computedSubtotal,
   })
 
-  const tokenToUse =
-    booking.aftercareSummary?.publicToken ?? newPublicToken()
+
   const now = new Date()
   const nextVersion = (booking.aftercareSummary?.version ?? 0) + 1
 
@@ -4477,7 +4507,7 @@ async function performLockedConfirmBookingFinalReview(args: {
     where: { bookingId: booking.id },
     create: {
       bookingId: booking.id,
-      publicToken: tokenToUse,
+      publicToken: newPublicToken(),
       notes: booking.aftercareSummary?.notes ?? null,
       rebookMode,
       rebookedFor,
@@ -4489,7 +4519,6 @@ async function performLockedConfirmBookingFinalReview(args: {
       version: 1,
     },
     update: {
-      publicToken: tokenToUse,
       notes: booking.aftercareSummary?.notes ?? null,
       rebookMode,
       rebookedFor,
@@ -8097,7 +8126,7 @@ if (
   return {
     aftercare: {
       id: existingAftercare.id,
-      publicToken: existingAftercare.publicToken,
+      publicAccess: buildAftercarePublicAccess(existingAftercare.publicToken),
       rebookMode: existingAftercare.rebookMode,
       rebookedFor: existingAftercare.rebookedFor,
       rebookWindowStart: existingAftercare.rebookWindowStart,
@@ -8479,18 +8508,18 @@ if (!areAuditValuesEqual(oldAftercareState, newAftercareState)) {
 }
 
 return {
-    aftercare: {
-      id: aftercare.id,
-      publicToken: aftercare.publicToken,
-      rebookMode: aftercare.rebookMode,
-      rebookedFor: aftercare.rebookedFor,
-      rebookWindowStart: aftercare.rebookWindowStart,
-      rebookWindowEnd: aftercare.rebookWindowEnd,
-      draftSavedAt: aftercare.draftSavedAt,
-      sentToClientAt: aftercare.sentToClientAt,
-      lastEditedAt: aftercare.lastEditedAt,
-      version: aftercare.version,
-    },
+  aftercare: {
+    id: aftercare.id,
+    publicAccess: buildAftercarePublicAccess(aftercare.publicToken),
+    rebookMode: aftercare.rebookMode,
+    rebookedFor: aftercare.rebookedFor,
+    rebookWindowStart: aftercare.rebookWindowStart,
+    rebookWindowEnd: aftercare.rebookWindowEnd,
+    draftSavedAt: aftercare.draftSavedAt,
+    sentToClientAt: aftercare.sentToClientAt,
+    lastEditedAt: aftercare.lastEditedAt,
+    version: aftercare.version,
+  },
     remindersTouched,
     clientNotified,
     bookingFinished,
