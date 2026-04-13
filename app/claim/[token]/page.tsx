@@ -94,8 +94,43 @@ function claimHref(token: string): string {
   return `/claim/${encodeURIComponent(token)}`
 }
 
+function buildClaimAuthParams(args: {
+  token: string
+  invitedName?: string | null
+  invitedEmail?: string | null
+  invitedPhone?: string | null
+}): string {
+  const params = new URLSearchParams()
+  const claimPath = claimHref(args.token)
+
+  params.set('from', claimPath)
+  params.set('next', claimPath)
+  params.set('role', 'CLIENT')
+  params.set('intent', 'CLAIM_INVITE')
+  params.set('inviteToken', args.token)
+
+  const invitedName = pickString(args.invitedName)
+  const invitedEmail = pickString(args.invitedEmail)
+  const invitedPhone = pickString(args.invitedPhone)
+
+  if (invitedName) params.set('name', invitedName)
+  if (invitedEmail) params.set('email', invitedEmail)
+  if (invitedPhone) params.set('phone', invitedPhone)
+
+  return params.toString()
+}
+
 function loginHref(token: string): string {
   return `/login?from=${encodeURIComponent(claimHref(token))}`
+}
+
+function signupHref(invite: ClaimInviteRecord, token: string): string {
+  return `/signup?${buildClaimAuthParams({
+    token,
+    invitedName: invite.invitedName,
+    invitedEmail: invite.invitedEmail,
+    invitedPhone: invite.invitedPhone,
+  })}`
 }
 
 function verifyHref(token: string): string {
@@ -257,6 +292,15 @@ export default async function ClaimInvitePage(props: PageProps) {
     pageState = stateFromQuery
   }
 
+  const loginLink = loginHref(token)
+  const signupLink = signupHref(invite, token)
+  const verifyLink = verifyHref(token)
+  const backToBookingHref = bookingHref(invite.booking.id)
+
+  if (!user && pageState === 'ready') {
+    redirect(signupLink)
+  }
+
   async function claimAction() {
     'use server'
 
@@ -266,7 +310,7 @@ export default async function ClaimInvitePage(props: PageProps) {
       freshUser.role !== 'CLIENT' ||
       !freshUser.clientProfile?.id
     ) {
-      redirect(loginHref(token))
+      redirect(signupLink)
     }
 
     if (freshUser.sessionKind !== 'ACTIVE' || !freshUser.isFullyVerified) {
@@ -293,7 +337,7 @@ export default async function ClaimInvitePage(props: PageProps) {
         redirect(`${claimHref(token)}?state=already-claimed`)
 
       case 'client_not_found':
-        redirect(loginHref(token))
+        redirect(signupLink)
 
       case 'client_mismatch':
         redirect(`${claimHref(token)}?state=client-mismatch`)
@@ -307,9 +351,6 @@ export default async function ClaimInvitePage(props: PageProps) {
   const professionalLabel = buildProfessionalLabel(invite.booking)
   const locationLabel = buildLocationLabel(invite.booking)
   const appointmentLabel = buildAppointmentLabel(invite.booking)
-  const loginLink = loginHref(token)
-  const verifyLink = verifyHref(token)
-  const backToBookingHref = bookingHref(invite.booking.id)
 
   return (
     <main className="mx-auto w-full max-w-[720px] px-4 pb-16 pt-16 text-textPrimary">
@@ -407,12 +448,21 @@ export default async function ClaimInvitePage(props: PageProps) {
             body="This claim link belongs to a different client identity than the one currently signed in. Use the correct client account to finish claiming this history."
             tone="warning"
           >
-            <Link
-              href={loginLink}
-              className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
-            >
-              Continue with a different account
-            </Link>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                href={loginLink}
+                className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
+              >
+                Continue with a different account
+              </Link>
+
+              <Link
+                href={signupLink}
+                className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+              >
+                Create a new client account
+              </Link>
+            </div>
           </StatusCard>
         ) : null}
 
@@ -433,15 +483,23 @@ export default async function ClaimInvitePage(props: PageProps) {
             {!user ? (
               <>
                 <div className="mt-2 text-sm text-textSecondary">
-                  Sign in as the client for this link to claim your history.
+                  We are sending you into client signup first so this history
+                  can attach to the right account.
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-3">
                   <Link
-                    href={loginLink}
+                    href={signupLink}
                     className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
                   >
-                    Sign in to continue
+                    Create client account
+                  </Link>
+
+                  <Link
+                    href={loginLink}
+                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
+                  >
+                    I already have an account
                   </Link>
                 </div>
               </>
@@ -451,12 +509,19 @@ export default async function ClaimInvitePage(props: PageProps) {
                   This link must be claimed from a client account.
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-3">
                   <Link
                     href={loginLink}
                     className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
                   >
                     Continue as client
+                  </Link>
+
+                  <Link
+                    href={signupLink}
+                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
+                  >
+                    Create a client account
                   </Link>
                 </div>
               </>
@@ -498,12 +563,19 @@ export default async function ClaimInvitePage(props: PageProps) {
                   currently signed in.
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-3">
                   <Link
                     href={loginLink}
                     className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
                   >
                     Use a different account
+                  </Link>
+
+                  <Link
+                    href={signupLink}
+                    className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+                  >
+                    Create a new client account
                   </Link>
                 </div>
               </>
