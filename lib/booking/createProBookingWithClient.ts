@@ -11,6 +11,7 @@ import {
   type ProBookingServiceAddressInput,
 } from '@/lib/booking/resolveProBookingClient'
 import { createProBooking } from '@/lib/booking/writeBoundary'
+import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
@@ -62,6 +63,13 @@ type CreateProBookingResult = Awaited<ReturnType<typeof createProBooking>>
 type CreatedInviteResult = {
   id: string
   token: string
+}
+
+type CreatedInviteDeliveryCandidate = CreatedInviteResult & {
+  invitedName: string
+  invitedEmail: string | null
+  invitedPhone: string | null
+  preferredContactMethod: ContactMethod | null
 }
 
 export type CreateProBookingWithClientResult =
@@ -135,6 +143,15 @@ function inferPreferredContactMethod(args: {
   return null
 }
 
+function toPublicInviteResult(
+  invite: CreatedInviteDeliveryCandidate,
+): CreatedInviteResult {
+  return {
+    id: invite.id,
+    token: invite.token,
+  }
+}
+
 async function loadInviteClientSnapshot(
   clientId: string,
 ): Promise<InviteClientSnapshot | null> {
@@ -148,7 +165,7 @@ async function tryCreateInvite(args: {
   professionalId: string
   bookingId: string
   clientId: string
-}): Promise<CreatedInviteResult | null> {
+}): Promise<CreatedInviteDeliveryCandidate | null> {
   const clientSnapshot = await loadInviteClientSnapshot(args.clientId)
 
   if (!clientSnapshot) {
@@ -167,6 +184,10 @@ async function tryCreateInvite(args: {
   const invitedName = buildInvitedName(clientSnapshot)
   const invitedEmail = normalizeOptionalString(clientSnapshot.email)
   const invitedPhone = normalizeOptionalString(clientSnapshot.phone)
+  const preferredContactMethod = inferPreferredContactMethod({
+    email: invitedEmail,
+    phone: invitedPhone,
+  })
 
   if (!invitedName || (!invitedEmail && !invitedPhone)) {
     return null
@@ -180,10 +201,7 @@ async function tryCreateInvite(args: {
       invitedName,
       invitedEmail,
       invitedPhone,
-      preferredContactMethod: inferPreferredContactMethod({
-        email: invitedEmail,
-        phone: invitedPhone,
-      }),
+      preferredContactMethod,
     })
 
     if (
@@ -197,6 +215,10 @@ async function tryCreateInvite(args: {
     return {
       id: createdInvite.id,
       token: createdInvite.token,
+      invitedName,
+      invitedEmail,
+      invitedPhone,
+      preferredContactMethod,
     }
   } catch (error: unknown) {
     console.error('createProBookingWithClient invite creation failed', {
@@ -206,6 +228,39 @@ async function tryCreateInvite(args: {
       error,
     })
     return null
+  }
+}
+
+async function tryEnqueueInviteDelivery(args: {
+  professionalId: string
+  actorUserId: string
+  bookingId: string
+  clientId: string
+  clientUserId: string | null
+  invite: CreatedInviteDeliveryCandidate
+}): Promise<void> {
+  try {
+    await createClientClaimInviteDelivery({
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+      bookingId: args.bookingId,
+      inviteId: args.invite.id,
+      rawToken: args.invite.token,
+      invitedName: args.invite.invitedName,
+      invitedEmail: args.invite.invitedEmail,
+      invitedPhone: args.invite.invitedPhone,
+      preferredContactMethod: args.invite.preferredContactMethod,
+      issuedByUserId: args.actorUserId,
+      recipientUserId: args.clientUserId,
+    })
+  } catch (error: unknown) {
+    console.error('createProBookingWithClient invite delivery enqueue failed', {
+      professionalId: args.professionalId,
+      bookingId: args.bookingId,
+      clientId: args.clientId,
+      inviteId: args.invite.id,
+      error,
+    })
   }
 }
 
@@ -247,18 +302,29 @@ export async function createProBookingWithClient(
     allowFarFuture: args.allowFarFuture,
   })
 
-  let invite: CreatedInviteResult | null = null
+  let inviteCandidate: CreatedInviteDeliveryCandidate | null = null
 
   if (
     shouldAutoCreateInvite({
       resolvedClientClaimStatus: resolvedClient.clientClaimStatus,
     })
   ) {
-    invite = await tryCreateInvite({
+    inviteCandidate = await tryCreateInvite({
       professionalId: args.professionalId,
       bookingId: bookingResult.booking.id,
       clientId: resolvedClient.clientId,
     })
+
+    if (inviteCandidate) {
+      await tryEnqueueInviteDelivery({
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
+        bookingId: bookingResult.booking.id,
+        clientId: resolvedClient.clientId,
+        clientUserId: resolvedClient.clientUserId,
+        invite: inviteCandidate,
+      })
+    }
   }
 
   return {
@@ -269,6 +335,6 @@ export async function createProBookingWithClient(
     clientClaimStatus: resolvedClient.clientClaimStatus,
     clientAddressId: resolvedClient.clientAddressId,
     bookingResult,
-    invite,
+    invite: inviteCandidate ? toPublicInviteResult(inviteCandidate) : null,
   }
 }

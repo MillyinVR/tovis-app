@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   createProBooking: vi.fn(),
   upsertClientClaimLink: vi.fn(),
   clientProfileFindUnique: vi.fn(),
+  createClientClaimInviteDelivery: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/resolveProBookingClient', () => ({
@@ -25,6 +26,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/clients/clientClaimLinks', () => ({
   upsertClientClaimLink: mocks.upsertClientClaimLink,
+}))
+
+vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
+  createClientClaimInviteDelivery: mocks.createClientClaimInviteDelivery,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -132,6 +137,30 @@ function makeInviteResult(overrides?: {
   }
 }
 
+function makeInviteDeliveryResult() {
+  return {
+    plan: {
+      idempotency: {
+        baseKey: 'base_1',
+        sendKey: 'send_1',
+      },
+    },
+    link: {
+      target: 'CLAIM',
+      href: '/claim/token_1',
+      tokenIncluded: true,
+    },
+    dispatch: {
+      created: true,
+      selectedChannels: [],
+      evaluations: [],
+      dispatch: {
+        id: 'dispatch_1',
+      },
+    },
+  }
+}
+
 describe('createProBookingWithClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -140,6 +169,9 @@ describe('createProBookingWithClient', () => {
     mocks.createProBooking.mockResolvedValue(makeBookingResult())
     mocks.clientProfileFindUnique.mockResolvedValue(makeInviteClientSnapshot())
     mocks.upsertClientClaimLink.mockResolvedValue(makeInviteResult())
+    mocks.createClientClaimInviteDelivery.mockResolvedValue(
+      makeInviteDeliveryResult(),
+    )
   })
 
   it('passes through resolveProBookingClient failures unchanged', async () => {
@@ -184,6 +216,7 @@ describe('createProBookingWithClient', () => {
     expect(mocks.createProBooking).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 
   it('passes normalized client and service address data to resolveProBookingClient', async () => {
@@ -310,6 +343,20 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      clientId: 'client_resolved_1',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'New Client',
+      invitedEmail: 'newclient@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      issuedByUserId: 'user_1',
+      recipientUserId: null,
+    })
+
     expect(result).toEqual({
       ok: true,
       clientId: 'client_resolved_1',
@@ -385,6 +432,20 @@ describe('createProBookingWithClient', () => {
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      clientId: 'client_existing_1',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'Existing Unclaimed',
+      invitedEmail: 'existing-unclaimed@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      issuedByUserId: 'user_1',
+      recipientUserId: null,
+    })
+
     expect(result).toEqual({
       ok: true,
       clientId: 'client_existing_1',
@@ -433,6 +494,7 @@ describe('createProBookingWithClient', () => {
 
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_claimed_1',
@@ -495,6 +557,20 @@ describe('createProBookingWithClient', () => {
       invitedEmail: 'newclient@example.com',
       invitedPhone: null,
       preferredContactMethod: ContactMethod.EMAIL,
+    })
+
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'New Client',
+      invitedEmail: 'newclient@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      issuedByUserId: 'user_1',
+      recipientUserId: null,
     })
 
     expect(result).toEqual({
@@ -563,6 +639,20 @@ describe('createProBookingWithClient', () => {
       invitedPhone: '+16195551234',
       preferredContactMethod: ContactMethod.SMS,
     })
+
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'Phone Only',
+      invitedEmail: null,
+      invitedPhone: '+16195551234',
+      preferredContactMethod: ContactMethod.SMS,
+      issuedByUserId: 'user_1',
+      recipientUserId: null,
+    })
   })
 
   it('auto-creates an invite with null preferredContactMethod when both email and phone exist in DB', async () => {
@@ -617,6 +707,20 @@ describe('createProBookingWithClient', () => {
       invitedPhone: '+16195551234',
       preferredContactMethod: null,
     })
+
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'Both Channels',
+      invitedEmail: 'both@example.com',
+      invitedPhone: '+16195551234',
+      preferredContactMethod: null,
+      issuedByUserId: 'user_1',
+      recipientUserId: null,
+    })
   })
 
   it('does not auto-create an invite when DB client profile cannot build an invited name', async () => {
@@ -660,6 +764,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',
@@ -714,6 +819,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',
@@ -775,6 +881,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',
@@ -836,6 +943,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',
@@ -888,6 +996,7 @@ describe('createProBookingWithClient', () => {
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
       expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+      expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'createProBookingWithClient invite client lookup failed',
         {
@@ -965,6 +1074,7 @@ describe('createProBookingWithClient', () => {
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
       expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
+      expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'createProBookingWithClient invite creation failed',
         expect.objectContaining({
@@ -984,6 +1094,88 @@ describe('createProBookingWithClient', () => {
         clientAddressId: null,
         bookingResult: makeBookingResult(),
         invite: null,
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
+  it('still succeeds when invite delivery enqueue throws and returns invite payload', async () => {
+    mocks.resolveProBookingClient.mockResolvedValueOnce(
+      makeResolvedClient({
+        clientId: 'client_unclaimed_1',
+        clientUserId: null,
+        clientEmail: 'newclient@example.com',
+        clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+      }),
+    )
+
+    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+      makeInviteClientSnapshot({
+        id: 'client_unclaimed_1',
+        firstName: 'New',
+        lastName: 'Client',
+        email: 'newclient@example.com',
+        phone: null,
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+      }),
+    )
+
+    mocks.createClientClaimInviteDelivery.mockRejectedValueOnce(
+      new Error('dispatch enqueue failed'),
+    )
+
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    try {
+      const result = await createProBookingWithClient({
+        professionalId: 'pro_1',
+        actorUserId: 'user_1',
+        overrideReason: null,
+        client: {
+          firstName: 'New',
+          lastName: 'Client',
+          email: 'newclient@example.com',
+        },
+        offeringId: 'offering_1',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        scheduledFor,
+        internalNotes: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: null,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+      })
+
+      expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
+      expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'createProBookingWithClient invite delivery enqueue failed',
+        expect.objectContaining({
+          professionalId: 'pro_1',
+          bookingId: 'booking_1',
+          clientId: 'client_unclaimed_1',
+          inviteId: 'invite_1',
+          error: expect.any(Error),
+        }),
+      )
+
+      expect(result).toEqual({
+        ok: true,
+        clientId: 'client_unclaimed_1',
+        clientUserId: null,
+        clientEmail: 'newclient@example.com',
+        clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+        clientAddressId: null,
+        bookingResult: makeBookingResult(),
+        invite: {
+          id: 'invite_1',
+          token: 'token_1',
+        },
       })
     } finally {
       consoleErrorSpy.mockRestore()

@@ -12,6 +12,7 @@ export type NotificationTemplateKey =
   | 'booking_cancelled_by_client'
   | 'booking_cancelled_by_pro'
   | 'booking_cancelled_by_admin'
+  | 'client_claim_invite'
   | 'consultation_proposal_sent'
   | 'consultation_approved'
   | 'consultation_rejected'
@@ -64,6 +65,11 @@ const CLIENT_IN_APP_ONLY_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.IN_APP,
 ]
 
+const CLIENT_EMAIL_SMS_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.SMS,
+  NotificationChannel.EMAIL,
+]
+
 export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.BOOKING_REQUEST_CREATED,
   NotificationEventKey.BOOKING_CONFIRMED,
@@ -71,6 +77,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
   NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
   NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+  NotificationEventKey.CLIENT_CLAIM_INVITE,
   NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
   NotificationEventKey.CONSULTATION_APPROVED,
   NotificationEventKey.CONSULTATION_REJECTED,
@@ -104,7 +111,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'booking_confirmed',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -117,7 +127,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: true,
     templateKey: 'booking_rescheduled',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -130,7 +143,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: true,
     templateKey: 'booking_cancelled_by_client',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
@@ -143,7 +159,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: true,
     templateKey: 'booking_cancelled_by_pro',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -156,10 +175,25 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: true,
     templateKey: 'booking_cancelled_by_admin',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.CLIENT_CLAIM_INVITE]: {
+    key: NotificationEventKey.CLIENT_CLAIM_INVITE,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    allowQuietHoursBypass: true,
+    templateKey: 'client_claim_invite',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
     },
   },
 
@@ -181,7 +215,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'consultation_approved',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -194,7 +231,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'consultation_rejected',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -219,7 +259,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'appointment_reminder',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -256,7 +299,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'payment_collected',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
@@ -269,7 +315,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'payment_action_required',
-    supportedRecipients: [NotificationRecipientKind.PRO, NotificationRecipientKind.CLIENT],
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
@@ -298,6 +347,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
   NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
   NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+  NotificationEventKey.CLIENT_CLAIM_INVITE,
   NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
   NotificationEventKey.CONSULTATION_APPROVED,
   NotificationEventKey.CONSULTATION_REJECTED,
@@ -318,7 +368,9 @@ export function isRecipientSupportedForEvent(
   key: NotificationEventKey,
   recipientKind: NotificationRecipientKind,
 ): boolean {
-  return getNotificationEventDefinition(key).supportedRecipients.includes(recipientKind)
+  return getNotificationEventDefinition(key).supportedRecipients.includes(
+    recipientKind,
+  )
 }
 
 export function getDefaultChannelsForRecipient(args: {

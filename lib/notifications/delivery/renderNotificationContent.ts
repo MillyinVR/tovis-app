@@ -225,6 +225,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   booking_cancelled_by_client: 'View cancellation',
   booking_cancelled_by_pro: 'View cancellation',
   booking_cancelled_by_admin: 'View cancellation',
+  client_claim_invite: 'Claim your profile',
   consultation_proposal_sent: 'Review proposal',
   consultation_approved: 'View consultation',
   consultation_rejected: 'View consultation',
@@ -240,7 +241,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   booking_request_created: buildStandardTemplateRenderer(
     templateCtaLabels.booking_request_created,
   ),
-  booking_confirmed: buildStandardTemplateRenderer(templateCtaLabels.booking_confirmed),
+  booking_confirmed: buildStandardTemplateRenderer(
+    templateCtaLabels.booking_confirmed,
+  ),
   booking_rescheduled: buildStandardTemplateRenderer(
     templateCtaLabels.booking_rescheduled,
   ),
@@ -253,6 +256,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   booking_cancelled_by_admin: buildStandardTemplateRenderer(
     templateCtaLabels.booking_cancelled_by_admin,
   ),
+  client_claim_invite: buildStandardTemplateRenderer(
+    templateCtaLabels.client_claim_invite,
+  ),
   consultation_proposal_sent: buildStandardTemplateRenderer(
     templateCtaLabels.consultation_proposal_sent,
   ),
@@ -262,25 +268,43 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   consultation_rejected: buildStandardTemplateRenderer(
     templateCtaLabels.consultation_rejected,
   ),
-  review_received: buildStandardTemplateRenderer(templateCtaLabels.review_received),
+  review_received: buildStandardTemplateRenderer(
+    templateCtaLabels.review_received,
+  ),
   appointment_reminder: buildStandardTemplateRenderer(
     templateCtaLabels.appointment_reminder,
   ),
-  aftercare_ready: buildStandardTemplateRenderer(templateCtaLabels.aftercare_ready),
+  aftercare_ready: buildStandardTemplateRenderer(
+    templateCtaLabels.aftercare_ready,
+  ),
   last_minute_opening_available: buildStandardTemplateRenderer(
     templateCtaLabels.last_minute_opening_available,
   ),
-  payment_collected: buildStandardTemplateRenderer(templateCtaLabels.payment_collected),
+  payment_collected: buildStandardTemplateRenderer(
+    templateCtaLabels.payment_collected,
+  ),
   payment_action_required: buildStandardTemplateRenderer(
     templateCtaLabels.payment_action_required,
   ),
+}
+
+function getTemplateRenderer(templateKey: NotificationTemplateKey): TemplateRendererSet {
+  const renderer = templateRenderers[templateKey]
+
+  if (!renderer) {
+    throw new Error(
+      `renderNotificationContent: missing renderer for templateKey ${templateKey}`,
+    )
+  }
+
+  return renderer
 }
 
 export function renderNotificationContent(
   args: RenderNotificationContentArgs,
 ): RenderedNotificationContent {
   const templateVersion = normalizeTemplateVersion(args.templateVersion)
-  const renderer = templateRenderers[args.templateKey]
+  const renderer = getTemplateRenderer(args.templateKey)
 
   if (args.channel === NotificationChannel.IN_APP) {
     return {
