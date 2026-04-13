@@ -1,15 +1,22 @@
-// app/(auth)/_components/signup/SignupClientClient.tsx
 'use client'
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
+import { hardNavigate } from '@/lib/clientNavigation'
 
-function sanitizePhone(v: string) {
-  return v.replace(/\s+/g, '')
+function normalizeTrimmed(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function sanitizePhone(value: string) {
+  return value.replace(/\s+/g, '')
 }
 
 function sanitizeNextUrl(nextUrl: unknown): string | null {
@@ -21,8 +28,96 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
+function readBooleanField(
+  data: Record<string, unknown> | null,
+  key: string,
+): boolean {
+  return data?.[key] === true
+}
+
+function splitFullName(fullName: string | null): {
+  firstName: string
+  lastName: string
+} {
+  if (!fullName) {
+    return { firstName: '', lastName: '' }
+  }
+
+  const parts = fullName
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  if (parts.length === 0) {
+    return { firstName: '', lastName: '' }
+  }
+
+  if (parts.length === 1) {
+    return { firstName: parts[0] ?? '', lastName: '' }
+  }
+
+  return {
+    firstName: parts[0] ?? '',
+    lastName: parts.slice(1).join(' '),
+  }
+}
+
+function appendIfPresent(
+  params: URLSearchParams,
+  key: string,
+  value: string | null,
+): void {
+  if (value) params.set(key, value)
+}
+
+function buildLoginHref(args: {
+  ti: string | null
+  from: string | null
+  next: string | null
+  intent: string | null
+  inviteToken: string | null
+  email: string | null
+  phone: string | null
+}): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'ti', args.ti)
+  appendIfPresent(params, 'from', args.from)
+  appendIfPresent(params, 'next', args.next)
+  appendIfPresent(params, 'intent', args.intent)
+  appendIfPresent(params, 'inviteToken', args.inviteToken)
+  appendIfPresent(params, 'email', args.email)
+  appendIfPresent(params, 'phone', args.phone)
+  params.set('role', 'CLIENT')
+
+  const qs = params.toString()
+  return qs ? `/login?${qs}` : '/login'
+}
+
+function buildVerifyPhoneUrl(args: {
+  nextUrl: string | null
+  emailVerificationSent: boolean
+}): string {
+  const params = new URLSearchParams()
+
+  if (args.nextUrl) {
+    params.set('next', args.nextUrl)
+  }
+
+  if (!args.emailVerificationSent) {
+    params.set('email', 'retry')
+  }
+
+  const qs = params.toString()
+  return qs ? `/verify-phone?${qs}` : '/verify-phone'
+}
+
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs font-black tracking-wide text-textSecondary">{children}</span>
+  return (
+    <span className="text-xs font-black tracking-wide text-textSecondary">
+      {children}
+    </span>
+  )
 }
 
 function HelpText({ children }: { children: React.ReactNode }) {
@@ -73,7 +168,13 @@ function PrimaryButton({
   )
 }
 
-function SecondaryLinkButton({ href, children }: { href: string; children: React.ReactNode }) {
+function SecondaryLinkButton({
+  href,
+  children,
+}: {
+  href: string
+  children: React.ReactNode
+}) {
   return (
     <Link
       href={href}
@@ -121,8 +222,12 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   const state = typeof g?.state === 'string' ? g.state : null
   const countryCode = typeof g?.countryCode === 'string' ? g.countryCode : null
 
-  if (lat == null || lng == null) throw new Error('ZIP lookup returned no coordinates.')
-  if (!postalCode) throw new Error('ZIP lookup did not resolve a valid postal code.')
+  if (lat == null || lng == null) {
+    throw new Error('ZIP lookup returned no coordinates.')
+  }
+  if (!postalCode) {
+    throw new Error('ZIP lookup did not resolve a valid postal code.')
+  }
 
   return { lat, lng, postalCode, city, state, countryCode }
 }
@@ -145,24 +250,53 @@ export default function SignupClientClient() {
   const router = useRouter()
   const sp = useSearchParams()
 
-  const ti = sp.get('ti')
-  const loginHref = ti ? `/login?ti=${encodeURIComponent(ti)}` : '/login'
+  const ti = normalizeTrimmed(sp.get('ti'))
+  const from = sanitizeNextUrl(sp.get('from'))
+  const nextFromQuery =
+    sanitizeNextUrl(sp.get('next')) ?? from
+  const intent = normalizeTrimmed(sp.get('intent'))
+  const inviteToken = normalizeTrimmed(sp.get('inviteToken'))
+  const emailPrefill = normalizeTrimmed(sp.get('email')) ?? ''
+  const phonePrefill = normalizeTrimmed(sp.get('phone')) ?? ''
 
-  // stable per page load (nice if you later add autocomplete)
-  useMemo(() => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now())), [])
+  const nameParts = useMemo(
+    () => splitFullName(normalizeTrimmed(sp.get('name'))),
+    [sp],
+  )
 
-  // identity
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
+  const loginHref = useMemo(
+    () =>
+      buildLoginHref({
+        ti,
+        from,
+        next: nextFromQuery,
+        intent,
+        inviteToken,
+        email: emailPrefill || null,
+        phone: phonePrefill || null,
+      }),
+    [ti, from, nextFromQuery, intent, inviteToken, emailPrefill, phonePrefill],
+  )
 
-  // location
+  const isClaimInviteFlow = intent === 'CLAIM_INVITE'
+
+  useMemo(
+    () =>
+      globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : String(Date.now()),
+    [],
+  )
+
+  const [firstName, setFirstName] = useState(nameParts.firstName)
+  const [lastName, setLastName] = useState(nameParts.lastName)
+
   const [zip, setZip] = useState('')
   const [zipLoading, setZipLoading] = useState(false)
   const [confirmed, setConfirmed] = useState<ConfirmedZip | null>(null)
 
-  // contact + auth
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState(phonePrefill)
+  const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
 
   const [error, setError] = useState<string | null>(null)
@@ -173,16 +307,16 @@ export default function SignupClientClient() {
     setConfirmed(null)
   }
 
-  // Auto-confirm on blur + safe to call from submit.
-  // Returns the confirmed object (so submit logic doesn't depend on state updating in time).
-  async function confirmZipIfValid(rawInput?: string): Promise<ConfirmedZip | null> {
+  async function confirmZipIfValid(
+    rawInput?: string,
+  ): Promise<ConfirmedZip | null> {
     const raw = (rawInput ?? zip).trim()
 
-    // empty: let required validation handle it
     if (!raw) return null
 
-    // already confirmed for this ZIP: no-op
-    if (confirmed?.postalCode && confirmed.postalCode === raw) return confirmed
+    if (confirmed?.postalCode && confirmed.postalCode === raw) {
+      return confirmed
+    }
 
     if (!isUsZip(raw)) {
       setConfirmed(null)
@@ -226,15 +360,24 @@ export default function SignupClientClient() {
     if (loading) return
     setError(null)
 
-    if (!firstName.trim() || !lastName.trim()) return setError('First and last name are required.')
+    if (!firstName.trim() || !lastName.trim()) {
+      return setError('First and last name are required.')
+    }
 
-    // force-confirm ZIP if user never blurred the field
     const confirmedZip = await confirmZipIfValid(zip)
-    if (!confirmedZip) return setError('Please enter a valid ZIP code.')
+    if (!confirmedZip) {
+      return setError('Please enter a valid ZIP code.')
+    }
 
-    if (!sanitizePhone(phone).trim()) return setError('Phone number is required.')
-    if (!email.trim()) return setError('Email is required.')
-    if (!password.trim()) return setError('Password is required.')
+    if (!sanitizePhone(phone).trim()) {
+      return setError('Phone number is required.')
+    }
+    if (!email.trim()) {
+      return setError('Email is required.')
+    }
+    if (!password.trim()) {
+      return setError('Password is required.')
+    }
 
     setLoading(true)
     try {
@@ -249,7 +392,6 @@ export default function SignupClientClient() {
           lastName,
           phone: sanitizePhone(phone),
           tapIntentId: ti ?? undefined,
-
           signupLocation: {
             kind: 'CLIENT_ZIP',
             postalCode: confirmedZip.postalCode,
@@ -272,8 +414,19 @@ export default function SignupClientClient() {
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
-      window.location.assign(nextUrl ?? '/looks')
+      const responseNextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+      const nextUrl = responseNextUrl ?? nextFromQuery
+      const emailVerificationSent = readBooleanField(
+        data,
+        'emailVerificationSent',
+      )
+
+      const verifyPhoneUrl = buildVerifyPhoneUrl({
+        nextUrl,
+        emailVerificationSent,
+      })
+
+      hardNavigate(verifyPhoneUrl)
     } catch (err) {
       console.error(err)
       setError('Network error.')
@@ -293,25 +446,55 @@ export default function SignupClientClient() {
     Boolean(confirmed)
 
   return (
-    <AuthShell title="Create Client Account" subtitle="Find pros, book fast, and keep your beauty life organized.">
+    <AuthShell
+      title={
+        isClaimInviteFlow
+          ? 'Create Client Account to Claim Your History'
+          : 'Create Client Account'
+      }
+      subtitle={
+        isClaimInviteFlow
+          ? 'Finish creating your client account so we can attach your booking history to the right identity.'
+          : 'Find pros, book fast, and keep your beauty life organized.'
+      }
+    >
       <form onSubmit={handleSubmit} className="grid gap-5">
-        {/* Identity (ZIP under last name) */}
+        {isClaimInviteFlow ? (
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
+            <span className="font-black text-textPrimary">Claim invite:</span>{' '}
+            Your account will return to the secure claim link after phone
+            verification.
+          </div>
+        ) : null}
+
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1.5">
             <FieldLabel>First name</FieldLabel>
-            <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required autoComplete="given-name" />
+            <Input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              required
+              autoComplete="given-name"
+            />
           </label>
 
           <label className="grid gap-1.5">
             <FieldLabel>Last name</FieldLabel>
-            <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required autoComplete="family-name" />
+            <Input
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              required
+              autoComplete="family-name"
+            />
           </label>
 
           <label className="grid gap-1.5 sm:col-span-2">
             <div className="flex items-center justify-between gap-3">
               <FieldLabel>ZIP code</FieldLabel>
               {confirmed?.timeZoneId ? (
-                <span className="text-[11px] font-black text-textSecondary/80">{confirmed.timeZoneId}</span>
+                <span className="text-[11px] font-black text-textSecondary/80">
+                  {confirmed.timeZoneId}
+                </span>
               ) : null}
             </div>
 
@@ -320,7 +503,7 @@ export default function SignupClientClient() {
               onChange={(e) => {
                 const v = e.target.value
                 setZip(v)
-                setConfirmed(null) // invalidate when user edits
+                setConfirmed(null)
                 setError(null)
               }}
               onBlur={() => {
@@ -332,14 +515,24 @@ export default function SignupClientClient() {
             />
 
             <div className="flex items-center justify-between gap-3">
-              {zipLoading ? <HelpText>Confirming…</HelpText> : <HelpText>We’ll confirm this when you leave the field.</HelpText>}
-              {confirmed ? <span className="text-xs font-black text-accentPrimary">Confirmed</span> : null}
+              {zipLoading ? (
+                <HelpText>Confirming…</HelpText>
+              ) : (
+                <HelpText>We’ll confirm this when you leave the field.</HelpText>
+              )}
+              {confirmed ? (
+                <span className="text-xs font-black text-accentPrimary">
+                  Confirmed
+                </span>
+              ) : null}
             </div>
 
             {confirmed && (confirmed.city || confirmed.state) ? (
               <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
                 <span className="font-black text-textPrimary">Near:</span>{' '}
-                <span>{[confirmed.city, confirmed.state].filter(Boolean).join(', ')}</span>
+                <span>
+                  {[confirmed.city, confirmed.state].filter(Boolean).join(', ')}
+                </span>
                 <button
                   type="button"
                   className="ml-3 text-xs font-black text-textPrimary/80 hover:text-textPrimary"
@@ -354,11 +547,12 @@ export default function SignupClientClient() {
 
         <div className="h-px w-full bg-surfaceGlass/10" />
 
-        {/* Phone */}
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Phone</FieldLabel>
-            <span className="text-xs font-black text-textSecondary/80">Required</span>
+            <span className="text-xs font-black text-textSecondary/80">
+              Required
+            </span>
           </div>
           <Input
             value={phone}
@@ -370,16 +564,27 @@ export default function SignupClientClient() {
           />
         </label>
 
-        {/* Email */}
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" inputMode="email" />
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            required
+            autoComplete="email"
+            inputMode="email"
+          />
         </label>
 
-        {/* Password */}
         <label className="grid gap-1.5">
           <FieldLabel>Password</FieldLabel>
-          <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required autoComplete="new-password" />
+          <Input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            required
+            autoComplete="new-password"
+          />
         </label>
 
         {error ? (
@@ -393,7 +598,9 @@ export default function SignupClientClient() {
             {loading ? 'Creating…' : 'Create Client Account'}
           </PrimaryButton>
 
-          <SecondaryLinkButton href={loginHref}>Sign in</SecondaryLinkButton>
+          <SecondaryLinkButton href={loginHref}>
+            {isClaimInviteFlow ? 'I already have a client account' : 'Sign in'}
+          </SecondaryLinkButton>
         </div>
       </form>
     </AuthShell>
