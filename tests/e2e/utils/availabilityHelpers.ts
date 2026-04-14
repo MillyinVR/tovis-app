@@ -1,12 +1,18 @@
 import { expect, type Locator, type Page } from '@playwright/test'
-import { byTestId, mobileAddressOption, testIds, text } from './selectors'
+import {
+  availabilityContinueButton,
+  availabilityDayButtons,
+  availabilityDrawer,
+  availabilitySlot,
+  availabilitySlotButtons,
+  byTestId,
+  mobileAddressOption,
+  testIds,
+  text,
+} from './selectors'
 
 type Scope = Page | Locator
 type DayTarget = string | RegExp
-
-function availabilityDrawer(scope: Scope): Locator {
-  return scope.getByRole('dialog').first()
-}
 
 function dayButton(scope: Scope, day: DayTarget): Locator {
   return availabilityDrawer(scope).getByRole('button', {
@@ -14,18 +20,8 @@ function dayButton(scope: Scope, day: DayTarget): Locator {
   })
 }
 
-function slotButtons(scope: Scope): Locator {
-  return availabilityDrawer(scope).getByRole('button', {
-    name: /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i,
-  })
-}
-
 function continueButton(scope: Scope): Locator {
-  return availabilityDrawer(scope)
-    .getByRole('button', {
-      name: /continue(?:\s+to\s+add-ons)?/i,
-    })
-    .first()
+  return availabilityContinueButton(scope)
 }
 
 function salonFallbackButton(scope: Scope): Locator {
@@ -56,14 +52,17 @@ async function waitForMobileAddressLoadingToFinish(
 
 export async function openAvailabilityDrawer(page: Page): Promise<Locator> {
   await byTestId(page, testIds.availability.openTrigger).click()
+
   const drawer = availabilityDrawer(page)
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText(text.availability.heading)).toBeVisible()
+
   return drawer
 }
 
 export async function closeAvailabilityDrawer(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
+
   await expect(drawer).toBeVisible()
   await byTestId(drawer, testIds.availability.closeButton).click()
   await expect(drawer).toBeHidden()
@@ -74,31 +73,37 @@ export async function waitForAvailabilityReady(
   options?: { allowError?: boolean },
 ): Promise<void> {
   const drawer = availabilityDrawer(page)
+
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText(text.availability.heading)).toBeVisible()
 
-  const loading = byTestId(drawer, testIds.availability.loading)
   const errorByTestId = byTestId(drawer, testIds.availability.error)
   const errorByText = drawer.getByText(text.availability.failed)
+  const loadingByText = drawer.getByText(
+    /loading times|loading more days|holding your time/i,
+  )
 
-  if (await loading.count()) {
-    await expect(loading).toBeHidden()
+  if (await loadingByText.count()) {
+    await expect(loadingByText).toBeHidden({ timeout: 30_000 })
   }
 
   if (!options?.allowError) {
     if (await errorByTestId.count()) {
       await expect(errorByTestId).toBeHidden()
     }
+
     if (await errorByText.count()) {
       await expect(errorByText).toBeHidden()
     }
   }
 
-  await expect(
-    drawer.getByRole('button', { name: /Mon|Tue|Wed|Thu|Fri|Sat|Sun/i }).first(),
-  ).toBeVisible({ timeout: 30_000 })
+  await expect(availabilityDayButtons(page).first()).toBeVisible({
+    timeout: 30_000,
+  })
 
-  await expect(slotButtons(page).first()).toBeVisible({ timeout: 30_000 })
+  await expect(availabilitySlotButtons(page).first()).toBeVisible({
+    timeout: 30_000,
+  })
 
   await expect(
     drawer.getByText(/something went wrong/i),
@@ -167,6 +172,7 @@ export async function switchToMobile(page: Page): Promise<void> {
 
 export async function chooseDay(page: Page, day: DayTarget): Promise<void> {
   const target = dayButton(page, day)
+
   await expect(target).toBeVisible()
   await target.click()
 }
@@ -177,6 +183,7 @@ export async function chooseSlot(page: Page, slotIso: string): Promise<void> {
 
   if (await slotByTestId.count()) {
     await expect(slotByTestId).toBeVisible()
+    await expect(slotByTestId).toBeEnabled()
     await slotByTestId.click()
     return
   }
@@ -186,34 +193,44 @@ export async function chooseSlot(page: Page, slotIso: string): Promise<void> {
   )
 }
 
+export async function chooseFirstEnabledSlot(page: Page): Promise<void> {
+  const slots = availabilitySlotButtons(page)
+  const count = await slots.count()
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = slots.nth(index)
+
+    if (!(await slot.isVisible())) continue
+    if (!(await slot.isEnabled())) continue
+
+    await slot.click()
+    return
+  }
+
+  throw new Error('No enabled availability slot found.')
+}
+
 export async function expectSlotVisible(
   page: Page,
   slotIso: string,
 ): Promise<void> {
-  const drawer = availabilityDrawer(page)
-  await expect(
-    byTestId(drawer, testIds.availability.slotChip(slotIso)),
-  ).toBeVisible()
+  await expect(availabilitySlot(page, slotIso)).toBeVisible()
 }
 
 export async function expectSlotNotVisible(
   page: Page,
   slotIso: string,
 ): Promise<void> {
-  const drawer = availabilityDrawer(page)
-  await expect(
-    byTestId(drawer, testIds.availability.slotChip(slotIso)),
-  ).toHaveCount(0)
+  await expect(availabilitySlot(page, slotIso)).toHaveCount(0)
 }
 
 export async function expectHoldSuccess(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
   const holdBanner = byTestId(drawer, testIds.availability.holdBanner)
-  const holdCountdown = byTestId(drawer, testIds.availability.holdCountdown)
 
-  if ((await holdBanner.count()) && (await holdCountdown.count())) {
+  if (await holdBanner.count()) {
     await expect(holdBanner).toBeVisible()
-    await expect(holdCountdown).toBeVisible()
+    await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
     return
   }
 
@@ -234,14 +251,15 @@ export async function expectContinueDisabled(page: Page): Promise<void> {
 }
 
 export async function continueToAddOns(page: Page): Promise<void> {
+  await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
   await continueButton(page).click()
 }
 
 export async function expectAddOnsPage(page: Page): Promise<void> {
-  const pageByTestId = byTestId(page, testIds.addOns.page)
+  const listByTestId = byTestId(page, testIds.addOns.list)
 
-  if (await pageByTestId.count()) {
-    await expect(pageByTestId).toBeVisible()
+  if (await listByTestId.count()) {
+    await expect(listByTestId).toBeVisible()
     return
   }
 
@@ -269,9 +287,16 @@ export async function expectMobileAddressRequired(page: Page): Promise<void> {
   const section = byTestId(drawer, testIds.mobileAddress.section)
   const emptyState = byTestId(section, testIds.mobileAddress.emptyState)
   const addButton = byTestId(section, testIds.mobileAddress.addButton)
+
   const noSavedAddressText = section.getByText(
     text.mobileAddress.noSavedAddress,
   )
+  const noSavedAddressHelpText = section.getByText(
+    text.mobileAddress.noSavedAddressHelp,
+  )
+  const addFirstAddressButton = section.getByRole('button', {
+    name: text.mobileAddress.addFirstAddress,
+  })
 
   await expect(section).toBeVisible()
   await waitForMobileAddressLoadingToFinish(section)
@@ -281,8 +306,11 @@ export async function expectMobileAddressRequired(page: Page): Promise<void> {
   }
 
   await expect(noSavedAddressText).toBeVisible({ timeout: 15_000 })
+  await expect(noSavedAddressHelpText).toBeVisible({ timeout: 15_000 })
   await expect(addButton).toBeVisible()
   await expect(addButton).toBeEnabled()
+  await expect(addFirstAddressButton).toBeVisible()
+  await expect(addFirstAddressButton).toBeEnabled()
   await expectContinueDisabled(page)
 }
 

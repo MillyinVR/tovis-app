@@ -90,31 +90,65 @@ type PageDiagnostics = {
   requestFailures: string[]
 }
 
-function attachPageDiagnostics(page: Page): PageDiagnostics {
+type SlotDescriptor = {
+  testId: string | null
+  ariaLabel: string
+  text: string
+}
+
+const DRAWER_TEST_ID = 'availability-drawer'
+const HOLD_BANNER_TEST_ID = 'availability-hold-banner'
+const HOLD_CONTINUE_TEST_ID = 'availability-hold-continue-button'
+const ADD_ONS_CONTINUE_TEST_ID = 'booking-add-ons-continue-button'
+const ADD_ONS_LIST_TEST_ID = 'booking-add-ons-list'
+const REFRESH_BUTTON_TEST_ID = 'availability-refresh-button'
+
+const SLOT_TEST_ID_PREFIX = 'availability-slot-'
+const SLOT_LIST_TEST_ID = 'availability-slot-list'
+const DAY_BUTTON_TEXT = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\d{1,2}$/i
+const SLOT_BUTTON_NAME =
+  /(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat).*?\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i
+const CONTINUE_BUTTON_NAME = /continue(?:\s+to\s+add-ons)?/i
+
+function attachPageDiagnostics(page: Page): {
+  diagnostics: PageDiagnostics
+  detach: () => void
+} {
   const diagnostics: PageDiagnostics = {
     consoleErrors: [],
     pageErrors: [],
     requestFailures: [],
   }
 
-  page.on('console', (msg) => {
+  const onConsole = (msg: Parameters<Page['on']>[1] extends never ? never : any) => {
     if (msg.type() !== 'error') return
     diagnostics.consoleErrors.push(msg.text())
-  })
+  }
 
-  page.on('pageerror', (error) => {
+  const onPageError = (error: unknown) => {
     diagnostics.pageErrors.push(
       error instanceof Error ? error.message : String(error),
     )
-  })
+  }
 
-  page.on('requestfailed', (request) => {
+  const onRequestFailed = (request: any) => {
     diagnostics.requestFailures.push(
       `${request.method()} ${request.url()} :: ${request.failure()?.errorText ?? 'request_failed'}`,
     )
-  })
+  }
 
-  return diagnostics
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+  page.on('requestfailed', onRequestFailed)
+
+  return {
+    diagnostics,
+    detach: () => {
+      page.off('console', onConsole)
+      page.off('pageerror', onPageError)
+      page.off('requestfailed', onRequestFailed)
+    },
+  }
 }
 
 const PERF_CASES = {
@@ -177,15 +211,15 @@ const SELECTORS = {
   dayButton: compactSelectors([process.env.PERF_DAY_BUTTON_SELECTOR]),
   slotButton: compactSelectors([
     process.env.PERF_SLOT_BUTTON_SELECTOR,
-    '[data-testid="availability-slot-button"]',
+    `[data-testid^="${SLOT_TEST_ID_PREFIX}"]:not([data-testid="${SLOT_LIST_TEST_ID}"])`,
   ]),
   drawerContinue: compactSelectors([
     process.env.PERF_DRAWER_CONTINUE_SELECTOR,
-    '[data-testid="availability-hold-continue-button"]',
+    `[data-testid="${HOLD_CONTINUE_TEST_ID}"]`,
   ]),
   backgroundRefreshTrigger: compactSelectors([
     process.env.PERF_BACKGROUND_REFRESH_TRIGGER_SELECTOR,
-    '[data-testid="availability-refresh-button"]',
+    `[data-testid="${REFRESH_BUTTON_TEST_ID}"]`,
   ]),
 }
 
@@ -603,6 +637,10 @@ function describeDiagnostics(diagnostics: PageDiagnostics): string {
   ].join(' | ')
 }
 
+function availabilityDrawer(page: Page): Locator {
+  return page.getByTestId(DRAWER_TEST_ID)
+}
+
 async function findBookingTrigger(page: Page): Promise<Locator> {
   const locator = await firstVisibleLocator(page, SELECTORS.bookingTrigger)
 
@@ -629,7 +667,7 @@ async function openDrawerAndWaitUsable(
       await trigger.scrollIntoViewIfNeeded()
       await trigger.click()
 
-      await expect(page.getByTestId('availability-drawer')).toBeVisible()
+      await expect(availabilityDrawer(page)).toBeVisible()
       return waitForMetric(page, PERF_CASES.drawerOpen.metric)
     }
 
@@ -639,6 +677,7 @@ async function openDrawerAndWaitUsable(
   const diagnostic = await describeBookingTriggers(page, SELECTORS.bookingTrigger)
   const pageState = await describePageState(page)
   const browserState = diagnostics ? describeDiagnostics(diagnostics) : ''
+
   throw new Error(
     `booking_trigger_not_visible | ${diagnostic} | ${pageState}${browserState ? ` | ${browserState}` : ''}`,
   )
@@ -654,7 +693,7 @@ async function findDayButtons(page: Page): Promise<Locator[]> {
     return Array.from({ length: count }, (_, index) => locators.nth(index))
   }
 
-  const drawer = page.getByTestId('availability-drawer')
+  const drawer = availabilityDrawer(page)
   const buttons = drawer.getByRole('button')
   const count = await buttons.count()
   const results: Locator[] = []
@@ -665,9 +704,7 @@ async function findDayButtons(page: Page): Promise<Locator[]> {
       .replace(/\s+/g, ' ')
       .trim()
 
-    if (!text) continue
-    if (!/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\d{1,2}$/i.test(text)) continue
-
+    if (!DAY_BUTTON_TEXT.test(text)) continue
     results.push(button)
   }
 
@@ -675,11 +712,11 @@ async function findDayButtons(page: Page): Promise<Locator[]> {
 }
 
 async function waitForHoldReady(page: Page): Promise<void> {
-  const drawer = page.getByTestId('availability-drawer')
+  const drawer = availabilityDrawer(page)
 
   const signals: Locator[] = [
-    page.getByTestId('availability-hold-banner'),
-    page.getByTestId('availability-hold-continue-button'),
+    page.getByTestId(HOLD_BANNER_TEST_ID),
+    page.getByTestId(HOLD_CONTINUE_TEST_ID),
     drawer.getByText(/your time is held|time held/i).first(),
   ]
 
@@ -700,6 +737,44 @@ async function readDayButtonLabel(button: Locator): Promise<string> {
     'unknown-day')
 }
 
+function isSlotTestId(testId: string | null): testId is string {
+  return (
+    typeof testId === 'string' &&
+    testId.startsWith(SLOT_TEST_ID_PREFIX) &&
+    testId !== SLOT_LIST_TEST_ID
+  )
+}
+
+function extractSlotIsoFromTestId(testId: string | null): string | null {
+  if (!isSlotTestId(testId)) return null
+
+  const value = testId.slice(SLOT_TEST_ID_PREFIX.length).trim()
+  return value.length > 0 ? value : null
+}
+
+function isSlotDescriptor(descriptor: SlotDescriptor): boolean {
+  if (isSlotTestId(descriptor.testId)) return true
+  if (SLOT_BUTTON_NAME.test(descriptor.ariaLabel)) return true
+  if (SLOT_BUTTON_NAME.test(descriptor.text)) return true
+  return false
+}
+
+async function readSlotDescriptor(locator: Locator): Promise<SlotDescriptor> {
+  return locator.evaluate((element) => {
+    const htmlElement = element as HTMLElement
+
+    return {
+      testId: htmlElement.getAttribute('data-testid'),
+      ariaLabel: htmlElement.getAttribute('aria-label') ?? '',
+      text: (htmlElement.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    }
+  })
+}
+
+function buildSlotSignature(descriptor: SlotDescriptor): string {
+  return `${descriptor.testId ?? ''}|${descriptor.ariaLabel}|${descriptor.text}`
+}
+
 async function findSlotButtons(page: Page): Promise<Locator[]> {
   for (const selector of SELECTORS.slotButton) {
     const locators = page.locator(selector)
@@ -707,17 +782,43 @@ async function findSlotButtons(page: Page): Promise<Locator[]> {
 
     if (count === 0) continue
 
-    return Array.from({ length: count }, (_, index) => locators.nth(index))
+    const results: Locator[] = []
+
+    for (let index = 0; index < count; index += 1) {
+      const locator = locators.nth(index)
+
+      try {
+        const descriptor = await readSlotDescriptor(locator)
+        if (!isSlotDescriptor(descriptor)) continue
+        results.push(locator)
+      } catch {
+        // ignore transient DOM reads
+      }
+    }
+
+    if (results.length > 0) {
+      return results
+    }
   }
 
-  const drawer = page.getByTestId('availability-drawer')
-  const timeLikeButtons = drawer
-    .getByRole('button')
-    .filter({ hasText: /(\d{1,2}:\d{2}|\d{1,2}\s?(am|pm))/i })
+  const drawer = availabilityDrawer(page)
+  const buttons = drawer.getByRole('button')
+  const count = await buttons.count()
+  const results: Locator[] = []
 
-  const count = await timeLikeButtons.count()
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index)
 
-  return Array.from({ length: count }, (_, index) => timeLikeButtons.nth(index))
+    try {
+      const descriptor = await readSlotDescriptor(button)
+      if (!isSlotDescriptor(descriptor)) continue
+      results.push(button)
+    } catch {
+      // ignore transient DOM reads
+    }
+  }
+
+  return results
 }
 
 async function readVisibleSlotButtonSignatures(
@@ -729,28 +830,14 @@ async function readVisibleSlotButtonSignatures(
   for (const slotButton of slotButtons) {
     try {
       if (!(await slotButton.isVisible())) continue
-
-      const signature = await slotButton.evaluate((element) => {
-        const htmlElement = element as HTMLElement
-        const dataset = htmlElement.dataset
-        const ariaLabel = htmlElement.getAttribute('aria-label') ?? ''
-        const text = (htmlElement.textContent ?? '').replace(/\s+/g, ' ').trim()
-
-        return `${ariaLabel}|${text}|${JSON.stringify(dataset)}`
-      })
-
-      signatures.push(signature)
+      const descriptor = await readSlotDescriptor(slotButton)
+      signatures.push(buildSlotSignature(descriptor))
     } catch {
       // skip if evaluation fails
     }
   }
 
   return signatures
-}
-
-function extractSlotIsoFromSignature(signature: string): string | null {
-  const match = signature.match(/availability-slot-(\d{4}-\d{2}-\d{2}T[^"]+)/)
-  return match?.[1] ?? null
 }
 
 function compareSlotCandidatesNewestFirst(
@@ -792,19 +879,12 @@ async function readVisibleSlotCandidates(page: Page): Promise<SlotCandidate[]> {
       if (!(await slotButton.isVisible())) continue
 
       const enabled = await slotButton.isEnabled()
-      const signature = await slotButton.evaluate((element) => {
-        const htmlElement = element as HTMLElement
-        const dataset = htmlElement.dataset
-        const ariaLabel = htmlElement.getAttribute('aria-label') ?? ''
-        const text = (htmlElement.textContent ?? '').replace(/\s+/g, ' ').trim()
-
-        return `${ariaLabel}|${text}|${JSON.stringify(dataset)}`
-      })
+      const descriptor = await readSlotDescriptor(slotButton)
 
       candidates.push({
         button: slotButton,
-        signature,
-        slotISO: extractSlotIsoFromSignature(signature),
+        signature: buildSlotSignature(descriptor),
+        slotISO: extractSlotIsoFromTestId(descriptor.testId),
         enabled,
       })
     } catch {
@@ -819,7 +899,10 @@ function inferSelectedDayYMDFromSignatures(signatures: string[]): string | null 
   const values = Array.from(
     new Set(
       signatures
-        .map((signature) => extractSlotIsoFromSignature(signature)?.slice(0, 10) ?? null)
+        .map((signature) => {
+          const testId = signature.split('|', 1)[0] || null
+          return extractSlotIsoFromTestId(testId)?.slice(0, 10) ?? null
+        })
         .filter((value): value is string => Boolean(value)),
     ),
   )
@@ -1107,8 +1190,8 @@ async function createSuccessfulHoldAcrossDays(
 
 async function waitForAddOnsReady(page: Page): Promise<void> {
   const signals: Locator[] = [
-    page.getByTestId('booking-add-ons-continue-button'),
-    page.getByTestId('booking-add-ons-list'),
+    page.getByTestId(ADD_ONS_CONTINUE_TEST_ID),
+    page.getByTestId(ADD_ONS_LIST_TEST_ID),
     page.getByRole('heading', { name: /add-ons/i }).first(),
   ]
 
@@ -1126,6 +1209,7 @@ async function waitForAddOnsReady(page: Page): Promise<void> {
 
 async function findEnabledContinueButton(page: Page): Promise<Locator | null> {
   const explicit = await firstVisibleLocator(page, SELECTORS.drawerContinue)
+
   if (explicit) {
     try {
       await expect(explicit).toBeEnabled({ timeout: 15_000 })
@@ -1135,9 +1219,9 @@ async function findEnabledContinueButton(page: Page): Promise<Locator | null> {
     }
   }
 
-  const drawer = page.getByTestId('availability-drawer')
+  const drawer = availabilityDrawer(page)
   const candidates = drawer.getByRole('button', {
-    name: /continue to add-ons|continue/i,
+    name: CONTINUE_BUTTON_NAME,
   })
   const count = await candidates.count()
 
@@ -1159,7 +1243,7 @@ async function findEnabledContinueButton(page: Page): Promise<Locator | null> {
 async function clickContinueAndWait(
   page: Page,
 ): Promise<AvailabilityPerfCompletedEntry | null> {
-  const preferred = page.getByTestId('availability-hold-continue-button')
+  const preferred = page.getByTestId(HOLD_CONTINUE_TEST_ID)
 
   if ((await preferred.count()) > 0) {
     await expect(preferred).toBeVisible({ timeout: 15_000 })
@@ -1262,8 +1346,9 @@ async function collectDrawerOpenSample(
   page: Page,
   request: APIRequestContext,
 ): Promise<RawPerfSample> {
+  const { diagnostics, detach } = attachPageDiagnostics(page)
+
   try {
-    const diagnostics = attachPageDiagnostics(page)
     await gotoBookingPage(page, request)
     await resetPerfStore(page)
 
@@ -1279,6 +1364,8 @@ async function collectDrawerOpenSample(
       PERF_CASES.drawerOpen,
       error instanceof Error ? error.message : 'drawer_open_failed',
     )
+  } finally {
+    detach()
   }
 }
 

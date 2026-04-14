@@ -1,7 +1,8 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
 import {
+  chooseFirstEnabledSlot,
   continueToAddOns,
   expectAddOnsPage,
   expectContinueDisabled,
@@ -13,6 +14,7 @@ import {
   switchToMobile,
   waitForAvailabilityReady,
 } from './utils/availabilityHelpers'
+import { byTestId, testIds } from './utils/selectors'
 import {
   seedBookingFlow,
   type SeedBookingFlowResult,
@@ -37,22 +39,12 @@ function getOfferingTitle(seed: SeedBookingFlowResult): string {
   return maybeTitle ?? DEFAULT_OFFERING_TITLE
 }
 
-function bookingCta(page: Page, seed: SeedBookingFlowResult) {
+function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
   return page.getByRole('button', {
     name: new RegExp(
       `^Book\\s+${escapeRegExp(getOfferingTitle(seed))}$`,
       'i',
     ),
-  })
-}
-
-function availabilityDialog(page: Page) {
-  return page.getByRole('dialog').first()
-}
-
-function slotButtons(page: Page) {
-  return availabilityDialog(page).getByRole('button', {
-    name: /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i,
   })
 }
 
@@ -74,39 +66,47 @@ async function openAvailabilityFromSeededService(
   seed: SeedBookingFlowResult,
 ): Promise<void> {
   await bookingCta(page, seed).click()
-  await expect(availabilityDialog(page)).toBeVisible()
-  await expect(
-    availabilityDialog(page).getByText(/availability/i).first(),
-  ).toBeVisible()
+
+  const drawer = byTestId(page, testIds.availability.drawer)
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByText(/^availability$/i)).toBeVisible()
 }
 
 async function waitForLocationToggleReady(page: Page): Promise<void> {
-  const dialog = availabilityDialog(page)
+  const drawer = byTestId(page, testIds.availability.drawer)
 
   await expect(
-    dialog.getByTestId('booking-location-salon'),
+    byTestId(drawer, testIds.location.salonOption),
   ).toBeVisible({ timeout: 15_000 })
 
   await expect(
-    dialog.getByTestId('booking-location-mobile'),
+    byTestId(drawer, testIds.location.mobileOption),
   ).toBeVisible({ timeout: 15_000 })
 }
 
-async function chooseFirstEnabledTimeSlot(page: Page): Promise<void> {
-  const slots = slotButtons(page)
-  const count = await slots.count()
+async function createHoldAndAssertSuccess(
+  page: Page,
+  logLabel: string,
+): Promise<void> {
+  const [holdResponse] = await Promise.all([
+    page.waitForResponse(
+      (resp) =>
+        resp.url().includes('/api/holds') &&
+        resp.request().method() === 'POST',
+      { timeout: 30_000 },
+    ),
+    chooseFirstEnabledSlot(page),
+  ])
 
-  for (let index = 0; index < count; index += 1) {
-    const slot = slots.nth(index)
+  const holdBody = await holdResponse.text()
 
-    if (!(await slot.isVisible())) continue
-    if (!(await slot.isEnabled())) continue
+  console.log(`${logLabel} hold status`, holdResponse.status())
+  console.log(`${logLabel} hold body`, holdBody)
 
-    await slot.click()
-    return
-  }
+  expect(holdResponse.status(), holdBody).toBe(201)
 
-  throw new Error('No enabled time slot found in availability drawer')
+  await expectHoldSuccess(page)
+  await expectContinueEnabled(page)
 }
 
 test.beforeAll(async () => {
@@ -157,25 +157,7 @@ test.describe('mobile availability browser flow', () => {
     await selectSavedMobileAddress(page, seed.clientAddress.id)
     await waitForAvailabilityReady(page)
 
-    const [holdResponse] = await Promise.all([
-      page.waitForResponse(
-        (resp) =>
-          resp.url().includes('/api/holds') &&
-          resp.request().method() === 'POST',
-        { timeout: 30_000 },
-      ),
-      chooseFirstEnabledTimeSlot(page),
-    ])
-
-    const holdBody = await holdResponse.text()
-
-    console.log('mobile hold status', holdResponse.status())
-    console.log('mobile hold body', holdBody)
-
-    expect(holdResponse.status(), holdBody).toBe(201)
-
-    await expectHoldSuccess(page)
-    await expectContinueEnabled(page)
+    await createHoldAndAssertSuccess(page, 'mobile')
 
     await continueToAddOns(page)
     await page.waitForURL(/\/booking\/add-ons(?:\?|$)/)

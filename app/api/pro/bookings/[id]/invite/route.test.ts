@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   bookingFindFirst: vi.fn(),
   upsertClientClaimLink: vi.fn(),
+  createClientClaimInviteDelivery: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -27,6 +28,10 @@ vi.mock('@/lib/clients/clientClaimLinks', () => ({
   upsertClientClaimLink: mocks.upsertClientClaimLink,
 }))
 
+vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
+  createClientClaimInviteDelivery: mocks.createClientClaimInviteDelivery,
+}))
+
 import { POST } from './route'
 
 function makeRequest(body: unknown): Request {
@@ -35,6 +40,79 @@ function makeRequest(body: unknown): Request {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+function makeBooking(overrides?: {
+  id?: string
+  clientId?: string
+  userId?: string | null
+}) {
+  return {
+    id: overrides?.id ?? 'booking_1',
+    clientId: overrides?.clientId ?? 'client_123',
+    client: {
+      userId: overrides?.userId ?? null,
+    },
+  }
+}
+
+function makeInvite(overrides?: {
+  id?: string
+  token?: string
+  status?: ProClientInviteStatus
+  invitedName?: string
+  invitedEmail?: string | null
+  invitedPhone?: string | null
+  preferredContactMethod?: ContactMethod | null
+  acceptedAt?: Date | null
+  revokedAt?: Date | null
+}) {
+  return {
+    id: overrides?.id ?? 'invite_1',
+    token: overrides?.token ?? 'token_1',
+    status: overrides?.status ?? ProClientInviteStatus.PENDING,
+    invitedName: overrides?.invitedName ?? 'Tori Morales',
+    invitedEmail:
+      overrides && 'invitedEmail' in overrides
+        ? overrides.invitedEmail
+        : 'tori@example.com',
+    invitedPhone:
+      overrides && 'invitedPhone' in overrides
+        ? overrides.invitedPhone
+        : null,
+    preferredContactMethod:
+      overrides && 'preferredContactMethod' in overrides
+        ? overrides.preferredContactMethod
+        : ContactMethod.EMAIL,
+    acceptedAt:
+      overrides && 'acceptedAt' in overrides ? overrides.acceptedAt : null,
+    revokedAt:
+      overrides && 'revokedAt' in overrides ? overrides.revokedAt : null,
+  }
+}
+
+function makeInviteDeliveryResult() {
+  return {
+    plan: {
+      idempotency: {
+        baseKey: 'invite_base_1',
+        sendKey: 'invite_send_1',
+      },
+    },
+    link: {
+      target: 'CLAIM',
+      href: '/claim/token_1',
+      tokenIncluded: true,
+    },
+    dispatch: {
+      created: true,
+      selectedChannels: [],
+      evaluations: [],
+      dispatch: {
+        id: 'dispatch_1',
+      },
+    },
+  }
 }
 
 describe('POST /api/pro/bookings/[id]/invite', () => {
@@ -64,20 +142,11 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       data,
     }))
 
-    mocks.bookingFindFirst.mockResolvedValue({
-      id: 'booking_1',
-      clientId: 'client_123',
-    })
-
-    mocks.upsertClientClaimLink.mockResolvedValue({
-      id: 'invite_1',
-      token: 'token_1',
-      status: ProClientInviteStatus.PENDING,
-      invitedName: 'Tori Morales',
-      invitedEmail: 'tori@example.com',
-      invitedPhone: null,
-      preferredContactMethod: ContactMethod.EMAIL,
-    })
+    mocks.bookingFindFirst.mockResolvedValue(makeBooking())
+    mocks.upsertClientClaimLink.mockResolvedValue(makeInvite())
+    mocks.createClientClaimInviteDelivery.mockResolvedValue(
+      makeInviteDeliveryResult(),
+    )
   })
 
   it('returns auth response when requirePro fails', async () => {
@@ -95,6 +164,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
     expect(result).toBe(authRes)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 
   it('returns VALIDATION_ERROR when booking id is missing', async () => {
@@ -263,6 +333,11 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       select: {
         id: true,
         clientId: true,
+        client: {
+          select: {
+            userId: true,
+          },
+        },
       },
     })
 
@@ -280,9 +355,10 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
     })
 
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 
-  it('creates or updates an invite successfully and returns the invite payload', async () => {
+  it('creates or updates a pending invite, queues delivery, and returns invite plus delivery summary', async () => {
     const result = await POST(
       makeRequest({
         name: '  Tori Morales  ',
@@ -304,6 +380,20 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      clientId: 'client_123',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      issuedByUserId: 'user_123',
+      recipientUserId: null,
+    })
+
     expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
         invite: {
@@ -314,6 +404,11 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
           invitedEmail: 'tori@example.com',
           invitedPhone: null,
           preferredContactMethod: ContactMethod.EMAIL,
+        },
+        inviteDelivery: {
+          attempted: true,
+          queued: true,
+          href: '/claim/token_1',
         },
       },
       200,
@@ -331,6 +426,185 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
           invitedEmail: 'tori@example.com',
           invitedPhone: null,
           preferredContactMethod: ContactMethod.EMAIL,
+        },
+        inviteDelivery: {
+          attempted: true,
+          queued: true,
+          href: '/claim/token_1',
+        },
+      },
+    })
+  })
+
+  it('passes recipientUserId through when the booking client is already linked to a user', async () => {
+    mocks.bookingFindFirst.mockResolvedValueOnce(
+      makeBooking({
+        userId: 'user_client_123',
+      }),
+    )
+
+    await POST(
+      makeRequest({
+        name: 'Tori Morales',
+        email: 'tori@example.com',
+      }),
+      {
+        params: { id: 'booking_1' },
+      },
+    )
+
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      clientId: 'client_123',
+      bookingId: 'booking_1',
+      inviteId: 'invite_1',
+      rawToken: 'token_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      issuedByUserId: 'user_123',
+      recipientUserId: 'user_client_123',
+    })
+  })
+
+  it('returns queued false when invite delivery enqueue fails but still returns 200 with the invite payload', async () => {
+    mocks.createClientClaimInviteDelivery.mockRejectedValueOnce(
+      new Error('dispatch enqueue failed'),
+    )
+
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    try {
+      const result = await POST(
+        makeRequest({
+          name: 'Tori Morales',
+          email: 'tori@example.com',
+        }),
+        {
+          params: { id: 'booking_1' },
+        },
+      )
+
+      expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/pro/bookings/[id]/invite delivery enqueue failed',
+        expect.objectContaining({
+          professionalId: 'pro_123',
+          bookingId: 'booking_1',
+          clientId: 'client_123',
+          inviteId: 'invite_1',
+          error: expect.any(Error),
+        }),
+      )
+
+      expect(result).toEqual({
+        ok: true,
+        status: 200,
+        data: {
+          invite: {
+            id: 'invite_1',
+            token: 'token_1',
+            status: ProClientInviteStatus.PENDING,
+            invitedName: 'Tori Morales',
+            invitedEmail: 'tori@example.com',
+            invitedPhone: null,
+            preferredContactMethod: ContactMethod.EMAIL,
+          },
+          inviteDelivery: {
+            attempted: true,
+            queued: false,
+            href: null,
+          },
+        },
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
+  it('does not attempt delivery for an already accepted invite', async () => {
+    mocks.upsertClientClaimLink.mockResolvedValueOnce(
+      makeInvite({
+        status: ProClientInviteStatus.ACCEPTED,
+        acceptedAt: new Date('2026-04-13T20:00:00.000Z'),
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        name: 'Tori Morales',
+        email: 'tori@example.com',
+      }),
+      {
+        params: { id: 'booking_1' },
+      },
+    )
+
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        invite: {
+          id: 'invite_1',
+          token: 'token_1',
+          status: ProClientInviteStatus.ACCEPTED,
+          invitedName: 'Tori Morales',
+          invitedEmail: 'tori@example.com',
+          invitedPhone: null,
+          preferredContactMethod: ContactMethod.EMAIL,
+        },
+        inviteDelivery: {
+          attempted: false,
+          queued: false,
+          href: null,
+        },
+      },
+    })
+  })
+
+  it('does not attempt delivery for a revoked invite', async () => {
+    mocks.upsertClientClaimLink.mockResolvedValueOnce(
+      makeInvite({
+        status: ProClientInviteStatus.REVOKED,
+        revokedAt: new Date('2026-04-13T20:00:00.000Z'),
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        name: 'Tori Morales',
+        email: 'tori@example.com',
+      }),
+      {
+        params: { id: 'booking_1' },
+      },
+    )
+
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        invite: {
+          id: 'invite_1',
+          token: 'token_1',
+          status: ProClientInviteStatus.REVOKED,
+          invitedName: 'Tori Morales',
+          invitedEmail: 'tori@example.com',
+          invitedPhone: null,
+          preferredContactMethod: ContactMethod.EMAIL,
+        },
+        inviteDelivery: {
+          attempted: false,
+          queued: false,
+          href: null,
         },
       },
     })

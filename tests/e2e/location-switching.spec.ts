@@ -2,14 +2,18 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
 import {
+  chooseFirstEnabledSlot,
   continueToAddOns,
   expectAddOnsPage,
   expectContinueDisabled,
+  expectContinueEnabled,
+  expectHoldSuccess,
   selectSavedMobileAddress,
   switchToMobile,
   switchToSalon,
   waitForAvailabilityReady,
 } from './utils/availabilityHelpers'
+import { byTestId, testIds } from './utils/selectors'
 import {
   seedBookingFlow,
   type SeedBookingFlowResult,
@@ -34,10 +38,6 @@ function getOfferingTitle(seed: SeedBookingFlowResult): string {
   return maybeTitle ?? DEFAULT_OFFERING_TITLE
 }
 
-function availabilityDialog(page: Page): Locator {
-  return page.getByRole('dialog').first()
-}
-
 function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
   return page.getByRole('button', {
     name: new RegExp(
@@ -47,30 +47,23 @@ function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
   })
 }
 
-function continueButton(page: Page): Locator {
-  return availabilityDialog(page)
-    .getByRole('button', {
-      name: /continue(?:\s+to\s+add-ons)?/i,
-    })
-    .first()
-}
-
-function slotButtons(page: Page): Locator {
-  return availabilityDialog(page).getByRole('button', {
-    name: /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i,
-  })
+function availabilityDialog(page: Page): Locator {
+  return byTestId(page, testIds.availability.drawer)
 }
 
 function holdBanner(page: Page): Locator {
-  return availabilityDialog(page).getByTestId('availability-hold-banner')
+  return byTestId(availabilityDialog(page), testIds.availability.holdBanner)
 }
 
 function mobileAddressSection(page: Page): Locator {
-  return availabilityDialog(page).getByTestId('mobile-address-section')
+  return byTestId(availabilityDialog(page), testIds.mobileAddress.section)
 }
 
 function mobileAddressAddButton(page: Page): Locator {
-  return availabilityDialog(page).getByTestId('mobile-address-add-button')
+  return byTestId(
+    availabilityDialog(page),
+    testIds.mobileAddress.addButton,
+  )
 }
 
 async function gotoProfessionalServicesPage(
@@ -91,33 +84,15 @@ async function openAvailabilityFromSeededService(
   seed: SeedBookingFlowResult,
 ): Promise<void> {
   await bookingCta(page, seed).click()
-  await expect(availabilityDialog(page)).toBeVisible()
-  await expect(
-    availabilityDialog(page).getByText(/availability/i).first(),
-  ).toBeVisible()
+
+  const drawer = availabilityDialog(page)
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByText(/^availability$/i)).toBeVisible()
 }
 
-async function chooseFirstEnabledTimeSlot(page: Page): Promise<void> {
-  const slots = slotButtons(page)
-  const count = await slots.count()
-
-  for (let index = 0; index < count; index += 1) {
-    const slot = slots.nth(index)
-
-    if (!(await slot.isVisible())) continue
-    if (!(await slot.isEnabled())) continue
-
-    await slot.click()
-    return
-  }
-
-  throw new Error('No enabled time slot found in availability drawer')
-}
-
-async function createHoldFromFirstEnabledSlot(page: Page): Promise<{
-  status: number
-  body: string
-}> {
+async function createHoldFromFirstEnabledSlot(
+  page: Page,
+): Promise<{ status: number; body: string }> {
   const [holdResponse] = await Promise.all([
     page.waitForResponse(
       (resp) =>
@@ -125,7 +100,7 @@ async function createHoldFromFirstEnabledSlot(page: Page): Promise<{
         resp.request().method() === 'POST',
       { timeout: 30_000 },
     ),
-    chooseFirstEnabledTimeSlot(page),
+    chooseFirstEnabledSlot(page),
   ])
 
   return {
@@ -135,7 +110,8 @@ async function createHoldFromFirstEnabledSlot(page: Page): Promise<{
 }
 
 async function expectHoldCreated(page: Page): Promise<void> {
-  await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
+  await expectHoldSuccess(page)
+  await expectContinueEnabled(page)
 }
 
 async function waitForLocationToggleReady(page: Page): Promise<void> {
@@ -144,11 +120,11 @@ async function waitForLocationToggleReady(page: Page): Promise<void> {
   const drawer = availabilityDialog(page)
 
   await expect(
-    drawer.getByTestId('booking-location-salon'),
+    byTestId(drawer, testIds.location.salonOption),
   ).toBeVisible({ timeout: 15_000 })
 
   await expect(
-    drawer.getByTestId('booking-location-mobile'),
+    byTestId(drawer, testIds.location.mobileOption),
   ).toBeVisible({ timeout: 15_000 })
 }
 
@@ -156,7 +132,7 @@ async function expectHoldClearedAfterLocationSwitch(
   page: Page,
   targetMode: 'MOBILE' | 'SALON',
 ): Promise<void> {
-  await expect(holdBanner(page)).toBeHidden({ timeout: 15_000 })
+  await expect(holdBanner(page)).toHaveCount(0, { timeout: 15_000 })
   await expectContinueDisabled(page)
 
   if (targetMode === 'MOBILE') {

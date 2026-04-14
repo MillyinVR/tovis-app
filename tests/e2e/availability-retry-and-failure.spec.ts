@@ -2,6 +2,18 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
 import {
+  expectAvailabilityError,
+  expectContinueDisabled,
+  expectContinueEnabled,
+  expectHoldExpired,
+  retryAvailability,
+  waitForAvailabilityReady,
+} from './utils/availabilityHelpers'
+import {
+  availabilityDrawer,
+  availabilitySlotButtons,
+} from './utils/selectors'
+import {
   seedBookingFlow,
   type SeedBookingFlowResult,
 } from './fixtures/seedBookingFlow'
@@ -25,10 +37,6 @@ function getOfferingTitle(seed: SeedBookingFlowResult): string {
   return maybeTitle ?? DEFAULT_OFFERING_TITLE
 }
 
-function availabilityDialog(page: Page): Locator {
-  return page.getByRole('dialog').first()
-}
-
 function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
   return page.getByRole('button', {
     name: new RegExp(
@@ -36,44 +44,6 @@ function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
       'i',
     ),
   })
-}
-
-function continueButton(page: Page): Locator {
-  return availabilityDialog(page)
-    .getByRole('button', {
-      name: /continue(?:\s+to\s+add-ons)?/i,
-    })
-    .first()
-}
-
-function dayButtons(page: Page): Locator {
-  return availabilityDialog(page).getByRole('button', {
-    name: /Mon|Tue|Wed|Thu|Fri|Sat|Sun/i,
-  })
-}
-
-function slotButtons(page: Page): Locator {
-  return availabilityDialog(page).getByRole('button', {
-    name: /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i,
-  })
-}
-
-function availabilityError(page: Page): Locator {
-  return availabilityDialog(page).getByText(
-    /could not load|something went wrong|failed/i,
-  )
-}
-
-function availabilityRetryButton(page: Page): Locator {
-  return availabilityDialog(page)
-    .getByRole('button', { name: /retry/i })
-    .first()
-}
-
-function holdExpiredMessage(page: Page): Locator {
-  return availabilityDialog(page).getByText(
-    /expired|time ran out|hold expired/i,
-  )
 }
 
 async function gotoProfessionalServicesPage(
@@ -94,23 +64,54 @@ async function openAvailabilityFromSeededService(
   seed: SeedBookingFlowResult,
 ): Promise<void> {
   await bookingCta(page, seed).click()
-  await expect(availabilityDialog(page)).toBeVisible()
-  await expect(
-    availabilityDialog(page).getByText(/availability/i).first(),
-  ).toBeVisible()
+
+  const drawer = availabilityDrawer(page)
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByText(/^availability$/i)).toBeVisible()
 }
 
-async function waitForAvailabilityReady(page: Page): Promise<void> {
-  await expect(availabilityDialog(page)).toBeVisible()
-  await expect(dayButtons(page).first()).toBeVisible({ timeout: 30_000 })
-  await expect(slotButtons(page).first()).toBeVisible({ timeout: 30_000 })
+async function chooseEnabledSlotByIndex(
+  page: Page,
+  index: number,
+): Promise<void> {
+  const slots = availabilitySlotButtons(page)
+  const count = await slots.count()
+  const enabledVisibleSlots: Locator[] = []
+
+  for (let slotIndex = 0; slotIndex < count; slotIndex += 1) {
+    const slot = slots.nth(slotIndex)
+
+    if (!(await slot.isVisible())) continue
+    if (!(await slot.isEnabled())) continue
+
+    enabledVisibleSlots.push(slot)
+  }
+
+  if (enabledVisibleSlots.length === 0) {
+    throw new Error('No enabled time slot found in availability drawer')
+  }
+
+  const targetIndex =
+    index >= 0 && index < enabledVisibleSlots.length ? index : 0
+
+  await enabledVisibleSlots[targetIndex].click()
 }
 
-async function chooseSlotByIndex(page: Page, index: number): Promise<void> {
-  const slots = slotButtons(page)
-  await expect(slots.first()).toBeVisible()
-  expect(await slots.count()).toBeGreaterThan(0)
-  await slots.nth(index).click()
+async function enabledSlotCount(page: Page): Promise<number> {
+  const slots = availabilitySlotButtons(page)
+  const count = await slots.count()
+  let enabledCount = 0
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = slots.nth(index)
+
+    if (!(await slot.isVisible())) continue
+    if (!(await slot.isEnabled())) continue
+
+    enabledCount += 1
+  }
+
+  return enabledCount
 }
 
 test.beforeAll(async () => {
@@ -178,13 +179,13 @@ test.describe('availability retry and failure browser flow', () => {
     await gotoProfessionalServicesPage(page, seed)
     await openAvailabilityFromSeededService(page, seed)
 
-    await expect(availabilityError(page)).toBeVisible()
-    await expect(continueButton(page)).toBeDisabled()
+    await expectAvailabilityError(page)
+    await expectContinueDisabled(page)
 
-    await availabilityRetryButton(page).click()
+    await retryAvailability(page)
     await waitForAvailabilityReady(page)
 
-    await expect(slotButtons(page).first()).toBeVisible()
+    await expect(availabilitySlotButtons(page).first()).toBeVisible()
   })
 
   test('surfaces a hold-expired path, keeps continue disabled, and allows retrying the hold', async ({
@@ -239,9 +240,10 @@ test.describe('availability retry and failure browser flow', () => {
       (resp) =>
         resp.url().includes('/api/holds') &&
         resp.request().method() === 'POST',
+      { timeout: 30_000 },
     )
 
-    await chooseSlotByIndex(page, 0)
+    await chooseEnabledSlotByIndex(page, 0)
 
     const failedHoldResponse = await failedHoldResponsePromise
     const failedHoldBody = await failedHoldResponse.text()
@@ -251,14 +253,14 @@ test.describe('availability retry and failure browser flow', () => {
 
     expect(failedHoldResponse.status(), failedHoldBody).toBe(409)
 
-    await expect(holdExpiredMessage(page)).toBeVisible()
-    await expect(continueButton(page)).toBeDisabled()
+    await expectHoldExpired(page)
+    await expectContinueDisabled(page)
 
-    // Wait for slots to be interactable before setting up the retry interceptor.
-    // This ensures the UI has fully settled into error state before we click again.
-    await expect(slotButtons(page).first()).toBeVisible({ timeout: 15_000 })
+    await expect(availabilitySlotButtons(page).first()).toBeVisible({
+      timeout: 15_000,
+    })
 
-    const retryIndex = (await slotButtons(page).count()) > 1 ? 1 : 0
+    const retryIndex = (await enabledSlotCount(page)) > 1 ? 1 : 0
 
     const retryHoldResponsePromise = page.waitForResponse(
       (resp) =>
@@ -267,7 +269,7 @@ test.describe('availability retry and failure browser flow', () => {
       { timeout: 30_000 },
     )
 
-    await chooseSlotByIndex(page, retryIndex)
+    await chooseEnabledSlotByIndex(page, retryIndex)
 
     const retryHoldResponse = await retryHoldResponsePromise
     const retryHoldBody = await retryHoldResponse.text()
@@ -277,6 +279,6 @@ test.describe('availability retry and failure browser flow', () => {
 
     expect(retryHoldResponse.status(), retryHoldBody).toBe(201)
 
-    await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
+    await expectContinueEnabled(page)
   })
 })

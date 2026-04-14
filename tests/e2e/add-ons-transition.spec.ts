@@ -2,8 +2,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
 import {
+  chooseFirstEnabledSlot,
   continueToAddOns,
   expectAddOnsPage,
+  expectContinueEnabled,
   waitForAvailabilityReady,
 } from './utils/availabilityHelpers'
 import { byTestId, testIds } from './utils/selectors'
@@ -44,20 +46,6 @@ function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
   })
 }
 
-function slotButtons(page: Page): Locator {
-  return availabilityDialog(page).getByRole('button', {
-    name: /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i,
-  })
-}
-
-function continueButton(page: Page): Locator {
-  return availabilityDialog(page)
-    .getByRole('button', {
-      name: /continue(?:\s+to\s+add-ons)?/i,
-    })
-    .first()
-}
-
 async function gotoProfessionalServicesPage(
   page: Page,
   seed: SeedBookingFlowResult,
@@ -76,16 +64,11 @@ async function openAvailabilityFromSeededService(
   seed: SeedBookingFlowResult,
 ): Promise<void> {
   await bookingCta(page, seed).click()
+
   await expect(availabilityDialog(page)).toBeVisible()
   await expect(
     availabilityDialog(page).getByText(/availability/i).first(),
   ).toBeVisible()
-}
-
-async function chooseFirstVisibleTimeSlot(page: Page): Promise<void> {
-  const firstSlot = slotButtons(page).first()
-  await expect(firstSlot).toBeVisible()
-  await firstSlot.click()
 }
 
 async function createHoldAndAssertSuccess(
@@ -97,8 +80,9 @@ async function createHoldAndAssertSuccess(
       (resp) =>
         resp.url().includes('/api/holds') &&
         resp.request().method() === 'POST',
+      { timeout: 30_000 },
     ),
-    chooseFirstVisibleTimeSlot(page),
+    chooseFirstEnabledSlot(page),
   ])
 
   const holdBody = await holdResponse.text()
@@ -111,7 +95,7 @@ async function createHoldAndAssertSuccess(
     `POST /api/holds failed: ${holdBody}`,
   ).toBe(201)
 
-  await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 })
+  await expectContinueEnabled(page)
 }
 
 test.beforeAll(async () => {
@@ -210,5 +194,6 @@ test.describe('add-ons transition browser flow', () => {
 
     await expect(skipButton).toBeVisible()
     await expect(addOnsContinueButton).toBeVisible()
+    await expect(addOnsContinueButton).toBeEnabled()
   })
 })

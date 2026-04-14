@@ -4,39 +4,171 @@
   "environment": "mobile",
   "deviceProfile": "mobile-chrome",
   "projectName": "mobile-chrome",
-  "collectedAt": "2026-04-06T00:16:36.886Z",
-  "sampleTargetPerScenario": 1,
-  "bookingUrl": "https://tovis.app/looks",
+  "collectedAt": "2026-04-14T02:17:44.620Z",
+  "sampleTargetPerScenario": 2,
+  "bookingUrl": "http://127.0.0.1:3000/looks",
   "samples": [
     {
       "scenario": "drawer-open",
       "metric": "drawer_open_to_first_usable_ms",
-      "invalid": true,
-      "invalidReason": "missing_perf_metric"
+      "durationMs": 3038.399999976158,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "bookingSource": "DISCOVERY",
+        "locationType": "SALON",
+        "selectedDayYMD": "2026-04-14",
+        "slotCount": 0,
+        "dayCount": 5
+      }
+    },
+    {
+      "scenario": "drawer-open",
+      "metric": "drawer_open_to_first_usable_ms",
+      "durationMs": 3085.7999999523163,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "bookingSource": "DISCOVERY",
+        "locationType": "SALON",
+        "selectedDayYMD": "2026-04-14",
+        "slotCount": 0,
+        "dayCount": 5
+      }
     },
     {
       "scenario": "day-switch",
       "metric": "day_switch_to_times_visible_ms",
-      "invalid": true,
-      "invalidReason": "drawer_not_usable"
+      "durationMs": 10.700000047683716,
+      "meta": {
+        "previousDayYMD": "2026-04-14",
+        "nextDayYMD": "2026-04-15",
+        "locationType": "SALON",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "bookingSource": "DISCOVERY",
+        "selectedDayYMD": "2026-04-15",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "slotCount": 27,
+        "requestedDayLabel": "Wed15"
+      }
+    },
+    {
+      "scenario": "day-switch",
+      "metric": "day_switch_to_times_visible_ms",
+      "durationMs": 10.100000023841858,
+      "meta": {
+        "previousDayYMD": "2026-04-14",
+        "nextDayYMD": "2026-04-15",
+        "locationType": "SALON",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "bookingSource": "DISCOVERY",
+        "selectedDayYMD": "2026-04-15",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "slotCount": 27,
+        "requestedDayLabel": "Wed15"
+      }
     },
     {
       "scenario": "hold-request",
       "metric": "hold_request_latency_ms",
-      "invalid": true,
-      "invalidReason": "drawer_not_usable"
+      "durationMs": 2466.8000000715256,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "selectedDayYMD": "2026-04-17",
+        "slotISO": "2026-04-17T22:30:00.000Z",
+        "locationType": "SALON",
+        "bookingSource": "DISCOVERY",
+        "statusCode": 201,
+        "ok": true
+      }
+    },
+    {
+      "scenario": "hold-request",
+      "metric": "hold_request_latency_ms",
+      "durationMs": 1756.2000000476837,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "selectedDayYMD": "2026-04-17",
+        "slotISO": "2026-04-17T21:00:00.000Z",
+        "locationType": "SALON",
+        "bookingSource": "DISCOVERY",
+        "statusCode": 201,
+        "ok": true
+      }
     },
     {
       "scenario": "continue-to-add-ons",
       "metric": "continue_to_add_ons_ms",
-      "invalid": true,
-      "invalidReason": "drawer_not_usable"
+      "durationMs": 4871.199999928474,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "selectedDayYMD": "2026-04-17",
+        "slotISO": "2026-04-17T22:30:00.000Z",
+        "locationType": "SALON",
+        "bookingSource": "DISCOVERY",
+        "holdId": "cmnxzqh5e0013tzrs2iixg8hu",
+        "mediaId": "cmnvb3e2b00200jdmqskpvzz6",
+        "addOnCount": 0,
+        "readyTarget": "booking-add-ons-continue-button"
+      }
+    },
+    {
+      "scenario": "continue-to-add-ons",
+      "metric": "continue_to_add_ons_ms",
+      "durationMs": 5031.299999952316,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "offeringId": "cmnvb3che001u0jdm2lmor9an",
+        "selectedDayYMD": "2026-04-17",
+        "slotISO": "2026-04-17T21:00:00.000Z",
+        "locationType": "SALON",
+        "bookingSource": "DISCOVERY",
+        "holdId": "cmnxzr4hi0015tzrs8l23jnz2",
+        "mediaId": "cmnvb3e2b00200jdmqskpvzz6",
+        "addOnCount": 0,
+        "readyTarget": "booking-add-ons-continue-button"
+      }
     },
     {
       "scenario": "background-refresh",
       "metric": "background_refresh_ms",
-      "invalid": true,
-      "invalidReason": "drawer_not_usable"
+      "durationMs": 8.700000047683716,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "locationType": null,
+        "includeOtherPros": false,
+        "refreshKind": "initial-background",
+        "cacheState": "cached-primary",
+        "dayCount": 5,
+        "hasOtherPros": false,
+        "availabilityVersion": "av:081ac22f899d9fdc44e2608a"
+      }
+    },
+    {
+      "scenario": "background-refresh",
+      "metric": "background_refresh_ms",
+      "durationMs": 8.700000047683716,
+      "meta": {
+        "professionalId": "cmnvb2zok00020jdm28k85h90",
+        "serviceId": "cmnvb35cj00120jdmhustgqu6",
+        "locationType": null,
+        "includeOtherPros": false,
+        "refreshKind": "initial-background",
+        "cacheState": "cached-primary",
+        "dayCount": 5,
+        "hasOtherPros": false,
+        "availabilityVersion": "av:081ac22f899d9fdc44e2608a"
+      }
     }
   ]
 }

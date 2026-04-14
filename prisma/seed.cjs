@@ -191,9 +191,21 @@ async function upsertAdmin({ email, password }) {
   return adminUser
 }
 
-async function upsertClientUser({ email, password }) {
+async function upsertClientUser({
+  email,
+  password,
+  phone = '+15555550100',
+}) {
   const normalizedEmail = normalizeEmail(email)
+  const normalizedPhone = normalizeOptionalPhone(phone)
   const passwordHash = await bcrypt.hash(password, 10)
+
+  if (!normalizedPhone) {
+    throw new Error('Seed client phone is required for a fully verified client')
+  }
+
+  const phoneVerifiedAt = new Date('2026-04-08T10:00:00.000Z')
+  const emailVerifiedAt = new Date('2026-04-08T10:05:00.000Z')
 
   const user = await prisma.user.upsert({
     where: { email: normalizedEmail },
@@ -201,13 +213,26 @@ async function upsertClientUser({ email, password }) {
       email: normalizedEmail,
       password: passwordHash,
       role: Role.CLIENT,
+      phone: normalizedPhone,
+      phoneVerifiedAt,
+      emailVerifiedAt,
     },
     create: {
       email: normalizedEmail,
       password: passwordHash,
       role: Role.CLIENT,
+      phone: normalizedPhone,
+      phoneVerifiedAt,
+      emailVerifiedAt,
     },
-    select: { id: true, email: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      phone: true,
+      phoneVerifiedAt: true,
+      emailVerifiedAt: true,
+    },
   })
 
   const clientProfile = await prisma.clientProfile.upsert({
@@ -215,14 +240,16 @@ async function upsertClientUser({ email, password }) {
     update: {
       firstName: 'Test',
       lastName: 'Client',
-      phone: null,
+      phone: normalizedPhone,
+      phoneVerifiedAt,
       avatarUrl: null,
     },
     create: {
       userId: user.id,
       firstName: 'Test',
       lastName: 'Client',
-      phone: null,
+      phone: normalizedPhone,
+      phoneVerifiedAt,
       avatarUrl: null,
     },
   })
@@ -809,7 +836,12 @@ async function main() {
 
   console.log('✅ Seed core data complete.')
   console.log('PRO login:', { email: proUser.email, password: proPassword })
-  console.log('CLIENT login:', { email: clientUser.email, password: clientPassword })
+  console.log('CLIENT login:', {
+  email: clientUser.email,
+  password: clientPassword,
+  phoneVerifiedAt: clientUser.phoneVerifiedAt,
+  emailVerifiedAt: clientUser.emailVerifiedAt,
+})
   console.log('ADMIN login:', { email: adminUser.email, password: adminPassword })
   console.log('PRO profile id:', professionalProfile.id)
   console.log('UNCLAIMED email client:', unclaimedEmailClient)
