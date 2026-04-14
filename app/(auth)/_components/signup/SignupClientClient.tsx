@@ -392,6 +392,9 @@ export default function SignupClientClient() {
           lastName,
           phone: sanitizePhone(phone),
           tapIntentId: ti ?? undefined,
+          next: nextFromQuery ?? undefined,
+          intent: intent ?? undefined,
+          inviteToken: inviteToken ?? undefined,
           signupLocation: {
             kind: 'CLIENT_ZIP',
             postalCode: confirmedZip.postalCode,

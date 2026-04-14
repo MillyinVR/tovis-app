@@ -118,6 +118,8 @@ describe('app/(auth)/verify-phone/page', () => {
     mockSearchParamsGet.mockImplementation((key: string) => {
       if (key === 'next') return null
       if (key === 'email') return null
+      if (key === 'intent') return null
+      if (key === 'inviteToken') return null
       return null
     })
 
@@ -170,6 +172,41 @@ describe('app/(auth)/verify-phone/page', () => {
 
     expect(mockReplace).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves claim handoff on the back-to-sign-in link', async () => {
+    mockSearchParamsGet.mockImplementation((key: string) => {
+      if (key === 'next') return '/claim/tok_1'
+      if (key === 'email') return 'retry'
+      if (key === 'intent') return 'CLAIM_INVITE'
+      if (key === 'inviteToken') return 'tok_1'
+      return null
+    })
+
+    fetchMock.mockResolvedValueOnce(
+      makeResponse(
+        makeStatusBody({
+          isPhoneVerified: false,
+          isEmailVerified: false,
+          isFullyVerified: false,
+          nextUrl: '/looks',
+          role: 'CLIENT',
+          email: 'client@example.com',
+        }),
+      ),
+    )
+
+    render(<VerifyPhonePage />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    const backLink = screen.getByRole('link', { name: /back to sign in/i })
+    expect(backLink).toHaveAttribute(
+      'href',
+      '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com&intent=CLAIM_INVITE&inviteToken=tok_1',
+    )
   })
 
   it('verifies phone, refreshes server truth, and keeps the user in verification flow when email is still pending', async () => {
@@ -230,6 +267,7 @@ describe('app/(auth)/verify-phone/page', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ code: '123456' }),
       }),
     )
@@ -335,6 +373,7 @@ describe('app/(auth)/verify-phone/page', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({}),
       }),
     )

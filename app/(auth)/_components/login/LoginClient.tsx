@@ -27,6 +27,12 @@ function sanitizeInternalPath(raw: string | null): string | null {
   return s
 }
 
+function sanitizeOptionalText(raw: string | null): string | null {
+  if (!raw) return null
+  const s = raw.trim()
+  return s || null
+}
+
 function isAuthPath(path: string): boolean {
   return (
     path === '/login' ||
@@ -87,6 +93,54 @@ function normalizeLanding(path: string, role: UserRole): string {
 
 function buildVerificationHref(nextPath: string): string {
   return `/verify-phone?next=${encodeURIComponent(nextPath)}`
+}
+
+function appendIfPresent(
+  params: URLSearchParams,
+  key: string,
+  value: string | null,
+): void {
+  if (value) params.set(key, value)
+}
+
+function buildSignupHref(args: {
+  ti: string | null
+  from: string | null
+  next: string | null
+  intent: string | null
+  inviteToken: string | null
+  email: string | null
+  phone: string | null
+}): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'ti', args.ti)
+  appendIfPresent(params, 'from', args.from)
+  appendIfPresent(params, 'next', args.next)
+  appendIfPresent(params, 'intent', args.intent)
+  appendIfPresent(params, 'inviteToken', args.inviteToken)
+  appendIfPresent(params, 'email', args.email)
+  appendIfPresent(params, 'phone', args.phone)
+
+  const qs = params.toString()
+  return qs ? `/signup?${qs}` : '/signup'
+}
+
+function buildForgotPasswordHref(args: {
+  ti: string | null
+  from: string | null
+  next: string | null
+  email: string | null
+}): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'ti', args.ti)
+  appendIfPresent(params, 'from', args.from)
+  appendIfPresent(params, 'next', args.next)
+  appendIfPresent(params, 'email', args.email)
+
+  const qs = params.toString()
+  return qs ? `/forgot-password?${qs}` : '/forgot-password'
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -176,26 +230,46 @@ export default function LoginClient() {
   const searchParams = useSearchParams()
 
   const fromRaw = searchParams.get('from')
-  const from = useMemo(() => sanitizeInternalPath(fromRaw), [fromRaw])
-  const fromSafe = useMemo(() => sanitizeRedirectTarget(from), [from])
-
+  const nextRaw = searchParams.get('next')
   const reasonRaw = searchParams.get('reason')
+  const tiRaw = searchParams.get('ti')
+  const intentRaw = searchParams.get('intent')
+  const inviteTokenRaw = searchParams.get('inviteToken')
+  const emailPrefillRaw = searchParams.get('email')
+  const phoneRaw = searchParams.get('phone')
+
+  const from = useMemo(() => sanitizeInternalPath(fromRaw), [fromRaw])
+  const next = useMemo(() => sanitizeInternalPath(nextRaw), [nextRaw])
+  const fromSafe = useMemo(() => sanitizeRedirectTarget(from), [from])
+  const nextSafe = useMemo(() => sanitizeRedirectTarget(next), [next])
+
   const explicitReason = useMemo(() => sanitizeReason(reasonRaw), [reasonRaw])
+  const ti = useMemo(() => sanitizeOptionalText(tiRaw), [tiRaw])
+  const intent = useMemo(() => sanitizeOptionalText(intentRaw), [intentRaw])
+  const inviteToken = useMemo(
+    () => sanitizeOptionalText(inviteTokenRaw),
+    [inviteTokenRaw],
+  )
+  const emailPrefill = useMemo(
+    () => sanitizeOptionalText(emailPrefillRaw) ?? '',
+    [emailPrefillRaw],
+  )
+  const phone = useMemo(() => sanitizeOptionalText(phoneRaw), [phoneRaw])
 
-  const ti = searchParams.get('ti')
-
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const pathIntent = nextSafe ?? fromSafe
+
   const inferredReason = useMemo<LoginReason | null>(() => {
     if (explicitReason) return explicitReason
-    const intent = roleIntentFromPath(fromSafe)
-    if (intent === 'ADMIN') return 'ADMIN_REQUIRED'
-    if (intent === 'PRO') return 'PRO_REQUIRED'
+    const intentRole = roleIntentFromPath(pathIntent)
+    if (intentRole === 'ADMIN') return 'ADMIN_REQUIRED'
+    if (intentRole === 'PRO') return 'PRO_REQUIRED'
     return null
-  }, [explicitReason, fromSafe])
+  }, [explicitReason, pathIntent])
 
   const reasonCopy = useMemo(() => {
     if (!inferredReason) return null
@@ -240,7 +314,7 @@ export default function LoginClient() {
         return
       }
 
-      const expectedRole = roleIntentFromPath(fromSafe)
+      const expectedRole = roleIntentFromPath(pathIntent)
 
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -278,7 +352,7 @@ export default function LoginClient() {
       const roleDefault =
         role === 'ADMIN' ? '/admin' : role === 'PRO' ? PRO_HOME : '/looks'
 
-      const rawDest = nextUrl ?? fromSafe ?? roleDefault
+      const rawDest = nextUrl ?? nextSafe ?? fromSafe ?? roleDefault
       const dest = normalizeLanding(rawDest, role)
 
       const isPhoneVerified = readBooleanField(data, 'isPhoneVerified')
@@ -310,10 +384,30 @@ export default function LoginClient() {
     }
   }
 
-  const signupHref = ti ? `/signup?ti=${encodeURIComponent(ti)}` : '/signup'
-  const forgotHref = ti
-    ? `/forgot-password?ti=${encodeURIComponent(ti)}`
-    : '/forgot-password'
+  const signupHref = useMemo(
+    () =>
+      buildSignupHref({
+        ti,
+        from: fromSafe,
+        next: nextSafe,
+        intent,
+        inviteToken,
+        email: emailPrefill || null,
+        phone,
+      }),
+    [ti, fromSafe, nextSafe, intent, inviteToken, emailPrefill, phone],
+  )
+
+  const forgotHref = useMemo(
+    () =>
+      buildForgotPasswordHref({
+        ti,
+        from: fromSafe,
+        next: nextSafe,
+        email: emailPrefill || null,
+      }),
+    [ti, fromSafe, nextSafe, emailPrefill],
+  )
 
   return (
     <AuthShell

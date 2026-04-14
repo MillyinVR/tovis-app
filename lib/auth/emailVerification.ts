@@ -40,6 +40,27 @@ function envOrNull(name: string): string | null {
   return value ? value : null
 }
 
+function sanitizeInternalPath(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  if (!value) return null
+  if (!value.startsWith('/')) return null
+  if (value.startsWith('//')) return null
+  return value
+}
+
+function sanitizeOptionalText(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  return value || null
+}
+
+function appendIfPresent(
+  params: URLSearchParams,
+  key: string,
+  value: string | null,
+): void {
+  if (value) params.set(key, value)
+}
+
 export function getAppUrlFromRequest(request: Request): string | null {
   const envUrl = envOrNull('NEXT_PUBLIC_APP_URL')
   if (envUrl) {
@@ -58,9 +79,25 @@ export function getAppUrlFromRequest(request: Request): string | null {
 export function buildVerifyEmailUrl(args: {
   appUrl: string
   token: string
+  next?: string | null
+  intent?: string | null
+  inviteToken?: string | null
 }): string {
   const url = new URL('/verify-email', args.appUrl)
   url.searchParams.set('token', args.token)
+
+  appendIfPresent(url.searchParams, 'next', sanitizeInternalPath(args.next))
+  appendIfPresent(
+    url.searchParams,
+    'intent',
+    sanitizeOptionalText(args.intent),
+  )
+  appendIfPresent(
+    url.searchParams,
+    'inviteToken',
+    sanitizeOptionalText(args.inviteToken),
+  )
+
   return url.toString()
 }
 
@@ -70,7 +107,9 @@ export async function enforceEmailVerificationLimits(
 ) {
   const db = getDb(tx)
   const now = Date.now()
-  const oneMinuteAgo = new Date(now - EMAIL_VERIFICATION_COOLDOWN_SECONDS * 1000)
+  const oneMinuteAgo = new Date(
+    now - EMAIL_VERIFICATION_COOLDOWN_SECONDS * 1000,
+  )
   const oneHourAgo = new Date(now - 60 * 60 * 1000)
 
   const recent = await db.emailVerificationToken.findFirst({
@@ -84,7 +123,10 @@ export async function enforceEmailVerificationLimits(
   })
 
   if (recent) {
-    return { ok: false as const, retryAfterSeconds: EMAIL_VERIFICATION_COOLDOWN_SECONDS }
+    return {
+      ok: false as const,
+      retryAfterSeconds: EMAIL_VERIFICATION_COOLDOWN_SECONDS,
+    }
   }
 
   const hourlyCount = await db.emailVerificationToken.count({
@@ -235,6 +277,9 @@ export async function issueAndSendEmailVerification(args: {
   userId: string
   email: string
   appUrl: string
+  next?: string | null
+  intent?: string | null
+  inviteToken?: string | null
   tx?: Prisma.TransactionClient
 }) {
   const issued = await createEmailVerificationToken({
@@ -246,6 +291,9 @@ export async function issueAndSendEmailVerification(args: {
   const verifyUrl = buildVerifyEmailUrl({
     appUrl: args.appUrl,
     token: issued.token,
+    next: args.next,
+    intent: args.intent,
+    inviteToken: args.inviteToken,
   })
 
   try {

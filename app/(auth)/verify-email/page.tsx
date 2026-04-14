@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 import AuthShell from '../_components/AuthShell'
 import { cn } from '@/lib/utils'
@@ -23,12 +24,14 @@ type VerificationStatus = {
   loaded: boolean
   nextUrl: string | null
   role: 'CLIENT' | 'PRO' | 'ADMIN' | null
+  email: string | null
 }
 
 const EMPTY_STATUS: VerificationStatus = {
   loaded: false,
   nextUrl: null,
   role: null,
+  email: null,
 }
 
 function sanitizeToken(raw: string | null): string | null {
@@ -44,6 +47,19 @@ function sanitizeNextUrl(raw: string | null): string | null {
   return value
 }
 
+function sanitizeOptionalText(raw: string | null): string | null {
+  const value = (raw ?? '').trim()
+  return value || null
+}
+
+function appendIfPresent(
+  params: URLSearchParams,
+  key: string,
+  value: string | null,
+): void {
+  if (value) params.set(key, value)
+}
+
 function readBoolean(value: unknown): boolean {
   return value === true
 }
@@ -57,10 +73,50 @@ function readRoleField(
   return role === 'CLIENT' || role === 'PRO' || role === 'ADMIN' ? role : null
 }
 
+function readEmailField(data: Record<string, unknown> | null): string | null {
+  const user = data?.user
+  if (!user || typeof user !== 'object' || Array.isArray(user)) return null
+  const email = (user as Record<string, unknown>).email
+  return typeof email === 'string' && email.trim() ? email.trim() : null
+}
+
 function buildDefaultNextUrl(role: 'CLIENT' | 'PRO' | 'ADMIN' | null): string {
   if (role === 'PRO') return '/pro/calendar'
   if (role === 'ADMIN') return '/admin'
   return '/looks'
+}
+
+function buildVerifyPhoneHref(args: {
+  next: string | null
+  intent: string | null
+  inviteToken: string | null
+}): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'next', args.next)
+  appendIfPresent(params, 'intent', args.intent)
+  appendIfPresent(params, 'inviteToken', args.inviteToken)
+
+  const qs = params.toString()
+  return qs ? `/verify-phone?${qs}` : '/verify-phone'
+}
+
+function buildLoginHref(args: {
+  next: string | null
+  email: string | null
+  intent: string | null
+  inviteToken: string | null
+}): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'from', args.next)
+  appendIfPresent(params, 'next', args.next)
+  appendIfPresent(params, 'email', args.email)
+  appendIfPresent(params, 'intent', args.intent)
+  appendIfPresent(params, 'inviteToken', args.inviteToken)
+
+  const qs = params.toString()
+  return qs ? `/login?${qs}` : '/login'
 }
 
 function PrimaryLinkButton({
@@ -115,12 +171,24 @@ function SecondaryLinkButton({
 
 export default function VerifyEmailPage() {
   const attemptedRef = useRef(false)
+  const searchParams = useSearchParams()
 
-  const token = useMemo(() => {
-    if (typeof window === 'undefined') return null
-    const url = new URL(window.location.href)
-    return sanitizeToken(url.searchParams.get('token'))
-  }, [])
+  const token = useMemo(
+    () => sanitizeToken(searchParams.get('token')),
+    [searchParams],
+  )
+  const nextFromQuery = useMemo(
+    () => sanitizeNextUrl(searchParams.get('next')),
+    [searchParams],
+  )
+  const intent = useMemo(
+    () => sanitizeOptionalText(searchParams.get('intent')),
+    [searchParams],
+  )
+  const inviteToken = useMemo(
+    () => sanitizeOptionalText(searchParams.get('inviteToken')),
+    [searchParams],
+  )
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -137,7 +205,9 @@ export default function VerifyEmailPage() {
     const data = await safeJsonRecord(res)
 
     if (!res.ok) {
-      return EMPTY_STATUS
+      const fallback = { ...EMPTY_STATUS, loaded: true }
+      setStatus(fallback)
+      return fallback
     }
 
     const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
@@ -146,6 +216,7 @@ export default function VerifyEmailPage() {
       loaded: true,
       nextUrl,
       role: readRoleField(data),
+      email: readEmailField(data),
     }
 
     setStatus(nextStatus)
@@ -189,7 +260,9 @@ export default function VerifyEmailPage() {
           isPhoneVerified: readBoolean(data?.isPhoneVerified),
           isEmailVerified: readBoolean(data?.isEmailVerified),
           isFullyVerified: readBoolean(data?.isFullyVerified),
-          requiresPhoneVerification: readBoolean(data?.requiresPhoneVerification),
+          requiresPhoneVerification: readBoolean(
+            data?.requiresPhoneVerification,
+          ),
         }
 
         setResult(nextResult)
@@ -209,8 +282,21 @@ export default function VerifyEmailPage() {
   const isFullyVerified = Boolean(result?.isFullyVerified)
   const requiresPhoneVerification = Boolean(result?.requiresPhoneVerification)
 
-  const continueHref =
-    status.nextUrl ?? buildDefaultNextUrl(status.role)
+  const resolvedNextUrl =
+    nextFromQuery ?? status.nextUrl ?? buildDefaultNextUrl(status.role)
+
+  const continueHref = resolvedNextUrl
+  const verifyPhoneHref = buildVerifyPhoneHref({
+    next: resolvedNextUrl,
+    intent,
+    inviteToken,
+  })
+  const loginHref = buildLoginHref({
+    next: resolvedNextUrl,
+    email: status.email,
+    intent,
+    inviteToken,
+  })
 
   const title = loading
     ? 'Verifying your email'
@@ -281,22 +367,23 @@ export default function VerifyEmailPage() {
                 Continue
               </PrimaryLinkButton>
             ) : requiresPhoneVerification ? (
-              <PrimaryLinkButton href="/verify-phone">
+              <PrimaryLinkButton href={verifyPhoneHref}>
                 Continue to phone verification
               </PrimaryLinkButton>
             ) : (
-              <PrimaryLinkButton href="/login">
+              <PrimaryLinkButton href={loginHref}>
                 Go to sign in
               </PrimaryLinkButton>
             )}
 
-            <SecondaryLinkButton href="/login">
+            <SecondaryLinkButton href={loginHref}>
               Back to sign in
             </SecondaryLinkButton>
 
             {!isFullyVerified ? (
               <div className="text-center text-xs text-textSecondary/80">
-                Full app access is locked until both phone and email are verified.
+                Full app access is locked until both phone and email are
+                verified.
               </div>
             ) : null}
           </div>

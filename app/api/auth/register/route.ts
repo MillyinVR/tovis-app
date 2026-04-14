@@ -68,6 +68,9 @@ type RegisterBody = {
   phone?: unknown
   tapIntentId?: unknown
   signupLocation?: unknown
+  next?: unknown
+  intent?: unknown
+  inviteToken?: unknown
 
   // pro fields
   businessName?: unknown
@@ -108,6 +111,19 @@ function envOrNull(name: string) {
 
 function pickUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
+}
+
+function sanitizeInternalPath(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  if (!value) return null
+  if (!value.startsWith('/')) return null
+  if (value.startsWith('//')) return null
+  return value
+}
+
+function sanitizeOptionalText(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  return value || null
 }
 
 function cleanPhone(v: unknown): string | null {
@@ -522,6 +538,11 @@ export async function POST(request: Request) {
 
     const tapIntentId = pickString(body.tapIntentId)
     const signupLocation = isLocationPayload(body.signupLocation) ? body.signupLocation : null
+    const nextForVerification = sanitizeInternalPath(pickString(body.next))
+    const verificationIntent = sanitizeOptionalText(pickString(body.intent))
+    const verificationInviteToken = sanitizeOptionalText(
+      pickString(body.inviteToken),
+    )
 
     if (!email || !password || !role) {
       return jsonFail(400, 'Missing required fields.', { code: 'MISSING_FIELDS' })
@@ -823,6 +844,9 @@ if (verificationEmail) {
       userId: user.id,
       email: verificationEmail,
       appUrl,
+      next: nextForVerification,
+      intent: verificationIntent,
+      inviteToken: verificationInviteToken,
     })
     emailVerificationSent = true
   } catch (emailErr) {
@@ -841,7 +865,7 @@ if (verificationEmail) {
     const res = jsonOk(
       {
         user: { id: user.id, email: user.email, role: user.role },
-        nextUrl: consumed?.nextUrl ?? null,
+        nextUrl: consumed?.nextUrl ?? nextForVerification ?? null,
         requiresPhoneVerification: true,
         requiresEmailVerification: true,
         isPhoneVerified: false,

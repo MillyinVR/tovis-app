@@ -114,6 +114,37 @@ function sanitizeNextUrl(raw: string | null) {
   return s
 }
 
+function sanitizeOptionalText(raw: string | null): string | null {
+  const s = (raw ?? '').trim()
+  return s || null
+}
+
+function appendIfPresent(
+  params: URLSearchParams,
+  key: string,
+  value: string | null,
+): void {
+  if (value) params.set(key, value)
+}
+
+function buildLoginHref(args: {
+  next: string | null
+  email: string | null
+  intent: string | null
+  inviteToken: string | null
+}): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'from', args.next)
+  appendIfPresent(params, 'next', args.next)
+  appendIfPresent(params, 'email', args.email)
+  appendIfPresent(params, 'intent', args.intent)
+  appendIfPresent(params, 'inviteToken', args.inviteToken)
+
+  const qs = params.toString()
+  return qs ? `/login?${qs}` : '/login'
+}
+
 function readRetryAfterSeconds(
   data: Record<string, unknown> | null,
 ): number | null {
@@ -166,6 +197,11 @@ export default function VerifyPhonePage() {
 
   const nextFromQuery = useMemo(() => sanitizeNextUrl(sp.get('next')), [sp])
   const emailRetryRequested = useMemo(() => sp.get('email') === 'retry', [sp])
+  const intent = useMemo(() => sanitizeOptionalText(sp.get('intent')), [sp])
+  const inviteToken = useMemo(
+    () => sanitizeOptionalText(sp.get('inviteToken')),
+    [sp],
+  )
 
   const [status, setStatus] = useState<VerificationStatus>(EMPTY_STATUS)
   const [code, setCode] = useState('')
@@ -178,6 +214,17 @@ export default function VerifyPhonePage() {
   const resolvedNextUrl = useMemo(() => {
     return nextFromQuery ?? status.nextUrl ?? buildDefaultNextUrl(status.role)
   }, [nextFromQuery, status.nextUrl, status.role])
+
+  const loginHref = useMemo(
+    () =>
+      buildLoginHref({
+        next: resolvedNextUrl,
+        email: status.email,
+        intent,
+        inviteToken,
+      }),
+    [resolvedNextUrl, status.email, intent, inviteToken],
+  )
 
   async function refreshStatus() {
     const res = await fetch('/api/auth/verification/status', {
@@ -262,6 +309,7 @@ export default function VerifyPhonePage() {
       const res = await fetch('/api/auth/phone/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({}),
       })
 
@@ -299,6 +347,7 @@ export default function VerifyPhonePage() {
       const res = await fetch('/api/auth/email/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({}),
       })
 
@@ -346,6 +395,7 @@ export default function VerifyPhonePage() {
       const res = await fetch('/api/auth/phone/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ code: trimmed }),
       })
 
@@ -509,7 +559,7 @@ export default function VerifyPhonePage() {
 
         <div className="text-center text-xs text-textSecondary/80">
           <Link
-            href="/login"
+            href={loginHref}
             className="font-black text-textPrimary hover:text-accentPrimary"
           >
             Back to sign in

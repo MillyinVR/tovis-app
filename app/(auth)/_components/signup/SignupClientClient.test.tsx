@@ -236,27 +236,30 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     )
 
     const registerCall = fetchMock.mock.calls[2]
-    const registerBody = JSON.parse(String(registerCall?.[1]?.body ?? '{}'))
+const registerBody = JSON.parse(String(registerCall?.[1]?.body ?? '{}'))
 
-    expect(registerBody).toEqual({
-      email: 'tori@example.com',
-      password: 'supersecret123',
-      role: 'CLIENT',
-      firstName: 'Tori',
-      lastName: 'Morales',
-      phone: '+16195551234',
-      tapIntentId: 'ti_123',
-      signupLocation: {
-        kind: 'CLIENT_ZIP',
-        postalCode: '92024',
-        city: 'Encinitas',
-        state: 'CA',
-        countryCode: 'US',
-        lat: 33.036,
-        lng: -117.292,
-        timeZoneId: 'America/Los_Angeles',
-      },
-    })
+expect(registerBody).toMatchObject({
+  email: 'tori@example.com',
+  password: 'supersecret123',
+  role: 'CLIENT',
+  firstName: 'Tori',
+  lastName: 'Morales',
+  phone: '+16195551234',
+  tapIntentId: 'ti_123',
+  next: '/claim/tok_1',
+  intent: 'CLAIM_INVITE',
+  inviteToken: 'tok_1',
+  signupLocation: {
+    kind: 'CLIENT_ZIP',
+    postalCode: '92024',
+    city: 'Encinitas',
+    state: 'CA',
+    countryCode: 'US',
+    lat: 33.036,
+    lng: -117.292,
+    timeZoneId: 'America/Los_Angeles',
+  },
+})
 
     expect(mocks.router.refresh).toHaveBeenCalledTimes(1)
 

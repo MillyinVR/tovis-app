@@ -276,11 +276,16 @@ describe('app/api/auth/register/route', () => {
       select: { id: true },
     })
 
-    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
-      userId: 'user_1',
-      email: 'client@example.com',
-      appUrl: 'http://localhost:3000',
-    })
+expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
+  expect.objectContaining({
+    userId: 'user_1',
+    email: 'client@example.com',
+    appUrl: 'http://localhost:3000',
+    next: null,
+    intent: null,
+    inviteToken: null,
+  }),
+)
 
     expect(mockConsumeTapIntent).toHaveBeenCalledWith({
       tapIntentId: 'tap_1',
