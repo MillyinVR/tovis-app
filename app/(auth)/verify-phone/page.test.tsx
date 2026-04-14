@@ -315,71 +315,75 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('resends verification email and shows success feedback', async () => {
-    const user = userEvent.setup()
+it('resends verification email and shows success feedback', async () => {
+  const user = userEvent.setup()
 
-    fetchMock
-      .mockResolvedValueOnce(
-        makeResponse(
-          makeStatusBody({
-            isPhoneVerified: true,
-            isEmailVerified: false,
-            isFullyVerified: false,
-            nextUrl: '/looks',
-            role: 'CLIENT',
-            email: 'client@example.com',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        makeResponse({
-          ok: true,
-          sent: true,
+  fetchMock
+    .mockResolvedValueOnce(
+      makeResponse(
+        makeStatusBody({
           isPhoneVerified: true,
           isEmailVerified: false,
           isFullyVerified: false,
+          nextUrl: '/looks',
+          role: 'CLIENT',
+          email: 'client@example.com',
         }),
-      )
-      .mockResolvedValueOnce(
-        makeResponse(
-          makeStatusBody({
-            isPhoneVerified: true,
-            isEmailVerified: false,
-            isFullyVerified: false,
-            nextUrl: '/looks',
-            role: 'CLIENT',
-            email: 'client@example.com',
-          }),
-        ),
-      )
-
-    render(<VerifyPhonePage />)
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    })
-
-    await user.click(
-      screen.getByRole('button', { name: /resend verification email/i }),
+      ),
     )
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(3)
-    })
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/auth/email/send',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({}),
+    .mockResolvedValueOnce(
+      makeResponse({
+        ok: true,
+        sent: true,
+        isPhoneVerified: true,
+        isEmailVerified: false,
+        isFullyVerified: false,
       }),
     )
+    .mockResolvedValueOnce(
+      makeResponse(
+        makeStatusBody({
+          isPhoneVerified: true,
+          isEmailVerified: false,
+          isFullyVerified: false,
+          nextUrl: '/looks',
+          role: 'CLIENT',
+          email: 'client@example.com',
+        }),
+      ),
+    )
 
-    expect(
-      await screen.findByText('Verification email sent. Check your inbox.'),
-    ).toBeInTheDocument()
+  render(<VerifyPhonePage />)
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  await user.click(
+    screen.getByRole('button', { name: /resend verification email/i }),
+  )
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    2,
+    '/api/auth/email/send',
+    expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        next: '/looks',
+        intent: null,
+        inviteToken: null,
+      }),
+    }),
+  )
+
+  expect(
+    await screen.findByText('Verification email sent. Check your inbox.'),
+  ).toBeInTheDocument()
+})
 })

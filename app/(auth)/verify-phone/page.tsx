@@ -348,7 +348,11 @@ export default function VerifyPhonePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          next: nextFromQuery ?? status.nextUrl ?? buildDefaultNextUrl(status.role),
+          intent,
+          inviteToken,
+        }),
       })
 
       const data = await safeJsonRecord(res)

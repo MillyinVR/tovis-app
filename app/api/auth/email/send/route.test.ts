@@ -179,42 +179,96 @@ describe('app/api/auth/email/send/route', () => {
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
   })
 
-  it('issues and sends the email verification when allowed', async () => {
-    mockRequireUser.mockResolvedValue({
-      ok: true,
-      user: makeUser({
-        phoneVerifiedAt: new Date('2026-04-08T09:00:00.000Z'),
-      }),
-    })
-    mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
-    mockEnforceEmailVerificationLimits.mockResolvedValue({
-      ok: true,
-      retryAfterSeconds: 0,
-    })
-    mockIssueAndSendEmailVerification.mockResolvedValue({
-      id: 'evt_1',
-      expiresAt: new Date('2026-04-09T09:00:00.000Z'),
-    })
-
-    const result = await POST(makeRequest())
-    const body = await result.json()
-
-    expect(result.status).toBe(200)
-    expect(body).toEqual({
-      ok: true,
-      sent: true,
-      isPhoneVerified: true,
-      isEmailVerified: false,
-      isFullyVerified: false,
-    })
-
-    expect(mockEnforceEmailVerificationLimits).toHaveBeenCalledWith('user_1')
-    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
-      userId: 'user_1',
-      email: 'user@example.com',
-      appUrl: 'http://localhost:3000',
-    })
+it('issues and sends the email verification when allowed', async () => {
+  mockRequireUser.mockResolvedValue({
+    ok: true,
+    user: makeUser({
+      phoneVerifiedAt: new Date('2026-04-08T09:00:00.000Z'),
+    }),
   })
+  mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
+  mockEnforceEmailVerificationLimits.mockResolvedValue({
+    ok: true,
+    retryAfterSeconds: 0,
+  })
+  mockIssueAndSendEmailVerification.mockResolvedValue({
+    id: 'evt_1',
+    expiresAt: new Date('2026-04-09T09:00:00.000Z'),
+  })
+
+  const result = await POST(makeRequest())
+  const body = await result.json()
+
+  expect(result.status).toBe(200)
+  expect(body).toEqual({
+    ok: true,
+    sent: true,
+    isPhoneVerified: true,
+    isEmailVerified: false,
+    isFullyVerified: false,
+    nextUrl: null,
+  })
+
+  expect(mockEnforceEmailVerificationLimits).toHaveBeenCalledWith('user_1')
+  expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
+    userId: 'user_1',
+    email: 'user@example.com',
+    appUrl: 'http://localhost:3000',
+    next: null,
+    intent: null,
+    inviteToken: null,
+  })
+})
+
+it('passes claim handoff context into resend verification emails', async () => {
+  mockRequireUser.mockResolvedValue({
+    ok: true,
+    user: makeUser({
+      phoneVerifiedAt: new Date('2026-04-08T09:00:00.000Z'),
+    }),
+  })
+  mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
+  mockEnforceEmailVerificationLimits.mockResolvedValue({
+    ok: true,
+    retryAfterSeconds: 0,
+  })
+  mockIssueAndSendEmailVerification.mockResolvedValue({
+    id: 'evt_2',
+    expiresAt: new Date('2026-04-09T09:00:00.000Z'),
+  })
+
+  const request = new Request('http://localhost/api/auth/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      next: '/claim/tok_1',
+      intent: 'CLAIM_INVITE',
+      inviteToken: 'tok_1',
+    }),
+  })
+
+  const result = await POST(request)
+  const body = await result.json()
+
+  expect(result.status).toBe(200)
+  expect(body).toEqual({
+    ok: true,
+    sent: true,
+    isPhoneVerified: true,
+    isEmailVerified: false,
+    isFullyVerified: false,
+    nextUrl: '/claim/tok_1',
+  })
+
+  expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
+    userId: 'user_1',
+    email: 'user@example.com',
+    appUrl: 'http://localhost:3000',
+    next: '/claim/tok_1',
+    intent: 'CLAIM_INVITE',
+    inviteToken: 'tok_1',
+  })
+})
 
   it('returns EMAIL_NOT_CONFIGURED when provider env is missing', async () => {
     mockRequireUser.mockResolvedValue({

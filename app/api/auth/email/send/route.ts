@@ -1,5 +1,5 @@
 // app/api/auth/email/send/route.ts
-import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import {
   enforceEmailVerificationLimits,
@@ -10,10 +10,29 @@ import {
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+type ResendEmailBody = {
+  next?: unknown
+  intent?: unknown
+  inviteToken?: unknown
+}
+
 function normalizeEmail(value: string | null): string | null {
   if (typeof value !== 'string') return null
   const normalized = value.trim()
   return normalized ? normalized : null
+}
+
+function sanitizeInternalPath(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  if (!value) return null
+  if (!value.startsWith('/')) return null
+  if (value.startsWith('//')) return null
+  return value
+}
+
+function sanitizeOptionalText(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  return value || null
 }
 
 export async function POST(request: Request) {
@@ -58,10 +77,21 @@ export async function POST(request: Request) {
       return res
     }
 
+    const body = ((await request.json().catch(() => ({}))) ?? {}) as ResendEmailBody
+
+    const nextForVerification = sanitizeInternalPath(pickString(body.next))
+    const verificationIntent = sanitizeOptionalText(pickString(body.intent))
+    const verificationInviteToken = sanitizeOptionalText(
+      pickString(body.inviteToken),
+    )
+
     await issueAndSendEmailVerification({
       userId: auth.user.id,
       email,
       appUrl,
+      next: nextForVerification,
+      intent: verificationIntent,
+      inviteToken: verificationInviteToken,
     })
 
     return jsonOk(
@@ -70,6 +100,7 @@ export async function POST(request: Request) {
         isPhoneVerified: auth.user.isPhoneVerified,
         isEmailVerified: false,
         isFullyVerified: false,
+        nextUrl: nextForVerification,
       },
       200,
     )
