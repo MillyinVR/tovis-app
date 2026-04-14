@@ -59,6 +59,15 @@ type SignupLocation =
       timeZoneId: string
     }
 
+
+type SmsSendResult =
+  | { ok: true }
+  | {
+      ok: false
+      code: 'SMS_NOT_CONFIGURED' | 'SMS_SEND_FAILED'
+    }
+
+
 type RegisterBody = {
   email?: unknown
   password?: unknown
@@ -96,12 +105,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : []
-}
-
-function envOrThrow(name: string) {
-  const v = process.env[name]
-  if (!v) throw new Error(`Missing env var: ${name}`)
-  return v
 }
 
 function envOrNull(name: string) {
@@ -261,20 +264,34 @@ function createManualLicenseDocData(urlOrRef: string) {
   }
 }
 
-async function sendPhoneVerificationSms(args: { to: string; code: string }) {
-  const accountSid = envOrThrow('TWILIO_ACCOUNT_SID')
-  const authToken = envOrThrow('TWILIO_AUTH_TOKEN')
-  const from = envOrThrow('TWILIO_FROM_NUMBER')
+async function sendPhoneVerificationSms(args: { to: string; code: string }): Promise<SmsSendResult> {
+  const accountSid = envOrNull('TWILIO_ACCOUNT_SID')
+  const authToken = envOrNull('TWILIO_AUTH_TOKEN')
+  const from = envOrNull('TWILIO_FROM_NUMBER')
 
-  const client = Twilio(accountSid, authToken)
-  const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
-  const msg = await client.messages.create({ to: args.to, from, body })
+  if (!accountSid || !authToken || !from) {
+    // eslint-disable-next-line no-console
+    console.error('[phone-verification] twilio env missing')
+    return { ok: false, code: 'SMS_NOT_CONFIGURED' }
+  }
 
-  // eslint-disable-next-line no-console
-  console.log(
-    '[phone-verification] twilio sent',
-    process.env.NODE_ENV !== 'production' ? { sid: msg.sid, to: args.to, from } : { sid: msg.sid, to: args.to },
-  )
+  try {
+    const client = Twilio(accountSid, authToken)
+    const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
+    const msg = await client.messages.create({ to: args.to, from, body })
+
+    // eslint-disable-next-line no-console
+    console.log(
+      '[phone-verification] twilio sent',
+      process.env.NODE_ENV !== 'production' ? { sid: msg.sid, to: args.to, from } : { sid: msg.sid, to: args.to },
+    )
+
+    return { ok: true }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[phone-verification] failed to send', err)
+    return { ok: false, code: 'SMS_SEND_FAILED' }
+  }
 }
 
 function isPrismaUniqueError(err: unknown) {
@@ -826,34 +843,30 @@ export async function POST(request: Request) {
       return { user, code }
     })
 
-    // SMS (best effort)
-    try {
-      await sendPhoneVerificationSms({ to: user.phone!, code })
-    } catch (smsErr) {
-      // eslint-disable-next-line no-console
-      console.error('[phone-verification] failed to send', smsErr)
+    const smsResult = await sendPhoneVerificationSms({ to: user.phone!, code })
+    const phoneVerificationSent = smsResult.ok
+    const phoneVerificationErrorCode = smsResult.ok ? null : smsResult.code
+
+    let emailVerificationSent = false
+
+    const verificationEmail = normalizeEmail(user.email)
+
+    if (verificationEmail) {
+      try {
+        await issueAndSendEmailVerification({
+          userId: user.id,
+          email: verificationEmail,
+          appUrl,
+          next: nextForVerification,
+          intent: verificationIntent,
+          inviteToken: verificationInviteToken,
+        })
+        emailVerificationSent = true
+      } catch (emailErr) {
+        // eslint-disable-next-line no-console
+        console.error('[email-verification] failed to send', emailErr)
+      }
     }
-
-let emailVerificationSent = false
-
-const verificationEmail = normalizeEmail(user.email)
-
-if (verificationEmail) {
-  try {
-    await issueAndSendEmailVerification({
-      userId: user.id,
-      email: verificationEmail,
-      appUrl,
-      next: nextForVerification,
-      intent: verificationIntent,
-      inviteToken: verificationInviteToken,
-    })
-    emailVerificationSent = true
-  } catch (emailErr) {
-    // eslint-disable-next-line no-console
-    console.error('[email-verification] failed to send', emailErr)
-  }
-}
 
     const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
     const token = createVerificationToken({
@@ -867,6 +880,8 @@ if (verificationEmail) {
         user: { id: user.id, email: user.email, role: user.role },
         nextUrl: consumed?.nextUrl ?? nextForVerification ?? null,
         requiresPhoneVerification: true,
+        phoneVerificationSent,
+        phoneVerificationErrorCode,
         requiresEmailVerification: true,
         isPhoneVerified: false,
         isEmailVerified: false,
@@ -909,13 +924,6 @@ if (signupLocation.kind === 'CLIENT_ZIP') {
       return jsonFail(400, 'Email or phone already in use.', { code: 'DUPLICATE_ACCOUNT' })
     }
 
-    const msg = err instanceof Error ? err.message : ''
-
-    if (msg.includes('Missing env var: TWILIO_')) {
-      // eslint-disable-next-line no-console
-      console.error('[phone-verification] twilio env missing', err)
-      return jsonFail(500, 'SMS provider is not configured.', { code: 'SMS_NOT_CONFIGURED' })
-    }
 
     // eslint-disable-next-line no-console
     console.error('Register error', err)

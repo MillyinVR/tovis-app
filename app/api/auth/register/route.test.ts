@@ -218,6 +218,8 @@ describe('app/api/auth/register/route', () => {
       isPhoneVerified: false,
       isEmailVerified: false,
       isFullyVerified: false,
+      phoneVerificationSent: true,
+      phoneVerificationErrorCode: null,
       emailVerificationSent: true,
       needsManualLicenseUpload: false,
       manualLicensePendingReview: false,
@@ -276,16 +278,16 @@ describe('app/api/auth/register/route', () => {
       select: { id: true },
     })
 
-expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
-  expect.objectContaining({
-    userId: 'user_1',
-    email: 'client@example.com',
-    appUrl: 'http://localhost:3000',
-    next: null,
-    intent: null,
-    inviteToken: null,
-  }),
-)
+    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user_1',
+        email: 'client@example.com',
+        appUrl: 'http://localhost:3000',
+        next: null,
+        intent: null,
+        inviteToken: null,
+      }),
+    )
 
     expect(mockConsumeTapIntent).toHaveBeenCalledWith({
       tapIntentId: 'tap_1',
@@ -336,6 +338,8 @@ expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
     expect(body.requiresPhoneVerification).toBe(true)
     expect(body.requiresEmailVerification).toBe(true)
     expect(body.isFullyVerified).toBe(false)
+    expect(body.phoneVerificationSent).toBe(true)
+    expect(body.phoneVerificationErrorCode).toBe(null)
     expect(body.emailVerificationSent).toBe(false)
 
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
@@ -346,6 +350,84 @@ expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
+  })
+
+  it('still creates the verification flow when sms send fails, but reports phoneVerificationSent=false with an error code', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_3',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      phoneVerification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({ id: 'pv_3' }),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockTwilioMessagesCreate.mockRejectedValue(new Error('Twilio timeout'))
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(201)
+    expect(body.ok).toBe(true)
+    expect(body.requiresPhoneVerification).toBe(true)
+    expect(body.requiresEmailVerification).toBe(true)
+    expect(body.isFullyVerified).toBe(false)
+    expect(body.phoneVerificationSent).toBe(false)
+    expect(body.phoneVerificationErrorCode).toBe('SMS_SEND_FAILED')
+    expect(body.emailVerificationSent).toBe(true)
+
+    expect(mockCreateVerificationToken).toHaveBeenCalledWith({
+      userId: 'user_3',
+      role: Role.CLIENT,
+      authVersion: 1,
+    })
+
+    const setCookie = result.headers.get('set-cookie')
+    expect(setCookie).toContain('tovis_token=verification_token')
+  })
+
+  it('still creates the verification flow when twilio env is missing, but reports phoneVerificationSent=false with SMS_NOT_CONFIGURED', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_4',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      phoneVerification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({ id: 'pv_4' }),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    delete process.env.TWILIO_ACCOUNT_SID
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(201)
+    expect(body.ok).toBe(true)
+    expect(body.phoneVerificationSent).toBe(false)
+    expect(body.phoneVerificationErrorCode).toBe('SMS_NOT_CONFIGURED')
+    expect(body.emailVerificationSent).toBe(true)
   })
 
   it('returns 500 when the app URL cannot be resolved', async () => {

@@ -29,6 +29,20 @@ function envOrThrow(key: string) {
   return v
 }
 
+function readPhoneSendErrorCode(err: unknown): 'SMS_NOT_CONFIGURED' | 'SMS_SEND_FAILED' | 'INTERNAL' {
+  const msg = err instanceof Error ? err.message : ''
+
+  if (msg.includes('Missing env var: TWILIO_')) {
+    return 'SMS_NOT_CONFIGURED'
+  }
+
+  if (msg) {
+    return 'SMS_SEND_FAILED'
+  }
+
+  return 'INTERNAL'
+}
+
 async function sendTwilioSms(args: { to: string; body: string }): Promise<{ sid: string | null }> {
   const sid = envOrThrow('TWILIO_ACCOUNT_SID')
   const auth = envOrThrow('TWILIO_AUTH_TOKEN')
@@ -52,7 +66,6 @@ async function sendTwilioSms(args: { to: string; body: string }): Promise<{ sid:
     cache: 'no-store',
   })
 
-  // ✅ safeJson exists; just treat its output as unknown and narrow.
   const data: unknown = await safeJson(res)
 
   if (!res.ok) {
@@ -108,7 +121,7 @@ export async function POST(_request: Request) {
     const userId = auth.user.id
 
     if (auth.user.phoneVerifiedAt) {
-      return jsonOk({ alreadyVerified: true }, 200)
+      return jsonOk({ alreadyVerified: true, sent: false }, 200)
     }
 
     const phone = (auth.user.phone ?? '').trim()
@@ -130,6 +143,11 @@ export async function POST(_request: Request) {
     const codeHash = sha256(code)
     const expiresAt = new Date(Date.now() + 1000 * 60 * 10)
 
+    const twilio = await sendTwilioSms({
+      to: phone,
+      body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
+    })
+
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.phoneVerification.updateMany({
         where: { userId, usedAt: null },
@@ -141,21 +159,27 @@ export async function POST(_request: Request) {
       })
     })
 
-    const twilio = await sendTwilioSms({
-      to: phone,
-      body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
-    })
-
     if (process.env.NODE_ENV !== 'production') {
       console.log('[phone/send] sent', { to: phone, sid: twilio.sid })
     } else {
       console.log('[phone/send] sent', { sid: twilio.sid })
     }
 
-    return jsonOk({}, 200)
+    return jsonOk({ sent: true }, 200)
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Internal server error'
-    console.error('[phone/send] error', msg)
+    const code = readPhoneSendErrorCode(err)
+
+    if (code === 'SMS_NOT_CONFIGURED') {
+      console.error('[phone/send] twilio env missing', err)
+      return jsonFail(500, 'SMS provider is not configured.', { code })
+    }
+
+    if (code === 'SMS_SEND_FAILED') {
+      console.error('[phone/send] send failed', err)
+      return jsonFail(502, 'Could not send verification code. Please try again.', { code })
+    }
+
+    console.error('[phone/send] error', err)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

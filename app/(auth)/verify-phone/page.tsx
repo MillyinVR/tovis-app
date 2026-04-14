@@ -197,6 +197,7 @@ export default function VerifyPhonePage() {
 
   const nextFromQuery = useMemo(() => sanitizeNextUrl(sp.get('next')), [sp])
   const emailRetryRequested = useMemo(() => sp.get('email') === 'retry', [sp])
+  const smsRetryRequested = useMemo(() => sp.get('sms') === 'retry', [sp])
   const intent = useMemo(() => sanitizeOptionalText(sp.get('intent')), [sp])
   const inviteToken = useMemo(
     () => sanitizeOptionalText(sp.get('inviteToken')),
@@ -468,6 +469,12 @@ export default function VerifyPhonePage() {
             </div>
           ) : null}
         </div>
+
+        {smsRetryRequested && !status.isPhoneVerified ? (
+          <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">
+            We could not send your phone verification code during signup. Use the resend button below to send it now.
+          </div>
+        ) : null}
 
         {emailRetryRequested && !status.isEmailVerified ? (
           <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">

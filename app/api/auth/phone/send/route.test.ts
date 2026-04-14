@@ -135,10 +135,12 @@ describe('app/api/auth/phone/send/route', () => {
     expect(body).toEqual({
       ok: true,
       alreadyVerified: true,
+      sent: false,
     })
 
     expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
     expect(mockFetch).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the phone number is missing', async () => {
@@ -153,7 +155,14 @@ describe('app/api/auth/phone/send/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('PHONE_REQUIRED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Phone number missing.',
+      code: 'PHONE_REQUIRED',
+    })
+
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('returns 429 and Retry-After when resend is rate limited by cooldown', async () => {
@@ -180,6 +189,7 @@ describe('app/api/auth/phone/send/route', () => {
 
     expect(mockPrisma.phoneVerification.count).not.toHaveBeenCalled()
     expect(mockFetch).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('returns 429 and Retry-After when hourly cap is exceeded', async () => {
@@ -204,9 +214,10 @@ describe('app/api/auth/phone/send/route', () => {
     })
 
     expect(mockFetch).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('invalidates old codes, creates a new code, and sends Twilio SMS', async () => {
+  it('sends Twilio SMS first, then rotates old codes and stores the new code', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
@@ -244,25 +255,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(result.status).toBe(200)
     expect(body).toEqual({
       ok: true,
-    })
-
-    expect(tx.phoneVerification.updateMany).toHaveBeenCalledWith({
-      where: {
-        userId: 'user_1',
-        usedAt: null,
-      },
-      data: {
-        usedAt: expect.any(Date),
-      },
-    })
-
-    expect(tx.phoneVerification.create).toHaveBeenCalledWith({
-      data: {
-        userId: 'user_1',
-        phone: '+15551234567',
-        codeHash: expect.any(String),
-        expiresAt: expect.any(Date),
-      },
+      sent: true,
     })
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
@@ -283,9 +276,33 @@ describe('app/api/auth/phone/send/route', () => {
     expect(String(fetchArgs?.body)).toContain('From=%2B15550001111')
     expect(String(fetchArgs?.body)).toContain('Body=TOVIS%3A+Your+verification+code+is+')
     expect(String(fetchArgs?.body)).toContain('Expires+in+10+minutes.')
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(tx.phoneVerification.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user_1',
+        usedAt: null,
+      },
+      data: {
+        usedAt: expect.any(Date),
+      },
+    })
+
+    expect(tx.phoneVerification.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'user_1',
+        phone: '+15551234567',
+        codeHash: expect.any(String),
+        expiresAt: expect.any(Date),
+      },
+    })
+
+    expect(mockFetch.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.$transaction.mock.invocationCallOrder[0],
+    )
   })
 
-  it('returns 500 when Twilio send fails', async () => {
+  it('returns 500 with SMS_NOT_CONFIGURED when Twilio env is missing', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
@@ -294,16 +311,30 @@ describe('app/api/auth/phone/send/route', () => {
     mockPrisma.phoneVerification.findFirst.mockResolvedValue(null)
     mockPrisma.phoneVerification.count.mockResolvedValue(0)
 
-    const tx = {
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_new' }),
-      },
-    }
+    delete process.env.TWILIO_ACCOUNT_SID
 
-    mockPrisma.$transaction.mockImplementation(
-      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
-    )
+    const result = await POST(makeRequest())
+    const body = await result.json()
+
+    expect(result.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'SMS provider is not configured.',
+      code: 'SMS_NOT_CONFIGURED',
+    })
+
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('returns 502 with SMS_SEND_FAILED when Twilio send fails and does not rotate codes', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    mockPrisma.phoneVerification.findFirst.mockResolvedValue(null)
+    mockPrisma.phoneVerification.count.mockResolvedValue(0)
 
     mockFetch.mockResolvedValue(
       new Response('', {
@@ -319,11 +350,14 @@ describe('app/api/auth/phone/send/route', () => {
     const result = await POST(makeRequest())
     const body = await result.json()
 
-    expect(result.status).toBe(500)
+    expect(result.status).toBe(502)
     expect(body).toEqual({
       ok: false,
-      error: 'Internal server error',
-      code: 'INTERNAL',
+      error: 'Could not send verification code. Please try again.',
+      code: 'SMS_SEND_FAILED',
     })
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 })

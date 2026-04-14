@@ -1,13 +1,13 @@
-// app/(auth)/_components/signup/SignupProClient.tsx
 'use client'
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
+import { hardNavigate } from '@/lib/clientNavigation'
 
 function sanitizePhone(v: string) {
   return v.replace(/\s+/g, '')
@@ -20,6 +20,36 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   if (!s.startsWith('/')) return null
   if (s.startsWith('//')) return null
   return s
+}
+
+function readBooleanField(
+  data: Record<string, unknown> | null,
+  key: string,
+): boolean {
+  return data?.[key] === true
+}
+
+function buildVerifyPhoneUrl(args: {
+  nextUrl: string | null
+  emailVerificationSent: boolean
+  phoneVerificationSent: boolean
+}): string {
+  const params = new URLSearchParams()
+
+  if (args.nextUrl) {
+    params.set('next', args.nextUrl)
+  }
+
+  if (!args.emailVerificationSent) {
+    params.set('email', 'retry')
+  }
+
+  if (!args.phoneVerificationSent) {
+    params.set('sms', 'retry')
+  }
+
+  const qs = params.toString()
+  return qs ? `/verify-phone?${qs}` : '/verify-phone'
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -115,7 +145,8 @@ function normalizeHandleInput(raw: string) {
   return raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
 
-// ✅ MUST match Prisma enum values
+// MUST match Prisma enum values
+// Keep these in sync with Prisma.
 type ProfessionType =
   | 'COSMETOLOGIST'
   | 'BARBER'
@@ -254,40 +285,31 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
 }
 
 export default function SignupProClient() {
+  const router = useRouter()
   const sp = useSearchParams()
 
   const ti = sp.get('ti')
   const loginHref = ti ? `/login?ti=${encodeURIComponent(ti)}` : '/login'
 
-  // identity
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
-  // optional pro fields
   const [businessName, setBusinessName] = useState('')
   const [handle, setHandle] = useState('')
-
-  // profession (required)
   const [professionType, setProfessionType] = useState<ProfessionType>('COSMETOLOGIST')
-
-  // pro mode
   const [proMode, setProMode] = useState<'SALON' | 'MOBILE'>('SALON')
   const [mobileRadiusMiles, setMobileRadiusMiles] = useState('15')
-
-  // CA license (only required for CA BBC professions)
   const [licenseState] = useState<'CA'>('CA')
   const [licenseNumber, setLicenseNumber] = useState('')
 
-  // stable per page load
   const sessionToken = useMemo(
     () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now())),
     [],
   )
 
-  // location
   const [locQuery, setLocQuery] = useState('')
   const [locPredictions, setLocPredictions] = useState<GooglePrediction[]>([])
   const [locLoading, setLocLoading] = useState(false)
@@ -481,17 +503,12 @@ export default function SignupProClient() {
           lastName,
           phone: sanitizePhone(phone),
           tapIntentId: ti ?? undefined,
-
           businessName: businessName.trim() ? businessName.trim() : undefined,
           handle: handle.trim() ? normalizeHandleInput(handle.trim()) : undefined,
-
           professionType,
-
           mobileRadiusMiles: proMode === 'MOBILE' ? Number(mobileRadiusMiles) : undefined,
-
           licenseState: needsLicense ? licenseState : undefined,
           licenseNumber: needsLicense ? licenseNumber.trim().toUpperCase() : undefined,
-
           signupLocation,
         }),
       })
@@ -503,11 +520,25 @@ export default function SignupProClient() {
         return
       }
 
-      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+      router.refresh()
 
-      // Hard navigation so the new auth cookie is sent on the first
-      // server render (matches the pattern in LoginClient).
-      window.location.replace(nextUrl ?? '/pro/services')
+      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+      const emailVerificationSent = readBooleanField(
+        data,
+        'emailVerificationSent',
+      )
+      const phoneVerificationSent = readBooleanField(
+        data,
+        'phoneVerificationSent',
+      )
+
+      const verifyPhoneUrl = buildVerifyPhoneUrl({
+        nextUrl,
+        emailVerificationSent,
+        phoneVerificationSent,
+      })
+
+      hardNavigate(verifyPhoneUrl)
     } catch (err: unknown) {
       console.error(err)
       setError('Network error.')
@@ -533,7 +564,6 @@ export default function SignupProClient() {
   return (
     <AuthShell title="Create Pro Account" subtitle="Run your business from your phone — set up takes minutes.">
       <form onSubmit={handleSubmit} className="grid gap-5">
-        {/* Profession */}
         <div className="grid gap-2">
           <FieldLabel>Profession</FieldLabel>
           <Select
@@ -561,7 +591,6 @@ export default function SignupProClient() {
           ) : null}
         </div>
 
-        {/* Mode */}
         <div className="grid gap-2">
           <FieldLabel>Where do you offer services?</FieldLabel>
           <div className={cn('grid grid-cols-2 gap-2')}>
@@ -600,7 +629,6 @@ export default function SignupProClient() {
           </div>
         </div>
 
-        {/* Location */}
         <div className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>{locationLabel()}</FieldLabel>
@@ -666,7 +694,6 @@ export default function SignupProClient() {
           </div>
         </div>
 
-        {/* Mobile radius */}
         {proMode === 'MOBILE' ? (
           <label className="grid gap-1.5">
             <div className="flex items-center justify-between gap-3">
@@ -684,7 +711,6 @@ export default function SignupProClient() {
           </label>
         ) : null}
 
-        {/* License block (only when required) */}
         {needsLicense ? (
           <div className="grid gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
             <div className="flex items-center justify-between gap-3">
@@ -725,7 +751,6 @@ export default function SignupProClient() {
 
         <div className="h-px w-full bg-surfaceGlass/10" />
 
-        {/* Identity */}
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1.5">
             <FieldLabel>First name</FieldLabel>
@@ -738,14 +763,12 @@ export default function SignupProClient() {
           </label>
         </div>
 
-        {/* Optional business */}
         <label className="grid gap-1.5">
           <FieldLabel>Business name (optional)</FieldLabel>
           <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Salon De Tovis" autoComplete="organization" />
           <HelpText>You can add this later — we won’t block signup.</HelpText>
         </label>
 
-        {/* Optional handle */}
         <label className="grid gap-1.5">
           <FieldLabel>Handle (optional)</FieldLabel>
           <Input
@@ -763,7 +786,6 @@ export default function SignupProClient() {
           </HelpText>
         </label>
 
-        {/* Phone */}
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Phone</FieldLabel>
@@ -772,13 +794,11 @@ export default function SignupProClient() {
           <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="+1 (___) ___-____" required />
         </label>
 
-        {/* Email */}
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
           <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" inputMode="email" />
         </label>
 
-        {/* Password */}
         <label className="grid gap-1.5">
           <FieldLabel>Password</FieldLabel>
           <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required autoComplete="new-password" />

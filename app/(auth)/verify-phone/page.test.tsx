@@ -118,6 +118,7 @@ describe('app/(auth)/verify-phone/page', () => {
     mockSearchParamsGet.mockImplementation((key: string) => {
       if (key === 'next') return null
       if (key === 'email') return null
+      if (key === 'sms') return null
       if (key === 'intent') return null
       if (key === 'inviteToken') return null
       return null
@@ -130,6 +131,7 @@ describe('app/(auth)/verify-phone/page', () => {
     mockSearchParamsGet.mockImplementation((key: string) => {
       if (key === 'next') return '/looks?from=tap'
       if (key === 'email') return 'retry'
+      if (key === 'sms') return null
       return null
     })
 
@@ -174,10 +176,45 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('loads partial verification state from server truth and shows the sms retry banner', async () => {
+    mockSearchParamsGet.mockImplementation((key: string) => {
+      if (key === 'next') return '/looks?from=tap'
+      if (key === 'email') return null
+      if (key === 'sms') return 'retry'
+      return null
+    })
+
+    fetchMock.mockResolvedValueOnce(
+      makeResponse(
+        makeStatusBody({
+          isPhoneVerified: false,
+          isEmailVerified: false,
+          isFullyVerified: false,
+          nextUrl: '/looks',
+          role: 'CLIENT',
+          email: 'client@example.com',
+        }),
+      ),
+    )
+
+    render(<VerifyPhonePage />)
+
+    expect(
+      await screen.findByText(
+        'We could not send your phone verification code during signup. Use the resend button below to send it now.',
+      ),
+    ).toBeInTheDocument()
+
+    expect(screen.getByRole('button', { name: /resend code/i })).toBeInTheDocument()
+    expect(mockReplace).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves claim handoff on the back-to-sign-in link', async () => {
     mockSearchParamsGet.mockImplementation((key: string) => {
       if (key === 'next') return '/claim/tok_1'
       if (key === 'email') return 'retry'
+      if (key === 'sms') return null
       if (key === 'intent') return 'CLAIM_INVITE'
       if (key === 'inviteToken') return 'tok_1'
       return null
@@ -289,6 +326,7 @@ describe('app/(auth)/verify-phone/page', () => {
     mockSearchParamsGet.mockImplementation((key: string) => {
       if (key === 'next') return '/client/bookings'
       if (key === 'email') return null
+      if (key === 'sms') return null
       return null
     })
 
@@ -315,75 +353,138 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-it('resends verification email and shows success feedback', async () => {
-  const user = userEvent.setup()
+  it('resends verification email and shows success feedback', async () => {
+    const user = userEvent.setup()
 
-  fetchMock
-    .mockResolvedValueOnce(
-      makeResponse(
-        makeStatusBody({
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: true,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          ok: true,
+          sent: true,
           isPhoneVerified: true,
           isEmailVerified: false,
           isFullyVerified: false,
-          nextUrl: '/looks',
-          role: 'CLIENT',
-          email: 'client@example.com',
         }),
-      ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: true,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(
+      screen.getByRole('button', { name: /resend verification email/i }),
     )
-    .mockResolvedValueOnce(
-      makeResponse({
-        ok: true,
-        sent: true,
-        isPhoneVerified: true,
-        isEmailVerified: false,
-        isFullyVerified: false,
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/email/send',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          next: '/looks',
+          intent: null,
+          inviteToken: null,
+        }),
       }),
     )
-    .mockResolvedValueOnce(
-      makeResponse(
-        makeStatusBody({
-          isPhoneVerified: true,
-          isEmailVerified: false,
-          isFullyVerified: false,
-          nextUrl: '/looks',
-          role: 'CLIENT',
-          email: 'client@example.com',
+
+    expect(
+      await screen.findByText('Verification email sent. Check your inbox.'),
+    ).toBeInTheDocument()
+  })
+
+  it('resends phone verification code and shows success feedback', async () => {
+    const user = userEvent.setup()
+
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          ok: true,
+          sent: true,
         }),
-      ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole('button', { name: /resend code/i }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/phone/send',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({}),
+      }),
     )
 
-  render(<VerifyPhonePage />)
-
-  await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(
+      await screen.findByText('New phone verification code sent.'),
+    ).toBeInTheDocument()
   })
-
-  await user.click(
-    screen.getByRole('button', { name: /resend verification email/i }),
-  )
-
-  await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-  })
-
-  expect(fetchMock).toHaveBeenNthCalledWith(
-    2,
-    '/api/auth/email/send',
-    expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        next: '/looks',
-        intent: null,
-        inviteToken: null,
-      }),
-    }),
-  )
-
-  expect(
-    await screen.findByText('Verification email sent. Check your inbox.'),
-  ).toBeInTheDocument()
-})
 })
