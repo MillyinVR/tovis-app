@@ -143,11 +143,7 @@ export async function POST(_request: Request) {
     const codeHash = sha256(code)
     const expiresAt = new Date(Date.now() + 1000 * 60 * 10)
 
-    const twilio = await sendTwilioSms({
-      to: phone,
-      body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
-    })
-
+    // Save the code to the DB before sending so the user can always verify it.
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.phoneVerification.updateMany({
         where: { userId, usedAt: null },
@@ -157,6 +153,11 @@ export async function POST(_request: Request) {
       await tx.phoneVerification.create({
         data: { userId, phone, codeHash, expiresAt },
       })
+    })
+
+    const twilio = await sendTwilioSms({
+      to: phone,
+      body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
     })
 
     if (process.env.NODE_ENV !== 'production') {
